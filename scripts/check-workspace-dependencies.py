@@ -27,20 +27,29 @@ def cargo_metadata(root: pathlib.Path = ROOT) -> dict[str, object]:
     return json.loads(result.stdout)
 
 
-def runtime_workspace_dependencies(metadata: dict[str, object]) -> dict[str, list[str]]:
+def declared_dependencies(
+    metadata: dict[str, object], *, include_development: bool = False
+) -> dict[str, list[str]]:
     packages = metadata["packages"]
     workspace_members = set(metadata["workspace_members"])
     workspace_packages = [package for package in packages if package["id"] in workspace_members]
-    workspace_names = {package["name"] for package in workspace_packages}
     return {
         package["name"]: sorted(
             {
                 dependency["name"]
                 for dependency in package["dependencies"]
-                if dependency["kind"] != "dev" and dependency["name"] in workspace_names
+                if include_development or dependency["kind"] != "dev"
             }
         )
         for package in sorted(workspace_packages, key=lambda item: item["name"])
+    }
+
+
+def runtime_workspace_dependencies(metadata: dict[str, object]) -> dict[str, list[str]]:
+    dependencies = declared_dependencies(metadata)
+    return {
+        owner: [dependency for dependency in declared if dependency in dependencies]
+        for owner, declared in dependencies.items()
     }
 
 
@@ -72,7 +81,51 @@ def boundary_errors(actual: dict[str, list[str]], policy: dict[str, object]) -> 
     return errors
 
 
-def check(policy: dict[str, object], metadata: dict[str, object]) -> int:
+def forbidden_dependency_errors(
+    dependencies: dict[str, list[str]], policy: dict[str, object],
+    rule_key: str = "forbidden_runtime_dependencies",
+) -> list[str]:
+    """Follow workspace edges and reject prohibited workspace or external packages."""
+    errors = []
+    for owner, forbidden in sorted(policy.get(rule_key, {}).items()):
+        if owner not in dependencies:
+            errors.append(f"Forbidden dependency rule names missing crate {owner}")
+            continue
+        pending = [(owner, [owner])]
+        visited = set()
+        while pending:
+            node, path = pending.pop()
+            if node in visited:
+                continue
+            visited.add(node)
+            for dependency in dependencies.get(node, []):
+                chain = path + [dependency]
+                if dependency in forbidden:
+                    errors.append(f"{owner} depends on a forbidden package: " + " -> ".join(chain))
+                elif dependency in dependencies:
+                    pending.append((dependency, chain))
+    return errors
+
+
+def source_path_errors(policy: dict[str, object], paths: list[str]) -> list[str]:
+    errors = []
+    for scope, rule in sorted(policy.get("crate_path_rules", {}).items()):
+        root = pathlib.PurePosixPath(scope)
+        forbidden_paths = [pathlib.PurePosixPath(path) for path in rule.get("forbidden_paths", [])]
+        prefixes = tuple(rule.get("forbidden_component_prefixes", []))
+        for path in sorted(set(paths)):
+            candidate = pathlib.PurePosixPath(path)
+            if not candidate.is_relative_to(root):
+                continue
+            relative = candidate.relative_to(root)
+            if any(relative == forbidden or forbidden in relative.parents for forbidden in forbidden_paths):
+                errors.append(f"Crate source ownership violation: {path}")
+            elif prefixes and any(part.startswith(prefixes) for part in relative.parts):
+                errors.append(f"Redundant crate prefix in file or directory: {path}")
+    return errors
+
+
+def check(policy: dict[str, object], metadata: dict[str, object], paths: list[str]) -> int:
     if policy.get("schema_version") != 1:
         print(f"Unsupported dependency policy schema: {policy.get('schema_version')}", file=sys.stderr)
         return 2
@@ -104,7 +157,16 @@ def check(policy: dict[str, object], metadata: dict[str, object]) -> int:
                 file=sys.stderr,
             )
 
-    for error in boundary_errors(actual, policy):
+    for error in (
+        boundary_errors(actual, policy)
+        + forbidden_dependency_errors(declared_dependencies(metadata), policy)
+        + forbidden_dependency_errors(
+            declared_dependencies(metadata, include_development=True),
+            policy,
+            "forbidden_dependencies",
+        )
+        + source_path_errors(policy, paths)
+    ):
         failed = True
         print(error, file=sys.stderr)
 
@@ -147,7 +209,7 @@ def check_staged(root: pathlib.Path) -> int:
                 destination.write_bytes(index_bytes(root, path))
             else:
                 destination.touch()
-        return check(policy, cargo_metadata(snapshot))
+        return check(policy, cargo_metadata(snapshot), paths)
 
 
 def main() -> int:
@@ -158,7 +220,11 @@ def main() -> int:
         if args.staged:
             return check_staged(ROOT)
         policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
-        return check(policy, cargo_metadata())
+        paths = subprocess.check_output(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"], cwd=ROOT
+        ).decode().split("\0")
+        paths = [path for path in paths if path and (ROOT / path).is_file()]
+        return check(policy, cargo_metadata(), paths)
     except subprocess.CalledProcessError as error:
         detail = error.stderr
         if isinstance(detail, bytes):

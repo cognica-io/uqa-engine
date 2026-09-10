@@ -46,7 +46,7 @@ env UQA_USQL=target/debug/usql python3 tests/parity/pg18/run_routines_stateful.p
 
 ```sh
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/recursive_alter_ownership_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/recursive_alter_ownership_oracle.expected.txt -
-cargo test -p uqa-engine --test integration engine_catalog::sql_relation_hierarchy::ownership::
+cargo test -p uqa-engine --test integration catalog::sql_relation_hierarchy::ownership::
 ```
 
 ## ONLY NOT NULL inheritance oracle
@@ -55,7 +55,7 @@ cargo test -p uqa-engine --test integration engine_catalog::sql_relation_hierarc
 
 ```sh
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/not_null_only_inheritance_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/not_null_only_inheritance_oracle.expected.txt -
-cargo test -p uqa-engine --test integration engine_catalog::sql_relation_hierarchy::not_null::
+cargo test -p uqa-engine --test integration catalog::sql_relation_hierarchy::not_null::
 ```
 
 ## MERGE and RETURNING oracle

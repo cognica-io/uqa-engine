@@ -6,25 +6,18 @@
 
 //! INSERT execution, defaults, constraint checks, and vector collection.
 
-use crate::sql::select::physical_work_mem_bytes;
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use super::{
-    build_returning_row, coerce_to_column_type, dml_returning_result, dml_storage_error,
-    document_supplied_id, eval_lowered_expression, eval_mutation_assignment, eval_mutation_expr,
-    finish_mutation_publication, insert_identity_columns, lock_document_key_dependencies,
-    lock_existing_document_foreign_key_dependencies, partition_insert_target,
-    persist_auto_increment_identity, prepare_auto_increment_identity, prepare_insert_identity,
-    publish_prepared_mutation_action, stage_prepared_document_rewrite,
-    validate_document_non_key_constraints, validate_key_constraints, validate_mutation_columns,
-    validate_returning_alias_relations, validate_view_checks, BTreeSet, ColumnType,
-    ConflictActionPlan, ConflictPlan, CteScope, DmlReturningShape, DocId, Document, Engine,
-    InsertConflictLocks, InsertConflictPreparation, InsertPlan, MutationAssignmentTarget,
-    MutationOverlayScope, MutationPublicationBatch, MutationRowImage, MutationRowImages,
-    PreparedDocumentInsert, PreparedInsertConflict, PreparedMutationAction, ReturningProjectionRow,
-    SQLError, SQLParam, SQLResult, ViewCheckContext,
+    dml_returning_result, dml_storage_error, document_supplied_id, eval_mutation_assignment,
+    eval_mutation_expr, finish_mutation_publication, insert_identity_columns,
+    partition_insert_target, persist_auto_increment_identity, prepare_auto_increment_identity,
+    prepare_insert_identity, validate_mutation_columns, validate_returning_alias_relations,
+    BTreeSet, ColumnType, ConflictActionPlan, ConflictPlan, CteScope, DmlReturningShape, DocId,
+    Document, Engine, InsertConflictLocks, InsertPlan, MutationAssignmentTarget,
+    MutationOverlayScope, MutationPublicationBatch, PreparedInsertConflict, SQLError, SQLParam,
+    SQLResult,
 };
 
 mod codec;
@@ -32,23 +25,16 @@ mod staging;
 mod view_rules;
 use view_rules::{required_view_rule_insert_input_positions, view_rule_insert_column_type};
 
-use codec::{
-    decode_prepared_insert_spill_row, encode_prepared_insert_spill_row,
-    prepared_insert_spill_schema, PreparedInsertSpillRow,
-};
+use codec::{decode_prepared_insert_spill_row, PreparedInsertSpillRow};
 
 pub(in crate::sql) use staging::{
     apply_missing_column_defaults, refresh_insert_identity_after_trigger,
 };
-use staging::{
-    apply_validated_prepared_insert, attach_prepared_insert_identity, prepare_values_insert_row,
-    stage_prepared_insert_row,
-};
+use staging::{apply_validated_prepared_insert, prepare_values_insert_row};
 
 mod select_source;
 use select_source::{
-    insert_source_expression_rows, InsertSelectConsumer, InsertSelectIdentity,
-    PreparedInsertRowContext, PreparedInsertSelect,
+    insert_source_expression_rows, InsertSelectConsumer, InsertSelectIdentity, PreparedInsertSelect,
 };
 
 pub(in crate::sql) fn run_insert(
@@ -190,90 +176,11 @@ fn run_insert_inner_with_ctes(
             "INSERT",
         )?;
     }
-    let default_values =
-        stmt.source.is_none() && stmt.columns.is_empty() && stmt.rows.iter().all(Vec::is_empty);
     super::conflict::validate_insert_returning(engine, stmt, params, inherited_ctes)?;
-    let privilege_subject = stmt
-        .target_privilege_subject
-        .clone()
-        .unwrap_or_else(|| engine.current_user_name());
-    if default_values {
-        engine.ensure_any_column_privilege_for(
-            &stmt.table,
-            &privilege_subject,
-            crate::engine_table_security::TableAclPrivilege::Insert,
-        )?;
-    } else {
-        let insert_columns = if stmt.columns.is_empty() {
-            let supplied = stmt.source.as_deref().map_or_else(
-                || stmt.rows.first().map(Vec::len),
-                |source| {
-                    crate::sql::select::query_plan_output_columns(source)
-                        .map(|columns| columns.len())
-                },
-            );
-            let columns = engine.bound_table_column_names(&stmt.table)?;
-            match supplied {
-                Some(supplied) => columns.into_iter().take(supplied).collect(),
-                None => columns,
-            }
-        } else {
-            stmt.columns.clone()
-        };
-        for column in insert_columns {
-            engine.ensure_column_privilege_for(
-                &stmt.table,
-                &column,
-                &privilege_subject,
-                crate::engine_table_security::TableAclPrivilege::Insert,
-            )?;
-        }
-    }
-    if let Some(columns) = conflict_update_columns.as_deref() {
-        for column in columns {
-            engine.ensure_column_privilege_for(
-                &stmt.table,
-                column,
-                &privilege_subject,
-                crate::engine_table_security::TableAclPrivilege::Update,
-            )?;
-        }
-    }
-    let mut privilege_expressions = stmt
-        .returning
-        .iter()
-        .map(|projection| &projection.expr)
-        .collect::<Vec<_>>();
-    if let Some(conflict) = &stmt.on_conflict {
-        privilege_expressions.extend(conflict.expressions.iter());
-        privilege_expressions.extend(conflict.predicate.iter().map(Box::as_ref));
-    }
-    if let Some(ConflictPlan {
-        action:
-            ConflictActionPlan::Update {
-                assignments,
-                predicate,
-            },
-        ..
-    }) = stmt.on_conflict.as_ref()
-    {
-        privilege_expressions.extend(assignments.iter().map(|assignment| &assignment.value));
-        privilege_expressions.extend(predicate.iter().map(Box::as_ref));
-    }
-    super::ensure_target_table_select_for_expressions(
+    uqa_sql::semantics::mutation_privileges::ensure_insert_target_privileges(
         engine,
-        super::TargetSelectPrivilegeRequest {
-            table: &stmt.table,
-            privilege_subject: stmt.target_privilege_subject.as_deref(),
-            target_qualifier: &stmt.target_qualifier,
-            returning_aliases: &stmt.returning_aliases,
-            expressions: &privilege_expressions,
-            subqueries: &stmt.subqueries,
-            required_columns: stmt
-                .on_conflict
-                .as_ref()
-                .map_or(&[][..], |conflict| conflict.conflict_columns.as_slice()),
-        },
+        stmt,
+        conflict_update_columns.as_deref(),
     )?;
     let view_original_query = !stmt.view_rule_relations.iter().try_fold(
         false,
@@ -347,7 +254,7 @@ fn run_insert_inner_with_ctes(
         .as_deref()
         .map(|snapshot| engine.statement_read_snapshot_engine(snapshot));
     let read_engine = snapshot_engine.as_ref().unwrap_or(engine);
-    let mut scope = CteScope::new_for_command(
+    let mut scope = crate::capabilities::query_scope::new_for_command(
         read_engine,
         stmt.statement_privilege_subject.as_deref(),
         stmt.relations_bound,
@@ -377,7 +284,7 @@ fn run_insert_inner_with_ctes(
             let mut source_scope = snapshot_scope.clone();
             source_scope.enable_command_progress_streaming();
             let consumer = Rc::new(InsertSelectConsumer::new(
-                engine,
+                engine.insert_source_context(),
                 stmt,
                 params,
                 snapshot_scope,
@@ -515,7 +422,7 @@ fn run_insert_inner_with_ctes(
     // Evaluate, validate, and stage every VALUES row before writer promotion. A scalar subquery inside VALUES may carry FOR UPDATE, so holding the backend writer during that wait would fabricate a deadlock. Ordinary subqueries retain the statement snapshot while VOLATILE functions read the logical overlay left by preceding rows, matching PostgreSQL 18 command visibility.
     let snapshot_scope = scope.returning_statement_snapshot_scope();
     let overlay = MutationOverlayScope::new(engine);
-    let mut conflict_locks = InsertConflictLocks::new(engine);
+    let mut conflict_locks = InsertConflictLocks::new(&engine.referential_execution_context());
     let input_rows = rule_source_rows.as_deref().unwrap_or(&stmt.rows);
     let mut documents = Vec::with_capacity(input_rows.len());
     let mut target_tables = Vec::with_capacity(input_rows.len());
@@ -616,7 +523,7 @@ fn run_insert_inner_with_ctes(
             )?,
         };
         if let Some(staged) = prepare_values_insert_row(
-            engine,
+            engine.mutation_preparation_context(),
             stmt,
             params,
             &snapshot_scope,
@@ -661,7 +568,7 @@ fn run_insert_inner_with_ctes(
         });
     }
     let view_rule_batches = super::prepare_view_rule_batches(super::ViewRuleBatchRequest {
-        engine,
+        context: engine.view_rule_execution_context(),
         relations: &stmt.view_rule_relations,
         event: uqa_sql::ast::RuleEvent::Insert,
         rows: &view_rule_rows,
@@ -757,7 +664,7 @@ fn run_insert_inner_with_ctes(
                 )?,
             };
             let Some(staged) = prepare_values_insert_row(
-                engine,
+                engine.mutation_preparation_context(),
                 stmt,
                 params,
                 &snapshot_scope,
@@ -837,7 +744,7 @@ fn run_insert_inner_with_ctes(
     let (rule_returning, rule_affected, rule_sets_command_tag) =
         if let Some(rule_batch) = rule_batch.as_ref() {
             let outcome = rule_batch.execute_actions_with_affected(
-                engine,
+                engine.rule_execution_context(),
                 crate::sql::rules::RuleReturningRequest::from_plan(
                     &stmt.returning,
                     &stmt.returning_aliases,
@@ -852,8 +759,10 @@ fn run_insert_inner_with_ctes(
         } else {
             (None, 0, false)
         };
-    let view_rule_outcome = view_rule_batches
-        .execute_actions_with_affected(engine, stmt.view_rule_returning.as_ref())?;
+    let view_rule_outcome = view_rule_batches.execute_actions_with_affected(
+        engine.rule_execution_context(),
+        stmt.view_rule_returning.as_ref(),
+    )?;
     let view_rule_returning = view_rule_outcome.returning;
     if view_rule_returning.is_some() && rule_returning.is_some() {
         return Err(SQLError::Routine {
@@ -863,7 +772,12 @@ fn run_insert_inner_with_ctes(
     }
     if !stmt.returning.is_empty() {
         if let Some(view_rule_returning) = view_rule_returning {
-            return view_rule_returning.project(engine, params, &scope, None);
+            return view_rule_returning.project(
+                engine.returning_execution_context(),
+                params,
+                &scope,
+                None,
+            );
         }
         let shape = DmlReturningShape {
             table: &stmt.table,
@@ -875,7 +789,7 @@ fn run_insert_inner_with_ctes(
             supplemental_schema: None,
         };
         if let Some(rule_returning) = rule_returning {
-            return rule_returning.project(engine, shape);
+            return rule_returning.project(engine.returning_execution_context(), shape);
         }
         return dml_returning_result(engine, shape, returning_rows, affected);
     }
@@ -902,75 +816,11 @@ fn fire_insert_after_triggers(
     conflict_update_columns: Option<&[String]>,
     events: &super::MutationEventQueue,
 ) -> Result<(), SQLError> {
-    let insert_transition = if insert_original_query {
-        crate::sql::triggers::build_transition_tables(
-            engine,
-            table,
-            uqa_sql::ast::TriggerEvent::Insert,
-            &[],
-            events.after_rows(),
-        )?
-    } else {
-        Vec::new()
-    };
-    let update_transition = if let Some(columns) = conflict_update_columns {
-        crate::sql::triggers::build_transition_tables(
-            engine,
-            table,
-            uqa_sql::ast::TriggerEvent::Update,
-            columns,
-            events.after_rows(),
-        )?
-    } else {
-        Vec::new()
-    };
-    let referential_transition = events.referential_transition_tables(engine)?;
-    let mut transition_tables = insert_transition
-        .iter()
-        .chain(update_transition.iter())
-        .collect::<Vec<_>>();
-    transition_tables.extend(referential_transition.iter());
-    let mut root_events = Vec::new();
-    if conflict_update_columns.is_some() {
-        root_events.push(uqa_sql::ast::TriggerEvent::Update);
-    }
-    if insert_original_query {
-        root_events.push(uqa_sql::ast::TriggerEvent::Insert);
-    }
-    for generation in crate::sql::triggers::after_trigger_generations(&transition_tables) {
-        crate::sql::triggers::fire_after_row_trigger_events_for_generation(
-            engine,
-            events.after_rows(),
-            &transition_tables,
-            generation,
-        )?;
-        events.fire_referential_after_statement_triggers(
-            engine,
-            &referential_transition,
-            table,
-            &root_events,
-            generation,
-        )?;
-        if let Some(columns) = conflict_update_columns {
-            crate::sql::triggers::fire_after_statement_trigger_generation_for_root(
-                engine,
-                table,
-                uqa_sql::ast::TriggerEvent::Update,
-                columns,
-                &update_transition,
-                generation,
-            )?;
-        }
-        if insert_original_query {
-            crate::sql::triggers::fire_after_statement_trigger_generation_for_root(
-                engine,
-                table,
-                uqa_sql::ast::TriggerEvent::Insert,
-                &[],
-                &insert_transition,
-                generation,
-            )?;
-        }
-    }
-    Ok(())
+    uqa_execution::mutation::insert::triggers::fire_insert_after_triggers(
+        &engine.trigger_execution_context(),
+        table,
+        insert_original_query,
+        conflict_update_columns,
+        events,
+    )
 }

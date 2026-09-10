@@ -9,8 +9,8 @@
 use std::collections::BTreeMap;
 
 use uqa_core::Value;
-use uqa_execution::ScalarExpr;
 use uqa_sql::ast::{BinaryOp, JoinKind, SetOpKind};
+use uqa_sql::ScalarExpr;
 
 use crate::{
     CardinalityEstimator, CommandPlan, ComputePlan, CostEstimator, CtePlan, CtePlanBody,

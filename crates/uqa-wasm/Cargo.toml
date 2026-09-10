@@ -16,6 +16,7 @@ name = "uqa"
 path = "src/main.rs"
 
 [dependencies]
+uqa-storage-sqlite = { workspace = true }
 base64 = "0.22"
 parking_lot = { workspace = true }
 serde_json = { workspace = true }
@@ -23,7 +24,6 @@ uqa-core = { workspace = true }
 uqa-engine = { workspace = true }
 uqa-scoring = { workspace = true }
 uqa-sql = { workspace = true }
-uqa-storage = { workspace = true }
 
 [lints]
 workspace = true

@@ -60,7 +60,7 @@ impl<'a> GraphEntityFilter<'a> {
 /// Upper bound on one graph identity page; callers advance with the last id.
 pub const MAX_GRAPH_ID_PAGE: usize = 4096;
 
-pub(crate) fn validate_graph_page(limit: usize) -> StorageBackendResult<()> {
+pub fn validate_graph_page(limit: usize) -> StorageBackendResult<()> {
     if !(1..=MAX_GRAPH_ID_PAGE).contains(&limit) {
         return Err(StorageBackendError::Other(format!(
             "graph identity page size must be in 1..={MAX_GRAPH_ID_PAGE}"

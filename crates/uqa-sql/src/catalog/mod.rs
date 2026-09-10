@@ -8,8 +8,11 @@
 
 use crate::ast::ColumnType;
 
+pub mod expression_text;
 pub mod oids;
 pub mod resolution;
+pub mod result_type;
+pub mod type_metadata;
 
 /// Namespace of the Apache AGE catalog relations, types, and functions.
 pub const AG_CATALOG_SCHEMA: &str = "ag_catalog";
@@ -911,3 +914,33 @@ fn information_routines_schema() -> Vec<(String, ColumnType)> {
 mod tests;
 
 pub mod analysis;
+
+pub mod domain;
+pub mod events;
+pub mod index;
+pub mod roles;
+
+/// Namespaces the engine implements without a durable schema row: the
+/// `PostgreSQL` system schemas and the Apache AGE catalog schema.
+pub fn is_virtual_system_schema(name: &str) -> bool {
+    matches!(name, "pg_catalog" | "information_schema" | "ag_catalog")
+}
+
+pub mod view;
+
+pub mod session;
+
+pub mod constraints;
+
+pub const DATABASE_NAME: &str = "uqa";
+pub const DATABASE_OID: i64 = 5;
+
+pub mod stored_ast;
+
+pub mod regrole_dependencies;
+
+pub mod security;
+
+pub mod stored_view;
+
+pub mod errors;

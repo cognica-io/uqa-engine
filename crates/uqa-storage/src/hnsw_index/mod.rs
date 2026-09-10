@@ -17,9 +17,9 @@ mod search;
 mod types;
 mod validation;
 
-pub(crate) use metric::MAX_HNSW_LEVEL;
+pub use metric::MAX_HNSW_LEVEL;
 pub use types::HNSWIndex;
-pub(crate) use types::{HNSWGraphMeta, HNSWNodeSnapshot, HNSWPersistenceDelta};
+pub use types::{HNSWGraphMeta, HNSWNodeSnapshot, HNSWPersistenceDelta};
 
 #[cfg(test)]
 mod tests;

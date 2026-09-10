@@ -7,7 +7,7 @@
 //! Compact scalar-subquery arenas after expression rewrites discard inputs.
 
 use std::collections::BTreeMap;
-use uqa_execution::ScalarExpr;
+use uqa_sql::ScalarExpr;
 
 use crate::{CommandPlan, QueryPlan, RelationalPlan, SourcePlan};
 

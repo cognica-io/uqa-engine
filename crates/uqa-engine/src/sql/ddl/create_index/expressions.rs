@@ -113,7 +113,7 @@ pub(super) fn prepare_index_keys(
                         .generated
                         .as_ref()
                         .is_some_and(|generated| generated.kind == GeneratedColumnKind::Virtual)
-                        && crate::engine_table_storage::schema_expr_references_column(
+                        && crate::table_storage::schema_expr_references_column(
                             expression,
                             &column.name,
                         )

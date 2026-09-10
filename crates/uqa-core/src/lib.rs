@@ -33,3 +33,8 @@ pub use types::{
     GeneralizedPayload, GeneralizedPostingEntry, IndexStats, PathExpr, PathSegment, Payload,
     PostingEntry, TemporalValue, Value, Vertex, VertexId,
 };
+
+mod scored_entry;
+pub use scored_entry::ScoredEntry;
+
+pub mod catalog_acl;

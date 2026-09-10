@@ -79,50 +79,49 @@ pub mod migration;
 pub mod operator_tree_bridge;
 pub mod sql;
 
+mod analyzers;
 mod async_sql_engine;
-mod engine_analyzers;
-mod engine_cancellation;
-mod engine_capabilities;
-mod engine_catalog_indexes;
-mod engine_database_security;
-mod engine_domains;
-mod engine_events;
-mod engine_fdw;
-mod engine_foreign_table_security;
-mod engine_fts;
-mod engine_generated;
-mod engine_graphs;
-mod engine_hierarchy;
-mod engine_hook;
-mod engine_models;
-mod engine_notifications;
-mod engine_open;
-mod engine_prepared;
-mod engine_relations;
-mod engine_roles;
-mod engine_schema_security;
-mod engine_search;
-mod engine_sequence_catalog;
-mod engine_sequence_introspection;
-mod engine_sequence_lifecycle;
-mod engine_sequence_ownership;
-mod engine_sequence_security;
-mod engine_sequence_values;
-mod engine_sequences;
-mod engine_session;
-mod engine_sql_registry;
-mod engine_state;
-mod engine_statistics;
-pub use engine_statistics::AutomaticStatisticsStatus;
-mod engine_statement_cache;
-mod engine_table_security;
-mod engine_table_storage;
-mod engine_tables;
-mod engine_transactions;
-mod engine_truncate;
-mod engine_user_functions;
+mod cancellation;
+mod capabilities;
+mod catalog_indexes;
+mod database_security;
+mod domains;
+mod events;
+mod fdw;
+mod foreign_table_security;
+mod fts;
+mod generated;
+mod graphs;
+mod hierarchy;
+mod hook;
+mod models;
+mod notifications;
+mod open;
+mod prepared;
+mod relations;
+mod roles;
+mod schema_security;
+mod search;
+mod sequence_catalog;
+mod sequence_introspection;
+mod sequence_lifecycle;
+mod sequence_ownership;
+mod sequence_security;
+mod sequence_values;
+mod sequences;
+mod session;
+mod sql_registry;
+mod state;
+mod statistics;
+pub use statistics::AutomaticStatisticsStatus;
 mod row_locks;
-mod sequence_state_serde;
+mod statement_cache;
+mod table_security;
+mod table_storage;
+mod tables;
+mod transactions;
+mod truncate;
+mod user_functions;
 mod value_index;
 
 pub(crate) use sql::dml::{
@@ -137,7 +136,7 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use uqa_analysis::{analyzer::standard_analyzer, registry as analyzer_registry, Analyzer};
-use uqa_core::{DocId, FieldName, PostingEntry, PostingList, Value};
+use uqa_core::{DocId, FieldName, PostingList, Value};
 use uqa_ml::{
     deep_learn as ml_deep_learn, DeepLearnOutput, DeepModel, LearnOptions, TrainingExample,
     TrainingSet,
@@ -151,34 +150,37 @@ use uqa_sql::SQLError;
 use uqa_storage::{
     document_store::Document, AnalyzerPhase, CatalogFacade, CatalogIndexRow, ColumnStatsInput,
     ColumnStatsRow, DocumentStore, HNSWIndex, HNSWIndexParams, IVFIndex, IVFIndexParams,
-    InvertedIndex, ManagedConnection, MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex,
+    InvertedIndex, MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex,
     PersistentStorageBackend, PersistentStorageProvider, PersistentStorageSession,
-    RelationIdentity, SQLiteCompressedContainerAnchor, SQLiteStorageProvider, SequenceOptions,
-    SequenceOwner, SequenceOwnerDependency, SequenceReservationResult, SequenceRow,
-    StorageBackendError, StorageBackendResult, StorageSavepointId, StoredDocument, TableSchema,
-    VectorFieldSchema, VectorIndex, VectorIndexOpenMode, VectorIndexSpec, ViewRow,
+    RelationIdentity, SequenceOptions, SequenceOwner, SequenceOwnerDependency,
+    SequenceReservationResult, SequenceRow, StorageBackendError, StorageBackendResult,
+    StorageSavepointId, StoredDocument, TableSchema, VectorFieldSchema, VectorIndex,
+    VectorIndexOpenMode, VectorIndexSpec, ViewRow,
+};
+use uqa_storage_sqlite::{
+    ManagedConnection, SQLiteCompressedContainerAnchor, SQLiteStorageProvider,
 };
 
-pub use engine_notifications::SQLNotification;
+pub use notifications::SQLNotification;
 pub use sql::{SQLCursor, SQLCursorSummary};
 pub use uqa_execution::{ColumnVector, ColumnarBatch};
 pub use uqa_sql::{
     ast::{SequenceBound, SequenceDataType, SequenceRestart},
     AsyncSQLEngine, SQLParam, SQLResult,
 };
-pub use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions, SQLiteError};
+pub use uqa_storage_sqlite::{DatabaseFileFormat, SQLiteCompressionOptions, SQLiteError};
 
-use engine_notifications::{NotificationHub, PendingListenAction, PendingNotification};
-use engine_state::{
-    DurableCatalogSnapshot, DurableCatalogState, EpochCoordinator, QueryRuntime, RuntimeExtensions,
-    SessionContext, StorageContext, StoredView, StoredViewKind,
-};
-use engine_statement_cache::{PreparedStatementPlan, SQLStatementCache};
 use functions::RegisteredSQLFunction;
 pub use functions::{
     SQLAggregateFunction, SQLAggregateState, SQLFunctionOptions, SQLFunctionVolatility,
     SQLScalarFunction, SQLTableFunction, SQLTableFunctionResult, SQLTableFunctionStream,
 };
+use notifications::{NotificationHub, PendingListenAction, PendingNotification};
+use state::{
+    DurableCatalogSnapshot, DurableCatalogState, EpochCoordinator, QueryRuntime, RuntimeExtensions,
+    SessionContext, StorageContext, StoredView, StoredViewKind,
+};
+use statement_cache::{PreparedStatementPlan, SQLStatementCache};
 
 const SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
 /// Metadata key prefix for per-graph AGE label registries
@@ -204,11 +206,7 @@ pub enum EngineError {
 
 pub type EngineResult<T> = std::result::Result<T, EngineError>;
 
-#[derive(Debug, Clone)]
-pub struct ScoredEntry {
-    pub doc_id: DocId,
-    pub score: f64,
-}
+pub use uqa_core::ScoredEntry;
 
 /// Algorithm that actually produced a text-search result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -245,15 +243,6 @@ pub struct FtsIndexStat {
     pub total_field_length: u64,
 }
 
-impl ScoredEntry {
-    fn from_entry(e: &PostingEntry) -> Self {
-        Self {
-            doc_id: e.doc_id,
-            score: e.payload.score,
-        }
-    }
-}
-
 /// Scoring strategy passed to [`Engine::search`].
 #[derive(Debug, Clone)]
 pub enum ScoringMode {
@@ -271,7 +260,7 @@ type TableFieldAnalyzerRegistry = BTreeMap<(String, String), (String, String)>;
 type SessionPortalTableSnapshots = Arc<BTreeMap<RelationIdentity, Arc<TableState>>>;
 type SessionPortalViewSnapshots = Arc<BTreeMap<RelationIdentity, StoredView>>;
 type SessionPortalSQLFunctionSnapshots =
-    Arc<BTreeMap<String, Vec<Arc<engine_user_functions::SQLUserFunction>>>>;
+    Arc<BTreeMap<String, Vec<Arc<user_functions::SQLUserFunction>>>>;
 type SessionPortalCatalogSnapshot = Arc<DurableCatalogSnapshot>;
 type SessionPortalTransactionOverlay =
     Arc<BTreeMap<String, BTreeMap<DocId, Option<StoredDocument>>>>;
@@ -338,6 +327,7 @@ pub struct Engine {
     epochs: EpochCoordinator,
     runtime: QueryRuntime,
     row_locks: Arc<row_locks::RowLockManager>,
+    statistics: Arc<statistics::StatisticsCoordinator>,
     notification_hub: Arc<NotificationHub>,
     session_id: u64,
     owns_session_registration: bool,
@@ -349,39 +339,7 @@ pub struct Engine {
     query_transaction_origin: Option<u64>,
 }
 
-/// Mutable state of a single SQL sequence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub struct SequenceState {
-    pub start: i64,
-    pub increment: i64,
-    pub current: i64,
-    /// Whether `current` has already been returned by `nextval`.  Keeping this
-    /// bit avoids the lossy `start - increment` sentinel at BIGINT boundaries.
-    #[serde(default = "sequence_state_called_default")]
-    pub called: bool,
-    #[serde(default)]
-    pub log_count: i64,
-    pub data_type: SequenceDataType,
-    pub min_value: i64,
-    pub max_value: i64,
-    pub cycle: bool,
-    #[serde(default = "sequence_cache_size_default")]
-    pub cache_size: i64,
-    #[serde(default)]
-    pub definition_generation: [u8; 16],
-    #[serde(default)]
-    pub owner: Option<SequenceOwner>,
-}
-
-const fn sequence_state_called_default() -> bool {
-    // Legacy serialized states used `current = start - increment`; treating
-    // that value as called preserves their next allocation semantics.
-    true
-}
-
-const fn sequence_cache_size_default() -> i64 {
-    1
-}
+pub use uqa_execution::catalog::sequence::SequenceState;
 
 #[derive(Clone, Copy, Default)]
 struct TransactionDirtyState {
@@ -433,12 +391,7 @@ impl Default for TransactionCharacteristicsState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct ConstraintIdentity {
-    pub(crate) relation: RelationIdentity,
-    pub(crate) name: String,
-    pub(crate) object_id: Option<[u8; 16]>,
-}
+pub(crate) use uqa_sql::catalog::constraints::ConstraintIdentity;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ConstraintModeState {
@@ -474,7 +427,7 @@ struct TransactionFrame {
     next_lock_mark: u32,
     snapshot_change_baseline: row_locks::RowChangeBaseline,
     row_changes: Vec<TransactionRowChange>,
-    statistics_changes: engine_statistics::StatisticsChanges,
+    statistics_changes: statistics::StatisticsChanges,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
     deferred_constraint_trigger_events: Vec<sql::DeferredConstraintTriggerEvent>,
     pending_listen_actions: Vec<PendingListenAction>,
@@ -539,7 +492,7 @@ struct TransactionSavepoint {
     dirty: TransactionDirtyState,
     lock_mark: u32,
     row_changes: Vec<TransactionRowChange>,
-    statistics_changes: engine_statistics::StatisticsChanges,
+    statistics_changes: statistics::StatisticsChanges,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
     deferred_constraint_trigger_events: Vec<sql::DeferredConstraintTriggerEvent>,
     pending_listen_actions: Vec<PendingListenAction>,
@@ -555,7 +508,7 @@ struct SessionStateSnapshot {
     search_path: Vec<String>,
     temporary_namespace_allocated: bool,
     session_vars: BTreeMap<String, String>,
-    local_parameter_restore: BTreeMap<String, engine_state::RuntimeParameterValue>,
+    local_parameter_restore: BTreeMap<String, state::RuntimeParameterValue>,
     sequence_currvals: BTreeMap<RelationIdentity, SessionSequenceValue>,
     last_sequence: Option<SessionLastSequenceReference>,
     sequence_discard_generation: u64,
@@ -726,7 +679,7 @@ struct EngineDataSnapshot {
 #[expect(clippy::struct_excessive_bools, reason = "independent snapshot flags")]
 struct TableDataSnapshot {
     state: Arc<TableState>,
-    security: engine_state::TableSecurity,
+    security: state::TableSecurity,
     storage_generation: [u8; 16],
     document_store: Arc<dyn DocumentStore>,
     inverted_index: Arc<dyn InvertedIndex>,
@@ -757,37 +710,37 @@ pub(crate) struct TableState {
     /// Durable logical relation identity used by `PostgreSQL` catalogs. Renames, schema changes, `TRUNCATE`, and reopen preserve it.
     object_id: [u8; 16],
     /// Durable SQL role ownership and ACL. Mutations publish this value atomically and preserve the relation's logical and physical identities.
-    security: engine_state::CatalogCell<engine_state::TableSecurity>,
+    security: state::CatalogCell<state::TableSecurity>,
     /// Durable physical-storage generation shared by every session. Schema-only changes preserve it; CREATE and TRUNCATE replace it so a fixed transaction snapshot never aliases a different physical relation lifetime.
     storage_generation: RwLock<[u8; 16]>,
     pub(crate) document_store: RwLock<Box<dyn DocumentStore>>,
     inverted_index: RwLock<Box<dyn InvertedIndex>>,
     vector_indexes: RwLock<BTreeMap<FieldName, Box<dyn VectorIndex>>>,
-    fts_fields: engine_state::CatalogCell<Vec<FieldName>>,
+    fts_fields: state::CatalogCell<Vec<FieldName>>,
     /// Column schema captured at CREATE TABLE / ALTER TABLE time, driving auto-id allocation and ALTER COLUMN bookkeeping.
-    columns: engine_state::CatalogCell<Vec<uqa_sql::ast::ColumnDef>>,
-    columns_declared: engine_state::CatalogCell<bool>,
+    columns: state::CatalogCell<Vec<uqa_sql::ast::ColumnDef>>,
+    columns_declared: state::CatalogCell<bool>,
     /// Monotonic id watermark for SERIAL/BIGSERIAL columns. The first allocated value is `1`; the watermark grows past `max(existing_doc_id, allocated)` so reopened catalogs do not collide with existing rows.
     next_id: parking_lot::Mutex<u128>,
-    analyzer: engine_state::CatalogCell<Analyzer>,
+    analyzer: state::CatalogCell<Analyzer>,
     /// Per-column statistics refreshed by `ANALYZE table_name` or lazily
     /// by `column_stats` after writes mark the table dirty. Keyed by column
     /// name.
-    column_stats: engine_state::CatalogCell<BTreeMap<String, uqa_planner::ColumnStats>>,
+    column_stats: state::CatalogCell<BTreeMap<String, uqa_planner::ColumnStats>>,
     column_stats_loaded: AtomicBool,
     column_stats_dirty: AtomicBool,
     /// Table-level `CHECK` constraints, evaluated against every row
     /// at INSERT / UPDATE time.
-    table_checks: engine_state::CatalogCell<Vec<uqa_sql::ast::TableCheck>>,
+    table_checks: state::CatalogCell<Vec<uqa_sql::ast::TableCheck>>,
     /// Table-level `FOREIGN KEY` constraints. Each entry binds local
     /// columns to a `(ref_table, ref_columns)` lookup target.
-    foreign_keys: engine_state::CatalogCell<Vec<uqa_sql::ast::ForeignKey>>,
+    foreign_keys: state::CatalogCell<Vec<uqa_sql::ast::ForeignKey>>,
     /// Typed PRIMARY KEY / UNIQUE tuples, including composite keys and
     /// their SQL NULL-equality policy.
-    key_constraints: engine_state::CatalogCell<Vec<uqa_sql::ast::TableKeyConstraint>>,
+    key_constraints: state::CatalogCell<Vec<uqa_sql::ast::TableKeyConstraint>>,
     /// Direct parents, an optional partition key, and an optional child bound.
     /// The complete object is persisted with the table's constraint envelope.
-    hierarchy: engine_state::CatalogCell<uqa_sql::ast::TableHierarchy>,
+    hierarchy: state::CatalogCell<uqa_sql::ast::TableHierarchy>,
     /// Lazily built per-column value indexes for PRIMARY KEY / UNIQUE
     /// / `CREATE INDEX` btree columns. Maintained incrementally by the
     /// document write paths; cleared on bulk reloads.
@@ -820,7 +773,7 @@ impl TableState {
         self.security.read().role_owner.clone()
     }
 
-    fn security(&self) -> engine_state::TableSecurity {
+    fn security(&self) -> state::TableSecurity {
         self.security.read().clone()
     }
 

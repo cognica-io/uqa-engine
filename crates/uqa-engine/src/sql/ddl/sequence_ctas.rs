@@ -62,7 +62,7 @@ fn run_create_table_as_inner(
     engine: &Engine,
     execution: &CreateTableAsExecution<'_>,
 ) -> Result<SQLResult, SQLError> {
-    let ctes = crate::sql::select::CteScope::new_for_current_routine(engine);
+    let ctes = crate::capabilities::query_scope::new_for_current_routine(engine);
     // PostgreSQL analyzes the CTAS source before target namespace resolution, collisions, or schema CREATE. Source execution still follows target validation, so an existing target wins over runtime expression errors and row locks.
     let temporary_privilege_error =
         if execution.persistence == uqa_sql::ast::RelationPersistence::Temporary {

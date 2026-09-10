@@ -5,7 +5,7 @@
 # Copyright (c) 2023-2026 Cognica, Inc.
 #
 
-"""Enforce ownership allowlists for migrated Engine capability boundaries."""
+"""Enforce Engine adapter ownership and independent implementation boundaries."""
 
 from __future__ import annotations
 
@@ -19,7 +19,9 @@ from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 POLICY_PATH = ROOT / "scripts" / "engine-capability-policy.json"
-ENGINE_REFERENCE = re.compile(r"\bEngine\b|\b(?:self|[A-Za-z_][A-Za-z0-9_]*)\.engine\b")
+# Ownership is determined by the concrete type, not a field's spelling.
+# Complete crate scopes also cover aliases and field type declarations.
+ENGINE_REFERENCE = re.compile(r"\bEngine\b")
 RUST_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 DATA_TYPE_DECLARATION = re.compile(
     r"\b(?P<kind>struct|enum|union)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"
@@ -223,11 +225,12 @@ def load_policy(path: pathlib.Path) -> dict[str, Any]:
     covered: set[str] = set()
     for index, scope in enumerate(scopes):
         field = f"scopes[{index}]"
-        if not isinstance(scope, dict) or set(scope) != {
-            "name",
-            "files",
-            "engine_allowlist",
-        }:
+        required = {"name", "files", "engine_allowlist"}
+        if (
+            not isinstance(scope, dict)
+            or not required.issubset(scope)
+            or set(scope).difference(required | {"directories"})
+        ):
             raise PolicyError(f"{field} has unexpected fields")
         name = scope["name"]
         if not isinstance(name, str) or not name.strip():
@@ -236,8 +239,9 @@ def load_policy(path: pathlib.Path) -> dict[str, Any]:
             raise PolicyError(f"duplicate scope name: {name}")
         names.add(name)
         files = sorted_unique_paths(scope["files"], f"{field}.files")
-        if not files:
-            raise PolicyError(f"{field}.files must not be empty")
+        directories = sorted_unique_paths(scope.get("directories", []), f"{field}.directories")
+        if not files and not directories:
+            raise PolicyError(f"{field} must declare files or directories")
         overlap = covered.intersection(files)
         if overlap:
             raise PolicyError(f"files occur in multiple scopes: {sorted(overlap)}")
@@ -245,12 +249,19 @@ def load_policy(path: pathlib.Path) -> dict[str, Any]:
         allowlist = sorted_unique_paths(
             scope["engine_allowlist"], f"{field}.engine_allowlist"
         )
-        unexpected = set(allowlist).difference(files)
+        unexpected = {
+            path for path in allowlist
+            if path not in files and not any(
+                pathlib.PurePosixPath(path).is_relative_to(directory) and path.endswith(".rs")
+                for directory in directories
+            )
+        }
         if unexpected:
             raise PolicyError(
                 f"{field}.engine_allowlist contains files outside the scope: {sorted(unexpected)}"
             )
         scope["files"] = files
+        scope["directories"] = directories
         scope["engine_allowlist"] = allowlist
     if policy["capability_module"] not in covered:
         raise PolicyError("capability_module must belong to a declared scope")
@@ -262,12 +273,32 @@ def verify(root: pathlib.Path, policy_path: pathlib.Path) -> dict[str, int]:
     errors: list[str] = []
     checked = 0
     allowed = 0
+    covered: set[str] = set()
     for scope in policy["scopes"]:
         allowlist = set(scope["engine_allowlist"])
-        for relative in scope["files"]:
+        files = set(scope["files"])
+        for relative in scope["directories"]:
+            directory = root / relative
+            if not directory.is_dir():
+                errors.append(f"declared capability-policy directory is missing: {relative}")
+                continue
+            sources = {path.relative_to(root).as_posix() for path in directory.rglob("*.rs")}
+            if not sources:
+                errors.append(f"capability-policy directory has no Rust sources: {relative}")
+            files.update(sources)
+        for relative in sorted(allowlist.difference(files)):
+            errors.append(f"declared Engine adapter is missing: {relative}")
+        overlap = covered.intersection(files)
+        if overlap:
+            errors.append(f"files occur in multiple scopes: {sorted(overlap)}")
+        covered.update(files)
+        for relative in sorted(files):
             path = root / relative
             if not path.is_file():
                 errors.append(f"declared capability-policy file is missing: {relative}")
+                continue
+            if not path.resolve().is_relative_to(root.resolve()):
+                errors.append(f"capability-policy source escapes the repository: {relative}")
                 continue
             checked += 1
             source = path.read_text(encoding="utf-8")

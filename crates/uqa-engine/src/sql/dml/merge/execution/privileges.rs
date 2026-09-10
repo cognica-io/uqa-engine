@@ -34,19 +34,18 @@ fn ensure_merge_mutation_privileges(engine: &Engine, stmt: &MergePlan) -> Result
                     } else {
                         columns.clone()
                     };
-                    column_privileges.extend(columns.into_iter().map(|column| {
-                        (
-                            crate::engine_table_security::TableAclPrivilege::Insert,
-                            column,
-                        )
-                    }));
+                    column_privileges.extend(
+                        columns.into_iter().map(|column| {
+                            (crate::table_security::TableAclPrivilege::Insert, column)
+                        }),
+                    );
                 }
             }
             MergeWhenPlan::UpdateMatched { assignments, .. }
             | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
                 column_privileges.extend(assignments.iter().map(|assignment| {
                     (
-                        crate::engine_table_security::TableAclPrivilege::Update,
+                        crate::table_security::TableAclPrivilege::Update,
                         assignment.column.clone(),
                     )
                 }));
@@ -60,14 +59,14 @@ fn ensure_merge_mutation_privileges(engine: &Engine, stmt: &MergePlan) -> Result
         engine.ensure_table_privilege_for(
             &stmt.target,
             &privilege_subject,
-            crate::engine_table_security::TableAclPrivilege::Delete,
+            crate::table_security::TableAclPrivilege::Delete,
         )?;
     }
     if requires_any_insert {
         engine.ensure_any_column_privilege_for(
             &stmt.target,
             &privilege_subject,
-            crate::engine_table_security::TableAclPrivilege::Insert,
+            crate::table_security::TableAclPrivilege::Insert,
         )?;
     }
     for (privilege, column) in column_privileges {

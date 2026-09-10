@@ -359,3 +359,13 @@ pub fn retrieval_function(name: &str) -> bool {
             | "deep_predict"
     )
 }
+
+pub fn expect_column_name(expr: &ScalarExpr, label: &str) -> Result<String, SQLError> {
+    match expr {
+        ScalarExpr::Column(name) => Ok(name.clone()),
+        ScalarExpr::QualifiedColumn { column, .. } => Ok(column.clone()),
+        other => Err(SQLError::TypeMismatch(format!(
+            "{label} must be a column reference, got {other:?}"
+        ))),
+    }
+}

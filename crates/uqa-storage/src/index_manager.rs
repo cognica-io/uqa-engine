@@ -11,7 +11,7 @@
 //! the planner. The registry stays in memory and delegates persistence to the
 //! catalog when wired by the engine.
 
-#![allow(clippy::needless_pass_by_value, clippy::map_unwrap_or, unused_imports)]
+#![allow(clippy::needless_pass_by_value, clippy::map_unwrap_or)]
 
 use parking_lot::Mutex;
 use std::collections::BTreeMap;
@@ -21,8 +21,7 @@ use uqa_core::{Predicate, Value};
 use crate::btree_index::BTreeIndex;
 use crate::index_abc::Index;
 use crate::index_types::{IndexDef, IndexType};
-use crate::sqlite::connection::ManagedConnection;
-use crate::SQLiteError;
+use crate::StorageBackendError;
 
 /// Thin [`Index`] adapter over an in-memory [`BTreeIndex`]. Each
 /// adapter owns its [`IndexDef`] so the registry can route lookups
@@ -33,9 +32,9 @@ pub struct BTreeIndexHandle {
 }
 
 impl BTreeIndexHandle {
-    pub fn new(def: IndexDef) -> Result<Self, SQLiteError> {
+    pub fn new(def: IndexDef) -> Result<Self, StorageBackendError> {
         if def.columns.len() != 1 {
-            return Err(SQLiteError::StorageBackend(format!(
+            return Err(StorageBackendError::Other(format!(
                 "B-tree index `{}` requires exactly one column; got {}",
                 def.name,
                 def.columns.len()
@@ -90,27 +89,24 @@ impl Index for BTreeIndexHandle {
             _ => card.max(1.0),
         }
     }
-    fn build(&mut self) -> Result<(), SQLiteError> {
+    fn build(&mut self) -> Result<(), StorageBackendError> {
         Ok(())
     }
-    fn drop_index(&mut self) -> Result<(), SQLiteError> {
+    fn drop_index(&mut self) -> Result<(), StorageBackendError> {
         self.inner.clear();
         Ok(())
     }
 }
 
-/// Index registry. Constructed once per [`crate::Catalog`] and shared
-/// across the engine's tables.
+/// In-memory physical index registry, independent of catalog persistence.
+#[derive(Default)]
 pub struct IndexManager {
-    #[allow(dead_code)]
-    conn: ManagedConnection,
     indexes: Mutex<BTreeMap<String, Box<dyn Index>>>,
 }
 
 impl IndexManager {
-    pub fn new(conn: ManagedConnection) -> Self {
+    pub fn new() -> Self {
         Self {
-            conn,
             indexes: Mutex::new(BTreeMap::new()),
         }
     }
@@ -118,9 +114,9 @@ impl IndexManager {
     /// Build a physical index and register the definition under
     /// `index_def.name`. Returns an error if an index with the same
     /// name is already registered.
-    pub fn create_index(&self, index_def: IndexDef) -> Result<(), SQLiteError> {
+    pub fn create_index(&self, index_def: IndexDef) -> Result<(), StorageBackendError> {
         if index_def.index_type != IndexType::BTree {
-            return Err(SQLiteError::StorageBackend(format!(
+            return Err(StorageBackendError::Other(format!(
                 "IndexManager has no physical `{}` implementation for index `{}`; engine-specific index backends must be registered through their owning engine",
                 index_def.index_type.as_str(),
                 index_def.name
@@ -129,7 +125,7 @@ impl IndexManager {
         let mut index: Box<dyn Index> = Box::new(BTreeIndexHandle::new(index_def.clone())?);
         let mut guard = self.indexes.lock();
         if guard.contains_key(&index_def.name) {
-            return Err(SQLiteError::StorageBackend(format!(
+            return Err(StorageBackendError::Other(format!(
                 "index `{}` is already registered",
                 index_def.name
             )));
@@ -139,7 +135,7 @@ impl IndexManager {
         Ok(())
     }
 
-    pub fn drop_index(&self, name: &str) -> Result<bool, SQLiteError> {
+    pub fn drop_index(&self, name: &str) -> Result<bool, StorageBackendError> {
         let mut guard = self.indexes.lock();
         if let Some(mut idx) = guard.remove(name) {
             idx.drop_index()?;
@@ -149,7 +145,7 @@ impl IndexManager {
         }
     }
 
-    pub fn drop_indexes_for_table(&self, table_name: &str) -> Result<(), SQLiteError> {
+    pub fn drop_indexes_for_table(&self, table_name: &str) -> Result<(), StorageBackendError> {
         let mut guard = self.indexes.lock();
         let names: Vec<String> = guard
             .iter()
@@ -215,8 +211,7 @@ mod tests {
     use super::*;
 
     fn fresh() -> IndexManager {
-        let conn = ManagedConnection::open_in_memory().unwrap();
-        IndexManager::new(conn)
+        IndexManager::new()
     }
 
     #[test]

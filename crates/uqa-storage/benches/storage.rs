@@ -6,16 +6,13 @@
 
 //! Document, inverted-index, and vector-index storage benchmarks.
 //!
-//! Covers document-store put/get/scan, inverted-index add/lookup,
-//! brute-force, IVF, and HNSW vector search, vector deletion, index builds,
-//! and `SQLite` vector persistence round trips.
+//! Covers document-store put/get/scan, inverted-index add/lookup, brute-force, IVF, and HNSW vector search, vector deletion, and index builds.
 
 use std::collections::BTreeMap;
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use uqa_analysis::standard_analyzer;
 use uqa_core::Value;
-use uqa_storage::sqlite::{Catalog, ManagedConnection, SQLiteVectorIndex};
 use uqa_storage::{
     DocumentStore, HNSWIndex, HNSWIndexParams, IVFIndex, InvertedIndex, MemoryDocumentStore,
     MemoryInvertedIndex, MemoryVectorIndex, VectorIndex,
@@ -273,32 +270,10 @@ fn bench_vector_index(c: &mut Criterion) {
     });
 }
 
-fn bench_vector_persistence(c: &mut Criterion) {
-    c.bench_function("vector_index_persistence_roundtrip", |bencher| {
-        bencher.iter(|| {
-            let dir = tempfile::tempdir().expect("temp dir");
-            let path = dir.path().join("vectors.db");
-            {
-                let conn = ManagedConnection::open(&path).expect("open sqlite");
-                let _catalog = Catalog::open(conn.clone()).expect("initialize sqlite catalog");
-                let mut idx = SQLiteVectorIndex::new(conn, "docs", "embedding", 8);
-                for id in 0..128 {
-                    idx.add(id, vector(id + 1, 8)).unwrap();
-                }
-            }
-            let conn = ManagedConnection::open(&path).expect("reopen sqlite");
-            let _catalog = Catalog::open(conn.clone()).expect("reopen sqlite catalog");
-            let idx = SQLiteVectorIndex::new(conn, "docs", "embedding", 8);
-            black_box(idx.count().unwrap())
-        });
-    });
-}
-
 criterion_group!(
     benches,
     bench_document_store,
     bench_inverted_index,
-    bench_vector_index,
-    bench_vector_persistence
+    bench_vector_index
 );
 criterion_main!(benches);

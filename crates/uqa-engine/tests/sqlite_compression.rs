@@ -8,7 +8,7 @@
 
 use uqa_core::Value;
 use uqa_engine::Engine;
-use uqa_storage::SQLiteCompressionOptions;
+use uqa_storage_sqlite::SQLiteCompressionOptions;
 
 fn exec(engine: &Engine, sql: &str) -> uqa_engine::SQLResult {
     engine.sql(sql, &[]).unwrap()

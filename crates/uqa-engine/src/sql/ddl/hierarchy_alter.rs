@@ -13,7 +13,7 @@ use uqa_sql::ast::{
     RelationPersistence, TableCheck, TableHierarchy, TableKeyConstraint,
 };
 
-use crate::engine_capabilities::RelationResolution;
+use crate::capabilities::RelationResolution;
 
 pub(super) fn run_alter_hierarchy_action(
     engine: &Engine,

@@ -6,12 +6,12 @@
 
 //! Persistent and in-memory backing stores for UQA: documents, inverted
 //! index, vector indexes (IVF), B-tree, in-memory spatial scan, block-max, and the
-//! `SQLite` catalog.
+//! provider-neutral catalog and transaction contracts.
 
 pub mod backend;
 pub mod block_max_index;
 pub mod btree_index;
-mod catalog_index_keys;
+pub mod catalog_index_keys;
 mod value_index_key;
 pub use value_index_key::ValueIndexKey;
 pub mod catalog;
@@ -25,14 +25,12 @@ pub mod inverted_index;
 pub mod ivf_index;
 pub mod key_value;
 pub mod spatial_index;
-pub mod sqlite;
 pub mod transaction;
 pub mod vector_index;
 
 pub use backend::{
     PersistentStorageBackend, PersistentStorageIdentity, PersistentStorageProvider,
-    PersistentStorageSession, SQLiteStorageBackend, SQLiteStorageProvider, StorageBackendError,
-    StorageBackendResult, StorageSavepointId,
+    PersistentStorageSession, StorageBackendError, StorageBackendResult, StorageSavepointId,
 };
 pub use block_max_index::{BlockMaxIndex, BlockMaxScorer, DEFAULT_BLOCK_SIZE};
 pub use btree_index::BTreeIndex;
@@ -62,15 +60,7 @@ pub use key_value::{
     KeyValueStorageBackend, KeyValueStore, KeyValueVectorIndex, MemoryKeyValueStore,
 };
 pub use spatial_index::{haversine_distance, MemorySpatialIndex, SpatialIndex};
-pub use sqlite::{
-    detect_database_file_format, read_authenticated_anchor, Catalog, DatabaseFileFormat,
-    ManagedConnection, SQLiteBTreeIndexStore, SQLiteCompressedContainerAnchor,
-    SQLiteCompressionCodec, SQLiteCompressionOptions, SQLiteDocumentStore, SQLiteError,
-    SQLiteHNSWIndex, SQLiteIVFIndex, SQLiteInvertedIndex, SQLiteVectorIndex,
-};
-pub use transaction::{
-    InMemoryTransaction, SQLiteTransaction, Snapshotable, TransactionError, TxResult,
-};
+pub use transaction::{InMemoryTransaction, Snapshotable, TransactionError, TxResult};
 pub use vector_index::{
     cosine_similarity, HNSWIndexParams, IVFIndexParams, MemoryVectorIndex, VectorIndex,
     VectorIndexOpenMode, VectorIndexSpec,

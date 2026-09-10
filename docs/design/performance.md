@@ -366,7 +366,7 @@ The 2026-08-10 `standard` run below used rustc 1.90.0 on the local 20-CPU arm64 
 | SQL `CREATE INDEX ... USING ivf` | 57.84 s | 1,729 |
 | SQL `CREATE INDEX ... USING hnsw` | 284.26 s | 352 |
 
-Release verification ran all 257 `uqa-storage` library tests and 129 storage integration tests, all 217 `uqa-scoring` unit and integration tests, and all 157 enabled tests in the consolidated `uqa-engine` `engine_search` harness; its two explicit profiling probes remained ignored because Criterion supplied the measurements. The vector suite includes graph invariants, recall floors, tensor collapse, persistence, SQLite and Key/Value restore, and transactional mutation; text exactness tests compare WAND and BMW with exhaustive scoring. These local measurements establish a same-machine regression baseline, not cross-machine or competitive performance claims.
+Release verification ran all 257 `uqa-storage` library tests and 129 storage integration tests, all 217 `uqa-scoring` unit and integration tests, and all 157 enabled tests in the consolidated `uqa-engine` `search` harness; its two explicit profiling probes remained ignored because Criterion supplied the measurements. The vector suite includes graph invariants, recall floors, tensor collapse, persistence, SQLite and Key/Value restore, and transactional mutation; text exactness tests compare WAND and BMW with exhaustive scoring. These local measurements establish a same-machine regression baseline, not cross-machine or competitive performance claims.
 
 ### BEIR real-embedding hybrid suite
 

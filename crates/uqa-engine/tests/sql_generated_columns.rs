@@ -13,8 +13,8 @@ use tempfile::TempDir;
 use uqa_core::{Predicate, Value};
 use uqa_engine::operator_tree_bridge::EngineDriver;
 use uqa_engine::Engine;
+use uqa_execution::operator_tree::{OperatorOutput, OperatorTreeDriver};
 use uqa_operators::{OperatorTree, SumMonoid};
-use uqa_planner::executor::{OperatorOutput, OperatorTreeDriver};
 use uqa_sql::ColumnType;
 
 #[path = "sql_generated_columns/array_transforms.rs"]

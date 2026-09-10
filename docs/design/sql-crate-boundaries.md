@@ -2,6 +2,8 @@
 
 `uqa-sql` owns statement and scalar IR, lowering, static schemas, type resolution, catalog definitions, routine descriptors, query binding, and preparation-time parameter inference. The engine constructs statement inputs and coordinates execution; the planner optimizes SQL-owned plans, and execution owns physical rows and buffers. This keeps SQL analysis independent of runtime and storage implementations.
 
+`uqa-engine` must not own a SQL interpreter module or a SQL implementation tree. SQL statement semantics belong in `uqa-sql`, plan transformations in `uqa-planner`, and statement and operator execution in `uqa-execution`. Engine adapters supply catalog, storage, session, transaction, and extension services through contracts owned by their consumers. Moving the same interpreter under another engine directory or exposing the entire engine through a replacement interface does not satisfy this boundary.
+
 ## Dependency direction
 
 Arrows mean a crate imports another crate. `uqa-sql` may depend on `uqa-core` and the parser import `uqa-pg-query`; it must not reach the planner, executor, storage implementations, or engine, even through an intermediate crate.
@@ -18,7 +20,7 @@ flowchart TD
     SQL --> Parser[uqa-pg-query: parser import]
 ```
 
-The diagram shows ownership dependencies relevant to SQL extraction. The complete current graph, including planner access to retrieval algorithms and scalar evaluation, remains checked in `scripts/workspace-dependency-policy.json`; this document does not claim those existing runtime dependencies have already been removed.
+The diagram shows ownership dependencies relevant to SQL extraction. The complete current graph, including planner access to retrieval statistics and algorithms, remains checked in `scripts/workspace-dependency-policy.json`; this document does not claim those existing runtime dependencies have already been removed.
 
 ## Owners
 
@@ -37,7 +39,7 @@ Static schema identity must be distinguished from row ownership and materializat
 
 ## Enforcement
 
-Run `bash scripts/install-git-hooks.sh` in a checkout to install the repository's versioned pre-commit hook. The hook runs `python3 scripts/check-workspace-dependencies.py --staged` on every commit. It builds Cargo metadata from the index's manifests, lockfile, and target paths, so an unstaged manifest or policy edit cannot change what is checked. Runtime, build, and platform-specific dependencies are checked; development-only dependencies are excluded from the runtime graph.
+Run `bash scripts/install-git-hooks.sh` in a checkout to install the repository's versioned pre-commit hook. The hook runs `python3 scripts/check-workspace-dependencies.py --staged` on every commit. It builds Cargo metadata from the index's manifests, lockfile, and target paths, so an unstaged manifest or policy edit cannot change what is checked. Runtime, build, and platform-specific dependencies are checked; development-only dependencies are excluded from the runtime graph. The common storage and graph crates additionally forbid provider dependencies in all dependency kinds, including test and benchmark dependencies. SQLite graph conformance tests and the vector persistence benchmark live in `uqa-storage-sqlite`, so provider publication does not introduce a dependency cycle through those consumers.
 
 The same checker runs in CI against the checked-out commit. It compares the explicit edge inventory, enforces dependency budgets, and checks transitive ownership boundaries. Changing the edge inventory alone cannot waive a forbidden dependency. Cargo also rejects cyclic package dependencies. The installer refuses to replace an existing custom hook configuration silently.
 
@@ -46,3 +48,9 @@ The same checker runs in CI against the checked-out commit. It compares the expl
 Each extraction keeps the existing executable path and moves its tests with the owning implementation. The crate dependency check, formatting, strict Clippy, workspace tests, PostgreSQL reference fixtures, manual SQL checks, and binding CI must pass before the change is merged. New top-level integration-test executables are not added.
 
 The engine binding facade translates statement CTE schemas into `BindingContext` and implements `AnalysisCatalog` over its immutable catalog snapshot. That contract returns table, view, sequence-presence, virtual-schema, and routine definitions; it cannot execute a query. SQL-only tests bind a complete query and operator-join sources through a minimal catalog fixture. JOIN output layout is shared SQL data, while `JoinOutput` computes runtime values in execution. File counts and line limits do not substitute for these ownership checks.
+
+The planner receives a constant-evaluation function through `OptimizerConfig::new`. The engine supplies `uqa_execution::scalar::eval_constant_scalar`, so constant errors and SQL types use the canonical evaluator without making the planner import physical execution. Operator-tree execution, execution statistics, and parallel workers are owned by `uqa-execution`; the planner has no runtime dependency on that crate.
+
+The operator-tree optimizer consumes immutable `IndexScanCandidate` values for access selection. Index discovery and scan-cost collection belong to the caller that owns the catalog snapshot; the optimizer does not retain `IndexManager` or import `uqa-storage` directly. The remaining retrieval-IR dependency through `uqa-operators` and the RPQ parser dependency through `uqa-graph` remain explicit in the dependency policy.
+
+The Engine still contains statement dispatch, DDL, INSERT/MERGE, view mutation, table-function execution, and operator-tree integration code. These remaining implementations must move to their owning crates through narrow contracts before the Engine SQL tree can be removed. The current policy protects the completed extractions and SQLite provider boundary; it does not yet assert that the Engine SQL tree is absent.

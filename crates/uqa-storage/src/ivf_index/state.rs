@@ -23,7 +23,7 @@ pub enum IVFState {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct IVFMetadataSnapshot {
+pub struct IVFMetadataSnapshot {
     pub state: IVFState,
     pub centroids: Vec<Vec<f32>>,
     pub assignments: Vec<(DocId, u32, usize)>,
@@ -104,7 +104,7 @@ impl IVFIndex {
         *self.nprobe.lock() = nprobe.max(1);
     }
 
-    pub(crate) fn metadata_snapshot(&self) -> IVFMetadataSnapshot {
+    pub fn metadata_snapshot(&self) -> IVFMetadataSnapshot {
         let vectors = self.vectors.lock();
         let mut assignments = vectors
             .values()

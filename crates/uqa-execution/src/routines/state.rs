@@ -1,0 +1,307 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Interpreter activation state, expression binding, and routine lifecycle.
+
+use super::{
+    bind_expr, bind_statement, cast_value_from, coercion_type_name, BTreeSet, ColumnType,
+    CreateFunction, DatumResolver, Expr, Flow, FunctionReturns, HashMap, Interpreter, PLpgSQLBlock,
+    PLpgSQLDatum, PLpgSQLFunction, RoutineContext, RoutineOutcome, SQLError, SQLResult, Statement,
+    Value,
+};
+
+impl<'a> Interpreter<'a> {
+    #[expect(clippy::too_many_lines, reason = "preserves PL/pgSQL transition order")]
+    pub fn new(
+        services: RoutineContext<'a>,
+        def: &'a CreateFunction,
+        parsed: &'a PLpgSQLFunction,
+        bound: Vec<Value>,
+    ) -> Result<Self, SQLError> {
+        let datums = &parsed.datums;
+        if datums.len() < def.params.len() {
+            return Err(SQLError::Internal(
+                "PL/pgSQL datum table is smaller than the parameter list".into(),
+            ));
+        }
+        let signature_arity = def.signature_arity();
+        if bound.len() != signature_arity {
+            return Err(SQLError::Internal(format!(
+                "PL/pgSQL routine `{}` received {} bound arguments for a signature of {signature_arity}",
+                def.name,
+                bound.len()
+            )));
+        }
+        let loop_vars: BTreeSet<usize> = parsed.loop_local_variable_datums();
+        let cursor_arguments: BTreeSet<usize> = parsed.cursor_argument_datums();
+        let mut bindings: HashMap<String, Vec<usize>> = HashMap::new();
+        for (idx, datum) in datums.iter().enumerate() {
+            if loop_vars.contains(&idx) || cursor_arguments.contains(&idx) {
+                continue;
+            }
+            if let Some(name) = datum.name() {
+                if !name.is_empty() {
+                    bindings.entry(name.to_string()).or_default().push(idx);
+                }
+            }
+        }
+        let mut out_datums = Vec::new();
+        for (idx, param) in def.params.iter().enumerate() {
+            if matches!(
+                param.mode,
+                uqa_sql::ast::FunctionParamMode::Out
+                    | uqa_sql::ast::FunctionParamMode::InOut
+                    | uqa_sql::ast::FunctionParamMode::Table
+            ) {
+                out_datums.push(idx);
+            }
+        }
+        let mut interpreter = Self {
+            services,
+            def,
+            datums,
+            values: vec![Value::Null; datums.len()],
+            record_types: HashMap::new(),
+            bindings,
+            err_stack: Vec::new(),
+            set_rows: Vec::new(),
+            ret: Value::Null,
+            ret_record_types: None,
+            out_datums,
+            found: parsed.found_datum,
+            last_row_count: 0,
+            is_set: def.returns_set(),
+        };
+        // Bind call arguments onto the leading parameter datums.
+        // Procedure OUT arguments start NULL (the placeholder value a
+        // caller passes is discarded, matching PostgreSQL 14+).
+        let mut bound = bound.into_iter();
+        for (idx, param) in def.params.iter().enumerate() {
+            let takes_argument = match param.mode {
+                uqa_sql::ast::FunctionParamMode::In
+                | uqa_sql::ast::FunctionParamMode::InOut
+                | uqa_sql::ast::FunctionParamMode::Variadic => true,
+                uqa_sql::ast::FunctionParamMode::Out => def.is_procedure,
+                uqa_sql::ast::FunctionParamMode::Table => false,
+            };
+            if takes_argument {
+                let value = bound.next().ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "PL/pgSQL routine `{}` ran out of validated arguments while binding parameter {}",
+                        def.name,
+                        idx + 1
+                    ))
+                })?;
+                if !matches!(param.mode, uqa_sql::ast::FunctionParamMode::Out) {
+                    interpreter.values[idx] = value;
+                }
+            }
+        }
+        if bound.next().is_some() {
+            return Err(SQLError::Internal(format!(
+                "PL/pgSQL routine `{}` left validated arguments unbound",
+                def.name
+            )));
+        }
+        // Initialize FOUND and declared-variable defaults.
+        if let Some(found) = interpreter.found {
+            interpreter.values[found] = Value::Bool(false);
+        }
+        for (idx, datum) in datums.iter().enumerate().skip(def.params.len()) {
+            let PLpgSQLDatum::Var(var) = datum else {
+                continue;
+            };
+            if var.name.eq_ignore_ascii_case("found")
+                || var.name.eq_ignore_ascii_case("sqlstate")
+                || var.name.eq_ignore_ascii_case("sqlerrm")
+            {
+                continue;
+            }
+            let (value, source) = match &var.default {
+                Some(default) => interpreter.eval_expr_with_type(default)?,
+                None => (Value::Null, None),
+            };
+            interpreter.values[idx] = super::coerce_routine_value_from(
+                interpreter.services.expressions,
+                &value,
+                &var.type_name,
+                source.as_ref(),
+            )?;
+            if var.not_null && matches!(interpreter.values[idx], Value::Null) {
+                return Err(SQLError::Routine {
+                    sqlstate: "22004".into(),
+                    message: format!(
+                        "null value cannot be assigned to variable \"{}\" declared NOT NULL",
+                        var.name
+                    ),
+                });
+            }
+        }
+        Ok(interpreter)
+    }
+
+    pub fn into_outcome(self) -> RoutineOutcome {
+        let out_values = self
+            .out_datums
+            .iter()
+            .map(|idx| self.values[*idx].clone())
+            .collect();
+        RoutineOutcome {
+            value: self.ret,
+            out_values,
+            set_rows: self.set_rows,
+            anonymous_record_column_types: self.ret_record_types,
+        }
+    }
+
+    pub fn initialize_trigger_context(
+        &mut self,
+        parsed: &PLpgSQLFunction,
+        context: &super::TriggerRoutineContext,
+    ) -> Result<(), SQLError> {
+        if let Some(index) = parsed.new_datum {
+            self.values[index] = context.new.clone();
+            self.record_types
+                .insert(index, context.column_types.clone());
+        }
+        if let Some(index) = parsed.old_datum {
+            self.values[index] = context.old.clone();
+            self.record_types
+                .insert(index, context.column_types.clone());
+        }
+        let argument_values = context
+            .arguments
+            .iter()
+            .cloned()
+            .map(Value::Str)
+            .collect::<Vec<_>>();
+        let arguments = if argument_values.is_empty() {
+            uqa_core::ArrayValue::try_new(argument_values)
+        } else {
+            uqa_core::ArrayValue::with_lower_bounds(argument_values, vec![0])
+        }
+        .ok_or_else(|| SQLError::Internal("trigger arguments are not a valid text array".into()))?;
+        for (index, datum) in self.datums.iter().enumerate() {
+            let Some(name) = datum.name() else {
+                continue;
+            };
+            let value = match name.to_ascii_lowercase().as_str() {
+                "new" => Some(context.new.clone()),
+                "old" => Some(context.old.clone()),
+                "tg_name" => Some(Value::Str(context.name.clone())),
+                "tg_when" => Some(Value::Str(context.when.clone())),
+                "tg_level" => Some(Value::Str(context.level.clone())),
+                "tg_op" => Some(Value::Str(context.operation.clone())),
+                "tg_relid" => Some(Value::Int(context.relation_oid)),
+                "tg_relname" | "tg_table_name" => Some(Value::Str(context.table_name.clone())),
+                "tg_table_schema" => Some(Value::Str(context.table_schema.clone())),
+                "tg_nargs" => Some(Value::Int(i64::try_from(context.arguments.len()).map_err(
+                    |_| SQLError::Internal("trigger argument count exceeds i64".into()),
+                )?)),
+                "tg_argv" => Some(Value::Array(arguments.clone())),
+                _ => None,
+            };
+            if let Some(value) = value {
+                self.values[index] = value;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn run(&mut self, action: &PLpgSQLBlock) -> Result<(), SQLError> {
+        match self.exec_block(action)? {
+            Flow::Return => Ok(()),
+            Flow::Normal => {
+                let returns_void = matches!(
+                    &self.def.returns,
+                    FunctionReturns::Scalar { type_name } if type_name == "void"
+                );
+                if self.def.is_procedure
+                    || self.is_set
+                    || returns_void
+                    || !self.out_datums.is_empty()
+                    || matches!(self.def.returns, FunctionReturns::None)
+                {
+                    Ok(())
+                } else {
+                    Err(SQLError::Routine {
+                        sqlstate: "2F005".into(),
+                        message: "control reached end of function without RETURN".into(),
+                    })
+                }
+            }
+            Flow::Exit(_) => Err(SQLError::Internal(
+                "EXIT escaped every enclosing loop and block".into(),
+            )),
+            Flow::Continue(_) => Err(SQLError::Internal(
+                "CONTINUE escaped every enclosing loop".into(),
+            )),
+        }
+    }
+
+    // -- expression / query plumbing -----------------------------------
+
+    pub(super) fn resolver(&self) -> DatumResolver<'_> {
+        DatumResolver {
+            services: self.services,
+            datums: self.datums,
+            values: &self.values,
+            record_types: &self.record_types,
+            bindings: &self.bindings,
+            error: self.err_stack.last(),
+            param_count: self.def.params.len(),
+        }
+    }
+
+    pub(super) fn eval_expr(&self, expr: &Expr) -> Result<Value, SQLError> {
+        let bound = bind_expr(expr, &mut self.resolver())?;
+        self.services.expressions.evaluate(&bound)
+    }
+
+    pub(super) fn eval_expr_with_type(
+        &self,
+        expr: &Expr,
+    ) -> Result<(Value, Option<ColumnType>), SQLError> {
+        let bound = bind_expr(expr, &mut self.resolver())?;
+        self.services.expressions.evaluate_with_type(&bound)
+    }
+
+    pub(super) fn eval_boolean(&self, expr: &Expr) -> Result<Option<bool>, SQLError> {
+        let (value, declared_type) = self.eval_expr_with_type(expr)?;
+        let source_type = declared_type.as_ref().map(coercion_type_name);
+        match cast_value_from(&value, "boolean", source_type.as_deref())? {
+            Value::Null => Ok(None),
+            Value::Bool(value) => Ok(Some(value)),
+            other => Err(SQLError::Internal(format!(
+                "PL/pgSQL boolean coercion returned {other:?}"
+            ))),
+        }
+    }
+
+    pub(super) fn exec_query(&self, statement: &Statement) -> Result<SQLResult, SQLError> {
+        let bound = bind_statement(statement, &mut self.resolver())?;
+        self.services.statements.execute_bound(bound, &[])
+    }
+
+    pub(super) fn set_found(&mut self, value: bool) {
+        if let Some(idx) = self.found {
+            self.values[idx] = Value::Bool(value);
+        }
+    }
+
+    pub(super) fn push_binding(&mut self, name: &str, idx: usize) {
+        self.bindings.entry(name.to_string()).or_default().push(idx);
+    }
+
+    pub(super) fn pop_binding(&mut self, name: &str) {
+        if let Some(stack) = self.bindings.get_mut(name) {
+            stack.pop();
+            if stack.is_empty() {
+                self.bindings.remove(name);
+            }
+        }
+    }
+}

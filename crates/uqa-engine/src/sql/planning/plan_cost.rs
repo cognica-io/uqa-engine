@@ -62,7 +62,7 @@ pub(super) fn parameterized_access(
         {
             continue;
         }
-        let definition = crate::engine_catalog_indexes::index_definition(&index)
+        let definition = crate::catalog_indexes::index_definition(&index)
             .map_err(|error| SQLError::Internal(error.to_string()))?;
         // A parameter cannot establish a partial index's predicate at planning time.
         if definition.predicate.is_some() {

@@ -104,7 +104,7 @@ When adding an engine method, decide explicitly whether each binding can support
 | Area | Path |
 | --- | --- |
 | Function traits | [`crates/uqa-engine/src/functions.rs`](../../../crates/uqa-engine/src/functions.rs) |
-| Function registry | [`crates/uqa-engine/src/engine_sql_registry.rs`](../../../crates/uqa-engine/src/engine_sql_registry.rs) |
+| Function registry | [`crates/uqa-engine/src/sql_registry.rs`](../../../crates/uqa-engine/src/sql_registry.rs) |
 | FDW contracts | [`crates/uqa-fdw/src/lib.rs`](../../../crates/uqa-fdw/src/lib.rs) |
 | QueryBuilder | [`crates/uqa-api/src/query_builder.rs`](../../../crates/uqa-api/src/query_builder.rs) |
 | ML runtime | [`crates/uqa-ml/src/lib.rs`](../../../crates/uqa-ml/src/lib.rs) |

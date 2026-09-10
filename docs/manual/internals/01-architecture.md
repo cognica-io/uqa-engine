@@ -38,6 +38,9 @@ graph TD
     storage --> core
     storage --> analysis
     sqlite --> storage
+    sqlite --> graph
+    sqlite --> analysis
+    sqlite --> core
     redb --> storage
     scoring --> core
     scoring --> storage
@@ -46,6 +49,9 @@ graph TD
     operators --> scoring
     operators --> fusion
     graph --> core
+    graph --> analysis
+    graph --> operators
+    graph --> storage
     joins --> core
     joins --> graph
     joins --> sql
@@ -53,9 +59,9 @@ graph TD
     sql --> parser
     execution --> core
     execution --> sql
+    execution --> graph
+    execution --> operators
     planner --> sql
-    planner --> execution
-    planner --> joins
     planner --> operators
     planner --> graph
     ml --> operators
@@ -63,6 +69,7 @@ graph TD
     engine --> planner
     engine --> execution
     engine --> storage
+    engine --> sqlite
     engine --> graph
     engine --> scoring
     engine --> fusion
@@ -72,7 +79,7 @@ graph TD
     adapters --> engine
 ```
 
-The executable dependency policy is stored in [`scripts/workspace-dependency-policy.json`](../../../scripts/workspace-dependency-policy.json) and checked by [`scripts/check-workspace-dependencies.py`](../../../scripts/check-workspace-dependencies.py). The policy checks exact runtime edges, dependency budgets, and transitive boundaries, including build and platform-specific dependencies. Install `bash scripts/install-git-hooks.sh` to run the same check against the Git index on every commit. See [SQL crate boundaries](../../design/sql-crate-boundaries.md) for the ownership contracts.
+The executable dependency policy is stored in [`scripts/workspace-dependency-policy.json`](../../../scripts/workspace-dependency-policy.json) and checked by [`scripts/check-workspace-dependencies.py`](../../../scripts/check-workspace-dependencies.py). The policy checks exact runtime edges, dependency budgets, transitive workspace boundaries, forbidden provider packages, and source ownership paths, including build and platform-specific declarations. The engine directly depends on the SQLite provider because it composes the default persistent implementation; common storage, graph algorithms, SQL analysis, planning, and execution have no runtime dependency on that provider. Execution's SQLite spill implementation is separate from durable database ownership. Install `bash scripts/install-git-hooks.sh` to run the same check against the Git index on every commit. See [SQL crate boundaries](../../design/sql-crate-boundaries.md) for the ownership contracts.
 
 ## Crate responsibilities
 
@@ -81,7 +88,7 @@ The executable dependency policy is stored in [`scripts/workspace-dependency-pol
 | `uqa-core` | Canonical relation identities, values, exact decimal representation and operations, document sets, relations, posting lists, ranked views, generalized postings, predicates, and shared graph value types |
 | `uqa-analysis` | Character filters, tokenizers, token filters, analyzers, stemming, and highlighting primitives |
 | `uqa-storage` | Backend-neutral document, inverted, vector, tensor, B-tree, block-max, spatial, catalog, ordered catalog-version migration, and Key/Value contracts |
-| `uqa-storage-sqlite` | SQLite implementation of the ordered Key/Value contract |
+| `uqa-storage-sqlite` | SQLite connections, catalog migrations, document and retrieval indexes, transactions, graph persistence, Key/Value storage, encryption, and compressed VFS |
 | `uqa-storage-redb` | redb implementation and persistent session provider |
 | `uqa-scoring` | BM25, Bayesian BM25, score domains, calibration, learning, WAND, and Block-Max WAND |
 | `uqa-fusion` | Exact Bayesian evidence, positive-evidence pooling, probabilistic Boolean, learned, and attention fusion |
@@ -176,27 +183,28 @@ Responsibility roots remain facades over semantic children rather than line-coun
 | DISTINCT execution | [`crates/uqa-execution/src/distinct`](../../../crates/uqa-execution/src/distinct) |
 | Hash-join execution | [`crates/uqa-execution/src/join`](../../../crates/uqa-execution/src/join) |
 | Engine composition | [`crates/uqa-engine/src/lib.rs`](../../../crates/uqa-engine/src/lib.rs) |
-| Engine capability adapters | [`crates/uqa-engine/src/engine_capabilities.rs`](../../../crates/uqa-engine/src/engine_capabilities.rs) |
-| Statement catalog snapshot | [`crates/uqa-engine/src/engine_capabilities/catalog.rs`](../../../crates/uqa-engine/src/engine_capabilities/catalog.rs) |
+| Engine capability adapters | [`crates/uqa-engine/src/capabilities.rs`](../../../crates/uqa-engine/src/capabilities.rs) |
+| Statement catalog adapter | [`crates/uqa-engine/src/capabilities/catalog_execution.rs`](../../../crates/uqa-engine/src/capabilities/catalog_execution.rs) |
 | Unified plan dispatcher | [`crates/uqa-engine/src/sql/plan_executor.rs`](../../../crates/uqa-engine/src/sql/plan_executor.rs) |
 | Shared mutation protocol | [`crates/uqa-engine/src/sql/dml/protocol.rs`](../../../crates/uqa-engine/src/sql/dml/protocol.rs) |
 | Session portal workflow | [`crates/uqa-engine/src/sql/session_portal_worker.rs`](../../../crates/uqa-engine/src/sql/session_portal_worker.rs) |
-| Catalog projection | [`crates/uqa-engine/src/sql/catalog.rs`](../../../crates/uqa-engine/src/sql/catalog.rs) |
-| Catalog relation families | [`crates/uqa-engine/src/sql/catalog/pg_catalog.rs`](../../../crates/uqa-engine/src/sql/catalog/pg_catalog.rs) |
-| Catalog projection policy | [`crates/uqa-engine/src/sql/catalog/helpers.rs`](../../../crates/uqa-engine/src/sql/catalog/helpers.rs) |
+| Catalog projection | [`crates/uqa-execution/src/catalog/projection.rs`](../../../crates/uqa-execution/src/catalog/projection.rs) |
+| Catalog relation families | [`crates/uqa-execution/src/catalog/projection/pg_catalog.rs`](../../../crates/uqa-execution/src/catalog/projection/pg_catalog.rs) |
+| Catalog projection policy | [`crates/uqa-execution/src/catalog/projection/helpers.rs`](../../../crates/uqa-execution/src/catalog/projection/helpers.rs) |
 | SQL schema and parameter binding | [`crates/uqa-sql/src/binding`](../../../crates/uqa-sql/src/binding) |
-| Statement binding adapter | [`crates/uqa-engine/src/sql/select/schema_binding/context.rs`](../../../crates/uqa-engine/src/sql/select/schema_binding/context.rs) |
+| Statement binding context | [`crates/uqa-execution/src/query/binding/context.rs`](../../../crates/uqa-execution/src/query/binding/context.rs) |
 | Query evaluation scopes | [`crates/uqa-engine/src/sql/select/evaluation.rs`](../../../crates/uqa-engine/src/sql/select/evaluation.rs) |
-| SELECT command execution | [`crates/uqa-engine/src/sql/select/execution.rs`](../../../crates/uqa-engine/src/sql/select/execution.rs) |
-| Filter-pushdown subqueries | [`crates/uqa-engine/src/sql/select/filter_pushdown/subqueries.rs`](../../../crates/uqa-engine/src/sql/select/filter_pushdown/subqueries.rs) |
-| Row-lock leaf validation | [`crates/uqa-engine/src/sql/select/row_locking/leaf_validation.rs`](../../../crates/uqa-engine/src/sql/select/row_locking/leaf_validation.rs) |
+| SELECT command execution | [`crates/uqa-execution/src/query/statement/execution.rs`](../../../crates/uqa-execution/src/query/statement/execution.rs) |
+| Filter-pushdown subqueries | [`crates/uqa-planner/src/filter_pushdown/subqueries.rs`](../../../crates/uqa-planner/src/filter_pushdown/subqueries.rs) |
+| Row-lock leaf validation | [`crates/uqa-execution/src/query/locking/leaf_validation.rs`](../../../crates/uqa-execution/src/query/locking/leaf_validation.rs) |
 | Physical query construction | [`crates/uqa-engine/src/sql/select/physical_plan.rs`](../../../crates/uqa-engine/src/sql/select/physical_plan.rs) |
-| Constraint rewrite and referencing policy | [`crates/uqa-engine/src/sql/dml/constraints/`](../../../crates/uqa-engine/src/sql/dml/constraints) |
+| Constraint rewrite and referencing policy | [`crates/uqa-execution/src/mutation/constraints/`](../../../crates/uqa-execution/src/mutation/constraints) |
 | MERGE action execution | [`crates/uqa-engine/src/sql/dml/merge/execution.rs`](../../../crates/uqa-engine/src/sql/dml/merge/execution.rs) |
-| Trigger transition tables | [`crates/uqa-engine/src/sql/triggers/transitions.rs`](../../../crates/uqa-engine/src/sql/triggers/transitions.rs) |
+| Trigger transition tables | [`crates/uqa-execution/src/mutation/triggers/transitions.rs`](../../../crates/uqa-execution/src/mutation/triggers/transitions.rs) |
 | Indexed spill storage | [`crates/uqa-execution/src/spill/indexed/`](../../../crates/uqa-execution/src/spill/indexed) |
 | Storage contracts | [`crates/uqa-storage/src/lib.rs`](../../../crates/uqa-storage/src/lib.rs) |
-| SQLite catalog migrations | [`crates/uqa-storage/src/sqlite/catalog/migration`](../../../crates/uqa-storage/src/sqlite/catalog/migration) |
+| SQLite provider | [`crates/uqa-storage-sqlite/src/lib.rs`](../../../crates/uqa-storage-sqlite/src/lib.rs) |
+| SQLite catalog migrations | [`crates/uqa-storage-sqlite/src/catalog/migration`](../../../crates/uqa-storage-sqlite/src/catalog/migration) |
 | Exact WAND and Block-Max WAND | [`crates/uqa-scoring/src/wand`](../../../crates/uqa-scoring/src/wand) |
 | Graph runtime | [`crates/uqa-graph/src/lib.rs`](../../../crates/uqa-graph/src/lib.rs) |
 

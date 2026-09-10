@@ -54,14 +54,14 @@ impl Engine {
         if columns.is_empty() {
             self.ensure_any_column_privilege(
                 &canonical,
-                crate::engine_table_security::TableAclPrivilege::Insert,
+                crate::table_security::TableAclPrivilege::Insert,
             )?;
         } else {
             for column in &columns {
                 self.ensure_column_privilege(
                     &canonical,
                     column,
-                    crate::engine_table_security::TableAclPrivilege::Insert,
+                    crate::table_security::TableAclPrivilege::Insert,
                 )?;
             }
         }
@@ -141,14 +141,14 @@ impl Engine {
                 if columns.is_empty() {
                     self.ensure_any_column_privilege(
                         &canonical,
-                        crate::engine_table_security::TableAclPrivilege::Select,
+                        crate::table_security::TableAclPrivilege::Select,
                     )?;
                 } else {
                     for column in &columns {
                         self.ensure_column_privilege(
                             &canonical,
                             column,
-                            crate::engine_table_security::TableAclPrivilege::Select,
+                            crate::table_security::TableAclPrivilege::Select,
                         )?;
                     }
                 }

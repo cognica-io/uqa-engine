@@ -1,0 +1,460 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Index relation and catalog projection.
+
+use uqa_core::Value;
+use uqa_sql::{ResultRow, SQLError};
+
+use crate::catalog::index::{index_definition, IndexDefinition};
+use crate::catalog::{CatalogReadView, RelationNameResolution};
+use uqa_core::RelationIdentity;
+
+use super::super::helpers::index_definitions::{index_columns, indexdef};
+use super::super::helpers::oids::{relation_oid, split_schema_name};
+use super::super::helpers::rows::{
+    bool_value, catalog_ordinal, catalog_usize, int_value, row, str_value,
+};
+use super::table_relation_oid_from;
+
+#[derive(Debug, Clone)]
+pub struct CatalogIndexRelation {
+    pub relation: RelationIdentity,
+    pub table_name: String,
+    pub index_type: String,
+    pub columns: Vec<uqa_sql::ast::IndexKey>,
+    pub definition: IndexDefinition,
+    pub primary: bool,
+    pub relkind: &'static str,
+    pub is_partition: bool,
+    pub has_children: bool,
+    pub parent_index_oid: Option<i64>,
+}
+
+impl CatalogIndexRelation {
+    pub fn oid(&self) -> i64 {
+        relation_oid(self.relkind, &self.relation.schema, &self.relation.name)
+    }
+}
+
+pub fn catalog_index_relations(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<CatalogIndexRelation>, SQLError> {
+    let mut roots = Vec::new();
+    for index in catalog.catalog_indexes() {
+        roots.push(CatalogIndexRelation {
+            relation: index.relation.clone(),
+            table_name: index.table_name.clone(),
+            index_type: index.index_type.clone(),
+            columns: index_columns(&index.columns_json)?,
+            definition: index_definition(index)
+                .map_err(|error| SQLError::Internal(error.to_string()))?,
+            primary: false,
+            relkind: "i",
+            is_partition: false,
+            has_children: false,
+            parent_index_oid: None,
+        });
+    }
+    for table in catalog.table_names() {
+        let snapshot = catalog
+            .table(resolution, &table)?
+            .ok_or_else(|| SQLError::UnknownTable(table.clone()))?;
+        let (schema, _) = split_schema_name(&table)?;
+        for key in snapshot.keys.iter() {
+            let name = key
+                .name
+                .as_ref()
+                .ok_or_else(|| SQLError::Internal("unnamed catalog key".into()))?;
+            roots.push(CatalogIndexRelation {
+                relation: RelationIdentity::new(&schema, name),
+                table_name: table.clone(),
+                index_type: if key.without_overlaps {
+                    "gist"
+                } else {
+                    "btree"
+                }
+                .into(),
+                columns: key
+                    .columns
+                    .iter()
+                    .cloned()
+                    .map(uqa_sql::ast::IndexKey::Column)
+                    .collect(),
+                definition: IndexDefinition {
+                    unique: true,
+                    nulls_not_distinct: key.nulls_not_distinct,
+                    ..IndexDefinition::default()
+                },
+                primary: key.kind == uqa_sql::ast::TableKeyConstraintKind::PrimaryKey,
+                relkind: "i",
+                is_partition: false,
+                has_children: false,
+                parent_index_oid: None,
+            });
+        }
+    }
+    let mut used = roots
+        .iter()
+        .map(|index| index.relation.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut order = roots
+        .iter()
+        .map(|index| {
+            partition_depth(catalog, resolution, &index.table_name)
+                .map(|depth| (depth, index.relation.clone()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    order.sort();
+    let mut pending = roots
+        .into_iter()
+        .map(|index| (index.relation.clone(), index))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut output = Vec::new();
+    for (_, relation) in order {
+        if let Some(root) = pending.remove(&relation) {
+            append_index_tree(
+                catalog,
+                resolution,
+                root,
+                &mut used,
+                &mut pending,
+                &mut output,
+            )?;
+        }
+    }
+    Ok(output)
+}
+
+fn append_index_tree(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    mut index: CatalogIndexRelation,
+    used: &mut std::collections::BTreeSet<RelationIdentity>,
+    pending: &mut std::collections::BTreeMap<RelationIdentity, CatalogIndexRelation>,
+    output: &mut Vec<CatalogIndexRelation>,
+) -> Result<(), SQLError> {
+    let snapshot = catalog
+        .table(resolution, &index.table_name)?
+        .ok_or_else(|| SQLError::UnknownTable(index.table_name.clone()))?;
+    index.relkind = if snapshot.hierarchy.partition_spec.is_some() {
+        "I"
+    } else {
+        "i"
+    };
+    let children = if index.relkind == "I" {
+        catalog.direct_hierarchy_children(resolution, &index.table_name)?
+    } else {
+        Vec::new()
+    };
+    index.has_children = !children.is_empty();
+    let parent_oid = index.oid();
+    output.push(index.clone());
+    for child in children {
+        let (schema, table) = split_schema_name(&child)?;
+        let reusable = pending
+            .values()
+            .find(|candidate| candidate.table_name == child && equivalent_index(candidate, &index))
+            .map(|candidate| candidate.relation.clone());
+        let mut child_index = if let Some(reusable) = reusable {
+            pending
+                .remove(&reusable)
+                .ok_or_else(|| SQLError::Internal("partition index disappeared".into()))?
+        } else {
+            CatalogIndexRelation {
+                relation: allocate_derived_index_name(
+                    &schema,
+                    &table,
+                    &index
+                        .columns
+                        .iter()
+                        .map(|key| key.column().unwrap_or("expr").to_owned())
+                        .collect::<Vec<_>>(),
+                    used,
+                ),
+                table_name: child,
+                ..index.clone()
+            }
+        };
+        child_index.is_partition = true;
+        child_index.parent_index_oid = Some(parent_oid);
+        append_index_tree(catalog, resolution, child_index, used, pending, output)?;
+    }
+    Ok(())
+}
+
+fn equivalent_index(left: &CatalogIndexRelation, right: &CatalogIndexRelation) -> bool {
+    left.columns == right.columns
+        && left.primary == right.primary
+        && left.index_type == right.index_type
+        && left.definition.unique == right.definition.unique
+        && left.definition.nulls_not_distinct == right.definition.nulls_not_distinct
+        && left.definition.included_columns == right.definition.included_columns
+        && left.definition.predicate == right.definition.predicate
+        && (0..left.columns.len()).all(|position| {
+            left.definition
+                .column_order
+                .get(position)
+                .copied()
+                .unwrap_or_default()
+                == right
+                    .definition
+                    .column_order
+                    .get(position)
+                    .copied()
+                    .unwrap_or_default()
+        })
+}
+
+fn partition_depth(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    table: &str,
+) -> Result<usize, SQLError> {
+    let mut table = table.to_string();
+    let mut ancestors = std::collections::BTreeSet::new();
+    loop {
+        let snapshot = catalog
+            .table(resolution, &table)?
+            .ok_or_else(|| SQLError::UnknownTable(table.clone()))?;
+        if snapshot.hierarchy.partition_bound.is_none() {
+            return Ok(ancestors.len());
+        }
+        let Some(parent) = snapshot.hierarchy.parents.first() else {
+            return Ok(ancestors.len());
+        };
+        if !ancestors.insert(parent.clone()) {
+            return Err(SQLError::Internal("cyclic index partition ancestry".into()));
+        }
+        table.clone_from(parent);
+    }
+}
+
+fn allocate_derived_index_name(
+    schema: &str,
+    table: &str,
+    columns: &[String],
+    used: &mut std::collections::BTreeSet<RelationIdentity>,
+) -> RelationIdentity {
+    fn component(raw: &str) -> String {
+        let mut output = String::with_capacity(raw.len());
+        let mut separator = false;
+        for character in raw.chars() {
+            if character.is_alphanumeric() || character == '_' {
+                output.extend(character.to_lowercase());
+                separator = false;
+            } else if !separator && !output.is_empty() {
+                output.push('_');
+                separator = true;
+            }
+        }
+        while output.ends_with('_') {
+            output.pop();
+        }
+        output
+    }
+
+    let mut parts = std::iter::once(table)
+        .chain(columns.iter().map(String::as_str))
+        .map(component)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        parts.push("index".into());
+    }
+    let base = format!("{}_idx", parts.join("_"));
+    let base_relation = RelationIdentity::new(schema, &base);
+    if used.insert(base_relation.clone()) {
+        return base_relation;
+    }
+    for suffix in 1_u64.. {
+        let candidate = format!("{base}{suffix}");
+        let relation = RelationIdentity::new(schema, candidate);
+        if used.insert(relation.clone()) {
+            return relation;
+        }
+    }
+    unreachable!("u64 index-name suffix space is non-empty")
+}
+
+pub fn index_access_method_oid(method: &str) -> i64 {
+    match method.to_ascii_lowercase().as_str() {
+        "" | "btree" => 403,
+        "hash" => 405,
+        "gist" => 783,
+        "gin" => 2_742,
+        "spgist" => 4_000,
+        "brin" => 3_580,
+        _ => 0,
+    }
+}
+
+fn index_key_ordinals(
+    index: &CatalogIndexRelation,
+    table_cols: &[uqa_sql::ast::ColumnDef],
+) -> Result<Vec<i64>, SQLError> {
+    index
+        .columns
+        .iter()
+        .map(uqa_sql::ast::IndexKey::column)
+        .chain(
+            index
+                .definition
+                .included_columns
+                .iter()
+                .map(|name| Some(name.as_str())),
+        )
+        .map(|column| {
+            column
+                .and_then(|name| table_cols.iter().position(|item| item.name == name))
+                .map(|position| catalog_ordinal(position, "pg_index key column"))
+                .transpose()
+                .map(|ordinal| ordinal.unwrap_or(0))
+        })
+        .collect()
+}
+
+pub fn build_pg_index(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
+    let mut rows = Vec::new();
+    for index in catalog_index_relations(catalog, resolution)? {
+        let table_cols = &catalog
+            .table(resolution, &index.table_name)?
+            .ok_or_else(|| SQLError::UnknownTable(index.table_name.clone()))?
+            .columns;
+        let keys = index_key_ordinals(&index, table_cols)?;
+        let expressions = index
+            .columns
+            .iter()
+            .filter_map(|key| match key {
+                uqa_sql::ast::IndexKey::Expression(expression) => Some(expression.as_ref()),
+                uqa_sql::ast::IndexKey::Column(_) => None,
+            })
+            .map(|expression| {
+                super::super::view_definition::stored_expression_definition(
+                    catalog, resolution, expression, false,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let column_count = catalog_usize(index.columns.len(), "pg_index column count")?;
+        let total_count = catalog_usize(
+            index.columns.len() + index.definition.included_columns.len(),
+            "pg_index total column count",
+        )?;
+        rows.push(row([
+            ("indexrelid", int_value(index.oid())),
+            (
+                "indrelid",
+                int_value(table_relation_oid_from(
+                    catalog,
+                    resolution,
+                    &index.table_name,
+                )?),
+            ),
+            ("indnatts", int_value(total_count)),
+            ("indnkeyatts", int_value(column_count)),
+            ("indisunique", bool_value(index.definition.unique)),
+            (
+                "indnullsnotdistinct",
+                bool_value(index.definition.nulls_not_distinct),
+            ),
+            ("indisprimary", bool_value(index.primary)),
+            ("indisexclusion", bool_value(false)),
+            ("indimmediate", bool_value(true)),
+            ("indisclustered", bool_value(false)),
+            ("indisvalid", bool_value(true)),
+            ("indcheckxmin", bool_value(false)),
+            ("indisready", bool_value(true)),
+            ("indislive", bool_value(true)),
+            ("indisreplident", bool_value(false)),
+            (
+                "indkey",
+                Value::List(keys.into_iter().map(Value::Int).collect()),
+            ),
+            ("indcollation", Value::Null),
+            ("indclass", Value::Null),
+            (
+                "indoption",
+                Value::List(
+                    (0..index.columns.len())
+                        .map(|position| {
+                            let order = index
+                                .definition
+                                .column_order
+                                .get(position)
+                                .copied()
+                                .unwrap_or_default();
+                            Value::Int(
+                                i64::from(order.descending) + 2 * i64::from(order.nulls_first),
+                            )
+                        })
+                        .collect(),
+                ),
+            ),
+            (
+                "indexprs",
+                if expressions.is_empty() {
+                    Value::Null
+                } else {
+                    Value::Str(expressions.join(", "))
+                },
+            ),
+            (
+                "indpred",
+                index
+                    .definition
+                    .predicate
+                    .as_deref()
+                    .map(|predicate| {
+                        super::super::view_definition::stored_expression_definition(
+                            catalog, resolution, predicate, false,
+                        )
+                    })
+                    .transpose()?
+                    .map_or(Value::Null, Value::Str),
+            ),
+        ]));
+    }
+    Ok(rows)
+}
+
+pub fn build_pg_indexes(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
+    let mut rows = Vec::new();
+    for index in catalog_index_relations(catalog, resolution)? {
+        let (schema, table) = split_schema_name(&index.table_name)?;
+        let qualified_table = format!(
+            "{}.{}",
+            uqa_sql::expr::quote_ident(if schema.starts_with("pg_temp_") {
+                "pg_temp"
+            } else {
+                &schema
+            }),
+            uqa_sql::expr::quote_ident(&table)
+        );
+        let index_target = if index.relkind == "I" {
+            format!("ONLY {qualified_table}")
+        } else {
+            qualified_table
+        };
+        rows.push(row([
+            ("schemaname", str_value(schema)),
+            ("tablename", str_value(table.clone())),
+            ("indexname", str_value(index.relation.name.clone())),
+            ("tablespace", Value::Null),
+            (
+                "indexdef",
+                str_value(indexdef(catalog, resolution, &index, &index_target, false)?),
+            ),
+        ]));
+    }
+    Ok(rows)
+}

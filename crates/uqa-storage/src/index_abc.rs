@@ -26,9 +26,9 @@ pub trait Index: Send + Sync {
     fn scan(&self, predicate: &Predicate) -> PostingList;
     fn estimate_cardinality(&self, predicate: &Predicate) -> usize;
     fn scan_cost(&self, predicate: &Predicate) -> f64;
-    fn build(&mut self) -> Result<(), crate::SQLiteError>;
+    fn build(&mut self) -> Result<(), crate::StorageBackendError>;
     /// Tear down the physical index. Avoids the name `drop` so it does
     /// not collide with [`Drop::drop`] when the trait is invoked
     /// through a trait object.
-    fn drop_index(&mut self) -> Result<(), crate::SQLiteError>;
+    fn drop_index(&mut self) -> Result<(), crate::StorageBackendError>;
 }

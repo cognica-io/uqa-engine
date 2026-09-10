@@ -9,6 +9,7 @@
 mod call_arguments;
 mod context;
 mod evaluator;
+pub mod plan;
 mod subquery;
 
 pub use uqa_sql::ir::{
@@ -26,3 +27,8 @@ pub use subquery::{ScalarSubqueryRunner, SubqueryResult};
 
 #[cfg(test)]
 mod tests;
+
+/// Evaluate an immutable scalar expression without row, parameter, or stateful-function inputs.
+pub fn eval_constant_scalar(expression: &ScalarExpr) -> Result<uqa_core::Value, uqa_sql::SQLError> {
+    eval_scalar(expression, &ScalarEvalContext::new(None, &[]))
+}

@@ -66,7 +66,7 @@ fn preflight_create_table_target(
     };
     if matches!(
         engine.resolve_bound_relation_kind(&name)?,
-        crate::engine_capabilities::RelationResolution::Found(_, _)
+        crate::capabilities::RelationResolution::Found(_, _)
     ) {
         let local = crate::RelationIdentity::from_legacy_name(&name)
             .map_err(SQLError::Internal)?

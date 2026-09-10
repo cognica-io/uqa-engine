@@ -277,8 +277,11 @@ fn redb_automatic_statistics_persist_and_release_the_file_on_drop() {
 fn compressed_automatic_statistics_use_separate_read_and_write_transactions() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("automatic-compressed.sqlite3");
-    let engine =
-        Engine::open_compressed(&path, uqa_storage::SQLiteCompressionOptions::default()).unwrap();
+    let engine = Engine::open_compressed(
+        &path,
+        uqa_storage_sqlite::SQLiteCompressionOptions::default(),
+    )
+    .unwrap();
     exec(
         &engine,
         "CREATE TABLE t (id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1), (2)",
@@ -296,7 +299,10 @@ fn compressed_automatic_statistics_use_separate_read_and_write_transactions() {
         std::thread::sleep(Duration::from_millis(20));
     }
     drop(engine);
-    let reopened =
-        Engine::open_compressed(&path, uqa_storage::SQLiteCompressionOptions::default()).unwrap();
+    let reopened = Engine::open_compressed(
+        &path,
+        uqa_storage_sqlite::SQLiteCompressionOptions::default(),
+    )
+    .unwrap();
     assert_eq!(reopened.column_stats("t").unwrap()["id"].row_count, 2);
 }

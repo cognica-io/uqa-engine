@@ -3786,14 +3786,25 @@ name = "uqa-execution"
 version = "0.2.3"
 dependencies = [
  "ahash",
+ "ciborium",
+ "libc",
  "parking_lot",
+ "rayon",
+ "regex",
+ "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "smallvec",
  "tempfile",
  "thiserror 1.0.69",
  "uqa-core",
+ "uqa-fdw",
+ "uqa-graph",
+ "uqa-operators",
  "uqa-sql",
+ "uqa-storage",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3829,7 +3840,6 @@ dependencies = [
  "parking_lot",
  "proptest",
  "regex",
- "rusqlite",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -3876,7 +3886,7 @@ dependencies = [
  "uqa-engine",
  "uqa-scoring",
  "uqa-sql",
- "uqa-storage",
+ "uqa-storage-sqlite",
 ]
 
 [[package]]
@@ -3937,16 +3947,14 @@ version = "0.2.3"
 dependencies = [
  "criterion",
  "proptest",
- "rayon",
  "serde",
+ "serde_json",
  "thiserror 1.0.69",
  "uqa-core",
  "uqa-execution",
  "uqa-graph",
- "uqa-joins",
  "uqa-operators",
  "uqa-sql",
- "uqa-storage",
 ]
 
 [[package]]
@@ -3962,7 +3970,7 @@ dependencies = [
  "uqa-engine",
  "uqa-scoring",
  "uqa-sql",
- "uqa-storage",
+ "uqa-storage-sqlite",
 ]
 
 [[package]]
@@ -4004,25 +4012,15 @@ dependencies = [
 name = "uqa-storage"
 version = "0.2.3"
 dependencies = [
- "argon2",
- "chacha20poly1305",
- "crc32fast",
  "criterion",
- "fs2",
- "getrandom 0.3.4",
- "hmac",
- "lz4_flex",
  "parking_lot",
  "proptest",
- "rusqlite",
  "serde",
  "serde_json",
- "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "uqa-analysis",
  "uqa-core",
- "zstd",
 ]
 
 [[package]]
@@ -4040,11 +4038,26 @@ dependencies = [
 name = "uqa-storage-sqlite"
 version = "0.2.3"
 dependencies = [
+ "argon2",
+ "chacha20poly1305",
+ "crc32fast",
+ "criterion",
+ "fs2",
+ "getrandom 0.3.4",
+ "hmac",
+ "lz4_flex",
+ "parking_lot",
  "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
  "tempfile",
+ "thiserror 1.0.69",
  "uqa-analysis",
  "uqa-core",
+ "uqa-graph",
  "uqa-storage",
+ "zstd",
 ]
 
 [[package]]
@@ -4058,7 +4071,7 @@ dependencies = [
  "uqa-engine",
  "uqa-scoring",
  "uqa-sql",
- "uqa-storage",
+ "uqa-storage-sqlite",
 ]
 
 [[package]]

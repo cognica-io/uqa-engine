@@ -25,7 +25,9 @@ flowchart TD
 
 `uqa-storage` defines backend-neutral traits for document rows, inverted postings, vector and tensor values, B-tree values, block-max metadata, spatial data, catalog records, and ordered Key/Value operations.
 
-B-tree backend methods use `ValueIndexKey::Column` for ordinary field indexes and `ValueIndexKey::Index` for a named catalog index. These are separate physical namespaces even when their strings are identical: SQLite encodes them as TEXT and BLOB keys, and key-value providers use distinct binary tags. Expression indexes store a composite `Value::Row` key under the named index identity. The engine owns SQL expression binding, dependency traversal, and key evaluation; storage providers preserve expression catalog payloads without depending on SQL AST types.
+`uqa-storage-sqlite` implements those contracts and the graph persistence contract from `uqa-graph`. It owns managed connections, catalog migrations, physical indexes, transactions, SQLCipher integration, and the compressed VFS. Neither common storage nor graph algorithms depend on the SQLite provider or driver, including their tests and benchmarks. Cross-provider graph conformance tests and SQLite persistence benchmarks live in `uqa-storage-sqlite`. Concrete Rust imports and provider error handling are described in the [development migration notes](../reference/10-upgrading.md#sqlite-provider-ownership-in-development).
+
+B-tree backend methods use `ValueIndexKey::Column` for ordinary field indexes and `ValueIndexKey::Index` for a named catalog index. These are separate physical namespaces even when their strings are identical: the SQLite provider encodes them as TEXT and BLOB keys, and key-value providers use distinct binary tags. Expression indexes store a composite `Value::Row` key under the named index identity. SQL binding and execution layers own expression binding, dependency traversal, and key evaluation; storage providers preserve expression catalog payloads without depending on SQL AST types.
 
 Expression key preparation finishes before the document-store write lock is acquired. The in-memory index retains each document's stored key so updates and deletes remove the original posting even after an immutable routine is replaced. Rollback recovery hydrates caches directly from restored durable postings without invoking SQL callbacks or reentering the transaction coordinator; a missing durable index remains cold until ordinary statement execution can rebuild it. Named memory and temporary indexes retain evaluated keys in transaction snapshots and are preserved when column accelerators are invalidated. VACUUM FULL rebuilds the physical indexes after rewriting their table.
 
@@ -36,7 +38,7 @@ Expression key preparation finishes before the document-store write lock is acqu
 | Provider | Main implementation | Session transaction identity | Security notes |
 | --- | --- | --- | --- |
 | Memory | In-engine memory stores | Engine session state | No durability |
-| SQLite | Catalog and storage modules in `uqa-storage` plus `uqa-storage-sqlite` Key/Value implementation | Managed connection | Plain, SQLCipher, or compressed VFS open paths |
+| SQLite | `uqa-storage-sqlite` | Managed connection | Plain, SQLCipher, or compressed VFS open paths |
 | redb | `uqa-storage-redb` | Independent read or write transaction over shared database | No encryption at rest |
 
 SQLite is the default persistent engine. redb uses the same SQL and logical storage surface through the provider contract.
@@ -116,7 +118,7 @@ sequenceDiagram
 
 ## Migrations
 
-Provider open runs required schema and posting-format migrations before table and index handles are restored. [`migration/registry.rs`](../../../crates/uqa-storage/src/sqlite/catalog/migration/registry.rs) is the single ordered dispatcher, while [`migration/steps/`](../../../crates/uqa-storage/src/sqlite/catalog/migration/steps) gives every catalog version its own SQL or data-dependent owner and records the version only after that step commits. The clustered-posting migration is bounded, atomic, idempotent, and validates output before recording its format marker. Failure retains the legacy representation and leaves no partial new representation.
+Provider open runs required schema and posting-format migrations before table and index handles are restored. [`migration/registry.rs`](../../../crates/uqa-storage-sqlite/src/catalog/migration/registry.rs) is the single ordered dispatcher, while [`migration/steps/`](../../../crates/uqa-storage-sqlite/src/catalog/migration/steps) gives every catalog version its own SQL or data-dependent owner and records the version only after that step commits. The clustered-posting migration is bounded, atomic, idempotent, and validates output before recording its format marker. Failure retains the legacy representation and leaves no partial new representation.
 
 An application upgrade should test open, restore, query, mutation, close, and reopen against a copy of production-shaped data. Storage compatibility is a release boundary even when the public SQL remains unchanged.
 
@@ -133,9 +135,9 @@ The [compressed VFS security contract](../../design/compressed-vfs-security.md) 
 | Area | Path |
 | --- | --- |
 | Storage traits | [`crates/uqa-storage/src/lib.rs`](../../../crates/uqa-storage/src/lib.rs) |
-| SQLite catalog | [`crates/uqa-storage/src/sqlite`](../../../crates/uqa-storage/src/sqlite) |
-| SQLite migration dispatcher | [`crates/uqa-storage/src/sqlite/catalog/migration/registry.rs`](../../../crates/uqa-storage/src/sqlite/catalog/migration/registry.rs) |
-| SQLite catalog-version steps | [`crates/uqa-storage/src/sqlite/catalog/migration/steps`](../../../crates/uqa-storage/src/sqlite/catalog/migration/steps) |
-| SQLite Key/Value store | [`crates/uqa-storage-sqlite/src/lib.rs`](../../../crates/uqa-storage-sqlite/src/lib.rs) |
+| SQLite provider | [`crates/uqa-storage-sqlite/src/lib.rs`](../../../crates/uqa-storage-sqlite/src/lib.rs) |
+| SQLite migration dispatcher | [`crates/uqa-storage-sqlite/src/catalog/migration/registry.rs`](../../../crates/uqa-storage-sqlite/src/catalog/migration/registry.rs) |
+| SQLite catalog-version steps | [`crates/uqa-storage-sqlite/src/catalog/migration/steps`](../../../crates/uqa-storage-sqlite/src/catalog/migration/steps) |
+| SQLite Key/Value store | [`crates/uqa-storage-sqlite/src/key_value.rs`](../../../crates/uqa-storage-sqlite/src/key_value.rs) |
 | redb provider | [`crates/uqa-storage-redb/src/lib.rs`](../../../crates/uqa-storage-redb/src/lib.rs) |
-| Engine open and restore | [`crates/uqa-engine/src/engine_open`](../../../crates/uqa-engine/src/engine_open) |
+| Engine open and restore | [`crates/uqa-engine/src/open`](../../../crates/uqa-engine/src/open) |

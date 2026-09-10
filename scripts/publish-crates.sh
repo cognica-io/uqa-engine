@@ -55,7 +55,6 @@ crates=(
   uqa-analysis
   uqa-storage
   uqa-storage-redb
-  uqa-storage-sqlite
   uqa-scoring
   uqa-fusion
   uqa-operators
@@ -63,6 +62,7 @@ crates=(
   uqa-sql
   uqa-fdw
   uqa-graph
+  uqa-storage-sqlite
   uqa-joins
   uqa-execution
   uqa-planner

@@ -2,8 +2,9 @@
   "schema_version": 1,
   "dependency_budgets": {
     "uqa": 2,
-    "uqa-engine": 13,
-    "uqa-sql": 2
+    "uqa-engine": 14,
+    "uqa-sql": 2,
+    "uqa-planner": 4
   },
   "runtime_workspace_dependencies": {
     "example-extensibility": [
@@ -67,11 +68,16 @@
       "uqa-planner",
       "uqa-scoring",
       "uqa-sql",
-      "uqa-storage"
+      "uqa-storage",
+      "uqa-storage-sqlite"
     ],
     "uqa-execution": [
       "uqa-core",
-      "uqa-sql"
+      "uqa-fdw",
+      "uqa-graph",
+      "uqa-operators",
+      "uqa-sql",
+      "uqa-storage"
     ],
     "uqa-fdw": [
       "uqa-core"
@@ -104,7 +110,7 @@
       "uqa-engine",
       "uqa-scoring",
       "uqa-sql",
-      "uqa-storage"
+      "uqa-storage-sqlite"
     ],
     "uqa-operators": [
       "uqa-core",
@@ -122,12 +128,9 @@
     "uqa-pg-wire": [],
     "uqa-planner": [
       "uqa-core",
-      "uqa-execution",
       "uqa-graph",
-      "uqa-joins",
       "uqa-operators",
-      "uqa-sql",
-      "uqa-storage"
+      "uqa-sql"
     ],
     "uqa-python": [
       "uqa-cli",
@@ -136,7 +139,7 @@
       "uqa-engine",
       "uqa-scoring",
       "uqa-sql",
-      "uqa-storage"
+      "uqa-storage-sqlite"
     ],
     "uqa-scoring": [
       "uqa-core",
@@ -154,6 +157,9 @@
       "uqa-storage"
     ],
     "uqa-storage-sqlite": [
+      "uqa-analysis",
+      "uqa-core",
+      "uqa-graph",
       "uqa-storage"
     ],
     "uqa-wasm": [
@@ -161,7 +167,7 @@
       "uqa-engine",
       "uqa-scoring",
       "uqa-sql",
-      "uqa-storage"
+      "uqa-storage-sqlite"
     ]
   },
   "transitive_dependency_boundaries": {
@@ -172,9 +178,16 @@
       "uqa-pg-query"
     ],
     "uqa-execution": [
+      "uqa-analysis",
       "uqa-core",
+      "uqa-fdw",
+      "uqa-fusion",
+      "uqa-graph",
+      "uqa-operators",
       "uqa-pg-query",
-      "uqa-sql"
+      "uqa-scoring",
+      "uqa-sql",
+      "uqa-storage"
     ],
     "uqa-storage": [
       "uqa-analysis",
@@ -183,15 +196,149 @@
     "uqa-planner": [
       "uqa-analysis",
       "uqa-core",
-      "uqa-execution",
       "uqa-fusion",
       "uqa-graph",
-      "uqa-joins",
       "uqa-operators",
       "uqa-pg-query",
       "uqa-scoring",
       "uqa-sql",
       "uqa-storage"
+    ],
+    "uqa-graph": [
+      "uqa-analysis",
+      "uqa-core",
+      "uqa-fusion",
+      "uqa-operators",
+      "uqa-scoring",
+      "uqa-storage"
+    ]
+  },
+  "crate_path_rules": {
+    "crates/uqa-engine": {
+      "forbidden_component_prefixes": [
+        "engine_"
+      ]
+    },
+    "crates/uqa-storage": {
+      "forbidden_paths": [
+        "src/sqlite",
+        "src/sqlite.rs"
+      ]
+    },
+    "crates/uqa-graph": {
+      "forbidden_paths": [
+        "src/sqlite_store",
+        "src/sqlite_store.rs"
+      ]
+    }
+  },
+  "forbidden_runtime_dependencies": {
+    "uqa-core": [
+      "libsqlite3-sys",
+      "redb",
+      "rusqlite",
+      "uqa-storage-redb",
+      "uqa-storage-sqlite"
+    ],
+    "uqa-analysis": [
+      "libsqlite3-sys",
+      "redb",
+      "rusqlite",
+      "uqa-storage-redb",
+      "uqa-storage-sqlite"
+    ],
+    "uqa-sql": [
+      "libsqlite3-sys",
+      "redb",
+      "rusqlite",
+      "uqa-storage-redb",
+      "uqa-storage-sqlite"
+    ],
+    "uqa-storage": [
+      "libsqlite3-sys",
+      "redb",
+      "rusqlite",
+      "uqa-storage-redb",
+      "uqa-storage-sqlite"
+    ],
+    "uqa-scoring": [
+      "libsqlite3-sys",
+      "redb",
+      "rusqlite",
+      "uqa-storage-redb",
+      "uqa-storage-sqlite"
+    ],
+    "uqa-fusion": [
+      "libsqlite3-sys",
+      "redb",
+      "rusqlite",
+      "uqa-storage-redb",
+      "uqa-storage-sqlite"
+    ],
+    "uqa-operators": [
+      "libsqlite3-sys",
+      "redb",
+      "rusqlite",
+      "uqa-storage-redb",
+      "uqa-storage-sqlite"
+    ],
+    "uqa-graph": [
+      "libsqlite3-sys",
+      "redb",
+      "rusqlite",
+      "uqa-storage-redb",
+      "uqa-storage-sqlite"
+    ],
+    "uqa-joins": [
+      "libsqlite3-sys",
+      "redb",
+      "rusqlite",
+      "uqa-storage-redb",
+      "uqa-storage-sqlite"
+    ],
+    "uqa-planner": [
+      "libsqlite3-sys",
+      "redb",
+      "rusqlite",
+      "uqa-storage-redb",
+      "uqa-storage-sqlite"
+    ],
+    "uqa-ml": [
+      "libsqlite3-sys",
+      "redb",
+      "rusqlite",
+      "uqa-storage-redb",
+      "uqa-storage-sqlite"
+    ],
+    "uqa-execution": [
+      "redb",
+      "uqa-storage-redb",
+      "uqa-storage-sqlite"
+    ],
+    "uqa-storage-redb": [
+      "libsqlite3-sys",
+      "rusqlite",
+      "uqa-storage-sqlite"
+    ],
+    "uqa-storage-sqlite": [
+      "redb",
+      "uqa-storage-redb"
+    ]
+  },
+  "forbidden_dependencies": {
+    "uqa-storage": [
+      "libsqlite3-sys",
+      "redb",
+      "rusqlite",
+      "uqa-storage-redb",
+      "uqa-storage-sqlite"
+    ],
+    "uqa-graph": [
+      "libsqlite3-sys",
+      "redb",
+      "rusqlite",
+      "uqa-storage-redb",
+      "uqa-storage-sqlite"
     ]
   }
 }

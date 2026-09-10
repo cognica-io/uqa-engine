@@ -12,7 +12,7 @@ The checked-in `expected/pg18.json` fixture is generated only after every UQA re
 cargo test -p uqa-engine --test integration sql_tpch::
 ```
 
-This gate is the `sql_tpch` module of the engine crate's single integration-test executable and loads the complete fixture once. The other engine integration sources are modules of domain harnesses such as `engine_queries`; no source creates an additional independently linked test executable.
+This gate is the `sql_tpch` module of the engine crate's single integration-test executable and loads the complete fixture once. The other engine integration sources are modules of domain harnesses such as `queries`; no source creates an additional independently linked test executable.
 
 ## Release timing runner
 

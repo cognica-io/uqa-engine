@@ -14,8 +14,8 @@ use uqa_planner::{
 use uqa_sql::ast::{CreateForeignServer, CreateForeignTable, FunctionParamMode};
 use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 
-use crate::engine_capabilities::{MutationCoordinator, QueryRuntimeView, SessionExecutionView};
-use crate::engine_session::{MaterializedViewRegistration, ViewRegistration};
+use crate::capabilities::{MutationCoordinator, QueryRuntimeView, SessionExecutionView};
+use crate::session::{MaterializedViewRegistration, ViewRegistration};
 
 use super::scalar::{
     analyze_physical_call_arguments, eval_physical_call_arguments, PhysicalEvalContext,
@@ -95,7 +95,7 @@ pub(super) fn analyze_call_result_schema(
         .iter()
         .map(|argument| argument.name.map(str::to_string))
         .collect::<Vec<_>>();
-    let scope = select::CteScope::new_for_current_routine(engine);
+    let scope = crate::capabilities::query_scope::new_for_current_routine(engine);
     let argument_types = arguments
         .iter()
         .zip(&call_arguments)
@@ -116,7 +116,7 @@ pub(super) fn analyze_call_result_schema(
         &argument_names,
         &argument_types,
         explicit_variadic,
-        crate::engine_user_functions::RoutineCallKind::Procedure,
+        crate::user_functions::RoutineCallKind::Procedure,
     )?
     else {
         let signature = argument_types
@@ -143,7 +143,7 @@ pub(super) fn analyze_call_result_schema(
 /// Owns top-level plan orchestration. Relational, mutation, DDL, procedural,
 /// and prepared-plan execution all enter through this exhaustive dispatcher;
 /// leaf executors never choose a second top-level SQL path.
-pub(super) struct UnifiedPlanExecutor<'engine, 'params> {
+pub(crate) struct UnifiedPlanExecutor<'engine, 'params> {
     engine: &'engine Engine,
     session: SessionExecutionView<'engine>,
     runtime: QueryRuntimeView<'engine>,
@@ -159,7 +159,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         Self::with_nested_statement(engine, params, false)
     }
 
-    pub(super) fn new_nested(engine: &'engine Engine, params: &'params [SQLParam]) -> Self {
+    pub(crate) fn new_nested(engine: &'engine Engine, params: &'params [SQLParam]) -> Self {
         Self::with_nested_statement(engine, params, true)
     }
 
@@ -190,7 +190,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         self
     }
 
-    pub(super) fn execute(&mut self, plan: &UnifiedPlan) -> Result<SQLResult, SQLError> {
+    pub(crate) fn execute(&mut self, plan: &UnifiedPlan) -> Result<SQLResult, SQLError> {
         self.runtime.check_cancelled()?;
         super::cte_validation::validate_plan(self.engine, plan)?;
         super::read_only::validate_transaction_plan(self.engine, plan)?;
@@ -207,8 +207,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         if self.session.transaction_depth() != 0 {
             select::lock_query_relations(self.engine, query)?;
         }
-        let mut ctes =
-            select::CteScope::new_for_statement(self.engine, self.privilege_subject.as_deref());
+        let mut ctes = crate::capabilities::query_scope::new_for_statement(
+            self.engine,
+            self.privilege_subject.as_deref(),
+        );
         select::execute_query_plan_with_ctes(self.engine, query, self.params, &mut ctes)
     }
 
@@ -227,8 +229,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         if self.session.transaction_depth() != 0 {
             select::lock_query_relations(self.engine, query)?;
         }
-        let mut ctes =
-            select::CteScope::new_for_statement(self.engine, self.privilege_subject.as_deref());
+        let mut ctes = crate::capabilities::query_scope::new_for_statement(
+            self.engine,
+            self.privilege_subject.as_deref(),
+        );
         select::execute_query_plan_output(
             self.engine,
             query,
@@ -444,7 +448,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 "cannot use subquery in CALL argument".into(),
             ));
         }
-        let scope = select::CteScope::new_for_current_routine(self.engine);
+        let scope = crate::capabilities::query_scope::new_for_current_routine(self.engine);
         let (call_arguments, explicit_variadic) = analyze_physical_call_arguments(arguments)?;
         let argument_types = arguments
             .iter()
@@ -485,7 +489,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         let role_owner = self.engine.session_execution_view().current_user();
         self.engine.ensure_database_privilege(
             &role_owner,
-            crate::engine_database_security::DatabaseAclPrivilege::Create,
+            crate::database_security::DatabaseAclPrivilege::Create,
         )?;
         self.mutation
             .register_schema(name, if_not_exists, &role_owner)
@@ -505,7 +509,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             command,
         ) {
             // Semantic errors precede the view's rewrite-time mutation rejection.
-            let ctes = select::CteScope::new_for_current_routine(self.engine);
+            let ctes = crate::capabilities::query_scope::new_for_current_routine(self.engine);
             super::prepared::analyze_command_parameters(self.engine, command, self.params, &ctes)?;
             return Err(error);
         }
@@ -717,7 +721,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                     };
                     self.engine.ensure_table_privilege(
                         &canonical,
-                        crate::engine_table_security::TableAclPrivilege::Maintain,
+                        crate::table_security::TableAclPrivilege::Maintain,
                     )?;
                     vec![canonical]
                 } else {
@@ -735,7 +739,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 tables,
                 cascade,
                 restart_identity,
-            } => crate::engine_truncate::execute_sql_truncate(
+            } => crate::truncate::execute_sql_truncate(
                 self.engine,
                 tables,
                 *cascade,

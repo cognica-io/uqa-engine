@@ -138,7 +138,7 @@ The Phase 1 boundary was measured on 2026-08-31 with `bash scripts/measure-rust-
 | `uqa-engine/src/lib.rs` | 1 | 885 |
 | `uqa-engine/src/sql.rs` | 1 | 337 |
 | `UnifiedPlanExecutor` owner | 1 | 557 |
-| `engine_capabilities.rs` | 1 | 582 |
+| `capabilities.rs` | 1 | 582 |
 
 The raw coupling scan reports 313 Rust files under `uqa-engine/src`, 236 files mentioning `Engine`, 75 files containing literal `impl Engine`, 143 SQL files mentioning `Engine`, 173 SQL files importing their parent module, and seven SQL files using a parent glob. These counts are not credited as migration by themselves: the enforceable evidence is the checked-in capability policy covering 14 files, with 12 declared facade or orchestration adapters and two engine-free catalog leaves. The policy enumerates the four capability types and `CatalogEpochs`, rejects undeclared data types and service traits, and rejects catch-all service names, `Deref`, stored or aliased `Engine`, and function signatures that accept or return `Engine`.
 
@@ -190,7 +190,7 @@ INSERT, UPDATE, DELETE, and MERGE now enter `run_mutation_command`, which create
 
 Prepared mutation, INSERT spill, base-table MERGE spill, and trigger-backed-view MERGE spill formats have dedicated versioned codecs with complete round trips and strict rejection of unknown versions, widths, field types, action kinds, and trailing data. The prepared rewrite codec carries `trigger_updated_columns`, so spilling cannot silently change trigger behavior. The checked-in capability policy now covers 119 files: 66 declared adapters and 53 engine-free leaves. The adapter count grew because the complete mutation surface is now declared and checked; protocol carriers and codecs cannot accept, store, alias, return, or recover `Engine`, while the four protocol operations that must cross storage, trigger, lock, or publication boundaries remain explicit adapters. The raw coupling scan reports 360 Rust files under `uqa-engine/src`, 239 files mentioning `Engine`, 75 files containing literal `impl Engine`, 145 SQL files mentioning `Engine`, 203 SQL files importing their parent module, and eight SQL files using a parent glob; these concentration counts are not credited as boundary completion.
 
-The structural ratchet now reports 58 files at or above 1,000 physical lines, with counts of 33 at or above 1,200, 22 at or above 1,350, 17 at or above 1,400, seven at or above 1,450, and none above 1,500. `dml.rs`, `delete.rs`, and `rules.rs` left the inventory; `conflict.rs`, `insert.rs`, `merge.rs`, `view_triggers.rs`, and `engine_table_storage/documents.rs` have lower exact baselines.
+The structural ratchet now reports 58 files at or above 1,000 physical lines, with counts of 33 at or above 1,200, 22 at or above 1,350, 17 at or above 1,400, seven at or above 1,450, and none above 1,500. `dml.rs`, `delete.rs`, and `rules.rs` left the inventory; `conflict.rs`, `insert.rs`, `merge.rs`, `view_triggers.rs`, and `table_storage/documents.rs` have lower exact baselines.
 
 The current library target reports 219 passed with no failures, and the single `uqa-engine` integration executable reports 2,067 passed, two ignored, and no failures across 2,069 discovered tests. The current release `usql` was executed against Docker PostgreSQL 18.4 with Apache AGE 1.8.0: all 797 differential probes matched, and the affected stateful suites matched constraints 162/162, type-temporal 49/49, triggers 584/584, rules 194/194, and transactions 61/61.
 
@@ -202,7 +202,7 @@ The Phase 4 boundary was measured on 2026-09-01 with `bash scripts/measure-rust-
 | --- | ---: | ---: |
 | `uqa-engine` | 646 | 234,242 |
 | `uqa-engine/src/sql`, including `sql.rs` | 232 | 89,466 |
-| `engine_transactions/` | 15 | Root 34; every child is below 1,000 lines and the largest is 737 lines |
+| `transactions/` | 15 | Root 34; every child is below 1,000 lines and the largest is 737 lines |
 | `row_locks/` | 19 | Root 89; every child is below 1,000 lines and the largest is 769 lines |
 | `row_locks/cross_process/mod.rs` | 1 | 235 |
 | `row_locks/cross_process/file/` | 6 | Root 194; responsibility-owned children are at most 317 lines |
@@ -211,7 +211,7 @@ Transaction ownership is separated into the frame coordinator, explicit control,
 
 Lock ownership is separated into stable identities, shared manager registration, in-process grants, relation locks, waits and deadlock traversal, release cleanup, row-change snapshot and publication gates, change history, physical change resolution, and the native cross-process adapter. The adapter further separates byte claims, the durable change journal, platform record-lock operations, holder and waiter slots, and transaction XID allocation. Snapshot, publication, observation, cross-process wait, row-lock statement, and transaction guards own the matching release path; repeated cancellation is tested to leave no row grant, relation wait, or advertised wait edge.
 
-The structural ratchet now reports 55 files at or above 1,000 physical lines, with counts of 30 at or above 1,200, 19 at or above 1,350, 15 at or above 1,400, six at or above 1,450, and none above 1,500. The former `engine_transactions.rs`, `row_locks.rs`, and `row_locks/cross_process.rs` entries left the transition inventory. The raw coupling scan reports 380 Rust files under `uqa-engine/src`, 245 files mentioning `Engine`, 79 files containing literal `impl Engine`, 145 SQL files mentioning `Engine`, 203 SQL files importing their parent module, and eight SQL files using a parent glob; the capability policy remains 119 files with 66 declared adapters and 53 engine-free leaves.
+The structural ratchet now reports 55 files at or above 1,000 physical lines, with counts of 30 at or above 1,200, 19 at or above 1,350, 15 at or above 1,400, six at or above 1,450, and none above 1,500. The former `transactions.rs`, `row_locks.rs`, and `row_locks/cross_process.rs` entries left the transition inventory. The raw coupling scan reports 380 Rust files under `uqa-engine/src`, 245 files mentioning `Engine`, 79 files containing literal `impl Engine`, 145 SQL files mentioning `Engine`, 203 SQL files importing their parent module, and eight SQL files using a parent glob; the capability policy remains 119 files with 66 declared adapters and 53 engine-free leaves.
 
 The current library target reports 222 passed with no failures, and the single `uqa-engine` integration executable reports 2,067 passed, two ignored, and no failures across 2,069 discovered tests. Focused verification reports 9 transaction-owner tests, 18 lock-manager tests, one native sidecar-owner test, 58 transaction-lifecycle integration tests, 44 SQL row-lock tests, and 85 row-lock recheck, independent-process, deadlock, and writer-order tests, all passing. The current release `usql` was executed against Docker PostgreSQL 18.4 with Apache AGE 1.8.0: all 797 differential probes matched, and the complete stateful matrix matched routines 129/129, roles 136/136, constraints 162/162, type-temporal 49/49, triggers 584/584, rules 194/194, and transactions 61/61.
 
@@ -298,7 +298,7 @@ The largest command, transaction, and lock roots do not merely contain many simi
 - INSERT/ON CONFLICT, UPDATE/UPDATE FROM, DELETE/DELETE USING, referential actions, partition movement, MERGE, automatic-view rewriting, trigger-backed views, and rules all consume the shared protocol. Their remaining command roots own SQL-specific source execution, qualification, rule and trigger policy, constraint sequencing, and result construction rather than an alternate transaction, cleanup, row-image, or publication path.
 - INSERT, base-table MERGE, and trigger-backed-view MERGE own dedicated versioned spill codecs, while the shared prepared-action codec owns insert, rewrite, and delete persistence. These codecs are separate from command policy and have exact round-trip and malformed-input tests.
 - Constraint validation, rewrite ordering, and referencing policy are separated under `sql/dml/constraints/`; SELECT-source INSERT, conflict `RETURNING`, MERGE execution, automatic-view layer rewriting, and trigger-backed update/delete execution likewise have dedicated owners. The corresponding command roots are 883, 918, 693, 378, and 528 lines, and none recreates a transaction, cleanup, row-image, or publication path outside the shared protocol.
-- `engine_transactions/` now separates frame coordination, scoped callbacks, explicit control, savepoints, snapshots, backend transitions, publication, and failure cleanup behind a 34-line root. `row_locks/` now separates identities, grants, relation locks, waits, cleanup, change gates and history, shared registration, and native sidecar coordination behind an 89-line root; the sidecar's claim, journal, platform, wait-slot, and XID owners are separate from its 194-line facade.
+- `transactions/` now separates frame coordination, scoped callbacks, explicit control, savepoints, snapshots, backend transitions, publication, and failure cleanup behind a 34-line root. `row_locks/` now separates identities, grants, relation locks, waits, cleanup, change gates and history, shared registration, and native sidecar coordination behind an 89-line root; the sidecar's claim, journal, platform, wait-slot, and XID owners are separate from its 194-line facade.
 
 Splitting these files at arbitrary line positions would hide the issue. Each resulting module must own one state transition or one projection family and expose a small typed boundary.
 
@@ -447,7 +447,7 @@ Exit gate: All DML commands use one transaction and publication protocol, comman
 
 ### 7.6 Transactions and locks
 
-- Split `engine_transactions.rs` into transaction coordinator, implicit-statement lifecycle, explicit transaction control, savepoints, snapshot/restore, deferred completion, publication, and failure cleanup.
+- Split `transactions.rs` into transaction coordinator, implicit-statement lifecycle, explicit transaction control, savepoints, snapshot/restore, deferred completion, publication, and failure cleanup.
 - Split `row_locks.rs` into lock identity and modes, in-process grant table, wait graph and deadlock detection, relation locks, row-change observation/publication, shared manager registry, and cross-process adapter.
 - Represent transaction and lock transitions with typed states or scoped guards so every success, error, panic, timeout, cancellation, and drop path has one cleanup owner.
 - Preserve the canonical multi-registry snapshot lock order and document it next to the coordinator rather than across callers.
@@ -468,7 +468,7 @@ The lower-crate work follows dependency order and is grouped by semantic owner r
 | `uqa-sql/src/expr.rs` | [`expr/`](../../crates/uqa-sql/src/expr) owns context and lookup, dispatch, argument normalization, builtin execution, diagnostics, and evaluator operations. |
 | `uqa-sql/src/expr/casting.rs` | [`expr/casting/`](../../crates/uqa-sql/src/expr/casting) owns the scalar and range facade, OID and binary, array, temporal, legacy-vector conversions, and tests. |
 | `uqa-scoring/src/wand.rs` | [`wand/`](../../crates/uqa-scoring/src/wand) owns common bounds and results, materialized and persistent cursors and loops, diagnostics, and tests. |
-| `uqa-storage/src/sqlite/catalog/migration.rs` | [`migration/`](../../crates/uqa-storage/src/sqlite/catalog/migration) owns access and shape repair, one dispatcher, and 25 ordered version modules with reopen fixtures. |
+| `uqa-storage/src/sqlite/catalog/migration.rs` | [`migration/`](../../crates/uqa-storage-sqlite/src/catalog/migration) now belongs to the SQLite provider and owns access and shape repair, one dispatcher, and ordered version modules with reopen fixtures. |
 | `uqa-core/src/types/decimal.rs` | [`decimal/`](../../crates/uqa-core/src/types/decimal) owns representation and normalization, parsing and formatting, arithmetic, sampling and transcendental operations, conversion, comparison, power, and serde. |
 
 Exit gate: Each lower crate matches its documented ownership, no reverse dependency is introduced, public re-exports preserve compatibility, and focused crate tests plus cross-crate engine tests pass.

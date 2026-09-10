@@ -43,7 +43,7 @@ The workspace declares `unsafe_code = "deny"` and `unused_must_use = "deny"`. Cl
 Integration domains can be selected by test harness and module path:
 
 ```sh
-cargo test -p uqa-engine --test integration engine_queries::sql_joins::
+cargo test -p uqa-engine --test integration queries::sql_joins::
 cargo test -p uqa-engine --test integration sql_tpch::
 cargo test -p uqa-scoring --test integration wand_exactness::
 cargo test -p uqa-graph --test integration rpq::
@@ -64,7 +64,7 @@ bash scripts/check-rust-file-lines.sh
 bash scripts/check-public-repository-hygiene.sh
 ```
 
-Install `bash scripts/install-git-hooks.sh` once per clone to check the exact staged dependency graph on every commit. `python3 scripts/check-workspace-dependencies.py --staged` checks the index manually; the default command checks the working tree as CI does. Both enforce runtime edge inventory, budgets, and transitive crate boundaries, including build and target-specific dependencies. Hook tests use real Git indexes and commits to verify rejection and independence from unstaged edits. The harness checker prevents uncontrolled integration-test process growth. Benchmark coverage ensures workload entry points and semantic evidence remain represented. The capability checker loads `scripts/engine-capability-policy.json`, rejects `Engine` access in declared leaf modules, rejects undeclared or stale adapter exceptions, requires the capability module's data types to match its explicit inventory, rejects service traits, and prevents `Engine` data fields, aliases, function parameters or returns, dereferences, catch-all service names, and recovery methods. Header, line, and hygiene scripts enforce repository publication rules.
+Install `bash scripts/install-git-hooks.sh` once per clone to check the exact staged dependency graph on every commit. `python3 scripts/check-workspace-dependencies.py --staged` checks the index manually; the default command checks the working tree as CI does. Both enforce runtime edge inventory, budgets, transitive crate boundaries, forbidden provider packages, and source ownership paths, including build and target-specific dependencies. Hook tests use real Git indexes and commits to verify rejection and independence from unstaged edits, including aliased external drivers reached through another workspace crate. Common storage and graph crates also reject provider dependencies in tests and benchmarks; provider conformance tests and persistence benchmarks belong to the provider crate. The harness checker prevents uncontrolled integration-test process growth. Benchmark coverage ensures workload entry points and semantic evidence remain represented. The capability checker loads `scripts/engine-capability-policy.json`, rejects `Engine` access in declared leaf modules, rejects undeclared or stale adapter exceptions, requires the capability module's data types to match its explicit inventory, rejects service traits, and prevents `Engine` data fields, aliases, function parameters or returns, dereferences, catch-all service names, and recovery methods. Header, line, and hygiene scripts enforce repository publication rules.
 
 The Rust line checker loads `scripts/rust-file-line-policy.json` and rejects every hand-maintained Rust file at or above 1,000 physical lines. There is no transition inventory or per-file exception. Imported `uqa-pg-query` sources and build output under `target` remain excluded. Root and module declarations cannot grant descendant-wide structural Clippy allowances; an irreducible local exception must sit on the affected item and state its invariant. Reproduce the `cloc`, physical-line, per-crate, SQL concentration, `Engine` coupling, and root-allowance report together with:
 
@@ -88,21 +88,21 @@ The 2026-08-31 structural baseline on Rust and Cargo 1.90.0 for `aarch64-apple-d
 The capability, read-path, and mutation-protocol boundaries have focused executable evidence inside the existing library targets and the crate's single integration target:
 
 ```sh
-cargo test -p uqa-engine --lib engine_capabilities::tests::
+cargo test -p uqa-engine --lib capabilities::tests::
 cargo test -p uqa-engine --lib sql::select::schema_binding::tests::
 cargo test -p uqa-engine --lib sql::select::physical_plan::tests::
 cargo test -p uqa-engine --lib sql::dml::protocol::
 cargo test -p uqa-engine --lib sql::dml::insert::codec::tests::
 cargo test -p uqa-engine --lib sql::dml::merge::codec::tests::
 cargo test -p uqa-engine --lib sql::dml::view_triggers::merge::codec::tests::
-cargo test -p uqa-engine --lib engine_transactions::tests::
+cargo test -p uqa-engine --lib transactions::tests::
 cargo test -p uqa-engine --lib row_locks::tests::
 cargo test -p uqa-engine --lib row_locks::cross_process::file::tests::
 cargo test -p uqa-execution --lib scalar::traversal::tests::
-cargo test -p uqa-engine --test integration engine_catalog::capability_boundaries::
+cargo test -p uqa-engine --test integration catalog::capability_boundaries::
 cargo test -p uqa-engine --test integration transaction_lifecycle::
-cargo test -p uqa-engine --test integration engine_queries::sql_row_locks::
-cargo test -p uqa-engine --test integration engine_queries::sql_row_locks_recheck::
+cargo test -p uqa-engine --test integration queries::sql_row_locks::
+cargo test -p uqa-engine --test integration queries::sql_row_locks_recheck::
 ```
 
 The library filters exercise immutable catalog snapshots, relation-name resolution, a deterministic complete-query binder fixture without `Engine`, physical construction from a bound plan and explicit runtime capabilities, complete physical-scalar traversal, exactly-one transaction-frame selection, transaction-scope and lock-guard cleanup, wait cancellation, deadlock detection, change epochs and update chains, overlay cleanup, and strict round trips and malformed-input rejection for prepared mutation spill rows. The integration filters execute virtual catalog reads against session state, persistent schema lifecycle, memory and persistent transactions, savepoints, failed transaction state, sibling writer waits, independent-process locks and deadlocks, and every DML command family through the same protocol, so none of this evidence is compile-only.

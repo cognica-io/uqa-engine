@@ -23,21 +23,28 @@ pub enum OptimizerError {
 
 pub type OptimizerResult<T> = Result<T, OptimizerError>;
 
+/// Evaluate a planner-proven constant using the runtime selected by the caller.
+pub type ConstantEvaluator = fn(&ScalarExpr) -> Result<uqa_core::Value, uqa_sql::SQLError>;
+
 #[derive(Debug, Clone)]
 pub struct OptimizerConfig {
     pub enable_filter_pushdown: bool,
     pub enable_boolean_simplify: bool,
     pub enable_vector_threshold_merge: bool,
     pub enable_join_reordering: bool,
+    /// Shared scalar execution supplied by the engine composition boundary.
+    pub constant_evaluator: ConstantEvaluator,
 }
 
-impl Default for OptimizerConfig {
-    fn default() -> Self {
+impl OptimizerConfig {
+    #[must_use]
+    pub const fn new(constant_evaluator: ConstantEvaluator) -> Self {
         Self {
             enable_filter_pushdown: true,
             enable_boolean_simplify: true,
             enable_vector_threshold_merge: true,
             enable_join_reordering: true,
+            constant_evaluator,
         }
     }
 }

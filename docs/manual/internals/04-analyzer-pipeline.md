@@ -171,8 +171,8 @@ Named definition and assignment publication advances catalog or table epochs. Ot
 | Character filters | [`crates/uqa-analysis/src/char_filter.rs`](../../../crates/uqa-analysis/src/char_filter.rs) |
 | Tokenizers | [`crates/uqa-analysis/src/tokenizer.rs`](../../../crates/uqa-analysis/src/tokenizer.rs) |
 | Token filters | [`crates/uqa-analysis/src/token_filter.rs`](../../../crates/uqa-analysis/src/token_filter.rs) |
-| Engine catalog lifecycle | [`crates/uqa-engine/src/engine_analyzers.rs`](../../../crates/uqa-engine/src/engine_analyzers.rs) |
-| Field registration and rebuild | [`crates/uqa-engine/src/engine_table_storage/fts.rs`](../../../crates/uqa-engine/src/engine_table_storage/fts.rs) |
+| Engine catalog lifecycle | [`crates/uqa-engine/src/analyzers.rs`](../../../crates/uqa-engine/src/analyzers.rs) |
+| Field registration and rebuild | [`crates/uqa-engine/src/table_storage/fts.rs`](../../../crates/uqa-engine/src/table_storage/fts.rs) |
 | SQL table functions | [`crates/uqa-engine/src/sql/from_rows/table_function_dispatch.rs`](../../../crates/uqa-engine/src/sql/from_rows/table_function_dispatch.rs) |
 | Inverted-index contract | [`crates/uqa-storage/src/inverted_index/contract.rs`](../../../crates/uqa-storage/src/inverted_index/contract.rs) |
 

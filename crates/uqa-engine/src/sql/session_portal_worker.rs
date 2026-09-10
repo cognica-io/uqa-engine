@@ -45,7 +45,7 @@ pub(super) fn declare_session_portal(
     Ok(SQLResult::empty())
 }
 
-pub(super) fn open_plpgsql_session_portal(
+pub(crate) fn open_plpgsql_session_portal(
     engine: &Engine,
     params: &[SQLParam],
     name: &str,
@@ -134,7 +134,7 @@ fn validate_explain_cursor_body(
     match body {
         UnifiedPlan::Query(query) => {
             select::lock_query_relations(engine, query)?;
-            let ctes = select::CteScope::new_for_current_routine(engine);
+            let ctes = crate::capabilities::query_scope::new_for_current_routine(engine);
             select::analyze_query_plan_schema(engine, query, params, &ctes, None)?;
             Ok(())
         }
@@ -162,7 +162,7 @@ fn cannot_open_command_cursor(command: &CommandPlan) -> SQLError {
     }
 }
 
-pub(super) fn ensure_plpgsql_session_portal_available(
+pub(crate) fn ensure_plpgsql_session_portal_available(
     engine: &Engine,
     name: &str,
 ) -> Result<(), SQLError> {
@@ -223,7 +223,7 @@ fn prepare_session_portal(
         });
     }
     select::lock_query_relations(engine, query)?;
-    let ctes = select::CteScope::new_for_current_routine(engine);
+    let ctes = crate::capabilities::query_scope::new_for_current_routine(engine);
     let schema = select::analyze_query_plan_schema(engine, query, params, &ctes, None)?;
     select::validate_query_row_locks(engine, query, params)?;
     engine.open_pending_session_portal(SessionPortalDeclaration {
@@ -280,13 +280,8 @@ impl SessionPortalRowConsumer {
     }
 }
 
-impl select::QueryRowConsumer for SessionPortalRowConsumer {
-    fn begin(
-        &self,
-        _engine: &Engine,
-        columns: &[String],
-        schema: &uqa_execution::RowSchema,
-    ) -> Result<(), SQLError> {
+impl uqa_execution::query::consumer::QueryRowConsumer for SessionPortalRowConsumer {
+    fn begin(&self, columns: &[String], schema: &uqa_execution::RowSchema) -> Result<(), SQLError> {
         self.public_width.set(columns.len());
         let column_types = columns
             .iter()
@@ -311,7 +306,6 @@ impl select::QueryRowConsumer for SessionPortalRowConsumer {
 
     fn consume(
         &self,
-        _engine: &Engine,
         row: uqa_execution::OwnedPhysicalRow,
     ) -> Result<select::QueryConsumerControl, SQLError> {
         let view = row.view();
@@ -329,14 +323,11 @@ impl select::QueryRowConsumer for SessionPortalRowConsumer {
         self.direction.get()
     }
 
-    fn direction_exhausted(
-        &self,
-        _engine: &Engine,
-    ) -> Result<select::QueryConsumerControl, SQLError> {
+    fn direction_exhausted(&self) -> Result<select::QueryConsumerControl, SQLError> {
         self.respond_and_wait(SessionPortalWorkerResponse::Eof)
     }
 
-    fn rewound(&self, _engine: &Engine) -> Result<select::QueryConsumerControl, SQLError> {
+    fn rewound(&self) -> Result<select::QueryConsumerControl, SQLError> {
         self.respond_and_wait(SessionPortalWorkerResponse::Rewound)
     }
 }
@@ -374,7 +365,7 @@ pub(crate) fn start_session_portal_worker(
             closed: std::cell::Cell::new(false),
             public_width: std::cell::Cell::new(0),
         });
-        let mut ctes = select::CteScope::new_for_current_routine(&engine);
+        let mut ctes = crate::capabilities::query_scope::new_for_current_routine(&engine);
         ctes.enable_command_progress_streaming();
         if directional {
             ctes.enable_backwards_scanning();
@@ -384,7 +375,7 @@ pub(crate) fn start_session_portal_worker(
             &query,
             &params,
             &mut ctes,
-            select::QueryOutputMode::RowConsumer(consumer.clone()),
+            select::QueryOutputMode::physical_consumer(consumer.clone()),
         );
         match result {
             Ok(_) if !consumer.closed.get() => {

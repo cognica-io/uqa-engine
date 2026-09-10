@@ -14,7 +14,7 @@ fn optimized(sql: &str) -> UnifiedPlan {
     let mut statements = compile(sql).expect("SQL compiles");
     optimize(
         UnifiedPlan::lower(statements.remove(0)),
-        &OptimizerConfig::default(),
+        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
     )
     .expect("optimizer succeeds")
 }
@@ -24,7 +24,7 @@ fn optimized_with_rows(sql: &str, rows: &[(&str, u64)]) -> UnifiedPlan {
     let rows = rows.iter().copied().collect::<BTreeMap<_, _>>();
     optimize_with_statistics(
         UnifiedPlan::lower(statements.remove(0)),
-        &OptimizerConfig::default(),
+        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
         &|table: &str| {
             rows.get(table).copied().map(|row_count| {
                 let column = || crate::ColumnStats {
@@ -545,26 +545,30 @@ fn dpccp_resolves_unique_unqualified_where_join_columns() {
     )
     .expect("SQL compiles");
     let plan = UnifiedPlan::lower(statements.remove(0));
-    let plan = optimize_with_statistics(plan, &OptimizerConfig::default(), &|table: &str| {
-        let (rows, columns): (u64, &[&str]) = match table {
-            "a" => (1_000_000, &["a_id"]),
-            "b" => (10_000, &["b_id", "b_a_id"]),
-            "c" => (10, &["c_id", "c_b_id"]),
-            _ => return None,
-        };
-        let mut stats = crate::RelationStats::new(rows);
-        for column in columns {
-            stats = stats.with_column(
-                *column,
-                crate::ColumnStats {
-                    distinct_count: rows,
-                    row_count: rows,
-                    ..crate::ColumnStats::default()
-                },
-            );
-        }
-        Some(stats)
-    })
+    let plan = optimize_with_statistics(
+        plan,
+        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+        &|table: &str| {
+            let (rows, columns): (u64, &[&str]) = match table {
+                "a" => (1_000_000, &["a_id"]),
+                "b" => (10_000, &["b_id", "b_a_id"]),
+                "c" => (10, &["c_id", "c_b_id"]),
+                _ => return None,
+            };
+            let mut stats = crate::RelationStats::new(rows);
+            for column in columns {
+                stats = stats.with_column(
+                    *column,
+                    crate::ColumnStats {
+                        distinct_count: rows,
+                        row_count: rows,
+                        ..crate::ColumnStats::default()
+                    },
+                );
+            }
+            Some(stats)
+        },
+    )
     .expect("optimizer succeeds");
     let source = query_block(&plan).from.as_ref().expect("join source");
 
@@ -643,19 +647,23 @@ fn join_reordering_preserves_lateral_boundary() {
     *lateral = true;
 
     let rows = BTreeMap::from([("a", 1_000_000), ("b", 10_000), ("c", 1)]);
-    let plan = optimize_with_statistics(plan, &OptimizerConfig::default(), &|table: &str| {
-        rows.get(table).copied().map(|row_count| {
-            let column = || crate::ColumnStats {
-                distinct_count: row_count,
-                row_count,
-                ..crate::ColumnStats::default()
-            };
-            crate::RelationStats::new(row_count)
-                .with_column("id", column())
-                .with_column("a_id", column())
-                .with_column("b_id", column())
-        })
-    })
+    let plan = optimize_with_statistics(
+        plan,
+        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+        &|table: &str| {
+            rows.get(table).copied().map(|row_count| {
+                let column = || crate::ColumnStats {
+                    distinct_count: row_count,
+                    row_count,
+                    ..crate::ColumnStats::default()
+                };
+                crate::RelationStats::new(row_count)
+                    .with_column("id", column())
+                    .with_column("a_id", column())
+                    .with_column("b_id", column())
+            })
+        },
+    )
     .expect("optimizer succeeds");
     let source = query_block(&plan).from.as_ref().expect("join source");
     let SourcePlan::Join {

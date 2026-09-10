@@ -27,11 +27,7 @@ impl QueryOptimizer {
             source: None,
         } = &op
         {
-            let managed = self
-                .index_manager
-                .as_ref()
-                .and_then(|manager| manager.find_covering_index_with_cost(table, field, predicate));
-            let catalog = self
+            let best = self
                 .index_candidates
                 .iter()
                 .filter(|candidate| {
@@ -43,12 +39,6 @@ impl QueryOptimizer {
                 })
                 .map(|candidate| (candidate.index_name.clone(), candidate.scan_cost))
                 .min_by(|left, right| left.1.total_cmp(&right.1));
-            let best = match (managed, catalog) {
-                (Some(left), Some(right)) if left.1 <= right.1 => Some(left),
-                (Some(_), Some(right)) => Some(right),
-                (Some(candidate), None) | (None, Some(candidate)) => Some(candidate),
-                (None, None) => None,
-            };
             if let Some((name, scan_cost)) = best {
                 // Prefer the index only when its `scan_cost(predicate)` beats
                 // a full scan; otherwise keep the filter over the original

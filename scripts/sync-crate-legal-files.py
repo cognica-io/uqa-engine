@@ -32,9 +32,9 @@ USER_FACING = {"uqa", "uqa-engine", "uqa-client", "uqa-cli", "uqa-api"}
 CRATE_ROLES = {
     "uqa-core": "document sets, finite-support relations, posting storage, and value types",
     "uqa-analysis": "tokenizers, character filters, token filters, and analyzers",
-    "uqa-storage": "document, inverted, vector, catalog, and key/value storage contracts",
+    "uqa-storage": "provider-independent storage contracts, shared codecs, and in-memory data structures",
     "uqa-storage-redb": "the redb implementation of the ordered key/value contract",
-    "uqa-storage-sqlite": "the SQLite implementation of the ordered key/value contract",
+    "uqa-storage-sqlite": "SQLite connections, catalogs and migrations, document and retrieval indexes, transactions, graph persistence, key/value storage, encryption, and compressed VFS",
     "uqa-scoring": "BM25, Bayesian BM25, WAND, calibration, and parameter learning",
     "uqa-fusion": "Bayesian evidence fusion and multi-signal retrieval pooling",
     "uqa-operators": "retrieval, Boolean, hybrid, staged, and fusion operators",
@@ -46,6 +46,12 @@ CRATE_ROLES = {
     "uqa-sql": "PostgreSQL 18 SQL parsing, shared plans, static schema binding, type resolution, and value expressions",
     "uqa-pg-wire": "network-independent PostgreSQL v3 message parsing and encoding",
     "uqa-fdw": "foreign-table contracts and DuckDB, Arrow, and memory handlers",
+}
+
+CRATE_NOTES = {
+    "uqa-storage": "Concrete SQLite implementations belong to `uqa-storage-sqlite`; the common storage crate has no runtime dependency on a database provider.",
+    "uqa-storage-sqlite": "Import concrete types such as `ManagedConnection`, `SQLiteStorageProvider`, `SQLiteCompressionOptions`, `SQLiteError`, and `SQLiteGraphStore` from `uqa_storage_sqlite`. This provider implements the backend-neutral contracts in `uqa-storage` and `uqa-graph`. See the [development Rust migration notes](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/reference/10-upgrading.md#sqlite-provider-ownership-in-development) for the previous import paths and error-handling changes.",
+    "uqa-graph": "Memory graph stores and the backend-neutral persistent graph contract live here. The standalone `SQLiteGraphStore` adapter lives in `uqa-storage-sqlite`; graph algorithms do not depend on a SQLite driver or provider.",
 }
 
 
@@ -92,13 +98,15 @@ def copy_legal_files(destination: pathlib.Path) -> None:
 
 def write_internal_readme(destination: pathlib.Path, name: str) -> None:
     role = CRATE_ROLES.get(name, "an internal UQA Engine component")
+    notes = CRATE_NOTES.get(name, "")
     destination.joinpath("README.md").write_text(
         (
             f"# {name}\n"
             "\n"
             f"`{name}` is the UQA Engine crate for {role}.\n"
             "\n"
-            "Applications should depend on `uqa-engine` or `uqa-client`. See the "
+            + (f"{notes}\n\n" if notes else "")
+            + "Applications should depend on `uqa-engine` or `uqa-client`. See the "
             "[repository README](https://github.com/cognica-io/uqa-engine) and the "
             "[manual](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/README.md).\n"
         ),

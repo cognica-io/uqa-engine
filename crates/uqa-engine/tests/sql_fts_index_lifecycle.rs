@@ -15,7 +15,8 @@ use rusqlite::params;
 use tempfile::TempDir;
 use uqa_core::Value;
 use uqa_engine::Engine;
-use uqa_storage::{document_store::Document, ManagedConnection, RelationIdentity};
+use uqa_storage::{document_store::Document, RelationIdentity};
+use uqa_storage_sqlite::ManagedConnection;
 
 fn ids(result: &uqa_sql::SQLResult) -> Vec<i64> {
     result
@@ -631,7 +632,7 @@ fn reopen_migrates_valid_v21_postings_without_rebuilding_from_documents() {
         .unwrap();
     assert_eq!(
         version,
-        uqa_storage::sqlite::CURRENT_SCHEMA_VERSION.to_string()
+        uqa_storage_sqlite::CURRENT_SCHEMA_VERSION.to_string()
     );
     let migrated_rows: i64 = connection
         .query_row(

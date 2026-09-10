@@ -296,10 +296,13 @@
         "vector_index_knn_hnsw",
         "vector_index_knn_trained",
         "vector_index_hnsw_build_1k",
-        "vector_index_persistence_roundtrip",
         "vector_index_threshold_search",
         "vector_index_train"
       ]
+    },
+    {
+      "path": "crates/uqa-storage-sqlite/benches/storage.rs",
+      "tokens": ["vector_index_persistence_roundtrip"]
     }
   ]
 }

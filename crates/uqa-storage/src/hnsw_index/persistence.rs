@@ -10,7 +10,7 @@ use super::types::{HNSWGraphMeta, HNSWIndex, HNSWNode, HNSWNodeSnapshot, HNSWPer
 
 impl HNSWIndex {
     #[cfg(test)]
-    pub(crate) fn persistence_snapshot(&self) -> HNSWPersistenceDelta {
+    pub fn persistence_snapshot(&self) -> HNSWPersistenceDelta {
         HNSWPersistenceDelta {
             meta: self.graph_meta(),
             nodes: self.nodes.values().map(HNSWNodeSnapshot::from).collect(),
@@ -18,7 +18,7 @@ impl HNSWIndex {
         }
     }
 
-    pub(crate) fn take_persistence_delta(&mut self) -> HNSWPersistenceDelta {
+    pub fn take_persistence_delta(&mut self) -> HNSWPersistenceDelta {
         let full_rewrite = self.full_rewrite;
         let nodes = if full_rewrite {
             self.nodes.values().map(HNSWNodeSnapshot::from).collect()

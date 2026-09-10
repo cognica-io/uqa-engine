@@ -108,7 +108,7 @@ impl Engine {
                                     "missing physical index definition {name}"
                                 ))
                             })?;
-                        let definition = crate::engine_catalog_indexes::index_definition(&row)
+                        let definition = crate::catalog_indexes::index_definition(&row)
                             .map_err(|error| SQLError::Internal(error.to_string()))?;
                         if crate::sql::dml::index_predicate_accepts(
                             self,

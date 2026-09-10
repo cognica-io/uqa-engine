@@ -83,7 +83,7 @@ pub(in crate::sql::dml) fn run_view_insert_inner(
         .as_deref()
         .map(|snapshot| engine.statement_read_snapshot_engine(snapshot));
     let read_engine = snapshot_engine.as_ref().unwrap_or(engine);
-    let mut ctes = CteScope::new_for_command(
+    let mut ctes = crate::capabilities::query_scope::new_for_command(
         read_engine,
         stmt.statement_privilege_subject.as_deref(),
         stmt.relations_bound,
@@ -196,7 +196,7 @@ pub(in crate::sql::dml) fn run_view_insert_inner(
         .collect::<Result<Vec<_>, SQLError>>()?;
     let outer_rule_batches =
         super::super::prepare_view_rule_batches(super::super::ViewRuleBatchRequest {
-            engine,
+            context: engine.view_rule_execution_context(),
             relations: &stmt.view_rule_relations,
             event: uqa_sql::ast::RuleEvent::Insert,
             rows: &rule_rows,
@@ -272,15 +272,17 @@ pub(in crate::sql::dml) fn run_view_insert_inner(
         affected,
     )?;
     let rule_outcome = rule_batch.execute_actions_with_affected(
-        engine,
+        engine.rule_execution_context(),
         crate::sql::rules::RuleReturningRequest::from_plan(
             &stmt.returning,
             &stmt.returning_aliases,
             &stmt.subqueries,
         ),
     )?;
-    let outer_rule_outcome = outer_rule_batches
-        .execute_actions_with_affected(engine, stmt.view_rule_returning.as_ref())?;
+    let outer_rule_outcome = outer_rule_batches.execute_actions_with_affected(
+        engine.rule_execution_context(),
+        stmt.view_rule_returning.as_ref(),
+    )?;
     if rule_outcome.returning.is_some() && outer_rule_outcome.returning.is_some() {
         return Err(SQLError::Routine {
             sqlstate: "0A000".into(),
@@ -289,7 +291,7 @@ pub(in crate::sql::dml) fn run_view_insert_inner(
     }
     if let Some(rule_returning) = rule_outcome.returning {
         return rule_returning.project(
-            engine,
+            engine.returning_execution_context(),
             DmlReturningShape {
                 table: &target.canonical_name,
                 target_qualifier: &stmt.target_qualifier,
@@ -302,7 +304,7 @@ pub(in crate::sql::dml) fn run_view_insert_inner(
         );
     }
     if let Some(outer_returning) = outer_rule_outcome.returning {
-        return outer_returning.project(engine, params, &ctes, None);
+        return outer_returning.project(engine.returning_execution_context(), params, &ctes, None);
     }
     if !original_query_survives && rule_outcome.sets_command_tag {
         result.affected_rows = rule_outcome.affected_rows;

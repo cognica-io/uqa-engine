@@ -75,7 +75,7 @@ fn available(engine: &Engine, table: &RelationIdentity, name: &str) -> Result<bo
         engine.resolve_bound_relation_kind(
             &RelationIdentity::new(&table.schema, name).qualified_name()
         )?,
-        crate::engine_capabilities::RelationResolution::MissingRelation
+        crate::capabilities::RelationResolution::MissingRelation
     ))
 }
 

@@ -196,6 +196,22 @@ pub fn qualify_unqualified_columns(expr: &ScalarExpr, qualifier: &str) -> Scalar
     }
 }
 
+/// True when the expression can never evaluate to SQL NULL for any
+/// row: registered search functions, IS NULL tests, and boolean
+/// combinations thereof. Anything referencing column comparisons may
+/// yield NULL, so set-complement `NOT` would be unsound for it.
+pub fn expr_is_null_free(expr: &ScalarExpr) -> bool {
+    match expr {
+        ScalarExpr::Func { name, .. } => crate::registry::is_registered(name),
+        ScalarExpr::IsNull { .. } => true,
+        ScalarExpr::Exists { .. } => true,
+        ScalarExpr::Literal(v) => !matches!(v, uqa_core::Value::Null),
+        ScalarExpr::And(parts) | ScalarExpr::Or(parts) => parts.iter().all(expr_is_null_free),
+        ScalarExpr::Not(inner) => expr_is_null_free(inner),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{expr_contains_function, expr_has_unqualified_column, expr_qualifiers, ScalarExpr};

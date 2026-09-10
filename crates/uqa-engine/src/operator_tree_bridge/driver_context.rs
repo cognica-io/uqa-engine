@@ -173,10 +173,8 @@ impl EngineDriver<'_> {
             .iter()
             .map(|field| (*field).to_string())
             .collect::<Vec<_>>();
-        if !crate::engine_generated::projection_contains_virtual_generated_column(
-            &columns,
-            &projection,
-        ) && !crate::sql::projections_use_tuple_xmin(&projection, &columns)
+        if !crate::generated::projection_contains_virtual_generated_column(&columns, &projection)
+            && !crate::sql::projections_use_tuple_xmin(&projection, &columns)
         {
             return self.bridge_context();
         }

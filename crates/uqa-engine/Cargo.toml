@@ -17,6 +17,7 @@ keywords = ["database", "sql", "postgresql", "full-text-search", "vector-search"
 categories = ["database-implementations"]
 
 [dependencies]
+uqa-storage-sqlite = { workspace = true }
 uqa-core = { workspace = true }
 uqa-analysis = { workspace = true }
 uqa-storage = { workspace = true }
@@ -59,7 +60,6 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage
 
 [dev-dependencies]
 uqa-storage-redb = { workspace = true }
-uqa-storage-sqlite = { workspace = true }
 serde_json = { workspace = true }
 serde = { workspace = true }
 criterion = { workspace = true }

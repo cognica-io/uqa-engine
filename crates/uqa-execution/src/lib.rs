@@ -56,15 +56,20 @@
     clippy::module_name_repetitions
 )]
 
+pub mod aggregation;
 pub mod batch;
+pub mod catalog;
 pub mod column_selection;
 pub mod columnar_batch;
 pub mod distinct;
 pub mod external_sort;
+pub mod functions;
 pub mod join;
 pub mod join_output;
 pub mod lateral_join;
 pub mod map_rows;
+pub mod operator_tree;
+pub mod parallel;
 pub mod physical;
 pub mod project_set;
 pub mod projected_predicate;
@@ -78,6 +83,7 @@ pub mod set_operation;
 pub mod spill;
 pub mod spill_scan;
 pub mod type_resolution;
+pub mod window;
 
 pub use batch::{
     Batch, ColumnIdentity, OwnedPhysicalRow, PhysicalRow, PhysicalRowView, RowLockOrigin,
@@ -148,3 +154,16 @@ pub use type_resolution::{
     RoutineParameterDescriptor, RoutinePolymorphicFamily, RoutinePolymorphicType,
     RoutineSignatureMatchError, RoutineTypeSubstitutions, RoutineVariadicMode, RoutineVariadicPlan,
 };
+
+pub use operator_tree::{ExecutionStats, OperatorOutput, OperatorTreeDriver, PlanExecutor};
+pub use parallel::{
+    run_parallel, ParallelExecutor, DEFAULT_PARALLEL_WORKERS, MIN_PARALLEL_BRANCHES,
+};
+
+pub mod row_locks;
+
+pub mod query;
+
+pub mod mutation;
+
+pub mod routines;

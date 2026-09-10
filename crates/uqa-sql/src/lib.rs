@@ -69,3 +69,5 @@ pub use schema::{ColumnIdentity, RowSchema};
 
 pub use type_resolution::*;
 pub use uqa_core::RelationIdentity;
+
+pub mod assignment;

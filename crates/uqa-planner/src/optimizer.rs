@@ -9,8 +9,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::Value;
-use uqa_execution::{ScalarExpr, ScalarFrameBound};
 use uqa_sql::ast::BinaryOp;
+use uqa_sql::{ScalarExpr, ScalarFrameBound};
 
 use crate::unified_plan::{
     AccessPathPlan, AggregateClassifier, AssignmentPlan, CommandPlan, ComputePlan,
@@ -35,7 +35,8 @@ mod traversal;
 pub use access_path::contains_retrieval;
 pub use api::{
     optimize, optimize_with_aggregates, optimize_with_aggregates_and_statistics,
-    optimize_with_statistics, OptimizerConfig, OptimizerError, OptimizerResult, SourceStatistics,
+    optimize_with_statistics, ConstantEvaluator, OptimizerConfig, OptimizerError, OptimizerResult,
+    SourceStatistics,
 };
 pub use implicit_fusion::query_contains_implicit_hybrid_fusion;
 

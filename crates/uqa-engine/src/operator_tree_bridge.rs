@@ -42,14 +42,14 @@ use uqa_core::{
     DocId, GeneralizedPostingList, PathSegment, Payload, PostingEntry, PostingList, Predicate,
     Value,
 };
+use uqa_execution::operator_tree::{OperatorOutput, OperatorTreeDriver, PlanExecutor};
+use uqa_execution::parallel::ParallelExecutor;
 use uqa_execution::{eval_scalar, ScalarEvalContext, ScalarExpr};
 use uqa_operators::{
     BayesianEvidenceFusionOperator, DeepGraphDirection, ExternalPriorMode, GatingSpec,
     MultiStageCutoff, MultiStageEntry, OperatorTree, RobustPositiveEvidencePoolOperator,
     TextScoringMode,
 };
-use uqa_planner::executor::{OperatorOutput, OperatorTreeDriver, PlanExecutor};
-use uqa_planner::parallel::ParallelExecutor;
 use uqa_planner::query_optimizer::{IndexScanCandidate, QueryOptimizer};
 use uqa_sql::ast::{BinaryOp, ColumnType};
 use uqa_sql::SQLParam;
@@ -411,7 +411,7 @@ impl<'a> EngineDriver<'a> {
             OperatorOutput::Graph(result) => Ok(result.to_posting_list()),
             OperatorOutput::Generalized(_) => Err(SQLError::TypeMismatch(format!(
                 "{} produces tuple rows and cannot feed a single-document operator",
-                uqa_planner::executor::operator_name(op)
+                uqa_execution::operator_tree::operator_name(op)
             ))),
         }
     }
@@ -908,17 +908,7 @@ fn lower_where_bound(
     }
 }
 
-pub(crate) enum DirectVectorRetrieval {
-    Knn {
-        top_k: usize,
-    },
-    Calibrated {
-        field: String,
-        query_vector: Vec<f32>,
-        top_k: usize,
-        threshold: Option<f64>,
-    },
-}
+pub(crate) use uqa_execution::query::table_sources::retrieval::DirectVectorRetrieval;
 
 /// Describe a complete predicate that owns one bounded vector candidate pool.
 /// A hierarchy scan applies that pool and any query-local calibration once

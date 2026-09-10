@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use uqa_storage::{Catalog, SQLiteStorageBackend};
+use uqa_storage_sqlite::{Catalog, SQLiteStorageBackend};
 
 #[derive(Clone)]
 struct StoreWithMissingDocId {

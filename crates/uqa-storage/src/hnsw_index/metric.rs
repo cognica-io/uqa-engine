@@ -8,7 +8,7 @@
 
 use crate::vector_index::vector_norm;
 
-pub(crate) const MAX_HNSW_LEVEL: usize = 32;
+pub const MAX_HNSW_LEVEL: usize = 32;
 
 pub(super) fn normalize_with_norm(vector: &[f32]) -> (Vec<f32>, f32) {
     let mut normalized = vector.to_vec();

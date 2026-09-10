@@ -14,10 +14,8 @@ use std::sync::Arc;
 use tempfile::tempdir;
 use uqa_core::Value;
 use uqa_engine::Engine;
-use uqa_storage::{
-    sqlite::{Catalog, ManagedConnection},
-    ColumnStatsInput, SQLiteStorageBackend,
-};
+use uqa_storage::ColumnStatsInput;
+use uqa_storage_sqlite::{Catalog, ManagedConnection, SQLiteStorageBackend};
 
 #[path = "sql_analyze_persistence/automatic.rs"]
 mod automatic;
@@ -419,9 +417,11 @@ fn compressed_read_only_analyze_and_analyze_after_write_do_not_self_block() {
     let dir = tempdir().unwrap();
     let db_path = dir.path().join("read-only-analyze.uqac.sqlite3");
     {
-        let engine =
-            Engine::open_compressed(&db_path, uqa_storage::SQLiteCompressionOptions::default())
-                .unwrap();
+        let engine = Engine::open_compressed(
+            &db_path,
+            uqa_storage_sqlite::SQLiteCompressionOptions::default(),
+        )
+        .unwrap();
         exec(
             &engine,
             "CREATE TABLE t (id INTEGER PRIMARY KEY, val INTEGER)",
@@ -439,9 +439,11 @@ fn compressed_read_only_analyze_and_analyze_after_write_do_not_self_block() {
         exec(&engine, "ROLLBACK");
     }
 
-    let reopened =
-        Engine::open_compressed(&db_path, uqa_storage::SQLiteCompressionOptions::default())
-            .unwrap();
+    let reopened = Engine::open_compressed(
+        &db_path,
+        uqa_storage_sqlite::SQLiteCompressionOptions::default(),
+    )
+    .unwrap();
     assert_eq!(reopened.column_stats("t").unwrap()["val"].row_count, 2);
 }
 

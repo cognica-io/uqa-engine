@@ -29,7 +29,7 @@ pub(super) struct HNSWNode {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct HNSWNodeSnapshot {
+pub struct HNSWNodeSnapshot {
     pub node_id: NodeId,
     pub doc_id: DocId,
     pub vector_ordinal: u32,
@@ -40,7 +40,7 @@ pub(crate) struct HNSWNodeSnapshot {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct HNSWGraphMeta {
+pub struct HNSWGraphMeta {
     pub entry_point: Option<NodeId>,
     pub max_level: usize,
     pub next_node_id: NodeId,
@@ -49,7 +49,7 @@ pub(crate) struct HNSWGraphMeta {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct HNSWPersistenceDelta {
+pub struct HNSWPersistenceDelta {
     pub meta: HNSWGraphMeta,
     pub nodes: Vec<HNSWNodeSnapshot>,
     pub full_rewrite: bool,

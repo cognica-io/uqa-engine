@@ -124,7 +124,7 @@ let vertex = engine
     .flatten();
 ```
 
-`graph_with_mut` callbacks return `GraphStoreResult<T>` and run inside a storage checkpoint. Errors and panics roll back the callback's writes. A standalone `SQLiteGraphStore` also reads indexed durable records directly; use its `read_snapshot` callback for a multi-read operation. Callers sharing a physical storage session must serialize transaction ownership.
+`graph_with_mut` callbacks return `GraphStoreResult<T>` and run inside a storage checkpoint. Errors and panics roll back the callback's writes. A standalone `uqa_storage_sqlite::SQLiteGraphStore` also reads indexed durable records directly; use its `read_snapshot` callback for a multi-read operation. Callers sharing a physical storage session must serialize transaction ownership. See the [development Rust import migration](10-upgrading.md#sqlite-provider-ownership-in-development).
 
 ## Regular path queries
 

@@ -163,3 +163,44 @@ fn complete_query_binding_uses_catalog_fixture_without_engine() {
         )
     );
 }
+
+#[test]
+fn deferred_cte_shadowing_uses_the_replacement_row_type() {
+    use crate::binding::snapshot::BindingSnapshot;
+    use std::collections::BTreeSet;
+    for previously_non_returning in [false, true] {
+        let statement =
+            crate::compile("WITH source AS (SELECT true AS value) SELECT value FROM source")
+                .unwrap()
+                .remove(0);
+        let crate::plan::UnifiedPlan::Query(mut plan) = crate::plan::UnifiedPlan::lower(statement)
+        else {
+            panic!("expected query plan");
+        };
+        let mut scope = BindingSnapshot {
+            catalog: super::fixture::catalog(BTreeMap::new()),
+            resolution: super::fixture::resolution(vec!["public".into()], "pg_temp_fixture".into()),
+            ctes: BTreeMap::from([(
+                "source".into(),
+                RowSchema::with_types(vec!["value".into()], vec![Some(ColumnType::Text)]),
+            )]),
+            deferred_ctes: BTreeMap::new(),
+            non_returning_ctes: if previously_non_returning {
+                BTreeSet::from(["source".into()])
+            } else {
+                BTreeSet::new()
+            },
+            scalar_subqueries: Vec::new(),
+        };
+        scope.insert_deferred(plan.ctes.remove(0));
+        let schema = super::analyze_query_plan_schema(
+            &EmptyRoutineResolution,
+            &plan,
+            &[],
+            &scope.context(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(schema.column_type(0), Some(&ColumnType::Boolean));
+    }
+}

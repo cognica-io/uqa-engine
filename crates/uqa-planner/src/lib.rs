@@ -22,8 +22,6 @@
 //!   `u64` for relation subsets, `HashMap` for the DP cache.
 //! * [`optimizer`] -- algebraic rewrites: filter pushdown, vector
 //!   threshold merging, facet additivity, Boolean simplification.
-//! * [`parallel`] -- rayon-backed parallel-aware split + recombine.
-//! * [`executor`] -- the planner-to-physical-operator bridge.
 
 #![allow(
     clippy::enum_glob_use,
@@ -51,12 +49,10 @@
 
 pub mod cardinality;
 pub mod cost_model;
-pub mod executor;
 pub mod join_enumerator;
 pub mod join_graph;
 pub mod join_order;
 pub mod optimizer;
-pub mod parallel;
 pub mod plan_cost;
 pub mod query_optimizer;
 pub mod text_top_k;
@@ -69,7 +65,6 @@ pub use cardinality::{
     JACCARD_JOIN_SELECTIVITY,
 };
 pub use cost_model::{CostEstimator, OperatorCost, OperatorKind};
-pub use executor::{ExecutionStats, OperatorOutput, OperatorTreeDriver, PlanExecutor};
 pub use join_enumerator::{enumerate_dpccp, enumerate_dpccp_with_cost_estimator, JoinPlan};
 pub use join_graph::{JoinEdge, JoinGraph, JoinGraphError, JoinGraphResult};
 pub use join_order::{
@@ -78,10 +73,7 @@ pub use join_order::{
 };
 pub use optimizer::{
     optimize, optimize_with_aggregates, optimize_with_aggregates_and_statistics,
-    optimize_with_statistics, OptimizerConfig, SourceStatistics,
-};
-pub use parallel::{
-    run_parallel, ParallelExecutor, DEFAULT_PARALLEL_WORKERS, MIN_PARALLEL_BRANCHES,
+    optimize_with_statistics, ConstantEvaluator, OptimizerConfig, SourceStatistics,
 };
 pub use query_optimizer::{
     IndexScanCandidate, OptimizerConfig as TreeOptimizerConfig, QueryOptimizer,
@@ -95,6 +87,16 @@ pub use unified_plan::{
     SourcePlan, TableFunctionPlan, UnifiedPlan, UpdatePlan, ViewCheckPlan, ViewRuleInsertPlan,
     ViewRuleReturningPlan, ViewRuleUpdatePlan,
 };
-pub use uqa_execution::{
+pub use uqa_sql::{
     ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec, SubqueryId,
 };
+
+pub mod source_filters;
+
+pub mod filter_pushdown;
+
+pub mod explain;
+
+pub mod column_pruning;
+
+pub mod mutation_outputs;

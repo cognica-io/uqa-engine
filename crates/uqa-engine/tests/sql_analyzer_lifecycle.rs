@@ -10,7 +10,7 @@
 
 use tempfile::TempDir;
 use uqa_engine::Engine;
-use uqa_storage::{Catalog, ManagedConnection};
+use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
 fn run_one(eng: &Engine, sql: &str) -> Result<usize, String> {
     eng.sql(sql, &[])

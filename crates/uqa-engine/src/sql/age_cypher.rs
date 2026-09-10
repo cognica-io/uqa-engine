@@ -122,11 +122,7 @@ pub(super) fn build_rows(
     Ok(out)
 }
 
-pub(super) fn query_is_mutating(query: &str) -> Result<bool, SQLError> {
-    uqa_graph::cypher::parse_cypher(query)
-        .map(|query| query.mutates_graph())
-        .map_err(|error| SQLError::Unsupported(format!("cypher: {error}")))
-}
+pub(super) use uqa_execution::query::graph_effects::query_is_mutating;
 
 /// Coerce one cypher output value to the SQL type declared in the
 /// record definition, following AGE's cast behavior.

@@ -211,8 +211,11 @@ fn pg18_vacuum_full_reclaims_persistent_file_space() {
 fn pg18_vacuum_full_rewrites_compressed_storage() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("vacuum-full-compressed.uqac.sqlite3");
-    let engine =
-        Engine::open_compressed(&path, uqa_storage::SQLiteCompressionOptions::default()).unwrap();
+    let engine = Engine::open_compressed(
+        &path,
+        uqa_storage_sqlite::SQLiteCompressionOptions::default(),
+    )
+    .unwrap();
     engine
         .sql(
             "CREATE TABLE vacuum_compressed_rows (id INTEGER PRIMARY KEY, value TEXT); INSERT INTO vacuum_compressed_rows SELECT x, repeat('x', 1024) FROM generate_series(1, 500) AS rows(x); DELETE FROM vacuum_compressed_rows WHERE id > 2",

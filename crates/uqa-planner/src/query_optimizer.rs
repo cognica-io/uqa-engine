@@ -44,7 +44,6 @@ mod tree_map;
 
 use uqa_core::{IndexStats, Predicate};
 use uqa_operators::OperatorTree;
-use uqa_storage::IndexManager;
 
 use crate::cardinality::{CardinalityEstimator, ColumnStats, GraphStats, GraphStoreSampler};
 use crate::cost_model::CostModel;
@@ -103,7 +102,6 @@ pub struct QueryOptimizer {
     pub estimator: CardinalityEstimator,
     pub cost_model: CostModel,
     pub graph_stats: Option<GraphStats>,
-    pub index_manager: Option<Arc<IndexManager>>,
     pub index_candidates: Vec<IndexScanCandidate>,
     pub table_name: Option<String>,
     pub row_count: Option<u64>,
@@ -117,7 +115,6 @@ impl QueryOptimizer {
             estimator: CardinalityEstimator::new(),
             cost_model: CostModel::new(),
             graph_stats: None,
-            index_manager: None,
             index_candidates: Vec::new(),
             table_name: None,
             row_count: None,
@@ -126,14 +123,7 @@ impl QueryOptimizer {
         }
     }
 
-    pub fn with_index_manager(mut self, im: Arc<IndexManager>, table: impl Into<String>) -> Self {
-        self.index_manager = Some(im);
-        self.table_name = Some(table.into());
-        self
-    }
-
-    /// Attach candidates discovered from an engine's physical catalog.
-    /// They compete with an optional storage [`IndexManager`] by scan cost.
+    /// Attach immutable scan candidates discovered from the caller's catalog snapshot. The optimizer selects among these candidates without retaining a storage handle.
     pub fn with_index_candidates(
         mut self,
         candidates: impl IntoIterator<Item = IndexScanCandidate>,

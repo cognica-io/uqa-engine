@@ -14,7 +14,7 @@ use crate::vector_index::{validate_vector_values, HNSWIndexParams};
 use crate::{StorageBackendError, StorageBackendResult};
 
 impl HNSWIndex {
-    pub(crate) fn from_persistence(
+    pub fn from_persistence(
         dimensions: u32,
         params: HNSWIndexParams,
         meta: HNSWGraphMeta,

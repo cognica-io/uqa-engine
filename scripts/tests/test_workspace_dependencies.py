@@ -51,6 +51,13 @@ class StagedDependencyTests(unittest.TestCase):
                 "uqa-sql": ["uqa-core"],
             },
             "transitive_dependency_boundaries": {"uqa-sql": ["uqa-core"]},
+            "forbidden_runtime_dependencies": {"uqa-sql": ["storage-driver"]},
+            "crate_path_rules": {
+                "engine": {
+                    "forbidden_paths": ["src/sql.rs", "src/sql"],
+                    "forbidden_component_prefixes": ["engine_"],
+                }
+            },
         }
         self.write_policy()
         self.command("git", "init", "-q")
@@ -82,6 +89,22 @@ class StagedDependencyTests(unittest.TestCase):
     def add_engine_dependency(self, section: str = "") -> None:
         (self.root / "sql/Cargo.toml").write_text(
             self.sql_manifest + section + 'uqa-engine = { path = "../engine" }\n'
+        )
+
+    def add_external_driver(self, owner: str = "sql", section: str = "") -> None:
+        driver = self.root / "driver"
+        (driver / "src").mkdir(parents=True)
+        (driver / "src/lib.rs").write_text("")
+        (driver / "Cargo.toml").write_text(
+            '[package]\nname = "storage-driver"\nversion = "0.1.0"\nedition = "2021"\n'
+        )
+        workspace = self.root / "Cargo.toml"
+        workspace.write_text(workspace.read_text() + 'exclude = ["driver"]\n')
+        manifest = self.root / owner / "Cargo.toml"
+        if owner == "core" and not section:
+            section = "\n[dependencies]\n"
+        manifest.write_text(
+            manifest.read_text() + section + 'driver-alias = { package = "storage-driver", path = "../driver" }\n'
         )
 
     def test_valid_index_can_be_committed(self) -> None:
@@ -134,6 +157,78 @@ class StagedDependencyTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("uqa-sql -> uqa-engine", result.stderr)
 
+    def test_external_provider_is_rejected_through_a_workspace_dependency(self) -> None:
+        self.add_external_driver(owner="core")
+        self.stage()
+        result = self.check_index()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("uqa-sql -> uqa-core -> storage-driver", result.stderr)
+
+    def test_external_build_and_platform_providers_are_rejected(self) -> None:
+        self.add_external_driver()
+        for section in ("\n[build-dependencies]\n", '\n[target.\'cfg(windows)\'.dependencies]\n'):
+            with self.subTest(section=section):
+                (self.root / "sql/Cargo.toml").write_text(
+                    self.sql_manifest + section
+                    + 'driver-alias = { package = "storage-driver", path = "../driver" }\n'
+                )
+                self.stage()
+                result = self.check_index()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("uqa-sql -> storage-driver", result.stderr)
+
+    def test_development_provider_fixture_does_not_create_a_runtime_edge(self) -> None:
+        self.add_external_driver(section="\n[dev-dependencies]\n")
+        self.stage()
+        result = self.check_index()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_all_dependency_rule_rejects_aliased_development_providers(self) -> None:
+        self.add_external_driver(section="\n[dev-dependencies]\n")
+        self.policy["forbidden_dependencies"] = {"uqa-sql": ["storage-driver"]}
+        self.write_policy()
+        for section in ("\n[dev-dependencies]\n", '\n[target.\'cfg(windows)\'.dev-dependencies]\n'):
+            with self.subTest(section=section):
+                (self.root / "sql/Cargo.toml").write_text(
+                    self.sql_manifest + section
+                    + 'driver-alias = { package = "storage-driver", path = "../driver" }\n'
+                )
+                self.stage()
+                result = self.command("git", "commit", "-m", "Invalid provider fixture", check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("uqa-sql -> storage-driver", result.stderr)
+
+    def test_all_dependency_rule_follows_development_edges_through_workspace_crates(self) -> None:
+        self.add_external_driver(owner="core", section="\n[dev-dependencies]\n")
+        self.policy["forbidden_dependencies"] = {"uqa-sql": ["storage-driver"]}
+        self.write_policy()
+        self.stage()
+        result = self.check_index()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("uqa-sql -> uqa-core -> storage-driver", result.stderr)
+
+    def test_unstaged_development_policy_and_manifest_repairs_do_not_bypass_the_hook(self) -> None:
+        self.add_external_driver(section="\n[dev-dependencies]\n")
+        self.policy["forbidden_dependencies"] = {"uqa-sql": ["storage-driver"]}
+        self.write_policy()
+        self.stage()
+        (self.root / "sql/Cargo.toml").write_text(self.sql_manifest)
+        self.policy["forbidden_dependencies"] = {}
+        self.write_policy()
+        result = self.command("git", "commit", "-m", "Invalid provider fixture", check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("uqa-sql -> storage-driver", result.stderr)
+
+    def test_unstaged_external_provider_removal_cannot_bypass_the_hook(self) -> None:
+        self.add_external_driver()
+        self.stage()
+        (self.root / "sql/Cargo.toml").write_text(self.sql_manifest)
+        self.policy["forbidden_runtime_dependencies"] = {}
+        self.write_policy()
+        result = self.command("git", "commit", "-m", "Invalid provider dependency", check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("uqa-sql -> storage-driver", result.stderr)
+
     def test_installer_activates_the_versioned_hook_and_is_idempotent(self) -> None:
         self.command("git", "config", "--local", "--unset", "core.hooksPath")
         self.command("sh", "scripts/install-git-hooks.sh")
@@ -166,6 +261,51 @@ class StagedDependencyTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("uqa-sql -> uqa-engine", result.stderr)
         self.assertNotEqual(self.command("git", "rev-parse", "--verify", "HEAD", check=False).returncode, 0)
+
+    def test_hook_rejects_redundant_crate_prefixes_in_nested_paths(self) -> None:
+        path = self.root / "engine/src/session/engine_portals/mod.rs"
+        path.parent.mkdir(parents=True)
+        path.write_text("")
+        self.stage()
+        result = self.command("git", "commit", "-m", "Invalid module ownership", check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("engine/src/session/engine_portals/mod.rs", result.stderr)
+        self.assertIn("Redundant crate prefix", result.stderr)
+
+    def test_unstaged_rename_cannot_hide_an_invalid_staged_name(self) -> None:
+        path = self.root / "engine/src/engine_catalog.rs"
+        path.write_text("")
+        self.stage()
+        path.rename(path.with_name("catalog.rs"))
+        result = self.check_index()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("engine/src/engine_catalog.rs", result.stderr)
+
+    def test_unstaged_forbidden_source_does_not_change_the_commit(self) -> None:
+        (self.root / "engine/src/sql.rs").write_text("")
+        result = self.check_index()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        working = self.command(sys.executable, "scripts/check-workspace-dependencies.py", check=False)
+        self.assertNotEqual(working.returncode, 0)
+        self.assertIn("engine/src/sql.rs", working.stderr)
+
+    def test_sql_file_and_directory_are_both_rejected(self) -> None:
+        (self.root / "engine/src/sql.rs").write_text("")
+        (self.root / "engine/src/sql").mkdir()
+        (self.root / "engine/src/sql/plan.rs").write_text("")
+        self.stage()
+        result = self.check_index()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("engine/src/sql.rs", result.stderr)
+        self.assertIn("engine/src/sql/plan.rs", result.stderr)
+
+    def test_source_rule_does_not_match_other_crates_or_similar_components(self) -> None:
+        (self.root / "sql/src/engine_functions.rs").write_text("")
+        (self.root / "engine/src/sql_registry.rs").write_text("")
+        (self.root / "engine/src/query_engine.rs").write_text("")
+        self.stage()
+        result = self.check_index()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 class DependencyPathTests(unittest.TestCase):

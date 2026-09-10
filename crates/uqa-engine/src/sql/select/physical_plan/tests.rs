@@ -4,10 +4,14 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::*;
-use crate::sql::select::CteScope;
 use crate::Engine;
+use uqa_core::Value;
+use uqa_execution::query::{
+    ordering::{order_projection, resolve_order_expression},
+    relational::build_relational_operator,
+};
 use uqa_planner::{AccessPathPlan, ComputePlan, OrderPlan, ProjectionPlan, QueryBlockPlan};
+use uqa_sql::ScalarExpr;
 
 #[test]
 fn position_bound_order_by_reuses_qualified_primary_key_ordering() {
@@ -48,7 +52,7 @@ fn position_bound_order_by_reuses_qualified_primary_key_ordering() {
 fn bound_projection_order_and_limit_build_with_explicit_runtime_view() {
     let engine = Engine::new();
     engine.set_variable("work_mem", "64kB").unwrap();
-    let ctes = CteScope::new_for_current_routine(&engine);
+    let ctes = crate::capabilities::query_scope::new_for_current_routine(&engine);
     let schema = uqa_execution::RowSchema::with_types(
         vec!["id".into(), "payload".into()],
         vec![
@@ -92,7 +96,7 @@ fn bound_projection_order_and_limit_build_with_explicit_runtime_view() {
     };
 
     let (mut operator, resjunk) = build_relational_operator(
-        &engine,
+        engine.relational_context(),
         operator,
         None,
         &statement,

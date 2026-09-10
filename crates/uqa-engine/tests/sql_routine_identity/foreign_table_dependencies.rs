@@ -425,7 +425,7 @@ fn foreign_table_sequence_dependencies_follow_rename_drop_and_reopen() {
 
 #[test]
 fn foreign_table_legacy_schema_migration_is_initial_open_only_and_atomic() {
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     let directory = TempDir::new().unwrap();
     let database = directory
@@ -837,7 +837,7 @@ fn foreign_table_owner_transfer_moves_owned_sequences_atomically() {
 
 #[test]
 fn legacy_foreign_generated_sequences_are_migrated_once() {
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     let directory = TempDir::new().unwrap();
     let database = directory

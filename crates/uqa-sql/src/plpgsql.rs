@@ -487,3 +487,5 @@ pub use pg_query::{PlpgsqlCatalog, PlpgsqlType};
 
 #[cfg(test)]
 mod tests;
+
+pub mod runtime_diagnostics;

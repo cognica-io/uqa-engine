@@ -32,24 +32,7 @@ pub(super) fn target_view_kind(
     engine: &Engine,
     name: &str,
 ) -> Result<Option<crate::StoredViewKind>, SQLError> {
-    let candidates = engine
-        .relation_lookup_candidates(name)
-        .map_err(|error| SQLError::Internal(format!("resolve DML relation `{name}`: {error}")))?;
-    let tables = engine.storage.tables.read();
-    let views = engine.durable.views.read();
-    for relation in candidates {
-        if tables.contains_key(&relation) {
-            return Ok(None);
-        }
-        if let Some(view) = views.get(&relation) {
-            return Ok(Some(view.kind));
-        }
-    }
-    Ok(None)
-}
-
-pub(super) fn target_is_view(engine: &Engine, name: &str) -> Result<bool, SQLError> {
-    Ok(target_view_kind(engine, name)?.is_some())
+    engine.mutation_view_kind(name)
 }
 
 fn resolve_view_target(engine: &Engine, name: &str) -> Result<ViewDmlTarget, SQLError> {
@@ -487,7 +470,7 @@ fn run_suppressed_view_insert_rules(
             .collect::<Result<Vec<_>, SQLError>>()?,
     )?;
     let outcome = rule_batch.execute_actions_with_affected(
-        engine,
+        engine.rule_execution_context(),
         crate::sql::rules::RuleReturningRequest::from_plan(
             &stmt.returning,
             &stmt.returning_aliases,
@@ -496,7 +479,7 @@ fn run_suppressed_view_insert_rules(
     )?;
     if let Some(returning) = outcome.returning {
         return returning.project(
-            engine,
+            engine.returning_execution_context(),
             DmlReturningShape {
                 table: &target.canonical_name,
                 target_qualifier: &stmt.target_qualifier,

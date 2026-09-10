@@ -6,9 +6,9 @@
 
 //! Evaluation of immutable constants without erasing their declared SQL type.
 
-use uqa_execution::{eval_scalar, scalar_type, RowSchema, ScalarEvalContext, ScalarExpr};
 use uqa_sql::ast::{ColumnType, FunctionBinding};
 use uqa_sql::SQLError;
+use uqa_sql::{scalar_type, RowSchema, ScalarExpr};
 
 use super::Value;
 
@@ -92,14 +92,16 @@ fn is_constant(expression: &ScalarExpr) -> bool {
     }
 }
 
-pub(super) fn fold_literal_expression(expression: ScalarExpr) -> Result<ScalarExpr, SQLError> {
+pub(super) fn fold_literal_expression(
+    expression: ScalarExpr,
+    evaluate: crate::optimizer::ConstantEvaluator,
+) -> Result<ScalarExpr, SQLError> {
     if literal_value(&expression).is_some() || !is_constant(&expression) {
         return Ok(expression);
     }
     let schema = RowSchema::default();
     let ty = scalar_type(&expression, &schema, &[])?;
-    let context = ScalarEvalContext::new(None, &[]);
-    let value = eval_scalar(&expression, &context)?;
+    let value = evaluate(&expression)?;
     let literal = ScalarExpr::Literal(value.clone());
     if !matches!(expression, ScalarExpr::Cast { .. }) && scalar_type(&literal, &schema, &[])? == ty
     {

@@ -34,3 +34,10 @@ pub use rewrite::rewrite_scalar_expression;
 
 #[cfg(test)]
 mod tests;
+
+mod projection;
+pub use projection::ProjectionTarget;
+
+pub mod source_projection;
+
+pub mod locking;
