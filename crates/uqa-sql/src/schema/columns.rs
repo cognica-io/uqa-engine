@@ -41,3 +41,19 @@ pub fn validate_postgres_relation_column_type(name: &str, ty: &ColumnType) -> Re
     }
     Ok(())
 }
+
+/// Append a declared column after checking its name against the existing schema.
+pub fn append_registered_column(
+    table: &str,
+    columns: &mut Vec<crate::ast::ColumnDef>,
+    column: crate::ast::ColumnDef,
+) -> Result<(), String> {
+    if columns.iter().any(|existing| existing.name == column.name) {
+        return Err(format!(
+            "column `{}` already exists on table `{table}`",
+            column.name
+        ));
+    }
+    columns.push(column);
+    Ok(())
+}

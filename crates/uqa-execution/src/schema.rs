@@ -11,3 +11,5 @@ pub mod indexes;
 pub mod validation;
 
 pub mod sequences;
+
+pub mod publication;

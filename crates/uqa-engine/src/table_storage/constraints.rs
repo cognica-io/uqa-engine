@@ -28,15 +28,7 @@ pub(crate) fn materialize_constraint_metadata(
         relation,
         columns,
         constraints,
-        &mut |object_kind| {
-            let mut object_id = [0_u8; 16];
-            getrandom::fill(&mut object_id).map_err(|error| {
-                uqa_sql::schema::constraint_metadata::ConstraintMetadataError(format!(
-                    "allocate {object_kind} object identity: {error}"
-                ))
-            })?;
-            Ok(object_id)
-        },
+        &mut crate::capabilities::allocate_catalog_object_id,
     )
     .map_err(|error| StorageBackendError::Other(error.to_string()))
 }

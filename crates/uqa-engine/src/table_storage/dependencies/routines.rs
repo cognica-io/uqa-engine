@@ -115,15 +115,6 @@ impl Engine {
         )
         .map_err(StorageBackendError::Other)
     }
-    pub(in crate::table_storage) fn bind_table_schema_routine_identities_with_check_columns(
-        &self,
-        table_name: &str,
-        columns: &mut [uqa_sql::ast::ColumnDef],
-        checks: &mut [uqa_sql::ast::TableCheck],
-        check_columns: &[uqa_sql::ast::ColumnDef],
-    ) -> StorageBackendResult<bool> {
-        uqa_sql::schema::dependencies::registration::bind_table_schema_routine_identities_with_check_columns(&self.schema_dependency_binding_context(), table_name, columns, checks, check_columns).map_err(StorageBackendError::Other)
-    }
     pub(crate) fn bind_default_routine_identities(
         &self,
         table_name: &str,

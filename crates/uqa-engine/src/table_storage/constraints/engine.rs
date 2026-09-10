@@ -28,54 +28,15 @@ impl Engine {
     fn replace_constraint_state_inner(
         &self,
         table: &str,
-        mut columns: Vec<uqa_sql::ast::ColumnDef>,
-        mut constraints: uqa_sql::ast::TableConstraintSet,
+        columns: Vec<uqa_sql::ast::ColumnDef>,
+        constraints: uqa_sql::ast::TableConstraintSet,
     ) -> StorageBackendResult<()> {
-        let table_name = self
-            .try_resolve_table_name(table)?
-            .ok_or_else(|| table_not_found(table))?;
-        let state = self
-            .try_table(&table_name)?
-            .ok_or_else(|| table_not_found(&table_name))?;
-        constraints.columns_declared = Some(
-            constraints
-                .columns_declared
-                .unwrap_or(*state.columns_declared.read())
-                || !columns.is_empty(),
-        );
-        for column in &mut columns {
-            if let Some(reference) = &mut column.references {
-                reference.table = self.canonical_foreign_key_target(&reference.table)?;
-            }
-        }
-        for foreign_key in &mut constraints.foreign_keys {
-            foreign_key.ref_table = self.canonical_foreign_key_target(&foreign_key.ref_table)?;
-        }
-        self.bind_table_schema_routine_identities(
-            &table_name,
-            &mut columns,
-            &mut constraints.checks,
-        )?;
-        let relation =
-            RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
-        materialize_constraint_metadata(&relation, &mut columns, &mut constraints)?;
-        if self.is_persistent() {
-            self.try_save_table_schema_with_components(
-                &table_name,
-                &state,
-                &columns,
-                &constraints,
-            )?;
-        }
-        *state.columns_declared.write() =
-            constraints.columns_declared.unwrap_or(false) || !columns.is_empty();
-        *state.columns.write() = columns;
-        *state.table_checks.write() = constraints.checks;
-        *state.foreign_keys.write() = constraints.foreign_keys;
-        *state.key_constraints.write() = constraints.key_constraints;
-        self.mark_column_stats_dirty(&table_name, &state)?;
-        self.refresh_value_indexes_for_table(&table_name)?;
-        Ok(())
+        uqa_execution::schema::publication::replace_constraint_state(
+            &self.schema_publication_context(),
+            table,
+            columns,
+            constraints,
+        )
     }
 
     pub fn set_column_default(

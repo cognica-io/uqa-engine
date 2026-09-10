@@ -7,8 +7,8 @@
 //! Column registration, index rebuild, and table or column rename.
 
 use super::{
-    materialize_constraint_metadata, schema_expr_references_column, table_next_id_metadata_key,
-    table_not_found, Engine, RelationIdentity, StorageBackendError, StorageBackendResult,
+    schema_expr_references_column, table_next_id_metadata_key, table_not_found, Engine,
+    RelationIdentity, StorageBackendError, StorageBackendResult,
 };
 use crate::VectorIndexSpec;
 
@@ -48,74 +48,15 @@ impl Engine {
     pub(super) fn try_register_column_inner(
         &self,
         table: &str,
-        mut column: uqa_sql::ast::ColumnDef,
+        column: uqa_sql::ast::ColumnDef,
         check_columns: Option<&[uqa_sql::ast::ColumnDef]>,
     ) -> StorageBackendResult<()> {
-        column.ty = crate::sql::resolve_declared_column_type(self, &column.ty)
-            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        let legacy_auto_increment = column
-            .auto_increment
-            .as_ref()
-            .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy);
-        let table_name = self
-            .try_resolve_table_name(table)?
-            .ok_or_else(|| table_not_found(table))?;
-        let t = self
-            .try_table(&table_name)?
-            .ok_or_else(|| table_not_found(&table_name))?;
-        if let Some(default) = &mut column.default {
-            self.bind_sequence_references_in_expr(default)?;
-        }
-        if let Some(generated) = &mut column.generated {
-            self.bind_sequence_references_in_expr(&mut generated.expression)?;
-        }
-        if let Some(reference) = &mut column.references {
-            reference.table = self.canonical_foreign_key_target(&reference.table)?;
-        }
-        let mut columns = t.columns.read().clone();
-        if columns.iter().any(|c| c.name == column.name) {
-            return Err(StorageBackendError::Other(format!(
-                "column `{}` already exists on table `{table_name}`",
-                column.name
-            )));
-        }
-        columns.push(column);
-        if let Some(check_columns) = check_columns {
-            self.bind_table_schema_routine_identities_with_check_columns(
-                &table_name,
-                &mut columns,
-                &mut [],
-                check_columns,
-            )?;
-        } else {
-            self.bind_table_schema_routine_identities(&table_name, &mut columns, &mut [])?;
-        }
-        let mut constraints = uqa_sql::ast::TableConstraintSet {
-            columns_declared: Some(true),
-            persistence: t.persistence,
-            on_commit: t.on_commit,
-            checks: t.table_checks.read().clone(),
-            foreign_keys: t.foreign_keys.read().clone(),
-            key_constraints: t.key_constraints.read().clone(),
-            hierarchy: t.hierarchy.read().clone(),
-        };
-        let relation =
-            RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
-        materialize_constraint_metadata(&relation, &mut columns, &mut constraints)?;
-        self.mark_column_stats_dirty(&table_name, &t)?;
-        if self.is_persistent() {
-            self.try_save_table_schema_with_components(&table_name, &t, &columns, &constraints)?;
-        }
-        *t.columns_declared.write() = true;
-        *t.columns.write() = columns;
-        *t.table_checks.write() = constraints.checks;
-        *t.foreign_keys.write() = constraints.foreign_keys;
-        *t.key_constraints.write() = constraints.key_constraints;
-        if legacy_auto_increment {
-            self.persist_next_id(&table_name)?;
-        }
-        self.refresh_value_indexes_for_table(&table_name)?;
-        Ok(())
+        uqa_execution::schema::publication::register_column(
+            &self.schema_publication_context(),
+            table,
+            column,
+            check_columns,
+        )
     }
 
     pub fn drop_column(&self, table: &str, column: &str) -> StorageBackendResult<bool> {
