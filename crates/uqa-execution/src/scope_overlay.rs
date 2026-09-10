@@ -59,6 +59,7 @@ impl PhysicalOperator for ScopeOverlay<'_> {
 
 #[cfg(test)]
 mod tests {
+    use crate::RowSchemaExecution;
     use uqa_core::Value;
     use uqa_sql::expr::RowLookup;
 

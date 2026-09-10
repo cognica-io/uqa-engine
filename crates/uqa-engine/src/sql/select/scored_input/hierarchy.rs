@@ -7,6 +7,7 @@
 //! One logical scored scan over independently stored hierarchy members.
 
 use std::collections::VecDeque;
+use uqa_execution::RowSchemaExecution;
 
 use uqa_execution::{ExecResult, PhysicalRow, RowSchema, RowSource};
 use uqa_sql::ResultRow;

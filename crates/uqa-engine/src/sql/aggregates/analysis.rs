@@ -114,33 +114,7 @@ pub(in crate::sql) fn is_aggregate(engine: &Engine, expr: &ScalarExpr) -> bool {
         || matches!(expr, ScalarExpr::Func { name, .. } if engine.has_registered_aggregate_function(name))
 }
 
-pub(in crate::sql) fn is_builtin_aggregate(expr: &ScalarExpr) -> bool {
-    matches!(expr, ScalarExpr::Func { name, .. } if matches!(
-        name.to_ascii_lowercase().as_str(),
-        "count"
-            | "sum"
-            | "avg"
-            | "min"
-            | "max"
-            | "string_agg"
-            | "array_agg"
-            | "bool_and"
-            | "bool_or"
-            | "stddev"
-            | "stddev_samp"
-            | "stddev_pop"
-            | "variance"
-            | "var_samp"
-            | "var_pop"
-            | "percentile_cont"
-            | "percentile_disc"
-            | "mode"
-            | "json_agg"
-            | "jsonb_agg"
-            | "json_object_agg"
-            | "jsonb_object_agg"
-    ))
-}
+pub(in crate::sql) use uqa_sql::semantics::is_builtin_aggregate;
 
 pub(in crate::sql) fn aggregate_exprs<'a>(
     engine: &Engine,

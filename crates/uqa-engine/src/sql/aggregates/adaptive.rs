@@ -6,6 +6,7 @@
 
 //! Adaptive streaming/hash aggregation with compact partial-state spill.
 
+use uqa_execution::RowSchemaExecution;
 mod finish;
 mod projected;
 

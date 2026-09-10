@@ -9,10 +9,10 @@
 use super::{
     collect_query_operator, contains_aggregate, eval_physical_scalar, expect_column_name,
     expr_contains_volatile_function, has_aggregate, physical_exec_error, physical_projections,
-    physical_work_mem_bytes, projection_label_at, ComputePlan, CteScope, Engine,
-    EngineExpressionEvaluator, PhysicalEvalContext, ProjectionPlan, QueryBlockPlan, QueryOutput,
-    QueryOutputMode, QueryRows, SQLError, SQLParam, ScalarExpr, ScopedEngineHook,
-    ScoredDocumentSource, ScoredInput, Value, SCORE_COLUMN,
+    physical_work_mem_bytes, ComputePlan, CteScope, Engine, EngineExpressionEvaluator,
+    PhysicalEvalContext, ProjectionPlan, QueryBlockPlan, QueryOutput, QueryOutputMode, QueryRows,
+    SQLError, SQLParam, ScalarExpr, ScopedEngineHook, ScoredDocumentSource, ScoredInput, Value,
+    SCORE_COLUMN,
 };
 
 pub(in crate::sql) fn facet_projection_fields(
@@ -437,9 +437,7 @@ pub(in crate::sql) fn float_limit_offset(value: f64, label: &str) -> Result<u64,
     Ok(u64::try_from(value).expect("non-negative bigint fits u64"))
 }
 
-pub(in crate::sql) fn projection_columns(projections: &[ProjectionPlan]) -> Vec<String> {
-    projections.iter().map(projection_label_at).collect()
-}
+pub(in crate::sql) use uqa_sql::semantics::projection_columns;
 
 pub(in crate::sql) fn build_projection_physical_row_with_ctes(
     engine: &Engine,

@@ -26,7 +26,7 @@
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use uqa_core::{DecimalValue, DocId, TemporalValue, Value};
 use uqa_sql::ast::{
@@ -113,7 +113,7 @@ pub(crate) use triggers::fire_statement_triggers;
 pub(crate) use triggers::{fire_deferred_constraint_trigger_event, DeferredConstraintTriggerEvent};
 
 use aggregates::{
-    aggregate_value, contains_aggregate, has_aggregate, projection_label_at, AggregateAccumulator,
+    aggregate_value, contains_aggregate, has_aggregate, AggregateAccumulator,
     PhysicalAggregateExecutor,
 };
 use catalog::build_info_schema_rows;
@@ -156,7 +156,7 @@ pub(crate) use regrole_dependencies::{
 use row_functions::{
     execute_function, execute_function_with_top_k, execute_tree_entries, expect_column_name,
     expect_optional_graph_value, graph_betweenness_entries, graph_hits_entries,
-    graph_pagerank_entries, is_semantic_field_argument, run_age_alter_graph_with_evaluator,
+    graph_pagerank_entries, run_age_alter_graph_with_evaluator,
     run_age_create_elabel_with_evaluator, run_age_create_graph_with_evaluator,
     run_age_create_vlabel_with_evaluator, run_age_drop_graph_with_evaluator,
     run_age_drop_label_with_evaluator, run_age_graph_exists_with_evaluator,
@@ -281,9 +281,9 @@ pub(crate) fn validate_stored_view_check_option(
 }
 
 const SCORE_COLUMN: &str = "_score";
-pub(in crate::sql) const DOC_ID_COLUMN: &str = "_doc_id";
-pub(in crate::sql) const TABLE_OID_COLUMN: &str = "tableoid";
-pub(crate) const XMIN_COLUMN: &str = "xmin";
+pub(crate) use uqa_sql::semantics::DOC_ID_COLUMN;
+pub(crate) use uqa_sql::semantics::TABLE_OID_COLUMN;
+pub(crate) use uqa_sql::semantics::XMIN_COLUMN;
 
 pub(crate) fn projection_uses_tuple_xmin(
     column: &str,
@@ -331,105 +331,11 @@ pub(crate) fn project_stored_document_column(
     project_document_column(document.fields(), document.metadata(), column, definitions)
 }
 
-pub(in crate::sql) const META_QUALIFIER: &str = "_meta";
-pub(in crate::sql) const META_DOC_ID_COLUMN: &str = "doc_id";
-pub(in crate::sql) const META_SCORE_COLUMN: &str = "score";
+pub(crate) use uqa_sql::semantics::META_DOC_ID_COLUMN;
+pub(crate) use uqa_sql::semantics::META_QUALIFIER;
+pub(crate) use uqa_sql::semantics::META_SCORE_COLUMN;
 
-/// Executor-only carrier for `PostgreSQL` 18's `merge_action()` value. The attribute has no SQL name and therefore cannot collide with a target or source column named `_merge_action`.
-pub(in crate::sql) fn merge_action_attribute() -> uqa_sql::ast::InternalColumnRef {
-    static ATTRIBUTE: LazyLock<uqa_sql::ast::InternalColumnRef> =
-        LazyLock::new(|| uqa_sql::ast::InternalRelationId::allocate().column(0));
-    *ATTRIBUTE
-}
-/// Resolve reserved system-schema aliases only when the local name belongs to
-/// that schema's built-in surface. Ordinary qualified names stay intact for
-/// runtime callbacks and user-defined routine lookup.
-pub(crate) fn builtin_function_dispatch_name(name: &str) -> String {
-    let lower = name.to_ascii_lowercase();
-    let Some((schema, local)) = lower.split_once('.') else {
-        return lower;
-    };
-    let is_builtin = match schema {
-        "ag_catalog" => matches!(
-            local,
-            "cypher"
-                | "create_graph"
-                | "drop_graph"
-                | "graph_exists"
-                | "create_vlabel"
-                | "create_elabel"
-                | "drop_label"
-                | "alter_graph"
-        ),
-        "pg_catalog" => {
-            uqa_sql::registry::is_registered(local)
-                || matches!(
-                    local,
-                    "generate_series"
-                        | "unnest"
-                        | "regexp_split_to_table"
-                        | "string_to_table"
-                        | "json_array_elements"
-                        | "jsonb_array_elements"
-                        | "json_array_elements_text"
-                        | "jsonb_array_elements_text"
-                        | "json_each"
-                        | "jsonb_each"
-                        | "json_each_text"
-                        | "jsonb_each_text"
-                        | "json_object_keys"
-                        | "jsonb_object_keys"
-                        | "upper"
-                        | "lower"
-                        | "bit_length"
-                        | "char_length"
-                        | "character_length"
-                        | "crc32"
-                        | "crc32c"
-                        | "gamma"
-                        | "json_strip_nulls"
-                        | "jsonb_strip_nulls"
-                        | "length"
-                        | "lgamma"
-                        | "md5"
-                        | "octet_length"
-                        | "reverse"
-                        | "random"
-                        | "setseed"
-                        | "nextval"
-                        | "currval"
-                        | "lastval"
-                        | "setval"
-                        | "current_schema"
-                        | "current_schemas"
-                        | "pg_backend_pid"
-                        | "pg_listening_channels"
-                        | "pg_notify"
-                        | "pg_notification_queue_usage"
-                        | "pg_get_expr"
-                        | "pg_get_partkeydef"
-                        | "pg_get_serial_sequence"
-                        | "pg_get_triggerdef"
-                        | "pg_get_ruledef"
-                        | "pg_get_viewdef"
-                        | "pg_get_indexdef"
-                        | "format_type"
-                        | "pg_has_role"
-                        | "has_table_privilege"
-                        | "has_column_privilege"
-                        | "has_database_privilege"
-                        | "has_schema_privilege"
-                        | "has_sequence_privilege"
-                )
-        }
-        _ => false,
-    };
-    if is_builtin {
-        local.to_string()
-    } else {
-        lower
-    }
-}
+pub(crate) use uqa_sql::semantics::builtin_function_dispatch_name;
 
 fn doc_id_value(doc_id: DocId) -> Result<Value, SQLError> {
     i64::try_from(doc_id).map(Value::Int).map_err(|_| {
@@ -440,3 +346,5 @@ fn doc_id_value(doc_id: DocId) -> Result<Value, SQLError> {
 #[cfg(test)]
 #[path = "sql/tests.rs"]
 mod tests;
+
+pub(crate) use uqa_sql::semantics::merge_action_attribute;

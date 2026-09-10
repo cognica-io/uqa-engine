@@ -79,53 +79,7 @@ pub(in crate::sql) fn qualifier_filters_for_stmt(
     Ok((!filters.is_empty()).then_some(filters))
 }
 
-/// Qualifiers whose rows can be synthesized as NULLs by an outer join cannot
-/// receive an arbitrary WHERE predicate before that join. A predicate such as
-/// `right.id IS NULL` accepts the synthesized row; pushing it into the right
-/// scan first can remove a real match, manufacture a NULL-extended row, and
-/// turn a non-result into a result. Keep predicates on these qualifiers above
-/// the outer join unless a separate rewrite has first reduced it to an inner
-/// join.
-pub(in crate::sql) fn outer_join_nullable_qualifiers(from: &SourcePlan) -> BTreeSet<String> {
-    let SourcePlan::Join {
-        left,
-        right,
-        kind,
-        alias,
-        ..
-    } = from
-    else {
-        return BTreeSet::new();
-    };
-    let left_nullable = outer_join_nullable_qualifiers(left);
-    let right_nullable = outer_join_nullable_qualifiers(right);
-    if let Some(alias) = alias {
-        let nullable = matches!(
-            kind,
-            uqa_sql::ast::JoinKind::Left
-                | uqa_sql::ast::JoinKind::Right
-                | uqa_sql::ast::JoinKind::Full
-        ) || !left_nullable.is_empty()
-            || !right_nullable.is_empty();
-        return if nullable {
-            BTreeSet::from([alias.clone()])
-        } else {
-            BTreeSet::new()
-        };
-    }
-    let mut nullable = left_nullable;
-    nullable.extend(right_nullable);
-    match kind {
-        uqa_sql::ast::JoinKind::Left => nullable.extend(from_qualifier_set(right)),
-        uqa_sql::ast::JoinKind::Right => nullable.extend(from_qualifier_set(left)),
-        uqa_sql::ast::JoinKind::Full => {
-            nullable.extend(from_qualifier_set(left));
-            nullable.extend(from_qualifier_set(right));
-        }
-        uqa_sql::ast::JoinKind::Inner | uqa_sql::ast::JoinKind::Cross => {}
-    }
-    nullable
-}
+pub(in crate::sql) use uqa_sql::semantics::outer_join_nullable_qualifiers;
 
 /// Project a multi-relation disjunction onto each relation as a necessary
 /// predicate. For `(A1 AND B1) OR (A2 AND B2)`, `A1 OR A2` is safe to apply to

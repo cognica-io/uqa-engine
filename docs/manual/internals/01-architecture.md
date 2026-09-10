@@ -25,6 +25,7 @@ graph TD
     operators[uqa-operators]
     graph[uqa-graph]
     joins[uqa-joins]
+    parser[uqa-pg-query]
     sql[uqa-sql]
     execution[uqa-execution]
     planner[uqa-planner]
@@ -49,17 +50,19 @@ graph TD
     joins --> graph
     joins --> sql
     sql --> core
+    sql --> parser
     execution --> core
     execution --> sql
+    planner --> sql
     planner --> execution
     planner --> joins
     planner --> operators
     planner --> graph
     ml --> operators
+    engine --> sql
     engine --> planner
     engine --> execution
     engine --> storage
-    engine --> sqlite
     engine --> graph
     engine --> scoring
     engine --> fusion
@@ -69,13 +72,13 @@ graph TD
     adapters --> engine
 ```
 
-The executable dependency policy is stored in [`scripts/workspace-dependency-policy.json`](../../../scripts/workspace-dependency-policy.json) and checked by [`scripts/check-workspace-dependencies.py`](../../../scripts/check-workspace-dependencies.py). A new runtime dependency is an architecture change, not an incidental Cargo edit.
+The executable dependency policy is stored in [`scripts/workspace-dependency-policy.json`](../../../scripts/workspace-dependency-policy.json) and checked by [`scripts/check-workspace-dependencies.py`](../../../scripts/check-workspace-dependencies.py). The policy checks exact runtime edges, dependency budgets, and transitive boundaries, including build and platform-specific dependencies. Install `bash scripts/install-git-hooks.sh` to run the same check against the Git index on every commit. See [SQL crate boundaries](../../design/sql-crate-boundaries.md) for the ownership contracts.
 
 ## Crate responsibilities
 
 | Crate | Ownership |
 | --- | --- |
-| `uqa-core` | Values, exact decimal representation and operations, document sets, relations, posting lists, ranked views, generalized postings, predicates, and shared graph value types |
+| `uqa-core` | Canonical relation identities, values, exact decimal representation and operations, document sets, relations, posting lists, ranked views, generalized postings, predicates, and shared graph value types |
 | `uqa-analysis` | Character filters, tokenizers, token filters, analyzers, stemming, and highlighting primitives |
 | `uqa-storage` | Backend-neutral document, inverted, vector, tensor, B-tree, block-max, spatial, catalog, ordered catalog-version migration, and Key/Value contracts |
 | `uqa-storage-sqlite` | SQLite implementation of the ordered Key/Value contract |
@@ -86,8 +89,8 @@ The executable dependency policy is stored in [`scripts/workspace-dependency-pol
 | `uqa-graph` | Named graph stores, Cypher, RPQ automata, graph algebra, centrality, temporal traversal, and graph indexes |
 | `uqa-joins` | Relational and cross-paradigm join algorithms |
 | `uqa-pg-query` | Imported PostgreSQL 18 `libpg_query` pin used through the `pg_query` library name |
-| `uqa-sql` | `uqa-pg-query` frontend, SQL AST, statement compiler, syntax registry, value-expression dispatch, and PostgreSQL-compatible value casting |
-| `uqa-execution` | Pull-based physical rows, physical scalar IR and evaluation, routine type resolution, batches, spill structures, distinctness, sorting, grouping, windows, and joins |
+| `uqa-sql` | Parser frontend, AST, scalar and statement IR, lowering, catalog definitions, name and type binding, routine signature resolution, prepared parameter inference, SQL validation, and value expressions |
+| `uqa-execution` | Physical rows and buffers, runtime scalar evaluation, batches, materialization, spill structures, distinctness, sorting, grouping, windows, and joins |
 | `uqa-planner` | Cardinality, cost, DPccp join ordering, unified-plan optimization, and physical access selection |
 | `uqa-engine` | Composition, SQL lifecycle, sessions, transactions, restore, publication, and public API |
 | `uqa` | Application facade over `uqa-engine` with the core `Value` type re-exported |
@@ -96,6 +99,8 @@ The executable dependency policy is stored in [`scripts/workspace-dependency-pol
 | `uqa-api` | Fluent `QueryBuilder` and result adapters |
 | `uqa-pg-wire` | PostgreSQL v3 message decoding and encoding without server socket ownership |
 | `uqa-cli`, `uqa-python`, `uqa-node`, `uqa-wasm` | User-facing adapters over the engine contract |
+
+SQL binding receives immutable `BindingContext` inputs, `AnalysisCatalog` relation definitions, and `RoutineResolution` signature lookup. These contracts expose no physical operators, row buffers, transaction mutation, or engine recovery. Engine adapters preserve namespace privileges and statement snapshots while returning SQL-owned definitions. `uqa-sql` can reach only `uqa-core` and `uqa-pg-query`; importing the engine, planner, execution, or storage through another crate also violates the dependency policy.
 
 ## Carrier boundaries
 
@@ -148,7 +153,7 @@ flowchart TD
     N --> O[SQL result boundary]
 ```
 
-`UnifiedPlan` is the shared executable boundary. It can own query blocks, command plans, CTEs, mutations, prepared bodies, and explained bodies. `OperatorTree` remains a specialized child algebra for posting, graph, scoring, fusion, model access, and tuple-producing operator joins; it does not absorb arbitrary SQL row semantics. A joined query can use an optimized `OperatorTree` as a table relation's local access path or use an aliased operator join as a costed relation source, so these are nested planning domains rather than mutually exclusive top-level planners.
+`uqa_sql::plan::UnifiedPlan` is the shared statement model; `uqa_sql::ir::ScalarExpr` is its scalar expression model. Planner and execution re-export the same types, without duplicate representations. The statement plan owns query blocks, command plans, CTEs, mutations, prepared bodies, and explained bodies. `OperatorTree` remains a specialized child algebra for posting, graph, scoring, fusion, model access, and tuple-producing operator joins; it does not absorb arbitrary SQL row semantics. A joined query can use an optimized `OperatorTree` as a table relation's local access path or use an aliased operator join as a costed relation source, so these are nested planning domains rather than mutually exclusive top-level planners.
 
 All INSERT, UPDATE, DELETE, and MERGE entry points use one mutation-command boundary for implicit transaction selection and one scoped command overlay for statement-visible staged rows. The shared DML protocol owns typed candidates, physical identities, lock outcomes, row images, deferred checks, prepared insert/rewrite/delete actions, trigger and referential event state, and publication batches; command modules retain SQL-specific selection and policy, while spill codecs are versioned at the command boundary and reject malformed or unknown layouts.
 
@@ -166,8 +171,8 @@ Responsibility roots remain facades over semantic children rather than line-coun
 | Query optimizer | [`crates/uqa-planner/src/query_optimizer.rs`](../../../crates/uqa-planner/src/query_optimizer.rs) |
 | Execution | [`crates/uqa-execution/src/lib.rs`](../../../crates/uqa-execution/src/lib.rs) |
 | Physical scalar evaluation | [`crates/uqa-execution/src/scalar`](../../../crates/uqa-execution/src/scalar) |
-| Physical scalar traversal | [`crates/uqa-execution/src/scalar/traversal.rs`](../../../crates/uqa-execution/src/scalar/traversal.rs) |
-| Routine signature resolution | [`crates/uqa-execution/src/type_resolution/routine_signature`](../../../crates/uqa-execution/src/type_resolution/routine_signature) |
+| SQL scalar IR and traversal | [`crates/uqa-sql/src/ir`](../../../crates/uqa-sql/src/ir) |
+| Routine signature resolution | [`crates/uqa-sql/src/type_resolution/routine_signature`](../../../crates/uqa-sql/src/type_resolution/routine_signature) |
 | DISTINCT execution | [`crates/uqa-execution/src/distinct`](../../../crates/uqa-execution/src/distinct) |
 | Hash-join execution | [`crates/uqa-execution/src/join`](../../../crates/uqa-execution/src/join) |
 | Engine composition | [`crates/uqa-engine/src/lib.rs`](../../../crates/uqa-engine/src/lib.rs) |
@@ -179,7 +184,8 @@ Responsibility roots remain facades over semantic children rather than line-coun
 | Catalog projection | [`crates/uqa-engine/src/sql/catalog.rs`](../../../crates/uqa-engine/src/sql/catalog.rs) |
 | Catalog relation families | [`crates/uqa-engine/src/sql/catalog/pg_catalog.rs`](../../../crates/uqa-engine/src/sql/catalog/pg_catalog.rs) |
 | Catalog projection policy | [`crates/uqa-engine/src/sql/catalog/helpers.rs`](../../../crates/uqa-engine/src/sql/catalog/helpers.rs) |
-| Schema binding | [`crates/uqa-engine/src/sql/select/schema_binding.rs`](../../../crates/uqa-engine/src/sql/select/schema_binding.rs) |
+| SQL schema and parameter binding | [`crates/uqa-sql/src/binding`](../../../crates/uqa-sql/src/binding) |
+| Statement binding adapter | [`crates/uqa-engine/src/sql/select/schema_binding/context.rs`](../../../crates/uqa-engine/src/sql/select/schema_binding/context.rs) |
 | Query evaluation scopes | [`crates/uqa-engine/src/sql/select/evaluation.rs`](../../../crates/uqa-engine/src/sql/select/evaluation.rs) |
 | SELECT command execution | [`crates/uqa-engine/src/sql/select/execution.rs`](../../../crates/uqa-engine/src/sql/select/execution.rs) |
 | Filter-pushdown subqueries | [`crates/uqa-engine/src/sql/select/filter_pushdown/subqueries.rs`](../../../crates/uqa-engine/src/sql/select/filter_pushdown/subqueries.rs) |

@@ -7,6 +7,7 @@
 //! Engine adapter for the shared scalar physical evaluator.
 
 use uqa_core::Value;
+use uqa_execution::RowSchemaExecution;
 use uqa_execution::{
     eval_scalar, scalar_call_argument, validate_scalar_call_arguments, PhysicalRow, RowSchema,
     ScalarEvalContext, ScalarExpr, ScalarSubqueryRunner, SubqueryId, SubqueryResult,

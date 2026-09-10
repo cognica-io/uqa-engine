@@ -92,55 +92,9 @@ pub(super) fn run_multi_field_match(
 
 type MultiFieldMatchArgs = (Vec<String>, Vec<String>, Vec<f64>);
 
-pub(super) enum MultiFieldMatchShape<'a> {
-    FieldsThenQuery {
-        fields: Vec<&'a ScalarExpr>,
-        query_idx: usize,
-    },
-    Pairs {
-        fields: Vec<&'a ScalarExpr>,
-    },
-}
+pub(super) use uqa_sql::semantics::MultiFieldMatchShape;
 
-pub(super) fn multi_field_match_shape(
-    args: &[ScalarExpr],
-) -> Result<MultiFieldMatchShape<'_>, SQLError> {
-    let first_non_column = args.iter().position(|arg| {
-        !matches!(
-            arg,
-            ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. }
-        )
-    });
-    if let Some(query_idx) = first_non_column {
-        if query_idx >= 2 {
-            return Ok(MultiFieldMatchShape::FieldsThenQuery {
-                fields: args[..query_idx].iter().collect(),
-                query_idx,
-            });
-        }
-    }
-    if args.len() < 4 || !args.len().is_multiple_of(2) {
-        if let Some(query_idx) = first_non_column {
-            if query_idx < 2 && args.len() >= 3 {
-                return Err(SQLError::TypeMismatch(format!(
-                    "multi_field_match field arguments must be column references, \
-                     but argument {} is an expression; store computed text in an \
-                     indexed column instead of concatenating at query time",
-                    query_idx + 1
-                )));
-            }
-        }
-        return Err(SQLError::BadArity {
-            name: "multi_field_match".into(),
-            expected: ">= 3 (fields..., query[, weights...]) or even >= 4 (field, query pairs)"
-                .into(),
-            actual: args.len(),
-        });
-    }
-    Ok(MultiFieldMatchShape::Pairs {
-        fields: (0..args.len() / 2).map(|i| &args[2 * i]).collect(),
-    })
-}
+pub(super) use uqa_sql::semantics::multi_field_match_shape;
 
 fn parse_multi_field_match_args(
     args: &[ScalarExpr],

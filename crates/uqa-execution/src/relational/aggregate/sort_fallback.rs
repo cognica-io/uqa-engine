@@ -11,6 +11,7 @@ use super::{
     PhysicalOperator, RowSchema, SQLParam, ScalarEvalContext, ScalarExpr, SortKey, Value,
 };
 use crate::PhysicalRow;
+use crate::RowSchemaExecution;
 use fold::{AggFold, GroupState};
 
 pub(super) fn execute(

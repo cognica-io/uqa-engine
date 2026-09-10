@@ -390,6 +390,7 @@ impl PhysicalOperator for ColumnSelection<'_> {
 
 #[cfg(test)]
 mod tests {
+    use crate::RowSchemaExecution;
     use std::collections::BTreeMap;
 
     use uqa_core::Value;

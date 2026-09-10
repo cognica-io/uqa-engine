@@ -24,6 +24,7 @@ use super::{
 };
 
 mod catalog;
+pub(crate) use uqa_sql::catalog::resolution::{RelationLookupMode, RelationNameResolution};
 
 /// Stable catalog generations observed by one statement boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -68,16 +69,6 @@ pub(crate) struct CatalogSequenceSnapshot {
     pub(crate) security: super::engine_state::SequenceSecurity,
 }
 
-/// Immutable session inputs used to resolve unqualified relation names during one statement.
-#[derive(Clone)]
-pub(crate) struct RelationNameResolution {
-    pub(super) search_path: Vec<String>,
-    pub(super) temporary_schema: String,
-    pub(super) temporary_namespace_allocated: bool,
-    pub(super) current_user: String,
-    pub(super) lookup_mode: RelationLookupMode,
-}
-
 /// Complete outcome of resolving one relation reference through a statement namespace.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum RelationResolution {
@@ -94,13 +85,6 @@ impl RelationResolution {
             Self::MissingRelation | Self::MissingSchema(_) => None,
         }
     }
-}
-
-/// Whether a query resolves session-visible names or follows catalog identities captured when a stored expression was defined.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum RelationLookupMode {
-    Dynamic,
-    Bound,
 }
 
 /// Read-only session values visible to statement execution. Durable registries and storage backends are intentionally absent.

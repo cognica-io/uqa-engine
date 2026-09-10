@@ -7,6 +7,7 @@
 //! Engine-backed scalar and function callback adapters.
 
 use std::sync::Arc;
+use uqa_execution::RowSchemaExecution;
 
 use uqa_execution::{
     ExecResult, ExpressionEvaluator, FunctionTypeResolver, SharedExpressionEvaluator,

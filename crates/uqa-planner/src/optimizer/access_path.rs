@@ -71,72 +71,7 @@ fn root_score_retrieval(expression: &ScalarExpr) -> bool {
     )
 }
 
-/// Whether a scalar expression contains a posting-list retrieval operator.
-/// Relational executors use the same classification as access-path planning
-/// so registered retrieval calls never fall through to scalar evaluation.
-pub fn contains_retrieval(expression: &ScalarExpr) -> bool {
-    match expression {
-        ScalarExpr::Func {
-            name,
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            retrieval_function(name)
-                || args.iter().any(contains_retrieval)
-                || order_by.iter().any(|order| contains_retrieval(&order.expr))
-                || filter.as_deref().is_some_and(contains_retrieval)
-        }
-        ScalarExpr::Array(items)
-        | ScalarExpr::Row(items)
-        | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => items.iter().any(contains_retrieval),
-        ScalarExpr::Binary { lhs, rhs, .. } => contains_retrieval(lhs) || contains_retrieval(rhs),
-        ScalarExpr::UnaryMinus(inner)
-        | ScalarExpr::Not(inner)
-        | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => contains_retrieval(inner),
-        ScalarExpr::Between { expr, low, high } => {
-            contains_retrieval(expr) || contains_retrieval(low) || contains_retrieval(high)
-        }
-        ScalarExpr::InList { expr, list, .. } => {
-            contains_retrieval(expr) || list.iter().any(contains_retrieval)
-        }
-        ScalarExpr::WindowCall { args, spec, .. } => {
-            args.iter().any(contains_retrieval)
-                || spec.partition_by.iter().any(contains_retrieval)
-                || spec
-                    .order_by
-                    .iter()
-                    .any(|order| contains_retrieval(&order.expr))
-        }
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            base.as_deref().is_some_and(contains_retrieval)
-                || when.iter().any(|(condition, result)| {
-                    contains_retrieval(condition) || contains_retrieval(result)
-                })
-                || else_branch.as_deref().is_some_and(contains_retrieval)
-        }
-        ScalarExpr::InSubquery { expr, .. } => contains_retrieval(expr),
-        ScalarExpr::Default
-        | ScalarExpr::Star
-        | ScalarExpr::QualifiedStar(_)
-        | ScalarExpr::Column(_)
-        | ScalarExpr::Position(_)
-        | ScalarExpr::InternalColumn(_)
-        | ScalarExpr::QualifiedColumn { .. }
-        | ScalarExpr::Literal(_)
-        | ScalarExpr::TypedLiteral { .. }
-        | ScalarExpr::Param(_)
-        | ScalarExpr::ScalarSubquery(_)
-        | ScalarExpr::Exists { .. } => false,
-    }
-}
+pub use uqa_sql::semantics::contains_retrieval;
 
 fn operator_compatible(expression: &ScalarExpr) -> bool {
     match expression {
@@ -179,38 +114,4 @@ fn scalar_operand(expression: &ScalarExpr) -> bool {
     )
 }
 
-fn retrieval_function(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "text_match"
-            | "bayesian_match"
-            | "fts_match"
-            | "bayesian_match_with_prior"
-            | "calibrated_vector_match"
-            | "knn_match"
-            | "fuse_log_odds"
-            | "pool_positive_evidence"
-            | "fuse_bayesian_evidence"
-            | "multi_field_match"
-            | "staged_retrieval"
-            | "attention"
-            | "fuse_attention"
-            | "fuse_multihead"
-            | "learned_fusion"
-            | "fuse_learned"
-            | "sparse_threshold"
-            | "graph_pagerank"
-            | "pagerank"
-            | "graph_hits"
-            | "hits"
-            | "graph_betweenness"
-            | "betweenness"
-            | "graph_traverse"
-            | "traverse_match"
-            | "graph_neighbors"
-            | "graph_edges"
-            | "temporal_traverse"
-            | "rpq"
-            | "deep_predict"
-    )
-}
+pub use uqa_sql::semantics::retrieval_function;

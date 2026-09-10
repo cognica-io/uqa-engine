@@ -18,7 +18,7 @@ use super::{
     TABLE_OID_COLUMN,
 };
 use rusqlite::OptionalExtension;
-use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema};
+use uqa_execution::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 use uqa_sql::ast::{ReturningAliases, Statement};
 
 mod inference;

@@ -12,15 +12,17 @@ sequenceDiagram
     participant Engine as uqa-engine
     participant Exec as uqa-execution
     participant Store as storage and indexes
-    App->>SQL: SQL text
-    SQL->>SQL: libpg_query parse and compile
-    SQL->>Planner: Statement and scalar IR
-    Planner->>Planner: Lower and optimize UnifiedPlan
-    Planner->>Engine: Physical access decision
-    Engine->>Exec: Execute query or command plan
-    Exec->>Store: Pull rows or ranked support
+    App->>Engine: SQL text
+    Engine->>SQL: Parse and lower SQL-owned UnifiedPlan
+    Engine->>SQL: Bind with immutable catalog and namespace inputs
+    SQL-->>Engine: Validated names, types, and parameters
+    Engine->>Planner: Optimize UnifiedPlan with source statistics
+    Planner-->>Engine: Optimized plan and access decisions
+    Engine->>Exec: Construct and run physical operators
+    Exec->>Store: Pull through provided row and retrieval sources
     Store-->>Exec: Values, postings, vectors, graph data
-    Exec-->>App: SQLResult, cursor, or columnar batches
+    Exec-->>Engine: Physical rows and batches
+    Engine-->>App: SQLResult, cursor, or columnar batches
 ```
 
 ## SQL frontend
@@ -33,9 +35,9 @@ Retrieval function calls remain syntax expressions until the engine and planner 
 
 The plan owns read queries and physical command bodies. Relational query blocks cover CTEs, set operations, joins, values and function sources, subqueries, filters, scalar projection, aggregation, windows, ordering, distinctness, offset, and limit. Mutation plans own sources, scalar assignments, conflict behavior, conditions, CTEs, and `RETURNING` expressions.
 
-Each AST CTE owns a `CteBody` and each planner CTE owns a `CtePlanBody`, so visitors must handle both query and mutation bodies. Command CTEs materialize their typed `RETURNING` outputs once. Their read snapshot contains frozen table and catalog handles; the evaluation scope holds no `Engine`, session, or transaction capability. The execution boundary constructs the read view and keeps mutation effects on the live command path.
+Each AST CTE owns a `CteBody` and each lowered CTE owns a `CtePlanBody`, so visitors must handle both query and mutation bodies. Command CTEs materialize their typed `RETURNING` outputs once. Their read snapshot contains frozen table and catalog handles; the evaluation scope holds no `Engine`, session, or transaction capability. The execution boundary constructs the read view and keeps mutation effects on the live command path.
 
-`ScalarExpr` is the executable scalar IR. Scalar subqueries point to owned query-plan slots and execute inside the current physical scope; the executor does not reconstruct a parser statement at runtime.
+`uqa_sql::ir::ScalarExpr` is the shared scalar IR. Scalar subqueries point to owned query-plan slots and execute inside the current physical scope; the executor does not reconstruct a parser statement at runtime.
 
 ## Statement capability boundaries
 
@@ -68,11 +70,11 @@ The final command decomposition preserves that single path while giving constrai
 
 Catalog projection is split by virtual-relation family under [`sql/catalog/pg_catalog/`](../../../crates/uqa-engine/src/sql/catalog/pg_catalog), and shared projection policy is split by rows, OIDs, type metadata, information-schema types, index definitions, constraints, and dependencies under [`sql/catalog/helpers/`](../../../crates/uqa-engine/src/sql/catalog/helpers). The roots contain declarations and direct owner imports rather than a forwarding implementation dump.
 
-Schema binding keeps scope, source, projection, routine/type, CTE, and catalog-source owners under [`sql/select/schema_binding/`](../../../crates/uqa-engine/src/sql/select/schema_binding). A deterministic fixture binds a complete query against `CatalogReadView` and `RoutineResolution` without constructing `Engine`. Evaluation keeps CTE lifetime, subquery cache, row-lock state, callbacks, and type resolution under [`sql/select/evaluation/`](../../../crates/uqa-engine/src/sql/select/evaluation), while physical construction keeps projection, aggregation, ordering, limits, row locking, operator assembly, and output finishing under [`sql/select/physical_plan/`](../../../crates/uqa-engine/src/sql/select/physical_plan).
+Schema binding, prepared parameter inference, and stored routine binding live under [`uqa-sql/src/binding/`](../../../crates/uqa-sql/src/binding). SQL-only fixtures bind complete queries using `AnalysisCatalog`, `RelationNameResolution`, and `RoutineResolution`. The engine [context adapter](../../../crates/uqa-engine/src/sql/select/schema_binding/context.rs) converts its statement snapshots and CTE row schemas into immutable `BindingContext` inputs. Evaluation keeps CTE lifetime, subquery cache, row-lock state, callbacks, and type resolution under [`sql/select/evaluation/`](../../../crates/uqa-engine/src/sql/select/evaluation), while physical construction keeps projection, aggregation, ordering, limits, row locking, operator assembly, and output finishing under [`sql/select/physical_plan/`](../../../crates/uqa-engine/src/sql/select/physical_plan).
 
 Top-level SELECT execution is owned by [`sql/select/execution.rs`](../../../crates/uqa-engine/src/sql/select/execution.rs), correlated filter-pushdown lowering by [`sql/select/filter_pushdown/subqueries.rs`](../../../crates/uqa-engine/src/sql/select/filter_pushdown/subqueries.rs), and physical row-lock leaf validation by [`sql/select/row_locking/leaf_validation.rs`](../../../crates/uqa-engine/src/sql/select/row_locking/leaf_validation.rs). Their roots retain orchestration and shared types without absorbing the extracted algorithms again.
 
-Reusable physical-scalar traversal is owned by [`uqa-execution/src/scalar/traversal.rs`](../../../crates/uqa-execution/src/scalar/traversal.rs). The surrounding [`scalar`](../../../crates/uqa-execution/src/scalar) owner separates physical IR, subquery protocol, evaluation context, call-argument validation, and evaluator operations. SELECT expression-shape and volatility checks use the shared traversal instead of maintaining incomplete recursive copies. Engine-specific planner statistics implement the narrow `SourceStatistics` contract and preserve the first callback failure instead of substituting guessed statistics.
+Reusable scalar IR traversal is owned by [`uqa-sql/src/ir/traversal.rs`](../../../crates/uqa-sql/src/ir/traversal.rs), with call-argument validation beside it. The execution [`scalar`](../../../crates/uqa-execution/src/scalar) owner retains the subquery execution protocol, evaluation context, argument evaluation, and runtime operations. SELECT expression-shape and volatility checks use the shared traversal instead of maintaining incomplete recursive copies. Engine-specific planner statistics implement the narrow `SourceStatistics` contract and preserve the first callback failure instead of substituting guessed statistics.
 
 ## Access path selection
 
@@ -167,7 +169,7 @@ Graph estimates bind live graph size, edge count, label distribution, average de
 
 ## Physical rows
 
-`RowSchema` maps logical output identities and hidden qualified aliases to flattened slots. `PhysicalRow` stores a small vector of shared value fragments. Selection and renaming usually remap schema slots, while joins concatenate fragment handles instead of rebuilding string-keyed maps and cloning every value.
+`uqa_sql::schema::RowSchema` owns logical output identities, declared types, ambiguity, and slot layouts. Execution imports the same type and implements `RowSchemaExecution` for physical row views and relayout; materialization and buffer ownership remain in `uqa-execution`. `PhysicalRow` stores a small vector of shared value fragments. Selection and renaming usually remap schema slots, while joins concatenate fragment handles instead of rebuilding string-keyed maps and cloning every value.
 
 Executor-only attributes are addressed by `InternalRelationId` and `InternalColumnRef`; wildcard visibility and retrieval-score provenance are likewise structural metadata. The public binding-only `_meta.score` and `_meta.doc_id` identities alias those physical metadata slots without copying values or occupying wildcard positions. This follows PostgreSQL 18's `resjunk`, `resno`, `Var`, and tuple-slot model: the planner does not fabricate SQL-visible labels that can collide with user columns such as `_score`, `_doc_id`, or `_merge_action`, or with the former `__uqa_*` namespace. Catalog restore upgrades version 0.1.6 compiler dispatch markers to structural dispatch values while preserving bound user routines with the same spelling.
 
@@ -193,7 +195,7 @@ Single-consumer derived-table projections can remain pull pipelines. Repeatable,
 
 Eligible unique-key inner joins hash borrowed physical slots and retain positions into the build row store. Hash matches are verified against original slots. If the direct structure exceeds its budget, execution rebuilds the canonical encoded-key index and uses the disk-spill path. General and outer hash joins use the exact encoded path, with right and full match state kept within bounded storage.
 
-Routine call mapping, polymorphic substitution, variadic planning, coercion targets, and ranked matches remain under [`uqa-execution/src/type_resolution/routine_signature`](../../../crates/uqa-execution/src/type_resolution/routine_signature). They consume execution's shared common-type and overload-ranking policy; moving that subtree alone to `uqa-sql` would invert the existing `uqa-execution` to `uqa-sql` dependency or duplicate the policy, so a crate move requires a separately proven movement of the complete typing-policy bundle.
+Routine call mapping, polymorphic substitution, variadic planning, coercion targets, and ranked matches live under [`uqa-sql/src/type_resolution/routine_signature`](../../../crates/uqa-sql/src/type_resolution/routine_signature). The complete common-type and overload-ranking policy moved with the scalar IR and static schema model; SQL analysis has no dependency on execution or the planner. Runtime routine lookup implements the SQL-owned `RoutineResolution` contract.
 
 ## Score cutoff optimization
 

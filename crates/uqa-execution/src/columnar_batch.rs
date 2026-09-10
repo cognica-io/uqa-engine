@@ -6,6 +6,7 @@
 
 //! Positional, column-oriented batches for public result transfer.
 
+use crate::RowSchemaExecution;
 use std::collections::BTreeMap;
 
 use uqa_core::Value;

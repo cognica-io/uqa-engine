@@ -12,7 +12,7 @@ use uqa_sql::ResultRow;
 
 use crate::physical::{ExecError, ExecResult};
 
-use super::{PhysicalRow, PhysicalRowView, RowSchema};
+use super::{PhysicalRow, PhysicalRowView, RowMaterializer, RowSchema, RowSchemaExecution};
 
 /// Owned schema/row pair for row-at-a-time consumers that must outlive a decoded batch. Cloning this carrier shares the immutable schema index and row fragments; it does not build a named row or clone contained values.
 #[derive(Debug, Clone, PartialEq)]
@@ -50,12 +50,12 @@ impl OwnedPhysicalRow {
                 schema.len()
             )));
         }
-        let slots = self.schema.index.slots.to_vec();
+        let slots = self.schema.layout_slots().to_vec();
         Ok(Self::new(schema, self.row.project_slots(&slots)))
     }
 
     pub fn into_result_row(self) -> ResultRow {
-        self.schema.materialize_result_row(self.row)
+        RowMaterializer::new(&self.schema).materialize_result_row(self.row)
     }
 }
 

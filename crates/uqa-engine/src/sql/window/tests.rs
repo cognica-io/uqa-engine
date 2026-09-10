@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use uqa_execution::RowSchemaExecution;
 use uqa_sql::expr::RowLookup as _;
 
 #[test]

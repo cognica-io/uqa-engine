@@ -6,27 +6,13 @@
 
 //! Positional output shaping for `JOIN ... USING` and `NATURAL JOIN`.
 
+use crate::RowSchemaExecution;
 use uqa_core::Value;
-use uqa_sql::ast::ColumnType;
 use uqa_sql::expr::cast_value;
 
 use crate::{Batch, ColumnIdentity, ExecError, ExecResult, PhysicalOperator, RowSchema};
 
-/// Source of one visible or hidden join-output identity.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum JoinOutputSource {
-    /// Reuse an existing logical input position without copying its value.
-    Input(usize),
-    /// Apply an implicit binder-selected coercion to one input position.
-    Cast { input: usize, ty: ColumnType },
-    /// SQL `COALESCE(left::type, right::type)` over two logical input
-    /// positions. This is required only for a merged column of `FULL JOIN`.
-    Coalesce {
-        left: usize,
-        right: usize,
-        ty: ColumnType,
-    },
-}
+pub use uqa_sql::schema::join_output::JoinOutputSource;
 
 /// Reorder and merge join columns while retaining the joined physical row.
 /// Inner, left, and right joins are schema-only remaps; a full join appends
@@ -44,7 +30,9 @@ impl<'a> JoinOutput<'a> {
         columns: &[(String, ColumnIdentity, JoinOutputSource)],
         aliases: &[(ColumnIdentity, JoinOutputSource)],
     ) -> ExecResult<RowSchema> {
-        compile_layout(input, columns, aliases).map(|(schema, _)| schema)
+        compile_layout(input, columns, aliases)
+            .map(|(schema, _)| schema)
+            .map_err(Into::into)
     }
 
     pub fn try_new(
@@ -61,88 +49,7 @@ impl<'a> JoinOutput<'a> {
     }
 }
 
-fn compile_layout(
-    input: &RowSchema,
-    columns: &[(String, ColumnIdentity, JoinOutputSource)],
-    aliases: &[(ColumnIdentity, JoinOutputSource)],
-) -> ExecResult<(RowSchema, Vec<JoinOutputSource>)> {
-    let input_width = input.len();
-    let mut computed = Vec::<JoinOutputSource>::new();
-    for source in columns
-        .iter()
-        .map(|(_, _, source)| source)
-        .chain(aliases.iter().map(|(_, source)| source))
-    {
-        match source {
-            JoinOutputSource::Input(position) if *position >= input_width => {
-                return Err(ExecError::Other(format!(
-                    "join output input position {position} is outside width {input_width}"
-                )));
-            }
-            JoinOutputSource::Cast { input, .. } if *input >= input_width => {
-                return Err(ExecError::Other(format!(
-                    "join output cast position {input} is outside width {input_width}"
-                )));
-            }
-            JoinOutputSource::Coalesce { left, right, .. }
-                if *left >= input_width || *right >= input_width =>
-            {
-                return Err(ExecError::Other(format!(
-                    "join output coalesce positions ({left}, {right}) are outside width {input_width}"
-                )));
-            }
-            source @ (JoinOutputSource::Cast { .. } | JoinOutputSource::Coalesce { .. }) => {
-                if !computed.contains(source) {
-                    computed.push(source.clone());
-                }
-            }
-            JoinOutputSource::Input(_) => {}
-        }
-    }
-
-    let computed_types = computed.iter().map(source_type).collect::<Vec<_>>();
-    let intermediate = RowSchema::append_hidden_typed(input, &computed_types);
-    let source_position = |source: &JoinOutputSource| -> usize {
-        match source {
-            JoinOutputSource::Input(position) => input
-                .physical_slot(*position)
-                .expect("validated join output input position has a physical slot"),
-            JoinOutputSource::Cast { .. } | JoinOutputSource::Coalesce { .. } => {
-                let index = computed
-                    .iter()
-                    .position(|candidate| candidate == source)
-                    .expect("computed join output source was registered");
-                input.physical_width() + index
-            }
-        }
-    };
-    let columns = columns
-        .iter()
-        .map(|(name, identity, source)| {
-            let ty = match source {
-                JoinOutputSource::Input(position) => intermediate.column_type(*position).cloned(),
-                JoinOutputSource::Cast { .. } | JoinOutputSource::Coalesce { .. } => {
-                    source_type(source)
-                }
-            };
-            (name.clone(), identity.clone(), source_position(source), ty)
-        })
-        .collect::<Vec<_>>();
-    let aliases = aliases
-        .iter()
-        .map(|(name, source)| {
-            let ty = match source {
-                JoinOutputSource::Input(position) => input.column_type(*position).cloned(),
-                JoinOutputSource::Cast { .. } | JoinOutputSource::Coalesce { .. } => {
-                    source_type(source)
-                }
-            };
-            (name.clone(), source_position(source), ty)
-        })
-        .collect::<Vec<_>>();
-    let schema = RowSchema::remap_typed_physical_identities(&intermediate, &columns, &aliases);
-    Ok((schema, computed))
-}
+pub use uqa_sql::schema::join_output::compile_layout;
 
 impl PhysicalOperator for JoinOutput<'_> {
     fn row_schema(&self) -> &RowSchema {
@@ -189,14 +96,7 @@ impl PhysicalOperator for JoinOutput<'_> {
     }
 }
 
-fn source_type(source: &JoinOutputSource) -> Option<ColumnType> {
-    match source {
-        JoinOutputSource::Input(_) => None,
-        JoinOutputSource::Cast { ty, .. } | JoinOutputSource::Coalesce { ty, .. } => {
-            Some(ty.clone())
-        }
-    }
-}
+pub use uqa_sql::schema::join_output::source_type;
 
 fn evaluate_source(
     source: &JoinOutputSource,
@@ -225,7 +125,9 @@ fn evaluate_source(
 
 #[cfg(test)]
 mod tests {
+    use crate::RowSchemaExecution;
     use std::collections::BTreeMap;
+    use uqa_sql::ast::ColumnType;
 
     use super::*;
     use crate::physical::run_to_rows;

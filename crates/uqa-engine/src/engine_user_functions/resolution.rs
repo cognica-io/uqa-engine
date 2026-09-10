@@ -8,7 +8,7 @@
 
 use uqa_execution::{
     match_routine_signature, rank_function_matches, BuiltinFunctionOverload, FunctionTypeResolver,
-    MatchedRoutineSignature, RankedFunctionMatch, ResolvedFunctionOverload, RoutineCallDescriptor,
+    MatchedRoutineSignature, ResolvedFunctionOverload, RoutineCallDescriptor,
     RoutineParameterDescriptor, RoutineSignatureMatchError,
 };
 use uqa_sql::ast::{
@@ -21,62 +21,6 @@ use crate::engine_capabilities::CatalogReadView;
 use crate::{Arc, Engine, RelationIdentity};
 
 use super::{canonical_routine_type_name, combined_overloads, SQLUserFunction};
-
-/// Function-catalog operations required by static query binding. The interface deliberately excludes storage, transaction, locking, and execution services so the binder can run against a deterministic catalog fixture.
-pub(crate) trait RoutineResolution: FunctionTypeResolver {
-    fn has_registered_scalar_function(&self, _name: &str) -> bool {
-        false
-    }
-
-    fn has_registered_table_function(&self, _name: &str) -> bool {
-        false
-    }
-
-    fn has_registered_aggregate_function(&self, _name: &str) -> bool {
-        false
-    }
-
-    fn lookup_visible_sql_functions(
-        &self,
-        _name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
-        Ok(None)
-    }
-
-    fn resolve_static_sql_function(
-        &self,
-        _name: &str,
-        _binding: Option<&FunctionBinding>,
-        _argument_names: &[Option<String>],
-        _argument_types: &[Option<ColumnType>],
-        _explicit_variadic: bool,
-    ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
-        Ok(None)
-    }
-
-    fn resolve_static_sql_function_match(
-        &self,
-        _name: &str,
-        _binding: Option<&FunctionBinding>,
-        _argument_names: &[Option<String>],
-        _argument_types: &[Option<ColumnType>],
-        _explicit_variadic: bool,
-    ) -> Result<Option<StaticFunctionMatch>, SQLError> {
-        Ok(None)
-    }
-
-    fn resolve_table_function_overload_with_builtins(
-        &self,
-        _name: &str,
-        _binding: Option<&FunctionBinding>,
-        _argument_names: &[Option<String>],
-        _argument_types: &[Option<ColumnType>],
-        _explicit_variadic: bool,
-        _builtins: &[BuiltinFunctionOverload],
-    ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
-        Ok(None)
-    }
-}
 
 impl RoutineResolution for Engine {
     fn has_registered_scalar_function(&self, name: &str) -> bool {
@@ -152,68 +96,6 @@ impl RoutineResolution for Engine {
             explicit_variadic,
             builtins,
         )
-    }
-}
-
-pub(crate) fn routine_signature_types(def: &CreateFunction) -> Vec<String> {
-    def.identity_params()
-        .iter()
-        .map(|parameter| canonical_routine_type_name(&parameter.type_name))
-        .collect()
-}
-
-pub(crate) fn routine_returns_anonymous_record(def: &CreateFunction) -> bool {
-    def.output_params().is_empty()
-        && matches!(
-            &def.returns,
-            FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }
-                if canonical_routine_type_name(type_name) == "record"
-        )
-}
-
-pub(crate) struct StaticFunctionMatch {
-    pub(crate) function: Arc<SQLUserFunction>,
-    pub(crate) invocation: Box<RoutineInvocationBinding>,
-    pub(super) argument_types: Vec<String>,
-    pub(super) raw_exact_matches: usize,
-    pub(super) exact_matches: usize,
-    pub(super) preferred_matches: usize,
-    pub(super) variadic_expansion: bool,
-}
-
-impl StaticFunctionMatch {
-    pub(crate) fn binding(&self) -> FunctionBinding {
-        FunctionBinding {
-            object_id: self.function.def.object_id,
-            name: self.function.def.name.clone(),
-            argument_types: routine_signature_types(&self.function.def),
-            builtin: false,
-            dispatch: None,
-            invocation: Some(self.invocation.clone()),
-            resolution_error: None,
-        }
-    }
-}
-
-impl RankedFunctionMatch for StaticFunctionMatch {
-    fn argument_types(&self) -> &[String] {
-        &self.argument_types
-    }
-
-    fn raw_exact_matches(&self) -> usize {
-        self.raw_exact_matches
-    }
-
-    fn exact_matches(&self) -> usize {
-        self.exact_matches
-    }
-
-    fn preferred_matches(&self) -> usize {
-        self.preferred_matches
-    }
-
-    fn is_variadic_expansion(&self) -> bool {
-        self.variadic_expansion
     }
 }
 
@@ -889,3 +771,8 @@ pub(crate) fn routine_local_name(name: &str) -> Result<String, SQLError> {
         .map(|relation| relation.name)
         .map_err(|error| SQLError::Internal(format!("invalid routine name `{name}`: {error}")))
 }
+
+pub(crate) use uqa_sql::routines::{
+    routine_returns_anonymous_record, routine_signature_types, RoutineResolution,
+    StaticFunctionMatch,
+};

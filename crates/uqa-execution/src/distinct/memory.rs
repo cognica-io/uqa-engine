@@ -6,6 +6,7 @@
 
 //! Collision-safe in-memory and reusable exact row sets.
 
+use crate::RowSchemaExecution;
 use std::collections::HashMap;
 use std::path::PathBuf;
 

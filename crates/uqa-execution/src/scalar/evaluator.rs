@@ -6,6 +6,7 @@
 
 //! Direct evaluation operations for the physical scalar IR.
 
+use crate::RowSchemaExecution;
 use uqa_core::{ArrayValue, Value};
 use uqa_sql::ast::BinaryOp;
 use uqa_sql::expr::{

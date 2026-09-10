@@ -12,11 +12,14 @@ The master plan in [`docs/plans/0001-uqa-engine-implementation-plan.md`](docs/pl
 
 ## Local gates
 
+Install the repository hook with `bash scripts/install-git-hooks.sh` once per clone. It sets the local `core.hooksPath` to `.githooks` and refuses to replace an existing custom hook configuration. The pre-commit hook checks the exact staged Cargo manifests, lockfile, targets, and dependency policy in an offline snapshot, so unstaged edits cannot mask an invalid commit. Runtime, build, platform-specific, and transitive workspace dependencies are checked; development-only dependencies are excluded from the runtime graph. CI runs the same checker against the committed tree.
+
 Every change has to clear all of:
 
 ```sh
 bash scripts/check-public-repository-hygiene.sh
 python3 scripts/check-integration-test-harnesses.py
+python3 scripts/check-workspace-dependencies.py
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
@@ -131,6 +134,7 @@ If a single PR introduces several logically distinct changes (for example, an im
 
 Before opening a pull request, confirm that the contribution is one of the [types that do not require an agreement](CONTRIBUTOR_POLICY.md#contributions-that-do-not-require-an-agreement) or is covered by a contributor agreement accepted by Cognica.
 
+- Finish validation, merge, and cleanup of the current pull request before opening the next one. Do not stack pull requests.
 - Branch off `main` for every change.
 - Keep the PR scope focused; reviews are easier when each PR has one reason to exist.
 - The PR description should mention which gates were run locally and call out anything that needs reviewer attention (intentional divergences from upstream, performance trade-offs, deferred follow-ups).

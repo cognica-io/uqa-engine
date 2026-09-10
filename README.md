@@ -231,6 +231,14 @@ Prebuilt Linux Python wheels target glibc 2.28 or newer because the bundled Duck
 
 ## Build and test
 
+Install the versioned commit hook once per clone:
+
+```sh
+bash scripts/install-git-hooks.sh
+```
+
+Every commit checks the staged crate dependency graph, including build and platform-specific edges and transitive ownership boundaries. See [crate ownership](docs/manual/internals/01-architecture.md) and the [SQL boundary design](docs/design/sql-crate-boundaries.md).
+
 Build the complete workspace:
 
 ```sh

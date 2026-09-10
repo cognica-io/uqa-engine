@@ -591,6 +591,7 @@ fn heap_pop(
 
 #[cfg(test)]
 mod tests {
+    use crate::RowSchemaExecution;
     use std::collections::BTreeMap;
     use std::io::Write as _;
     use std::sync::Arc;

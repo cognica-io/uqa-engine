@@ -11,6 +11,7 @@ use super::{
     AggregateAccumulator, CteScope, Engine, PlanSubqueryArena, QueryBlockPlan, SQLError, SQLParam,
     ScalarEvalContext, ScalarExpr, ScopedEngineHook, SpillBuffer, Value,
 };
+use uqa_execution::RowSchemaExecution;
 use uqa_execution::{ExternalSort, PhysicalOperator, RowSchema, SortKey, SpillScan};
 
 #[expect(

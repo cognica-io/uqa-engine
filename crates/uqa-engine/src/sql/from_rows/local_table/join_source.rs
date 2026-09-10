@@ -13,6 +13,7 @@ use super::{
     EngineLateralSource, JoinExecutionStrategy, JoinKind, QualifierFilters, SQLError, SQLParam,
     ScalarExpr, SourcePlan,
 };
+use uqa_execution::RowSchemaExecution;
 use uqa_execution::{HashJoin, LateralJoin, NestedLoopJoin, PhysicalOperator};
 
 /// Build the physical operator for a join source.

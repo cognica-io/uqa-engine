@@ -11,6 +11,7 @@ use super::{
     recheck_storage_names_match, Engine, LockAcquire, LockRows, LockStrength, LockWait,
     PhysicalOperator, PhysicalRow, ResolvedRowLock, RowSchema, SQLError,
 };
+use uqa_execution::RowSchemaExecution;
 
 /// One physical tuple this candidate row must lock. A self-join names the same tuple through several visible qualifiers; the tuple is locked once at the strongest requested strength while every qualifier stays known so each marked alias is pinned to the substituted image during a recheck.
 struct LockCandidate {

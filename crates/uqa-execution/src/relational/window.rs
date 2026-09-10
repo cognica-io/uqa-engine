@@ -11,6 +11,7 @@ use super::{
     ExecResult, PhysicalOperator, RowSchema, SQLParam, ScalarEvalContext, ScalarExpr, SortKey,
     Value,
 };
+use crate::RowSchemaExecution;
 use uqa_sql::expr::RowLookup;
 
 #[derive(Debug, Clone)]

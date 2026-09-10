@@ -9,6 +9,7 @@
 use super::{
     eval_scalar, Arc, ExecResult, RowSchema, SQLParam, ScalarEvalContext, ScalarExpr, Value,
 };
+use crate::RowSchemaExecution;
 use uqa_sql::ast::ColumnType;
 use uqa_sql::expr::RowLookup;
 use uqa_sql::SQLError;

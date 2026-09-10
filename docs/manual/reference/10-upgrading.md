@@ -104,3 +104,7 @@ Keep migration failures visible and resolve them before admitting writes. Retain
 `HttpEngine`, SQL parameter helpers, and streaming execute in JavaScript without a native addon. Existing imports from `@cognica-io/uqa` continue to expose these APIs; `@cognica-io/uqa/http` is the explicit HTTP entry point for both CommonJS and ESM. An HTTP-only deployment can omit optional dependencies. Embedded `Engine` use still requires the platform's native package.
 
 Use an explicit URL and token or `HttpEngine.fromEnv()` when deployment configuration already supplies credentials. The asynchronous `local()` and `cloud()` constructors require the installed `uqa` CLI and resolve a project once. Keep using the documented parameter wrappers for vectors and tensors, JavaScript `bigint` for exact signed 64-bit integers, and `Buffer` or `Uint8Array` for binary values. The [HTTP Engine reference](09-http-engine.md) describes errors, response limits, streaming, and cancellation.
+
+## Internal Rust SQL ownership
+
+SQL statement and scalar models, static row schemas, and type resolution now live in `uqa_sql::plan`, `uqa_sql::ir`, `uqa_sql::schema`, and `uqa_sql::type_resolution`. Existing planner and execution exports refer to the same definitions. Low-level callers of `RowSchema::view` or `RowSchema::relayout_physical_row` must import `uqa_execution::RowSchemaExecution`; physical rows and materialization remain execution-owned. Applications using `Engine` require no SQL or query-result migration for this ownership change.

@@ -6,8 +6,8 @@
 
 use super::{
     bind_projection_output_schema, build_projection_physical_row_with_ctes, dml_storage_error,
-    doc_id_value, returning_row_context, BTreeSet, ColumnIdentity, CteScope, DocId, Document,
-    Engine, MutationRowImage, MutationRowImages, OwnedPhysicalRow, PhysicalRow, ProjectionPlan,
+    doc_id_value, returning_row_context, BTreeSet, CteScope, DocId, Document, Engine,
+    MutationRowImage, MutationRowImages, OwnedPhysicalRow, PhysicalRow, ProjectionPlan,
     ReturningAliases, RowSchema, SQLError, SQLParam, SQLResult, Statement, Value, DOC_ID_COLUMN,
     TABLE_OID_COLUMN,
 };
@@ -51,43 +51,7 @@ pub(super) fn returning_image_values(
         .collect()
 }
 
-pub(super) fn returning_context_schema(
-    columns: &[String],
-    types: &[Option<uqa_sql::ast::ColumnType>],
-    composite_width: usize,
-    target_qualifier: &str,
-    aliases: &ReturningAliases,
-) -> RowSchema {
-    let target =
-        RowSchema::with_qualified_types(target_qualifier, columns.to_vec(), types.to_vec());
-    let target = RowSchema::with_wildcard_hidden_positions(&target, composite_width..columns.len());
-    let hidden_types = types
-        .iter()
-        .cloned()
-        .chain(types.iter().cloned())
-        .collect::<Vec<_>>();
-    let schema = RowSchema::append_hidden_typed(&target, &hidden_types);
-    let width = columns.len();
-    let identity_aliases = columns
-        .iter()
-        .enumerate()
-        .flat_map(|(position, column)| {
-            [
-                (
-                    ColumnIdentity::qualified(&aliases.old, column),
-                    width + position,
-                    types[position].clone(),
-                ),
-                (
-                    ColumnIdentity::qualified(&aliases.new, column),
-                    width * 2 + position,
-                    types[position].clone(),
-                ),
-            ]
-        })
-        .collect::<Vec<_>>();
-    RowSchema::with_physical_identity_aliases(&schema, &identity_aliases)
-}
+pub(in crate::sql) use uqa_sql::semantics::returning_context_schema;
 
 #[derive(Clone)]
 pub(in crate::sql) struct ReturningProjectionRow<'a> {
@@ -491,29 +455,7 @@ pub(in crate::sql) fn returning_target_schema(
     Ok(RowSchema::with_types(columns, types))
 }
 
-pub(in crate::sql) fn returning_expression_schema(
-    target: &RowSchema,
-    target_qualifier: &str,
-    aliases: &ReturningAliases,
-    supplemental: Option<&RowSchema>,
-) -> RowSchema {
-    let composite_width = target.len();
-    let mut columns = target.columns().to_vec();
-    let mut types = target.column_types().to_vec();
-    if !columns.iter().any(|column| column == DOC_ID_COLUMN) {
-        columns.push(DOC_ID_COLUMN.into());
-        types.push(Some(uqa_sql::ast::ColumnType::BigInteger));
-    }
-    columns.push(TABLE_OID_COLUMN.into());
-    types.push(Some(uqa_sql::ast::ColumnType::Oid));
-    columns.push(crate::sql::XMIN_COLUMN.into());
-    types.push(Some(uqa_sql::ast::ColumnType::Xid));
-    let target =
-        returning_context_schema(&columns, &types, composite_width, target_qualifier, aliases);
-    supplemental.map_or(target.clone(), |source| {
-        RowSchema::join(&target, source, std::iter::empty())
-    })
-}
+pub(in crate::sql) use uqa_sql::semantics::returning_expression_schema;
 
 pub(in crate::sql) fn expanded_returning_projections(
     engine: &Engine,

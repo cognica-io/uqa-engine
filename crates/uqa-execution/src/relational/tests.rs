@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use crate::RowSchemaExecution;
 use std::collections::BTreeMap;
 
 use super::*;

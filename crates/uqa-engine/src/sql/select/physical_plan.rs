@@ -46,9 +46,9 @@ pub(in crate::sql) use output::{
     execute_filter_physical_rows, execute_query_block_operator_output,
 };
 pub(in crate::sql) use projection::{
-    close_after_physical_failure, expand_bound_projection_stars, expand_from_star_columns,
-    physical_exec_error, physical_projections, physical_work_mem_bytes,
-    user_function_output_columns, visible_projection_source_position,
+    close_after_physical_failure, expand_from_star_columns, physical_exec_error,
+    physical_projections, physical_work_mem_bytes, user_function_output_columns,
+    visible_projection_source_position,
 };
 pub(in crate::sql) use row_locking::build_row_lock_recheck_operator;
 

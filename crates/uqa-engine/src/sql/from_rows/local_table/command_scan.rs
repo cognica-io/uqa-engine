@@ -8,6 +8,7 @@
 
 use super::{EngineTableRowSource, SQLError, Value};
 use std::sync::Arc;
+use uqa_execution::RowSchemaExecution;
 
 enum CommandScanCandidate {
     Persisted(uqa_core::DocId),

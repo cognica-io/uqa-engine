@@ -6,6 +6,7 @@
 
 //! Pull-based scalar-subquery protocol and result consumers.
 
+use crate::RowSchemaExecution;
 use uqa_core::Value;
 use uqa_sql::expr::RowLookup;
 use uqa_sql::{ResultRow, SQLError, SQLParam};

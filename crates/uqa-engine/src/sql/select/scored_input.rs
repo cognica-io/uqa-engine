@@ -727,6 +727,7 @@ impl uqa_execution::RowSource for ScoredDocumentSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uqa_execution::RowSchemaExecution;
     use uqa_execution::RowSource;
     use uqa_sql::expr::RowLookup;
 

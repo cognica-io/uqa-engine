@@ -11,6 +11,7 @@ use super::{
     aggregate_value, projection_columns, AggregateAccumulator, CteScope, Engine, SQLError,
     SQLParam, ScopedEngineHook, Value,
 };
+use uqa_execution::RowSchemaExecution;
 use uqa_execution::{
     eval_scalar, Batch, ExecResult, ExternalSort, IndexedSpill, PhysicalOperator, PhysicalRow,
     RowSchema, ScalarEvalContext, ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarSubqueryRunner,

@@ -8,6 +8,7 @@
 use super::{Arc, EngineTableRowSource, ResultRow, SQLError, SharedLockOrigin, Value};
 use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
 use crate::sql::doc_id_value;
+use uqa_execution::RowSchemaExecution;
 
 pub(super) fn table_lock_origin(
     catalog: &CatalogReadView,

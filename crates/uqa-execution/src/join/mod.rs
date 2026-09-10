@@ -6,6 +6,7 @@
 
 //! Physical relational join operators.
 
+use crate::RowSchemaExecution;
 mod canonical_index;
 mod direct_index;
 mod nested_loop;
