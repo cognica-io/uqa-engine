@@ -232,7 +232,7 @@ impl Engine {
                     )));
                 }
             } else {
-                crate::sql::drop_constraint_dependency(self, table, constraint)
+                self.drop_constraint_dependency(table, constraint)
                     .map_err(|error| StorageBackendError::Other(error.to_string()))?;
             }
         }

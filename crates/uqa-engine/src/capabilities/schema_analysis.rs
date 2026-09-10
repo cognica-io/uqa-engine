@@ -8,7 +8,7 @@
 
 use crate::Engine;
 use uqa_sql::{
-    ast::{ColumnDef, FunctionVolatility},
+    ast::{ColumnDef, ColumnType, Expr, FunctionVolatility},
     SQLError,
 };
 
@@ -159,5 +159,45 @@ impl uqa_sql::schema::constraint_views::StoredTableNames for Engine {
     }
     fn stored_table_names(&self) -> Vec<uqa_core::RelationIdentity> {
         self.storage.tables.read().keys().cloned().collect()
+    }
+}
+
+impl Engine {
+    pub(crate) fn validate_default_expression(
+        &self,
+        expression: &mut Expr,
+        target: &ColumnType,
+    ) -> Result<(), SQLError> {
+        let scope = crate::capabilities::query_scope::new_for_catalog_binding(self);
+        let binding = uqa_execution::query::binding::binding_context(&scope)?;
+        uqa_sql::schema::defaults::validate_default_expression(
+            &uqa_sql::schema::SchemaBindingContext {
+                catalog: self,
+                binding: &binding,
+            },
+            expression,
+            target,
+        )
+    }
+
+    pub(crate) fn validate_check_expression(
+        &self,
+        table: &str,
+        qualifier: &str,
+        columns: &[ColumnDef],
+        expression: &mut Expr,
+    ) -> Result<(), SQLError> {
+        let scope = crate::capabilities::query_scope::new_for_catalog_binding(self);
+        let binding = uqa_execution::query::binding::binding_context(&scope)?;
+        uqa_sql::schema::constraints::validate_check_expression(
+            &uqa_sql::schema::SchemaBindingContext {
+                catalog: self,
+                binding: &binding,
+            },
+            table,
+            qualifier,
+            columns,
+            expression,
+        )
     }
 }

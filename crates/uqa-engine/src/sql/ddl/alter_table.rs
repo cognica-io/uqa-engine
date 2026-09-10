@@ -8,9 +8,6 @@
 
 use super::{AlterTableAction, AlterTableStmt, Engine, SQLError, SQLResult};
 
-mod constraint_drop;
-pub(crate) use constraint_drop::{drop_column_cascade, drop_constraint_dependency};
-
 pub(in crate::sql) fn run_alter_table(
     engine: &Engine,
     mut stmt: AlterTableStmt,

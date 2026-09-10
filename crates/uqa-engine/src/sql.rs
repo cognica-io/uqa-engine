@@ -114,8 +114,7 @@ use ddl::{
     run_create_table_as, run_create_table_if_not_exists, run_drop, CreateTableAsExecution,
 };
 pub(crate) use ddl::{
-    convert_value_to_column_type, drop_column_cascade, drop_constraint_dependency,
-    validate_check_expression, validate_default_expression, validate_postgres_column_name,
+    convert_value_to_column_type, validate_postgres_column_name,
     validate_postgres_relation_column_type, validate_vector_dimensions,
 };
 use from_rows::engine_func_intercept;

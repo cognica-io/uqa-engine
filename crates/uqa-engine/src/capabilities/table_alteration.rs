@@ -158,3 +158,30 @@ impl ColumnRemovalState for Engine {
         }
     }
 }
+
+impl Engine {
+    pub(crate) fn drop_constraint_dependency(
+        &self,
+        table: &str,
+        name: &str,
+    ) -> Result<(), SQLError> {
+        uqa_execution::schema::constraints::drop::drop_constraint_dependency(
+            &self.constraint_alter_context(),
+            table,
+            name,
+        )
+    }
+    pub(crate) fn drop_column_cascade(
+        &self,
+        table: &str,
+        column: &str,
+        if_exists: bool,
+    ) -> Result<(), SQLError> {
+        uqa_execution::schema::columns::removal::drop_column_cascade(
+            &self.column_removal_context(),
+            table,
+            column,
+            if_exists,
+        )
+    }
+}

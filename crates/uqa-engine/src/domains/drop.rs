@@ -423,7 +423,7 @@ impl Engine {
                 self.drop_foreign_table_check_dependency(table, constraint)
                     .map_err(|error| storage_error(&error))?;
             } else {
-                crate::sql::drop_constraint_dependency(self, table, constraint)?;
+                self.drop_constraint_dependency(table, constraint)?;
             }
         }
         for (table, column, foreign) in &dependents.defaults {
@@ -440,7 +440,7 @@ impl Engine {
                 self.drop_foreign_table_column_dependency(table, column)
                     .map_err(|error| storage_error(&error))?;
             } else {
-                crate::sql::drop_column_cascade(self, table, column, true)?;
+                self.drop_column_cascade(table, column, true)?;
             }
         }
         Ok(())

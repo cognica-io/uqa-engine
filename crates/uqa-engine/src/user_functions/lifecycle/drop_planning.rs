@@ -407,7 +407,7 @@ impl Engine {
         foreign: bool,
     ) -> Result<(), SQLError> {
         if !foreign {
-            return crate::sql::drop_constraint_dependency(self, table, constraint);
+            return self.drop_constraint_dependency(table, constraint);
         }
         if self
             .drop_foreign_table_check_dependency(table, constraint)

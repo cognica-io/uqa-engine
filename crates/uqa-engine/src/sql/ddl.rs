@@ -9,19 +9,14 @@
 use super::{AlterTableAction, AlterTableStmt, DropKind, DropStmt, Engine, SQLError, SQLResult};
 
 mod alter_table;
-mod constraint_validation;
 mod create_index;
 mod create_table;
-mod defaults;
 mod drop;
 mod sequence_ctas;
 
 pub(super) use alter_table::run_alter_table;
-pub(crate) use alter_table::{drop_column_cascade, drop_constraint_dependency};
-pub(crate) use constraint_validation::validate_check_expression;
 pub(super) use create_index::run_create_index;
 pub(super) use create_table::{run_create_table, run_create_table_if_not_exists};
-pub(crate) use defaults::validate_default_expression;
 pub(super) use drop::run_drop;
 pub(super) use sequence_ctas::{
     run_alter_sequence, run_create_sequence, run_create_table_as, CreateTableAsExecution,

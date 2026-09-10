@@ -123,17 +123,11 @@ impl Engine {
         for column in columns.iter_mut() {
             if let Some(default) = &mut column.default {
                 self.prepare_foreign_table_sequence_references(default, stored)?;
-                crate::sql::validate_default_expression(self, default, &column.ty)?;
+                self.validate_default_expression(default, &column.ty)?;
             }
             if let Some(check) = &mut column.check {
                 self.prepare_foreign_table_sequence_references(check, stored)?;
-                crate::sql::validate_check_expression(
-                    self,
-                    table_name,
-                    &qualifier,
-                    &check_columns,
-                    check,
-                )?;
+                self.validate_check_expression(table_name, &qualifier, &check_columns, check)?;
                 crate::sql::reject_stored_regrole_constants(self, check, None)?;
             }
             if let Some(generated) = &mut column.generated {
@@ -142,8 +136,7 @@ impl Engine {
         }
         for check in checks.iter_mut() {
             self.prepare_foreign_table_sequence_references(&mut check.expr, stored)?;
-            crate::sql::validate_check_expression(
-                self,
+            self.validate_check_expression(
                 table_name,
                 &qualifier,
                 &check_columns,
