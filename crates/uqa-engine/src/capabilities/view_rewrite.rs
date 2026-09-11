@@ -35,14 +35,15 @@ impl ViewRewriteCatalog for Engine {
         Engine::try_table_columns(self, name).map_err(|error| error.to_string())
     }
     fn rules_for(&self, name: &str, event: RuleEvent) -> Result<Vec<StoredRule>, SQLError> {
-        Engine::rules_for(self, name, event)
+        self.event_lookup_context().rules_for(name, event)
     }
     fn rule_definitions_for(
         &self,
         name: &str,
         event: RuleEvent,
     ) -> Result<Vec<StoredRule>, SQLError> {
-        Engine::rule_definitions_for(self, name, event)
+        self.event_lookup_context()
+            .rule_definitions_for(name, event)
     }
     fn has_trigger_definition(
         &self,
@@ -51,7 +52,8 @@ impl ViewRewriteCatalog for Engine {
         event: TriggerEvent,
         row: bool,
     ) -> Result<bool, SQLError> {
-        Engine::has_trigger_definition(self, name, timing, event, row)
+        self.event_lookup_context()
+            .has_trigger_definition(name, timing, event, row)
     }
     fn rule_new_row_columns(
         &self,

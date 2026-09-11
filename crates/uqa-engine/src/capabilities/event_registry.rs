@@ -14,7 +14,8 @@ use uqa_sql::{
         constraints::ConstraintIdentity,
         events::{
             definition::lookup::{EventLookupContext, EventPartitionCatalog},
-            reads::{EventCatalogReads, RuleCatalogRead, TriggerCatalogRead},
+            reads::{EventCatalogReads, EventLookupState, RuleCatalogRead, TriggerCatalogRead},
+            RuleCatalog, TriggerCatalog,
         },
     },
 };
@@ -25,6 +26,7 @@ impl Engine {
             analysis: self.event_analysis_context(),
             partitions: self,
             registry: self,
+            state: self,
         }
     }
     pub(crate) fn event_lifecycle_context(&self) -> EventLifecycleContext<'_> {
@@ -101,5 +103,21 @@ impl uqa_execution::schema::events::EventCatalogPublication for Engine {
         rules: &uqa_sql::catalog::events::RuleCatalog,
     ) -> Result<(), uqa_sql::SQLError> {
         self.persist_rule_catalog_snapshot(rules)
+    }
+}
+
+impl EventLookupState for Engine {
+    fn query_rules(&self) -> Option<&RuleCatalog> {
+        self.query_catalog_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.rules.as_ref())
+    }
+    fn query_triggers(&self) -> Option<&TriggerCatalog> {
+        self.query_catalog_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.triggers.as_ref())
+    }
+    fn session_replication_role_is_replica(&self) -> bool {
+        Engine::session_replication_role_is_replica(self)
     }
 }

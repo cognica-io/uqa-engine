@@ -39,7 +39,6 @@ struct StoredRuleCatalog {
 }
 
 mod lifecycle;
-mod lookup;
 mod persistence;
 
 #[cfg(test)]

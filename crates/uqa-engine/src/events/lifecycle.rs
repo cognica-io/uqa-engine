@@ -132,7 +132,7 @@ impl Engine {
         target: &uqa_sql::ast::FunctionBinding,
     ) -> Result<Vec<(String, String)>, SQLError> {
         let mut dependents = Vec::new();
-        for trigger in self.list_triggers() {
+        for trigger in self.event_lookup_context().list_triggers() {
             let invokes_target = match (trigger.function_object_id, target.object_id) {
                 (Some(trigger), Some(target)) => trigger == target,
                 (None, None) => {

@@ -4,27 +4,26 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Trigger lookup across ordinary and partitioned relations.
+//! Rule and trigger selection over pinned query catalogs and live execution registries.
 
 use std::collections::BTreeMap;
 
-use uqa_sql::ast::{RuleEvent, TriggerEvent, TriggerTiming};
-use uqa_sql::SQLError;
+use crate::ast::{RuleEvent, TriggerEvent, TriggerTiming};
+use crate::SQLError;
 
-use crate::Engine;
+use super::EventLookupContext;
 
-use super::{StoredRule, StoredTrigger};
+use crate::catalog::events::{StoredRule, StoredTrigger};
 
-impl Engine {
-    pub(crate) fn rule_definitions_for(
+impl EventLookupContext<'_> {
+    pub fn rule_definitions_for(
         &self,
         table: &str,
         event: RuleEvent,
     ) -> Result<Vec<StoredRule>, SQLError> {
-        let relation = self.event_analysis_context().resolve_rule_relation(table)?;
-        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
+        let relation = self.analysis.resolve_rule_relation(table)?;
+        if let Some(snapshot) = self.state.query_rules() {
             return Ok(snapshot
-                .rules
                 .get(&relation)
                 .into_iter()
                 .flat_map(BTreeMap::values)
@@ -33,9 +32,8 @@ impl Engine {
                 .collect());
         }
         Ok(self
-            .durable
-            .rules
-            .read()
+            .registry
+            .read_rules()
             .get(&relation)
             .into_iter()
             .flat_map(BTreeMap::values)
@@ -44,17 +42,12 @@ impl Engine {
             .collect())
     }
 
-    pub(crate) fn rules_for(
-        &self,
-        table: &str,
-        event: RuleEvent,
-    ) -> Result<Vec<StoredRule>, SQLError> {
-        let relation = self.event_analysis_context().resolve_rule_relation(table)?;
-        let replica = self.session_replication_role_is_replica();
+    pub fn rules_for(&self, table: &str, event: RuleEvent) -> Result<Vec<StoredRule>, SQLError> {
+        let relation = self.analysis.resolve_rule_relation(table)?;
+        let replica = self.state.session_replication_role_is_replica();
         Ok(self
-            .durable
-            .rules
-            .read()
+            .registry
+            .read_rules()
             .get(&relation)
             .into_iter()
             .flat_map(BTreeMap::values)
@@ -69,17 +62,16 @@ impl Engine {
             .collect())
     }
 
-    pub(crate) fn relation_has_rules(&self, table: &str) -> Result<bool, SQLError> {
-        let relation = self.event_analysis_context().resolve_rule_relation(table)?;
+    pub fn relation_has_rules(&self, table: &str) -> Result<bool, SQLError> {
+        let relation = self.analysis.resolve_rule_relation(table)?;
         Ok(self
-            .durable
-            .rules
-            .read()
+            .registry
+            .read_rules()
             .get(&relation)
             .is_some_and(|entries| !entries.is_empty()))
     }
 
-    pub(crate) fn triggers_for(
+    pub fn triggers_for(
         &self,
         table: &str,
         timing: TriggerTiming,
@@ -87,15 +79,14 @@ impl Engine {
         row: bool,
         updated_columns: &[String],
     ) -> Result<Vec<StoredTrigger>, SQLError> {
-        let relation = self.event_analysis_context().resolve_trigger_table(table)?;
-        let replica = self.session_replication_role_is_replica();
+        let relation = self.analysis.resolve_trigger_table(table)?;
+        let replica = self.state.session_replication_role_is_replica();
         let relations = if row {
-            self.event_lookup_context()
-                .partition_trigger_sources(&relation.qualified_name())?
+            self.partition_trigger_sources(&relation.qualified_name())?
         } else {
             vec![relation.clone()]
         };
-        let triggers = self.durable.triggers.read();
+        let triggers = self.registry.read_triggers();
         let mut candidates = BTreeMap::new();
         for source in relations {
             for trigger in triggers.get(&source).into_iter().flat_map(BTreeMap::values) {
@@ -129,14 +120,14 @@ impl Engine {
             .collect())
     }
 
-    pub(crate) fn has_trigger_definition(
+    pub fn has_trigger_definition(
         &self,
         table: &str,
         timing: TriggerTiming,
         event: TriggerEvent,
         row: bool,
     ) -> Result<bool, SQLError> {
-        let relation = self.event_analysis_context().resolve_trigger_table(table)?;
+        let relation = self.analysis.resolve_trigger_table(table)?;
         let matches = |entries: &BTreeMap<String, StoredTrigger>| {
             entries.values().any(|trigger| {
                 trigger.definition.timing == timing
@@ -144,28 +135,21 @@ impl Engine {
                     && trigger.definition.events.contains(&event)
             })
         };
-        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
-            return Ok(snapshot.triggers.get(&relation).is_some_and(matches));
+        if let Some(snapshot) = self.state.query_triggers() {
+            return Ok(snapshot.get(&relation).is_some_and(matches));
         }
         Ok(self
-            .durable
-            .triggers
-            .read()
+            .registry
+            .read_triggers()
             .get(&relation)
             .is_some_and(matches))
     }
 
-    pub(crate) fn has_row_triggers(
-        &self,
-        table: &str,
-        event: TriggerEvent,
-    ) -> Result<bool, SQLError> {
-        let relation = self.event_analysis_context().resolve_trigger_table(table)?;
-        let sources = self
-            .event_lookup_context()
-            .partition_trigger_sources(&relation.qualified_name())?;
-        let replica = self.session_replication_role_is_replica();
-        let triggers = self.durable.triggers.read();
+    pub fn has_row_triggers(&self, table: &str, event: TriggerEvent) -> Result<bool, SQLError> {
+        let relation = self.analysis.resolve_trigger_table(table)?;
+        let sources = self.partition_trigger_sources(&relation.qualified_name())?;
+        let replica = self.state.session_replication_role_is_replica();
+        let triggers = self.registry.read_triggers();
         Ok(sources.iter().any(|source| {
             triggers.get(source).is_some_and(|entries| {
                 entries.values().any(|trigger| {
@@ -180,18 +164,16 @@ impl Engine {
         }))
     }
 
-    pub(crate) fn list_triggers(&self) -> Vec<StoredTrigger> {
-        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
+    pub fn list_triggers(&self) -> Vec<StoredTrigger> {
+        if let Some(snapshot) = self.state.query_triggers() {
             return snapshot
-                .triggers
                 .values()
                 .flat_map(BTreeMap::values)
                 .cloned()
                 .collect();
         }
-        self.durable
-            .triggers
-            .read()
+        self.registry
+            .read_triggers()
             .values()
             .flat_map(BTreeMap::values)
             .cloned()

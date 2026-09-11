@@ -14,11 +14,11 @@ use crate::{
     },
 };
 use std::{cell::RefCell, collections::BTreeMap};
-struct Partitions {
-    hierarchy: BTreeMap<RelationIdentity, TableHierarchy>,
-    triggers: TriggerCatalog,
-    rules: RuleCatalog,
-    reads: RefCell<Vec<String>>,
+pub(super) struct Partitions {
+    pub(super) hierarchy: BTreeMap<RelationIdentity, TableHierarchy>,
+    pub(super) triggers: TriggerCatalog,
+    pub(super) rules: RuleCatalog,
+    pub(super) reads: RefCell<Vec<String>>,
 }
 impl EventPartitionCatalog for Partitions {
     fn contains_loaded_table(&self, relation: &RelationIdentity) -> bool {
@@ -45,6 +45,7 @@ impl EventPartitionCatalog for Partitions {
 }
 impl EventCatalogReads for Partitions {
     fn read_rules(&self) -> RuleCatalogRead<'_> {
+        self.reads.borrow_mut().push("rules".into());
         Box::new(&self.rules)
     }
     fn read_triggers(&self) -> TriggerCatalogRead<'_> {
@@ -53,11 +54,15 @@ impl EventCatalogReads for Partitions {
     }
 }
 impl Partitions {
-    fn context<'a>(&'a self, analysis: &EventAnalysisContext<'a>) -> EventLookupContext<'a> {
+    pub(super) fn context<'a>(
+        &'a self,
+        analysis: &EventAnalysisContext<'a>,
+    ) -> EventLookupContext<'a> {
         EventLookupContext {
             analysis: *analysis,
             partitions: self,
             registry: self,
+            state: self,
         }
     }
 }
@@ -67,7 +72,7 @@ fn hierarchy(sql: &str) -> TableHierarchy {
     };
     table.hierarchy
 }
-fn fixture() -> Partitions {
+pub(super) fn fixture() -> Partitions {
     Partitions {
         hierarchy: BTreeMap::from([
             (
@@ -84,7 +89,7 @@ fn fixture() -> Partitions {
         reads: RefCell::new(Vec::new()),
     }
 }
-fn trigger(table: &str, name: &str) -> StoredTrigger {
+pub(super) fn trigger(table: &str, name: &str) -> StoredTrigger {
     let Statement::CreateTrigger(definition) = crate::compile(&format!(
         "CREATE TRIGGER {name} BEFORE INSERT ON {table} FOR EACH ROW EXECUTE FUNCTION handler()"
     ))
@@ -172,4 +177,16 @@ fn descendant_conflicts_report_the_descendant_relation() {
         matches!(error,crate::SQLError::Routine {sqlstate,message} if sqlstate=="42710" && message=="trigger \"same\" for relation \"public.child\" already exists")
     );
     assert_eq!(partitions.reads.borrow().last().unwrap(), "triggers");
+}
+
+impl crate::catalog::events::reads::EventLookupState for Partitions {
+    fn query_rules(&self) -> Option<&RuleCatalog> {
+        None
+    }
+    fn query_triggers(&self) -> Option<&TriggerCatalog> {
+        None
+    }
+    fn session_replication_role_is_replica(&self) -> bool {
+        false
+    }
 }

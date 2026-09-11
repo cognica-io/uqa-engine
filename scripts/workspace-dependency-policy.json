@@ -241,6 +241,7 @@
         "src/events/validation.rs",
         "src/events/validation",
         "src/events/registry.rs",
+        "src/events/lookup.rs",
         "src/events/rule_binding.rs",
         "src/events/rule_condition_binding.rs"
       ]

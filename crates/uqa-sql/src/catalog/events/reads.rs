@@ -13,3 +13,10 @@ pub trait EventCatalogReads {
     fn read_rules(&self) -> RuleCatalogRead<'_>;
     fn read_triggers(&self) -> TriggerCatalogRead<'_>;
 }
+
+/// Borrow statement-pinned event definitions and read the current replication role on demand.
+pub trait EventLookupState {
+    fn query_rules(&self) -> Option<&RuleCatalog>;
+    fn query_triggers(&self) -> Option<&TriggerCatalog>;
+    fn session_replication_role_is_replica(&self) -> bool;
+}
