@@ -84,7 +84,6 @@ mod async_sql_engine;
 mod cancellation;
 mod capabilities;
 mod catalog_indexes;
-mod database_security;
 mod domains;
 mod events;
 mod fdw;
@@ -182,9 +181,6 @@ use state::{
 use statement_cache::{PreparedStatementPlan, SQLStatementCache};
 
 const SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
-/// Metadata key prefix for per-graph AGE label registries
-/// (`graph_label_registry::<graph>` -> JSON `GraphLabelRegistry`).
-const DATABASE_SECURITY_METADATA_KEY: &str = "sql_database_security_json";
 const ROLES_METADATA_KEY: &str = "sql_roles_json";
 const ROLE_MEMBERSHIPS_METADATA_KEY: &str = "sql_role_memberships_json";
 const TRIGGERS_METADATA_KEY: &str = "sql_triggers_json";

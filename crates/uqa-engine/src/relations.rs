@@ -112,7 +112,7 @@ impl Engine {
         let current_user = self.current_user_name();
         self.ensure_database_privilege(
             &current_user,
-            crate::database_security::DatabaseAclPrivilege::Temporary,
+            uqa_sql::catalog::security::database::DatabaseAclPrivilege::Temporary,
         )
     }
 

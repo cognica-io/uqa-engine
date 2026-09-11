@@ -24,6 +24,7 @@
         "crates/uqa-engine/src/capabilities/constraints.rs",
         "crates/uqa-engine/src/capabilities/copy.rs",
         "crates/uqa-engine/src/capabilities/cypher.rs",
+        "crates/uqa-engine/src/capabilities/database_privileges.rs",
         "crates/uqa-engine/src/capabilities/domains.rs",
         "crates/uqa-engine/src/capabilities/foreign_table_alteration.rs",
         "crates/uqa-engine/src/capabilities/graph_lifecycle.rs",

@@ -4,27 +4,27 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Database ACL privilege sets, grant paths, and dependency-aware revocation.
+//! Database ACL values, grant paths, privilege checks and dependency-aware revocation.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use uqa_sql::ast::{DatabasePrivilege, RoleAttribute};
-use uqa_sql::SQLError;
+use crate::ast::{DatabasePrivilege, DatabaseRevokeBehavior, GrantDatabaseStmt, RoleAttribute};
+use crate::catalog::DATABASE_NAME;
+use crate::SQLError;
 
-use crate::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey};
-use crate::state::{DatabaseAclEntry, DatabasePrivileges, DatabaseSecurity};
+use crate::catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum DatabaseAclPrivilege {
+pub enum DatabaseAclPrivilege {
     Connect,
     Create,
     Temporary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct DatabasePrivilegeCheck {
-    pub(super) privilege: DatabaseAclPrivilege,
-    pub(super) grant_option: bool,
+pub struct DatabasePrivilegeCheck {
+    pub privilege: DatabaseAclPrivilege,
+    pub grant_option: bool,
 }
 
 impl DatabaseAclPrivilege {
@@ -49,7 +49,7 @@ impl DatabaseAclPrivilege {
     }
 }
 
-pub(super) fn requested_acl_privileges(
+pub fn requested_acl_privileges(
     requested: &[DatabasePrivilege],
 ) -> Result<Vec<DatabaseAclPrivilege>, SQLError> {
     requested
@@ -66,7 +66,7 @@ pub(super) fn requested_acl_privileges(
         .collect()
 }
 
-pub(super) fn parse_privilege_checks(value: &str) -> Result<Vec<DatabasePrivilegeCheck>, SQLError> {
+pub fn parse_privilege_checks(value: &str) -> Result<Vec<DatabasePrivilegeCheck>, SQLError> {
     value
         .split(',')
         .map(|item| {
@@ -147,7 +147,7 @@ fn grant_option_roles(
     }
 }
 
-pub(super) fn select_acl_grantor(
+pub fn select_acl_grantor(
     security: &DatabaseSecurity,
     privilege: DatabaseAclPrivilege,
     current_user: &str,
@@ -169,7 +169,7 @@ pub(super) fn select_acl_grantor(
     })
 }
 
-pub(super) fn role_has_database_privilege_check(
+pub fn role_has_database_privilege_check(
     security: &DatabaseSecurity,
     subject: &str,
     check: DatabasePrivilegeCheck,
@@ -203,7 +203,7 @@ pub(super) fn role_has_database_privilege_check(
     }
 }
 
-pub(crate) fn role_has_database_privilege(
+pub fn role_has_database_privilege(
     security: &DatabaseSecurity,
     subject: &str,
     privilege: DatabaseAclPrivilege,
@@ -222,7 +222,7 @@ pub(crate) fn role_has_database_privilege(
     )
 }
 
-pub(super) fn grant_acl(
+pub fn grant_acl(
     security: &mut DatabaseSecurity,
     privilege: DatabaseAclPrivilege,
     grantees: &[String],
@@ -256,7 +256,7 @@ pub(super) fn grant_acl(
     }
 }
 
-pub(super) fn revoke_acl(
+pub fn revoke_acl(
     security: &mut DatabaseSecurity,
     privilege: DatabaseAclPrivilege,
     grantees: &[String],
@@ -333,4 +333,200 @@ fn revoke_dependent_acl(
 
 fn remove_empty_entries(acl: &mut Vec<DatabaseAclEntry>) {
     acl.retain(|entry| !entry.privileges.is_empty() || !entry.grant_options.is_empty());
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DatabasePrivileges {
+    pub connect: bool,
+    pub create: bool,
+    pub temporary: bool,
+}
+
+impl DatabasePrivileges {
+    pub const ALL: Self = Self {
+        connect: true,
+        create: true,
+        temporary: true,
+    };
+
+    pub const fn intersects(self, other: Self) -> bool {
+        (self.connect && other.connect)
+            || (self.create && other.create)
+            || (self.temporary && other.temporary)
+    }
+
+    pub fn insert(&mut self, other: Self) {
+        self.connect |= other.connect;
+        self.create |= other.create;
+        self.temporary |= other.temporary;
+    }
+
+    pub fn remove(&mut self, other: Self) {
+        self.connect &= !other.connect;
+        self.create &= !other.create;
+        self.temporary &= !other.temporary;
+    }
+
+    pub const fn is_empty(self) -> bool {
+        !self.connect && !self.create && !self.temporary
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DatabaseAclEntry {
+    pub role: String,
+    pub grantor: Option<String>,
+    pub privileges: DatabasePrivileges,
+    pub grant_options: DatabasePrivileges,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DatabaseSecurity {
+    pub role_owner: String,
+    pub acl: Option<Vec<DatabaseAclEntry>>,
+}
+
+impl DatabaseSecurity {
+    pub fn bootstrap() -> Self {
+        Self {
+            role_owner: "uqa".into(),
+            acl: None,
+        }
+    }
+}
+
+pub fn resolve_database_grant_targets(databases: &[String]) -> Result<(), SQLError> {
+    for database in databases {
+        if database != DATABASE_NAME {
+            return Err(SQLError::Routine {
+                sqlstate: "3D000".into(),
+                message: format!("database \"{database}\" does not exist"),
+            });
+        }
+    }
+    Ok(())
+}
+
+pub fn apply_database_acl(
+    statement: &GrantDatabaseStmt,
+    grantees: &[String],
+    privileges: &[DatabaseAclPrivilege],
+    current_user: &str,
+    roles: &BTreeMap<String, RoleDefinition>,
+    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    current: &DatabaseSecurity,
+) -> Result<(DatabaseSecurity, usize), SQLError> {
+    let grantors = privileges
+        .iter()
+        .map(|privilege| {
+            (
+                *privilege,
+                select_acl_grantor(current, *privilege, current_user, roles, memberships),
+            )
+        })
+        .collect::<Vec<_>>();
+    let grantable = grantors
+        .iter()
+        .filter(|(_, grantor)| grantor.is_some())
+        .count();
+    let mut next = current.clone();
+    for (privilege, grantor) in grantors {
+        let Some(grantor) = grantor else {
+            continue;
+        };
+        if statement.is_grant {
+            grant_acl(
+                &mut next,
+                privilege,
+                grantees,
+                &grantor,
+                statement.grant_option,
+            );
+        } else {
+            revoke_acl(
+                &mut next,
+                privilege,
+                grantees,
+                &grantor,
+                statement.grant_option_only,
+                statement.revoke_behavior == DatabaseRevokeBehavior::Cascade,
+            )?;
+        }
+    }
+    Ok((next, grantable))
+}
+
+pub fn validate_database_acl_roles(
+    statement: &GrantDatabaseStmt,
+    grantees: &[String],
+    requested_grantor: Option<&str>,
+    current_user: &str,
+    roles: &BTreeMap<String, RoleDefinition>,
+) -> Result<(), SQLError> {
+    for role in grantees {
+        if role != "PUBLIC" && !roles.contains_key(role) {
+            return Err(SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!("role \"{role}\" does not exist"),
+            });
+        }
+    }
+    if statement.is_grant && statement.grant_option && grantees.iter().any(|role| role == "PUBLIC")
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "0LP01".into(),
+            message: "grant options can only be granted to roles".into(),
+        });
+    }
+    if let Some(requested_grantor) = requested_grantor {
+        if !roles.contains_key(requested_grantor) {
+            return Err(SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!("role \"{requested_grantor}\" does not exist"),
+            });
+        }
+        if requested_grantor != current_user {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "grantor must be current user".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+pub fn database_acl_warning(is_grant: bool, partial: bool, name: &str) -> (&'static str, String) {
+    let message = match (is_grant, partial) {
+        (true, true) => format!("not all privileges were granted for \"{name}\""),
+        (true, false) => format!("no privileges were granted for \"{name}\""),
+        (false, true) => format!("not all privileges could be revoked for \"{name}\""),
+        (false, false) => format!("no privileges could be revoked for \"{name}\""),
+    };
+    ("WARNING", message)
+}
+
+pub fn validate_stored_database_security(
+    security: &DatabaseSecurity,
+    roles: &BTreeMap<String, RoleDefinition>,
+) -> Result<(), String> {
+    if !roles.contains_key(&security.role_owner) {
+        return Err(format!(
+            "persisted database owner `{}` does not exist",
+            security.role_owner
+        ));
+    }
+    if let Some(acl) = security.acl.as_ref() {
+        for entry in acl {
+            let grantor = entry.grantor.as_deref().unwrap_or(&security.role_owner);
+            if (entry.role != "PUBLIC" && !roles.contains_key(&entry.role))
+                || !roles.contains_key(grantor)
+            {
+                return Err(format!(
+                    "persisted database ACL `{}` from `{grantor}` references a missing role",
+                    entry.role
+                ));
+            }
+        }
+    }
+    Ok(())
 }

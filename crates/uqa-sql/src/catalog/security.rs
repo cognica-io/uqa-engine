@@ -60,3 +60,6 @@ impl SchemaSecurity {
 }
 
 pub mod schema_inquiry;
+
+pub mod database;
+pub mod database_inquiry;
