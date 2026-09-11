@@ -516,7 +516,7 @@ fn new_trigger_object_id() -> Result<[u8; 16], SQLError> {
 }
 
 impl EventLifecycleContext<'_> {
-    fn notice(&self, level: &str, message: &str) {
+    pub(super) fn notice(&self, level: &str, message: &str) {
         self.notices
             .lock()
             .push((level.to_string(), message.to_string()));

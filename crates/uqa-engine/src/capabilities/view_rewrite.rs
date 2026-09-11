@@ -59,7 +59,7 @@ impl ViewRewriteCatalog for Engine {
         &self,
         rule: &StoredRule,
     ) -> Result<Option<BTreeSet<String>>, SQLError> {
-        crate::events::rule_new_row_columns(self, rule)
+        uqa_sql::semantics::rules::action_binding::rule_new_row_columns(self, rule)
     }
     fn target_view_kind(&self, name: &str) -> Result<Option<StoredViewKind>, SQLError> {
         self.mutation_view_kind(name)

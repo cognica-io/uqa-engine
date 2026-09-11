@@ -8,21 +8,9 @@
 
 use serde::{Deserialize, Serialize};
 
-pub(crate) use uqa_sql::catalog::stored_ast::{
-    expression_references_routine_identity, rewrite_expression_routine_identity,
-    rewrite_statement_routine_identity,
-};
-pub(crate) use uqa_sql::semantics::rules::action_binding::{
-    bind_rule_action, bind_rule_expr_scoped, rule_new_row_columns,
-};
-
 const RULE_CATALOG_FORMAT_VERSION: u32 = 3;
 
-pub(crate) use uqa_sql::catalog::events::{RuleColumnDependency, StoredRule, StoredTrigger};
-
-pub(crate) use uqa_sql::catalog::events::PreparedRuleColumnDrop;
-
-use uqa_sql::catalog::events::synchronize_rule_sql_text;
+pub(crate) use uqa_sql::catalog::events::{StoredRule, StoredTrigger};
 
 #[derive(Default, Serialize, Deserialize)]
 struct StoredTriggerCatalog {
@@ -38,7 +26,6 @@ struct StoredRuleCatalog {
     rules: Vec<StoredRule>,
 }
 
-mod lifecycle;
 mod persistence;
 
 #[cfg(test)]

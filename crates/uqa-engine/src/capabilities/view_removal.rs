@@ -88,16 +88,20 @@ impl ViewRemovalEvents for Engine {
         &self,
         names: &[String],
     ) -> StorageBackendResult<Vec<(RelationIdentity, String)>> {
-        Engine::rules_depending_on_relations(self, names)
+        self.event_lookup_context()
+            .rules_depending_on_relations(names)
+            .map_err(uqa_storage::StorageBackendError::Other)
     }
     fn drop_rules_depending_on_relations_inner(
         &self,
         names: &[String],
     ) -> StorageBackendResult<()> {
-        Engine::drop_rules_depending_on_relations_inner(self, names)
+        self.event_lifecycle_context()
+            .drop_rules_depending_on_relations_inner(names)
     }
     fn drop_relation_events_inner(&self, relation: &RelationIdentity) -> StorageBackendResult<()> {
-        Engine::drop_relation_events_inner(self, relation)
+        self.event_lifecycle_context()
+            .drop_relation_events_inner(relation)
     }
 }
 impl ViewRemovalPublication for Engine {

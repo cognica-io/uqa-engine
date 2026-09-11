@@ -91,7 +91,9 @@ impl Engine {
             );
         }
         dependents.extend(
-            self.rules_depending_on_relations(canonical_names)?
+            self.event_lookup_context()
+                .rules_depending_on_relations(canonical_names)
+                .map_err(uqa_storage::StorageBackendError::Other)?
                 .into_iter()
                 .map(|(table, rule)| format!("rule {rule} on table {}", table.qualified_name())),
         );
@@ -255,7 +257,8 @@ impl Engine {
             )));
         }
         if cascade {
-            self.drop_rules_depending_on_relations_inner(&canonical_names)?;
+            self.event_lifecycle_context()
+                .drop_rules_depending_on_relations_inner(&canonical_names)?;
             self.drop_views_depending_on_relations(&canonical_names)?;
             for (name, table, columns, checks, foreign_keys, key_constraints) in &updates {
                 self.persist_constraint_candidate(
@@ -328,7 +331,8 @@ impl Engine {
         if !self.storage.tables.read().contains_key(&relation) {
             return Err(table_not_found(name));
         }
-        self.drop_relation_events_inner(&relation)?;
+        self.event_lifecycle_context()
+            .drop_relation_events_inner(&relation)?;
         let temporary = self
             .storage
             .tables

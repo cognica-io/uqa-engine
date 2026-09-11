@@ -64,7 +64,9 @@ impl Engine {
             ))
         })?;
         let rules = self
+            .event_lookup_context()
             .rules_depending_on_relations(&[name.to_string()])
+            .map_err(uqa_storage::StorageBackendError::Other)
             .map_err(|error| {
                 SQLError::Internal(format!(
                     "inspect rule dependencies for sequence `{name}`: {error}"
@@ -82,12 +84,14 @@ impl Engine {
         names: &[String],
         cascade_views: &[String],
     ) -> Result<(), SQLError> {
-        self.drop_rules_depending_on_relations_inner(names)
+        self.event_lifecycle_context()
+            .drop_rules_depending_on_relations_inner(names)
             .map_err(|error| {
                 SQLError::Internal(format!("drop rules depending on sequence: {error}"))
             })?;
         if !cascade_views.is_empty() {
-            self.drop_rules_depending_on_relations_inner(cascade_views)
+            self.event_lifecycle_context()
+                .drop_rules_depending_on_relations_inner(cascade_views)
                 .map_err(|error| {
                     SQLError::Internal(format!("drop rules depending on cascading views: {error}"))
                 })?;

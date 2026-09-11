@@ -453,7 +453,9 @@ impl Engine {
                 .map(|view| format!("view {view}")),
         );
         dependents.extend(
-            self.rules_depending_on_relations(&[sequence.to_string()])?
+            self.event_lookup_context()
+                .rules_depending_on_relations(&[sequence.to_string()])
+                .map_err(uqa_storage::StorageBackendError::Other)?
                 .into_iter()
                 .map(|(table, rule)| format!("rule {rule} on table {}", table.qualified_name())),
         );

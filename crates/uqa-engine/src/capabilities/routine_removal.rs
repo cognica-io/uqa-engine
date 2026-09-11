@@ -198,19 +198,24 @@ impl RoutineEventDependencies for Engine {
         &self,
         target: &FunctionBinding,
     ) -> Result<Vec<(String, String)>, SQLError> {
-        Engine::triggers_depending_on_routine(self, target)
+        self.event_lookup_context()
+            .triggers_depending_on_routine(target)
     }
     fn rules_depending_on_routine(
         &self,
         target: &FunctionBinding,
     ) -> StorageBackendResult<Vec<(RelationIdentity, String)>> {
-        Engine::rules_depending_on_routine(self, target)
+        self.event_lookup_context()
+            .rules_depending_on_routine(target)
+            .map_err(uqa_storage::StorageBackendError::Other)
     }
     fn rules_depending_on_relations(
         &self,
         relations: &[String],
     ) -> StorageBackendResult<Vec<(RelationIdentity, String)>> {
-        Engine::rules_depending_on_relations(self, relations)
+        self.event_lookup_context()
+            .rules_depending_on_relations(relations)
+            .map_err(uqa_storage::StorageBackendError::Other)
     }
 }
 impl RoutineIndexDependencies for Engine {

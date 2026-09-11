@@ -482,7 +482,8 @@ impl Engine {
                 "Foreign table `{name}` has no loaded security metadata"
             ));
         }
-        self.drop_relation_events_inner(&relation)
+        self.event_lifecycle_context()
+            .drop_relation_events_inner(&relation)
             .map_err(|error| format!("drop foreign table `{name}` events: {error}"))?;
         if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog

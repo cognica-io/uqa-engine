@@ -318,7 +318,8 @@ impl Engine {
                 )));
             }
         }
-        self.handle_drop_column_event_dependencies(table_name, column_name, false)
+        self.event_lifecycle_context()
+            .handle_drop_column_event_dependencies(table_name, column_name, false)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         for column in &mut table.columns {
             if column.name != column_name
