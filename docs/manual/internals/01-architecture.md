@@ -85,7 +85,7 @@ The executable dependency policy is stored in [`scripts/workspace-dependency-pol
 
 | Crate | Ownership |
 | --- | --- |
-| `uqa-core` | Canonical relation identities, values, exact decimal representation and operations, document sets, relations, posting lists, ranked views, generalized postings, predicates, and shared graph value types |
+| `uqa-core` | Canonical relation identities, index catalog rows, values, exact decimal representation and operations, document sets, relations, posting lists, ranked views, generalized postings, predicates, and shared graph value types |
 | `uqa-analysis` | Character filters, tokenizers, token filters, analyzers, stemming, and highlighting primitives |
 | `uqa-storage` | Backend-neutral document, inverted, vector, tensor, B-tree, block-max, spatial, catalog, ordered catalog-version migration, and Key/Value contracts |
 | `uqa-storage-sqlite` | SQLite connections, catalog migrations, document and retrieval indexes, transactions, graph persistence, Key/Value storage, encryption, and compressed VFS |
@@ -98,7 +98,7 @@ The executable dependency policy is stored in [`scripts/workspace-dependency-pol
 | `uqa-pg-query` | Imported PostgreSQL 18 `libpg_query` pin used through the `pg_query` library name |
 | `uqa-sql` | Parser frontend, AST, scalar and statement IR, lowering, catalog definitions, name and type binding, routine signature and stored-definition binding, overload ranking, replacement and privilege rules, prepared parameter inference, SQL validation, and value expressions |
 | `uqa-execution` | Physical rows and buffers, runtime scalar evaluation, batches, materialization, spill structures, distinctness, sorting, grouping, windows, joins, and routine definition and privilege execution |
-| `uqa-planner` | Cardinality, cost, DPccp join ordering, unified-plan optimization, and physical access selection |
+| `uqa-planner` | Cardinality, cost, statement statistics, prepared-plan estimates, rewrite-rule input pruning, DPccp join ordering, unified-plan optimization, and physical access selection |
 | `uqa-engine` | Composition, SQL lifecycle, sessions, transactions, restore, publication, and public API |
 | `uqa` | Application facade over `uqa-engine` with the core `Value` type re-exported |
 | `uqa-fdw` | Foreign server and table contracts plus DuckDB, Arrow, and memory handlers |

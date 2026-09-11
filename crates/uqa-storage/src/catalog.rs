@@ -152,17 +152,7 @@ pub struct ViewRow {
     pub definition_json: String,
 }
 
-/// One row from the secondary-index registry.
-#[derive(Debug, Clone)]
-pub struct CatalogIndexRow {
-    pub relation: RelationIdentity,
-    pub index_type: String,
-    pub table_name: String,
-    pub columns_json: String,
-    pub parameters_json: String,
-    /// Durable semantic definition; absent on legacy ordinary secondary indexes.
-    pub definition_json: Option<String>,
-}
+pub use uqa_core::catalog_index::CatalogIndexRow;
 
 /// Values persisted into one column-statistics row.
 #[derive(Debug, Clone, Copy)]

@@ -143,17 +143,6 @@ pub(crate) fn resolve_age_label_relation_name(
         name,
     )
 }
-pub(crate) fn query_source_column_names(
-    engine: &Engine,
-    name: &str,
-    relations_bound: bool,
-) -> Result<Option<Vec<String>>, SQLError> {
-    uqa_execution::catalog::projection::query_source_column_names(
-        &engine.catalog_execution(),
-        name,
-        relations_bound,
-    )
-}
 pub(crate) fn resolve_catalog_column_type_name(
     engine: &Engine,
     type_name: &str,

@@ -4,149 +4,17 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{volatility, Engine, SQLError, SQLParam, SQLResult, Statement, UnifiedPlanExecutor};
+use super::{Engine, SQLError, SQLParam, SQLResult, Statement, UnifiedPlanExecutor};
 
-mod plan_cost;
-mod rule_inputs;
-pub(crate) use plan_cost::estimate_engine_plan;
+pub(crate) fn estimate_engine_plan(
+    engine: &Engine,
+    plan: &uqa_planner::UnifiedPlan,
+) -> Result<uqa_planner::plan_cost::PlanCost, SQLError> {
+    uqa_planner::statement_planning::estimate_plan(engine.statement_statistics_context(), plan)
+}
 
 #[cfg(test)]
 use super::{compile, Arc};
-
-struct EngineSourceStatistics<'a> {
-    engine: &'a Engine,
-    error: &'a std::cell::RefCell<Option<SQLError>>,
-}
-
-impl EngineSourceStatistics<'_> {
-    fn record_error(&self, error: SQLError) {
-        if self.error.borrow().is_none() {
-            *self.error.borrow_mut() = Some(error);
-        }
-    }
-}
-
-impl uqa_planner::SourceStatistics for EngineSourceStatistics<'_> {
-    fn relation_statistics(&self, table: &str) -> Option<uqa_planner::RelationStats> {
-        match self.engine.try_table(table) {
-            Ok(None) => None,
-            Ok(Some(_)) => match (
-                hierarchy_row_count(self.engine, table),
-                self.engine.try_query_column_stats(table),
-            ) {
-                (Ok(row_count), Ok(columns)) => {
-                    Some(uqa_planner::RelationStats { row_count, columns })
-                }
-                (Err(error), _) => {
-                    self.record_error(error);
-                    None
-                }
-                (_, Err(error)) => {
-                    self.record_error(SQLError::Internal(format!(
-                        "read optimizer statistics for `{table}`: {error}"
-                    )));
-                    None
-                }
-            },
-            Err(error) => {
-                self.record_error(SQLError::Internal(format!(
-                    "resolve optimizer storage table `{table}`: {error}"
-                )));
-                None
-            }
-        }
-    }
-
-    fn source_access_estimate(
-        &self,
-        source: &uqa_planner::SourcePlan,
-    ) -> Option<uqa_planner::LocalAccessEstimate> {
-        let uqa_planner::SourcePlan::Function {
-            name,
-            relations,
-            args,
-            ..
-        } = source
-        else {
-            return None;
-        };
-        if args.iter().any(|argument| {
-            argument.contains_parameter()
-                || volatility::expr_contains_volatile_function(self.engine, argument)
-        }) {
-            return None;
-        }
-        let identity = name.to_ascii_lowercase();
-        let lower = crate::sql::builtin_function_dispatch_name(&identity);
-        if !crate::operator_tree_bridge::is_operator_join_table_function(&lower) {
-            return None;
-        }
-        match crate::operator_tree_bridge::estimate_operator_join_table_function(
-            self.engine,
-            &lower,
-            relations.as_ref(),
-            args,
-            &[],
-        ) {
-            Ok(estimate) => Some(estimate),
-            Err(error) => {
-                self.record_error(error);
-                None
-            }
-        }
-    }
-
-    fn local_access_estimate(
-        &self,
-        table: &str,
-        predicate: &uqa_execution::ScalarExpr,
-    ) -> Option<uqa_planner::LocalAccessEstimate> {
-        if volatility::expr_contains_volatile_function(self.engine, predicate) {
-            return None;
-        }
-        if predicate.contains_parameter() {
-            return match plan_cost::parameterized_access(self, table, predicate) {
-                Ok(estimate) => estimate,
-                Err(error) => {
-                    self.record_error(error);
-                    None
-                }
-            };
-        }
-        match self.engine.try_table(table) {
-            Ok(Some(_)) => {}
-            Ok(None) => return None,
-            Err(error) => {
-                self.record_error(SQLError::Internal(format!(
-                    "resolve optimizer storage table `{table}`: {error}"
-                )));
-                return None;
-            }
-        }
-        match crate::operator_tree_bridge::estimate_local_access(self.engine, table, predicate, &[])
-        {
-            Ok(estimate) => estimate,
-            Err(error) => {
-                self.record_error(error);
-                None
-            }
-        }
-    }
-}
-
-fn hierarchy_row_count(engine: &Engine, table: &str) -> Result<u64, SQLError> {
-    let mut total = 0_u64;
-    for member in engine.query_hierarchy_scan_tables(table, true)? {
-        total = total
-            .checked_add(engine.table_doc_count(&member)?)
-            .ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "optimizer hierarchy row count overflow for `{table}`"
-                ))
-            })?;
-    }
-    Ok(total)
-}
 
 #[cfg(test)]
 pub(super) fn compile_logical_plans(
@@ -234,48 +102,15 @@ pub(crate) fn optimize_engine_query(
 
 pub(crate) fn optimize_engine_plan(
     engine: &Engine,
-    mut plan: uqa_planner::UnifiedPlan,
-) -> Result<uqa_planner::UnifiedPlan, SQLError> {
-    rule_inputs::rewrite_plan(engine, &mut plan)?;
-    let callback_error = std::cell::RefCell::new(None);
-    let statistics = EngineSourceStatistics {
-        engine,
-        error: &callback_error,
-    };
-    let optimized = optimize_plan_with_statistics(engine, plan, &statistics);
-    if let Some(error) = callback_error.into_inner() {
-        return Err(error);
-    }
-    optimized
-}
-
-fn optimize_plan_with_statistics(
-    engine: &Engine,
     plan: uqa_planner::UnifiedPlan,
-    statistics: &dyn uqa_planner::SourceStatistics,
 ) -> Result<uqa_planner::UnifiedPlan, SQLError> {
-    let mut optimizer_config =
-        uqa_planner::optimizer::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
-    if volatility::unified_plan_contains_volatile_function(engine, &plan) {
-        // Predicate prioritization and DPccp both move expressions across
-        // physical evaluation boundaries.  A VOLATILE callback may observe
-        // or mutate state on every call, so even a logically equivalent join
-        // order can change SQL-visible behavior by changing its call count.
-        optimizer_config.enable_filter_pushdown = false;
-        optimizer_config.enable_join_reordering = false;
-    }
-    let optimized = uqa_planner::optimizer::optimize_with_aggregates_and_statistics(
-        plan,
-        &optimizer_config,
+    uqa_planner::statement_planning::optimize_plan(
+        engine.statement_statistics_context(),
+        &engine.rule_input_planning_context(),
         &|name: &str| engine.has_registered_aggregate_function(name),
-        statistics,
-    );
-    optimized.map_err(|error| match error {
-        uqa_planner::optimizer::OptimizerError::Expression(error) => error,
-        uqa_planner::optimizer::OptimizerError::JoinGraph(error) => {
-            SQLError::Internal(format!("optimize SQL join order: {error}"))
-        }
-    })
+        uqa_execution::scalar::eval_constant_scalar,
+        plan,
+    )
 }
 
 /// Lower and execute an already-compiled statement through the same unified

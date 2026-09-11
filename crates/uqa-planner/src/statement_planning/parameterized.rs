@@ -4,57 +4,24 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Engine statistics and parameter-independent index costs for prepared plans.
-
-use uqa_execution::ScalarExpr;
-use uqa_planner::{
+//! Parameter-independent prepared-plan index costs over canonical catalog metadata.
+use super::statistics::CatalogSourceStatistics;
+use crate::{
     AccessParadigm, CardinalityEstimator, CostEstimator, LocalAccessEstimate, OperatorKind,
     RelationStats, SourceStatistics,
 };
-use uqa_sql::ast::BinaryOp;
-
-use super::{Engine, EngineSourceStatistics, SQLError};
-
-pub(crate) fn estimate_engine_plan(
-    engine: &Engine,
-    plan: &uqa_planner::UnifiedPlan,
-) -> Result<uqa_planner::plan_cost::PlanCost, SQLError> {
-    let error = std::cell::RefCell::new(None);
-    let statistics = EngineSourceStatistics {
-        engine,
-        error: &error,
-    };
-    let estimate = uqa_planner::plan_cost::PlanCostEstimator::new(&statistics).estimate(plan);
-    if let Some(error) = error.into_inner() {
-        return Err(error);
-    }
-    if !estimate.execution.is_finite()
-        || estimate.execution < 0.0
-        || !estimate.rows.is_finite()
-        || estimate.rows < 0.0
-    {
-        return Err(SQLError::Internal(
-            "prepared plan produced an invalid cost estimate".into(),
-        ));
-    }
-    Ok(estimate)
-}
-
+use uqa_sql::{ast::BinaryOp, SQLError, ScalarExpr};
 pub(super) fn parameterized_access(
-    statistics: &EngineSourceStatistics<'_>,
+    statistics: &CatalogSourceStatistics<'_>,
     table: &str,
     predicate: &ScalarExpr,
 ) -> Result<Option<LocalAccessEstimate>, SQLError> {
     let Some(stats) = statistics.relation_statistics(table) else {
         return Ok(None);
     };
-    let engine = statistics.engine;
-    let resolved = engine
-        .resolve_table_name(table)
-        .map_err(|error| SQLError::Internal(error.to_string()))?;
-    let indexes = engine
-        .list_catalog_indexes()
-        .map_err(|error| SQLError::Internal(error.to_string()))?;
+    let catalog = statistics.context.catalog;
+    let resolved = catalog.resolved_table_name(table)?;
+    let indexes = catalog.catalog_indexes()?;
     let mut fields = std::collections::BTreeSet::new();
     for index in indexes {
         if Some(&index.table_name) != resolved.as_ref()
@@ -62,8 +29,11 @@ pub(super) fn parameterized_access(
         {
             continue;
         }
-        let definition = crate::catalog_indexes::index_definition(&index)
-            .map_err(|error| SQLError::Internal(error.to_string()))?;
+        let definition =
+            uqa_sql::catalog::index::stored::index_definition(index.definition_json.as_deref())
+                .map_err(|error| {
+                    SQLError::Internal(format!("payload serialization failed: {error}"))
+                })?;
         // A parameter cannot establish a partial index's predicate at planning time.
         if definition.predicate.is_some() {
             continue;
@@ -123,12 +93,11 @@ fn index_rows(
     ) {
         return None;
     }
-    let (column, parameter) = match (lhs.as_ref(), rhs.as_ref()) {
-        (ScalarExpr::Column(column) | ScalarExpr::QualifiedColumn { column, .. }, other)
-        | (other, ScalarExpr::Column(column) | ScalarExpr::QualifiedColumn { column, .. }) => {
-            (column, other)
-        }
-        _ => return None,
+    let ((ScalarExpr::Column(column) | ScalarExpr::QualifiedColumn { column, .. }, parameter)
+    | (parameter, ScalarExpr::Column(column) | ScalarExpr::QualifiedColumn { column, .. })) =
+        (lhs.as_ref(), rhs.as_ref())
+    else {
+        return None;
     };
     if !fields.contains(column)
         || !matches!(
