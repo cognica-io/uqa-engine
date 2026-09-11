@@ -8,6 +8,9 @@
 use crate::Engine;
 use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
+use uqa_execution::schema::removal::entry::{
+    DomainRemovalWrite, DropStatementBindings, SchemaRemovalWrite,
+};
 use uqa_execution::schema::removal::{
     RelationRemovalContext, RelationRemovalEvents, RelationRemovalForeignTables,
     RelationRemovalLocks, RelationRemovalPrivileges, RelationRemovalRoutines,
@@ -20,6 +23,28 @@ use uqa_sql::{
     SQLError, SQLResult,
 };
 use uqa_storage::StorageBackendResult;
+
+impl DropStatementBindings for Engine {
+    fn with_schema_removal_write(
+        &self,
+        write: SchemaRemovalWrite<'_>,
+    ) -> Result<SQLResult, SQLError> {
+        self.with_implicit_transaction(|engine| write(&engine.schema_removal_context()))
+    }
+    fn with_domain_removal_write(
+        &self,
+        write: DomainRemovalWrite<'_>,
+    ) -> Result<SQLResult, SQLError> {
+        self.with_implicit_transaction(|engine| write(&engine.domain_removal_context()))
+    }
+    fn with_relation_removal_inputs(
+        &self,
+        run: RelationRemovalWrite<'_>,
+    ) -> Result<SQLResult, SQLError> {
+        run(&self.relation_removal_context())
+    }
+}
+
 impl Engine {
     pub(crate) fn relation_removal_context(&self) -> RelationRemovalContext<'_> {
         RelationRemovalContext {

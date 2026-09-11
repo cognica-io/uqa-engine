@@ -6,6 +6,8 @@
 
 //! Namespace declaration rules independent of catalog storage.
 
+pub mod removal;
+
 pub fn validate_schema_name(name: &str) -> Result<(), String> {
     if name.is_empty() {
         return Err(format!("invalid schema name `{name}`"));

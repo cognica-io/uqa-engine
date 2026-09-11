@@ -11,6 +11,7 @@ use uqa_sql::{
 };
 mod context;
 pub use context::*;
+pub mod entry;
 
 pub fn run_drop(
     context: &RelationRemovalContext<'_>,

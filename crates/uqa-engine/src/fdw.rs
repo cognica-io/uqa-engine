@@ -321,7 +321,7 @@ impl Engine {
         options: Vec<(String, String)>,
     ) -> Result<(), uqa_sql::SQLError> {
         for column in &mut columns {
-            column.ty = crate::sql::resolve_declared_column_type(self, &column.ty)?;
+            column.ty = uqa_sql::type_resolution::resolve_declared_column_type(self, &column.ty)?;
         }
         self.materialize_implicit_sequences(
             "CREATE FOREIGN TABLE",

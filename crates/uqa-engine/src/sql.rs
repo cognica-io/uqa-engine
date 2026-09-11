@@ -28,7 +28,7 @@
 use std::sync::Arc;
 
 use uqa_core::Value;
-use uqa_sql::ast::{DropKind, DropStmt, Statement};
+use uqa_sql::ast::Statement;
 #[cfg(test)]
 use uqa_sql::compile;
 use uqa_sql::{SQLError, SQLParam, SQLResult};
@@ -46,8 +46,6 @@ mod completion;
 mod correlation;
 mod cte_validation;
 mod cursor;
-mod ddl;
-mod domains;
 mod driver;
 mod from_rows;
 mod generated;
@@ -80,7 +78,6 @@ pub(crate) use catalog_statement_routines::{
     mark_catalog_statement_relations_bound,
 };
 pub use cursor::{SQLCursor, SQLCursorSummary};
-pub(crate) use domains::{cast_domain_value, resolve_declared_column_type};
 pub(crate) use driver::{execute, execute_nested};
 use mutability::{
     is_transaction_control, query_may_mutate_engine, query_requires_statement_transaction,
@@ -108,13 +105,6 @@ pub(crate) use catalog::{
     resolve_regtype_oid, resolve_regtype_output, runtime_constraints, schema_object_oid,
     sequence_relation_oid, view_relation_oid,
 };
-use ddl::{
-    column_type_name, json_table_arg, json_table_value_to_text, json_to_core_value, run_drop,
-};
-pub(crate) use ddl::{
-    convert_value_to_column_type, validate_postgres_column_name,
-    validate_postgres_relation_column_type, validate_vector_dimensions,
-};
 use from_rows::engine_func_intercept;
 pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_columns};
 use plan_executor::UnifiedPlanExecutor;
@@ -130,6 +120,15 @@ use row_functions::{
     run_age_drop_graph_with_evaluator, run_age_drop_label_with_evaluator,
     run_age_graph_exists_with_evaluator, run_graph_create_with_evaluator,
     run_graph_drop_with_evaluator,
+};
+use uqa_sql::assignment::conversion::{
+    column_type_name, json_table_arg, json_table_value_to_text, json_to_core_value,
+};
+pub(crate) use uqa_sql::assignment::conversion::{
+    convert_value_to_column_type, validate_vector_dimensions,
+};
+pub(crate) use uqa_sql::schema::columns::{
+    validate_postgres_column_name, validate_postgres_relation_column_type,
 };
 
 pub(crate) fn map_physical_exec_error(error: uqa_execution::ExecError) -> SQLError {

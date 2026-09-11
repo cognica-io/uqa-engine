@@ -23,6 +23,7 @@
         "crates/uqa-engine/src/capabilities/constraint_changes.rs",
         "crates/uqa-engine/src/capabilities/constraints.rs",
         "crates/uqa-engine/src/capabilities/copy.rs",
+        "crates/uqa-engine/src/capabilities/domains.rs",
         "crates/uqa-engine/src/capabilities/foreign_table_alteration.rs",
         "crates/uqa-engine/src/capabilities/hierarchy.rs",
         "crates/uqa-engine/src/capabilities/index_creation.rs",

@@ -12,6 +12,17 @@ use uqa_sql::{
     SQLError,
 };
 
+impl uqa_sql::assignment::AssignmentContext for Engine {
+    fn evaluate_domain_check(
+        &self,
+        expression: &Expr,
+        row: &uqa_sql::ResultRow,
+        schema: &uqa_sql::RowSchema,
+    ) -> Result<uqa_core::Value, SQLError> {
+        crate::sql::scalar::eval_lowered_expression_with_schema(self, expression, row, schema, &[])
+    }
+}
+
 impl uqa_sql::schema::SchemaExpressionCatalog for Engine {
     fn registered_runtime_function_volatility(&self, name: &str) -> Option<FunctionVolatility> {
         Engine::registered_runtime_function_volatility(self, name)

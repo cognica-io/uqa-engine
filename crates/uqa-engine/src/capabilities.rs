@@ -595,4 +595,5 @@ mod foreign_table_alteration;
 mod relation_alteration;
 mod view_alteration;
 
+mod domains;
 mod namespaces;

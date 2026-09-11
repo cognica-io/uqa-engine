@@ -32,5 +32,6 @@ pub mod relation_alteration;
 
 pub mod view_alteration;
 
+pub mod domains;
 pub mod foreign_table_alteration;
 pub mod namespaces;

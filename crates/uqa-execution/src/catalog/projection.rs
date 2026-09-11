@@ -14,10 +14,7 @@ use crate::catalog::{CatalogReadView, RelationNameResolution};
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::constraints::ConstraintIdentity;
 
-pub fn domain_object_oid(object_id: &[u8; 16]) -> u32 {
-    u32::try_from(helpers::oids::stable_object_oid("domain", object_id))
-        .expect("catalog OIDs fit in u32")
-}
+pub use uqa_sql::catalog::domain::domain_object_oid;
 
 pub fn is_virtual_catalog_relation(resolution: &RelationNameResolution, name: &str) -> bool {
     resolve_virtual_relation(resolution, name).is_some()
