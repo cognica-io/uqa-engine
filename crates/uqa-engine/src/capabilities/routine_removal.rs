@@ -269,21 +269,24 @@ impl RoutineForeignRemoval for Engine {
         table: &str,
         constraint: &str,
     ) -> StorageBackendResult<Option<bool>> {
-        Engine::drop_foreign_table_check_dependency(self, table, constraint)
+        self.foreign_definition_context()
+            .drop_foreign_table_check_dependency(table, constraint)
     }
     fn clear_foreign_table_default_dependency(
         &self,
         table: &str,
         column: &str,
     ) -> StorageBackendResult<Option<bool>> {
-        Engine::clear_foreign_table_default_dependency(self, table, column)
+        self.foreign_definition_context()
+            .clear_foreign_table_default_dependency(table, column)
     }
     fn drop_foreign_table_generated_column_dependency(
         &self,
         table: &str,
         column: &str,
     ) -> StorageBackendResult<Option<bool>> {
-        Engine::drop_foreign_table_generated_column_dependency(self, table, column)
+        self.foreign_definition_context()
+            .drop_foreign_table_column_dependency(table, column)
     }
 }
 impl RoutineEventRemoval for Engine {

@@ -184,21 +184,27 @@ impl DomainForeignRemoval for Engine {
         table: &str,
         name: &str,
     ) -> StorageBackendResult<()> {
-        Engine::drop_foreign_table_check_dependency(self, table, name).map(|_| ())
+        self.foreign_definition_context()
+            .drop_foreign_table_check_dependency(table, name)
+            .map(|_| ())
     }
     fn clear_foreign_table_default_dependency(
         &self,
         table: &str,
         column: &str,
     ) -> StorageBackendResult<()> {
-        Engine::clear_foreign_table_default_dependency(self, table, column).map(|_| ())
+        self.foreign_definition_context()
+            .clear_foreign_table_default_dependency(table, column)
+            .map(|_| ())
     }
     fn drop_foreign_table_column_dependency(
         &self,
         table: &str,
         column: &str,
     ) -> StorageBackendResult<()> {
-        Engine::drop_foreign_table_column_dependency(self, table, column).map(|_| ())
+        self.foreign_definition_context()
+            .drop_foreign_table_column_dependency(table, column)
+            .map(|_| ())
     }
 }
 impl DomainIndexRemoval for Engine {

@@ -19,3 +19,5 @@ pub mod dependencies;
 pub mod dispatch;
 pub mod entry;
 pub mod lifecycle;
+
+pub mod migration;

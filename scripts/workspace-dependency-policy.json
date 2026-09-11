@@ -245,7 +245,8 @@
         "src/events/lifecycle.rs",
         "src/events/persistence.rs",
         "src/events/rule_binding.rs",
-        "src/events/rule_condition_binding.rs"
+        "src/events/rule_condition_binding.rs",
+        "src/fdw/schema.rs"
       ]
     },
     "crates/uqa-storage": {

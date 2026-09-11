@@ -659,3 +659,5 @@ mod event_definitions;
 mod event_registry;
 
 mod foreign_creation;
+
+mod foreign_definitions;

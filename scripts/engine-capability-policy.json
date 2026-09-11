@@ -31,6 +31,7 @@
         "crates/uqa-engine/src/capabilities/event_definitions.rs",
         "crates/uqa-engine/src/capabilities/event_registry.rs",
         "crates/uqa-engine/src/capabilities/foreign_creation.rs",
+        "crates/uqa-engine/src/capabilities/foreign_definitions.rs",
         "crates/uqa-engine/src/capabilities/foreign_table_alteration.rs",
         "crates/uqa-engine/src/capabilities/graph_lifecycle.rs",
         "crates/uqa-engine/src/capabilities/hierarchy.rs",
