@@ -4,56 +4,20 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Routine overload resolution, argument binding, and coercion.
-
-use super::{
-    value_type_name, Arc, CreateFunction, Engine, FunctionBinding, SQLError, SQLUserFunction, Value,
+//! Resolve runtime carriers through SQL overload analysis, then materialize the winning arguments.
+use super::context::RoutineInvocationContext;
+use crate::routines::arguments::materialize_arguments;
+use std::sync::Arc;
+use uqa_core::Value;
+use uqa_sql::{
+    ast::{ColumnType, FunctionBinding, RoutineInvocationBinding, RoutineVariadicMode},
+    routines::{
+        invocation::{routine_resolution_error, runtime_argument_types},
+        resolution::RoutineCallKind,
+        SQLUserFunction,
+    },
+    SQLError,
 };
-use crate::user_functions::RoutineCallKind;
-use uqa_sql::ast::{ColumnType, RoutineInvocationBinding, RoutineVariadicMode};
-
-pub(super) fn output_column_names(def: &CreateFunction) -> Vec<String> {
-    def.output_params()
-        .iter()
-        .enumerate()
-        .map(|(idx, p)| {
-            if p.name.is_empty() {
-                format!("column{}", idx + 1)
-            } else {
-                p.name.clone()
-            }
-        })
-        .collect()
-}
-
-pub(super) fn call_signature(name: &str, args: &[(Option<String>, Value)]) -> String {
-    let types = args
-        .iter()
-        .map(|(arg_name, value)| match arg_name {
-            Some(arg_name) => format!("{arg_name} => {}", value_type_name(value)),
-            None => value_type_name(value).to_string(),
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("{name}({types})")
-}
-
-pub(super) fn routine_resolution_error(
-    kind: &str,
-    name: &str,
-    args: &[(Option<String>, Value)],
-    suffix: &str,
-) -> SQLError {
-    SQLError::Routine {
-        sqlstate: if suffix == "is not unique" {
-            "42725".into()
-        } else {
-            "42883".into()
-        },
-        message: format!("{kind} {} {suffix}", call_signature(name, args)),
-    }
-}
-
 /// A resolved overload plus its bound argument values.
 pub(super) struct ResolvedRoutine {
     pub(super) function: Arc<SQLUserFunction>,
@@ -65,14 +29,14 @@ pub(super) struct ResolvedRoutine {
 /// values (declared-type casts applied, defaults evaluated).
 /// `Ok(None)` = no routine with this name at all.
 pub(super) fn resolve_routine(
-    engine: &Engine,
+    context: &RoutineInvocationContext<'_>,
     name: &str,
     args: &[(Option<String>, Value)],
     declared_argument_types: Option<&[Option<ColumnType>]>,
     kind: &str,
     explicit_variadic: bool,
 ) -> Result<Option<ResolvedRoutine>, SQLError> {
-    if engine.lookup_visible_sql_functions(name)?.is_none() {
+    if context.lookup.lookup_visible_sql_functions(name)?.is_none() {
         return Ok(None);
     }
     let argument_names = args
@@ -99,7 +63,8 @@ pub(super) fn resolve_routine(
     } else {
         RoutineCallKind::Function
     };
-    let matched = engine
+    let matched = context
+        .overloads
         .resolve_static_sql_routine_match(
             name,
             None,
@@ -109,7 +74,12 @@ pub(super) fn resolve_routine(
             call_kind,
         )?
         .ok_or_else(|| routine_resolution_error(kind, name, args, "does not exist"))?;
-    let bound = materialize_arguments(engine, &matched.function.def, &matched.invocation, args)?;
+    let bound = materialize_arguments(
+        context.runtime.expressions,
+        &matched.function.def,
+        &matched.invocation,
+        args,
+    )?;
     Ok(Some(ResolvedRoutine {
         function: matched.function,
         bound,
@@ -118,7 +88,7 @@ pub(super) fn resolve_routine(
 }
 
 pub(super) fn resolve_bound_routine(
-    engine: &Engine,
+    context: &RoutineInvocationContext<'_>,
     binding: &FunctionBinding,
     args: &[(Option<String>, Value)],
 ) -> Result<Option<ResolvedRoutine>, SQLError> {
@@ -136,7 +106,7 @@ pub(super) fn resolve_bound_routine(
             .iter()
             .map(|name| {
                 name.as_deref()
-                    .map(|name| crate::sql::resolve_catalog_column_type_name(engine, name))
+                    .map(|name| context.runtime.expressions.column_type_name(name))
                     .transpose()
             })
             .collect::<Result<Vec<_>, _>>()?
@@ -149,7 +119,8 @@ pub(super) fn resolve_bound_routine(
             RoutineVariadicMode::Explicit { .. }
         )
     });
-    let matched = engine
+    let matched = context
+        .overloads
         .resolve_static_sql_routine_match(
             &binding.name,
             Some(binding),
@@ -166,51 +137,15 @@ pub(super) fn resolve_bound_routine(
                 binding.argument_types.join(", ")
             ),
         })?;
-    let bound = materialize_arguments(engine, &matched.function.def, &matched.invocation, args)?;
+    let bound = materialize_arguments(
+        context.runtime.expressions,
+        &matched.function.def,
+        &matched.invocation,
+        args,
+    )?;
     Ok(Some(ResolvedRoutine {
         function: matched.function,
         bound,
         invocation: matched.invocation,
     }))
-}
-
-fn runtime_argument_types(
-    args: &[(Option<String>, Value)],
-) -> Result<Vec<Option<ColumnType>>, SQLError> {
-    args.iter()
-        .map(|(_, value)| {
-            if matches!(value, Value::Null) {
-                Ok(None)
-            } else {
-                ColumnType::from_sql_name(value_type_name(value)).map(Some)
-            }
-        })
-        .collect()
-}
-
-/// Evaluate defaults and apply declared-type casts for the winning
-/// overload.
-fn materialize_arguments(
-    engine: &Engine,
-    def: &CreateFunction,
-    invocation: &RoutineInvocationBinding,
-    args: &[(Option<String>, Value)],
-) -> Result<Vec<Value>, SQLError> {
-    uqa_execution::routines::arguments::materialize_arguments(
-        engine.routine_execution_context().expressions,
-        def,
-        invocation,
-        args,
-    )
-}
-
-/// Apply a routine declaration's already-resolved SQL type. Pseudo-types use
-/// their own carrier validation; every scalar type goes through the SQL cast
-/// layer and an unsupported declaration remains an error.
-pub(super) fn coerce_routine_value(
-    engine: &Engine,
-    value: &Value,
-    type_name: &str,
-) -> Result<Value, SQLError> {
-    uqa_sql::assignment::routines::coerce_routine_value(engine, value, type_name)
 }

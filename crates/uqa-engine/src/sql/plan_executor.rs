@@ -12,7 +12,7 @@ use uqa_planner::{
     CommandPlan, DeletePlan, ExpressionPlan, InsertPlan, MergePlan, QueryPlan, UnifiedPlan,
     UpdatePlan,
 };
-use uqa_sql::ast::{CreateForeignServer, CreateForeignTable, FunctionParamMode};
+use uqa_sql::ast::{CreateForeignServer, CreateForeignTable};
 use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 
 use crate::capabilities::{QueryRuntimeView, SessionExecutionView};
@@ -21,56 +21,8 @@ use crate::session::{MaterializedViewRegistration, ViewRegistration};
 use super::scalar::{
     analyze_physical_call_arguments, eval_physical_call_arguments, PhysicalEvalContext,
 };
-use super::{plpgsql_exec, run_explain, select, Engine};
-
-fn call_output_schema(
-    engine: &Engine,
-    definition: &uqa_sql::ast::CreateFunction,
-    parameter_types: &[String],
-) -> Result<Option<uqa_execution::RowSchema>, SQLError> {
-    let output_indices = definition
-        .params
-        .iter()
-        .enumerate()
-        .filter_map(|(index, parameter)| {
-            matches!(
-                parameter.mode,
-                FunctionParamMode::Out | FunctionParamMode::InOut | FunctionParamMode::Table
-            )
-            .then_some(index)
-        })
-        .collect::<Vec<_>>();
-    if output_indices.is_empty() {
-        return Ok(None);
-    }
-    let columns = definition
-        .output_params()
-        .iter()
-        .enumerate()
-        .map(|(index, parameter)| {
-            if parameter.name.is_empty() {
-                format!("column{}", index + 1)
-            } else {
-                parameter.name.clone()
-            }
-        })
-        .collect::<Vec<_>>();
-    let column_types = output_indices
-        .into_iter()
-        .map(|index| {
-            super::resolve_catalog_column_type(engine, &parameter_types[index])
-                .or_else(|| uqa_sql::ast::ColumnType::from_sql_name(&parameter_types[index]).ok())
-                .map(Some)
-                .ok_or_else(|| {
-                    SQLError::TypeMismatch(format!("unknown type `{}`", parameter_types[index]))
-                })
-        })
-        .collect::<Result<Vec<_>, SQLError>>()?;
-    Ok(Some(uqa_execution::RowSchema::with_types(
-        columns,
-        column_types,
-    )))
-}
+use super::{run_explain, select, Engine};
+use crate::capabilities::routine_invocation;
 
 pub(super) fn analyze_call_result_schema(
     engine: &Engine,
@@ -129,7 +81,7 @@ pub(super) fn analyze_call_result_schema(
             message: format!("procedure {name}({signature}) does not exist"),
         });
     };
-    call_output_schema(
+    uqa_sql::routines::invocation::call_output_schema(
         engine,
         &resolved.function.def,
         &resolved.invocation.parameter_types,
@@ -484,7 +436,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             .with_function_hook(&hook)
             .with_subquery_runner(&hook);
         let args = eval_physical_call_arguments(arguments, &context)?;
-        plpgsql_exec::run_call(
+        routine_invocation::run_call(
             self.engine,
             name,
             &args,
@@ -862,17 +814,17 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 .map(|()| SQLResult::empty()),
             CommandPlan::Merge(plan) => self.execute_merge(plan),
             CommandPlan::CreateFunction(definition) => {
-                plpgsql_exec::run_create_function(self.engine, (**definition).clone())
+                routine_invocation::run_create_function(self.engine, (**definition).clone())
             }
             CommandPlan::DropFunction(statement) => {
-                plpgsql_exec::run_drop_function(self.engine, statement)
+                routine_invocation::run_drop_function(self.engine, statement)
             }
             CommandPlan::AlterRoutine(statement) => {
                 self.engine.alter_sql_routine(statement)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::DoBlock { language, body } => {
-                plpgsql_exec::run_do_block(self.engine, language, body, self.nested_statement)
+                routine_invocation::run_do_block(self.engine, language, body, self.nested_statement)
             }
             CommandPlan::Call { name, args } => self.execute_call(name, args),
         }

@@ -97,7 +97,7 @@ The executable dependency policy is stored in [`scripts/workspace-dependency-pol
 | `uqa-joins` | Relational and cross-paradigm join algorithms |
 | `uqa-pg-query` | Imported PostgreSQL 18 `libpg_query` pin used through the `pg_query` library name |
 | `uqa-sql` | Parser frontend, AST, scalar and statement IR, lowering, catalog definitions, name and type binding, routine signature and stored-definition binding, overload ranking, replacement and privilege rules, prepared parameter inference, SQL validation, and value expressions |
-| `uqa-execution` | Physical rows and buffers, runtime scalar evaluation, batches, materialization, spill structures, distinctness, sorting, grouping, windows, joins, and routine definition and privilege execution |
+| `uqa-execution` | Physical rows and buffers, runtime scalar evaluation, batches, materialization, spill structures, distinctness, sorting, grouping, windows, joins, and routine definition, invocation, scoped caller-state restoration, and privilege execution |
 | `uqa-planner` | Cardinality, cost, statement statistics, prepared-plan estimates, rewrite-rule input pruning, DPccp join ordering, unified-plan optimization, and physical access selection |
 | `uqa-engine` | Composition, SQL lifecycle, sessions, transactions, restore, publication, and public API |
 | `uqa` | Application facade over `uqa-engine` with the core `Value` type re-exported |

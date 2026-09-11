@@ -610,3 +610,5 @@ mod index_routines;
 mod view_dependencies;
 
 mod statement_planning;
+
+pub(crate) mod routine_invocation;

@@ -54,6 +54,7 @@
         "crates/uqa-engine/src/capabilities/routine_catalog.rs",
         "crates/uqa-engine/src/capabilities/routine_definitions.rs",
         "crates/uqa-engine/src/capabilities/routine_execution.rs",
+        "crates/uqa-engine/src/capabilities/routine_invocation.rs",
         "crates/uqa-engine/src/capabilities/routine_privileges.rs",
         "crates/uqa-engine/src/capabilities/routine_removal.rs",
         "crates/uqa-engine/src/capabilities/routine_rename.rs",

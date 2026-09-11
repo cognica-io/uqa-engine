@@ -34,12 +34,14 @@ impl uqa_execution::query::routine_invocation::SQLRoutineInvoker for ScopedEngin
         arguments: &[(Option<String>, Value)],
     ) -> Option<Result<bool, SQLError>> {
         match binding {
-            Some(binding) => crate::sql::plpgsql_exec::resolved_bound_user_function_returns_set(
-                self.engine,
-                binding,
-                arguments,
-            ),
-            None => crate::sql::plpgsql_exec::resolved_user_function_returns_set(
+            Some(binding) => {
+                crate::capabilities::routine_invocation::resolved_bound_user_function_returns_set(
+                    self.engine,
+                    binding,
+                    arguments,
+                )
+            }
+            None => crate::capabilities::routine_invocation::resolved_user_function_returns_set(
                 self.engine,
                 name,
                 arguments,
@@ -53,14 +55,18 @@ impl uqa_execution::query::routine_invocation::SQLRoutineInvoker for ScopedEngin
         arguments: &[(Option<String>, Value)],
     ) -> Option<Result<Value, SQLError>> {
         match binding {
-            Some(binding) => crate::sql::plpgsql_exec::call_bound_user_scalar_function(
+            Some(binding) => {
+                crate::capabilities::routine_invocation::call_bound_user_scalar_function(
+                    self.engine,
+                    binding,
+                    arguments,
+                )
+            }
+            None => crate::capabilities::routine_invocation::call_user_scalar_function(
                 self.engine,
-                binding,
+                name,
                 arguments,
             ),
-            None => {
-                crate::sql::plpgsql_exec::call_user_scalar_function(self.engine, name, arguments)
-            }
         }
     }
     fn call_user_table_function(
@@ -70,13 +76,15 @@ impl uqa_execution::query::routine_invocation::SQLRoutineInvoker for ScopedEngin
         arguments: &[(Option<String>, Value)],
     ) -> Option<Result<SQLTableFunctionResult, SQLError>> {
         match binding {
-            Some(binding) => crate::sql::plpgsql_exec::call_bound_user_table_function(
-                self.engine,
-                binding,
-                arguments,
-                None,
-            ),
-            None => crate::sql::plpgsql_exec::call_user_table_function(
+            Some(binding) => {
+                crate::capabilities::routine_invocation::call_bound_user_table_function(
+                    self.engine,
+                    binding,
+                    arguments,
+                    None,
+                )
+            }
+            None => crate::capabilities::routine_invocation::call_user_table_function(
                 self.engine,
                 name,
                 arguments,

@@ -8,8 +8,7 @@
 
 use crate::Engine;
 pub(crate) use uqa_execution::mutation::triggers::{
-    current_transition_relation_names, current_transition_relations,
-    enter_empty_transition_relation_scope, DeferredConstraintTriggerEvent,
+    current_transition_relation_names, current_transition_relations, DeferredConstraintTriggerEvent,
 };
 use uqa_sql::{
     ast::{TriggerEvent, TriggerTiming},

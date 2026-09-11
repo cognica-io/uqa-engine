@@ -6,12 +6,11 @@
 
 //! PostgreSQL-shaped logical roles and routine execution contexts.
 
-use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_sql::ast::{
-    AlterRoleStmt, CreateFunction, CreateRoleStmt, DropRoleStmt, FunctionVolatility, GrantRoleStmt,
-    RoleAttribute, RoleMembershipAction, RoleMembershipOptions,
+    AlterRoleStmt, CreateRoleStmt, DropRoleStmt, GrantRoleStmt, RoleAttribute,
+    RoleMembershipAction, RoleMembershipOptions,
 };
 use uqa_sql::SQLError;
 
@@ -28,62 +27,7 @@ pub(crate) struct RoutineSessionStateGuard<'a> {
     current_user: Option<String>,
 }
 
-thread_local! {
-    static ROUTINE_VOLATILITY_STACK: RefCell<Vec<FunctionVolatility>> = const { RefCell::new(Vec::new()) };
-    static SECURITY_DEFINER_DEPTH: Cell<usize> = const { Cell::new(0) };
-}
-
-pub(crate) fn active_routine_reads_command_overlay() -> Option<bool> {
-    ROUTINE_VOLATILITY_STACK.with(|stack| {
-        stack
-            .borrow()
-            .last()
-            .map(|volatility| *volatility == FunctionVolatility::Volatile)
-    })
-}
-
-struct RoutineVolatilityGuard;
-
-struct SecurityDefinerGuard {
-    active: bool,
-}
-
-impl RoutineVolatilityGuard {
-    fn enter(volatility: FunctionVolatility) -> Self {
-        ROUTINE_VOLATILITY_STACK.with(|stack| stack.borrow_mut().push(volatility));
-        Self
-    }
-}
-
-impl Drop for RoutineVolatilityGuard {
-    fn drop(&mut self) {
-        ROUTINE_VOLATILITY_STACK.with(|stack| {
-            let removed = stack.borrow_mut().pop();
-            debug_assert!(removed.is_some(), "routine volatility stack underflow");
-        });
-    }
-}
-
-impl SecurityDefinerGuard {
-    fn enter(active: bool) -> Self {
-        if active {
-            SECURITY_DEFINER_DEPTH.with(|depth| depth.set(depth.get() + 1));
-        }
-        Self { active }
-    }
-}
-
-impl Drop for SecurityDefinerGuard {
-    fn drop(&mut self) {
-        if self.active {
-            SECURITY_DEFINER_DEPTH.with(|depth| {
-                let current = depth.get();
-                debug_assert!(current > 0, "security-definer depth underflow");
-                depth.set(current.saturating_sub(1));
-            });
-        }
-    }
-}
+pub(crate) use uqa_execution::routines::invocation::scopes::active_routine_reads_command_overlay;
 
 impl RoutineSessionStateGuard<'_> {
     fn capture(engine: &Engine, preserve_statement_cache: bool) -> RoutineSessionStateGuard<'_> {
@@ -98,7 +42,7 @@ impl RoutineSessionStateGuard<'_> {
         }
     }
 
-    fn preserve_current_user(&mut self) {
+    pub(crate) fn preserve_current_user(&mut self) {
         self.current_user = None;
     }
 }
@@ -142,7 +86,7 @@ impl Engine {
     }
 
     pub(crate) fn set_role(&self, requested: &str) -> Result<(), SQLError> {
-        if SECURITY_DEFINER_DEPTH.with(Cell::get) > 0 {
+        if uqa_execution::routines::invocation::scopes::security_definer_active() {
             return Err(SQLError::Routine {
                 sqlstate: "42501".into(),
                 message: "cannot set parameter \"role\" within security-definer function".into(),
@@ -763,31 +707,6 @@ impl Engine {
         *self.durable.roles.write() = roles;
         *self.durable.role_memberships.write() = membership_map;
         Ok(())
-    }
-
-    pub(crate) fn with_routine_context<T>(
-        &self,
-        definition: &CreateFunction,
-        execute: impl FnOnce() -> Result<T, SQLError>,
-    ) -> Result<T, SQLError> {
-        let mut guard = self.routine_session_state_guard();
-        let _volatility = RoutineVolatilityGuard::enter(definition.volatility);
-        let _security_definer = SecurityDefinerGuard::enter(definition.security.security_definer);
-        if definition.security.security_definer {
-            self.session
-                .state
-                .write()
-                .current_user
-                .clone_from(&definition.owner);
-        }
-        for (name, value) in &definition.config {
-            self.set_variable(name, value)?;
-        }
-        let result = execute();
-        if result.is_ok() && !definition.security.security_definer {
-            guard.preserve_current_user();
-        }
-        result
     }
 
     pub(crate) fn with_current_user_context<T>(
