@@ -65,6 +65,7 @@
         "crates/uqa-engine/src/capabilities/rules.rs",
         "crates/uqa-engine/src/capabilities/schema_analysis.rs",
         "crates/uqa-engine/src/capabilities/schema_publication.rs",
+        "crates/uqa-engine/src/capabilities/sequence_introspection.rs",
         "crates/uqa-engine/src/capabilities/sequences.rs",
         "crates/uqa-engine/src/capabilities/statement_effects.rs",
         "crates/uqa-engine/src/capabilities/statement_planning.rs",

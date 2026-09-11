@@ -8,7 +8,7 @@
 
 use super::{
     CatalogFacade, Engine, RelationIdentity, SQLError, SequenceOwner, SequenceOwnerDependency,
-    StorageBackendError, StorageBackendResult, Value,
+    StorageBackendError, StorageBackendResult,
 };
 
 fn resolve_migrated_sequence_reference(
@@ -213,73 +213,6 @@ impl Engine {
             changed = true;
         }
         Ok(changed)
-    }
-
-    pub(crate) fn pg_get_serial_sequence_value(
-        &self,
-        arguments: &[Value],
-    ) -> Result<Value, SQLError> {
-        if arguments.len() != 2 {
-            return Err(SQLError::BadArity {
-                name: "pg_get_serial_sequence".into(),
-                expected: "2".into(),
-                actual: arguments.len(),
-            });
-        }
-        if arguments
-            .iter()
-            .any(|argument| matches!(argument, Value::Null))
-        {
-            return Ok(Value::Null);
-        }
-        let relation_name = match &arguments[0] {
-            Value::Str(value) | Value::FixedChar(value) => value,
-            other => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "pg_get_serial_sequence table name must be text, got {other:?}"
-                )))
-            }
-        };
-        let column_name = match &arguments[1] {
-            Value::Str(value) | Value::FixedChar(value) => value,
-            other => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "pg_get_serial_sequence column name must be text, got {other:?}"
-                )))
-            }
-        };
-        let Some((canonical, kind)) = self.try_resolve_visible_relation_kind(relation_name)? else {
-            return Err(SQLError::Routine {
-                sqlstate: "42P01".into(),
-                message: format!("relation \"{relation_name}\" does not exist"),
-            });
-        };
-        let Some(owner_column) =
-            uqa_sql::schema::sequences::ownership::sequence_owner_column_identity(
-                self,
-                &canonical,
-                kind,
-                column_name,
-            )?
-        else {
-            return Ok(Value::Null);
-        };
-        self.refresh_sequences_from_catalog().map_err(|error| {
-            SQLError::Internal(format!("load sequence ownership catalog: {error}"))
-        })?;
-        let sequence = self
-            .durable
-            .sequences
-            .read()
-            .iter()
-            .find(|(_, state)| {
-                state.owner.is_some_and(|owner| {
-                    owner.table_object_id == owner_column.table_object_id
-                        && owner.column_object_id == owner_column.column_object_id
-                })
-            })
-            .map(|(relation, _)| relation.qualified_name());
-        Ok(sequence.map_or(Value::Null, Value::Str))
     }
 
     pub(crate) fn migrate_implicit_sequence_owners(

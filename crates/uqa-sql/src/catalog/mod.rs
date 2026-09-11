@@ -944,3 +944,5 @@ pub mod security;
 pub mod stored_view;
 
 pub mod errors;
+
+pub mod sequence_functions;

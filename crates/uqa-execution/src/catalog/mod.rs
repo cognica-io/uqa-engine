@@ -115,3 +115,5 @@ pub mod context;
 pub mod index;
 pub mod projection;
 pub mod services;
+
+pub mod sequence_introspection;
