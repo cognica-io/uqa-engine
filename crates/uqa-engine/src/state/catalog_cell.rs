@@ -25,6 +25,11 @@ impl<T> CatalogCell<T> {
         parking_lot::RwLockReadGuard::map(self.0.read(), |value| value.as_ref())
     }
 
+    #[cfg(test)]
+    pub(crate) fn is_locked(&self) -> bool {
+        self.0.is_locked()
+    }
+
     pub(crate) fn snapshot(&self) -> Arc<T> {
         Arc::clone(&self.0.read())
     }

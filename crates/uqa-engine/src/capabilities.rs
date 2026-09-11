@@ -671,3 +671,5 @@ mod table_authorization;
 mod table_ownership;
 
 mod sequence_ownership;
+
+mod sequence_dependencies;

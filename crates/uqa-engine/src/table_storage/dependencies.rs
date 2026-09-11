@@ -8,7 +8,6 @@
 
 mod regclass;
 mod routines;
-mod sequences;
 
 use super::{
     rename_schema_expr_column, rename_schema_expr_qualified_column, rename_schema_expr_relation,

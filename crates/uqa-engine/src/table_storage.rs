@@ -32,26 +32,6 @@ use uqa_sql::schema::dependencies::rewrites::{
 };
 pub(crate) use uqa_sql::schema::dependencies::schema_expr_references_column;
 
-fn walk_schema_expr_mut(
-    expression: &mut uqa_sql::ast::Expr,
-    visit: &mut impl FnMut(&mut uqa_sql::ast::Expr) -> StorageBackendResult<()>,
-) -> StorageBackendResult<()> {
-    uqa_sql::schema::dependencies::walk_schema_expr_mut(expression, &mut |node| {
-        visit(node).map_err(|error| error.to_string())
-    })
-    .map_err(StorageBackendError::Other)
-}
-
-fn rewrite_sequence_function_references(
-    expression: &mut uqa_sql::ast::Expr,
-    visit: &mut impl FnMut(&mut String) -> StorageBackendResult<()>,
-) -> StorageBackendResult<()> {
-    uqa_sql::schema::dependencies::rewrites::rewrite_sequence_function_references(
-        expression,
-        &mut |reference| visit(reference).map_err(|error| error.to_string()),
-    )
-    .map_err(StorageBackendError::Other)
-}
 pub(crate) fn rename_schema_expr_column(
     expression: &mut uqa_sql::ast::Expr,
     from: &str,
