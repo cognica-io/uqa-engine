@@ -77,3 +77,53 @@ impl StatementPortals for Engine {
         Engine::close_all_session_portals(self);
     }
 }
+
+impl Engine {
+    pub(crate) fn portal_binding_context(
+        &self,
+    ) -> uqa_sql::binding::portals::PortalBindingContext<'_> {
+        uqa_sql::binding::portals::PortalBindingContext {
+            catalog: self,
+            routines: self,
+            transitions: self,
+        }
+    }
+}
+
+impl uqa_sql::binding::portals::PortalRelationCatalog for Engine {
+    fn try_resolve_table_name(&self, name: &str) -> Result<Option<String>, String> {
+        Engine::try_resolve_table_name(self, name).map_err(|error| error.to_string())
+    }
+    fn hierarchy_scan_tables(
+        &self,
+        table: &str,
+        include_descendants: bool,
+    ) -> Result<Vec<String>, SQLError> {
+        Engine::hierarchy_scan_tables(self, table, include_descendants)
+    }
+    fn view_plan(&self, name: &str) -> Result<Option<uqa_sql::plan::QueryPlan>, SQLError> {
+        Engine::view_plan(self, name)
+    }
+    fn try_resolve_visible_relation_kind(
+        &self,
+        name: &str,
+    ) -> Result<Option<(String, &'static str)>, SQLError> {
+        Engine::try_resolve_visible_relation_kind(self, name)
+    }
+    fn resolve_age_label_relation_name(&self, name: &str) -> Result<Option<String>, SQLError> {
+        uqa_execution::catalog::projection::resolve_age_label_relation_name(
+            &self.catalog_execution(),
+            name,
+        )
+    }
+    fn try_resolve_sequence_reference(&self, name: &str) -> Result<Option<String>, String> {
+        Engine::try_resolve_sequence_oid_reference_for_binding(self, name)
+            .map_err(|error| error.to_string())
+    }
+}
+
+impl uqa_sql::binding::portals::PortalTransitionRelations for Engine {
+    fn active_transition_relation_names(&self) -> std::collections::BTreeSet<String> {
+        crate::sql::active_trigger_transition_relation_names()
+    }
+}

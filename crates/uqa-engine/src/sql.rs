@@ -75,10 +75,9 @@ pub(crate) use triggers::{fire_deferred_constraint_trigger_event, DeferredConstr
 pub use uqa_execution::query::cursor::{SQLCursor, SQLCursorSummary};
 
 pub(crate) use catalog::{
-    resolve_age_label_relation_name, resolve_catalog_column_type, resolve_catalog_column_type_name,
-    resolve_regclass_oid, resolve_regnamespace_oid, resolve_regobject_oid,
-    resolve_regprocedure_oid, resolve_regrole_oid, resolve_regtype_oid, resolve_regtype_output,
-    runtime_constraints, sequence_relation_oid,
+    resolve_catalog_column_type, resolve_catalog_column_type_name, resolve_regclass_oid,
+    resolve_regnamespace_oid, resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid,
+    resolve_regtype_oid, resolve_regtype_output, runtime_constraints, sequence_relation_oid,
 };
 pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_columns};
 pub(crate) type UnifiedPlanExecutor<'engine, 'params> =
@@ -141,7 +140,8 @@ pub(crate) use uqa_execution::query::document_projection::{
     project_stored_document_column, projection_uses_tuple_xmin, projections_use_tuple_xmin,
 };
 
-pub(crate) use uqa_sql::semantics::builtin_function_dispatch_name;
+#[cfg(test)]
+use uqa_sql::semantics::builtin_function_dispatch_name;
 
 #[cfg(test)]
 #[path = "sql/tests.rs"]

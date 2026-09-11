@@ -195,7 +195,7 @@ Responsibility roots remain facades over semantic children rather than line-coun
 | SQL-plan optimization contract | [`crates/uqa-sql/src/plan/optimization.rs`](../../../crates/uqa-sql/src/plan/optimization.rs) |
 | Mutation command entry | [`crates/uqa-execution/src/mutation/entry.rs`](../../../crates/uqa-execution/src/mutation/entry.rs) |
 | Shared mutation state and snapshots | [`crates/uqa-execution/src/mutation/command_scope.rs`](../../../crates/uqa-execution/src/mutation/command_scope.rs) |
-| Portal declaration and streaming | [`portal`](../../../crates/uqa-execution/src/statement/portal.rs), SQL [cursor restrictions](../../../crates/uqa-sql/src/semantics/portals.rs), Engine [worker lifetime](../../../crates/uqa-engine/src/session/portals/worker.rs) |
+| Portal declaration, binding and streaming | [`portal`](../../../crates/uqa-execution/src/statement/portal.rs), SQL [cursor restrictions](../../../crates/uqa-sql/src/semantics/portals.rs) and [snapshot dependencies](../../../crates/uqa-sql/src/binding/portals.rs), Engine [worker lifetime](../../../crates/uqa-engine/src/session/portals/worker.rs) |
 | Catalog projection | [`crates/uqa-execution/src/catalog/projection.rs`](../../../crates/uqa-execution/src/catalog/projection.rs) |
 | Catalog relation families | [`crates/uqa-execution/src/catalog/projection/pg_catalog.rs`](../../../crates/uqa-execution/src/catalog/projection/pg_catalog.rs) |
 | Catalog projection policy | [`crates/uqa-execution/src/catalog/projection/helpers.rs`](../../../crates/uqa-execution/src/catalog/projection/helpers.rs) |

@@ -52,15 +52,6 @@ pub(crate) fn resolve_catalog_column_type(engine: &Engine, type_name: &str) -> O
 pub(crate) fn runtime_constraints(engine: &Engine) -> Result<Vec<RuntimeConstraint>, SQLError> {
     uqa_execution::catalog::projection::runtime_constraints(&engine.catalog_execution())
 }
-pub(crate) fn resolve_age_label_relation_name(
-    engine: &Engine,
-    name: &str,
-) -> Result<Option<String>, SQLError> {
-    uqa_execution::catalog::projection::resolve_age_label_relation_name(
-        &engine.catalog_execution(),
-        name,
-    )
-}
 pub(crate) fn resolve_catalog_column_type_name(
     engine: &Engine,
     type_name: &str,

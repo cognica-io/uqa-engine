@@ -975,3 +975,5 @@ pub mod scoped_types;
 pub mod snapshot;
 
 pub mod view_dependencies;
+
+pub mod portals;
