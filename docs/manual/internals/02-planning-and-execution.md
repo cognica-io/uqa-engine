@@ -175,6 +175,10 @@ SQL graph-command arity, text and boolean argument rules live in [`uqa-sql/src/s
 
 ## Plan-native optimization
 
+SQL owns view namespace and replacement row-type rules and authorization policy. Execution schedules view creation and materialized refresh, source execution, and durable publication. Engine supplies live transaction, role, binding and registry scopes. Replacement preserves the view identity and ACL state; publication changes the catalog generation only after persistence and registry insertion succeed. Materialized refresh evaluates under the view owner and restores the caller before validating the resulting snapshot.
+
+Execution also owns statement read-only validation, snapshot marking and error rollback; SQL supplies transaction-block requirements and diagnostics. The Engine transaction capability supplies the active depth, access mode, snapshot marker and existing abort and rollback operations.
+
 Optimization recursively visits executable query blocks, CTEs, set-operation branches, scalar subqueries, mutations, and explained bodies. PREPARE and stored view or routine definitions retain logical plans until execution; CTAS and materialized-view creation optimize the populated query after their target checks. Important passes include predicate handling, access selection, join order, ordering propagation, score top-K selection, and specialized `OperatorTree` rewrites.
 
 Constant folding preserves declared SQL types and propagates arithmetic and conversion errors through `OptimizerError::Expression`; join-graph errors use `OptimizerError::JoinGraph`. CASE, Boolean expressions, and COALESCE retain their type-analysis requirements while respecting value-evaluation order. Runtime COALESCE evaluates arguments only until the first non-NULL value.

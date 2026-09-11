@@ -50,7 +50,6 @@ mod mutability;
 pub(crate) mod plan_executor;
 pub use uqa_sql::result::format_postgres_text;
 mod planning;
-mod read_only;
 mod regrole_dependencies;
 pub(crate) mod scalar;
 mod select;
@@ -84,7 +83,7 @@ pub(super) use planning::{
     plan_for_execution,
 };
 use select::query_has_row_locks;
-pub(crate) use select::{execute_query_plan, RowLockRetryCache};
+pub(crate) use select::RowLockRetryCache;
 pub(crate) use triggers::fire_statement_triggers;
 pub(crate) use triggers::{fire_deferred_constraint_trigger_event, DeferredConstraintTriggerEvent};
 
@@ -97,8 +96,7 @@ pub(crate) use catalog::{
 pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_columns};
 use plan_executor::UnifiedPlanExecutor;
 pub(crate) use regrole_dependencies::{
-    reject_stored_plan_regrole_constants, reject_stored_query_regrole_constants,
-    reject_stored_regrole_constants,
+    reject_stored_plan_regrole_constants, reject_stored_regrole_constants,
 };
 pub(crate) use uqa_sql::assignment::conversion::{
     convert_value_to_column_type, validate_vector_dimensions,
@@ -157,18 +155,6 @@ pub(crate) fn bind_catalog_expression_routines_with_outer(
 ) -> Result<Option<uqa_sql::ast::ColumnType>, SQLError> {
     let ctes = crate::capabilities::query_scope::new_for_catalog_binding(engine);
     select::bind_expression_plan_routines_for_storage(engine, expression, params, &ctes, outer)
-}
-
-pub(crate) fn validate_stored_view_check_option(
-    engine: &Engine,
-    name: &str,
-    view: &crate::StoredView,
-) -> Result<(), SQLError> {
-    uqa_sql::semantics::view_rewrite::validate_view_definition_check_option(
-        engine.view_rewrite_context(),
-        name,
-        &view.rewrite_definition(),
-    )
 }
 
 pub(crate) use uqa_sql::semantics::XMIN_COLUMN;

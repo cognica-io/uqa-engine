@@ -37,16 +37,6 @@ pub(in crate::sql) use schema_binding::*;
 // SELECT
 // -------------------------------------------------------------------------
 
-/// Execute the physical relational plan directly. CTEs, set-operation branches, values, and query blocks recurse through plan children; query blocks select physical access and row operators without reconstructing a parser statement.
-pub(crate) fn execute_query_plan(
-    engine: &Engine,
-    plan: &QueryPlan,
-    params: &[SQLParam],
-) -> Result<SQLResult, SQLError> {
-    let mut ctes = crate::capabilities::query_scope::new_for_current_routine(engine);
-    execute_query_plan_with_ctes(engine, plan, params, &mut ctes)
-}
-
 pub(super) type QueryOutputMode<'consumer> =
     uqa_execution::query::statement::consumer::QueryOutputMode<
         'consumer,

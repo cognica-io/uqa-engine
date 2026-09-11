@@ -75,3 +75,5 @@ pub struct SequenceSecurity {
 }
 
 pub mod table_inquiry;
+
+pub mod view_ownership;
