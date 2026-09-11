@@ -151,7 +151,7 @@ use uqa_storage::{
     PersistentStorageBackend, PersistentStorageProvider, PersistentStorageSession,
     RelationIdentity, SequenceOwner, SequenceOwnerDependency, SequenceReservationResult,
     SequenceRow, StorageBackendError, StorageBackendResult, StorageSavepointId, StoredDocument,
-    TableSchema, VectorFieldSchema, VectorIndex, VectorIndexOpenMode, VectorIndexSpec, ViewRow,
+    TableSchema, VectorFieldSchema, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
 };
 use uqa_storage_sqlite::{
     ManagedConnection, SQLiteCompressedContainerAnchor, SQLiteStorageProvider,

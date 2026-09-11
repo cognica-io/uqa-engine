@@ -7,22 +7,15 @@
 //! Durable view registration, binding, dependencies, and restoration.
 
 mod columns;
-mod restoration;
 
+#[cfg(test)]
+use super::QueryPlan;
 use super::{
-    bind_query_plan_relations, query_plan_references_relation, Engine, QueryPlan, RelationIdentity,
-    SQLError, StorageBackendError, StorageBackendResult, StoredView, StoredViewKind,
+    bind_query_plan_relations, query_plan_references_relation, Engine, RelationIdentity, SQLError,
+    StorageBackendError, StorageBackendResult, StoredView, StoredViewKind,
 };
-use uqa_sql::binding::view_dependencies::restoration::{
-    bind_stored_view_relations, upgrade_legacy_view_dispatches,
-};
-
-#[derive(serde::Deserialize)]
-#[serde(untagged)]
-enum RestoredView {
-    Current(StoredView),
-    Legacy(QueryPlan),
-}
+#[cfg(test)]
+use uqa_sql::binding::view_dependencies::restoration::bind_stored_view_relations;
 
 pub(crate) use uqa_execution::catalog::view::catalog_view_row;
 

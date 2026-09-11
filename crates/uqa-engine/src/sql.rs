@@ -136,16 +136,6 @@ pub(crate) fn analyze_rule_action_returning_schema(
     )
 }
 
-/// Bind every catalog-owned scalar and table-function call to an exact routine identity before the query plan is serialized.
-pub(crate) fn bind_catalog_query_routines(
-    engine: &Engine,
-    query: &mut uqa_planner::QueryPlan,
-    params: &[SQLParam],
-) -> Result<uqa_execution::RowSchema, SQLError> {
-    let ctes = crate::capabilities::query_scope::new_for_catalog_binding(engine);
-    select::bind_query_plan_routines_for_storage(engine, query, params, &ctes, None)
-}
-
 /// Bind a catalog-owned scalar expression, including all nested query plans, against a statically typed outer row.
 pub(crate) fn bind_catalog_expression_routines_with_outer(
     engine: &Engine,

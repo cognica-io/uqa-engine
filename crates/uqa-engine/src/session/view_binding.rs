@@ -6,8 +6,7 @@
 
 pub(crate) use uqa_sql::binding::view_dependencies::{
     bind_cte_plan_relations, bind_query_plan_relations, bind_query_plan_sequence_references,
-    canonical_virtual_relation_reference, query_plan_has_legacy_routine_identity,
-    query_plan_references_relation,
+    canonical_virtual_relation_reference, query_plan_references_relation,
 };
 
 #[cfg(test)]

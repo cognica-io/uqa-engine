@@ -89,3 +89,5 @@ impl StoredView {
 }
 
 pub mod dependencies;
+
+pub mod restoration;

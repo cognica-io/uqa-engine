@@ -11,7 +11,7 @@ use uqa_execution::{
     catalog::view::{StoredView, ViewPublication},
     schema::view_alteration::{
         self, ViewAlterAccess, ViewAlterCatalog, ViewAlterContext, ViewAlterPublication,
-        ViewAlterTransactions, ViewAlterWrite, ViewRegistryWrite,
+        ViewAlterTransactions, ViewAlterWrite,
     },
 };
 use uqa_sql::{
@@ -70,9 +70,6 @@ impl ViewPublication for Engine {
             .catalog
             .as_ref()
             .map_or(Ok(()), |catalog| catalog.save_view(row))
-    }
-    fn views_write(&self) -> ViewRegistryWrite<'_> {
-        Box::new(self.durable.views.write())
     }
 }
 
