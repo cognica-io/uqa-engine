@@ -42,6 +42,19 @@ pub trait RetrievalPlanningCatalog {
         field: &str,
         predicate: &Predicate,
     ) -> Result<Option<usize>, SQLError>;
+    fn value_index_supports(
+        &self,
+        table: &str,
+        field: &str,
+        predicate: &Predicate,
+    ) -> Result<bool, String>;
+    /// Read analyzed term and indexed-document counts under one retained text-index guard.
+    fn text_top_k_capabilities(
+        &self,
+        table: &str,
+        field: &str,
+        query: &str,
+    ) -> Result<crate::TextTopKCapabilities, SQLError>;
     fn table_doc_count(&self, table: &str) -> Result<u64, SQLError>;
     fn try_query_table(
         &self,

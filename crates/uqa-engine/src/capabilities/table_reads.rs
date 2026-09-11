@@ -68,7 +68,8 @@ impl RetrievalAccess for Engine {
         predicate: &ScalarExpr,
         params: &[SQLParam],
     ) -> Result<Option<DirectVectorRetrieval>, SQLError> {
-        crate::operator_tree_bridge::direct_vector_retrieval(self, predicate, params)
+        self.retrieval_binding()
+            .direct_vector_retrieval(predicate, params)
     }
     fn knn_entries(
         &self,

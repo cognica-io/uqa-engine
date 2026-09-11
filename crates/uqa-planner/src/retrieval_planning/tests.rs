@@ -34,6 +34,17 @@ impl RetrievalPlanningCatalog for Catalog {
     ) -> Result<Option<usize>, SQLError> {
         panic!("no filter candidates")
     }
+    fn value_index_supports(&self, _: &str, _: &str, _: &Predicate) -> Result<bool, String> {
+        panic!("this failure must precede access selection")
+    }
+    fn text_top_k_capabilities(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> Result<crate::TextTopKCapabilities, SQLError> {
+        panic!("these trees do not plan physical text limits")
+    }
     fn table_doc_count(&self, _: &str) -> Result<u64, SQLError> {
         Ok(10)
     }
@@ -145,6 +156,17 @@ impl RetrievalPlanningCatalog for BrokenIndexCatalog {
         _: &Predicate,
     ) -> Result<Option<usize>, SQLError> {
         panic!("invalid catalog metadata must precede index access")
+    }
+    fn value_index_supports(&self, _: &str, _: &str, _: &Predicate) -> Result<bool, String> {
+        panic!("this failure must precede access selection")
+    }
+    fn text_top_k_capabilities(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> Result<crate::TextTopKCapabilities, SQLError> {
+        panic!("these trees do not plan physical text limits")
     }
     fn table_doc_count(&self, _: &str) -> Result<u64, SQLError> {
         panic!("invalid catalog metadata must precede statistics reads")

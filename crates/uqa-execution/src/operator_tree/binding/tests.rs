@@ -163,3 +163,35 @@ fn logical_attention_defers_checked_model_capacity_to_execution() {
     );
     assert!(inputs.events.borrow().is_empty());
 }
+
+#[test]
+fn direct_vector_pool_is_owned_only_by_the_complete_root_predicate() {
+    use crate::query::table_sources::retrieval::DirectVectorRetrieval;
+
+    let inputs = Inputs::default();
+    let binding = RetrievalBinding {
+        hook: &inputs,
+        graphs: &inputs,
+    };
+    let knn = predicate("SELECT * FROM docs WHERE knn_match(embedding, ARRAY[0.9, 0.1], 3)");
+    assert!(matches!(
+        binding.direct_vector_retrieval(&knn, &[]).unwrap(),
+        Some(DirectVectorRetrieval::Knn { top_k: 3 })
+    ));
+    let calibrated = predicate(
+        "SELECT * FROM docs WHERE calibrated_vector_match('embedding', ARRAY[0.9, 0.1], 3, 0.6)",
+    );
+    assert!(
+        matches!(binding.direct_vector_retrieval(&calibrated, &[]).unwrap(),
+        Some(DirectVectorRetrieval::Calibrated { field, query_vector, top_k: 3, threshold: Some(threshold) })
+        if field == "embedding" && query_vector == [0.9_f32, 0.1_f32] && threshold == 0.6)
+    );
+    let bounded = predicate(
+        "SELECT * FROM docs WHERE knn_match(embedding, ARRAY[0.9, 0.1], 3) AND category = 1",
+    );
+    assert!(binding
+        .direct_vector_retrieval(&bounded, &[])
+        .unwrap()
+        .is_none());
+    assert!(inputs.events.borrow().is_empty());
+}

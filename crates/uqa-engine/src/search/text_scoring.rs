@@ -165,30 +165,4 @@ impl Engine {
         }
         Ok(entries)
     }
-
-    pub(super) fn text_top_k_capabilities(
-        &self,
-        table: &str,
-        field: &str,
-        query: &str,
-    ) -> Result<uqa_planner::TextTopKCapabilities, SQLError> {
-        let Some(t) = self
-            .try_query_table(table)
-            .map_err(|error| storage_sql_error("resolve text-search table", error))?
-        else {
-            return Err(SQLError::UnknownTable(table.to_string()));
-        };
-        let index = t.inverted_index.read();
-        let analyzer = index.get_search_analyzer(field);
-        let analyzed_terms = analyzer
-            .analyze(query)
-            .map_err(|error| storage_sql_error("analyze text query", error))?;
-        let indexed_document_count = index
-            .field_doc_count(field)
-            .map_err(|error| storage_sql_error("read indexed document count", error))?;
-        Ok(uqa_planner::TextTopKCapabilities {
-            analyzed_term_count: analyzed_terms.len(),
-            indexed_document_count,
-        })
-    }
 }

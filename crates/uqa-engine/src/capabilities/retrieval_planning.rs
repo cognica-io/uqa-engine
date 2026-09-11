@@ -74,6 +74,41 @@ impl RetrievalPlanningCatalog for Engine {
     ) -> Result<Option<usize>, SQLError> {
         self.value_index_cardinality(table, field, predicate)
     }
+    fn value_index_supports(
+        &self,
+        table: &str,
+        field: &str,
+        predicate: &Predicate,
+    ) -> Result<bool, String> {
+        self.value_index_supports(table, field, predicate)
+            .map_err(|error| error.to_string())
+    }
+    fn text_top_k_capabilities(
+        &self,
+        table: &str,
+        field: &str,
+        query: &str,
+    ) -> Result<uqa_planner::TextTopKCapabilities, SQLError> {
+        let Some(t) = self.try_query_table(table).map_err(|error| {
+            crate::search::storage_sql_error("resolve text-search table", error)
+        })?
+        else {
+            return Err(SQLError::UnknownTable(table.to_string()));
+        };
+        let index = t.inverted_index.read();
+        let analyzer = index.get_search_analyzer(field);
+        let analyzed_terms = analyzer
+            .analyze(query)
+            .map_err(|error| crate::search::storage_sql_error("analyze text query", error))?;
+        let indexed_document_count = index.field_doc_count(field).map_err(|error| {
+            crate::search::storage_sql_error("read indexed document count", error)
+        })?;
+        Ok(uqa_planner::TextTopKCapabilities {
+            analyzed_term_count: analyzed_terms.len(),
+            indexed_document_count,
+        })
+    }
+
     fn table_doc_count(&self, table: &str) -> Result<u64, SQLError> {
         self.table_doc_count(table)
     }
@@ -115,3 +150,22 @@ impl RetrievalPlanningCatalog for Engine {
 
 #[cfg(test)]
 mod tests;
+
+impl uqa_execution::operator_tree::query::RelationRetrievalPlanner for Engine {
+    fn accelerated_tree(
+        &self,
+        table: &str,
+        expression: &uqa_sql::ScalarExpr,
+        tree: uqa_operators::OperatorTree,
+    ) -> Result<Option<uqa_operators::OperatorTree>, SQLError> {
+        uqa_planner::retrieval_planning::accelerated_tree(self, table, expression, tree)
+    }
+    fn text_top_k(
+        &self,
+        table: &str,
+        tree: uqa_operators::OperatorTree,
+        top_k: usize,
+    ) -> Result<uqa_operators::OperatorTree, SQLError> {
+        uqa_planner::retrieval_planning::plan_bound_text_top_k(self, table, tree, top_k)
+    }
+}

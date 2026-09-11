@@ -23,17 +23,9 @@ impl Engine {
         scoring: TextScoringMode,
         top_k: usize,
     ) -> Result<OperatorTree, SQLError> {
-        let capabilities = self.text_top_k_capabilities(table, field, query)?;
-        Ok(uqa_planner::plan_text_top_k(
-            OperatorTree::Term {
-                query: query.to_string(),
-                field: Some(field.to_string()),
-                scoring: Some(scoring),
-                top_k: None,
-            },
-            top_k,
-            capabilities,
-        ))
+        uqa_planner::retrieval_planning::plan_text_top_k_tree(
+            self, table, field, query, scoring, top_k,
+        )
     }
 
     /// Materialize scorer-versioned block bounds for one text field. `SQLite`

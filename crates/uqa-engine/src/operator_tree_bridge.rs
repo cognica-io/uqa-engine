@@ -94,17 +94,9 @@ pub(crate) fn estimate_local_access(
     estimate_operator_tree_access(engine, table, tree, true).map(Some)
 }
 
-pub(crate) use uqa_execution::query::table_sources::retrieval::DirectVectorRetrieval;
-
-/// Describe a complete predicate that owns one bounded vector candidate pool.
-/// A hierarchy scan applies that pool and any query-local calibration once
-/// after merging every physical relation.
 mod execution;
+pub(crate) use execution::execute_scored_tree;
 pub use execution::run_optimised;
-pub(crate) use execution::{
-    direct_vector_retrieval, execute_relation_operator_tree_in_execution, execute_scored_tree,
-    expect_posting_output, run_accelerated,
-};
 
 use uqa_execution::operator_tree::driver::posting::posting_list_to_scored;
 

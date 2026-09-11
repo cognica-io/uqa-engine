@@ -12,7 +12,7 @@ use uqa_execution::query::retrieval::context::{
     RetrievalDocuments, TextRetrieval, VectorPoolRetrieval,
 };
 use uqa_scoring::BayesianBM25Params;
-use uqa_sql::SQLError;
+use uqa_sql::{SQLError, SQLParam, ScalarExpr};
 use uqa_storage::document_store::Document;
 
 impl TextRetrieval for Engine {
@@ -57,5 +57,52 @@ impl Engine {
             hook: self,
             graphs: self,
         }
+    }
+}
+
+impl Engine {
+    pub(crate) fn retrieval_query_context(
+        &self,
+    ) -> uqa_execution::operator_tree::query::RetrievalQueryContext<'_> {
+        uqa_execution::operator_tree::query::RetrievalQueryContext {
+            binding: self.retrieval_binding(),
+            trees: self.tree_execution_context(),
+            planner: self,
+            graphs: self,
+        }
+    }
+}
+
+impl uqa_execution::query::block::context::RelationRetrieval for Engine {
+    fn accelerated(
+        &self,
+        table: &str,
+        signal_table: &str,
+        predicate: Option<&ScalarExpr>,
+        params: &[SQLParam],
+    ) -> Result<Option<Vec<ScoredEntry>>, SQLError> {
+        self.retrieval_query_context()
+            .accelerated(table, signal_table, predicate, params)
+    }
+    fn optimized(
+        &self,
+        table: &str,
+        predicate: Option<&ScalarExpr>,
+        params: &[SQLParam],
+    ) -> Result<Option<Vec<ScoredEntry>>, SQLError> {
+        self.retrieval_query_context()
+            .optimized(table, predicate, params)
+    }
+    fn function(
+        &self,
+        table: &str,
+        signal_table: &str,
+        name: &str,
+        args: &[ScalarExpr],
+        params: &[SQLParam],
+        top_k: Option<usize>,
+    ) -> Result<Vec<ScoredEntry>, SQLError> {
+        self.retrieval_query_context()
+            .function(table, signal_table, name, args, params, top_k)
     }
 }
