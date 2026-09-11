@@ -637,3 +637,6 @@ mod retrieval_planning;
 mod prepared;
 
 mod statement_transactions;
+
+mod view_references;
+mod view_removal;

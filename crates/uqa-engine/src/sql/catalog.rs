@@ -9,7 +9,6 @@ use crate::Engine;
 use uqa_core::Value;
 pub(crate) use uqa_execution::catalog::projection::*;
 pub use uqa_sql::catalog::result_type::{postgres_result_type, SQLTypeMetadata};
-use uqa_sql::plan::QueryPlan;
 use uqa_sql::{ColumnType, SQLError};
 
 pub(crate) fn resolve_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {
@@ -48,34 +47,6 @@ pub(crate) fn resolve_catalog_column_type(engine: &Engine, type_name: &str) -> O
     uqa_execution::catalog::projection::resolve_catalog_column_type(
         &engine.catalog_execution(),
         type_name,
-    )
-}
-pub(crate) fn rename_view_column_query(
-    engine: &Engine,
-    query: &mut QueryPlan,
-    table: &str,
-    from: &str,
-    to: &str,
-) -> Result<(), SQLError> {
-    uqa_execution::catalog::projection::rename_view_column_query(
-        &engine.catalog_execution(),
-        query,
-        table,
-        from,
-        to,
-    )
-}
-pub(crate) fn view_query_references_column(
-    engine: &Engine,
-    query: &QueryPlan,
-    table: &str,
-    column: &str,
-) -> Result<bool, SQLError> {
-    uqa_execution::catalog::projection::view_query_references_column(
-        &engine.catalog_execution(),
-        query,
-        table,
-        column,
     )
 }
 pub(crate) fn runtime_constraints(engine: &Engine) -> Result<Vec<RuntimeConstraint>, SQLError> {
