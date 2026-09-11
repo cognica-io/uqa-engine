@@ -83,6 +83,8 @@
         "crates/uqa-engine/src/capabilities/schema_privileges.rs",
         "crates/uqa-engine/src/capabilities/schema_publication.rs",
         "crates/uqa-engine/src/capabilities/sequence_introspection.rs",
+        "crates/uqa-engine/src/capabilities/sequence_ownership.rs",
+        "crates/uqa-engine/src/capabilities/sequence_ownership/tests.rs",
         "crates/uqa-engine/src/capabilities/sequence_privileges.rs",
         "crates/uqa-engine/src/capabilities/sequences.rs",
         "crates/uqa-engine/src/capabilities/statement_effects.rs",
