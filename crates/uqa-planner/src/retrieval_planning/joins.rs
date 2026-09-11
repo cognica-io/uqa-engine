@@ -4,25 +4,22 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Independent relation statistics and cost estimation for operator joins.
+//! Independent relation costs and cross-relation operator-join estimates.
 
-use uqa_planner::{
+use super::{operator_tree_paradigm, query_optimizer, PlanningResult, RetrievalPlanningCatalog};
+use crate::{
     CardinalityEstimator, CostEstimator, OperatorKind, GRAPH_AVG_DEGREE_DEFAULT,
     JACCARD_JOIN_SELECTIVITY,
 };
-use uqa_sql::ast::OperatorJoinRelations;
-
-use super::{
-    engine_query_optimizer, operator_tree_paradigm, DriverResult, Engine, OperatorTree, SQLError,
-    SQLParam, ScalarExpr,
-};
+use uqa_operators::OperatorTree;
+use uqa_sql::{ast::OperatorJoinRelations, SQLError};
 
 struct OperatorJoinSideEstimate {
     output_rows: f64,
     cost: f64,
     total_docs: f64,
     dimensions: u32,
-    graph_stats: Option<uqa_planner::GraphStats>,
+    graph_stats: Option<crate::GraphStats>,
 }
 
 enum OperatorJoinEstimateKind {
@@ -37,10 +34,10 @@ struct OperatorJoinEstimateInput {
     left: OperatorTree,
     right: OperatorTree,
     kind: OperatorJoinEstimateKind,
-    paradigm: uqa_planner::AccessParadigm,
+    paradigm: crate::AccessParadigm,
 }
 
-fn split_operator_join_estimate(tree: OperatorTree) -> DriverResult<OperatorJoinEstimateInput> {
+fn split_operator_join_estimate(tree: OperatorTree) -> PlanningResult<OperatorJoinEstimateInput> {
     let paradigm = operator_tree_paradigm(&tree);
     let (left, right, kind) = match tree {
         OperatorTree::TextSimilarityJoin {
@@ -84,11 +81,11 @@ fn split_operator_join_estimate(tree: OperatorTree) -> DriverResult<OperatorJoin
 }
 
 fn estimate_operator_join_side(
-    engine: &Engine,
+    catalog: &dyn RetrievalPlanningCatalog,
     relation: &str,
     tree: OperatorTree,
-) -> DriverResult<OperatorJoinSideEstimate> {
-    let optimizer = engine_query_optimizer(engine, relation, &tree)?;
+) -> PlanningResult<OperatorJoinSideEstimate> {
+    let optimizer = query_optimizer(catalog, relation, &tree)?;
     let planned = optimizer.optimize(tree);
     let output_rows = optimizer
         .estimator
@@ -201,14 +198,14 @@ fn estimate_operator_join_result(
     }
 }
 
-fn estimate_cross_relation_operator_join(
-    engine: &Engine,
+pub fn estimate_cross_relation_operator_join(
+    catalog: &dyn RetrievalPlanningCatalog,
     relations: &OperatorJoinRelations,
     tree: OperatorTree,
-) -> DriverResult<uqa_planner::LocalAccessEstimate> {
+) -> PlanningResult<crate::LocalAccessEstimate> {
     let input = split_operator_join_estimate(tree)?;
-    let left = estimate_operator_join_side(engine, &relations.left, input.left)?;
-    let right = estimate_operator_join_side(engine, &relations.right, input.right)?;
+    let left = estimate_operator_join_side(catalog, &relations.left, input.left)?;
+    let right = estimate_operator_join_side(catalog, &relations.right, input.right)?;
     let (output_rows, join_cost) = estimate_operator_join_result(&input.kind, &left, &right);
     let cost = left.cost + right.cost + join_cost;
     if !output_rows.is_finite() || output_rows < 0.0 || !cost.is_finite() || cost < 0.0 {
@@ -216,22 +213,9 @@ fn estimate_cross_relation_operator_join(
             "cross-relation operator join produced invalid estimate rows={output_rows}, cost={cost}"
         )));
     }
-    Ok(uqa_planner::LocalAccessEstimate {
+    Ok(crate::LocalAccessEstimate {
         output_rows,
         cost,
         paradigm: input.paradigm,
     })
-}
-
-pub(crate) fn estimate_operator_join_table_function(
-    engine: &Engine,
-    name: &str,
-    relations: Option<&OperatorJoinRelations>,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> DriverResult<uqa_planner::LocalAccessEstimate> {
-    let (relations, tree) = engine
-        .retrieval_binding()
-        .lower_join(name, relations, args, params)?;
-    estimate_cross_relation_operator_join(engine, &relations, tree)
 }

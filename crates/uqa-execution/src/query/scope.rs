@@ -187,6 +187,30 @@ mod tests {
         };
         assert!(expr_contains_subquery(&expression));
     }
+    #[test]
+    fn scalar_subquery_scope_restores_the_parent_arena_after_unwind() {
+        use uqa_sql::plan::UnifiedPlan;
+
+        let statement = uqa_sql::compile("SELECT 1")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let UnifiedPlan::Query(query) = UnifiedPlan::lower(statement) else {
+            panic!("SELECT must lower to a query plan");
+        };
+        let query = *query;
+        let mut scope = CteScope::<()>::new();
+        scope.scalar_subqueries.push(query.clone());
+
+        let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = scope.enter_scalar_subqueries(&[query.clone(), query]);
+            panic!("exercise scalar-subquery scope cleanup");
+        }));
+
+        assert!(unwind.is_err());
+        assert_eq!(scope.scalar_subqueries.len(), 1);
+    }
 }
 
 pub mod bindings;

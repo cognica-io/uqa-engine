@@ -244,3 +244,6 @@ pub fn call_bound_builtin(
         .collect::<Vec<_>>();
     catalog_scalar_value(context, &binding.name, &values)
 }
+
+#[cfg(test)]
+mod tests;

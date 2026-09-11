@@ -46,3 +46,25 @@ pub fn qualifier_filter(filters: Option<&QualifierFilters>, qualifier: &str) -> 
         .filter(|filters| !filters.is_empty())
         .and_then(|filters| combine_filters(filters.iter().cloned()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::semantics::doc_id_value;
+
+    #[test]
+    fn combine_filters_handles_empty_and_single_inputs_without_panicking() {
+        assert!(combine_filters(Vec::<ScalarExpr>::new()).is_none());
+        let combined = combine_filters([ScalarExpr::Literal(Value::Bool(true))]);
+        assert!(matches!(
+            combined,
+            Some(ScalarExpr::Literal(Value::Bool(true)))
+        ));
+    }
+
+    #[test]
+    fn document_ids_outside_bigint_are_rejected_at_the_sql_boundary() {
+        assert!(doc_id_value(i64::MAX as u64).is_ok());
+        assert!(doc_id_value(i64::MAX as u64 + 1).is_err());
+    }
+}

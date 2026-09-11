@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use uqa_sql::{semantics::source_filters::combine_filters, ResultRow};
+use uqa_sql::ResultRow;
 
 #[test]
 fn scalar_context_errors_preserve_argument_evaluation_order() {
@@ -22,7 +22,7 @@ fn scalar_context_errors_preserve_argument_evaluation_order() {
             calls += 1;
             Err(SQLError::Internal("argument failed".into()))
         };
-        let error = engine_func_intercept(None, function, &args, &row, &mut evaluate).unwrap_err();
+        let error = intercept_function(None, function, &args, &row, &mut evaluate).unwrap_err();
         assert!(matches!(error, SQLError::Internal(message) if message == "argument failed"));
         assert_eq!(
             calls, 1,
@@ -41,7 +41,7 @@ fn scalar_context_errors_preserve_argument_evaluation_order() {
             calls += 1;
             Err(SQLError::Internal("argument failed".into()))
         };
-        let error = engine_func_intercept(None, function, &args, &row, &mut evaluate).unwrap_err();
+        let error = intercept_function(None, function, &args, &row, &mut evaluate).unwrap_err();
         assert!(
             matches!(error, SQLError::Unsupported(message) if message == format!("{function} requires an engine-backed projection"))
         );
@@ -50,16 +50,6 @@ fn scalar_context_errors_preserve_argument_evaluation_order() {
             "{function} must require its context before evaluating arguments"
         );
     }
-}
-
-#[test]
-fn combine_filters_handles_empty_and_single_inputs_without_panicking() {
-    assert!(combine_filters(Vec::<ScalarExpr>::new()).is_none());
-    let combined = combine_filters([ScalarExpr::Literal(Value::Bool(true))]);
-    assert!(matches!(
-        combined,
-        Some(ScalarExpr::Literal(Value::Bool(true)))
-    ));
 }
 
 #[test]
@@ -73,7 +63,7 @@ fn engine_backed_projection_functions_reject_a_missing_engine_context() {
         "drop_graph",
     ] {
         let mut evaluate = |_: &ScalarExpr| Ok(Value::Null);
-        let error = engine_func_intercept(None, function, &[], &row, &mut evaluate)
+        let error = intercept_function(None, function, &[], &row, &mut evaluate)
             .expect_err("engine-backed functions must not report success without an engine");
         assert!(
             matches!(
@@ -88,7 +78,7 @@ fn engine_backed_projection_functions_reject_a_missing_engine_context() {
 
 #[test]
 fn score_projection_uses_explicit_provenance_even_for_zero() {
-    use uqa_execution::{OwnedPhysicalRow, PhysicalRow, RowSchema};
+    use crate::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 
     let args = [ScalarExpr::Literal(Value::Str("query".into()))];
     let mut evaluate = |expr: &ScalarExpr| match expr {
@@ -108,7 +98,7 @@ fn score_projection_uses_explicit_provenance_even_for_zero() {
         PhysicalRow::from_values(vec![Value::Str("rust".into()), Value::Float(0.0)]),
     );
     assert_eq!(
-        engine_func_intercept(None, "score_bm25", &args, &scored_row, &mut evaluate).unwrap(),
+        intercept_function(None, "score_bm25", &args, &scored_row, &mut evaluate).unwrap(),
         Some(Value::Float(0.0))
     );
 
@@ -122,13 +112,13 @@ fn score_projection_uses_explicit_provenance_even_for_zero() {
         PhysicalRow::from_values(vec![Value::Str("rust".into()), Value::Float(0.0)]),
     );
     let error =
-        engine_func_intercept(None, "score_bm25", &args, &unscored_row, &mut evaluate).unwrap_err();
+        intercept_function(None, "score_bm25", &args, &unscored_row, &mut evaluate).unwrap_err();
     assert!(error.to_string().contains("score-bearing"), "{error}");
 }
 
 #[test]
 fn qualified_score_projection_uses_structured_provenance_identity() {
-    use uqa_execution::{OwnedPhysicalRow, PhysicalRow, RowSchema};
+    use crate::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 
     let score_column = uqa_sql::ast::InternalRelationId::allocate().column(0);
     let schema = RowSchema::with_qualified_types(
@@ -151,7 +141,7 @@ fn qualified_score_projection_uses_structured_provenance_identity() {
         _ => Ok(Value::Null),
     };
     assert_eq!(
-        engine_func_intercept(None, "score_bm25", &args, &row, &mut evaluate).unwrap(),
+        intercept_function(None, "score_bm25", &args, &row, &mut evaluate).unwrap(),
         Some(Value::Float(0.25))
     );
 }

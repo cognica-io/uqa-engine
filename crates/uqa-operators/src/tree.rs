@@ -863,3 +863,6 @@ fn visit_operator_slice(children: &[OperatorTree], visitor: &mut impl FnMut(&Ope
         child.visit(visitor);
     }
 }
+
+mod introspection;
+pub use introspection::collect_graph_names;

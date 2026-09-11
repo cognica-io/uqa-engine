@@ -130,3 +130,36 @@ fn graph_default_resolution_retains_row_call_and_predicate_evaluation_order() {
     );
     assert_eq!(*inputs.events.borrow(), ["graphs"]);
 }
+
+#[test]
+fn logical_attention_defers_checked_model_capacity_to_execution() {
+    let inputs = Inputs::default();
+    let binding = RetrievalBinding {
+        hook: &inputs,
+        graphs: &inputs,
+    };
+    // This exceeds Vec's byte-capacity limit before any allocation is attempted.
+    let heads = (isize::MAX as usize / std::mem::size_of::<uqa_fusion::AttentionFusion>()) + 1;
+    let expression = predicate(&format!("SELECT * FROM docs WHERE fuse_multihead(bayesian_match(body, 'rust'), knn_match(embedding, ARRAY[1.0, 0.0], 2), n_heads => {heads})"));
+    let logical = retrieval::lower_where_bound(
+        &binding,
+        &expression,
+        &RetrievalConstants {
+            params: &[],
+            evaluate: &evaluate_constant,
+        },
+    )
+    .unwrap()
+    .unwrap();
+    assert!(
+        matches!(&logical, retrieval::RetrievalExpr::AttentionFusion {
+        options: AttentionSpec::MultiHead { n_heads, .. }, ..
+    } if *n_heads == heads)
+    );
+    assert!(inputs.events.borrow().is_empty());
+    assert!(
+        matches!(instantiate(logical), Err(SQLError::TypeMismatch(message))
+        if message == "fuse_multihead: multi-head attention head count exceeds available memory")
+    );
+    assert!(inputs.events.borrow().is_empty());
+}

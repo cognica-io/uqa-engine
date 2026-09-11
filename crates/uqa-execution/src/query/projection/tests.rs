@@ -5,8 +5,7 @@
 //
 
 use super::*;
-use uqa_execution::{Batch, ExecError, ExecResult, PhysicalOperator, RowSchema};
-use uqa_planner::UnifiedPlan;
+use crate::{Batch, ExecError, ExecResult, PhysicalOperator, RowSchema};
 
 struct CloseOperator {
     schema: RowSchema,
@@ -62,27 +61,4 @@ fn physical_failure_reports_both_execution_and_close_errors() {
     assert!(message.contains("primary"));
     assert!(message.contains("spill buffering"));
     assert!(message.contains("cleanup"));
-}
-
-#[test]
-fn scalar_subquery_scope_restores_the_parent_arena_after_unwind() {
-    let statement = uqa_sql::compile("SELECT 1")
-        .unwrap()
-        .into_iter()
-        .next()
-        .unwrap();
-    let UnifiedPlan::Query(query) = UnifiedPlan::lower(statement) else {
-        panic!("SELECT must lower to a query plan");
-    };
-    let query = *query;
-    let mut scope = CteScope::new();
-    scope.scalar_subqueries.push(query.clone());
-
-    let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _guard = scope.enter_scalar_subqueries(&[query.clone(), query]);
-        panic!("exercise scalar-subquery scope cleanup");
-    }));
-
-    assert!(unwind.is_err());
-    assert_eq!(scope.scalar_subqueries.len(), 1);
 }

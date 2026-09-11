@@ -53,6 +53,8 @@
         "crates/uqa-engine/src/capabilities/relation_removal.rs",
         "crates/uqa-engine/src/capabilities/retrieval_catalog.rs",
         "crates/uqa-engine/src/capabilities/retrieval_execution.rs",
+        "crates/uqa-engine/src/capabilities/retrieval_planning.rs",
+        "crates/uqa-engine/src/capabilities/retrieval_planning/tests.rs",
         "crates/uqa-engine/src/capabilities/returning.rs",
         "crates/uqa-engine/src/capabilities/routine_catalog.rs",
         "crates/uqa-engine/src/capabilities/routine_definitions.rs",
