@@ -14,7 +14,6 @@ use uqa_sql::ast::TransactionIsolationLevel;
 use uqa_sql::SQLError;
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
-use super::session::is_virtual_system_schema;
 use super::state::{
     DurableCatalogSnapshot, DurableCatalogState, EpochCoordinator, QueryRuntime, SessionContext,
     StorageContext,
@@ -186,27 +185,16 @@ impl MutationCoordinator<'_> {
         if_not_exists: bool,
         role_owner: &str,
     ) -> StorageBackendResult<bool> {
-        validate_schema_name(name)?;
-        let mut schemas = self.durable.schemas.write();
-        if schemas.contains_key(name) || self.durable.graphs.read().contains_key(name) {
-            if if_not_exists {
-                return Ok(false);
-            }
-            return Err(StorageBackendError::Other(format!(
-                "schema `{name}` already exists"
-            )));
-        }
-        let security = super::state::SchemaSecurity {
-            role_owner: role_owner.to_string(),
-            acl: None,
-        };
-        if let Some(catalog) = self.storage.catalog.as_ref() {
-            catalog.save_schema_row(&security.row(name))?;
-        }
-        schemas.insert(name.to_string(), security);
-        drop(schemas);
-        self.note_catalog_registry_changed();
-        Ok(true)
+        uqa_execution::schema::namespaces::register_schema(
+            &uqa_execution::schema::namespaces::SchemaRegistrationContext {
+                state: self,
+                persistence: self,
+                changes: self,
+            },
+            name,
+            if_not_exists,
+            role_owner,
+        )
     }
 
     pub(crate) fn note_catalog_registry_changed(&self) {
@@ -514,17 +502,7 @@ pub(super) fn parse_work_mem_bytes(raw: &str) -> Result<usize, SQLError> {
 }
 
 pub(crate) fn validate_schema_name(name: &str) -> StorageBackendResult<()> {
-    if name.is_empty() {
-        return Err(StorageBackendError::Other(format!(
-            "invalid schema name `{name}`"
-        )));
-    }
-    if is_virtual_system_schema(name) {
-        return Err(StorageBackendError::Other(format!(
-            "schema name `{name}` is reserved"
-        )));
-    }
-    Ok(())
+    uqa_sql::schema::namespaces::validate_schema_name(name).map_err(StorageBackendError::Other)
 }
 
 #[cfg(test)]
@@ -616,3 +594,5 @@ mod relation_removal;
 mod foreign_table_alteration;
 mod relation_alteration;
 mod view_alteration;
+
+mod namespaces;
