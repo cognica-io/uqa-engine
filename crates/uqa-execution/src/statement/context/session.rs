@@ -9,7 +9,7 @@
 use uqa_sql::{
     ast::{ColumnType, DiscardTarget, FetchCursorStmt, SetConstraintName, TransactionStmt},
     plan::UnifiedPlan,
-    SQLError, SQLParam, SQLResult,
+    SQLError, SQLResult,
 };
 
 pub trait StatementSettings {
@@ -55,23 +55,13 @@ pub trait StatementPortals {
 }
 pub trait PreparedPlanState {
     fn lookup_prepared(&self, name: &str) -> Option<UnifiedPlan>;
-    fn register_prepared_plan_with_types(
-        &self,
-        name: String,
-        plan: UnifiedPlan,
-        declared: &[ColumnType],
-        source_sql: Option<&str>,
-    ) -> Result<(), SQLError>;
     fn prepared_parameter_types(&self, name: &str) -> Option<Vec<Option<ColumnType>>>;
-    fn prepared_plan_for_execution(
-        &self,
-        name: &str,
-        params: &[SQLParam],
-    ) -> Result<Option<UnifiedPlan>, SQLError>;
     fn deallocate_prepared(&self, name: Option<&str>);
 }
 #[derive(Clone, Copy)]
 pub struct PreparedStatements<'a> {
     pub state: &'a dyn PreparedPlanState,
     pub arguments: &'a dyn crate::query::prepared::PreparedArgumentScopes,
+    pub definitions: crate::statement::prepared::PreparedRegistrationContext<'a>,
+    pub plans: &'a dyn uqa_sql::prepared::planning::PreparedPlanProvider,
 }

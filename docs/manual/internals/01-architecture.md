@@ -203,6 +203,8 @@ Responsibility roots remain facades over semantic children rather than line-coun
 | Statement binding context | [`crates/uqa-execution/src/query/binding/context.rs`](../../../crates/uqa-execution/src/query/binding/context.rs) |
 | TRUNCATE binding and execution | [`SQL target binding`](../../../crates/uqa-sql/src/schema/truncate.rs), [`execution scheduling`](../../../crates/uqa-execution/src/schema/truncate.rs) |
 | Executable statement analysis | [`crates/uqa-sql/src/binding/statements.rs`](../../../crates/uqa-sql/src/binding/statements.rs) |
+| Prepared definition and cache entry | [`SQL analysis`](../../../crates/uqa-sql/src/prepared/definition.rs), [`shared entry`](../../../crates/uqa-sql/src/prepared/entry.rs) |
+| Prepared registration and selection | [`execution registration`](../../../crates/uqa-execution/src/statement/prepared.rs), [`planner selection`](../../../crates/uqa-planner/src/statement_planning/prepared/selection.rs) |
 | Compiled statement scheduling | [`crates/uqa-execution/src/statement/compiled.rs`](../../../crates/uqa-execution/src/statement/compiled.rs) |
 | Engine query API and scopes | [`crates/uqa-engine/src/queries.rs`](../../../crates/uqa-engine/src/queries.rs) |
 | Analysis before optimization | [`crates/uqa-planner/src/statement_planning/executable.rs`](../../../crates/uqa-planner/src/statement_planning/executable.rs) |

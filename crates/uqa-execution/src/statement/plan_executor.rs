@@ -273,15 +273,13 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 "already exists",
             ));
         }
-        self.context
-            .prepared
-            .state
-            .register_prepared_plan_with_types(
-                name.to_string(),
-                body.clone(),
-                parameter_types,
-                self.source_sql.as_deref(),
-            )?;
+        crate::statement::prepared::register_plan(
+            &self.context.prepared.definitions,
+            name.to_string(),
+            body.clone(),
+            parameter_types,
+            self.source_sql.as_deref(),
+        )?;
         Ok(SQLResult::empty())
     }
 
@@ -300,8 +298,8 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         let plan = self
             .context
             .prepared
-            .state
-            .prepared_plan_for_execution(name, &bound)?
+            .plans
+            .plan_for_execution(name, &bound)?
             .ok_or_else(|| uqa_sql::prepared::statement_error("26000", name, "does not exist"))?;
         UnifiedPlanExecutor::new_nested(self.context.clone(), &bound).execute(&plan)
     }

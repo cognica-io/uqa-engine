@@ -9,7 +9,7 @@
 use uqa_sql::{
     ast::{ColumnType, DiscardTarget, SetConstraintName, TransactionStmt},
     plan::UnifiedPlan,
-    SQLError, SQLParam,
+    SQLError,
 };
 
 use crate::Engine;
@@ -66,24 +66,8 @@ impl PreparedPlanState for Engine {
     fn lookup_prepared(&self, name: &str) -> Option<UnifiedPlan> {
         Engine::lookup_prepared(self, name)
     }
-    fn register_prepared_plan_with_types(
-        &self,
-        name: String,
-        plan: UnifiedPlan,
-        declared: &[ColumnType],
-        source_sql: Option<&str>,
-    ) -> Result<(), SQLError> {
-        Engine::register_prepared_plan_with_types(self, name, plan, declared, source_sql)
-    }
     fn prepared_parameter_types(&self, name: &str) -> Option<Vec<Option<ColumnType>>> {
         Engine::prepared_parameter_types(self, name)
-    }
-    fn prepared_plan_for_execution(
-        &self,
-        name: &str,
-        params: &[SQLParam],
-    ) -> Result<Option<UnifiedPlan>, SQLError> {
-        Engine::prepared_plan_for_execution(self, name, params)
     }
     fn deallocate_prepared(&self, name: Option<&str>) {
         Engine::deallocate_prepared(self, name);
