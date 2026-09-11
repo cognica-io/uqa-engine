@@ -46,3 +46,5 @@ pub mod truncate;
 pub mod foreign_creation;
 
 pub mod foreign_definitions;
+
+pub mod foreign_removal;

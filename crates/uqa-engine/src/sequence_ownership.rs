@@ -263,39 +263,10 @@ impl Engine {
         &self,
         table_object_ids: &std::collections::BTreeSet<[u8; 16]>,
     ) -> StorageBackendResult<std::collections::BTreeSet<String>> {
-        self.refresh_sequences_from_catalog()?;
-        Ok(self
-            .durable
-            .sequences
-            .read()
-            .iter()
-            .filter(|(_, state)| {
-                state
-                    .owner
-                    .is_some_and(|owner| table_object_ids.contains(&owner.table_object_id))
-            })
-            .map(|(relation, _)| relation.qualified_name())
-            .collect())
-    }
-
-    pub(crate) fn foreign_table_owned_sequence_names(
-        &self,
-        table_names: &[String],
-    ) -> StorageBackendResult<std::collections::BTreeSet<String>> {
-        let mut table_object_ids = std::collections::BTreeSet::new();
-        let tables = self.durable.foreign_tables.read();
-        for table_name in table_names {
-            let relation = RelationIdentity::from_legacy_name(table_name)
-                .map_err(StorageBackendError::Other)?;
-            let table = tables.get(&relation).ok_or_else(|| {
-                StorageBackendError::Other(format!(
-                    "foreign table `{table_name}` disappeared while resolving owned sequences"
-                ))
-            })?;
-            table_object_ids.insert(table.object_id);
-        }
-        drop(tables);
-        self.sequence_names_owned_by_tables(&table_object_ids)
+        uqa_execution::catalog::sequence_introspection::ownership::sequence_names_owned_by_tables(
+            self,
+            table_object_ids,
+        )
     }
 
     pub(crate) fn sequence_external_dependents_for_owner_drop(
@@ -331,20 +302,11 @@ impl Engine {
         table_object_id: [u8; 16],
         column_object_id: [u8; 16],
     ) -> StorageBackendResult<std::collections::BTreeSet<String>> {
-        self.refresh_sequences_from_catalog()?;
-        Ok(self
-            .durable
-            .sequences
-            .read()
-            .iter()
-            .filter(|(_, state)| {
-                state.owner.is_some_and(|owner| {
-                    owner.table_object_id == table_object_id
-                        && owner.column_object_id == column_object_id
-                })
-            })
-            .map(|(relation, _)| relation.qualified_name())
-            .collect())
+        uqa_execution::catalog::sequence_introspection::ownership::sequence_names_owned_by_column(
+            self,
+            table_object_id,
+            column_object_id,
+        )
     }
 
     pub(crate) fn owned_sequence_dependents_for_column(

@@ -83,29 +83,8 @@ impl Engine {
         &self,
         name: &str,
     ) -> StorageBackendResult<Vec<RelationIdentity>> {
-        let (schema, relation) =
-            RelationIdentity::parse_reference(name).map_err(StorageBackendError::Other)?;
-        if let Some(schema) = schema {
-            if schema == "pg_temp" {
-                return Ok(vec![RelationIdentity::new(
-                    self.temporary_schema_name(),
-                    relation,
-                )]);
-            }
-            return Ok(vec![RelationIdentity::new(schema, relation)]);
-        }
-        let mut candidates = Vec::new();
-        candidates.push(RelationIdentity::new(
-            self.temporary_schema_name(),
-            &relation,
-        ));
-        for schema in &self.session.state.read().search_path {
-            if schema == "pg_catalog" || schema == "information_schema" {
-                continue;
-            }
-            candidates.push(RelationIdentity::new(schema, &relation));
-        }
-        Ok(candidates)
+        uqa_sql::catalog::resolution::candidates::relation_lookup_candidates(self, name)
+            .map_err(StorageBackendError::Other)
     }
 
     pub(crate) fn ensure_temporary_relation_creation_privilege(&self) -> Result<(), SQLError> {
@@ -529,19 +508,6 @@ impl Engine {
             .relation_lookup_candidates(name)?
             .into_iter()
             .find(|candidate| sequences.contains_key(candidate))
-            .map(|relation| relation.qualified_name()))
-    }
-
-    pub(crate) fn resolve_foreign_table_name(
-        &self,
-        name: &str,
-    ) -> StorageBackendResult<Option<String>> {
-        self.synchronize_catalog_registries()?;
-        let tables = self.durable.foreign_tables.read();
-        Ok(self
-            .relation_lookup_candidates(name)?
-            .into_iter()
-            .find(|candidate| tables.contains_key(candidate))
             .map(|relation| relation.qualified_name()))
     }
 

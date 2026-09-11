@@ -661,3 +661,5 @@ mod event_registry;
 mod foreign_creation;
 
 mod foreign_definitions;
+
+mod foreign_catalog;

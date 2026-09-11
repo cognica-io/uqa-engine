@@ -8,7 +8,6 @@
 use crate::catalog::foreign::StoredForeignTable;
 use crate::schema::{
     events::context::EventLifecycleContext,
-    foreign_creation::ForeignCreationRegistry,
     foreign_table_alteration::ForeignTableAlterPublication,
     publication::dependencies::CatalogPublicationChanges,
     view_references::{self, ViewReferenceContext},
@@ -18,7 +17,7 @@ use uqa_sql::schema::foreign_tables::dependencies as declarations;
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 pub mod migration;
 pub struct ForeignDefinitionContext<'a> {
-    pub registry: &'a dyn ForeignCreationRegistry,
+    pub registry: &'a dyn ForeignRegistryReads,
     pub publication: &'a dyn ForeignTableAlterPublication,
     pub catalog: Option<&'a dyn CatalogFacade>,
     pub changes: &'a dyn CatalogPublicationChanges,
@@ -179,3 +178,5 @@ impl ForeignDefinitionContext<'_> {
         Ok(changed)
     }
 }
+
+use crate::catalog::foreign::reads::ForeignRegistryReads;

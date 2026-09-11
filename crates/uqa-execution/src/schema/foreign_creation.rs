@@ -16,10 +16,7 @@ use crate::schema::{
         ownership::{self, ImplicitOwnershipContext},
     },
 };
-use std::{
-    collections::BTreeMap,
-    ops::{Deref, DerefMut},
-};
+use std::{collections::BTreeMap, ops::DerefMut};
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::DeferredCreateForeignTable,
@@ -29,18 +26,12 @@ use uqa_sql::{
 use uqa_storage::{CatalogFacade, StorageBackendResult};
 
 pub mod entry;
-pub type ForeignServersRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<String, uqa_fdw::ForeignServer>> + 'a>;
-pub type ForeignTablesRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RelationIdentity, StoredForeignTable>> + 'a>;
-pub type ForeignSecurityRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RelationIdentity, TableSecurity>> + 'a>;
+pub use crate::catalog::foreign::reads::{
+    ForeignRegistryReads, ForeignSecurityRead, ForeignServersRead, ForeignTablesRead,
+};
 pub type ForeignServersWrite<'a> =
     Box<dyn DerefMut<Target = BTreeMap<String, uqa_fdw::ForeignServer>> + 'a>;
-pub trait ForeignCreationRegistry {
-    fn servers(&self) -> ForeignServersRead<'_>;
-    fn tables(&self) -> ForeignTablesRead<'_>;
-    fn security(&self) -> ForeignSecurityRead<'_>;
+pub trait ForeignCreationRegistry: ForeignRegistryReads {
     fn servers_write(&self) -> ForeignServersWrite<'_>;
 }
 pub trait ForeignCreationNamespace {

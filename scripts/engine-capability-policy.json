@@ -30,6 +30,7 @@
         "crates/uqa-engine/src/capabilities/domains.rs",
         "crates/uqa-engine/src/capabilities/event_definitions.rs",
         "crates/uqa-engine/src/capabilities/event_registry.rs",
+        "crates/uqa-engine/src/capabilities/foreign_catalog.rs",
         "crates/uqa-engine/src/capabilities/foreign_creation.rs",
         "crates/uqa-engine/src/capabilities/foreign_definitions.rs",
         "crates/uqa-engine/src/capabilities/foreign_table_alteration.rs",

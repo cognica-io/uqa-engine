@@ -8,8 +8,8 @@
 
 use super::{NamespaceCatalogChanges, NamespaceCatalogRefresh, SchemaRegistryWrite};
 use crate::schema::removal::{
-    RelationRemovalEvents, RelationRemovalForeignTables, RelationRemovalLocks,
-    RelationRemovalRoutines, RelationRemovalSequences, RelationRemovalTables,
+    RelationRemovalEvents, RelationRemovalLocks, RelationRemovalRoutines, RelationRemovalSequences,
+    RelationRemovalTables,
 };
 use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
@@ -54,7 +54,7 @@ pub struct SchemaRemovalContext<'a> {
     pub tables: &'a dyn RelationRemovalTables,
     pub routines: &'a dyn RelationRemovalRoutines,
     pub events: &'a dyn RelationRemovalEvents,
-    pub foreign: &'a dyn RelationRemovalForeignTables,
+    pub foreign: crate::schema::foreign_removal::ForeignTableRemovalContext<'a>,
     pub views: &'a dyn SchemaRemovalViews,
     pub sequences: &'a dyn RelationRemovalSequences,
     pub locks: &'a dyn RelationRemovalLocks,

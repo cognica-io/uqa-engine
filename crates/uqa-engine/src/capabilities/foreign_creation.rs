@@ -40,7 +40,7 @@ impl Engine {
         }
     }
 }
-impl ForeignCreationRegistry for Engine {
+impl ForeignRegistryReads for Engine {
     fn servers(&self) -> ForeignServersRead<'_> {
         Box::new(self.durable.foreign_servers.read())
     }
@@ -50,6 +50,8 @@ impl ForeignCreationRegistry for Engine {
     fn security(&self) -> ForeignSecurityRead<'_> {
         Box::new(self.durable.foreign_table_security.read())
     }
+}
+impl ForeignCreationRegistry for Engine {
     fn servers_write(&self) -> ForeignServersWrite<'_> {
         Box::new(self.durable.foreign_servers.write())
     }
@@ -73,3 +75,5 @@ impl ForeignCreationTransactions for Engine {
         self.with_implicit_transaction(|engine| write(&engine.foreign_creation_context()))
     }
 }
+
+use uqa_execution::catalog::foreign::reads::ForeignRegistryReads;
