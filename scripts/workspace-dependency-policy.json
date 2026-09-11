@@ -252,7 +252,9 @@
         "src/table_security/acl.rs",
         "src/table_security/columns.rs",
         "src/foreign_table_security.rs",
-        "src/table_security.rs"
+        "src/table_security.rs",
+        "src/sequence_ownership.rs",
+        "src/table_storage/dependencies/sequences.rs"
       ]
     },
     "crates/uqa-storage": {

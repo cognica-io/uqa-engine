@@ -87,3 +87,20 @@ pub fn rewritten_view_sequence_references(
     )?;
     Ok(changed.then_some(rewritten))
 }
+
+pub mod analysis;
+
+pub fn detach_sequence_provenance(columns: &mut [crate::ast::ColumnDef], sequence: &str) -> bool {
+    let mut changed = false;
+    for column in columns {
+        if column
+            .auto_increment
+            .as_ref()
+            .is_some_and(|provenance| provenance.sequence.as_deref() == Some(sequence))
+        {
+            column.auto_increment = None;
+            changed = true;
+        }
+    }
+    changed
+}

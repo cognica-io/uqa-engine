@@ -7,7 +7,6 @@
 //! Bind SQL schema reference analysis to the active or restored catalog.
 use crate::{Engine, StorageBackendError, StorageBackendResult};
 use uqa_sql::ast::{ColumnDef, TableCheck};
-pub(super) use uqa_sql::schema::dependencies::regclass::regclass_constant_oid;
 impl Engine {
     pub(in crate::table_storage) fn bind_table_schema_regclass_constants(
         &self,

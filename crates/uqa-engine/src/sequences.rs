@@ -11,8 +11,6 @@ use super::{
 
 mod dependencies;
 
-pub(crate) use dependencies::SequenceSchemaDependent;
-
 impl Engine {
     /// Resolve a sequence reference at DDL binding time using the current
     /// `search_path`. Persisted expressions must store the returned canonical

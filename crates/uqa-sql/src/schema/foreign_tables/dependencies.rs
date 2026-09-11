@@ -97,17 +97,4 @@ pub fn remove_foreign_column(
     checks.retain(|check| !schema_expr_references_column(&check.expr, column_name));
 }
 
-pub fn detach_foreign_sequence_provenance(columns: &mut [ColumnDef], sequence: &str) -> bool {
-    let mut changed = false;
-    for column in columns {
-        if column
-            .auto_increment
-            .as_ref()
-            .is_some_and(|provenance| provenance.sequence.as_deref() == Some(sequence))
-        {
-            column.auto_increment = None;
-            changed = true;
-        }
-    }
-    changed
-}
+pub use crate::schema::sequences::dependencies::detach_sequence_provenance as detach_foreign_sequence_provenance;

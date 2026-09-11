@@ -24,3 +24,5 @@ pub mod migration;
 
 pub mod owner_migration;
 pub mod owner_publication;
+
+pub mod dependency_lifecycle;
