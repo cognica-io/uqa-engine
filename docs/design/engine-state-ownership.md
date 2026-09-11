@@ -37,6 +37,8 @@ Foreign-table declaration analysis belongs to SQL and creation scheduling belong
 
 The [table grant adapter](../../crates/uqa-engine/src/capabilities/table_grants.rs) retains the original table generation under the actual table registry guard and provides ordered schema reads plus provider writes. Its mutation handles are separate from read-only privilege inquiry state. SQL computes ACL candidates; execution persists all table, view and foreign candidates before any memory publication and retains the authorization guards until that publication finishes. A failed final foreign write rolls back preceding durable writes through the existing transaction boundary.
 
+The [authorization adapter](../../crates/uqa-engine/src/capabilities/table_authorization.rs) supplies read-only relation catalogs and retained table generations. Column guards are acquired only when table-wide access fails; owner reads retain the original narrow security lookup. Maintenance captures security while holding the actual table registry guard, then releases role and membership guards before notices. SQL owns view access rules, and execution owns table/foreign authority and optional-provider foreign security persistence.
+
 ## Atomicity and locking
 
 Transactional session values live behind one `SessionContext.state` lock. Snapshot and restore therefore cannot combine an old search path with a new prepared-plan cache, PRNG state, or sequence `currval` map.

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Unsupported CREATE syntax must fail before it can create a durable object.
+//! Rejected CREATE declarations must fail before they can create a durable object.
 
 use uqa_engine::Engine;
 
@@ -15,7 +15,7 @@ fn rejected_create_syntax_has_no_current_or_reopened_catalog_side_effects() {
     let rejected = [
         "CREATE TABLE inherited (id INTEGER) INHERITS (parent)",
         "CREATE TABLE optioned (id INTEGER) WITH (fillfactor = 70)",
-        "CREATE SCHEMA owned AUTHORIZATION CURRENT_USER",
+        "CREATE SCHEMA owned AUTHORIZATION missing_schema_owner",
         "CREATE SCHEMA bundled CREATE TABLE bundled.child (id INTEGER)",
         "CREATE UNLOGGED VIEW unlogged_v AS SELECT 1",
         "CREATE TEMP MATERIALIZED VIEW temp_materialized AS SELECT 1",

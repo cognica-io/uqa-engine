@@ -120,3 +120,5 @@ pub mod sequence_introspection;
 
 #[cfg(test)]
 pub(crate) mod test_support;
+
+pub mod notices;

@@ -665,3 +665,5 @@ mod foreign_definitions;
 mod foreign_catalog;
 
 mod table_grants;
+
+mod table_authorization;

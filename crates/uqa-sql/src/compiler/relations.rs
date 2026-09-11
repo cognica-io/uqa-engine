@@ -550,23 +550,41 @@ pub(super) fn compile_refresh_materialized_view(
 pub(super) fn compile_create_schema(
     stmt: &pg_query::protobuf::CreateSchemaStmt,
 ) -> Result<Statement> {
-    if stmt.authrole.is_some() {
-        return Err(SQLError::Unsupported(
-            "CREATE SCHEMA AUTHORIZATION is not supported".into(),
-        ));
-    }
     if !stmt.schema_elts.is_empty() {
         return Err(SQLError::Unsupported(
             "CREATE SCHEMA containing schema elements is not supported".into(),
         ));
     }
-    let name = if stmt.schemaname.is_empty() {
-        return Err(SQLError::Internal("CREATE SCHEMA without name".into()));
-    } else {
-        stmt.schemaname.clone()
-    };
+    let authorization = stmt
+        .authrole
+        .as_ref()
+        .map(|role| {
+            use crate::ast::SchemaAuthorization;
+            use pg_query::protobuf::RoleSpecType;
+            match role.roletype() {
+                RoleSpecType::RolespecCstring => {
+                    Ok(SchemaAuthorization::Role(role.rolename.clone()))
+                }
+                RoleSpecType::RolespecCurrentRole | RoleSpecType::RolespecCurrentUser => {
+                    Ok(SchemaAuthorization::CurrentUser)
+                }
+                RoleSpecType::RolespecSessionUser => Ok(SchemaAuthorization::SessionUser),
+                RoleSpecType::RolespecPublic => Ok(SchemaAuthorization::Role("public".into())),
+                other => Err(SQLError::Internal(format!(
+                    "CREATE SCHEMA has invalid role specification {other:?}"
+                ))),
+            }
+        })
+        .transpose()?;
+    let name = (!stmt.schemaname.is_empty()).then(|| stmt.schemaname.clone());
+    if name.is_none() && authorization.is_none() {
+        return Err(SQLError::Internal(
+            "CREATE SCHEMA without name or authorization".into(),
+        ));
+    }
     Ok(Statement::CreateSchema {
         name,
         if_not_exists: stmt.if_not_exists,
+        authorization,
     })
 }

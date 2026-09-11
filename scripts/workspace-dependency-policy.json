@@ -250,7 +250,8 @@
         "src/capabilities/statements/definitions.rs",
         "src/table_security/grants.rs",
         "src/table_security/acl.rs",
-        "src/table_security/columns.rs"
+        "src/table_security/columns.rs",
+        "src/foreign_table_security.rs"
       ]
     },
     "crates/uqa-storage": {

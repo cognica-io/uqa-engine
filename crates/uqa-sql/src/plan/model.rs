@@ -539,8 +539,10 @@ pub enum CommandPlan {
         with_no_data: bool,
     },
     CreateSchema {
-        name: String,
+        name: Option<String>,
         if_not_exists: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        authorization: Option<crate::ast::SchemaAuthorization>,
     },
     AlterSchemaOwner {
         name: String,

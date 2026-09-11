@@ -21,6 +21,7 @@ mod function_binding;
 mod indexes;
 mod interval;
 mod locking;
+mod namespaces;
 mod ranges;
 mod relation_hierarchy;
 mod relation_lifecycle;
@@ -39,6 +40,7 @@ pub use function_binding::*;
 pub use indexes::*;
 pub use interval::*;
 pub use locking::*;
+pub use namespaces::*;
 pub use ranges::*;
 pub use relation_hierarchy::*;
 pub use relation_lifecycle::*;
@@ -555,12 +557,12 @@ pub enum Statement {
         concurrently: bool,
         with_no_data: bool,
     },
-    /// `CREATE SCHEMA [IF NOT EXISTS] name`. This AST entry records the
-    /// command for the engine's durable schema catalog and namespace
-    /// resolver.
+    /// `CREATE SCHEMA [IF NOT EXISTS] [name] [AUTHORIZATION role]`; an omitted name binds to the resolved owner.
     CreateSchema {
-        name: String,
+        name: Option<String>,
         if_not_exists: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        authorization: Option<SchemaAuthorization>,
     },
     AlterSchemaOwner {
         name: String,

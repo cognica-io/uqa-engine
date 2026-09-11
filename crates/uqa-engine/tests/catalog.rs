@@ -78,3 +78,6 @@ mod sql_update_from_delete_using;
 mod sql_value_index;
 #[path = "sql_views.rs"]
 mod sql_views;
+
+#[path = "catalog/sql_schema_authorization.rs"]
+mod sql_schema_authorization;
