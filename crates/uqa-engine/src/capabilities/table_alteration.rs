@@ -170,10 +170,12 @@ impl ColumnRemovalEvents for Engine {
         column: &str,
         cascade: bool,
     ) -> Result<(), SQLError> {
-        self.handle_drop_column_event_dependencies(table, column, cascade)
+        self.event_lifecycle_context()
+            .handle_drop_column_event_dependencies(table, column, cascade)
     }
     fn drop_relation_rules(&self, relations: &[String]) -> StorageBackendResult<()> {
-        self.drop_rules_depending_on_relations_inner(relations)
+        self.event_lifecycle_context()
+            .drop_rules_depending_on_relations_inner(relations)
     }
 }
 impl ColumnRemovalViews for Engine {

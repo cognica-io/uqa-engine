@@ -104,3 +104,6 @@ pub fn undefined_rule(name: &str, relation: &str) -> SQLError {
 }
 
 pub mod lookup;
+
+pub mod dependents;
+pub mod rewrites;

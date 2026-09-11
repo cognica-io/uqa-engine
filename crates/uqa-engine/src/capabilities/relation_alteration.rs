@@ -62,7 +62,11 @@ impl RelationRenameDependencies for Engine {
         from: &RelationIdentity,
         to: &RelationIdentity,
     ) -> StorageBackendResult<()> {
-        self.rename_relation_events_inner(from, to)
+        uqa_execution::schema::events::rename_relation_events(
+            &self.event_catalog_context(),
+            from,
+            to,
+        )
     }
 }
 impl RoleTargetSchemaAccess for Engine {

@@ -90,3 +90,5 @@ fn failed_constraint_trigger_replacement_preserves_registered_identity_and_defin
         before
     );
 }
+
+mod publication;

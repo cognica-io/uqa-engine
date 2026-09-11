@@ -84,7 +84,9 @@ impl ForeignTableDropDependencies for Engine {
         &self,
         names: &[String],
     ) -> Result<Vec<(RelationIdentity, String)>, SQLError> {
-        Engine::rules_depending_on_relations(self, names)
+        self.event_lookup_context()
+            .rules_depending_on_relations(names)
+            .map_err(uqa_storage::StorageBackendError::Other)
             .map_err(|error| storage_error("DROP FOREIGN TABLE dependency preflight", &error))
     }
     fn sequence_external_dependents_for_owner_drop(
@@ -144,7 +146,8 @@ impl RelationRemovalEvents for Engine {
         &self,
         names: &[String],
     ) -> StorageBackendResult<()> {
-        Engine::drop_rules_depending_on_relations_inner(self, names)
+        self.event_lifecycle_context()
+            .drop_rules_depending_on_relations_inner(names)
     }
 }
 impl RelationRemovalForeignTables for Engine {

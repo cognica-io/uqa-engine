@@ -60,3 +60,5 @@ pub fn rename_relation_events(
 
 pub mod context;
 mod lifecycle;
+
+mod dependents;

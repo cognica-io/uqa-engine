@@ -142,3 +142,5 @@ pub mod definition;
 pub mod restoration;
 
 pub mod reads;
+
+pub mod removal;

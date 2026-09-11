@@ -171,10 +171,13 @@ impl ColumnDropRows for Engine {
 }
 impl ColumnDropRules for Engine {
     fn prepare(&self, table: &str, column: &str) -> StorageBackendResult<PreparedRuleColumnDrop> {
-        self.prepare_rule_column_drop(table, column)
+        self.event_lookup_context()
+            .prepare_rule_column_drop(table, column)
+            .map_err(uqa_storage::StorageBackendError::Other)
     }
     fn finish(&self, prepared: PreparedRuleColumnDrop) -> StorageBackendResult<()> {
-        self.finish_rule_column_drop(prepared)
+        self.event_lifecycle_context()
+            .finish_rule_column_drop(prepared)
     }
 }
 impl ColumnDropSequences for Engine {

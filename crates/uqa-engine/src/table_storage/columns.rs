@@ -316,7 +316,8 @@ impl Engine {
             .map_err(|error| {
                 StorageBackendError::Other(format!("rewrite routine column references: {error}"))
             })?;
-        self.rename_event_column_inner(&table_name, from, to)?;
+        self.event_lifecycle_context()
+            .rename_event_column_inner(&table_name, from, to)?;
         self.mark_column_stats_dirty(&table_name, &t)?;
         self.refresh_value_indexes_for_table(&table_name)?;
         Ok(true)

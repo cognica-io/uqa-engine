@@ -41,6 +41,7 @@ impl RoutineRenameDependents for Engine {
         target: &FunctionBinding,
         new_name: &str,
     ) -> Result<(), SQLError> {
-        Engine::rewrite_event_routine_identity(self, target, new_name)
+        self.event_lifecycle_context()
+            .rewrite_event_routine_identity(target, new_name)
     }
 }
