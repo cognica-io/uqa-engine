@@ -16,6 +16,8 @@ When generating SQL:
 - Order ranked results by `_score DESC` and a stable identity tie key.
 - Treat unsupported shapes as errors rather than silently approximating them.
 
+Model training orchestration and table-to-training-data conversion live in `crates/uqa-execution/src/query/model_training.rs` and its `data.rs` module; `uqa-ml` owns numerical training. Engine supplies retained table handles, projected document reads, and model persistence with the original transaction boundary. Pure training-label and IVF-catalog validation tests reside in execution and storage respectively.
+
 ## Start here
 
 - [Manual overview](docs/manual/README.md): Scope, reading paths, conventions, and compatibility target.

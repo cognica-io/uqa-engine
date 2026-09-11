@@ -4,9 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{
-    ml_deep_learn, DeepLearnOutput, DeepModel, DocId, Engine, LearnOptions, SQLError, TrainingSet,
-};
+use super::{DeepLearnOutput, DeepModel, DocId, Engine, LearnOptions, SQLError, TrainingSet};
 
 const VECTOR_CALIBRATION_MODEL_PREFIX: &str = "vector_calibration_model::";
 
@@ -95,10 +93,8 @@ impl Engine {
         training_set: &TrainingSet,
         options: &LearnOptions,
     ) -> Result<DeepLearnOutput, SQLError> {
-        let output = ml_deep_learn(training_set, options)
-            .map_err(|e| SQLError::Unsupported(format!("deep_learn: {e}")))?;
-        self.save_model(name, &output.model)?;
-        Ok(output)
+        self.model_training_context()
+            .train(name, training_set, options)
     }
 
     /// Parse a JSON [`TrainingSet`], train it, and persist the model.
@@ -108,10 +104,8 @@ impl Engine {
         training_json: &str,
         options: &LearnOptions,
     ) -> Result<DeepLearnOutput, SQLError> {
-        let training_set: TrainingSet = serde_json::from_str(training_json).map_err(|e| {
-            SQLError::TypeMismatch(format!("invalid deep_learn training JSON: {e}"))
-        })?;
-        self.deep_learn(name, &training_set, options)
+        self.model_training_context()
+            .train_json(name, training_json, options)
     }
 
     /// Train from a table containing `features` and `label` columns.
@@ -121,8 +115,8 @@ impl Engine {
         table: &str,
         options: &LearnOptions,
     ) -> Result<DeepLearnOutput, SQLError> {
-        let training_set = self.training_set_from_table(table, "features", "label")?;
-        self.deep_learn(name, &training_set, options)
+        self.model_training_context()
+            .train_table(name, table, options)
     }
 
     /// Persist Bayesian calibration parameters for a named signal. The
@@ -290,3 +284,6 @@ impl Engine {
         Ok(scores)
     }
 }
+
+#[cfg(test)]
+mod tests;

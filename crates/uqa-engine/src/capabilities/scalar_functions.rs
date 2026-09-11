@@ -5,13 +5,16 @@
 //
 
 //! Compose scalar execution services from current session and catalog state.
-use crate::Engine;
+use crate::{Engine, TableState};
+use std::{collections::BTreeMap, sync::Arc};
+use uqa_core::DocId;
 use uqa_execution::query::{
-    model_training::ModelTraining,
+    model_training::{ModelTrainingContext, TrainedModels, TrainingTable, TrainingTables},
     scalar_functions::{ScalarFunctionContext, ScalarSession},
 };
-use uqa_ml::{DeepLearnOutput, LearnOptions};
+use uqa_ml::DeepModel;
 use uqa_sql::SQLError;
+use uqa_storage::{document_store::Document, StorageBackendResult};
 impl ScalarSession for Engine {
     fn backend_process_id(&self) -> i32 {
         self.backend_process_id()
@@ -23,25 +26,48 @@ impl ScalarSession for Engine {
         self.notification_queue_usage()
     }
 }
-impl ModelTraining for Engine {
-    fn train_json(
-        &self,
-        model: &str,
-        source: &str,
-        options: &LearnOptions,
-    ) -> Result<DeepLearnOutput, SQLError> {
-        self.deep_learn_json(model, source, options)
-    }
-    fn train_table(
-        &self,
-        model: &str,
-        source: &str,
-        options: &LearnOptions,
-    ) -> Result<DeepLearnOutput, SQLError> {
-        self.deep_learn_table(model, source, options)
+struct TrainingTableState(Arc<TableState>);
+
+impl TrainingTable for TrainingTableState {
+    fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {
+        self.0.document_store.read().doc_ids()
     }
 }
+
+impl TrainingTables for Engine {
+    fn training_table(
+        &self,
+        name: &str,
+    ) -> StorageBackendResult<Option<Box<dyn TrainingTable + '_>>> {
+        self.try_table(name).map(|table| {
+            table.map(|state| Box::new(TrainingTableState(state)) as Box<dyn TrainingTable>)
+        })
+    }
+
+    fn training_documents(
+        &self,
+        table: &str,
+        doc_ids: &[DocId],
+        projection: &[String],
+    ) -> Result<BTreeMap<DocId, Document>, SQLError> {
+        self.get_documents_with_materialized_projection(table, doc_ids, projection)
+    }
+}
+
+impl TrainedModels for Engine {
+    fn save_model(&self, name: &str, model: &DeepModel) -> Result<(), SQLError> {
+        self.save_model(name, model)
+    }
+}
+
 impl Engine {
+    pub(crate) fn model_training_context(&self) -> ModelTrainingContext<'_> {
+        ModelTrainingContext {
+            tables: self,
+            models: self,
+        }
+    }
+
     pub(crate) fn scalar_function_context(&self) -> ScalarFunctionContext<'_> {
         ScalarFunctionContext {
             catalog: self.catalog_execution(),
@@ -54,7 +80,7 @@ impl Engine {
             tables: self.table_privilege_context(),
             session: self,
             graphs: self,
-            models: self,
+            models: self.model_training_context(),
         }
     }
 }

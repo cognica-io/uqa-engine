@@ -51,6 +51,8 @@ The [sequence restoration adapter](../../crates/uqa-engine/src/capabilities/sequ
 
 The [sequence value adapter](../../crates/uqa-engine/src/capabilities/sequence_values.rs) lends actual allocation, persistence, cache, and session guards to native value execution. Session readers expose current values and the last-used identity under one retained lock. Native execution releases allocation and session guards before calling the unchanged Engine transaction-history recorder; discard and rollback keep their existing ownership. SQL errors and pure cache tests live with their implementations, while guard, failure-publication, and rollback tests use real Engine state.
 
+Model training consumes a retained table generation and session-bound projected document reads. The table document-store guard ends after the ID scan; the retained table handle survives row materialization and conversion, then ends before numerical training and model publication. Native execution owns JSON decoding, feature/label conversion, training invocation, and report construction. Engine supplies the unchanged model-save transaction and actual catalog/cache publication. Whole-training callbacks into Engine are removed.
+
 ## Atomicity and locking
 
 Transactional session values live behind one `SessionContext.state` lock. Snapshot and restore therefore cannot combine an old search path with a new prepared-plan cache, PRNG state, or sequence `currval` map.

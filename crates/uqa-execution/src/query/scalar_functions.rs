@@ -8,7 +8,7 @@
 
 use super::{
     graph_lifecycle::GraphLifecycle,
-    model_training::{run_deep_learn_projection, ModelTraining},
+    model_training::{run_deep_learn_projection, ModelTrainingContext},
 };
 use crate::catalog::{
     context::CatalogContext, security::table_inquiry::TablePrivilegeContext,
@@ -42,7 +42,7 @@ pub struct ScalarFunctionContext<'a> {
     pub tables: TablePrivilegeContext<'a>,
     pub session: &'a dyn ScalarSession,
     pub graphs: &'a dyn GraphLifecycle,
-    pub models: &'a dyn ModelTraining,
+    pub models: ModelTrainingContext<'a>,
 }
 use crate::query::graph_lifecycle::{
     run_age_alter_graph_with_evaluator, run_age_create_elabel_with_evaluator,
@@ -79,7 +79,7 @@ pub fn intercept_function(
             Ok(Some(score))
         }
         "deep_learn" => Ok(Some(run_deep_learn_projection(
-            require_scalar_context(context, "deep_learn")?.models,
+            &require_scalar_context(context, "deep_learn")?.models,
             args,
             evaluate,
         )?)),

@@ -7,25 +7,6 @@
 use super::*;
 
 #[test]
-fn value_to_usize_rejects_non_finite_fractional_and_out_of_range_floats() {
-    assert_eq!(value_to_usize(&Value::Float(42.0)).unwrap(), 42);
-    for value in [f64::NAN, f64::INFINITY, -1.0, 1.5] {
-        assert!(value_to_usize(&Value::Float(value)).is_err());
-    }
-    let exponent = i32::try_from(usize::BITS).unwrap();
-    assert!(value_to_usize(&Value::Float(2.0_f64.powi(exponent))).is_err());
-}
-
-#[test]
-fn persisted_ivf_parameters_reject_invalid_values() {
-    let invalid = BTreeMap::from([("lists".to_string(), "not-a-number".to_string())]);
-    assert!(IVFIndexParams::from_catalog_map(&invalid).is_err());
-
-    let zero = BTreeMap::from([("probes".to_string(), "0".to_string())]);
-    assert!(IVFIndexParams::from_catalog_map(&zero).is_err());
-}
-
-#[test]
 fn document_id_watermark_represents_and_reports_exhaustion_without_wrapping() {
     let engine = Engine::new();
     engine.create_default_table("docs", Vec::new()).unwrap();

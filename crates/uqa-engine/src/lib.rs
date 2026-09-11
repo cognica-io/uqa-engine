@@ -132,10 +132,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use uqa_analysis::{analyzer::standard_analyzer, registry as analyzer_registry, Analyzer};
 use uqa_core::{DocId, FieldName, PostingList, Value};
-use uqa_ml::{
-    deep_learn as ml_deep_learn, DeepLearnOutput, DeepModel, LearnOptions, TrainingExample,
-    TrainingSet,
-};
+use uqa_ml::{DeepLearnOutput, DeepModel, LearnOptions, TrainingSet};
 use uqa_operators::ExecutionContext;
 use uqa_scoring::{
     BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, CalibrationMetrics,
