@@ -10,10 +10,6 @@ use uqa_execution::ScalarExpr;
 use uqa_planner::{QueryBlockPlan, QueryPlan};
 
 use super::from_rows::execute_lateral_subquery_output;
-use super::scalar::{
-    eval_physical_scalar, PhysicalEvalContext, PhysicalOuterRow, PhysicalSubqueryRunner,
-};
-use super::volatility::query_contains_volatile_function;
 use super::{Engine, SQLError, SQLParam, SQLResult, Value};
 
 mod cte_execution;
@@ -43,11 +39,11 @@ pub(super) type QueryOutputMode<'consumer> =
         crate::session::StatementReadSnapshot,
     >;
 pub(in crate::sql) use uqa_execution::query::consumer::QueryConsumerControl;
-pub(in crate::sql) use uqa_execution::query::output::{QueryOutput, QueryRows};
+pub(in crate::sql) use uqa_execution::query::output::QueryOutput;
 
 /// Execute a physical query plan while preserving the caller's CTE scope.
 mod execution;
 pub(super) use execution::{execute_query_plan_output, execute_query_plan_with_ctes};
 
-pub(crate) use evaluation::{prepare_correlated_exists_predicate, ScopedEngineHook};
+pub(crate) use evaluation::ScopedEngineHook;
 pub(crate) use row_locking::attach_lock_rows;

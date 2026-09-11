@@ -10,6 +10,3 @@ mod ordering;
 mod projection;
 
 pub(in crate::sql) use projection::physical_exec_error;
-
-#[cfg(test)]
-mod tests;

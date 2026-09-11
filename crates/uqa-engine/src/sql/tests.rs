@@ -6,11 +6,12 @@
 
 use super::{
     builtin_function_dispatch_name, compile, lower_statement, query_may_mutate_engine,
-    query_requires_statement_transaction, volatility::function_volatility, Engine,
+    query_requires_statement_transaction, Engine,
 };
 use crate::{SQLAggregateState, SQLFunctionOptions, SQLFunctionVolatility, SQLTableFunctionResult};
 use uqa_core::Value;
 use uqa_planner::UnifiedPlan;
+use uqa_sql::semantics::volatility::function_volatility;
 use uqa_sql::SQLError;
 
 #[derive(Default)]

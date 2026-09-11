@@ -397,3 +397,6 @@ pub fn append_row_at_time_projection<'a>(
         evaluator,
     ))
 }
+
+#[cfg(test)]
+mod tests;
