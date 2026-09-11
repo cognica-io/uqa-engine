@@ -42,3 +42,5 @@ pub mod view_references;
 pub mod view_removal;
 
 pub mod truncate;
+
+pub mod foreign_creation;

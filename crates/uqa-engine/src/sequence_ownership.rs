@@ -121,22 +121,6 @@ use uqa_sql::schema::sequences::implicit::{
 };
 
 impl Engine {
-    pub(crate) fn materialize_implicit_sequences(
-        &self,
-        statement: &str,
-        table_name: &str,
-        columns: &mut [uqa_sql::ast::ColumnDef],
-        persistence: uqa_sql::ast::RelationPersistence,
-    ) -> Result<(), SQLError> {
-        uqa_execution::schema::sequences::implicit::materialize_implicit_sequences(
-            &self.implicit_sequence_context(),
-            statement,
-            table_name,
-            columns,
-            persistence,
-        )
-    }
-
     pub(crate) fn materialize_persisted_foreign_implicit_sequences(
         catalog: &dyn CatalogFacade,
         relation: &RelationIdentity,
@@ -290,20 +274,6 @@ impl Engine {
             }
         }
         Ok(())
-    }
-
-    pub(crate) fn attach_implicit_sequence_owners_for_columns(
-        &self,
-        table_name: &str,
-        table_object_id: [u8; 16],
-        columns: &[uqa_sql::ast::ColumnDef],
-    ) -> StorageBackendResult<()> {
-        uqa_execution::schema::sequences::ownership::attach_column_owners(
-            &self.implicit_ownership_context(),
-            table_name,
-            table_object_id,
-            columns,
-        )
     }
 
     pub(crate) fn validate_implicit_sequence_owners_for_columns(

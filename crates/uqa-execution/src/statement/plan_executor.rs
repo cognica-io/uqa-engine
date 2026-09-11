@@ -322,15 +322,14 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         &self,
         statement: &CreateForeignServer,
     ) -> Result<SQLResult, SQLError> {
-        self.context
-            .foreign
-            .register_foreign_server(
-                statement.name.clone(),
-                statement.fdw_type.clone(),
-                statement.options.clone(),
-                statement.if_not_exists,
-            )
-            .map_err(SQLError::Unsupported)?;
+        crate::schema::foreign_creation::entry::register_foreign_server(
+            self.context.foreign,
+            statement.name.clone(),
+            statement.fdw_type.clone(),
+            statement.options.clone(),
+            statement.if_not_exists,
+        )
+        .map_err(SQLError::Unsupported)?;
         Ok(SQLResult::empty())
     }
 
@@ -338,7 +337,8 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         &self,
         statement: &CreateForeignTable,
     ) -> Result<SQLResult, SQLError> {
-        self.context.foreign.register_foreign_table_with_checks(
+        crate::schema::foreign_creation::entry::register_foreign_table_with_checks(
+            self.context.foreign,
             statement.name.clone(),
             statement.server_name.clone(),
             statement.columns.clone(),
@@ -812,11 +812,13 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             CommandPlan::CreateForeignTable(statement) => {
                 self.execute_create_foreign_table(statement)
             }
-            CommandPlan::CreateForeignTableIfNotExists(statement) => self
-                .context
-                .foreign
-                .register_deferred_foreign_table(statement.clone())
-                .map(|()| SQLResult::empty()),
+            CommandPlan::CreateForeignTableIfNotExists(statement) => {
+                crate::schema::foreign_creation::entry::register_deferred_foreign_table(
+                    self.context.foreign,
+                    statement.clone(),
+                )
+                .map(|()| SQLResult::empty())
+            }
             CommandPlan::Merge(plan) => self.execute_merge(plan),
             CommandPlan::CreateFunction(definition) => {
                 crate::routines::registration::register_sql_function(

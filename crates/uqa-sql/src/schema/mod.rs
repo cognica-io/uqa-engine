@@ -213,3 +213,5 @@ pub mod relation_alteration;
 pub mod view_creation;
 
 pub mod truncate;
+
+pub mod foreign_tables;

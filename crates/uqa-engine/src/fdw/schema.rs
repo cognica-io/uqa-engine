@@ -6,50 +6,11 @@
 
 //! Canonical SQL definition and FDW projection for a foreign table.
 
-use uqa_sql::ast::{ColumnDef, TableCheck};
-
-use crate::{
-    CatalogFacade, Engine, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult,
-};
+use crate::{CatalogFacade, Engine, RelationIdentity, StorageBackendError, StorageBackendResult};
 
 pub(crate) use uqa_execution::catalog::foreign::StoredForeignTable;
 
 impl Engine {
-    pub(crate) fn validate_foreign_table_schema_envelope(
-        columns: &[ColumnDef],
-    ) -> Result<(), SQLError> {
-        let mut names = std::collections::BTreeSet::new();
-        for column in columns {
-            if !names.insert(column.name.as_str()) {
-                return Err(SQLError::Routine {
-                    sqlstate: "42701".into(),
-                    message: format!("column \"{}\" specified more than once", column.name),
-                });
-            }
-            uqa_sql::schema::columns::validate_postgres_column_name(&column.name)?;
-            uqa_sql::schema::columns::validate_postgres_relation_column_type(
-                &column.name,
-                &column.ty,
-            )?;
-            if column.primary_key || column.unique {
-                let kind = if column.primary_key {
-                    "primary key"
-                } else {
-                    "unique"
-                };
-                return Err(SQLError::Unsupported(format!(
-                    "{kind} constraints are not supported on foreign tables"
-                )));
-            }
-            if column.references.is_some() {
-                return Err(SQLError::Unsupported(
-                    "foreign key constraints are not supported on foreign tables".into(),
-                ));
-            }
-        }
-        Ok(())
-    }
-
     pub(crate) fn migrate_foreign_table_identities(
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
@@ -90,93 +51,6 @@ impl Engine {
             }
         }
         Ok(())
-    }
-
-    pub(crate) fn prepare_foreign_table_schema(
-        &self,
-        table_name: &str,
-        columns: &mut [ColumnDef],
-        checks: &mut Vec<TableCheck>,
-    ) -> Result<(), SQLError> {
-        self.prepare_foreign_table_schema_inner(table_name, columns, checks, false)
-    }
-
-    pub(crate) fn prepare_stored_foreign_table_schema(
-        &self,
-        table_name: &str,
-        columns: &mut [ColumnDef],
-        checks: &mut Vec<TableCheck>,
-    ) -> Result<(), SQLError> {
-        Self::validate_foreign_table_schema_envelope(columns)?;
-        self.prepare_foreign_table_schema_inner(table_name, columns, checks, true)
-    }
-
-    fn prepare_foreign_table_schema_inner(
-        &self,
-        table_name: &str,
-        columns: &mut [ColumnDef],
-        checks: &mut Vec<TableCheck>,
-        stored: bool,
-    ) -> Result<(), SQLError> {
-        let relation = RelationIdentity::from_legacy_name(table_name).map_err(|error| {
-            SQLError::Internal(format!("decode foreign table `{table_name}`: {error}"))
-        })?;
-        let qualifier = relation.name.clone();
-        let check_columns = columns.to_vec();
-        for column in columns.iter_mut() {
-            if let Some(default) = &mut column.default {
-                self.prepare_foreign_table_sequence_references(default, stored)?;
-                self.validate_default_expression(default, &column.ty)?;
-            }
-            if let Some(check) = &mut column.check {
-                self.prepare_foreign_table_sequence_references(check, stored)?;
-                self.validate_check_expression(table_name, &qualifier, &check_columns, check)?;
-                uqa_sql::catalog::regrole_dependencies::reject_stored_regrole_constants(
-                    self, check, None,
-                )?;
-            }
-            if let Some(generated) = &mut column.generated {
-                self.prepare_foreign_table_sequence_references(&mut generated.expression, stored)?;
-            }
-        }
-        for check in checks.iter_mut() {
-            self.prepare_foreign_table_sequence_references(&mut check.expr, stored)?;
-            self.validate_check_expression(
-                table_name,
-                &qualifier,
-                &check_columns,
-                &mut check.expr,
-            )?;
-            uqa_sql::catalog::regrole_dependencies::reject_stored_regrole_constants(
-                self,
-                &check.expr,
-                None,
-            )?;
-        }
-        uqa_sql::schema::generated::prepare_generated_columns(self, &qualifier, columns, &[], &[])?;
-        let mut constraints = uqa_sql::ast::TableConstraintSet {
-            checks: std::mem::take(checks),
-            ..uqa_sql::ast::TableConstraintSet::default()
-        };
-        crate::table_storage::materialize_constraint_metadata(&relation, columns, &mut constraints)
-            .map_err(|error| SQLError::Internal(error.to_string()))?;
-        *checks = constraints.checks;
-        Ok(())
-    }
-
-    fn prepare_foreign_table_sequence_references(
-        &self,
-        expression: &mut uqa_sql::ast::Expr,
-        stored: bool,
-    ) -> Result<(), SQLError> {
-        self.bind_schema_regclass_constants(expression, stored)
-            .map_err(|error| SQLError::Internal(error.to_string()))?;
-        let result = if stored {
-            self.resolve_loaded_sequence_references_in_expr(expression)
-        } else {
-            self.bind_sequence_references_in_expr(expression)
-        };
-        result.map_err(|error| SQLError::Internal(error.to_string()))
     }
 
     pub(crate) fn persist_foreign_table_definition(

@@ -9,6 +9,9 @@ use uqa_core::{ArrayValue, Value};
 
 mod schema;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) use schema::StoredForeignTable;
 
 struct MemoryForeignRowStream<'a> {
@@ -102,50 +105,10 @@ impl Engine {
         if_not_exists: bool,
     ) -> std::result::Result<(), String> {
         self.with_implicit_string_transaction(move |engine| {
-            engine.register_foreign_server_inner(name, &fdw_type, options, if_not_exists)
+            engine
+                .foreign_creation_context()
+                .register_foreign_server_inner(name, &fdw_type, options, if_not_exists)
         })
-    }
-
-    fn register_foreign_server_inner(
-        &self,
-        name: String,
-        fdw_type: &str,
-        options: Vec<(String, String)>,
-        if_not_exists: bool,
-    ) -> std::result::Result<(), String> {
-        self.synchronize_catalog_registries()
-            .map_err(|err| format!("refresh FDW catalog: {err}"))?;
-        let mut servers = self.durable.foreign_servers.write();
-        if servers.contains_key(&name) {
-            if if_not_exists {
-                return Ok(());
-            }
-            return Err(format!("Foreign server `{name}` already exists"));
-        }
-        if !matches!(fdw_type, "duckdb_fdw" | "arrow_fdw" | "memory_fdw") {
-            return Err(format!("Unsupported FDW type: `{fdw_type}`"));
-        }
-        let mut opt_map: std::collections::BTreeMap<String, String> =
-            std::collections::BTreeMap::new();
-        for (k, v) in options {
-            opt_map.insert(k, v);
-        }
-        let server = uqa_fdw::ForeignServer {
-            name: name.clone(),
-            fdw_type: fdw_type.to_string(),
-            options: opt_map.clone(),
-        };
-        if let Some(catalog) = self.storage.catalog.as_ref() {
-            let options_json = serde_json::to_string(&opt_map)
-                .map_err(|err| format!("serialize foreign server `{name}`: {err}"))?;
-            catalog
-                .save_foreign_server(&name, fdw_type, &options_json)
-                .map_err(|err| format!("persist foreign server `{name}`: {err}"))?;
-        }
-        servers.insert(name, server);
-        drop(servers);
-        self.note_catalog_registry_changed();
-        Ok(())
     }
 
     pub fn register_foreign_table(
@@ -158,6 +121,7 @@ impl Engine {
     ) -> std::result::Result<(), String> {
         self.with_implicit_string_transaction(move |engine| {
             engine
+                .foreign_creation_context()
                 .register_foreign_table_inner(
                     &name,
                     server_name,
@@ -170,252 +134,12 @@ impl Engine {
         })
     }
 
-    pub(crate) fn register_foreign_table_with_checks(
-        &self,
-        name: String,
-        server_name: String,
-        columns: Vec<uqa_sql::ast::ColumnDef>,
-        checks: Vec<uqa_sql::ast::TableCheck>,
-        options: Vec<(String, String)>,
-        if_not_exists: bool,
-    ) -> Result<(), uqa_sql::SQLError> {
-        self.with_implicit_transaction(move |engine| {
-            engine.register_foreign_table_inner(
-                &name,
-                server_name,
-                columns,
-                checks,
-                options,
-                if_not_exists,
-            )
-        })
-    }
-
-    pub(crate) fn register_deferred_foreign_table(
-        &self,
-        deferred: uqa_sql::ast::DeferredCreateForeignTable,
-    ) -> Result<(), uqa_sql::SQLError> {
-        self.with_implicit_transaction(move |engine| {
-            let Some((name, relation)) =
-                engine.preflight_foreign_table_creation(&deferred.name, true)?
-            else {
-                return Ok(());
-            };
-            let statement = uqa_sql::resolve_deferred_create_foreign_table(&deferred)?;
-            Self::validate_foreign_table_schema_envelope(&statement.columns)?;
-            engine.register_foreign_table_after_preflight(
-                &name,
-                relation,
-                statement.server_name,
-                statement.columns,
-                statement.checks,
-                statement.options,
-            )
-        })
-    }
-
-    fn preflight_foreign_table_creation(
-        &self,
-        name: &str,
-        if_not_exists: bool,
-    ) -> Result<Option<(String, RelationIdentity)>, uqa_sql::SQLError> {
-        self.synchronize_catalog_registries().map_err(|error| {
-            uqa_sql::SQLError::Internal(format!("refresh FDW catalog: {error}"))
-        })?;
-        let name = self.try_relation_name_for_sql_create(name)?;
-        let relation = RelationIdentity::from_legacy_name(&name).map_err(|error| {
-            uqa_sql::SQLError::Internal(format!("decode foreign table `{name}`: {error}"))
-        })?;
-        if self
-            .relation_kind_at(&name)
-            .map_err(|error| {
-                uqa_sql::SQLError::Internal(format!("resolve relation `{name}`: {error}"))
-            })?
-            .is_some()
-        {
-            if if_not_exists {
-                self.push_sql_notice(
-                    "NOTICE",
-                    &format!("relation \"{}\" already exists, skipping", relation.name),
-                );
-                return Ok(None);
-            }
-            return Err(uqa_sql::SQLError::Routine {
-                sqlstate: "42P07".into(),
-                message: format!("relation \"{}\" already exists", relation.name),
-            });
-        }
-        {
-            let tables = self.durable.foreign_tables.read();
-            let table_security = self.durable.foreign_table_security.read();
-            if tables.contains_key(&relation) {
-                if !table_security.contains_key(&relation) {
-                    return Err(uqa_sql::SQLError::Internal(format!(
-                        "foreign table `{name}` has no loaded security metadata"
-                    )));
-                }
-                return Err(uqa_sql::SQLError::Internal(format!(
-                    "foreign table `{name}` appeared after relation collision preflight"
-                )));
-            }
-            if table_security.contains_key(&relation) {
-                return Err(uqa_sql::SQLError::Internal(format!(
-                    "foreign table security metadata exists without table `{name}`"
-                )));
-            }
-        }
-        Ok(Some((name, relation)))
-    }
-
-    fn ensure_foreign_server_exists(&self, server_name: &str) -> Result<(), uqa_sql::SQLError> {
-        if self
-            .durable
-            .foreign_servers
-            .read()
-            .contains_key(server_name)
-        {
-            return Ok(());
-        }
-        Err(uqa_sql::SQLError::Routine {
-            sqlstate: "42704".into(),
-            message: format!("server \"{server_name}\" does not exist"),
-        })
-    }
-
-    fn register_foreign_table_inner(
-        &self,
-        name: &str,
-        server_name: String,
-        columns: Vec<uqa_sql::ast::ColumnDef>,
-        checks: Vec<uqa_sql::ast::TableCheck>,
-        options: Vec<(String, String)>,
-        if_not_exists: bool,
-    ) -> Result<(), uqa_sql::SQLError> {
-        if !if_not_exists {
-            Self::validate_foreign_table_schema_envelope(&columns)?;
-        }
-        let Some((name, relation)) = self.preflight_foreign_table_creation(name, if_not_exists)?
-        else {
-            return Ok(());
-        };
-        if if_not_exists {
-            Self::validate_foreign_table_schema_envelope(&columns)?;
-        }
-        self.register_foreign_table_after_preflight(
-            &name,
-            relation,
-            server_name,
-            columns,
-            checks,
-            options,
-        )
-    }
-
-    fn register_foreign_table_after_preflight(
-        &self,
-        name: &str,
-        relation: RelationIdentity,
-        server_name: String,
-        mut columns: Vec<uqa_sql::ast::ColumnDef>,
-        mut checks: Vec<uqa_sql::ast::TableCheck>,
-        options: Vec<(String, String)>,
-    ) -> Result<(), uqa_sql::SQLError> {
-        for column in &mut columns {
-            column.ty = uqa_sql::type_resolution::resolve_declared_column_type(self, &column.ty)?;
-        }
-        self.materialize_implicit_sequences(
-            "CREATE FOREIGN TABLE",
-            name,
-            &mut columns,
-            uqa_sql::ast::RelationPersistence::Permanent,
-        )?;
-        self.prepare_foreign_table_schema(name, &mut columns, &mut checks)?;
-        self.ensure_foreign_server_exists(&server_name)?;
-        let mut opt_map: std::collections::BTreeMap<String, String> =
-            std::collections::BTreeMap::new();
-        for (k, v) in options {
-            opt_map.insert(k, v);
-        }
-        let object_id = crate::new_table_object_id().map_err(|error| {
-            uqa_sql::SQLError::Internal(format!(
-                "allocate foreign table `{name}` object identity: {error}"
-            ))
-        })?;
-        let owner_columns = columns.clone();
-        let table = StoredForeignTable {
-            name: name.to_string(),
-            object_id,
-            server_name,
-            columns,
-            checks,
-            options: opt_map,
-        };
-        let role_owner = self.current_user_name();
-        let security = crate::state::TableSecurity::owner(role_owner);
-        let mut tables = self.durable.foreign_tables.write();
-        let mut table_security = self.durable.foreign_table_security.write();
-        if tables.contains_key(&relation) || table_security.contains_key(&relation) {
-            return Err(uqa_sql::SQLError::Internal(format!(
-                "foreign table `{name}` changed during creation"
-            )));
-        }
-        if let Some(catalog) = self.storage.catalog.as_ref() {
-            catalog
-                .save_foreign_table(&table.catalog_row(&relation, &security).map_err(|error| {
-                    uqa_sql::SQLError::Internal(format!(
-                        "serialize foreign table `{name}`: {error}"
-                    ))
-                })?)
-                .map_err(|error| {
-                    uqa_sql::SQLError::Internal(format!("persist foreign table `{name}`: {error}"))
-                })?;
-        }
-        tables.insert(relation.clone(), table);
-        table_security.insert(relation, security);
-        drop(table_security);
-        drop(tables);
-        self.attach_implicit_sequence_owners_for_columns(name, object_id, &owner_columns)
-            .map_err(|error| {
-                uqa_sql::SQLError::Internal(format!(
-                    "attach foreign table `{name}` sequence ownership: {error}"
-                ))
-            })?;
-        self.note_catalog_registry_changed();
-        Ok(())
-    }
-
     pub fn drop_foreign_server(&self, name: &str) -> Result<bool, String> {
-        self.with_implicit_string_transaction(|engine| engine.drop_foreign_server_inner(name))
-    }
-
-    fn drop_foreign_server_inner(&self, name: &str) -> Result<bool, String> {
-        self.synchronize_catalog_registries()
-            .map_err(|err| format!("refresh FDW catalog: {err}"))?;
-        // Reject when any foreign table references this server.
-        let referenced = self
-            .durable
-            .foreign_tables
-            .read()
-            .values()
-            .any(|t| t.server_name == name);
-        if referenced {
-            return Err(format!(
-                "foreign server `{name}` is referenced by a foreign table"
-            ));
-        }
-        if !self.durable.foreign_servers.read().contains_key(name) {
-            return Ok(false);
-        }
-        if let Some(catalog) = self.storage.catalog.as_ref() {
-            catalog
-                .drop_foreign_server(name)
-                .map_err(|err| format!("drop foreign server `{name}`: {err}"))?;
-        }
-        let removed = self.durable.foreign_servers.write().remove(name).is_some();
-        if removed {
-            self.note_catalog_registry_changed();
-        }
-        Ok(removed)
+        self.with_implicit_string_transaction(|engine| {
+            engine
+                .foreign_creation_context()
+                .drop_foreign_server_inner(name)
+        })
     }
 
     pub fn drop_foreign_table(&self, name: &str) -> Result<bool, String> {
