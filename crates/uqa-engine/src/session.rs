@@ -30,9 +30,6 @@ pub(crate) use views::catalog_view_row;
 
 use analyze_helpers::{build_histogram, build_mcv, collect_analyze_values, distinct_count};
 use settings_parse::parse_search_path_list;
-use uqa_sql::binding::view_dependencies::{
-    bind_query_plan_sequence_references, canonical_virtual_relation_reference,
-};
 
 #[cfg(test)]
 use uqa_sql::binding::view_dependencies::sequence_function_reference_mut;

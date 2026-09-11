@@ -6,7 +6,6 @@
 
 //! Session portal lifecycle shared by PL/pgSQL routine activations.
 
-mod binding;
 mod fetch;
 mod statement_snapshot;
 mod worker;
@@ -22,60 +21,13 @@ use crate::{
     SessionPortalTransactionOverlay, SessionPortalViewSnapshots, StorageContext, StoredDocument,
     TableState, Value, VectorIndex,
 };
-use binding::bind_session_portal_function_relations;
 use fetch::{
     ensure_portal_rows_for_fetch, fetch_directional_query_portal, fetch_indices,
     materialize_portal_to_end, select_portal_rows, uses_directional_query_execution,
 };
-use uqa_planner::{QueryPlan, RelationalPlan, SourcePlan};
 use uqa_sql::ast::{CursorDirection, FetchCursorStmt};
 
-struct SessionPortalTableDependencies {
-    tables: Option<std::collections::BTreeSet<RelationIdentity>>,
-    graphs: Option<std::collections::BTreeSet<String>>,
-    graph_catalog: bool,
-}
-
-impl SessionPortalTableDependencies {
-    fn empty() -> Self {
-        Self {
-            tables: Some(std::collections::BTreeSet::new()),
-            graphs: Some(std::collections::BTreeSet::new()),
-            graph_catalog: false,
-        }
-    }
-
-    fn all() -> Self {
-        Self {
-            tables: None,
-            graphs: None,
-            graph_catalog: true,
-        }
-    }
-
-    fn is_all(&self) -> bool {
-        self.tables.is_none() && self.graphs.is_none()
-    }
-
-    fn includes(&self, relation: &RelationIdentity) -> bool {
-        self.tables
-            .as_ref()
-            .is_none_or(|tables| tables.contains(relation))
-    }
-
-    fn insert(&mut self, relation: RelationIdentity) {
-        if let Some(relations) = &mut self.tables {
-            relations.insert(relation);
-        }
-    }
-
-    fn insert_graph(&mut self, graph: String) {
-        self.graph_catalog = true;
-        if let Some(graphs) = &mut self.graphs {
-            graphs.insert(graph);
-        }
-    }
-}
+use uqa_sql::binding::portals::SessionPortalTableDependencies;
 
 type SessionPortalTableSource = (
     RelationIdentity,
@@ -112,22 +64,8 @@ impl Engine {
             holdable,
             binary,
         } = declaration;
-        bind_session_portal_query_relations(self, &mut query, &std::collections::BTreeSet::new())?;
-        super::bind_query_plan_sequence_references(&mut query, &mut |reference| {
-            self.try_resolve_sequence_oid_reference_for_binding(reference)
-                .map_err(|error| {
-                    SQLError::Internal(format!(
-                        "bind cursor sequence `{reference}` at DECLARE: {error}"
-                    ))
-                })
-                .and_then(|bound| {
-                    bound.ok_or_else(|| SQLError::Routine {
-                        sqlstate: "42P01".into(),
-                        message: format!("relation \"{reference}\" does not exist"),
-                    })
-                })
-        })?;
-        let table_dependencies = session_portal_table_dependencies(self, &query)?;
+        let table_dependencies =
+            uqa_sql::binding::portals::prepare_query(&self.portal_binding_context(), &mut query)?;
         let snapshot_gate = self
             .row_locks
             .begin_change_snapshot(&self.runtime.cancellation)?;
@@ -743,8 +681,6 @@ impl Engine {
     }
 }
 
-mod dependencies;
-use dependencies::{bind_session_portal_query_relations, session_portal_table_dependencies};
 impl Engine {
     pub(crate) fn fork_session_portal_worker_engine(&self) -> Result<Engine, SQLError> {
         let table_snapshots = self.query_table_snapshots.clone().ok_or_else(|| {

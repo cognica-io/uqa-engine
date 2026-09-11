@@ -244,7 +244,9 @@
         "src/sql/driver.rs",
         "src/sql/cursor.rs",
         "src/sql/completion.rs",
-        "src/sql/session_portal_worker.rs"
+        "src/sql/session_portal_worker.rs",
+        "src/session/portals/binding.rs",
+        "src/session/portals/dependencies.rs"
       ]
     },
     "crates/uqa-storage": {
