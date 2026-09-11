@@ -467,9 +467,10 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 Ok(SQLResult::empty())
             }
             CommandPlan::GrantTable(statement) => {
-                self.context
-                    .table_privileges
-                    .grant_table_privileges(statement)?;
+                crate::catalog::security::table_grants::grant_table_privileges(
+                    self.context.table_privileges,
+                    statement,
+                )?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::GrantSequence(statement) => {

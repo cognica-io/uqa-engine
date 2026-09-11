@@ -13,7 +13,6 @@ use uqa_sql::{
     semantics::{effects::QueryEffectContext, rules::RuleCatalog},
     SQLError, SQLResult,
 };
-pub mod definitions;
 pub mod queries;
 pub mod routines;
 pub mod schemas;
@@ -66,6 +65,6 @@ pub struct StatementExecutionContext<'a, S: Clone + 'static> {
     pub roles: crate::catalog::security::role_lifecycle::context::RoleExecutionContext<'a>,
     pub events: crate::schema::events::context::EventLifecycleContext<'a>,
     pub foreign: &'a dyn crate::schema::foreign_creation::entry::ForeignCreationTransactions,
-    pub table_privileges: &'a dyn definitions::TablePrivileges,
+    pub table_privileges: &'a dyn crate::catalog::security::table_grants::TableGrantInputs,
     pub explain: ExplainRenderer,
 }

@@ -22,11 +22,9 @@ use crate::{
 use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 
-pub trait SequenceGrantNamespace {
-    fn temporary_schema_name(&self) -> String;
-    fn temporary_namespace_allocated(&self) -> bool;
-    fn has_namespace(&self, name: &str) -> Result<bool, String>;
-}
+pub use super::grants::{
+    bind_grant_schemas as bind_sequence_grant_schemas, GrantNamespace as SequenceGrantNamespace,
+};
 
 pub struct ResolvedSequenceGrantTarget {
     pub requested: String,
@@ -66,38 +64,6 @@ pub fn bind_named_sequence_grants(
         });
     }
     Ok(resolved)
-}
-
-pub fn bind_sequence_grant_schemas(
-    namespace: &dyn SequenceGrantNamespace,
-    schemas: &[String],
-) -> Result<Vec<String>, SQLError> {
-    let temporary_schema = namespace.temporary_schema_name();
-    let mut resolved_schemas = Vec::with_capacity(schemas.len());
-    for schema in schemas {
-        let resolved = if schema == "pg_temp" {
-            temporary_schema.clone()
-        } else {
-            schema.clone()
-        };
-        let exists = if resolved == temporary_schema {
-            namespace.temporary_namespace_allocated()
-        } else {
-            namespace.has_namespace(&resolved).map_err(|error| {
-                SQLError::Internal(format!("resolve schema `{schema}`: {error}"))
-            })?
-        };
-        if !exists {
-            return Err(SQLError::Routine {
-                sqlstate: "3F000".into(),
-                message: format!("schema \"{schema}\" does not exist"),
-            });
-        }
-        if !resolved_schemas.contains(&resolved) {
-            resolved_schemas.push(resolved);
-        }
-    }
-    Ok(resolved_schemas)
 }
 
 pub fn sequence_grants_in_schemas<'a>(

@@ -12,7 +12,6 @@ use uqa_execution::catalog::security::sequence_lifecycle::{
     SequencePrivilegeContext, SequencePrivilegePublication, SequenceSecurityWrite,
 };
 use uqa_sql::{
-    ast::GrantSequenceStmt,
     catalog::{
         resolution::RelationResolution,
         security::{
@@ -91,13 +90,6 @@ impl Engine {
             catalog: self.catalog_execution(),
             storage: self.storage.catalog.as_deref(),
         }
-    }
-    pub(crate) fn grant_sequence_privileges(
-        &self,
-        statement: &GrantSequenceStmt,
-    ) -> Result<(), SQLError> {
-        self.sequence_privilege_context()
-            .grant_sequence_privileges(statement)
     }
     pub(crate) fn persist_sequence_security(
         &self,

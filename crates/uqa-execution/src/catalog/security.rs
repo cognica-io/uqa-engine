@@ -29,3 +29,5 @@ pub mod database_lifecycle;
 pub mod sequence_lifecycle;
 
 pub mod table_inquiry;
+
+pub mod table_grants;

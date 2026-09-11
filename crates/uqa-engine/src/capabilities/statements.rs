@@ -74,7 +74,6 @@ impl StatementEffects for Engine {
         Engine::query_effect_context(self)
     }
 }
-mod definitions;
 mod queries;
 mod routines;
 mod schemas;
