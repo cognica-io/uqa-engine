@@ -23,7 +23,7 @@ enum PortalDeclarationContext {
     PLpgSQL,
 }
 
-pub(super) fn declare_session_portal(
+pub(crate) fn declare_session_portal(
     engine: &Engine,
     params: &[SQLParam],
     name: &str,

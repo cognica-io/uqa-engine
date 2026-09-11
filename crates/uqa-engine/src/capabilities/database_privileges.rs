@@ -49,7 +49,6 @@ use uqa_execution::catalog::security::database_lifecycle::{
     self, DatabasePrivilegeContext, DatabasePrivilegePublication, DatabaseSecurityRegistry,
     DatabaseSecurityWrite, DATABASE_SECURITY_METADATA_KEY,
 };
-use uqa_sql::ast::GrantDatabaseStmt;
 use uqa_sql::catalog::security::database::DatabaseSecurity;
 use uqa_storage::{CatalogFacade, StorageBackendResult};
 
@@ -95,12 +94,6 @@ impl Engine {
             registry: self,
             publication: self,
         }
-    }
-    pub(crate) fn grant_database_privileges(
-        &self,
-        statement: &GrantDatabaseStmt,
-    ) -> Result<(), SQLError> {
-        database_lifecycle::grant_database_privileges(&self.database_privilege_context(), statement)
     }
     pub(crate) fn restore_database_security_from_metadata(
         &self,

@@ -96,7 +96,7 @@ fn execute_with_context(
             };
             if can_execute_without_transaction {
                 return UnifiedPlanExecutor::with_nested_statement(
-                    engine,
+                    engine.statement_execution_context(),
                     params,
                     nested_statement,
                 )
@@ -259,7 +259,7 @@ fn execute_uncached_or_snapshot_scoped(
                     engine.push_sql_notice("WARNING", "there is no transaction in progress");
                 }
                 last = UnifiedPlanExecutor::with_nested_statement(
-                    engine,
+                    engine.statement_execution_context(),
                     params,
                     nested_statement || simple_query_batch,
                 )
@@ -344,7 +344,7 @@ fn execute_uncached_or_snapshot_scoped(
                     }
                 };
                 let mut executor = UnifiedPlanExecutor::with_nested_statement(
-                    engine,
+                    engine.statement_execution_context(),
                     params,
                     nested_statement || simple_query_batch,
                 )
@@ -466,7 +466,7 @@ fn execute_uncached_or_snapshot_scoped(
                     Err(error) => return rollback_after_statement_error(engine, error),
                 };
                 let mut executor = UnifiedPlanExecutor::with_nested_statement(
-                    engine,
+                    engine.statement_execution_context(),
                     params,
                     nested_statement || simple_query_batch,
                 )
@@ -501,7 +501,7 @@ fn execute_uncached_or_snapshot_scoped(
                     plan
                 };
                 last = UnifiedPlanExecutor::with_nested_statement(
-                    engine,
+                    engine.statement_execution_context(),
                     params,
                     nested_statement || simple_query_batch,
                 )

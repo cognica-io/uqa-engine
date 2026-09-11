@@ -38,13 +38,11 @@ mod api;
 mod catalog;
 mod catalog_statement_routines;
 mod completion;
-mod cte_validation;
 mod cursor;
 mod driver;
 mod from_rows;
 mod generated;
 mod mutability;
-pub(crate) mod plan_executor;
 pub use uqa_sql::result::format_postgres_text;
 mod planning;
 mod regrole_dependencies;
@@ -87,7 +85,12 @@ pub(crate) use catalog::{
     runtime_constraints, sequence_relation_oid,
 };
 pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_columns};
-use plan_executor::UnifiedPlanExecutor;
+pub(crate) type UnifiedPlanExecutor<'engine, 'params> =
+    uqa_execution::statement::plan_executor::UnifiedPlanExecutor<
+        'engine,
+        'params,
+        crate::session::StatementReadSnapshot,
+    >;
 pub(crate) use regrole_dependencies::{
     reject_stored_plan_regrole_constants, reject_stored_regrole_constants,
 };
@@ -107,14 +110,13 @@ pub(crate) fn execute_nested_optimized_command(
     command: &uqa_planner::CommandPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    UnifiedPlanExecutor::new_nested(engine, params).execute(&uqa_planner::UnifiedPlan::Command(
-        Box::new(command.clone()),
-    ))
+    UnifiedPlanExecutor::new_nested(engine.statement_execution_context(), params).execute(
+        &uqa_planner::UnifiedPlan::Command(Box::new(command.clone())),
+    )
 }
 
 pub(in crate::sql) use crate::capabilities::routine_invocation::analyze_call_result_schema;
 
-use select::run_explain;
 pub(crate) use select::CteScope;
 pub(crate) use session_portal_worker::start_session_portal_worker;
 

@@ -190,7 +190,7 @@ Responsibility roots remain facades over semantic children rather than line-coun
 | Engine capability adapters | [`crates/uqa-engine/src/capabilities.rs`](../../../crates/uqa-engine/src/capabilities.rs) |
 | Statement catalog adapter | [`crates/uqa-engine/src/capabilities/catalog_execution.rs`](../../../crates/uqa-engine/src/capabilities/catalog_execution.rs) |
 | Schema declaration binding adapter | [`crates/uqa-engine/src/capabilities/schema_analysis.rs`](../../../crates/uqa-engine/src/capabilities/schema_analysis.rs) |
-| Unified plan dispatcher | [`crates/uqa-engine/src/sql/plan_executor.rs`](../../../crates/uqa-engine/src/sql/plan_executor.rs) |
+| Unified plan dispatcher | [`crates/uqa-execution/src/statement/plan_executor.rs`](../../../crates/uqa-execution/src/statement/plan_executor.rs) |
 | Mutation command entry | [`crates/uqa-execution/src/mutation/entry.rs`](../../../crates/uqa-execution/src/mutation/entry.rs) |
 | Shared mutation state and snapshots | [`crates/uqa-execution/src/mutation/command_scope.rs`](../../../crates/uqa-execution/src/mutation/command_scope.rs) |
 | Session portal workflow | [`crates/uqa-engine/src/sql/session_portal_worker.rs`](../../../crates/uqa-engine/src/sql/session_portal_worker.rs) |

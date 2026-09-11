@@ -4,6 +4,8 @@ Every compiled statement follows one top-level path: SQL statement, unified lowe
 
 [Statement planning](../../../crates/uqa-planner/src/statement_planning/executable.rs) schedules [SQL statement analysis](../../../crates/uqa-sql/src/binding/statements.rs) before capturing optimizer inputs or evaluating constants. Each recursive EXPLAIN analysis captures a fresh statement scope; query-bearing commands analyze their query schema, while mutation commands validate parameters before their result schema. Engine supplies scope capture and the existing planner metadata through typed adapters. Scoped Engine function callbacks live under [`capabilities/query_expressions.rs`](../../../crates/uqa-engine/src/capabilities/query_expressions.rs); scalar-subquery result types bind through execution after checking the query-arena slot and retain the original outer schema and declared parameter types.
 
+[The unified dispatcher](../../../crates/uqa-execution/src/statement/plan_executor.rs) lives in execution and exhaustively handles query and command plans. [Entry validation](../../../crates/uqa-execution/src/statement/validation.rs) checks cancellation, captures namespace inputs for SQL CTE validation, and validates transaction access before observing failed-transaction state or dispatching a command. Queries acquire relation locks before capturing their statement scope; mutations fill only missing privilege subjects. EXPLAIN ANALYZE enters the same nested executor with the caller’s privilege subject, and EXECUTE binds arguments before selecting and running its plan. CALL validates markers and argument types before borrowing expression hooks, evaluates arguments, then captures invocation inputs. Engine supplies [typed subsystem adapters](../../../crates/uqa-engine/src/capabilities/statements.rs); top-level runtime inputs contain only cancellation and notices. EXPLAIN measurements are SQL-owned values consumed by the planner renderer, so execution gains no planner dependency.
+
 ## End-to-end pipeline
 
 ```mermaid
@@ -21,7 +23,7 @@ sequenceDiagram
     SQL-->>Planner: Validated names, types, and parameters
     Planner->>Planner: Optimize with source statistics
     Planner-->>Engine: Executable plan and access decisions
-    Engine->>Exec: Construct and run physical operators
+    Engine->>Exec: Dispatch UnifiedPlan through typed statement inputs
     Exec->>Store: Pull through provided row and retrieval sources
     Store-->>Exec: Values, postings, vectors, graph data
     Exec-->>Engine: Physical rows and batches
@@ -108,7 +110,7 @@ flowchart LR
     DML --> Mutation
 ```
 
-The engine facade constructs narrow capability values at execution boundaries instead of passing its full state surface into migrated leaves. `CatalogReadView` owns an immutable statement snapshot, `RelationNameResolution` owns the matching search path and temporary namespace, and the remaining views borrow only their existing state owners; none contains an `Engine` reference or recovery mechanism. `UnifiedPlanExecutor` stores the statement's session and runtime capabilities while remaining the only exhaustive `UnifiedPlan` and `CommandPlan` dispatcher.
+The engine facade constructs narrow capability values at execution boundaries instead of passing its full state surface into migrated leaves. `CatalogReadView` owns an immutable statement snapshot, `RelationNameResolution` owns the matching search path and temporary namespace, and the remaining views borrow only their existing state owners; none contains an `Engine` reference or recovery mechanism. Execution’s `UnifiedPlanExecutor` composes separate query, mutation, schema, routine and session inputs and remains the only exhaustive `UnifiedPlan` and `CommandPlan` dispatcher.
 
 `CteScope` captures the catalog and name-resolution pair once and passes it through schema binding, filter pushdown, virtual catalog scans, table access, row-lock planning, evaluation, and physical construction. Static catalog metadata and pure row builders are engine-free leaves; live builders consume only the snapshot and the session values they require. The `CREATE SCHEMA` command arm enters execution-owned namespace creation, and `MutationCoordinator` supplies live registry guards and provider writes to the registration executor. INSERT, UPDATE, DELETE, and MERGE share the same implicit-or-existing transaction entry, command overlay, candidate and lock carriers, prepared action family, row-image and event state, and publication pipeline across base tables, automatic views, trigger-backed views, rules, conflicts, referential actions, and partition movement. The [mutation command dispatcher](../../../crates/uqa-execution/src/mutation/dispatch.rs), command loops, physical carriers, and spill codecs belong to execution. Engine supplies session state and transaction entry through consumer-owned contracts.
 

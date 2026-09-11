@@ -11,24 +11,18 @@ use uqa_execution::{
     catalog::{foreign::StoredForeignTable, security::TableSecurity},
     schema::{
         foreign_table_alteration::{
-            self, ForeignMemoryRegistryWrite, ForeignSecurityRegistryWrite,
-            ForeignTableAlterAccess, ForeignTableAlterCatalog, ForeignTableAlterContext,
-            ForeignTableAlterPublication, ForeignTableAlterTransactions, ForeignTableAlterWrite,
-            ForeignTableOwnerWriter, ForeignTableRegistryWrite,
+            ForeignMemoryRegistryWrite, ForeignSecurityRegistryWrite, ForeignTableAlterAccess,
+            ForeignTableAlterCatalog, ForeignTableAlterContext, ForeignTableAlterPublication,
+            ForeignTableAlterTransactions, ForeignTableAlterWrite, ForeignTableOwnerWriter,
+            ForeignTableRegistryWrite,
         },
         sequences::role_ownership::OwnedSequenceSecurityWrite,
     },
 };
-use uqa_sql::{ast::AlterForeignTableStmt, SQLError};
+use uqa_sql::SQLError;
 use uqa_storage::StorageBackendResult;
 
 impl Engine {
-    pub(crate) fn alter_foreign_table(
-        &self,
-        statement: &AlterForeignTableStmt,
-    ) -> Result<(), SQLError> {
-        foreign_table_alteration::alter_foreign_table(self, statement)
-    }
     fn foreign_table_alter_context(&self) -> ForeignTableAlterContext<'_> {
         ForeignTableAlterContext {
             names: self,

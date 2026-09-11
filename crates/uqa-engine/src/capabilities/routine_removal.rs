@@ -43,7 +43,7 @@ use uqa_execution::routines::removal::{
     },
 };
 use uqa_sql::{
-    ast::{DropFunctionStmt, DropRule, DropTrigger, FunctionBinding},
+    ast::{DropRule, DropTrigger, FunctionBinding},
     routines::lifecycle::RoutineRegistry,
     schema::sequences::dependents::SequenceSchemaDependent,
 };
@@ -74,7 +74,11 @@ impl Engine {
             changes: self,
         }
     }
-    pub(crate) fn drop_sql_functions(&self, statement: &DropFunctionStmt) -> Result<(), SQLError> {
+    #[cfg(test)]
+    pub(crate) fn drop_sql_functions(
+        &self,
+        statement: &uqa_sql::ast::DropFunctionStmt,
+    ) -> Result<(), SQLError> {
         self.with_implicit_transaction(|engine| {
             removal::drop_sql_functions(&engine.routine_removal_context(), statement)
         })
@@ -82,7 +86,7 @@ impl Engine {
     #[cfg(test)]
     pub(crate) fn preflight_sql_function_drop(
         &self,
-        statement: &DropFunctionStmt,
+        statement: &uqa_sql::ast::DropFunctionStmt,
     ) -> Result<uqa_sql::routines::lifecycle::SQLFunctionDropPlan, SQLError> {
         removal::preflight_sql_function_drop(&self.routine_removal_context(), statement)
     }

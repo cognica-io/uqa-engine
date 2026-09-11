@@ -238,7 +238,9 @@
         "src/sql/correlation.rs",
         "src/sql/select/evaluation",
         "src/sql/select/evaluation.rs",
-        "src/truncate.rs"
+        "src/truncate.rs",
+        "src/sql/plan_executor.rs",
+        "src/sql/cte_validation.rs"
       ]
     },
     "crates/uqa-storage": {
