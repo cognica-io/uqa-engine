@@ -136,13 +136,6 @@ impl Engine {
             kind,
         )
     }
-    pub(crate) fn relation_dependents_drop_error(
-        &self,
-        names: &[String],
-        kind: &str,
-    ) -> Result<SQLError, SQLError> {
-        removal::relation_dependents_drop_error(&self.routine_removal_context(), names, kind)
-    }
 }
 impl RoutineRegistryState for Engine {
     fn routine_snapshot(&self) -> RoutineRegistry {

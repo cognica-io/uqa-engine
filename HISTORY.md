@@ -20,6 +20,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - Implemented `CREATE SCHEMA AUTHORIZATION` with named and session-role owners, omitted schema names, PostgreSQL authorization and duplicate-schema checks, and durable transaction behavior. Schema owner transfer now checks database `CREATE` on the invoking role.
+- Moved sequence DROP execution into native dependency consumers and removed Engine command callbacks, retaining owner preflight, recursive cascade order, rollback, and stable-identity cache cleanup.
 - Moved sequence expression and owner-dependency analysis out of Engine, preserving actual metadata guard lifetimes and ordered CHECK, default, generated-column, and provenance removal.
 - Moved legacy sequence-owner inference to SQL and initial-open migration, loaded-owner validation, and attachment publication to execution. Stable owner identities now live in Core with existing storage imports and serialized fields preserved.
 - Moved table-owner transfer into native execution, preserving sequence-before-table persistence, complete schema capture, ACL rewrites, rollback, and retained table generations. Removed Engine’s table-security implementation and whole-command owner callback.

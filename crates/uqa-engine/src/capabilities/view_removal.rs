@@ -18,7 +18,7 @@ use uqa_sql::SQLError;
 use uqa_storage::StorageBackendResult;
 
 impl Engine {
-    fn view_removal_context(&self) -> ViewRemovalContext<'_> {
+    pub(crate) fn view_removal_context(&self) -> ViewRemovalContext<'_> {
         ViewRemovalContext {
             registry: self,
             publication: self,

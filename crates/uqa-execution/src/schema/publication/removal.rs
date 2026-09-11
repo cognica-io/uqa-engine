@@ -64,13 +64,12 @@ pub trait ColumnDropRules {
     fn prepare(&self, table: &str, column: &str) -> StorageBackendResult<PreparedRuleColumnDrop>;
     fn finish(&self, prepared: PreparedRuleColumnDrop) -> StorageBackendResult<()>;
 }
-pub trait ColumnDropSequences {
+pub trait ColumnDropSequences: crate::schema::sequences::removal::SequenceRemovalInputs {
     fn owned_by_column(
         &self,
         table: [u8; 16],
         column: [u8; 16],
     ) -> StorageBackendResult<BTreeSet<String>>;
-    fn drop_owned(&self, sequence: &str, cascade: bool) -> StorageBackendResult<()>;
 }
 pub struct ColumnDropPublicationContext<'a> {
     pub catalog: &'a dyn ColumnDropCatalog,
@@ -147,7 +146,10 @@ pub fn drop_column(
     state.persist_drop(&table_name, column)?;
     context.rules.finish(prepared_rule_drop)?;
     for sequence in owned_sequences {
-        context.sequences.drop_owned(&sequence, cascade)?;
+        context
+            .sequences
+            .sequence_removal_context()
+            .drop_owned_sequence(&sequence, cascade)?;
     }
     state.mark_statistics_dirty(&table_name)?;
     context.indexes.refresh_value_indexes(&table_name)?;

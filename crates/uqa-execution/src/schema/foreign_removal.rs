@@ -11,7 +11,8 @@ use crate::catalog::{
 };
 use crate::schema::{
     events::context::EventLifecycleContext, foreign_table_alteration::ForeignTableAlterPublication,
-    publication::dependencies::CatalogPublicationChanges, removal::RelationRemovalSequences,
+    publication::dependencies::CatalogPublicationChanges,
+    sequences::removal::SequenceRemovalInputs,
 };
 use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
@@ -31,7 +32,7 @@ pub struct ForeignTableRemovalContext<'a> {
     pub events: EventLifecycleContext<'a>,
     pub owners: &'a dyn SequenceIntrospectionCatalog,
     pub dependencies: &'a dyn ForeignSequenceDependents,
-    pub sequences: &'a dyn RelationRemovalSequences,
+    pub sequences: &'a dyn SequenceRemovalInputs,
 }
 impl ForeignTableRemovalContext<'_> {
     pub fn drop_foreign_table(&self, name: &str) -> Result<bool, String> {
@@ -70,6 +71,7 @@ impl ForeignTableRemovalContext<'_> {
         }
         for sequence in owned_sequences {
             self.sequences
+                .sequence_removal_context()
                 .drop_owned_sequence(&sequence, false)
                 .map_err(|error| format!("drop owned sequence `{sequence}`: {error}"))?;
         }

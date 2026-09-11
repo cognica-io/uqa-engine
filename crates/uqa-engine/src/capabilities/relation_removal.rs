@@ -13,8 +13,8 @@ use uqa_execution::schema::removal::entry::{
 };
 use uqa_execution::schema::removal::{
     RelationRemovalContext, RelationRemovalEvents, RelationRemovalLocks, RelationRemovalPrivileges,
-    RelationRemovalRoutines, RelationRemovalSequences, RelationRemovalTables,
-    RelationRemovalTransactions, RelationRemovalViews, RelationRemovalWrite,
+    RelationRemovalRoutines, RelationRemovalTables, RelationRemovalTransactions,
+    RelationRemovalViews, RelationRemovalWrite,
 };
 use uqa_sql::{
     catalog::{errors::storage_error, resolution::RelationResolution},
@@ -157,14 +157,7 @@ impl RelationRemovalViews for Engine {
         Engine::drop_views_depending_on_relations(self, names)
     }
 }
-impl RelationRemovalSequences for Engine {
-    fn drop_sequences_sql_inner(&self, names: &[String], cascade: bool) -> Result<(), SQLError> {
-        Engine::drop_sequences_sql_inner(self, names, cascade)
-    }
-    fn drop_owned_sequence(&self, name: &str, cascade: bool) -> StorageBackendResult<()> {
-        Engine::drop_owned_sequence(self, name, cascade)
-    }
-}
+
 impl RelationRemovalLocks for Engine {
     fn lock_exclusive(&self, table: &str) -> Result<(), SQLError> {
         self.lock_relation(table, crate::row_locks::RelationLockMode::AccessExclusive)

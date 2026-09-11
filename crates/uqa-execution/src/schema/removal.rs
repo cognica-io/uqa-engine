@@ -189,6 +189,7 @@ fn run_drop_inner(
             for sequence in owned_sequences {
                 context
                     .sequences
+                    .sequence_removal_context()
                     .drop_owned_sequence(&sequence, stmt.cascade)
                     .map_err(|error| {
                         ddl_storage_error("DROP FOREIGN TABLE owned sequence", error)
@@ -216,7 +217,8 @@ fn run_drop_inner(
             )?;
             context
                 .sequences
-                .drop_sequences_sql_inner(&sequences, stmt.cascade)?;
+                .sequence_removal_context()
+                .drop_sequences(&sequences, stmt.cascade)?;
         }
         DropKind::Schema => unreachable!("DROP SCHEMA has a namespace dependency path"),
         DropKind::Domain => unreachable!("DROP DOMAIN has a type dependency path"),

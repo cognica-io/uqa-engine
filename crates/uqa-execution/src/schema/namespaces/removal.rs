@@ -8,8 +8,7 @@
 
 use super::{NamespaceCatalogChanges, NamespaceCatalogRefresh, SchemaRegistryWrite};
 use crate::schema::removal::{
-    RelationRemovalEvents, RelationRemovalLocks, RelationRemovalRoutines, RelationRemovalSequences,
-    RelationRemovalTables,
+    RelationRemovalEvents, RelationRemovalLocks, RelationRemovalRoutines, RelationRemovalTables,
 };
 use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
@@ -56,7 +55,7 @@ pub struct SchemaRemovalContext<'a> {
     pub events: &'a dyn RelationRemovalEvents,
     pub foreign: crate::schema::foreign_removal::ForeignTableRemovalContext<'a>,
     pub views: &'a dyn SchemaRemovalViews,
-    pub sequences: &'a dyn RelationRemovalSequences,
+    pub sequences: &'a dyn crate::schema::sequences::removal::SequenceRemovalInputs,
     pub locks: &'a dyn RelationRemovalLocks,
     pub publication: &'a dyn SchemaRemovalPublication,
     pub notices: &'a dyn SchemaDropNotices,
@@ -128,6 +127,7 @@ pub fn drop_schemas(
         for sequence in sequences {
             context
                 .sequences
+                .sequence_removal_context()
                 .drop_owned_sequence(&sequence, true)
                 .map_err(|error| storage_error(&error))?;
         }
@@ -201,6 +201,7 @@ fn drop_schema_relations(
     for sequence in owned_sequences {
         context
             .sequences
+            .sequence_removal_context()
             .drop_owned_sequence(&sequence, true)
             .map_err(|error| storage_error(&error))?;
     }

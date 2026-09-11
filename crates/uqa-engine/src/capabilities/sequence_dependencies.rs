@@ -102,14 +102,6 @@ impl Engine {
         self.sequence_dependency_context()
             .sequence_schema_expression_dependents(sequence)
     }
-    pub(crate) fn detach_sequence_column_dependencies(
-        &self,
-        sequence: &str,
-        cascade: bool,
-    ) -> StorageBackendResult<()> {
-        self.sequence_dependency_context()
-            .detach_sequence_column_dependencies(sequence, cascade)
-    }
     pub(crate) fn resolve_stored_sequence_references_in_expr(
         &self,
         expression: &mut uqa_sql::ast::Expr,

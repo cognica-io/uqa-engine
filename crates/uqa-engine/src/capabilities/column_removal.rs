@@ -188,7 +188,4 @@ impl ColumnDropSequences for Engine {
     ) -> StorageBackendResult<BTreeSet<String>> {
         self.sequence_names_owned_by_column(table, column)
     }
-    fn drop_owned(&self, sequence: &str, cascade: bool) -> StorageBackendResult<()> {
-        self.drop_owned_sequence(sequence, cascade)
-    }
 }

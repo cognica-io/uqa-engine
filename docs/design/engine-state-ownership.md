@@ -45,6 +45,8 @@ The [authorization adapter](../../crates/uqa-engine/src/capabilities/table_autho
 
 The [sequence dependency adapter](../../crates/uqa-engine/src/capabilities/sequence_dependencies.rs) lends actual table generations, column and CHECK guards, sequence identities, and the foreign registry to native dependency consumers. SQL owns literal and regclass expression analysis. Execution preserves refresh order, guard lifetimes, owner filtering, and ordered CASCADE publication through existing constraint, column, and foreign-definition owners. Native provenance detachment retains each table generation, saves the changed schema before taking its column write guard, and publishes the catalog epoch after the table loop. Engine tests cover actual lock retention and SQLite rollback and reopen; pure dependency tests live in SQL.
 
+The [sequence removal adapter](../../crates/uqa-engine/src/capabilities/sequence_removal.rs) retains the existing provider decision and ordered sequence, identity, persistence, security, session-value, and allocation-cache updates. It releases the session guard before clearing allocation caches and advances the catalog epoch last. Execution owns DROP authority and dependency scheduling; native callers borrow its inputs through a context factory without an Engine command callback. Tests cover all-target identity preflight, failed publication after dependent defaults and views have been removed, and cleanup by stable sequence identity.
+
 ## Atomicity and locking
 
 Transactional session values live behind one `SessionContext.state` lock. Snapshot and restore therefore cannot combine an old search path with a new prepared-plan cache, PRNG state, or sequence `currval` map.
