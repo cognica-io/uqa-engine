@@ -28,6 +28,7 @@ use uqa_sql::plpgsql::{
 use uqa_sql::type_resolution::canonical_routine_type_name;
 use uqa_sql::{compile, SQLError, SQLParam, SQLResult};
 pub mod context;
+pub mod removal;
 pub mod transaction;
 pub use context::RoutineContext;
 mod blocks;

@@ -216,18 +216,10 @@ impl Engine {
         definition: &CreateFunction,
         current_user_has_owner_privileges: bool,
     ) -> Result<(), SQLError> {
-        if current_user_has_owner_privileges {
-            Ok(())
-        } else {
-            Err(SQLError::Routine {
-                sqlstate: "42501".into(),
-                message: format!(
-                    "must be owner of {} {}",
-                    routine_kind(definition),
-                    definition.name
-                ),
-            })
-        }
+        uqa_sql::routines::lifecycle::ensure_routine_owner_as(
+            definition,
+            current_user_has_owner_privileges,
+        )
     }
 
     pub(super) fn validate_routine_support(&self, support: &str) -> Result<(), SQLError> {

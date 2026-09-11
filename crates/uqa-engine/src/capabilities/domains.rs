@@ -75,15 +75,12 @@ use std::{
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::foreign::StoredForeignTable;
 use uqa_execution::schema::domains::dependencies::{
-    self as dependencies, DomainCheckRead, DomainColumnRead, DomainDependencyCatalog,
-    DomainDependencyContext, DomainForeignRemoval, DomainIndexRemoval, DomainRegistryPublication,
-    DomainTableMetadata, DomainTableRemoval, DomainViewDependencies,
+    DomainCheckRead, DomainColumnRead, DomainDependencyCatalog, DomainDependencyContext,
+    DomainForeignRemoval, DomainIndexRemoval, DomainRegistryPublication, DomainTableMetadata,
+    DomainTableRemoval, DomainViewDependencies,
 };
 use uqa_sql::schema::domains::dependencies::DomainTypeCatalog;
-use uqa_sql::{
-    ast::{ColumnType, CreateFunction, FunctionBinding},
-    catalog::stored_view::StoredView,
-};
+use uqa_sql::{ast::ColumnType, catalog::stored_view::StoredView};
 use uqa_storage::{CatalogIndexRow, StorageBackendResult};
 
 impl Engine {
@@ -100,60 +97,6 @@ impl Engine {
             locks: self,
             changes: self,
         }
-    }
-    pub(crate) fn routine_references_domain(
-        &self,
-        definition: &CreateFunction,
-        targets: &BTreeSet<u32>,
-    ) -> Result<bool, SQLError> {
-        uqa_sql::schema::domains::dependencies::routine_references_domain(self, definition, targets)
-    }
-    pub(crate) fn domain_drop_column_names(
-        &self,
-        targets: &BTreeSet<u32>,
-    ) -> Result<BTreeSet<(String, String)>, SQLError> {
-        dependencies::domain_drop_column_names(&self.domain_dependency_context(), targets)
-    }
-    pub(crate) fn domain_drop_has_dependents(
-        &self,
-        targets: &BTreeSet<u32>,
-    ) -> Result<bool, SQLError> {
-        dependencies::domain_drop_has_dependents(&self.domain_dependency_context(), targets)
-    }
-    pub(crate) fn domain_drop_view_names(
-        &self,
-        targets: &BTreeSet<u32>,
-    ) -> Result<Vec<String>, SQLError> {
-        dependencies::domain_drop_view_names(&self.domain_dependency_context(), targets)
-    }
-    pub(crate) fn commit_domain_drop(&self, targets: &BTreeSet<u32>) -> Result<(), SQLError> {
-        dependencies::commit_domain_drop(&self.domain_dependency_context(), targets)
-    }
-    pub(crate) fn expand_domain_drop_targets(
-        &self,
-        targets: &mut BTreeSet<u32>,
-        routines: &[FunctionBinding],
-    ) -> Result<(), SQLError> {
-        dependencies::expand_domain_drop_targets(
-            &self.domain_dependency_context(),
-            targets,
-            routines,
-        )
-    }
-    pub(crate) fn domain_checks_depending_on_routines(
-        &self,
-        routines: &[FunctionBinding],
-    ) -> Result<Vec<(String, String)>, SQLError> {
-        dependencies::domain_checks_depending_on_routines(
-            &self.domain_dependency_context(),
-            routines,
-        )
-    }
-    pub(crate) fn drop_domain_routine_checks(
-        &self,
-        routines: &[FunctionBinding],
-    ) -> Result<(), SQLError> {
-        dependencies::drop_domain_routine_checks(&self.domain_dependency_context(), routines)
     }
 }
 impl DomainTypeCatalog for Engine {

@@ -21,8 +21,7 @@ pub(crate) use rule_dependencies::{
     bind_stored_expression_routines, bind_stored_statement_routines,
     copy_stored_source_column_shapes, expression_references_routine_identity,
     rewrite_expression_routine_identity, rewrite_statement_routine_identity,
-    rewrite_stored_statement_relation, statement_references_routine_identity,
-    stored_statement_relation_names, visit_stored_expression, visit_stored_statement_expressions,
+    rewrite_stored_statement_relation, visit_stored_expression, visit_stored_statement_expressions,
     visit_stored_statement_merges, visit_stored_statement_sources,
 };
 

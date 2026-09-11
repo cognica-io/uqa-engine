@@ -6,200 +6,35 @@
 
 //! Routine registration, catalog persistence, alteration, and removal.
 
-mod cascade;
 mod column_aliases;
-mod column_dependencies;
 mod compilation;
 mod dependencies;
-mod drop_planning;
 mod merge_columns;
 mod regclass;
-mod relation_dependencies;
 mod rename;
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_sql::ast::{
-    AlterRoutineKind, AlterRoutineStmt, CreateFunction, DropFunctionItem, DropFunctionStmt,
-    FunctionBinding, FunctionBody, RoleAttribute,
+    AlterRoutineStmt, CreateFunction, FunctionBinding, FunctionBody, RoleAttribute,
 };
 use uqa_sql::SQLError;
 
 use crate::{
-    open::CatalogRestoreMode, roles::role_inherits, schema_security::SchemaAclPrivilege, Arc,
-    CatalogFacade, Engine, RelationIdentity, StorageBackendError, StorageBackendResult,
-    FUNCTIONS_METADATA_KEY,
+    open::CatalogRestoreMode, roles::role_inherits, Arc, CatalogFacade, Engine, RelationIdentity,
+    StorageBackendError, StorageBackendResult, FUNCTIONS_METADATA_KEY,
 };
 
 use super::declaration::{resolve_alter_routine_identity_types, resolve_routine_type_references};
 use super::resolution::{routine_kind, routine_signature_types};
 use super::{canonical_routine_type_name, CompiledFunctionBody, SQLUserFunction};
-use dependencies::{stored_routine_dependents, RoutineCompilationMode};
-
-struct SQLFunctionDropPlan {
-    domains: BTreeSet<u32>,
-    targets: Vec<RoutineDropTarget>,
-    dependents: RoutineObjectDependents,
-    notices: Vec<(&'static str, String)>,
-}
-
-struct RoutineDropResolution {
-    targets: Vec<RoutineDropTarget>,
-    seen_targets: BTreeSet<RoutineDropTarget>,
-    notices: Vec<(&'static str, String)>,
-}
-
-struct RoutineObjectDependents {
-    indexes: Vec<crate::RelationIdentity>,
-    views: Vec<String>,
-    columns: Vec<(String, String, bool)>,
-    defaults: Vec<(String, String, bool)>,
-    checks: Vec<(String, String, bool)>,
-    triggers: Vec<(String, String)>,
-    rules: Vec<(String, String)>,
-}
-
-#[derive(Default)]
-struct RoutineSchemaDependents {
-    columns: Vec<(String, String, bool)>,
-    defaults: Vec<(String, String, bool)>,
-    checks: Vec<(String, String, bool)>,
-}
+use dependencies::RoutineCompilationMode;
+pub(super) use uqa_sql::routines::lifecycle::routine_signature_label;
 
 pub(crate) struct PendingSQLFunctionRestore {
     definitions: BTreeMap<String, Vec<CreateFunction>>,
     migrated: bool,
     previous: BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct RoutineDropTarget {
-    object_id: Option<[u8; 16]>,
-    name: String,
-    argument_types: Vec<String>,
-    is_procedure: bool,
-}
-
-impl RoutineDropTarget {
-    fn kind(&self) -> &'static str {
-        if self.is_procedure {
-            "procedure"
-        } else {
-            "function"
-        }
-    }
-
-    fn label(&self) -> String {
-        routine_signature_label(&self.name, &self.argument_types)
-    }
-
-    fn binding(&self) -> FunctionBinding {
-        FunctionBinding {
-            object_id: self.object_id,
-            name: self.name.clone(),
-            argument_types: self.argument_types.clone(),
-            builtin: false,
-            dispatch: None,
-            invocation: None,
-            resolution_error: None,
-        }
-    }
-}
-
-pub(super) fn routine_signature_label(name: &str, types: &[String]) -> String {
-    let display_types = types
-        .iter()
-        .map(|type_name| {
-            uqa_sql::ast::ColumnType::from_sql_name(type_name)
-                .map_or_else(|_| type_name.clone(), |column_type| column_type.sql_name())
-        })
-        .collect::<Vec<_>>();
-    format!("{name}({})", display_types.join(", "))
-}
-
-fn wrong_routine_kind_error(
-    name: &str,
-    types: &[String],
-    actual_is_procedure: bool,
-    expected_kind: &str,
-) -> SQLError {
-    let actual_kind = if actual_is_procedure {
-        "procedure"
-    } else {
-        "function"
-    };
-    SQLError::Routine {
-        sqlstate: "42809".into(),
-        message: format!(
-            "{} is a {actual_kind}, not a {expected_kind}",
-            routine_signature_label(name, types)
-        ),
-    }
-}
-
-fn append_routine_cascade_notice(
-    notices: &mut Vec<(&'static str, String)>,
-    cascaded_routines: &[RoutineDropTarget],
-    dependents: &RoutineObjectDependents,
-) {
-    let mut cascaded = cascaded_routines
-        .iter()
-        .map(|target| format!("{} {}", target.kind(), target.label()))
-        .collect::<Vec<_>>();
-    cascaded.extend(dependents.columns.iter().map(|(table, column, foreign)| {
-        format!(
-            "column {column} of {} {table}",
-            routine_schema_relation_kind(*foreign)
-        )
-    }));
-    cascaded.extend(dependents.defaults.iter().map(|(table, column, foreign)| {
-        format!(
-            "default value for column {column} of {} {table}",
-            routine_schema_relation_kind(*foreign)
-        )
-    }));
-    cascaded.extend(
-        dependents
-            .checks
-            .iter()
-            .map(|(table, constraint, foreign)| {
-                format!(
-                    "constraint {constraint} on {} {table}",
-                    routine_schema_relation_kind(*foreign)
-                )
-            }),
-    );
-    cascaded.extend(dependents.views.iter().map(|view| format!("view {view}")));
-    cascaded.extend(
-        dependents
-            .triggers
-            .iter()
-            .map(|(table, trigger)| format!("trigger {trigger} on table {table}")),
-    );
-    cascaded.extend(
-        dependents
-            .rules
-            .iter()
-            .map(|(table, rule)| format!("rule {rule} on table {table}")),
-    );
-    cascaded.sort();
-    cascaded.dedup();
-    match cascaded.as_slice() {
-        [] => {}
-        [object] => notices.push(("NOTICE", format!("drop cascades to {object}"))),
-        objects => notices.push((
-            "NOTICE",
-            format!("drop cascades to {} other objects", objects.len()),
-        )),
-    }
-}
-
-fn routine_schema_relation_kind(foreign: bool) -> &'static str {
-    if foreign {
-        "foreign table"
-    } else {
-        "table"
-    }
 }
 
 fn allocate_routine_object_id(
@@ -421,41 +256,7 @@ impl Engine {
 
     /// Resolve a routine name through the schemas the current user can access, while qualified names report missing schemas and `USAGE` denials directly.
     fn routine_lookup_keys(&self, name: &str) -> Result<Vec<String>, SQLError> {
-        let (schema, local_name) =
-            RelationIdentity::parse_reference(name).map_err(|error| SQLError::Routine {
-                sqlstate: "42602".into(),
-                message: format!("invalid routine name `{name}`: {error}"),
-            })?;
-        if let Some(schema) = schema {
-            if self.schema_security_for_privilege(&schema).is_none() {
-                return Err(SQLError::Routine {
-                    sqlstate: "3F000".into(),
-                    message: format!("schema \"{schema}\" does not exist"),
-                });
-            }
-            self.require_schema_privilege(
-                &schema,
-                &self.current_user_name(),
-                SchemaAclPrivilege::Usage,
-            )?;
-            return Ok(vec![
-                RelationIdentity::new(schema, local_name).qualified_name()
-            ]);
-        }
-        let current_user = self.current_user_name();
-        let search_path = self.session.state.read().search_path.clone();
-        Ok(search_path
-            .into_iter()
-            .filter(|schema| {
-                self.schema_security_for_privilege(schema).is_some()
-                    && self.schema_has_privilege_for_role(
-                        schema,
-                        &current_user,
-                        SchemaAclPrivilege::Usage,
-                    )
-            })
-            .map(|schema| RelationIdentity::new(schema, &local_name).qualified_name())
-            .collect())
+        uqa_sql::routines::lifecycle::names::routine_lookup_keys(self, name)
     }
 
     /// Visible overload set for `name`. Identical signatures in later
@@ -608,7 +409,7 @@ impl Engine {
         std::mem::take(&mut *self.runtime.notices.lock())
     }
 
-    pub(super) fn persist_sql_functions_snapshot(
+    pub(crate) fn persist_sql_functions_snapshot(
         &self,
         registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
     ) -> Result<(), SQLError> {
@@ -818,22 +619,6 @@ impl Engine {
     }
 }
 
-fn alter_routine_kind_name(kind: AlterRoutineKind) -> &'static str {
-    match kind {
-        AlterRoutineKind::Function => "function",
-        AlterRoutineKind::Procedure => "procedure",
-        AlterRoutineKind::Routine => "routine",
-    }
-}
-
-fn alter_routine_kind_matches(kind: AlterRoutineKind, def: &CreateFunction) -> bool {
-    match kind {
-        AlterRoutineKind::Function => !def.is_procedure,
-        AlterRoutineKind::Procedure => def.is_procedure,
-        AlterRoutineKind::Routine => true,
-    }
-}
-
 /// `CREATE OR REPLACE` may not change the declared result shape.
 fn same_return_shape(a: &CreateFunction, b: &CreateFunction) -> bool {
     use uqa_sql::ast::FunctionReturns;
@@ -864,7 +649,7 @@ fn same_return_shape(a: &CreateFunction, b: &CreateFunction) -> bool {
 mod tests {
     use std::sync::{mpsc, Arc};
 
-    use uqa_sql::ast::Statement;
+    use uqa_sql::ast::{DropFunctionStmt, Statement};
 
     use super::*;
 

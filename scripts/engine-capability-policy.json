@@ -51,6 +51,7 @@
         "crates/uqa-engine/src/capabilities/retrieval_execution.rs",
         "crates/uqa-engine/src/capabilities/returning.rs",
         "crates/uqa-engine/src/capabilities/routine_execution.rs",
+        "crates/uqa-engine/src/capabilities/routine_removal.rs",
         "crates/uqa-engine/src/capabilities/rule_targets.rs",
         "crates/uqa-engine/src/capabilities/rules.rs",
         "crates/uqa-engine/src/capabilities/schema_analysis.rs",

@@ -6,6 +6,8 @@
 
 //! SQL routine definitions and static signature lookup contracts.
 
+pub mod lifecycle;
+
 use crate::ast::{
     ColumnType, CreateFunction, FunctionBinding, FunctionReturns, RoutineInvocationBinding,
 };
