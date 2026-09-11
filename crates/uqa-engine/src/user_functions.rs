@@ -13,14 +13,11 @@ mod combined_overloads;
 pub(crate) use uqa_sql::routines::declaration::resolve_plpgsql_datum_types;
 mod lifecycle;
 mod resolution;
-mod security;
 
 pub(crate) use resolution::{
     routine_local_name, routine_returns_anonymous_record, routine_signature_types, RoutineCallKind,
 };
 pub(crate) use uqa_execution::canonical_routine_type_name;
-
-pub(crate) use uqa_sql::routines::builtin_routine_support_oid;
 
 pub(crate) use uqa_sql::routines::{
     is_routine_namespace_lookup_error, CompiledFunctionBody, SQLUserFunction,

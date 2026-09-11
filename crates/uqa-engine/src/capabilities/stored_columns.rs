@@ -11,7 +11,10 @@ use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::{CreateRule, Expr, Statement},
-    binding::stored_columns::{self as analysis, StoredColumnBindingContext, StoredColumnCatalog},
+    binding::stored_columns::{
+        self as analysis, StoredColumnBindingContext, StoredColumnCatalog, StoredSourceCatalog,
+        StoredSourceColumns,
+    },
     catalog::events::RuleColumnDependency,
     SQLError,
 };
@@ -32,37 +35,6 @@ impl Engine {
             sources: self,
             merge: self,
         }
-    }
-    pub(crate) fn bind_stored_statement_source_columns(
-        &self,
-        statement: &mut Statement,
-    ) -> Result<bool, SQLError> {
-        let catalog = self.catalog_read_view();
-        let mut resolution = self.session_execution_view().relation_name_resolution();
-        resolution.set_lookup_mode(crate::capabilities::RelationLookupMode::Bound);
-        analysis::bind_stored_statement_source_columns(statement, |name| {
-            Ok(
-                if let Some(table) = catalog.table_resolved(&resolution, name)? {
-                    Some(
-                        table
-                            .columns
-                            .iter()
-                            .map(|column| column.name.clone())
-                            .collect(),
-                    )
-                } else {
-                    catalog
-                        .foreign_table_resolved(&resolution, name)?
-                        .map(|table| {
-                            table
-                                .columns
-                                .iter()
-                                .map(|column| column.name.clone())
-                                .collect()
-                        })
-                },
-            )
-        })
     }
     pub(crate) fn bind_rule_condition_column_dependencies(
         &self,
@@ -104,5 +76,17 @@ impl Engine {
             definition,
             dependency,
         )
+    }
+}
+
+impl StoredSourceCatalog for Engine {
+    fn stored_source_columns(&self) -> StoredSourceColumns {
+        let catalog = self.catalog_read_view();
+        let mut resolution = self.session_execution_view().relation_name_resolution();
+        resolution.set_lookup_mode(crate::capabilities::RelationLookupMode::Bound);
+        StoredSourceColumns {
+            catalog: std::sync::Arc::new(catalog),
+            resolution,
+        }
     }
 }

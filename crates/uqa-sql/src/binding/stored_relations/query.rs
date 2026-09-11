@@ -22,6 +22,11 @@ pub trait StoredQuerySequences {
     fn query_sequence(&self, reference: &str) -> Result<String, String>;
     fn loaded_query_sequence(&self, reference: &str) -> Result<String, String>;
 }
+/// Namespace metadata captured at the start of a stored query binding pass.
+pub struct StoredQueryNamespace {
+    pub temporary_schema: String,
+    pub transition_relations: BTreeSet<String>,
+}
 pub struct StoredQueryBindingContext<'a> {
     pub relations: &'a dyn StoredRelationCatalog,
     pub sequences: &'a dyn StoredQuerySequences,

@@ -9,15 +9,17 @@
 use crate::Engine;
 use std::collections::BTreeSet;
 use uqa_sql::{
-    ast::{ColumnDef, ColumnType, CreateFunction, Statement},
-    plan::QueryPlan,
+    ast::{ColumnDef, ColumnType, CreateFunction},
+    binding::{snapshot::BindingSnapshot, stored_relations::StoredQueryNamespace},
     plpgsql::PlpgsqlCatalog,
     routines::{
-        compilation::{RoutineCompilationContext, RoutineParserCatalog, RoutinePlanBinding},
+        compilation::{RoutineCompilationCatalog, RoutineCompilationContext, RoutineParserCatalog},
         declaration::RoutineTypeCatalog,
-        merge_columns::{self, StoredMergeColumnCatalog},
+        dependencies::RoutineCompilationMode,
+        merge_columns::StoredMergeColumnCatalog,
+        regclass::RoutineRegclassCatalog,
     },
-    RowSchema, SQLError, SQLParam,
+    SQLError,
 };
 
 impl Engine {
@@ -25,16 +27,13 @@ impl Engine {
         RoutineCompilationContext {
             types: self,
             parsers: self,
-            bindings: self,
+            catalog: self,
+            routines: self,
+            relations: self,
+            sequences: self,
             merge: self,
             regroles: self,
         }
-    }
-    pub(crate) fn bind_stored_merge_target_columns(
-        &self,
-        statement: &mut Statement,
-    ) -> Result<bool, SQLError> {
-        merge_columns::bind_stored_merge_target_columns(self, statement)
     }
 }
 impl RoutineTypeCatalog for Engine {
@@ -73,31 +72,26 @@ impl RoutineParserCatalog for Engine {
         uqa_execution::catalog::projection::plpgsql_catalog(&self.catalog_execution())
     }
 }
-impl RoutinePlanBinding for Engine {
+impl RoutineCompilationCatalog for Engine {
     fn has_registered_aggregate_function(&self, name: &str) -> bool {
         Engine::has_registered_aggregate_function(self, name)
     }
-    fn bind_definition_query_relations(&self, query: &mut QueryPlan) -> Result<(), SQLError> {
-        self.bind_stored_query_relations(query, "SQL routine body", false)
-            .map(|_| ())
-    }
-    fn bind_persisted_query_relations(&self, query: &mut QueryPlan) -> Result<(), SQLError> {
-        self.bind_loaded_stored_query_relations(query, "SQL routine body", false)
-            .map(|_| ())
-    }
-    fn bind_query_routines(
-        &self,
-        query: &mut QueryPlan,
-        params: &[SQLParam],
-        outer: &RowSchema,
-    ) -> Result<RowSchema, SQLError> {
+    fn binding_snapshot(&self) -> Result<BindingSnapshot, SQLError> {
         let scope = super::query_scope::new_for_catalog_binding(self);
-        uqa_execution::query::binding::bind_query_plan_routines_for_storage(
-            self,
-            query,
-            params,
-            &scope,
-            Some(outer),
+        uqa_execution::query::binding::binding_context(&scope).map(Into::into)
+    }
+    fn stored_query_namespace(&self) -> StoredQueryNamespace {
+        StoredQueryNamespace {
+            temporary_schema: self.temporary_schema_name(),
+            transition_relations: crate::sql::active_trigger_transition_relation_names(),
+        }
+    }
+}
+impl RoutineRegclassCatalog for Engine {
+    fn resolve_routine_regclass(&self, reference: &str) -> Result<Option<i64>, SQLError> {
+        uqa_execution::catalog::projection::resolve_regclass_oid(
+            &self.catalog_execution(),
+            reference,
         )
     }
 }
@@ -105,11 +99,26 @@ impl RoutinePlanBinding for Engine {
 use uqa_core::RelationIdentity;
 use uqa_execution::routines::{
     compilation::{self, RoutineCompilationSession, StoredRoutineCompilationContext},
+    definition::{self, RoutineDefinitionContext},
     rewrites::{self, RoutineRewriteContext},
 };
 use uqa_sql::{ast::FunctionBinding, routines::CompiledFunctionBody};
 
 impl Engine {
+    pub(crate) fn routine_definition_context(&self) -> RoutineDefinitionContext<'_> {
+        RoutineDefinitionContext {
+            compilation: self.stored_routine_compilation_context(),
+            sources: self,
+            regclasses: self,
+        }
+    }
+    pub(crate) fn compile_catalog_bound_routine(
+        &self,
+        def: &mut CreateFunction,
+        mode: RoutineCompilationMode,
+    ) -> Result<(CompiledFunctionBody, bool), SQLError> {
+        definition::compile_catalog_bound_routine(&self.routine_definition_context(), def, mode)
+    }
     pub(crate) fn stored_routine_compilation_context(&self) -> StoredRoutineCompilationContext<'_> {
         StoredRoutineCompilationContext {
             analysis: self.routine_compilation_context(),
@@ -125,26 +134,11 @@ impl Engine {
             changes: self,
         }
     }
-    pub(crate) fn compile_sql_function_body(
-        &self,
-        def: &CreateFunction,
-    ) -> Result<CompiledFunctionBody, SQLError> {
-        uqa_sql::routines::compilation::compile_function_body(
-            &self.routine_compilation_context(),
-            def,
-        )
-    }
     pub(crate) fn compile_persisted_sql_function(
         &self,
         def: &CreateFunction,
     ) -> Result<CompiledFunctionBody, SQLError> {
         compilation::compile_persisted_sql_function(&self.stored_routine_compilation_context(), def)
-    }
-    pub(crate) fn stored_merge_dependency_body(
-        &self,
-        def: &CreateFunction,
-    ) -> Result<Option<CompiledFunctionBody>, SQLError> {
-        compilation::stored_merge_dependency_body(&self.stored_routine_compilation_context(), def)
     }
     pub(crate) fn rewrite_routine_relation_references(
         &self,
@@ -188,10 +182,70 @@ impl Engine {
     }
 }
 impl RoutineCompilationSession for Engine {
+    fn routine_search_path(&self) -> Vec<String> {
+        self.session.state.read().search_path.clone()
+    }
     fn replace_routine_search_path(&self, path: Vec<String>) -> Vec<String> {
         std::mem::replace(&mut self.session.state.write().search_path, path)
     }
     fn restore_routine_search_path(&self, path: Vec<String>) {
         self.session.state.write().search_path = path;
+    }
+}
+
+use uqa_execution::routines::{
+    catalog::RoutineMutationContext,
+    configuration::{RoutineConfigurationGuard, RoutineConfigurationSession},
+    registration::{self, RoutineCreationNamespace, RoutineRegistrationContext},
+};
+use uqa_sql::{ast::AlterRoutineStmt, routines::registration::RoutineSupportAuthority};
+
+impl RoutineCreationNamespace for Engine {
+    fn routine_name_for_create(&self, name: &str) -> Result<String, SQLError> {
+        self.try_relation_name_for_sql_create(name)
+    }
+}
+impl RoutineSupportAuthority for Engine {
+    fn current_user_is_superuser(&self) -> bool {
+        Engine::current_user_is_superuser(self)
+    }
+}
+impl RoutineConfigurationGuard for crate::roles::RoutineSessionStateGuard<'_> {}
+impl RoutineConfigurationSession for Engine {
+    fn routine_configuration_guard(&self) -> Box<dyn RoutineConfigurationGuard + '_> {
+        Box::new(self.routine_config_state_guard())
+    }
+    fn set_routine_variable(&self, name: &str, value: &str) -> Result<(), SQLError> {
+        self.set_variable(name, value)
+    }
+    fn show_routine_variable(&self, name: &str) -> Result<String, SQLError> {
+        self.show_variable(name)
+    }
+}
+impl Engine {
+    pub(crate) fn routine_mutation_context(&self) -> RoutineMutationContext<'_> {
+        RoutineMutationContext {
+            writer: self,
+            names: self,
+            roles: self,
+            registry: self,
+            publication: self,
+            changes: self,
+        }
+    }
+    fn routine_registration_context(&self) -> RoutineRegistrationContext<'_> {
+        RoutineRegistrationContext {
+            catalog: self.routine_mutation_context(),
+            namespace: self,
+            definition: self.routine_definition_context(),
+            support: self,
+            configuration: self,
+        }
+    }
+    pub(crate) fn register_sql_function(&self, def: CreateFunction) -> Result<(), SQLError> {
+        registration::register_sql_function(&self.routine_registration_context(), def)
+    }
+    pub(crate) fn alter_sql_routine(&self, stmt: &AlterRoutineStmt) -> Result<(), SQLError> {
+        registration::alter_sql_routine(&self.routine_registration_context(), stmt)
     }
 }

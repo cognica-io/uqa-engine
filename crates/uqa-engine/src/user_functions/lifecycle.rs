@@ -6,28 +6,21 @@
 
 //! Routine registration, catalog persistence, alteration, and removal.
 
-mod dependencies;
-mod regclass;
 mod rename;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use uqa_sql::ast::{
-    AlterRoutineStmt, CreateFunction, FunctionBinding, FunctionBody, RoleAttribute,
-};
+use uqa_sql::ast::{CreateFunction, FunctionBinding, FunctionBody};
 use uqa_sql::SQLError;
 
 use crate::{
-    open::CatalogRestoreMode, roles::role_inherits, Arc, CatalogFacade, Engine, RelationIdentity,
-    StorageBackendError, StorageBackendResult, FUNCTIONS_METADATA_KEY,
+    open::CatalogRestoreMode, Arc, CatalogFacade, Engine, RelationIdentity, StorageBackendError,
+    StorageBackendResult, FUNCTIONS_METADATA_KEY,
 };
 
-use super::resolution::{routine_kind, routine_signature_types};
-use super::{canonical_routine_type_name, CompiledFunctionBody, SQLUserFunction};
-use dependencies::RoutineCompilationMode;
-use uqa_sql::routines::declaration::{
-    resolve_alter_routine_identity_types, resolve_routine_type_references,
-};
+use super::resolution::routine_signature_types;
+use super::{CompiledFunctionBody, SQLUserFunction};
+use uqa_sql::routines::dependencies::RoutineCompilationMode;
 pub(super) use uqa_sql::routines::lifecycle::routine_signature_label;
 
 pub(crate) struct PendingSQLFunctionRestore {
@@ -36,223 +29,7 @@ pub(crate) struct PendingSQLFunctionRestore {
     previous: BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
 }
 
-fn allocate_routine_object_id(
-    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
-    name: &str,
-) -> Result<[u8; 16], SQLError> {
-    loop {
-        let candidate = crate::new_routine_object_id().map_err(|error| {
-            SQLError::Internal(format!("allocate routine `{name}` identity: {error}"))
-        })?;
-        if registry
-            .values()
-            .flat_map(|overloads| overloads.iter())
-            .all(|function| function.def.object_id != Some(candidate))
-        {
-            return Ok(candidate);
-        }
-    }
-}
-
-fn persisted_routine_object_id(def: &CreateFunction) -> Result<[u8; 16], SQLError> {
-    def.object_id.ok_or_else(|| {
-        SQLError::Internal(format!(
-            "existing routine `{}` has no catalog object identity",
-            def.name
-        ))
-    })
-}
-
 impl Engine {
-    /// Register (or replace) a user-defined routine. Applies the
-    /// `PostgreSQL` conflict rules for `(schema, name, argument types)`
-    /// collisions and persists the updated overload set.
-    pub(crate) fn register_sql_function(&self, mut def: CreateFunction) -> Result<(), SQLError> {
-        self.prepare_explicit_transaction_writer()?;
-        let requested_name = def.name.clone();
-        def.name = self.try_relation_name_for_sql_create(&requested_name)?;
-        resolve_routine_type_references(self, &mut def)?;
-        if def.owner.is_empty() {
-            def.owner = self.current_user_name();
-        }
-        if let Some(support) = def.support.as_deref() {
-            self.validate_routine_support(support)?;
-        }
-        self.apply_routine_config_actions(&mut def)?;
-        let (compiled, _) =
-            self.compile_catalog_bound_routine(&mut def, RoutineCompilationMode::Definition)?;
-        let name = def.name.clone();
-        let signature = routine_signature_types(&def);
-        let kind = routine_kind(&def);
-        let current_user = self.current_user_name();
-        let roles = self.durable.roles.read();
-        if !roles.contains_key(&def.owner) {
-            return Err(SQLError::Routine {
-                sqlstate: "42704".into(),
-                message: format!("role \"{}\" does not exist", def.owner),
-            });
-        }
-        let current_user_is_superuser = roles
-            .get(&current_user)
-            .is_some_and(|role| role.has(RoleAttribute::Superuser));
-        let memberships = self.durable.role_memberships.read();
-        if (def.security.leakproof || def.support.is_some()) && !current_user_is_superuser {
-            return Err(SQLError::Routine {
-                sqlstate: "42501".into(),
-                message: if def.security.leakproof {
-                    "only superuser can define a leakproof function".into()
-                } else {
-                    "must be superuser to specify a support function".into()
-                },
-            });
-        }
-        let mut registry = self.durable.sql_user_functions.write();
-        let mut next = registry.clone();
-        {
-            let overloads = next.entry(name.clone()).or_default();
-            if let Some(pos) = overloads
-                .iter()
-                .position(|function| routine_signature_types(&function.def) == signature)
-            {
-                let existing = &overloads[pos].def;
-                if !def.or_replace {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42723".into(),
-                        message: format!(
-                            "{kind} \"{requested_name}\" already exists with same argument types"
-                        ),
-                    });
-                }
-                Self::ensure_routine_owner_as(
-                    existing,
-                    role_inherits(&roles, &memberships, &current_user, &existing.owner),
-                )?;
-                if existing.is_procedure != def.is_procedure {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42809".into(),
-                        message: "cannot change routine kind".into(),
-                    });
-                }
-                if !same_return_shape(existing, &def) {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42P13".into(),
-                        message: "cannot change return type of existing function".into(),
-                    });
-                }
-                // CREATE OR REPLACE changes the definition but not object ownership or privileges.
-                def.object_id = Some(persisted_routine_object_id(existing)?);
-                def.owner.clone_from(&existing.owner);
-                def.execute_acl.clone_from(&existing.execute_acl);
-                overloads[pos] = Arc::new(SQLUserFunction { def, compiled });
-            } else {
-                def.object_id = Some(allocate_routine_object_id(&registry, &name)?);
-                overloads.push(Arc::new(SQLUserFunction { def, compiled }));
-            }
-            overloads.sort_by(|left, right| {
-                routine_signature_types(&left.def)
-                    .cmp(&routine_signature_types(&right.def))
-                    .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
-            });
-        }
-        self.persist_sql_functions_snapshot(&next)?;
-        *registry = next;
-        drop(registry);
-        drop(memberships);
-        drop(roles);
-        self.note_catalog_registry_changed();
-        Ok(())
-    }
-
-    /// Change mutable routine attributes without replacing its identity or compiled body.
-    pub(crate) fn alter_sql_routine(&self, stmt: &AlterRoutineStmt) -> Result<(), SQLError> {
-        self.prepare_explicit_transaction_writer()?;
-        let requested_types = resolve_alter_routine_identity_types(self, stmt)?;
-        let current_user = self.current_user_name();
-        let roles = self.durable.roles.read();
-        let current_user_is_superuser = roles
-            .get(&current_user)
-            .is_some_and(|role| role.has(RoleAttribute::Superuser));
-        let memberships = self.durable.role_memberships.read();
-        let mut registry = self.durable.sql_user_functions.write();
-        let (name, position) = self.resolve_sql_routine_alter_target(
-            &registry,
-            &stmt.name,
-            requested_types.as_deref(),
-            stmt.kind,
-        )?;
-        let existing = registry
-            .get(&name)
-            .and_then(|overloads| overloads.get(position))
-            .cloned()
-            .ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "resolved ALTER routine target `{name}` disappeared before mutation"
-                ))
-            })?;
-        Self::ensure_routine_owner_as(
-            &existing.def,
-            role_inherits(&roles, &memberships, &current_user, &existing.def.owner),
-        )?;
-        if existing.def.is_procedure
-            && (stmt.volatility.is_some()
-                || stmt.strict.is_some()
-                || stmt.leakproof.is_some()
-                || stmt.parallel.is_some()
-                || stmt.support.is_some())
-        {
-            return Err(SQLError::Routine {
-                sqlstate: "42P13".into(),
-                message: "invalid attribute in procedure definition".into(),
-            });
-        }
-
-        let mut def = existing.def.clone();
-        if let Some(volatility) = stmt.volatility {
-            def.volatility = volatility;
-        }
-        if let Some(strict) = stmt.strict {
-            def.strict = strict;
-        }
-        if let Some(security_definer) = stmt.security_definer {
-            def.security.security_definer = security_definer;
-        }
-        if let Some(leakproof) = stmt.leakproof {
-            if leakproof && !current_user_is_superuser {
-                return Err(SQLError::Routine {
-                    sqlstate: "42501".into(),
-                    message: "only superuser can define a leakproof function".into(),
-                });
-            }
-            def.security.leakproof = leakproof;
-        }
-        if let Some(parallel) = stmt.parallel {
-            def.parallel = parallel;
-        }
-        if let Some(support) = &stmt.support {
-            self.validate_routine_support(support)?;
-            def.support = Some(support.clone());
-        }
-        def.config_actions.clone_from(&stmt.config_actions);
-        self.apply_routine_config_actions(&mut def)?;
-        let mut next = registry.clone();
-        let overloads = next.get_mut(&name).ok_or_else(|| {
-            SQLError::Internal(format!(
-                "resolved ALTER routine registry entry `{name}` disappeared before mutation"
-            ))
-        })?;
-        overloads[position] = Arc::new(SQLUserFunction {
-            def,
-            compiled: existing.compiled.clone(),
-        });
-        self.persist_sql_functions_snapshot(&next)?;
-        *registry = next;
-        drop(registry);
-        drop(memberships);
-        drop(roles);
-        self.note_catalog_registry_changed();
-        Ok(())
-    }
-
     /// Resolve a routine name through the schemas the current user can access, while qualified names report missing schemas and `USAGE` denials directly.
     fn routine_lookup_keys(&self, name: &str) -> Result<Vec<String>, SQLError> {
         uqa_sql::routines::lifecycle::names::routine_lookup_keys(self, name)
@@ -619,31 +396,6 @@ impl Engine {
 }
 
 /// `CREATE OR REPLACE` may not change the declared result shape.
-fn same_return_shape(a: &CreateFunction, b: &CreateFunction) -> bool {
-    use uqa_sql::ast::FunctionReturns;
-    let same_outputs = {
-        let a_outs = a.output_params();
-        let b_outs = b.output_params();
-        a_outs.len() == b_outs.len()
-            && a_outs.iter().zip(&b_outs).all(|(x, y)| {
-                x.name == y.name
-                    && canonical_routine_type_name(&x.type_name)
-                        == canonical_routine_type_name(&y.type_name)
-                    && x.mode == y.mode
-            })
-    };
-    let same_kind = match (&a.returns, &b.returns) {
-        (FunctionReturns::None, FunctionReturns::None)
-        | (FunctionReturns::Table, FunctionReturns::Table) => true,
-        (FunctionReturns::Scalar { type_name: x }, FunctionReturns::Scalar { type_name: y })
-        | (FunctionReturns::SetOf { type_name: x }, FunctionReturns::SetOf { type_name: y }) => {
-            canonical_routine_type_name(x) == canonical_routine_type_name(y)
-        }
-        _ => false,
-    };
-    same_kind && same_outputs
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::{mpsc, Arc};
@@ -651,6 +403,7 @@ mod tests {
     use uqa_sql::ast::{DropFunctionStmt, Statement};
 
     use super::*;
+    use crate::user_functions::canonical_routine_type_name;
 
     fn create_function(sql: &str) -> CreateFunction {
         let mut statements = uqa_sql::compile(sql).expect("compile CREATE FUNCTION");

@@ -17,9 +17,11 @@ use uqa_sql::{
 };
 
 pub trait RoutineCompilationSession {
+    fn routine_search_path(&self) -> Vec<String>;
     fn replace_routine_search_path(&self, path: Vec<String>) -> Vec<String>;
     fn restore_routine_search_path(&self, path: Vec<String>);
 }
+#[derive(Clone, Copy)]
 pub struct StoredRoutineCompilationContext<'a> {
     pub analysis: RoutineCompilationContext<'a>,
     pub session: &'a dyn RoutineCompilationSession,

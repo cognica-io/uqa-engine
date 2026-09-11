@@ -25,6 +25,42 @@ pub trait StoredColumnCatalog {
     fn stored_relation_column_names(&self, name: &str) -> Result<Option<Vec<String>>, SQLError>;
 }
 
+/// Catalog and namespace snapshots captured before resolving stored source columns.
+pub struct StoredSourceColumns {
+    pub catalog: crate::catalog::analysis::CatalogReadView,
+    pub resolution: crate::catalog::resolution::RelationNameResolution,
+}
+pub trait StoredSourceCatalog {
+    fn stored_source_columns(&self) -> StoredSourceColumns;
+}
+impl StoredSourceColumns {
+    pub fn bind_statement(&self, statement: &mut Statement) -> Result<bool, SQLError> {
+        bind_stored_statement_source_columns(statement, |name| {
+            Ok(
+                if let Some(table) = self.catalog.table_resolved(&self.resolution, name)? {
+                    Some(
+                        table
+                            .columns
+                            .iter()
+                            .map(|column| column.name.clone())
+                            .collect(),
+                    )
+                } else {
+                    self.catalog
+                        .foreign_table_resolved(&self.resolution, name)?
+                        .map(|table| {
+                            table
+                                .columns
+                                .iter()
+                                .map(|column| column.name.clone())
+                                .collect()
+                        })
+                },
+            )
+        })
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct StoredColumnBindingContext<'a> {
     pub sources: &'a dyn StoredColumnCatalog,

@@ -17,3 +17,13 @@ pub trait RoutineRegistryState {
 pub trait RoutineRegistryPublication {
     fn persist_routine_definitions(&self, registry: &RoutineRegistry) -> Result<(), SQLError>;
 }
+
+#[derive(Clone, Copy)]
+pub struct RoutineMutationContext<'a> {
+    pub writer: &'a dyn crate::schema::namespaces::SchemaStatementWriter,
+    pub names: &'a dyn uqa_sql::routines::lifecycle::names::RoutineNameCatalog,
+    pub roles: &'a dyn crate::catalog::security::roles::RoleCatalogGuards,
+    pub registry: &'a dyn RoutineRegistryState,
+    pub publication: &'a dyn RoutineRegistryPublication,
+    pub changes: &'a dyn crate::schema::namespaces::NamespaceCatalogChanges,
+}

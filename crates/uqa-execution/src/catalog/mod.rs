@@ -7,6 +7,7 @@
 //! Immutable catalog inputs and runtime catalog projections.
 
 pub mod foreign;
+pub mod identity;
 pub mod security;
 pub mod sequence;
 pub mod view;
