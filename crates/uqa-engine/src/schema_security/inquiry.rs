@@ -9,8 +9,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::acl::{parse_privilege_checks, role_has_schema_privilege_check};
-use super::{Engine, RoleDefinition, SQLError, SchemaSecurity};
+use super::{Engine, SQLError, SchemaSecurity};
 use crate::Value;
+use uqa_sql::catalog::roles::RoleDefinition;
 
 impl Engine {
     pub(crate) fn has_schema_privilege_value(

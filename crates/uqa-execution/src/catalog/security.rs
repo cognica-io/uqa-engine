@@ -79,35 +79,6 @@ pub struct SequenceSecurity {
 
 pub use uqa_sql::catalog::security::TableSecurity;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SchemaSecurity {
-    pub role_owner: String,
-    pub acl: Option<Vec<uqa_storage::SchemaAclEntry>>,
-}
-
-impl SchemaSecurity {
-    pub fn from_row(row: uqa_storage::SchemaRow) -> (String, Self) {
-        (
-            row.name,
-            Self {
-                role_owner: row.role_owner,
-                acl: row.acl,
-            },
-        )
-    }
-
-    pub fn row(&self, name: impl Into<String>) -> uqa_storage::SchemaRow {
-        uqa_storage::SchemaRow {
-            name: name.into(),
-            role_owner: self.role_owner.clone(),
-            acl: self.acl.clone(),
-        }
-    }
-
-    pub fn legacy(name: &str) -> Self {
-        let (_, security) = Self::from_row(uqa_storage::SchemaRow::legacy(name));
-        security
-    }
-}
+pub use uqa_sql::catalog::security::SchemaSecurity;
 
 pub mod roles;

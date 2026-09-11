@@ -15,7 +15,7 @@ use uqa_planner::{
 use uqa_sql::ast::{CreateForeignServer, CreateForeignTable, FunctionParamMode};
 use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 
-use crate::capabilities::{MutationCoordinator, QueryRuntimeView, SessionExecutionView};
+use crate::capabilities::{QueryRuntimeView, SessionExecutionView};
 use crate::session::{MaterializedViewRegistration, ViewRegistration};
 
 use super::scalar::{
@@ -143,7 +143,6 @@ pub(crate) struct UnifiedPlanExecutor<'engine, 'params> {
     engine: &'engine Engine,
     session: SessionExecutionView<'engine>,
     runtime: QueryRuntimeView<'engine>,
-    mutation: MutationCoordinator<'engine>,
     params: &'params [SQLParam],
     nested_statement: bool,
     privilege_subject: Option<String>,
@@ -168,7 +167,6 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             engine,
             session: engine.session_execution_view(),
             runtime: engine.query_runtime_view(),
-            mutation: engine.mutation_coordinator(),
             params,
             nested_statement,
             privilege_subject: None,
@@ -496,25 +494,6 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         )
     }
 
-    fn execute_create_schema(
-        &self,
-        name: &str,
-        if_not_exists: bool,
-    ) -> Result<SQLResult, SQLError> {
-        self.engine.prepare_explicit_transaction_writer()?;
-        let role_owner = self.engine.session_execution_view().current_user();
-        self.engine.ensure_database_privilege(
-            &role_owner,
-            crate::database_security::DatabaseAclPrivilege::Create,
-        )?;
-        self.mutation
-            .register_schema(name, if_not_exists, &role_owner)
-            .map_err(|error| {
-                SQLError::Internal(format!("CREATE SCHEMA catalog write failed: {error}"))
-            })?;
-        Ok(SQLResult::empty())
-    }
-
     #[expect(
         clippy::too_many_lines,
         reason = "preserves SELECT schema and row identity"
@@ -577,7 +556,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 Ok(SQLResult::empty())
             }
             CommandPlan::GrantSchema(statement) => {
-                self.engine.grant_schema_privileges(statement)?;
+                uqa_execution::schema::namespaces::privileges::grant_schema_privileges(
+                    &self.engine.schema_privilege_context(),
+                    statement,
+                )?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::GrantRole(statement) => {
@@ -679,10 +661,18 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             CommandPlan::CreateSchema {
                 name,
                 if_not_exists,
-            } => self.execute_create_schema(name, *if_not_exists),
+            } => uqa_execution::schema::namespaces::create_schema(
+                &self.engine.schema_creation_context(),
+                name,
+                *if_not_exists,
+            ),
             CommandPlan::AlterSchemaOwner { name, new_owner } => {
                 self.engine.with_implicit_transaction(|engine| {
-                    engine.alter_schema_owner(name, new_owner)?;
+                    uqa_execution::schema::namespaces::alter_schema_owner(
+                        &engine.schema_owner_context(),
+                        name,
+                        new_owner,
+                    )?;
                     Ok(SQLResult::empty())
                 })
             }

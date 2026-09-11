@@ -208,4 +208,5 @@ pub mod table_alteration;
 
 pub mod removal;
 
+pub mod namespaces;
 pub mod relation_alteration;
