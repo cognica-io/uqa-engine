@@ -95,7 +95,6 @@ pub(crate) use select::{execute_query_plan, RowLockRetryCache};
 pub(crate) use triggers::fire_statement_triggers;
 pub(crate) use triggers::{fire_deferred_constraint_trigger_event, DeferredConstraintTriggerEvent};
 
-pub(crate) use catalog::query_source_column_names;
 pub(crate) use catalog::{
     foreign_table_relation_oid, resolve_age_label_relation_name, resolve_catalog_column_type,
     resolve_catalog_column_type_name, resolve_regclass_kind_by_oid, resolve_regclass_oid,

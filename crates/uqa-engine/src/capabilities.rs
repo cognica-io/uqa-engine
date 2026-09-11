@@ -608,3 +608,5 @@ mod namespaces;
 
 mod index_routines;
 mod view_dependencies;
+
+mod statement_planning;
