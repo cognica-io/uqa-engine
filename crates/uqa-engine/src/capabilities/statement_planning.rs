@@ -98,3 +98,27 @@ impl RuleInputColumns for Engine {
         )
     }
 }
+
+impl Engine {
+    pub(crate) fn statement_planning_context(
+        &self,
+    ) -> uqa_planner::statement_planning::executable::StatementPlanningContext<'_> {
+        uqa_planner::statement_planning::executable::StatementPlanningContext {
+            analysis: uqa_sql::binding::statements::StatementAnalysisContext {
+                scopes: self,
+                routines: self,
+            },
+            aggregates: self,
+            optimization: self,
+            constant_evaluator: uqa_execution::scalar::eval_constant_scalar,
+        }
+    }
+}
+impl uqa_planner::statement_planning::executable::StatementOptimizationContexts for Engine {
+    fn statistics(&self) -> StatementStatisticsContext<'_> {
+        self.statement_statistics_context()
+    }
+    fn rule_inputs(&self) -> RuleInputPlanningContext<'_> {
+        self.rule_input_planning_context()
+    }
+}

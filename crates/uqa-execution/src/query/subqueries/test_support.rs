@@ -8,8 +8,7 @@ use super::context::{ScopedSubqueryHooks, SubqueryProbe, SubqueryQueryContexts};
 use super::{SubqueryContext, SubqueryServices};
 use crate::catalog::{
     services::{CatalogSession, CatalogSnapshotSource},
-    CatalogDefinitionSnapshot, CatalogReadSnapshot, CatalogReadView, RelationLookupMode,
-    RelationNameResolution,
+    CatalogReadView, RelationLookupMode, RelationNameResolution,
 };
 use crate::query::{
     runtime::QueryMemorySettings, scope::subqueries::CachedScalarSubquery, sources::SourceContext,
@@ -18,7 +17,6 @@ use crate::query::{
 use crate::scalar::plan::{PhysicalOuterRow, PhysicalSubqueryRunner};
 use crate::{Batch, PhysicalRow, RowSchema, SpillBuffer, SubqueryResult};
 use parking_lot::Mutex;
-use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::Value;
 use uqa_sql::{
     ast::{FunctionBinding, FunctionVolatility},
@@ -76,28 +74,7 @@ impl CatalogSnapshotSource for Services {
             "cached execution must not capture metadata"
         );
         self.events.lock().push("catalog");
-        CatalogReadView::new(CatalogReadSnapshot {
-            tables: BTreeMap::default(),
-            definitions: CatalogDefinitionSnapshot {
-                sequence_persistence: Arc::default(),
-                foreign_tables: Arc::default(),
-                sql_user_functions: Arc::default(),
-                role_memberships: Arc::default(),
-                domains: Arc::default(),
-                graphs: Arc::default(),
-                views: Arc::default(),
-                catalog_indexes: Arc::default(),
-                database_security: crate::catalog::security::DatabaseSecurity::bootstrap().into(),
-                schemas: Arc::default(),
-                sequences: Arc::default(),
-                sequence_object_ids: Arc::default(),
-                sequence_security: Arc::default(),
-                foreign_table_security: Arc::default(),
-                roles: Arc::default(),
-                triggers: Arc::default(),
-                rules: Arc::default(),
-            },
-        })
+        crate::catalog::test_support::empty_catalog()
     }
 
     fn refreshed_catalog_snapshot(&self) -> Result<CatalogReadView, SQLError> {

@@ -15,6 +15,8 @@ use uqa_sql::routines::RoutineResolution;
 use uqa_sql::{ColumnType, SQLError, SQLParam};
 mod context;
 pub use context::binding_context;
+mod subqueries;
+pub use subqueries::resolve_scalar_subquery_type;
 
 pub fn analyze_prepared_command_schema<S: Clone>(
     routines: &dyn RoutineResolution,
@@ -292,18 +294,11 @@ pub fn analyze_command_parameters<S: Clone>(
     params: &[SQLParam],
     ctes: &CteScope<S>,
 ) -> Result<(), SQLError> {
-    let schema = RowSchema::default();
-    let declared = (1..=params.len())
-        .map(|index| match &params[index - 1] {
-            SQLParam::Scalar(uqa_core::Value::Str(_) | uqa_core::Value::Null) => Ok(None),
-            _ => crate::scalar_type(&ScalarExpr::Param(index), &schema, params),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    infer_prepared_parameter_types(
-        routines,
-        &UnifiedPlan::Command(Box::new(command.clone())),
-        &declared,
-        ctes,
-    )?;
-    Ok(())
+    uqa_sql::binding::statements::analyze_command_parameters(routines, command, params, ctes)
+}
+
+impl<S: Clone> uqa_sql::binding::statements::StatementBindingScope for CteScope<S> {
+    fn binding_context(&self) -> Result<uqa_sql::binding::BindingContext<'_>, SQLError> {
+        binding_context(self)
+    }
 }

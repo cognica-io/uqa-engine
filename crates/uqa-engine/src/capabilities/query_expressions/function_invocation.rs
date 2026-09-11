@@ -6,7 +6,7 @@
 
 //! Route physical function invocation through the engine's active routine context.
 
-use super::callbacks::ScopedEngineHook;
+use super::ScopedEngineHook;
 use uqa_core::Value;
 use uqa_execution::functions::SQLTableFunctionResult;
 use uqa_execution::query::table_functions::{TableFunctionCall, TableFunctionRows};

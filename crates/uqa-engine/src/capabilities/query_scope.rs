@@ -6,7 +6,7 @@
 
 //! Capture engine-owned session and routine state for a query execution scope.
 
-use crate::sql::CteScope;
+pub(crate) type CteScope = uqa_execution::query::CteScope<crate::session::StatementReadSnapshot>;
 use crate::Engine;
 use uqa_sql::{catalog::resolution::RelationLookupMode, SQLError};
 
@@ -58,5 +58,15 @@ impl
         relations_bound: bool,
     ) -> Result<CteScope, SQLError> {
         new_for_command(self, privilege_subject, relations_bound)
+    }
+}
+
+impl uqa_sql::binding::statements::StatementAnalysisScopes for Engine {
+    fn with_scope(
+        &self,
+        analyze: uqa_sql::binding::statements::StatementAnalysisOperation<'_>,
+    ) -> Result<(), SQLError> {
+        let scope = new_for_current_routine(self);
+        analyze(&scope)
     }
 }

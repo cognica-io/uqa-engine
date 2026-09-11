@@ -22,6 +22,7 @@ mod projection;
 mod routine_binding;
 mod scope;
 mod sources;
+pub mod statements;
 mod type_resolution;
 
 pub use commands::analyze_prepared_command_schema;
