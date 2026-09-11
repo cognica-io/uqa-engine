@@ -13,11 +13,9 @@ use uqa_sql::{SQLError, SQLParam};
 
 use crate::{Engine, ScoredEntry};
 
-mod arguments;
 mod dispatch;
 mod graph;
 
-pub(super) use arguments::expect_column_name;
 pub(super) use graph::{
     run_age_alter_graph_with_evaluator, run_age_create_elabel_with_evaluator,
     run_age_create_graph_with_evaluator, run_age_create_vlabel_with_evaluator,
@@ -26,5 +24,5 @@ pub(super) use graph::{
     run_graph_drop_with_evaluator,
 };
 
-use arguments::expect_evaluated_string;
 use graph::{run_graph_create, run_graph_drop};
+use uqa_sql::semantics::retrieval::expect_evaluated_string;

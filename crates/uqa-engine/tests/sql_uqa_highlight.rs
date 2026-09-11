@@ -6,6 +6,11 @@
 
 //! Coverage for the `uqa_highlight` SQL projection function.
 
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
+
 use uqa_core::Value;
 use uqa_engine::Engine;
 
@@ -51,6 +56,47 @@ fn highlight_custom_tags() {
         other => panic!("expected string, got {other:?}"),
     };
     assert!(h.contains("<em>fox</em>"));
+}
+
+#[test]
+fn highlight_null_inputs_do_not_call_later_arguments() {
+    let eng = fixture();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let callback_calls = Arc::clone(&calls);
+    eng.register_scalar_function("highlight_tag", move |_args: &[Value]| {
+        callback_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(Value::Str("<em>".into()))
+    })
+    .unwrap();
+
+    for (expression, expected) in [
+        (
+            "uqa_highlight(NULL, highlight_tag(), highlight_tag())",
+            Value::Null,
+        ),
+        (
+            "uqa_highlight(body, NULL, highlight_tag())",
+            Value::Str("the quick brown fox jumps over the lazy dog".into()),
+        ),
+    ] {
+        let result = eng
+            .sql(&format!("SELECT {expression} AS h FROM notes"), &[])
+            .unwrap();
+        assert_eq!(result.rows[0]["h"], expected);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    let result = eng
+        .sql(
+            "SELECT uqa_highlight(body, 'fox', highlight_tag(), '</em>') AS h FROM notes",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        result.rows[0]["h"],
+        Value::Str("the quick brown <em>fox</em> jumps over the lazy dog".into())
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
 #[test]

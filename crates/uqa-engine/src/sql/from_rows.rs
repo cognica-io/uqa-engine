@@ -17,7 +17,7 @@ use crate::Engine;
 
 use super::select::{CteScope, QueryOutput};
 use super::{
-    expect_column_name, run_age_alter_graph_with_evaluator, run_age_create_elabel_with_evaluator,
+    run_age_alter_graph_with_evaluator, run_age_create_elabel_with_evaluator,
     run_age_create_graph_with_evaluator, run_age_create_vlabel_with_evaluator,
     run_age_drop_graph_with_evaluator, run_age_drop_label_with_evaluator,
     run_age_graph_exists_with_evaluator, run_graph_create_with_evaluator,

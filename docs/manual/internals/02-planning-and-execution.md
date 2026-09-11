@@ -155,6 +155,8 @@ The shared agtype value envelopes, ordering, and canonical text rendering live i
 
 Procedure CALL syntax markers, subquery rejection, unknown-literal type inference, overload selection, and result-schema analysis live in [`uqa-sql/src/routines/call.rs`](../../../crates/uqa-sql/src/routines/call.rs). Shared expression-plan argument decoding lives in SQL IR and retains its existing execution re-export. Engine captures the live catalog scope at the original boundary: result description decodes names before scope capture, while execution captures scope before marker decoding. Physical argument evaluation and procedure invocation remain execution-owned.
 
+Score projection argument rules and highlight field/options evaluation live in [`uqa-sql/src/semantics/scalar_projection.rs`](../../../crates/uqa-sql/src/semantics/scalar_projection.rs). SQL preserves NULL short circuits and the evaluation order of optional arguments. [`uqa-execution/src/query/scalar_projection.rs`](../../../crates/uqa-execution/src/query/scalar_projection.rs) reads explicit score provenance and renders highlights through `uqa-analysis`. This direct dependency reflects ownership of text rendering without adding an analysis or physical-execution dependency to SQL.
+
 ## Plan-native optimization
 
 Optimization recursively visits executable query blocks, CTEs, set-operation branches, scalar subqueries, mutations, and explained bodies. PREPARE and stored view or routine definitions retain logical plans until execution; CTAS and materialized-view creation optimize the populated query after their target checks. Important passes include predicate handling, access selection, join order, ordering propagation, score top-K selection, and specialized `OperatorTree` rewrites.

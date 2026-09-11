@@ -58,6 +58,7 @@ graph TD
     sql --> core
     sql --> parser
     execution --> core
+    execution --> analysis
     execution --> sql
     execution --> graph
     execution --> operators
