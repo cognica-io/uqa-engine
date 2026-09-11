@@ -495,19 +495,31 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 Ok(SQLResult::empty())
             }
             CommandPlan::GrantRole(statement) => {
-                self.context.roles.grant_roles(statement)?;
+                crate::catalog::security::role_lifecycle::grant_roles(
+                    &self.context.roles,
+                    statement,
+                )?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::CreateRole(statement) => {
-                self.context.roles.create_role(statement)?;
+                crate::catalog::security::role_lifecycle::create_role(
+                    &self.context.roles,
+                    statement,
+                )?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::AlterRole(statement) => {
-                self.context.roles.alter_role(statement)?;
+                crate::catalog::security::role_lifecycle::alter_role(
+                    &self.context.roles,
+                    statement,
+                )?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::DropRole(statement) => {
-                self.context.roles.drop_roles(statement)?;
+                crate::catalog::security::role_lifecycle::drop_roles(
+                    &self.context.roles,
+                    statement,
+                )?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::CreateTrigger(statement) => {

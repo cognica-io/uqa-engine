@@ -295,7 +295,10 @@ impl Engine {
             }
         };
         if name == "role" {
-            self.set_role(value.unwrap_or("default"))?;
+            uqa_execution::catalog::security::role_lifecycle::set_role(
+                &self.role_execution_context(),
+                value.unwrap_or("default"),
+            )?;
         } else if let Some(value) = value {
             self.set_variable(&name, value)?;
         } else {

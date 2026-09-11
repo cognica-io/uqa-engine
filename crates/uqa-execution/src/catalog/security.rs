@@ -21,6 +21,7 @@ pub use uqa_sql::catalog::security::TableSecurity;
 
 pub use uqa_sql::catalog::security::SchemaSecurity;
 
+pub mod role_lifecycle;
 pub mod roles;
 
 pub mod database_lifecycle;

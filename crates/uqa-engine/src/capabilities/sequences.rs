@@ -288,22 +288,6 @@ impl Engine {
         }
     }
 }
-impl uqa_execution::catalog::security::roles::RoleCatalogGuards for Engine {
-    fn role_definitions(&self) -> uqa_execution::catalog::security::roles::RoleDefinitionRead<'_> {
-        Box::new(self.durable.roles.read())
-    }
-    fn role_memberships(&self) -> uqa_execution::catalog::security::roles::RoleMembershipRead<'_> {
-        Box::new(self.durable.role_memberships.read())
-    }
-}
-impl uqa_sql::catalog::roles::RoleReferenceNames for Engine {
-    fn current_user_name(&self) -> String {
-        Engine::current_user_name(self)
-    }
-    fn session_user_name(&self) -> String {
-        Engine::session_user_name(self)
-    }
-}
 impl uqa_execution::schema::sequences::role_ownership::SequenceRoleAccess for Engine {
     fn ensure_sequence_owner(
         &self,

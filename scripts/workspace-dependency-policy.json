@@ -236,7 +236,8 @@
         "src/session/portals/binding.rs",
         "src/session/portals/dependencies.rs",
         "src/sql",
-        "src/sql.rs"
+        "src/sql.rs",
+        "src/roles/memberships.rs"
       ]
     },
     "crates/uqa-storage": {
