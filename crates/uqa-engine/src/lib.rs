@@ -182,8 +182,6 @@ use statement_cache::{PreparedStatementPlan, SQLStatementCache};
 const SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
 const ROLES_METADATA_KEY: &str = "sql_roles_json";
 const ROLE_MEMBERSHIPS_METADATA_KEY: &str = "sql_role_memberships_json";
-const TRIGGERS_METADATA_KEY: &str = "sql_triggers_json";
-const RULES_METADATA_KEY: &str = "sql_rules_json";
 /// Default nesting cap for user-defined function calls. Exceeding it
 /// raises `stack depth limit exceeded`, mirroring the `PostgreSQL`
 /// `max_stack_depth` guard.

@@ -4,114 +4,53 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Durable trigger metadata serialization and restoration.
-
-use std::collections::BTreeMap;
-
+//! Event metadata I/O and catalog restoration inside the caller's existing transaction boundary.
+use super::EventCatalogContext;
 use sha2::{Digest, Sha256};
-use uqa_sql::ast::RelationPersistence;
-use uqa_sql::SQLError;
-
-use crate::capabilities::RelationLookupMode;
-use crate::open::CatalogRestoreMode;
-use crate::{
-    CatalogFacade, Engine, RelationIdentity, StorageBackendError, StorageBackendResult,
-    RULES_METADATA_KEY, TRIGGERS_METADATA_KEY,
+use std::collections::BTreeMap;
+use uqa_core::RelationIdentity;
+use uqa_sql::{
+    ast::RelationPersistence,
+    catalog::{
+        events::{
+            definition::EventAnalysisContext,
+            persistence::{
+                self as model, EventRelationPersistence, StoredRuleCatalog, StoredTriggerCatalog,
+            },
+            reads::EventCatalogReads,
+            StoredRule, StoredTrigger,
+        },
+        resolution::RelationLookupMode,
+    },
+    SQLError,
 };
-
-use super::{
-    StoredRule, StoredRuleCatalog, StoredTrigger, StoredTriggerCatalog, RULE_CATALOG_FORMAT_VERSION,
-};
-
-impl Engine {
-    fn rule_relation_is_temporary(&self, relation: &RelationIdentity) -> bool {
-        self.storage
-            .tables
-            .read()
-            .get(relation)
-            .is_some_and(|table| table.persistence == RelationPersistence::Temporary)
-            || self
-                .durable
-                .views
-                .read()
-                .get(relation)
-                .is_some_and(|view| view.persistence == RelationPersistence::Temporary)
-    }
-
-    fn trigger_relation_persistence(
-        &self,
-        relation: &RelationIdentity,
-    ) -> Option<RelationPersistence> {
-        self.storage
-            .tables
-            .read()
-            .get(relation)
-            .map(|table| table.persistence)
-            .or_else(|| {
-                self.durable
-                    .views
-                    .read()
-                    .get(relation)
-                    .map(|view| view.persistence)
-            })
-            .or_else(|| {
-                self.durable
-                    .foreign_tables
-                    .read()
-                    .contains_key(relation)
-                    .then_some(RelationPersistence::Permanent)
-            })
-    }
-
-    pub(crate) fn persist_rule_catalog_snapshot(
-        &self,
-        rules: &BTreeMap<RelationIdentity, BTreeMap<String, StoredRule>>,
-    ) -> Result<(), SQLError> {
-        let Some(catalog) = self.storage.catalog.as_ref() else {
-            return Ok(());
-        };
-        let snapshot = StoredRuleCatalog {
-            format_version: RULE_CATALOG_FORMAT_VERSION,
-            rules: rules
-                .iter()
-                .filter(|(relation, _)| !self.rule_relation_is_temporary(relation))
-                .flat_map(|(_, entries)| entries.values().cloned())
-                .collect(),
-        };
-        let json = serde_json::to_string(&snapshot)
-            .map_err(|error| SQLError::Internal(format!("serialize rule catalog: {error}")))?;
-        catalog
-            .set_metadata(RULES_METADATA_KEY, &json)
-            .map_err(|error| SQLError::Internal(format!("persist rule catalog: {error}")))
-    }
-
-    pub(crate) fn restore_rules_from_metadata(
+use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
+pub const TRIGGERS_METADATA_KEY: &str = "sql_triggers_json";
+pub const RULES_METADATA_KEY: &str = "sql_rules_json";
+pub struct EventRestoreContext<'a> {
+    pub analysis: EventAnalysisContext<'a>,
+    pub reads: &'a dyn EventCatalogReads,
+    pub catalog: EventCatalogContext<'a>,
+    pub relations: &'a dyn EventRelationPersistence,
+}
+impl EventRestoreContext<'_> {
+    pub fn restore_rules_from_metadata(
         &self,
         catalog: &dyn CatalogFacade,
-        mode: CatalogRestoreMode,
+        allows_migration: bool,
     ) -> StorageBackendResult<()> {
         let stored = match catalog.get_metadata(RULES_METADATA_KEY)? {
             Some(json) => serde_json::from_str::<StoredRuleCatalog>(&json)?,
             None => StoredRuleCatalog::default(),
         };
-        if stored.format_version > RULE_CATALOG_FORMAT_VERSION {
-            return Err(StorageBackendError::Other(format!(
-                "rule catalog format {} is newer than supported format {RULE_CATALOG_FORMAT_VERSION}",
-                stored.format_version
-            )));
-        }
-        let migrating_catalog = stored.format_version < RULE_CATALOG_FORMAT_VERSION;
-        if migrating_catalog && !mode.allows_migration() {
-            return Err(StorageBackendError::Other(
-                "rule catalog requires an initial-open format migration".into(),
-            ));
-        }
+        let migrating_catalog =
+            model::rule_catalog_requires_migration(stored.format_version, allows_migration)
+                .map_err(StorageBackendError::Other)?;
         let temporary_rules = self
-            .durable
-            .rules
-            .read()
+            .reads
+            .read_rules()
             .iter()
-            .filter(|(relation, _)| self.rule_relation_is_temporary(relation))
+            .filter(|(relation, _)| self.relations.rule_relation_is_temporary(relation))
             .map(|(relation, entries)| (relation.clone(), entries.clone()))
             .collect::<BTreeMap<_, _>>();
         let mut rules = temporary_rules;
@@ -130,7 +69,7 @@ impl Engine {
             let stored_condition_plan = rule.condition_plan.clone();
             let stored_condition_binding = rule.condition_binding.clone();
             let (relation, condition_plan, condition_binding, dependencies) = self
-                .event_analysis_context()
+                .analysis
                 .validate_rule_definition(
                     &mut rule.definition,
                     RelationLookupMode::Bound,
@@ -170,55 +109,33 @@ impl Engine {
                 )));
             }
         }
-        *self.durable.rules.write() = rules;
+        **self.catalog.registry.rules() = rules;
         if migrating_catalog {
-            let rules = self.durable.rules.read();
-            self.persist_rule_catalog_snapshot(&rules)
+            let rules = self.reads.read_rules();
+            self.catalog
+                .publication
+                .persist_rules(&rules)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         }
         Ok(())
     }
 
-    pub(crate) fn persist_trigger_catalog_snapshot(
-        &self,
-        triggers: &BTreeMap<RelationIdentity, BTreeMap<String, StoredTrigger>>,
-    ) -> Result<(), SQLError> {
-        let Some(catalog) = self.storage.catalog.as_ref() else {
-            return Ok(());
-        };
-        let snapshot = StoredTriggerCatalog {
-            triggers: triggers
-                .iter()
-                .filter(|(relation, _)| {
-                    self.trigger_relation_persistence(relation)
-                        .is_some_and(|persistence| persistence != RelationPersistence::Temporary)
-                })
-                .flat_map(|(_, entries)| entries.values().cloned())
-                .collect(),
-        };
-        let json = serde_json::to_string(&snapshot)
-            .map_err(|error| SQLError::Internal(format!("serialize trigger catalog: {error}")))?;
-        catalog
-            .set_metadata(TRIGGERS_METADATA_KEY, &json)
-            .map_err(|error| SQLError::Internal(format!("persist trigger catalog: {error}")))
-    }
-
-    pub(crate) fn restore_triggers_from_metadata(
+    pub fn restore_triggers_from_metadata(
         &self,
         catalog: &dyn CatalogFacade,
-        mode: CatalogRestoreMode,
+        allows_migration: bool,
     ) -> StorageBackendResult<()> {
         let stored = match catalog.get_metadata(TRIGGERS_METADATA_KEY)? {
             Some(json) => serde_json::from_str::<StoredTriggerCatalog>(&json)?,
             None => StoredTriggerCatalog::default(),
         };
         let temporary_triggers = self
-            .durable
-            .triggers
-            .read()
+            .reads
+            .read_triggers()
             .iter()
             .filter(|(relation, _)| {
-                self.trigger_relation_persistence(relation) == Some(RelationPersistence::Temporary)
+                self.relations.trigger_relation_persistence(relation)
+                    == Some(RelationPersistence::Temporary)
             })
             .map(|(relation, entries)| (relation.clone(), entries.clone()))
             .collect::<BTreeMap<_, _>>();
@@ -232,13 +149,13 @@ impl Engine {
                 condition.upgrade_legacy_serialized_dispatches();
             }
             let (relation, condition_routine_bindings_changed) = self
-                .event_analysis_context()
+                .analysis
                 .validate_trigger_definition(&mut trigger.definition, RelationLookupMode::Bound)
                 .map_err(|error| {
                     StorageBackendError::Other(format!("restore trigger catalog: {error}"))
                 })?;
             if condition_routine_bindings_changed {
-                if !mode.allows_migration() {
+                if !allows_migration {
                     return Err(StorageBackendError::Other(format!(
                         "trigger `{}` WHEN condition requires an initial-open routine-identity migration",
                         trigger.definition.name
@@ -248,7 +165,7 @@ impl Engine {
             }
             let function_object_id =
                 uqa_sql::catalog::events::restoration::trigger_function_object_id(
-                    &self.event_analysis_context(),
+                    &self.analysis,
                     &trigger.definition,
                 )
                 .map_err(StorageBackendError::Other)?;
@@ -262,7 +179,7 @@ impl Engine {
                 )));
             }
             if trigger.function_object_id.is_none() {
-                if !mode.allows_migration() {
+                if !allows_migration {
                     return Err(StorageBackendError::Other(format!(
                         "trigger `{}` requires an initial-open function-identity migration",
                         trigger.definition.name
@@ -272,7 +189,7 @@ impl Engine {
                 migrated = true;
             }
             if trigger.object_id.is_none() {
-                if !mode.allows_migration() {
+                if !allows_migration {
                     return Err(StorageBackendError::Other(format!(
                         "trigger `{}` requires an initial-open object-identity migration",
                         trigger.definition.name
@@ -293,10 +210,12 @@ impl Engine {
                 )));
             }
         }
-        *self.durable.triggers.write() = triggers;
+        **self.catalog.registry.triggers() = triggers;
         if migrated {
-            let triggers = self.durable.triggers.read();
-            self.persist_trigger_catalog_snapshot(&triggers)
+            let triggers = self.reads.read_triggers();
+            self.catalog
+                .publication
+                .persist_triggers(&triggers)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         }
         Ok(())
@@ -314,3 +233,38 @@ fn legacy_trigger_object_id(definition: &uqa_sql::ast::CreateTrigger) -> [u8; 16
     object_id.copy_from_slice(&digest[..16]);
     object_id
 }
+
+pub fn persist_rule_catalog_snapshot(
+    catalog: Option<&dyn CatalogFacade>,
+    relations: &dyn EventRelationPersistence,
+    rules: &BTreeMap<RelationIdentity, BTreeMap<String, StoredRule>>,
+) -> Result<(), SQLError> {
+    let Some(catalog) = catalog else {
+        return Ok(());
+    };
+    let snapshot = model::stored_rules_snapshot(rules, relations);
+    let json = serde_json::to_string(&snapshot)
+        .map_err(|error| SQLError::Internal(format!("serialize rule catalog: {error}")))?;
+    catalog
+        .set_metadata(RULES_METADATA_KEY, &json)
+        .map_err(|error| SQLError::Internal(format!("persist rule catalog: {error}")))
+}
+
+pub fn persist_trigger_catalog_snapshot(
+    catalog: Option<&dyn CatalogFacade>,
+    relations: &dyn EventRelationPersistence,
+    triggers: &BTreeMap<RelationIdentity, BTreeMap<String, StoredTrigger>>,
+) -> Result<(), SQLError> {
+    let Some(catalog) = catalog else {
+        return Ok(());
+    };
+    let snapshot = model::stored_triggers_snapshot(triggers, relations);
+    let json = serde_json::to_string(&snapshot)
+        .map_err(|error| SQLError::Internal(format!("serialize trigger catalog: {error}")))?;
+    catalog
+        .set_metadata(TRIGGERS_METADATA_KEY, &json)
+        .map_err(|error| SQLError::Internal(format!("persist trigger catalog: {error}")))
+}
+
+#[cfg(test)]
+mod tests;

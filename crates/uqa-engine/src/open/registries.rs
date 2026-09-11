@@ -40,8 +40,10 @@ impl Engine {
         }
         // Triggers and rules may target views, so both event registries must be
         // restored only after the complete relation namespace is available.
-        self.restore_triggers_from_metadata(catalog, mode)?;
-        self.restore_rules_from_metadata(catalog, mode)?;
+        self.event_restore_context()
+            .restore_triggers_from_metadata(catalog, mode.allows_migration())?;
+        self.event_restore_context()
+            .restore_rules_from_metadata(catalog, mode.allows_migration())?;
         self.restore_catalog_indexes_from_catalog(catalog)?;
         self.restore_path_indexes_from_catalog(catalog)?;
         Ok(())

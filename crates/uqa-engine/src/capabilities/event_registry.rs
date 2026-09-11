@@ -96,13 +96,21 @@ impl uqa_execution::schema::events::EventCatalogPublication for Engine {
         &self,
         triggers: &uqa_sql::catalog::events::TriggerCatalog,
     ) -> Result<(), uqa_sql::SQLError> {
-        self.persist_trigger_catalog_snapshot(triggers)
+        uqa_execution::schema::events::persistence::persist_trigger_catalog_snapshot(
+            self.storage.catalog.as_deref(),
+            self,
+            triggers,
+        )
     }
     fn persist_rules(
         &self,
         rules: &uqa_sql::catalog::events::RuleCatalog,
     ) -> Result<(), uqa_sql::SQLError> {
-        self.persist_rule_catalog_snapshot(rules)
+        uqa_execution::schema::events::persistence::persist_rule_catalog_snapshot(
+            self.storage.catalog.as_deref(),
+            self,
+            rules,
+        )
     }
 }
 
@@ -119,5 +127,58 @@ impl EventLookupState for Engine {
     }
     fn session_replication_role_is_replica(&self) -> bool {
         Engine::session_replication_role_is_replica(self)
+    }
+}
+
+impl Engine {
+    pub(crate) fn event_restore_context(
+        &self,
+    ) -> uqa_execution::schema::events::persistence::EventRestoreContext<'_> {
+        uqa_execution::schema::events::persistence::EventRestoreContext {
+            analysis: self.event_analysis_context(),
+            reads: self,
+            catalog: self.event_catalog_context(),
+            relations: self,
+        }
+    }
+}
+use uqa_sql::{ast::RelationPersistence, catalog::events::persistence::EventRelationPersistence};
+impl EventRelationPersistence for Engine {
+    fn rule_relation_is_temporary(&self, relation: &RelationIdentity) -> bool {
+        self.storage
+            .tables
+            .read()
+            .get(relation)
+            .is_some_and(|table| table.persistence == RelationPersistence::Temporary)
+            || self
+                .durable
+                .views
+                .read()
+                .get(relation)
+                .is_some_and(|view| view.persistence == RelationPersistence::Temporary)
+    }
+    fn trigger_relation_persistence(
+        &self,
+        relation: &RelationIdentity,
+    ) -> Option<RelationPersistence> {
+        self.storage
+            .tables
+            .read()
+            .get(relation)
+            .map(|table| table.persistence)
+            .or_else(|| {
+                self.durable
+                    .views
+                    .read()
+                    .get(relation)
+                    .map(|view| view.persistence)
+            })
+            .or_else(|| {
+                self.durable
+                    .foreign_tables
+                    .read()
+                    .contains_key(relation)
+                    .then_some(RelationPersistence::Permanent)
+            })
     }
 }
