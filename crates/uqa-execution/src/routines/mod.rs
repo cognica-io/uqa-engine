@@ -35,6 +35,8 @@ pub mod definition;
 pub mod privileges;
 pub mod registration;
 pub mod removal;
+pub mod rename;
+pub mod restoration;
 pub mod rewrites;
 pub mod transaction;
 pub use context::RoutineContext;

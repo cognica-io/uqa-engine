@@ -532,10 +532,13 @@ mod table_reads;
 
 mod view_rewrite;
 
+mod routine_catalog;
 mod routine_definitions;
 mod routine_execution;
 mod routine_privileges;
 mod routine_removal;
+mod routine_rename;
+mod routine_resolution;
 
 mod query_sources;
 

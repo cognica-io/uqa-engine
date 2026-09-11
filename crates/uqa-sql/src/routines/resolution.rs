@@ -4,122 +4,62 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Static user-routine signature matching and overload resolution.
+//! Static routine signature matching, invocation binding, and declared return-type resolution.
 
-use uqa_execution::{
-    match_routine_signature, rank_function_matches, BuiltinFunctionOverload, FunctionTypeResolver,
-    MatchedRoutineSignature, ResolvedFunctionOverload, RoutineCallDescriptor,
-    RoutineParameterDescriptor, RoutineSignatureMatchError,
+mod combined_overloads;
+
+use super::{
+    declaration::RoutineTypeCatalog, routine_signature_types, SQLUserFunction, StaticFunctionMatch,
 };
-use uqa_sql::ast::{
-    ColumnType, CreateFunction, FunctionBinding, FunctionParamMode, FunctionReturns,
-    RoutineInvocationBinding, RoutineVariadicMode,
+use crate::type_resolution::{
+    canonical_routine_type_name, match_routine_signature, rank_function_matches,
+    BuiltinFunctionOverload, FunctionTypeResolver, MatchedRoutineSignature,
+    ResolvedFunctionOverload, RoutineCallDescriptor, RoutineParameterDescriptor,
+    RoutineSignatureMatchError,
 };
-use uqa_sql::SQLError;
+use crate::{
+    ast::{
+        ColumnType, CreateFunction, FunctionBinding, FunctionParamMode, FunctionReturns,
+        RoutineInvocationBinding, RoutineVariadicMode,
+    },
+    catalog::domain::StoredDomain,
+    SQLError,
+};
+use std::{collections::BTreeMap, sync::Arc};
+use uqa_core::RelationIdentity;
 
-use crate::capabilities::CatalogReadView;
-use crate::{Arc, Engine, RelationIdentity};
-
-use super::{canonical_routine_type_name, combined_overloads, SQLUserFunction};
-
-impl RoutineResolution for Engine {
+/// The original immutable domain allocation captured for one signature-matching pass.
+pub type RoutineTypeSnapshot = Arc<BTreeMap<String, StoredDomain>>;
+pub trait RoutineOverloadCatalog: RoutineTypeCatalog + Send + Sync {
+    fn routine_type_snapshot(&self) -> RoutineTypeSnapshot;
+    fn routine_search_path(&self) -> Vec<String>;
+    fn has_registered_scalar_function(&self, name: &str) -> bool;
+    fn lookup_sql_routine_candidates(
+        &self,
+        name: &str,
+    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError>;
+    fn lookup_bound_sql_routine_candidates_by_binding(
+        &self,
+        binding: &FunctionBinding,
+    ) -> Option<Vec<Arc<SQLUserFunction>>>;
     fn lookup_bound_sql_functions_by_binding(
         &self,
         binding: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
-        Engine::lookup_bound_sql_functions_by_binding(self, binding)
-    }
-
-    fn has_registered_scalar_function(&self, name: &str) -> bool {
-        Engine::has_registered_scalar_function(self, name)
-    }
-
-    fn has_registered_table_function(&self, name: &str) -> bool {
-        Engine::has_registered_table_function(self, name)
-    }
-
-    fn has_registered_aggregate_function(&self, name: &str) -> bool {
-        Engine::has_registered_aggregate_function(self, name)
-    }
-
-    fn lookup_visible_sql_functions(
-        &self,
-        name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
-        Engine::lookup_visible_sql_functions(self, name)
-    }
-
-    fn lookup_visible_sql_functions_for_analysis(
-        &self,
-        name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
-        Engine::lookup_visible_sql_functions_for_analysis(self, name)
-    }
-
-    fn resolve_static_sql_function(
-        &self,
-        name: &str,
-        binding: Option<&FunctionBinding>,
-        argument_names: &[Option<String>],
-        argument_types: &[Option<ColumnType>],
-        explicit_variadic: bool,
-    ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
-        Engine::resolve_static_sql_function(
-            self,
-            name,
-            binding,
-            argument_names,
-            argument_types,
-            explicit_variadic,
-        )
-    }
-
-    fn resolve_static_sql_function_match(
-        &self,
-        name: &str,
-        binding: Option<&FunctionBinding>,
-        argument_names: &[Option<String>],
-        argument_types: &[Option<ColumnType>],
-        explicit_variadic: bool,
-    ) -> Result<Option<StaticFunctionMatch>, SQLError> {
-        Engine::resolve_static_sql_function_match(
-            self,
-            name,
-            binding,
-            argument_names,
-            argument_types,
-            explicit_variadic,
-        )
-    }
-
-    fn resolve_table_function_overload_with_builtins(
-        &self,
-        name: &str,
-        binding: Option<&FunctionBinding>,
-        argument_names: &[Option<String>],
-        argument_types: &[Option<ColumnType>],
-        explicit_variadic: bool,
-        builtins: &[BuiltinFunctionOverload],
-    ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
-        Engine::resolve_table_function_overload_with_builtins(
-            self,
-            name,
-            binding,
-            argument_names,
-            argument_types,
-            explicit_variadic,
-            builtins,
-        )
-    }
+    ) -> Option<Vec<Arc<SQLUserFunction>>>;
+}
+pub struct RoutineOverloadContext<'a> {
+    pub catalog: &'a dyn RoutineOverloadCatalog,
 }
 
-impl FunctionTypeResolver for Engine {
+impl FunctionTypeResolver for RoutineOverloadContext<'_> {
     fn has_untyped_function(&self, name: &str) -> bool {
-        self.has_registered_scalar_function(name)
+        self.catalog.has_registered_scalar_function(name)
     }
 
     fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
-        crate::sql::resolve_catalog_column_type_name(self, name).map(Some)
+        self.catalog
+            .resolve_catalog_column_type_name(name)
+            .map(Some)
     }
 
     fn resolve_function_type(
@@ -180,6 +120,7 @@ impl FunctionTypeResolver for Engine {
             return Ok(false);
         }
         let function = self
+            .catalog
             .lookup_bound_sql_functions_by_binding(binding)
             .and_then(|overloads| {
                 overloads.into_iter().find(|function| {
@@ -213,7 +154,7 @@ impl FunctionTypeResolver for Engine {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RoutineCallKind {
+pub enum RoutineCallKind {
     Function,
     Procedure,
 }
@@ -231,12 +172,12 @@ impl RoutineCallKind {
     }
 }
 
-impl Engine {
+impl RoutineOverloadContext<'_> {
     pub(super) fn user_function_precedes_pg_catalog(&self, name: &str) -> bool {
         let Ok((Some(schema), _)) = RelationIdentity::parse_reference(name) else {
             return false;
         };
-        let search_path = &self.session.state.read().search_path;
+        let search_path = self.catalog.routine_search_path();
         let Some(user_position) = search_path.iter().position(|entry| entry == &schema) else {
             return false;
         };
@@ -246,7 +187,7 @@ impl Engine {
             .is_some_and(|catalog_position| user_position < catalog_position)
     }
 
-    pub(crate) fn resolve_static_sql_function(
+    pub fn resolve_static_sql_function(
         &self,
         name: &str,
         binding: Option<&FunctionBinding>,
@@ -264,7 +205,7 @@ impl Engine {
         .map(|matched| matched.map(|matched| matched.function))
     }
 
-    pub(crate) fn resolve_static_sql_function_match(
+    pub fn resolve_static_sql_function_match(
         &self,
         name: &str,
         binding: Option<&FunctionBinding>,
@@ -282,7 +223,7 @@ impl Engine {
         )
     }
 
-    pub(crate) fn resolve_table_function_overload_with_builtins(
+    pub fn resolve_table_function_overload_with_builtins(
         &self,
         name: &str,
         binding: Option<&FunctionBinding>,
@@ -303,7 +244,7 @@ impl Engine {
         .map(Some)
     }
 
-    pub(crate) fn resolve_static_sql_routine_match(
+    pub fn resolve_static_sql_routine_match(
         &self,
         name: &str,
         binding: Option<&FunctionBinding>,
@@ -317,6 +258,7 @@ impl Engine {
                 return Ok(None);
             }
             let function = self
+                .catalog
                 .lookup_bound_sql_routine_candidates_by_binding(binding)
                 .and_then(|overloads| {
                     overloads.into_iter().find(|function| {
@@ -349,7 +291,7 @@ impl Engine {
                 }
             } else {
                 static_routine_match(
-                    &self.catalog_read_view(),
+                    &self.catalog.routine_type_snapshot(),
                     function,
                     argument_names,
                     argument_types,
@@ -362,11 +304,11 @@ impl Engine {
             ensure_routine_kind(name, argument_types, kind, &matched.function.def)?;
             return Ok(Some(matched));
         }
-        let Some(overloads) = self.lookup_sql_routine_candidates(name)? else {
+        let Some(overloads) = self.catalog.lookup_sql_routine_candidates(name)? else {
             return Ok(None);
         };
         resolve_static_routine_overload(
-            &self.catalog_read_view(),
+            &self.catalog.routine_type_snapshot(),
             name,
             overloads,
             argument_names,
@@ -379,7 +321,7 @@ impl Engine {
 }
 
 fn resolve_static_routine_overload(
-    catalog: &CatalogReadView,
+    catalog: &RoutineTypeSnapshot,
     name: &str,
     overloads: Vec<Arc<SQLUserFunction>>,
     argument_names: &[Option<String>],
@@ -454,7 +396,7 @@ pub(super) fn retain_earliest_effective_signatures(candidates: &mut Vec<StaticFu
 }
 
 fn static_routine_match(
-    catalog: &CatalogReadView,
+    catalog: &RoutineTypeSnapshot,
     function: Arc<SQLUserFunction>,
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
@@ -485,14 +427,14 @@ fn static_routine_match(
         preferred_matches: matched.preferred_matches,
         variadic_expansion: matches!(
             matched.variadic_mode,
-            uqa_execution::RoutineVariadicMode::Pack
+            crate::type_resolution::RoutineVariadicMode::Pack
         ),
         invocation: Box::new(invocation),
     }))
 }
 
 pub(super) fn static_function_match(
-    catalog: &CatalogReadView,
+    catalog: &RoutineTypeSnapshot,
     function: Arc<SQLUserFunction>,
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
@@ -509,8 +451,8 @@ pub(super) fn static_function_match(
 }
 
 fn match_static_function_signature(
-    catalog: &CatalogReadView,
-    signature: &[&uqa_sql::ast::FunctionParam],
+    catalog: &RoutineTypeSnapshot,
+    signature: &[&crate::ast::FunctionParam],
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
     explicit_variadic: bool,
@@ -535,18 +477,14 @@ fn match_static_function_signature(
     )
 }
 
-fn declared_parameter_type(catalog: &CatalogReadView, type_name: &str) -> Option<ColumnType> {
+fn declared_parameter_type(catalog: &RoutineTypeSnapshot, type_name: &str) -> Option<ColumnType> {
     if let Some(element) = type_name.strip_suffix("[]") {
         return declared_parameter_type(catalog, element).map(|ty| ColumnType::Array(Box::new(ty)));
     }
     ColumnType::from_sql_name(type_name).ok().or_else(|| {
-        catalog
-            .domains()
-            .map(crate::domains::StoredDomain::column_type)
-            .find(|ty| {
-                canonical_routine_type_name(&ty.sql_name())
-                    == canonical_routine_type_name(type_name)
-            })
+        catalog.values().map(StoredDomain::column_type).find(|ty| {
+            canonical_routine_type_name(&ty.sql_name()) == canonical_routine_type_name(type_name)
+        })
     })
 }
 
@@ -595,18 +533,18 @@ fn routine_invocation_binding(
         .map(|call_index| parameter_indices[*call_index])
         .collect();
     let variadic_mode = match &matched.variadic_plan {
-        uqa_execution::RoutineVariadicPlan::Pack {
+        crate::type_resolution::RoutineVariadicPlan::Pack {
             parameter_index, ..
         } => RoutineVariadicMode::Expanded {
             parameter_index: parameter_indices[*parameter_index],
         },
-        uqa_execution::RoutineVariadicPlan::PassThrough {
+        crate::type_resolution::RoutineVariadicPlan::PassThrough {
             parameter_index, ..
         } => RoutineVariadicMode::Explicit {
             parameter_index: parameter_indices[*parameter_index],
         },
-        uqa_execution::RoutineVariadicPlan::None
-        | uqa_execution::RoutineVariadicPlan::Default { .. } => RoutineVariadicMode::None,
+        crate::type_resolution::RoutineVariadicPlan::None
+        | crate::type_resolution::RoutineVariadicPlan::Default { .. } => RoutineVariadicMode::None,
     };
     let output_indices = def
         .params
@@ -660,7 +598,7 @@ pub(super) fn static_signature_error(
 }
 
 pub(super) fn static_function_return_type(
-    engine: &Engine,
+    resolver: &RoutineOverloadContext<'_>,
     name: &str,
     def: &CreateFunction,
     invocation: Option<&RoutineInvocationBinding>,
@@ -685,7 +623,9 @@ pub(super) fn static_function_return_type(
         return Ok(ColumnType::Record);
     }
     if let Some(type_name) = invocation_return {
-        return crate::sql::resolve_catalog_column_type(engine, type_name)
+        return resolver
+            .catalog
+            .resolve_catalog_column_type(type_name)
             .or_else(|| ColumnType::from_sql_name(type_name).ok())
             .ok_or_else(|| {
                 SQLError::TypeMismatch(format!(
@@ -709,7 +649,9 @@ pub(super) fn static_function_return_type(
         }
         FunctionReturns::Table => unreachable!("table result handled above"),
     };
-    crate::sql::resolve_catalog_column_type(engine, type_name)
+    resolver
+        .catalog
+        .resolve_catalog_column_type(type_name)
         .or_else(|| ColumnType::from_sql_name(type_name).ok())
         .ok_or_else(|| SQLError::TypeMismatch(format!("unknown type `{type_name}`")))
 }
@@ -771,8 +713,3 @@ fn static_routine_argument_types(argument_types: &[Option<ColumnType>]) -> Strin
         .collect::<Vec<_>>()
         .join(", ")
 }
-
-pub(crate) use uqa_sql::routines::{
-    routine_local_name, routine_returns_anonymous_record, routine_signature_types,
-    RoutineResolution, StaticFunctionMatch,
-};

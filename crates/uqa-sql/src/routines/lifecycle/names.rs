@@ -49,3 +49,14 @@ pub fn routine_lookup_keys(
         .map(|schema| RelationIdentity::new(schema, &local_name).qualified_name())
         .collect())
 }
+
+/// Defer namespace errors during recursive argument analysis; definitive binding checks again.
+pub fn routine_lookup_keys_for_analysis(
+    catalog: &dyn RoutineNameCatalog,
+    name: &str,
+) -> Result<Option<Vec<String>>, SQLError> {
+    match routine_lookup_keys(catalog, name) {
+        Err(error) if crate::routines::is_routine_namespace_lookup_error(&error) => Ok(None),
+        result => result.map(Some),
+    }
+}

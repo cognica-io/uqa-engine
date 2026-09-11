@@ -9,8 +9,11 @@
 pub mod binding;
 pub mod dependencies;
 pub mod diagnostics;
+pub mod lookup;
 pub mod names;
 pub mod relations;
+pub mod rename;
+pub mod restoration;
 pub mod rewrites;
 
 use super::SQLUserFunction;
