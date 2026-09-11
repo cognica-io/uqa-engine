@@ -35,7 +35,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use uqa_core::{GeneralizedPostingList, PathSegment, Predicate, Value};
+use uqa_core::{PathSegment, Predicate, Value};
 use uqa_execution::operator_tree::{OperatorOutput, OperatorTreeDriver};
 use uqa_execution::parallel::ParallelExecutor;
 use uqa_execution::{eval_scalar, ScalarEvalContext, ScalarExpr};
@@ -56,7 +56,6 @@ mod lowering_fusion;
 mod lowering_graph;
 mod lowering_retrieval;
 mod operator_join_estimation;
-mod operator_join_execution;
 mod optimizer_binding;
 
 use lowering_boolean::{column_name, lower_comparison, lower_document_boolean, lower_function};
@@ -77,7 +76,6 @@ use lowering_retrieval::{
     validate_probability_signal_contract,
 };
 pub(crate) use operator_join_estimation::estimate_operator_join_table_function;
-pub(crate) use operator_join_execution::execute_operator_join_table_function;
 pub(crate) use optimizer_binding::engine_query_optimizer;
 use optimizer_binding::operator_tree_paradigm;
 type DriverResult<T> = Result<T, SQLError>;
@@ -351,10 +349,6 @@ fn estimate_operator_tree_access(
     })
 }
 
-pub(crate) fn is_operator_join_table_function(name: &str) -> bool {
-    uqa_sql::registry::is_operator_join_table_function(name)
-}
-
 fn lower_join_operand(
     engine: &Engine,
     expression: &ScalarExpr,
@@ -388,7 +382,7 @@ fn const_join_threshold(
     Ok(threshold)
 }
 
-fn lower_operator_join_table_function(
+pub(crate) fn lower_operator_join_table_function(
     engine: &Engine,
     name: &str,
     relations: Option<&uqa_sql::ast::OperatorJoinRelations>,
@@ -609,9 +603,8 @@ pub(crate) use uqa_execution::query::table_sources::retrieval::DirectVectorRetri
 mod execution;
 pub use execution::run_optimised;
 pub(crate) use execution::{
-    direct_vector_retrieval, execute_operator_tree_in_execution,
-    execute_relation_operator_tree_in_execution, execute_scored_tree, expect_posting_output,
-    run_accelerated,
+    direct_vector_retrieval, execute_relation_operator_tree_in_execution, execute_scored_tree,
+    expect_posting_output, run_accelerated,
 };
 
 use uqa_execution::operator_tree::driver::introspection::collect_graph_names;

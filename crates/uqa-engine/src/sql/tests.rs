@@ -362,7 +362,8 @@ fn reserved_catalog_aliases_resolve_only_existing_builtins() {
 mod unified_plan_tests {
     use uqa_planner::{CommandPlan, ComputePlan, RelationalPlan, SourcePlan, UnifiedPlan};
 
-    use super::super::{compile_logical_plans, doc_id_value, optimize_engine_plan, Engine};
+    use super::super::{compile_logical_plans, optimize_engine_plan, Engine};
+    use uqa_sql::semantics::doc_id_value;
 
     #[test]
     fn document_ids_outside_bigint_are_rejected_at_the_sql_boundary() {

@@ -230,17 +230,7 @@ pub struct TextSearchProfile {
     pub elapsed_ms: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FtsIndexStat {
-    pub table_name: String,
-    pub field: String,
-    pub analyzer: String,
-    pub posting_count: u64,
-    pub doc_length_count: u64,
-    pub indexed_doc_count: u64,
-    pub term_count: u64,
-    pub total_field_length: u64,
-}
+pub use uqa_storage::FtsIndexStat;
 
 pub use uqa_scoring::ScoringMode;
 

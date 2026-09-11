@@ -42,7 +42,7 @@ impl RoutineInvocationSession for Engine {
     }
 }
 impl Engine {
-    fn routine_invocation_context(&self) -> RoutineInvocationContext<'_> {
+    pub(crate) fn routine_invocation_context(&self) -> RoutineInvocationContext<'_> {
         RoutineInvocationContext {
             runtime: self.routine_execution_context(),
             session: self,

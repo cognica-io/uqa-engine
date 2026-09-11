@@ -32,7 +32,9 @@ pub fn expr_contains_subquery(expr: &crate::ScalarExpr) -> bool {
 
 mod bound_columns;
 mod catalog_mutation;
+pub mod graph_functions;
 mod join_using;
+pub mod table_function_arguments;
 mod table_functions;
 pub use bound_columns::*;
 pub use catalog_mutation::*;

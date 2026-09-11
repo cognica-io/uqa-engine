@@ -129,3 +129,11 @@ pub fn registered_table_function_row_stream(
 pub mod values;
 
 pub mod rows_from;
+
+mod analyzers;
+pub mod context;
+mod dispatch;
+mod graphs;
+mod records;
+mod stream;
+pub use stream::build_table_function_row_stream_with_row;

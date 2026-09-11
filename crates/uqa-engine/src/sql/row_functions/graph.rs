@@ -7,93 +7,9 @@
 //! Graph analytics, graph lifecycle, and AGE-compatible scalar helpers.
 
 use super::{
-    eval_scalar, expect_evaluated_string, Engine, OperatorTree, SQLError, SQLParam,
-    ScalarEvalContext, ScalarExpr, ScoredEntry, Value,
+    eval_scalar, expect_evaluated_string, Engine, SQLError, SQLParam, ScalarEvalContext,
+    ScalarExpr, ScoredEntry, Value,
 };
-
-fn default_graph_name(engine: &Engine, function_name: &str) -> Result<String, SQLError> {
-    let graphs = engine
-        .list_graphs()
-        .map_err(|err| SQLError::Internal(format!("read graph catalog: {err}")))?;
-    match graphs.as_slice() {
-        [name] => Ok(name.clone()),
-        [] => Err(SQLError::Unsupported(format!(
-            "{function_name} requires a graph argument because no graph is registered"
-        ))),
-        _ => Err(SQLError::Unsupported(format!(
-            "{function_name} requires a graph argument because multiple graphs are registered: {}",
-            graphs.join(", ")
-        ))),
-    }
-}
-
-pub(in crate::sql) fn expect_optional_graph_value(
-    engine: &Engine,
-    value: Option<&Value>,
-    function_name: &str,
-) -> Result<String, SQLError> {
-    match value {
-        Some(Value::Str(name)) => Ok(name.clone()),
-        Some(other) => Err(SQLError::TypeMismatch(format!(
-            "{function_name}.graph must be string, got {other:?}"
-        ))),
-        None => default_graph_name(engine, function_name),
-    }
-}
-
-pub(in crate::sql) fn graph_pagerank_entries(
-    engine: &Engine,
-    name: &str,
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    execute_tree_entries(
-        engine,
-        &OperatorTree::PageRank {
-            graph: name.to_string(),
-        },
-    )
-}
-
-pub(in crate::sql) fn graph_hits_entries(
-    engine: &Engine,
-    name: &str,
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    execute_tree_entries(
-        engine,
-        &OperatorTree::HITS {
-            graph: name.to_string(),
-        },
-    )
-}
-
-pub(in crate::sql) fn graph_betweenness_entries(
-    engine: &Engine,
-    name: &str,
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    execute_tree_entries(
-        engine,
-        &OperatorTree::BetweennessCentrality {
-            graph: name.to_string(),
-        },
-    )
-}
-
-pub(in crate::sql) fn execute_tree_entries(
-    engine: &Engine,
-    tree: &OperatorTree,
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    let posting = crate::operator_tree_bridge::expect_posting_output(
-        crate::operator_tree_bridge::execute_operator_tree_in_execution(engine, "", &[], tree)?,
-        "SQL table function",
-    )?;
-    Ok(posting
-        .entries()
-        .iter()
-        .map(|entry| ScoredEntry {
-            doc_id: entry.doc_id,
-            score: entry.payload.score,
-        })
-        .collect())
-}
 
 pub(in crate::sql) fn run_graph_create(
     engine: &Engine,
