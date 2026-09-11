@@ -13,15 +13,15 @@ use super::{
 };
 
 pub(super) fn collect_cte_relation_dependencies(
-    body: &uqa_planner::CtePlanBody,
+    body: &crate::plan::CtePlanBody,
     dependencies: &mut RuleDependencies,
     inherited: &BTreeSet<String>,
 ) -> Result<(), SQLError> {
     match body {
-        uqa_planner::CtePlanBody::Query(query) => {
+        crate::plan::CtePlanBody::Query(query) => {
             collect_query_relation_dependencies(query, dependencies, inherited)
         }
-        uqa_planner::CtePlanBody::Command(command) => {
+        crate::plan::CtePlanBody::Command(command) => {
             if let Some(target) = command.mutation_target() {
                 collect_canonical_relation(target, dependencies)?;
             }
@@ -45,14 +45,14 @@ pub(super) fn collect_cte_relation_dependencies(
 }
 
 pub(super) fn collect_cte_source_routine_dependencies(
-    body: &uqa_planner::CtePlanBody,
+    body: &crate::plan::CtePlanBody,
     dependencies: &mut RuleDependencies,
 ) {
     match body {
-        uqa_planner::CtePlanBody::Query(query) => {
+        crate::plan::CtePlanBody::Query(query) => {
             collect_query_source_routine_dependencies(query, dependencies);
         }
-        uqa_planner::CtePlanBody::Command(command) => {
+        crate::plan::CtePlanBody::Command(command) => {
             for cte in command.ctes() {
                 collect_cte_source_routine_dependencies(&cte.body, dependencies);
             }

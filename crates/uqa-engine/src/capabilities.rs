@@ -520,6 +520,7 @@ mod schema_analysis;
 
 mod statement_effects;
 mod stored_columns;
+mod stored_relations;
 
 mod partitions;
 

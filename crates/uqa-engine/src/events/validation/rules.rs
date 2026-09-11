@@ -412,12 +412,12 @@ impl Engine {
         crate::sql::reject_stored_plan_regrole_constants(self, &mut stored_plan)?;
         let bound_routines = crate::sql::bind_catalog_statement_routines(self, &stored_plan)?;
         if let Some(routine_plan) = &bound_routines.query {
-            super::super::rule_dependencies::collect_query_routine_dependencies(
+            uqa_sql::catalog::events::dependencies::collect_query_routine_dependencies(
                 routine_plan,
                 &mut dependencies,
             );
         }
-        super::super::rule_dependencies::bind_stored_statement_routines(
+        uqa_sql::catalog::stored_ast::bind_stored_statement_routines(
             action,
             &bound_routines.references,
         )?;
@@ -436,19 +436,19 @@ impl Engine {
         dependencies: &mut RuleDependencies,
     ) -> Result<(), SQLError> {
         if let Some(plan) = condition_plan {
-            super::super::rule_dependencies::collect_expression_routine_dependencies(
+            uqa_sql::catalog::events::dependencies::collect_expression_routine_dependencies(
                 plan,
                 dependencies,
             );
             for subquery in &plan.subqueries {
-                super::super::rule_dependencies::collect_query_relation_dependencies(
+                uqa_sql::catalog::events::dependencies::collect_query_relation_dependencies(
                     subquery,
                     dependencies,
                     &std::collections::BTreeSet::new(),
                 )?;
             }
             let routine_references = crate::sql::collect_expression_routine_references(plan)?;
-            super::super::rule_dependencies::bind_stored_expression_routines(
+            uqa_sql::catalog::stored_ast::bind_stored_expression_routines(
                 condition,
                 &routine_references,
             )?;
@@ -465,13 +465,13 @@ impl Engine {
             &[],
             &uqa_execution::RowSchema::default(),
         )?;
-        super::super::rule_dependencies::collect_expression_routine_dependencies(
+        uqa_sql::catalog::events::dependencies::collect_expression_routine_dependencies(
             &dependency_plan,
             dependencies,
         );
         let routine_references =
             crate::sql::collect_expression_routine_references(&dependency_plan)?;
-        super::super::rule_dependencies::bind_stored_expression_routines(
+        uqa_sql::catalog::stored_ast::bind_stored_expression_routines(
             condition,
             &routine_references,
         )

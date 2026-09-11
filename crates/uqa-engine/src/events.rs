@@ -17,7 +17,7 @@ pub(crate) use rule_binding::{
     rule_new_row_columns, rule_statement_row_columns,
 };
 pub(crate) use rule_condition_binding::RuleConditionBinding;
-pub(crate) use rule_dependencies::{
+pub(crate) use uqa_sql::catalog::stored_ast::{
     bind_stored_expression_routines, bind_stored_statement_routines,
     expression_references_routine_identity, rewrite_expression_routine_identity,
     rewrite_statement_routine_identity, visit_stored_expression,
@@ -27,7 +27,7 @@ pub(crate) use rule_dependencies::{
 const RULE_CATALOG_FORMAT_VERSION: u32 = 3;
 
 pub(crate) use uqa_sql::catalog::events::{
-    RuleColumnDependency, RuleDependencies, RuleRoutineDependency, StoredRule, StoredTrigger,
+    RuleColumnDependency, RuleDependencies, StoredRule, StoredTrigger,
 };
 
 pub(crate) use uqa_sql::catalog::events::PreparedRuleColumnDrop;
@@ -75,5 +75,4 @@ mod persistence;
 mod registry;
 mod rule_binding;
 mod rule_condition_binding;
-mod rule_dependencies;
 mod validation;

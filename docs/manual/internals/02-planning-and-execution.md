@@ -65,6 +65,8 @@ Routine declaration types and `%TYPE` references are analyzed in [`uqa-sql/src/r
 
 [`uqa-execution/src/routines/compilation.rs`](../../../crates/uqa-execution/src/routines/compilation.rs) recompiles SQL-standard bodies in their recorded creation namespace and restores the caller's search path on success and error. Its [rewrite executor](../../../crates/uqa-execution/src/routines/rewrites.rs) takes the publication registry snapshot after dependent catalog changes, matches exact routine identities and signatures, compiles replacement bodies, persists the complete registry, publishes it, and advances the catalog epoch. Column and sequence dependency expansion occurs before alias candidates are selected. Engine provides current metadata and session-state adapters; the former declaration, stored compilation, MERGE binding, and rule-column analysis implementation files are removed.
 
+[`uqa-sql/src/binding/stored_relations.rs`](../../../crates/uqa-sql/src/binding/stored_relations.rs) binds stored query and statement relations through separate current, loaded-catalog, and bound-identity lookups. Its [query binder](../../../crates/uqa-sql/src/binding/stored_relations/query.rs) preserves virtual catalog, AGE label, and transition-relation precedence, temporary relation tracking, and sequence diagnostics. [`catalog/events/dependencies.rs`](../../../crates/uqa-sql/src/catalog/events/dependencies.rs) collects rule dependencies through query plans, mutation CTEs, and table-function sources. Engine supplies namespace inputs and current catalog services, retaining the loaded sequence registry read guard across candidate lookup; stored AST traversal and relation-kind validation are SQL-owned.
+
 ## Statement capability boundaries
 
 ```mermaid
