@@ -175,7 +175,7 @@ SQL graph-command arity, text and boolean argument rules live in [`uqa-sql/src/s
 
 ## Plan-native optimization
 
-SQL owns view namespace and replacement row-type rules and authorization policy. Execution schedules view creation and materialized refresh, source execution, and durable publication. Engine supplies live transaction, role, binding and registry scopes. Replacement preserves the view identity and ACL state; publication changes the catalog generation only after persistence and registry insertion succeed. Materialized refresh evaluates under the view owner and restores the caller before validating the resulting snapshot.
+SQL owns view namespace and replacement row-type rules and authorization policy. Restoration binds persisted source names and repairs legacy scalar dispatch identities through SQL-owned visitors using the supplied catalog namespace. Execution schedules view creation and materialized refresh, source execution, and durable publication. Engine supplies live transaction, role, binding and registry scopes. Replacement preserves the view identity and ACL state; publication changes the catalog generation only after persistence and registry insertion succeed. Materialized refresh evaluates under the view owner and restores the caller before validating the resulting snapshot.
 
 Execution also owns statement read-only validation, snapshot marking and error rollback; SQL supplies transaction-block requirements and diagnostics. The Engine transaction capability supplies the active depth, access mode, snapshot marker and existing abort and rollback operations.
 
