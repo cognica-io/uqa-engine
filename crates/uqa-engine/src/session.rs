@@ -12,8 +12,6 @@ use super::{
     StoredViewKind, TableState, Value,
 };
 use uqa_planner::QueryPlan;
-#[cfg(test)]
-use uqa_planner::{RelationalPlan, SourcePlan};
 
 type AnalyzeValues = BTreeMap<String, analyze_helpers::ColumnAnalyzeValues>;
 type AnalyzeNullCounts = BTreeMap<String, u64>;
