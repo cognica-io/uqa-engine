@@ -247,7 +247,7 @@ impl Engine {
         uqa_execution::schema::foreign_definitions::migration::migrate_foreign_table_identities(
             catalog,
         )?;
-        Self::migrate_implicit_sequence_owners(catalog)
+        uqa_execution::schema::sequences::owner_migration::migrate_implicit_sequence_owners(catalog)
     }
 
     fn migrate_table_identities(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {

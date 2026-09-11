@@ -239,35 +239,9 @@ impl Default for SequenceOptions {
     }
 }
 
-/// Dependency strength of a sequence owner. Ordinary `OWNED BY` and `SERIAL` use an automatic dependency, while an identity column owns its sequence through an internal dependency that cannot be reassigned or dropped directly.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SequenceOwnerDependency {
-    #[default]
-    Automatic,
-    Internal,
-}
-
-impl SequenceOwnerDependency {
-    #[must_use]
-    pub const fn catalog_code(self) -> &'static str {
-        match self {
-            Self::Automatic => "a",
-            Self::Internal => "i",
-        }
-    }
-}
-
-/// Stable owner identity for a sequence dependency. Names are deliberately excluded so table and column renames do not require dependency rewrites.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SequenceOwner {
-    pub table_object_id: [u8; 16],
-    pub column_object_id: [u8; 16],
-    #[serde(default)]
-    pub dependency: SequenceOwnerDependency,
-}
-
-pub use uqa_core::catalog_sequence::{SequenceAclEntry, SequencePrivileges};
+pub use uqa_core::catalog_sequence::{
+    SequenceAclEntry, SequenceOwner, SequenceOwnerDependency, SequencePrivileges,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SequenceRow {

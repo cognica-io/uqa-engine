@@ -890,6 +890,14 @@ fn relation_if_not_exists_defers_definition_analysis_until_execution() {
 
 #[test]
 fn unsupported_create_ddl_never_loses_remaining_envelope_semantics() {
+    assert!(matches!(
+        first("CREATE SCHEMA owned AUTHORIZATION CURRENT_USER"),
+        Statement::CreateSchema {
+            name: Some(name),
+            if_not_exists: false,
+            authorization: Some(crate::ast::SchemaAuthorization::CurrentUser),
+        } if name == "owned"
+    ));
     for (sql, expected) in [
         (
             "CREATE TABLE optioned (id INTEGER) WITH (fillfactor = 70)",
@@ -902,10 +910,6 @@ fn unsupported_create_ddl_never_loses_remaining_envelope_semantics() {
         (
             "CREATE TABLE accessed (id INTEGER) USING heap",
             "access methods",
-        ),
-        (
-            "CREATE SCHEMA owned AUTHORIZATION CURRENT_USER",
-            "AUTHORIZATION",
         ),
         (
             "CREATE SCHEMA bundled CREATE TABLE child (id INTEGER)",

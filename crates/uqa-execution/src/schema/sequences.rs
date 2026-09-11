@@ -21,3 +21,6 @@ pub mod entry;
 pub mod lifecycle;
 
 pub mod migration;
+
+pub mod owner_migration;
+pub mod owner_publication;
