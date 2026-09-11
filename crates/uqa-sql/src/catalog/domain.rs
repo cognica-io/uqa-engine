@@ -8,6 +8,11 @@ use crate::ast::{ColumnType, CreateDomain};
 use serde::{Deserialize, Serialize};
 use uqa_core::RelationIdentity;
 
+pub fn domain_object_oid(object_id: &[u8; 16]) -> u32 {
+    u32::try_from(super::oids::stable_object_oid("domain", object_id))
+        .expect("catalog OIDs fit in u32")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredDomain {
     pub object_id: [u8; 16],

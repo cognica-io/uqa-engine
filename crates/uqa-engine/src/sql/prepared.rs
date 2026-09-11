@@ -138,7 +138,7 @@ pub(super) fn bind_execute_parameters(
             }
             let constant = match (&argument.scalar, target) {
                 (ScalarExpr::Literal(Value::Str(value)), Some(target)) => {
-                    Some(super::ddl::coerce_assignment_value(
+                    Some(uqa_sql::assignment::conversion::coerce_assignment_value(
                         engine,
                         Value::Str(value.clone()),
                         parameter_base_type(target),
@@ -163,7 +163,7 @@ pub(super) fn bind_execute_parameters(
             let value = eval_physical(argument, &context)?;
             analyzed.constant = Some(match target {
                 Some(target) if !contains_domain(parameter_base_type(target)) => {
-                    super::ddl::coerce_assignment_value(
+                    uqa_sql::assignment::conversion::coerce_assignment_value(
                         engine,
                         value,
                         parameter_base_type(target),
@@ -188,7 +188,7 @@ pub(super) fn bind_execute_parameters(
             };
             match target {
                 Some(target) if analyzed.converted => Ok(SQLParam::typed_scalar(value, target)),
-                Some(target) => super::ddl::coerce_assignment_value(
+                Some(target) => uqa_sql::assignment::conversion::coerce_assignment_value(
                     engine,
                     value,
                     &target,

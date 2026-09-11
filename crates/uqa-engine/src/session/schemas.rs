@@ -6,9 +6,7 @@
 
 //! Schema/catalog enumeration and schema lifecycle.
 
-mod drop;
-
-use super::{CatalogIndexRow, Engine, RelationIdentity, StorageBackendError, StorageBackendResult};
+use super::{CatalogIndexRow, Engine, RelationIdentity, StorageBackendResult};
 
 pub(crate) use uqa_sql::catalog::is_virtual_system_schema;
 
@@ -49,41 +47,12 @@ impl Engine {
 
     /// Drop an empty durable schema. Virtual system namespaces cannot be removed.
     pub fn drop_schema(&self, name: &str) -> StorageBackendResult<bool> {
-        self.with_implicit_storage_transaction(|engine| engine.drop_schema_inner(name))
-    }
-
-    pub(crate) fn preflight_drop_schema(&self, name: &str) -> StorageBackendResult<bool> {
-        self.synchronize_catalog_registries()?;
-        if is_virtual_system_schema(name) {
-            return Err(StorageBackendError::Other(format!(
-                "schema `{name}` cannot be dropped"
-            )));
-        }
-        if !self.durable.schemas.read().contains_key(name) {
-            return Ok(false);
-        }
-        if !self.schema_is_empty(name) {
-            return Err(StorageBackendError::Other(format!(
-                "schema `{name}` is not empty"
-            )));
-        }
-        Ok(true)
-    }
-
-    fn drop_schema_inner(&self, name: &str) -> StorageBackendResult<bool> {
-        if !self.preflight_drop_schema(name)? {
-            return Ok(false);
-        }
-        let mut schemas = self.durable.schemas.write();
-        if let Some(catalog) = self.storage.catalog.as_ref() {
-            catalog.drop_schema(name)?;
-        }
-        let removed = schemas.remove(name).is_some();
-        drop(schemas);
-        if removed {
-            self.note_catalog_registry_changed();
-        }
-        Ok(removed)
+        self.with_implicit_storage_transaction(|engine| {
+            uqa_execution::schema::namespaces::removal::drop_empty_schema(
+                &engine.empty_schema_removal_context(),
+                name,
+            )
+        })
     }
 
     pub fn has_schema(&self, name: &str) -> StorageBackendResult<bool> {
@@ -143,8 +112,7 @@ impl Engine {
                 .values()
                 .any(|domain| domain.identity.schema == schema)
             && !self.durable.sql_user_functions.read().keys().any(|name| {
-                RelationIdentity::from_legacy_name(name)
-                    .map_or(true, |relation| relation.schema == schema)
+                uqa_sql::schema::namespaces::removal::routine_name_occupies_schema(name, schema)
             })
     }
 

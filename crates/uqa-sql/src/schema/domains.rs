@@ -17,6 +17,31 @@ use crate::{
 use std::collections::BTreeSet;
 use uqa_core::{RelationIdentity, Value};
 
+/// Namespace and collision reads used before binding a domain declaration.
+pub trait DomainCreationCatalog {
+    fn domain_creation_name(&self, reference: &str) -> Result<String, SQLError>;
+    fn domain_type_exists(&self, name: &str) -> bool;
+    fn domain_table_exists(&self, name: &str) -> Result<bool, SQLError>;
+}
+
+pub fn bind_domain_creation_target(
+    catalog: &dyn DomainCreationCatalog,
+    definition: &mut CreateDomain,
+) -> Result<RelationIdentity, SQLError> {
+    definition.name = catalog.domain_creation_name(&definition.name)?;
+    let identity =
+        RelationIdentity::from_legacy_name(&definition.name).map_err(SQLError::Internal)?;
+    if catalog.domain_type_exists(&definition.name)
+        || catalog.domain_table_exists(&definition.name)?
+    {
+        return Err(domain_error(
+            "42710",
+            format!("type \"{}\" already exists", identity.name),
+        ));
+    }
+    Ok(identity)
+}
+
 pub fn prepare_domain_definition(
     context: &SchemaBindingContext<'_, '_>,
     domains: &dyn DomainCatalog,
@@ -177,3 +202,6 @@ fn bind_domain_check(
     super::defaults::bind_stored_schema_expression_routines(context, expression, typed)?;
     Ok(())
 }
+
+pub mod dependencies;
+pub mod removal;

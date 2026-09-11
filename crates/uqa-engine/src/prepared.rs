@@ -40,7 +40,7 @@ impl Engine {
             .iter()
             .map(|ty| match ty {
                 uqa_sql::ast::ColumnType::Named(name) if is_unknown_type(name)? => Ok(None),
-                _ => crate::sql::resolve_declared_column_type(self, ty).map(Some),
+                _ => uqa_sql::type_resolution::resolve_declared_column_type(self, ty).map(Some),
             })
             .collect::<Result<Vec<_>, _>>()?;
         logical_plan.rewrite_scalar_expressions(&mut |expression| {

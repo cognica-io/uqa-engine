@@ -6,6 +6,7 @@
 
 //! Schema registration and owner publication through live catalog and authorization guards.
 pub mod privileges;
+pub mod removal;
 
 use crate::catalog::security::roles::RoleCatalogGuards;
 use std::{collections::BTreeMap, ops::DerefMut};

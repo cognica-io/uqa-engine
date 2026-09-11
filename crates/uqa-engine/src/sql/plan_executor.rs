@@ -21,7 +21,7 @@ use crate::session::{MaterializedViewRegistration, ViewRegistration};
 use super::scalar::{
     analyze_physical_call_arguments, eval_physical_call_arguments, PhysicalEvalContext,
 };
-use super::{plpgsql_exec, run_drop, run_explain, select, Engine};
+use super::{plpgsql_exec, run_explain, select, Engine};
 
 fn call_output_schema(
     engine: &Engine,
@@ -530,7 +530,12 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             CommandPlan::Insert(plan) => self.execute_insert(plan),
             CommandPlan::Update(plan) => self.execute_update(plan),
             CommandPlan::Delete(plan) => self.execute_delete(plan),
-            CommandPlan::Drop(statement) => run_drop(self.engine, statement.clone()),
+            CommandPlan::Drop(statement) => {
+                uqa_execution::schema::removal::entry::run_drop_statement(
+                    self.engine,
+                    statement.clone(),
+                )
+            }
             CommandPlan::AlterRoutineOwner(statement) => {
                 self.engine.alter_sql_routine_owner(statement)?;
                 Ok(SQLResult::empty())
@@ -804,7 +809,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 )
             }
             CommandPlan::CreateDomain(statement) => {
-                super::domains::create_domain(self.engine, statement.clone())?;
+                uqa_execution::schema::domains::create_domain(
+                    &self.engine.domain_creation_context(),
+                    statement.clone(),
+                )?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::AlterSequence(statement) => {

@@ -163,7 +163,7 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         source: Option<&str>,
         target: &uqa_sql::ast::ColumnType,
     ) -> Result<Option<Value>, SQLError> {
-        crate::sql::cast_domain_value(self.engine, value, source, target)
+        uqa_sql::assignment::domain::cast_domain_value(self.engine, value, source, target)
     }
     fn resolve_type_name(
         &self,
