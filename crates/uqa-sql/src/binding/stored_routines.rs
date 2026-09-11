@@ -814,3 +814,5 @@ fn mark_source_relations_bound(source: &mut SourcePlan) {
         | SourcePlan::FunctionGroup { .. } => {}
     }
 }
+
+pub mod analysis;

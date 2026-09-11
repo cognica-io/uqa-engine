@@ -13,8 +13,8 @@ use uqa_sql::{
     SQLError,
 };
 
-use super::{canonical_routine_type_name, routine_signature_types};
 use crate::Engine;
+use uqa_sql::{routines::routine_signature_types, type_resolution::canonical_routine_type_name};
 
 fn create_function(sql: &str) -> CreateFunction {
     let mut statements = uqa_sql::compile(sql).expect("compile CREATE FUNCTION");

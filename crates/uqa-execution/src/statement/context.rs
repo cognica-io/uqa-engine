@@ -64,7 +64,7 @@ pub struct StatementExecutionContext<'a, S: Clone + 'static> {
     pub controls: &'a dyn session::StatementControl,
     pub portals: super::portal::context::PortalExecutionContext<'a, S>,
     pub roles: crate::catalog::security::role_lifecycle::context::RoleExecutionContext<'a>,
-    pub events: &'a dyn definitions::EventDefinitions,
+    pub events: crate::schema::events::context::EventLifecycleContext<'a>,
     pub foreign: &'a dyn definitions::ForeignDefinitions,
     pub table_privileges: &'a dyn definitions::TablePrivileges,
     pub explain: ExplainRenderer,

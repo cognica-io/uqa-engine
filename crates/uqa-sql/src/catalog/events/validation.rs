@@ -4,81 +4,33 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Trigger-function resolution and definition validation.
+//! Trigger condition and rule pseudo-relation validation over SQL metadata.
 
+use crate::{
+    ast::{
+        ColumnType, CreateTrigger, Expr, FromClause, OnConflictAction, RuleEvent, SelectStmt,
+        Statement, TableHierarchy, TriggerEvent, TriggerTiming, TriggerTransitionRelation,
+    },
+    plpgsql::{ResolvedVariable, VariableResolver},
+    semantics::rules::action_binding::{
+        first_rule_row_reference_in_expr, first_rule_row_reference_in_select, RuleSourceCatalog,
+    },
+    SQLError,
+};
 use uqa_core::Value;
-use uqa_sql::ast::{
-    ColumnDef, ColumnType, CreateRule, CreateTrigger, Expr, FromClause, FunctionReturns,
-    OnConflictAction, RuleEvent, SelectStmt, Statement, TableHierarchy, TriggerEvent,
-    TriggerTiming, TriggerTransitionRelation,
-};
-use uqa_sql::plpgsql::{bind_expr, ResolvedVariable, VariableResolver};
-use uqa_sql::SQLError;
 
-use super::{
-    first_rule_row_reference_in_expr, first_rule_row_reference_in_select,
-    rule_action_has_set_operation,
-};
-use crate::capabilities::{RelationLookupMode, RelationResolution};
-use crate::user_functions::{
-    canonical_routine_type_name, routine_signature_types, CompiledFunctionBody, SQLUserFunction,
-};
-use crate::{Arc, Engine, RelationIdentity, StoredViewKind};
-
-impl Engine {
-    pub(in crate::events) fn event_relation_from_resolution(
-        requested: &str,
-        resolution: RelationResolution,
-    ) -> Result<(RelationIdentity, &'static str), SQLError> {
-        let (canonical, kind) = match resolution {
-            RelationResolution::Found(canonical, kind)
-                if matches!(kind, "table" | "view" | "materialized view") =>
-            {
-                (canonical, kind)
-            }
-            RelationResolution::Found(_, _) | RelationResolution::MissingRelation => {
-                return Err(SQLError::UnknownTable(requested.to_string()));
-            }
-            RelationResolution::MissingSchema(schema) => {
-                return Err(SQLError::Routine {
-                    sqlstate: "3F000".into(),
-                    message: format!("schema \"{schema}\" does not exist"),
-                });
-            }
-        };
-        let relation = RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
-            SQLError::Internal(format!(
-                "decode resolved event relation `{canonical}`: {error}"
-            ))
-        })?;
-        Ok((relation, kind))
-    }
-
-    pub(in crate::events) fn resolve_event_relation_kind(
-        &self,
-        name: &str,
-        lookup_mode: RelationLookupMode,
-    ) -> Result<(RelationIdentity, &'static str), SQLError> {
-        let resolution = match lookup_mode {
-            RelationLookupMode::Dynamic => self.resolve_visible_relation_kind(name)?,
-            RelationLookupMode::Bound => self.resolve_bound_relation_kind(name)?,
-        };
-        Self::event_relation_from_resolution(name, resolution)
-    }
+pub struct TriggerConditionTypeResolver<'a> {
+    pub columns: &'a [crate::ast::ColumnDef],
 }
 
-struct TriggerConditionTypeResolver<'a> {
-    columns: &'a [uqa_sql::ast::ColumnDef],
+pub struct RuleRowTypeResolver<'a> {
+    pub columns: &'a [(String, ColumnType)],
+    pub event: RuleEvent,
 }
 
-struct RuleRowTypeResolver<'a> {
-    columns: &'a [(String, ColumnType)],
-    event: RuleEvent,
-}
-
-struct RuleConditionNameResolver<'a> {
-    columns: &'a [(String, ColumnType)],
-    event: RuleEvent,
+pub struct RuleConditionNameResolver<'a> {
+    pub columns: &'a [(String, ColumnType)],
+    pub event: RuleEvent,
 }
 
 impl VariableResolver for RuleConditionNameResolver<'_> {
@@ -226,7 +178,7 @@ impl VariableResolver for TriggerConditionTypeResolver<'_> {
     }
 }
 
-fn is_boolean_type(ty: &ColumnType) -> bool {
+pub fn is_boolean_type(ty: &ColumnType) -> bool {
     match ty {
         ColumnType::Boolean => true,
         ColumnType::Domain { base, .. } => is_boolean_type(base),
@@ -234,7 +186,7 @@ fn is_boolean_type(ty: &ColumnType) -> bool {
     }
 }
 
-fn rule_action_has_returning(action: &Statement) -> bool {
+pub fn rule_action_has_returning(action: &Statement) -> bool {
     match action {
         Statement::Insert(statement) => !statement.returning.is_empty(),
         Statement::Update(statement) => !statement.returning.is_empty(),
@@ -260,8 +212,8 @@ fn same_rule_returning_type_with_different_modifier(
     }
 }
 
-fn validate_rule_returning_shape(
-    schema: &uqa_execution::RowSchema,
+pub fn validate_rule_returning_shape(
+    schema: &crate::RowSchema,
     columns: &[(String, ColumnType)],
 ) -> Result<(), SQLError> {
     if schema.len() < columns.len() {
@@ -303,9 +255,9 @@ fn validate_rule_returning_shape(
     Ok(())
 }
 
-fn validate_trigger_condition_references(
+pub fn validate_trigger_condition_references(
     definition: &CreateTrigger,
-    columns: &[uqa_sql::ast::ColumnDef],
+    columns: &[crate::ast::ColumnDef],
     condition: &Expr,
 ) -> Result<(), SQLError> {
     if condition.any_node(&|node| {
@@ -391,7 +343,7 @@ fn validate_trigger_condition_references(
     Ok(())
 }
 
-fn first_invalid_rule_condition_qualifier(condition: &Expr) -> Option<String> {
+pub fn first_invalid_rule_condition_qualifier(condition: &Expr) -> Option<String> {
     let invalid = std::cell::RefCell::new(None);
     let _ = condition.any_node(&|node| {
         let Expr::QualifiedColumn { qualifier, .. } = node else {
@@ -425,7 +377,7 @@ fn invalid_rule_set_operation_reference() -> SQLError {
     }
 }
 
-pub(super) use uqa_sql::semantics::rules::action_binding::invalid_rule_action_reference;
+pub(super) use crate::semantics::rules::action_binding::invalid_rule_action_reference;
 
 fn ambiguous_rule_pseudo_relation(qualifier: &str) -> SQLError {
     SQLError::Routine {
@@ -505,7 +457,10 @@ fn validate_rule_action_select_namespace(select: &SelectStmt) -> Result<(), SQLE
     Ok(())
 }
 
-fn validate_rule_action_namespace(engine: &Engine, action: &Statement) -> Result<(), SQLError> {
+fn validate_rule_action_namespace(
+    catalog: &dyn RuleSourceCatalog,
+    action: &Statement,
+) -> Result<(), SQLError> {
     let (ctes, source) = match action {
         Statement::Select(select) => return validate_rule_action_select_namespace(select),
         Statement::Insert(insert) => (insert.with.as_slice(), insert.select_source.as_deref()),
@@ -518,8 +473,8 @@ fn validate_rule_action_namespace(engine: &Engine, action: &Statement) -> Result
                 return Err(duplicate_rule_pseudo_relation(&qualifier));
             }
             if let Some(qualifier) = rule_pseudo_relation_name(&update.target_qualifier) {
-                if super::rule_binding::action_target_qualifier_referenced(
-                    engine, action, &qualifier,
+                if crate::semantics::rules::action_binding::action_target_qualifier_referenced(
+                    catalog, action, &qualifier,
                 ) {
                     return Err(ambiguous_rule_pseudo_relation(&qualifier));
                 }
@@ -535,8 +490,8 @@ fn validate_rule_action_namespace(engine: &Engine, action: &Statement) -> Result
                 return Err(duplicate_rule_pseudo_relation(&qualifier));
             }
             if let Some(qualifier) = rule_pseudo_relation_name(&delete.target_qualifier) {
-                if super::rule_binding::action_target_qualifier_referenced(
-                    engine, action, &qualifier,
+                if crate::semantics::rules::action_binding::action_target_qualifier_referenced(
+                    catalog, action, &qualifier,
                 ) {
                     return Err(ambiguous_rule_pseudo_relation(&qualifier));
                 }
@@ -557,52 +512,60 @@ fn validate_rule_action_namespace(engine: &Engine, action: &Statement) -> Result
     Ok(())
 }
 
-fn validate_rule_ctes(engine: &Engine, ctes: &[uqa_sql::ast::CTE]) -> Result<(), SQLError> {
+fn validate_rule_ctes(
+    catalog: &dyn RuleSourceCatalog,
+    ctes: &[crate::ast::CTE],
+) -> Result<(), SQLError> {
     for cte in ctes {
         let statement = cte.body.clone().into_statement();
         if let Some(qualifier) =
-            super::rule_binding::first_rule_row_reference_in_statement(engine, &statement)?
+            crate::semantics::rules::action_binding::first_rule_row_reference_in_statement(
+                catalog, &statement,
+            )?
         {
             return Err(invalid_rule_cte_reference(&qualifier));
         }
-        validate_rule_action_reference_scopes(engine, &statement)?;
+        validate_rule_action_reference_scopes(catalog, &statement)?;
     }
     Ok(())
 }
 
-fn validate_rule_select_scopes(engine: &Engine, select: &SelectStmt) -> Result<(), SQLError> {
-    validate_rule_ctes(engine, &select.with)?;
+fn validate_rule_select_scopes(
+    catalog: &dyn RuleSourceCatalog,
+    select: &SelectStmt,
+) -> Result<(), SQLError> {
+    validate_rule_ctes(catalog, &select.with)?;
     if let Some(set_op) = &select.set_op {
         let member_references_rule_row = set_op
             .left
             .as_deref()
-            .and_then(|left| first_rule_row_reference_in_select(engine, left))
-            .or_else(|| first_rule_row_reference_in_select(engine, &set_op.right));
+            .and_then(|left| first_rule_row_reference_in_select(catalog, left))
+            .or_else(|| first_rule_row_reference_in_select(catalog, &set_op.right));
         if member_references_rule_row.is_some() {
             return Err(invalid_rule_set_operation_reference());
         }
         if let Some(left) = set_op.left.as_deref() {
-            validate_rule_select_scopes(engine, left)?;
+            validate_rule_select_scopes(catalog, left)?;
         }
-        validate_rule_select_scopes(engine, &set_op.right)?;
+        validate_rule_select_scopes(catalog, &set_op.right)?;
         for order in &set_op.combined_order_by {
-            validate_rule_expr_scopes(engine, &order.expr)?;
+            validate_rule_expr_scopes(catalog, &order.expr)?;
         }
         if let Some(limit) = &set_op.combined_limit {
-            validate_rule_expr_scopes(engine, limit)?;
+            validate_rule_expr_scopes(catalog, limit)?;
         }
         if let Some(offset) = &set_op.combined_offset {
-            validate_rule_expr_scopes(engine, offset)?;
+            validate_rule_expr_scopes(catalog, offset)?;
         }
     }
     for projection in &select.projections {
-        validate_rule_expr_scopes(engine, &projection.expr)?;
+        validate_rule_expr_scopes(catalog, &projection.expr)?;
     }
     for expr in select.values.iter().flatten() {
-        validate_rule_expr_scopes(engine, expr)?;
+        validate_rule_expr_scopes(catalog, expr)?;
     }
     if let Some(from) = &select.from {
-        validate_rule_from_scopes(engine, from)?;
+        validate_rule_from_scopes(catalog, from)?;
     }
     for expr in select
         .r#where
@@ -615,44 +578,47 @@ fn validate_rule_select_scopes(engine: &Engine, select: &SelectStmt) -> Result<(
         .chain(select.offset.iter())
         .chain(select.distinct_on.iter())
     {
-        validate_rule_expr_scopes(engine, expr)?;
+        validate_rule_expr_scopes(catalog, expr)?;
     }
     Ok(())
 }
 
-fn validate_rule_from_scopes(engine: &Engine, from: &FromClause) -> Result<(), SQLError> {
+fn validate_rule_from_scopes(
+    catalog: &dyn RuleSourceCatalog,
+    from: &FromClause,
+) -> Result<(), SQLError> {
     match from {
         FromClause::Table { .. } => {}
         FromClause::Join {
             left, right, on, ..
         } => {
-            validate_rule_from_scopes(engine, left)?;
-            validate_rule_from_scopes(engine, right)?;
+            validate_rule_from_scopes(catalog, left)?;
+            validate_rule_from_scopes(catalog, right)?;
             if let Some(on) = on {
-                validate_rule_expr_scopes(engine, on)?;
+                validate_rule_expr_scopes(catalog, on)?;
             }
         }
         FromClause::Values { rows, .. } => {
             for expr in rows.iter().flatten() {
-                validate_rule_expr_scopes(engine, expr)?;
+                validate_rule_expr_scopes(catalog, expr)?;
             }
         }
         FromClause::Function { args, .. } => {
             for expr in args {
-                validate_rule_expr_scopes(engine, expr)?;
+                validate_rule_expr_scopes(catalog, expr)?;
             }
         }
         FromClause::FunctionGroup { functions, .. } => {
             for expr in functions.iter().flat_map(|function| &function.args) {
-                validate_rule_expr_scopes(engine, expr)?;
+                validate_rule_expr_scopes(catalog, expr)?;
             }
         }
-        FromClause::Subquery { body, .. } => validate_rule_select_scopes(engine, body)?,
+        FromClause::Subquery { body, .. } => validate_rule_select_scopes(catalog, body)?,
     }
     Ok(())
 }
 
-fn validate_rule_expr_scopes(engine: &Engine, expr: &Expr) -> Result<(), SQLError> {
+fn validate_rule_expr_scopes(catalog: &dyn RuleSourceCatalog, expr: &Expr) -> Result<(), SQLError> {
     match expr {
         Expr::Func {
             args,
@@ -661,45 +627,45 @@ fn validate_rule_expr_scopes(engine: &Engine, expr: &Expr) -> Result<(), SQLErro
             ..
         } => {
             for expr in args {
-                validate_rule_expr_scopes(engine, expr)?;
+                validate_rule_expr_scopes(catalog, expr)?;
             }
             for order in order_by {
-                validate_rule_expr_scopes(engine, &order.expr)?;
+                validate_rule_expr_scopes(catalog, &order.expr)?;
             }
             if let Some(filter) = filter {
-                validate_rule_expr_scopes(engine, filter)?;
+                validate_rule_expr_scopes(catalog, filter)?;
             }
         }
         Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
             for expr in items {
-                validate_rule_expr_scopes(engine, expr)?;
+                validate_rule_expr_scopes(catalog, expr)?;
             }
         }
         Expr::Binary { lhs, rhs, .. } => {
-            validate_rule_expr_scopes(engine, lhs)?;
-            validate_rule_expr_scopes(engine, rhs)?;
+            validate_rule_expr_scopes(catalog, lhs)?;
+            validate_rule_expr_scopes(catalog, rhs)?;
         }
         Expr::UnaryMinus(expr)
         | Expr::Not(expr)
         | Expr::IsNull { expr, .. }
-        | Expr::Cast { expr, .. } => validate_rule_expr_scopes(engine, expr)?,
+        | Expr::Cast { expr, .. } => validate_rule_expr_scopes(catalog, expr)?,
         Expr::Between { expr, low, high } => {
-            validate_rule_expr_scopes(engine, expr)?;
-            validate_rule_expr_scopes(engine, low)?;
-            validate_rule_expr_scopes(engine, high)?;
+            validate_rule_expr_scopes(catalog, expr)?;
+            validate_rule_expr_scopes(catalog, low)?;
+            validate_rule_expr_scopes(catalog, high)?;
         }
         Expr::InList { expr, list, .. } => {
-            validate_rule_expr_scopes(engine, expr)?;
+            validate_rule_expr_scopes(catalog, expr)?;
             for item in list {
-                validate_rule_expr_scopes(engine, item)?;
+                validate_rule_expr_scopes(catalog, item)?;
             }
         }
         Expr::WindowCall { args, spec, .. } => {
             for expr in args.iter().chain(spec.partition_by.iter()) {
-                validate_rule_expr_scopes(engine, expr)?;
+                validate_rule_expr_scopes(catalog, expr)?;
             }
             for order in &spec.order_by {
-                validate_rule_expr_scopes(engine, &order.expr)?;
+                validate_rule_expr_scopes(catalog, &order.expr)?;
             }
         }
         Expr::Case {
@@ -708,22 +674,22 @@ fn validate_rule_expr_scopes(engine: &Engine, expr: &Expr) -> Result<(), SQLErro
             else_branch,
         } => {
             if let Some(base) = base {
-                validate_rule_expr_scopes(engine, base)?;
+                validate_rule_expr_scopes(catalog, base)?;
             }
             for (condition, result) in when {
-                validate_rule_expr_scopes(engine, condition)?;
-                validate_rule_expr_scopes(engine, result)?;
+                validate_rule_expr_scopes(catalog, condition)?;
+                validate_rule_expr_scopes(catalog, result)?;
             }
             if let Some(else_branch) = else_branch {
-                validate_rule_expr_scopes(engine, else_branch)?;
+                validate_rule_expr_scopes(catalog, else_branch)?;
             }
         }
         Expr::ScalarSubquery(body) | Expr::Exists { body, .. } => {
-            validate_rule_select_scopes(engine, body)?;
+            validate_rule_select_scopes(catalog, body)?;
         }
         Expr::InSubquery { expr, body, .. } => {
-            validate_rule_expr_scopes(engine, expr)?;
-            validate_rule_select_scopes(engine, body)?;
+            validate_rule_expr_scopes(catalog, expr)?;
+            validate_rule_select_scopes(catalog, body)?;
         }
         Expr::Default
         | Expr::Literal(_)
@@ -738,27 +704,27 @@ fn validate_rule_expr_scopes(engine: &Engine, expr: &Expr) -> Result<(), SQLErro
     Ok(())
 }
 
-fn validate_rule_action_reference_scopes(
-    engine: &Engine,
+pub fn validate_rule_action_reference_scopes(
+    catalog: &dyn RuleSourceCatalog,
     action: &Statement,
 ) -> Result<(), SQLError> {
-    validate_rule_action_namespace(engine, action)?;
+    validate_rule_action_namespace(catalog, action)?;
     match action {
-        Statement::Select(select) => validate_rule_select_scopes(engine, select),
+        Statement::Select(select) => validate_rule_select_scopes(catalog, select),
         Statement::Insert(insert) => {
-            validate_rule_ctes(engine, &insert.with)?;
+            validate_rule_ctes(catalog, &insert.with)?;
             for expr in insert.rows.iter().flatten() {
-                validate_rule_expr_scopes(engine, expr)?;
+                validate_rule_expr_scopes(catalog, expr)?;
             }
             if let Some(select) = &insert.select_source {
-                validate_rule_select_scopes(engine, select)?;
+                validate_rule_select_scopes(catalog, select)?;
             }
             if let Some(conflict) = &insert.on_conflict {
                 for expression in &conflict.expressions {
-                    validate_rule_expr_scopes(engine, expression)?;
+                    validate_rule_expr_scopes(catalog, expression)?;
                 }
                 if let Some(predicate) = conflict.predicate.as_deref() {
-                    validate_rule_expr_scopes(engine, predicate)?;
+                    validate_rule_expr_scopes(catalog, predicate)?;
                 }
                 if let OnConflictAction::Update {
                     assignments,
@@ -783,22 +749,22 @@ fn validate_rule_action_reference_scopes(
                         return Err(invalid_rule_action_reference(&qualifier));
                     }
                     for (_, expr) in assignments {
-                        validate_rule_expr_scopes(engine, expr)?;
+                        validate_rule_expr_scopes(catalog, expr)?;
                     }
                     if let Some(r#where) = r#where {
-                        validate_rule_expr_scopes(engine, r#where)?;
+                        validate_rule_expr_scopes(catalog, r#where)?;
                     }
                 }
             }
             for projection in &insert.returning {
-                validate_rule_expr_scopes(engine, &projection.expr)?;
+                validate_rule_expr_scopes(catalog, &projection.expr)?;
             }
             Ok(())
         }
         Statement::Update(update) => {
-            validate_rule_ctes(engine, &update.with)?;
+            validate_rule_ctes(catalog, &update.with)?;
             if let Some(from) = &update.from {
-                validate_rule_from_scopes(engine, from)?;
+                validate_rule_from_scopes(catalog, from)?;
             }
             for expr in update
                 .assignments
@@ -807,21 +773,21 @@ fn validate_rule_action_reference_scopes(
                 .chain(update.r#where.iter())
                 .chain(update.returning.iter().map(|projection| &projection.expr))
             {
-                validate_rule_expr_scopes(engine, expr)?;
+                validate_rule_expr_scopes(catalog, expr)?;
             }
             Ok(())
         }
         Statement::Delete(delete) => {
-            validate_rule_ctes(engine, &delete.with)?;
+            validate_rule_ctes(catalog, &delete.with)?;
             if let Some(using) = &delete.using {
-                validate_rule_from_scopes(engine, using)?;
+                validate_rule_from_scopes(catalog, using)?;
             }
             for expr in delete
                 .r#where
                 .iter()
                 .chain(delete.returning.iter().map(|projection| &projection.expr))
             {
-                validate_rule_expr_scopes(engine, expr)?;
+                validate_rule_expr_scopes(catalog, expr)?;
             }
             Ok(())
         }
@@ -829,7 +795,7 @@ fn validate_rule_action_reference_scopes(
     }
 }
 
-fn validate_trigger_transition_relation(
+pub fn validate_trigger_transition_relation(
     definition: &CreateTrigger,
     hierarchy: &TableHierarchy,
     transition: &TriggerTransitionRelation,
@@ -910,5 +876,5 @@ fn validate_trigger_transition_relation(
     Ok(())
 }
 
-mod rules;
-mod triggers;
+#[cfg(test)]
+mod tests;

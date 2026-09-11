@@ -83,6 +83,11 @@ pub trait RoutineResolution: FunctionTypeResolver {
         self.lookup_visible_sql_functions(name)
     }
 
+    /// Resolve an exact stored routine name without repeating visible-name lookup.
+    fn lookup_bound_sql_functions(&self, _name: &str) -> Option<Vec<Arc<SQLUserFunction>>> {
+        None
+    }
+
     fn lookup_bound_sql_functions_by_binding(
         &self,
         _binding: &FunctionBinding,

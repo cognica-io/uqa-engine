@@ -7,18 +7,10 @@
 //! Role, event, foreign relation and table privilege catalog entry points.
 
 use uqa_sql::{
-    ast::{
-        ColumnDef, CreateRule, CreateTrigger, DeferredCreateForeignTable, DropRule, DropTrigger,
-        GrantTableStmt, TableCheck,
-    },
+    ast::{ColumnDef, DeferredCreateForeignTable, GrantTableStmt, TableCheck},
     SQLError,
 };
-pub trait EventDefinitions {
-    fn register_trigger(&self, statement: CreateTrigger) -> Result<(), SQLError>;
-    fn drop_trigger_sql(&self, statement: &DropTrigger) -> Result<(), SQLError>;
-    fn register_rule(&self, statement: CreateRule) -> Result<(), SQLError>;
-    fn drop_rule_sql(&self, statement: &DropRule) -> Result<(), SQLError>;
-}
+
 pub trait TablePrivileges {
     fn grant_table_privileges(&self, statement: &GrantTableStmt) -> Result<(), SQLError>;
 }

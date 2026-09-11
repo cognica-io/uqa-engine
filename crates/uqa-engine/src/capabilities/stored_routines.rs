@@ -7,34 +7,24 @@
 //! Capture catalog binding scopes for stored statements and scalar expressions.
 
 use crate::Engine;
-use uqa_sql::{
-    binding::stored_routines::BoundStatementRoutines, plan::UnifiedPlan, SQLError, SQLParam,
-};
+use uqa_sql::SQLError;
 
-pub(crate) fn bind_catalog_statement_routines(
-    engine: &Engine,
-    plan: &UnifiedPlan,
-) -> Result<BoundStatementRoutines, SQLError> {
-    let scope = crate::capabilities::query_scope::new_for_catalog_binding(engine);
-    let binding = uqa_execution::query::binding::binding_context(&scope)?;
-    uqa_sql::binding::stored_routines::bind_catalog_statement_routines(
-        &uqa_sql::binding::stored_routines::CatalogRoutineContext {
-            routines: engine,
-            binding: &binding,
-        },
-        plan,
-    )
+impl Engine {
+    pub(crate) fn catalog_routine_analysis_context(
+        &self,
+    ) -> uqa_sql::binding::stored_routines::analysis::CatalogRoutineAnalysisContext<'_> {
+        uqa_sql::binding::stored_routines::analysis::CatalogRoutineAnalysisContext {
+            scopes: self,
+            routines: self,
+        }
+    }
 }
-
-/// Bind a catalog-owned scalar expression, including all nested query plans, against a statically typed outer row.
-pub(crate) fn bind_catalog_expression_routines_with_outer(
-    engine: &Engine,
-    expression: &mut uqa_planner::ExpressionPlan,
-    params: &[SQLParam],
-    outer: &uqa_execution::RowSchema,
-) -> Result<Option<uqa_sql::ast::ColumnType>, SQLError> {
-    let ctes = crate::capabilities::query_scope::new_for_catalog_binding(engine);
-    uqa_execution::query::binding::bind_expression_plan_routines_for_storage(
-        engine, expression, params, &ctes, outer,
-    )
+impl uqa_sql::binding::stored_routines::analysis::CatalogRoutineScopes for Engine {
+    fn with_catalog_scope(
+        &self,
+        analyze: uqa_sql::binding::statements::StatementAnalysisOperation<'_>,
+    ) -> Result<(), SQLError> {
+        let scope = crate::capabilities::query_scope::new_for_catalog_binding(self);
+        analyze(&scope)
+    }
 }

@@ -131,9 +131,17 @@ pub fn reject_stored_regrole_constants(
     expression: &Expr,
     assignment_target: Option<&ColumnType>,
 ) -> Result<(), SQLError> {
+    reject_stored_regrole_constants_with(context, expression, assignment_target)
+}
+
+pub fn reject_stored_regrole_constants_with<C: StoredRegroleResolver + ?Sized>(
+    context: &C,
+    expression: &Expr,
+    assignment_target: Option<&ColumnType>,
+) -> Result<(), SQLError> {
     let mut constants = StoredRegroleConstants::default();
     constants.collect_expression(expression, assignment_target);
-    constants.reject(context)
+    constants.reject_with(context)
 }
 
 pub fn reject_stored_query_regrole_constants(
@@ -149,7 +157,14 @@ pub fn reject_stored_plan_regrole_constants(
     context: &dyn EngineHook,
     plan: &mut UnifiedPlan,
 ) -> Result<(), SQLError> {
+    reject_stored_plan_regrole_constants_with(context, plan)
+}
+
+pub fn reject_stored_plan_regrole_constants_with<C: StoredRegroleResolver + ?Sized>(
+    context: &C,
+    plan: &mut UnifiedPlan,
+) -> Result<(), SQLError> {
     let mut constants = StoredRegroleConstants::default();
     constants.collect_plan(plan);
-    constants.reject(context)
+    constants.reject_with(context)
 }

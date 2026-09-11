@@ -130,6 +130,7 @@ impl Engine {
             let stored_condition_plan = rule.condition_plan.clone();
             let stored_condition_binding = rule.condition_binding.clone();
             let (relation, condition_plan, condition_binding, dependencies) = self
+                .event_analysis_context()
                 .validate_rule_definition(
                     &mut rule.definition,
                     RelationLookupMode::Bound,
@@ -231,6 +232,7 @@ impl Engine {
                 condition.upgrade_legacy_serialized_dispatches();
             }
             let (relation, condition_routine_bindings_changed) = self
+                .event_analysis_context()
                 .validate_trigger_definition(&mut trigger.definition, RelationLookupMode::Bound)
                 .map_err(|error| {
                     StorageBackendError::Other(format!("restore trigger catalog: {error}"))
@@ -244,21 +246,12 @@ impl Engine {
                 }
                 migrated = true;
             }
-            let function_object_id = self
-                .resolve_trigger_function(&trigger.definition.function, RelationLookupMode::Bound)
-                .map_err(|error| {
-                    StorageBackendError::Other(format!(
-                        "restore trigger function identity: {error}"
-                    ))
-                })?
-                .def
-                .object_id
-                .ok_or_else(|| {
-                    StorageBackendError::Other(format!(
-                        "restore trigger catalog: function `{}` has no object identity",
-                        trigger.definition.function
-                    ))
-                })?;
+            let function_object_id =
+                uqa_sql::catalog::events::restoration::trigger_function_object_id(
+                    &self.event_analysis_context(),
+                    &trigger.definition,
+                )
+                .map_err(StorageBackendError::Other)?;
             if trigger
                 .function_object_id
                 .is_some_and(|stored| stored != function_object_id)

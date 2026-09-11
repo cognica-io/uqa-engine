@@ -294,37 +294,3 @@ impl uqa_execution::schema::sequences::dependencies::ViewCatalogPublication for 
         self.durable.views.write().extend(updates);
     }
 }
-
-impl Engine {
-    pub(crate) fn event_catalog_context(
-        &self,
-    ) -> uqa_execution::schema::events::EventCatalogContext<'_> {
-        uqa_execution::schema::events::EventCatalogContext {
-            registry: self,
-            publication: self,
-            changes: self,
-        }
-    }
-}
-impl uqa_execution::schema::events::EventCatalogGuards for Engine {
-    fn triggers(&self) -> uqa_execution::schema::events::TriggerCatalogWrite<'_> {
-        Box::new(self.durable.triggers.write())
-    }
-    fn rules(&self) -> uqa_execution::schema::events::RuleCatalogWrite<'_> {
-        Box::new(self.durable.rules.write())
-    }
-}
-impl uqa_execution::schema::events::EventCatalogPublication for Engine {
-    fn persist_triggers(
-        &self,
-        triggers: &uqa_sql::catalog::events::TriggerCatalog,
-    ) -> Result<(), uqa_sql::SQLError> {
-        self.persist_trigger_catalog_snapshot(triggers)
-    }
-    fn persist_rules(
-        &self,
-        rules: &uqa_sql::catalog::events::RuleCatalog,
-    ) -> Result<(), uqa_sql::SQLError> {
-        self.persist_rule_catalog_snapshot(rules)
-    }
-}

@@ -4,15 +4,26 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{
-    bind_expr, first_invalid_rule_condition_qualifier, is_boolean_type, rule_action_has_returning,
-    rule_action_has_set_operation, validate_rule_action_reference_scopes,
-    validate_rule_returning_shape, ColumnType, CreateRule, Engine, Expr, RelationIdentity,
-    RelationLookupMode, RelationResolution, RuleConditionNameResolver, RuleEvent,
-    RuleRowTypeResolver, SQLError, Statement, StoredViewKind, Value,
+use super::EventAnalysisContext;
+use crate::{
+    ast::{ColumnType, CreateRule, Expr, RuleEvent, Statement},
+    catalog::{
+        events::{
+            validation::{
+                first_invalid_rule_condition_qualifier, is_boolean_type, rule_action_has_returning,
+                validate_rule_action_reference_scopes, validate_rule_returning_shape,
+                RuleConditionNameResolver, RuleRowTypeResolver,
+            },
+            RuleConditionBinding, RuleDependencies,
+        },
+        resolution::{RelationLookupMode, RelationResolution},
+        view::StoredViewKind,
+    },
+    plpgsql::bind_expr,
+    semantics::rules::action_binding::rule_action_has_set_operation,
+    SQLError,
 };
-use crate::events::RuleConditionBinding;
-use crate::events::RuleDependencies;
+use uqa_core::{RelationIdentity, Value};
 
 fn rule_condition_has_subquery(condition: &Expr) -> bool {
     condition.any_node(&|node| {
@@ -26,7 +37,7 @@ fn rule_condition_has_subquery(condition: &Expr) -> bool {
 fn rule_condition_row_schema(
     columns: &[(String, ColumnType)],
     binding: &RuleConditionBinding,
-) -> uqa_execution::RowSchema {
+) -> crate::RowSchema {
     let mut names = Vec::with_capacity(columns.len() * 2);
     let mut identities = Vec::with_capacity(columns.len() * 2);
     let mut types = Vec::with_capacity(columns.len() * 2);
@@ -41,13 +52,13 @@ fn rule_condition_row_schema(
         for (attribute, (name, ty)) in columns.iter().enumerate() {
             let slot = names.len();
             names.push(name.clone());
-            identities.push(uqa_execution::ColumnIdentity::qualified(side, name));
+            identities.push(crate::ColumnIdentity::qualified(side, name));
             types.push(Some(ty.clone()));
             internal.push((relation.column(attribute), slot, Some(ty.clone())));
         }
     }
-    let schema = uqa_execution::RowSchema::with_identities(names, identities, types);
-    uqa_execution::RowSchema::with_physical_internal_aliases(&schema, &internal)
+    let schema = crate::RowSchema::with_identities(names, identities, types);
+    crate::RowSchema::with_physical_internal_aliases(&schema, &internal)
 }
 
 fn validate_rule_action_contract(definition: &CreateRule) -> Result<(), SQLError> {
@@ -85,15 +96,15 @@ fn validate_rule_action_contract(definition: &CreateRule) -> Result<(), SQLError
     Ok(())
 }
 
-impl Engine {
+impl EventAnalysisContext<'_> {
     fn resolve_rule_event_relation_kind(
         &self,
         name: &str,
         lookup_mode: RelationLookupMode,
     ) -> Result<(RelationIdentity, &'static str), SQLError> {
         let resolution = match lookup_mode {
-            RelationLookupMode::Dynamic => self.resolve_visible_relation_kind(name)?,
-            RelationLookupMode::Bound => self.resolve_bound_relation_kind(name)?,
+            RelationLookupMode::Dynamic => self.relations.resolve_visible_relation_kind(name)?,
+            RelationLookupMode::Bound => self.relations.resolve_bound_relation_kind(name)?,
         };
         if let RelationResolution::Found(canonical, "foreign table") = &resolution {
             let relation = RelationIdentity::from_legacy_name(canonical).map_err(|error| {
@@ -113,7 +124,11 @@ impl Engine {
         &self,
         name: &str,
     ) -> Result<RelationIdentity, SQLError> {
-        let Some((canonical, kind)) = self.try_resolve_visible_relation_kind(name)? else {
+        let Some((canonical, kind)) = self
+            .relations
+            .resolve_visible_relation_kind(name)?
+            .into_found()
+        else {
             return Err(SQLError::UnknownTable(name.to_string()));
         };
         if !matches!(kind, "table" | "view" | "materialized view") {
@@ -126,8 +141,9 @@ impl Engine {
         })
     }
 
-    pub(crate) fn resolve_rule_relation(&self, name: &str) -> Result<RelationIdentity, SQLError> {
-        let RelationResolution::Found(canonical, kind) = self.resolve_bound_relation_kind(name)?
+    pub fn resolve_rule_relation(&self, name: &str) -> Result<RelationIdentity, SQLError> {
+        let RelationResolution::Found(canonical, kind) =
+            self.relations.resolve_bound_relation_kind(name)?
         else {
             return Err(SQLError::UnknownTable(name.to_string()));
         };
@@ -139,11 +155,10 @@ impl Engine {
         })
     }
 
-    pub(crate) fn rule_relation_columns(
-        &self,
-        name: &str,
-    ) -> Result<Vec<(String, ColumnType)>, SQLError> {
+    pub fn rule_relation_columns(&self, name: &str) -> Result<Vec<(String, ColumnType)>, SQLError> {
         if let Some(columns) = self
+            .returning
+            .catalog
             .try_describe_table_row_type(name)
             .map_err(|error| SQLError::Internal(format!("read rule columns: {error}")))?
         {
@@ -156,13 +171,10 @@ impl Engine {
             SQLError::Internal(format!("decode rule relation `{name}`: {error}"))
         })?;
         let view = self
-            .durable
-            .views
-            .read()
-            .get(&relation)
-            .cloned()
+            .catalog
+            .view(&relation)
             .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
-        let schema = self.stored_view_schema(&view)?;
+        let schema = self.catalog.stored_view_schema(&view)?;
         Ok(schema
             .columns()
             .iter()
@@ -228,14 +240,14 @@ impl Engine {
         condition: &mut Expr,
         columns: &[(String, ColumnType)],
         event: RuleEvent,
-        stored_plan: Option<&uqa_planner::ExpressionPlan>,
+        stored_plan: Option<&crate::plan::ExpressionPlan>,
         stored_binding: Option<&RuleConditionBinding>,
-    ) -> Result<Option<(uqa_planner::ExpressionPlan, RuleConditionBinding)>, SQLError> {
+    ) -> Result<Option<(crate::plan::ExpressionPlan, RuleConditionBinding)>, SQLError> {
         let has_subquery = rule_condition_has_subquery(condition);
         if condition.contains_aggregate()
             || condition.contains_window()
             || condition.any_node(&|node| {
-                matches!(node, Expr::Func { name, .. } if self.has_registered_aggregate_function(name))
+                matches!(node, Expr::Func { name, .. } if self.routines.has_registered_aggregate_function(name))
             })
         {
             return Err(SQLError::Routine {
@@ -260,9 +272,9 @@ impl Engine {
                     let binding = binding.reallocate_plan_relations(&mut plan);
                     (plan, binding, true)
                 } else {
-                    let plan = uqa_planner::ExpressionPlan::lower_with(
+                    let plan = crate::plan::ExpressionPlan::lower_with(
                         condition.clone(),
-                        &|name: &str| self.has_registered_aggregate_function(name),
+                        &|name: &str| self.routines.has_registered_aggregate_function(name),
                     );
                     let column_names = columns
                         .iter()
@@ -276,17 +288,13 @@ impl Engine {
                 };
             if !reused {
                 for subquery in &mut plan.subqueries {
-                    self.bind_stored_query_relations(subquery, "CREATE RULE", false)?;
+                    self.bind_rule_condition_subquery_relations(subquery)?;
                 }
             }
             let schema = rule_condition_row_schema(columns, &binding);
-            let ty =
-                crate::capabilities::stored_routines::bind_catalog_expression_routines_with_outer(
-                    self,
-                    &mut plan,
-                    &[],
-                    &schema,
-                )?;
+            let ty = self
+                .stored_routines
+                .bind_expression(&mut plan, &[], &schema)?;
             if let Some(ty) = ty {
                 if !is_boolean_type(&ty) {
                     return Err(SQLError::TypeMismatch(format!(
@@ -295,18 +303,20 @@ impl Engine {
                     )));
                 }
             }
-            uqa_sql::catalog::regrole_dependencies::reject_stored_regrole_constants(
-                self, condition, None,
+            crate::catalog::regrole_dependencies::reject_stored_regrole_constants_with(
+                self.regroles,
+                condition,
+                None,
             )?;
             return Ok(Some((plan, binding)));
         }
         let bound = bind_expr(condition, &mut RuleRowTypeResolver { columns, event })?;
-        let lowered = uqa_planner::ExpressionPlan::lower(bound);
-        match uqa_execution::common_context_expression_type(
+        let lowered = crate::plan::ExpressionPlan::lower(bound);
+        match crate::common_context_expression_type(
             &lowered.scalar,
-            &uqa_execution::RowSchema::default(),
+            &crate::RowSchema::default(),
             &[],
-            Some(self),
+            Some(self.routines),
         )? {
             Some(ty) if !is_boolean_type(&ty) => {
                 return Err(SQLError::TypeMismatch(format!(
@@ -316,7 +326,7 @@ impl Engine {
             }
             None => {
                 if let Expr::Literal(value @ (Value::Str(_) | Value::FixedChar(_))) = condition {
-                    *value = uqa_sql::expr::cast_value(value, "boolean")?;
+                    *value = crate::expr::cast_value(value, "boolean")?;
                 } else {
                     *condition = Expr::Cast {
                         expr: Box::new(condition.clone()),
@@ -326,10 +336,32 @@ impl Engine {
             }
             Some(_) => {}
         }
-        uqa_sql::catalog::regrole_dependencies::reject_stored_regrole_constants(
-            self, condition, None,
+        crate::catalog::regrole_dependencies::reject_stored_regrole_constants_with(
+            self.regroles,
+            condition,
+            None,
         )?;
         Ok(None)
+    }
+
+    fn bind_rule_condition_subquery_relations(
+        &self,
+        subquery: &mut crate::plan::QueryPlan,
+    ) -> Result<(), SQLError> {
+        let namespace = self.namespaces.stored_query_namespace();
+        crate::binding::stored_relations::bind_stored_query_relations(
+            &crate::binding::stored_relations::StoredQueryBindingContext {
+                relations: self.relations,
+                sequences: self.sequences,
+                temporary_schema: &namespace.temporary_schema,
+                transition_relations: &namespace.transition_relations,
+            },
+            subquery,
+            "CREATE RULE",
+            false,
+            false,
+        )?;
+        Ok(())
     }
 
     fn canonicalize_rule_action_target(
@@ -359,18 +391,18 @@ impl Engine {
         Ok(())
     }
 
-    pub(crate) fn rule_action_target_columns(
+    pub fn rule_action_target_columns(
         &self,
         action: &Statement,
     ) -> Result<std::collections::BTreeSet<String>, SQLError> {
-        uqa_sql::semantics::rules::action_binding::rule_action_target_columns(self, action)
+        crate::semantics::rules::action_binding::rule_action_target_columns(self.sources, action)
     }
 
     fn rule_action_target_row_type(
         &self,
         action: &Statement,
     ) -> Result<Vec<(String, ColumnType)>, SQLError> {
-        uqa_sql::semantics::rules::action_binding::rule_action_target_row_type(self, action)
+        crate::semantics::rules::action_binding::rule_action_target_row_type(self.sources, action)
     }
 
     fn validate_rule_action_definition(
@@ -381,28 +413,39 @@ impl Engine {
         lookup_mode: RelationLookupMode,
     ) -> Result<RuleDependencies, SQLError> {
         self.canonicalize_rule_action_target(action, lookup_mode)?;
-        let mut dependencies = self.bind_rule_action_relation_dependencies(action, lookup_mode)?;
+        let mut dependencies =
+            crate::binding::stored_relations::bind_rule_action_relation_dependencies(
+                self.relations,
+                action,
+                lookup_mode,
+            )?;
         let action_row_type = self.rule_action_target_row_type(action)?;
         let action_columns: std::collections::BTreeSet<String> = action_row_type
             .iter()
             .map(|(column, _)| column.clone())
             .collect();
         if lookup_mode == RelationLookupMode::Dynamic {
-            *action = crate::events::expand_rule_action_row_stars(
-                self,
+            *action = crate::semantics::rules::action_binding::expand_rule_action_row_stars(
+                self.sources,
                 action,
                 &action_columns,
                 event_columns,
                 event,
             )?;
-            *action = crate::events::expand_rule_action_returning_stars(action, &action_row_type);
+            *action = crate::semantics::rules::action_binding::expand_rule_action_returning_stars(
+                action,
+                &action_row_type,
+            );
         }
-        dependencies
-            .columns
-            .extend(self.bind_rule_action_column_dependencies(action)?);
-        validate_rule_action_reference_scopes(self, action)?;
-        let bound = crate::events::bind_rule_action(
-            self,
+        dependencies.columns.extend(
+            crate::binding::stored_columns::bind_rule_action_column_dependencies(
+                self.columns,
+                action,
+            )?,
+        );
+        validate_rule_action_reference_scopes(self.sources, action)?;
+        let bound = crate::semantics::rules::action_binding::bind_rule_action(
+            self.sources,
             action,
             &action_columns,
             &mut RuleRowTypeResolver {
@@ -410,28 +453,25 @@ impl Engine {
                 event,
             },
         )?;
-        let schema = uqa_sql::semantics::returning::dml_statement_returning_schema(
-            self.returning_analysis_context(),
+        let schema = crate::semantics::returning::dml_statement_returning_schema(
+            self.returning,
             bound.clone(),
         )?;
-        let mut stored_plan = uqa_planner::UnifiedPlan::lower_with(bound, &|name: &str| {
-            self.has_registered_aggregate_function(name)
+        let mut stored_plan = crate::plan::UnifiedPlan::lower_with(bound, &|name: &str| {
+            self.routines.has_registered_aggregate_function(name)
         });
-        uqa_sql::catalog::regrole_dependencies::reject_stored_plan_regrole_constants(
-            self,
+        crate::catalog::regrole_dependencies::reject_stored_plan_regrole_constants_with(
+            self.regroles,
             &mut stored_plan,
         )?;
-        let bound_routines = crate::capabilities::stored_routines::bind_catalog_statement_routines(
-            self,
-            &stored_plan,
-        )?;
+        let bound_routines = self.stored_routines.bind_statement(&stored_plan)?;
         if let Some(routine_plan) = &bound_routines.query {
-            uqa_sql::catalog::events::dependencies::collect_query_routine_dependencies(
+            crate::catalog::events::dependencies::collect_query_routine_dependencies(
                 routine_plan,
                 &mut dependencies,
             );
         }
-        uqa_sql::catalog::stored_ast::bind_stored_statement_routines(
+        crate::catalog::stored_ast::bind_stored_statement_routines(
             action,
             &bound_routines.references,
         )?;
@@ -444,26 +484,26 @@ impl Engine {
     fn bind_rule_condition_object_dependencies(
         &self,
         condition: &mut Expr,
-        condition_plan: Option<&uqa_planner::ExpressionPlan>,
+        condition_plan: Option<&crate::plan::ExpressionPlan>,
         columns: &[(String, ColumnType)],
         event: RuleEvent,
         dependencies: &mut RuleDependencies,
     ) -> Result<(), SQLError> {
         if let Some(plan) = condition_plan {
-            uqa_sql::catalog::events::dependencies::collect_expression_routine_dependencies(
+            crate::catalog::events::dependencies::collect_expression_routine_dependencies(
                 plan,
                 dependencies,
             );
             for subquery in &plan.subqueries {
-                uqa_sql::catalog::events::dependencies::collect_query_relation_dependencies(
+                crate::catalog::events::dependencies::collect_query_relation_dependencies(
                     subquery,
                     dependencies,
                     &std::collections::BTreeSet::new(),
                 )?;
             }
             let routine_references =
-                uqa_sql::binding::stored_routines::collect_expression_routine_references(plan)?;
-            uqa_sql::catalog::stored_ast::bind_stored_expression_routines(
+                crate::binding::stored_routines::collect_expression_routine_references(plan)?;
+            crate::catalog::stored_ast::bind_stored_expression_routines(
                 condition,
                 &routine_references,
             )?;
@@ -471,40 +511,36 @@ impl Engine {
         }
 
         let bound = bind_expr(condition, &mut RuleRowTypeResolver { columns, event })?;
-        let mut dependency_plan = uqa_planner::ExpressionPlan::lower_with(bound, &|name: &str| {
-            self.has_registered_aggregate_function(name)
+        let mut dependency_plan = crate::plan::ExpressionPlan::lower_with(bound, &|name: &str| {
+            self.routines.has_registered_aggregate_function(name)
         });
-        crate::capabilities::stored_routines::bind_catalog_expression_routines_with_outer(
-            self,
+        self.stored_routines.bind_expression(
             &mut dependency_plan,
             &[],
-            &uqa_execution::RowSchema::default(),
+            &crate::RowSchema::default(),
         )?;
-        uqa_sql::catalog::events::dependencies::collect_expression_routine_dependencies(
+        crate::catalog::events::dependencies::collect_expression_routine_dependencies(
             &dependency_plan,
             dependencies,
         );
         let routine_references =
-            uqa_sql::binding::stored_routines::collect_expression_routine_references(
+            crate::binding::stored_routines::collect_expression_routine_references(
                 &dependency_plan,
             )?;
-        uqa_sql::catalog::stored_ast::bind_stored_expression_routines(
-            condition,
-            &routine_references,
-        )
-        .map(|_| ())
+        crate::catalog::stored_ast::bind_stored_expression_routines(condition, &routine_references)
+            .map(|_| ())
     }
 
-    pub(in crate::events) fn validate_rule_definition(
+    pub fn validate_rule_definition(
         &self,
         definition: &mut CreateRule,
         lookup_mode: RelationLookupMode,
-        stored_condition_plan: Option<&uqa_planner::ExpressionPlan>,
+        stored_condition_plan: Option<&crate::plan::ExpressionPlan>,
         stored_condition_binding: Option<&RuleConditionBinding>,
     ) -> Result<
         (
             RelationIdentity,
-            Option<uqa_planner::ExpressionPlan>,
+            Option<crate::plan::ExpressionPlan>,
             Option<RuleConditionBinding>,
             RuleDependencies,
         ),
@@ -516,12 +552,7 @@ impl Engine {
         if lookup_mode == RelationLookupMode::Dynamic {
             self.ensure_event_relation_owner(&relation, None)?;
         }
-        let stored_view_kind = self
-            .durable
-            .views
-            .read()
-            .get(&relation)
-            .map(|view| view.kind);
+        let stored_view_kind = self.catalog.view_kind(&relation);
         if stored_view_kind == Some(StoredViewKind::Materialized) {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
@@ -534,13 +565,20 @@ impl Engine {
         let mut dependencies = RuleDependencies::default();
         if let Some(condition) = &mut definition.condition {
             let condition_dependencies =
-                self.bind_rule_condition_relation_dependencies(condition, lookup_mode)?;
+                crate::binding::stored_relations::bind_rule_condition_relation_dependencies(
+                    self.relations,
+                    condition,
+                    lookup_mode,
+                )?;
             dependencies
                 .relations
                 .extend(condition_dependencies.relations);
-            dependencies
-                .columns
-                .extend(self.bind_rule_condition_column_dependencies(condition)?);
+            dependencies.columns.extend(
+                crate::binding::stored_columns::bind_rule_condition_column_dependencies(
+                    self.columns,
+                    condition,
+                )?,
+            );
         }
         let condition = definition
             .condition
@@ -569,9 +607,9 @@ impl Engine {
                 &mut dependencies,
             )?;
             dependencies.columns.extend(
-                crate::events::rule_expr_row_columns(condition)
+                crate::semantics::rules::action_binding::rule_expr_row_columns(condition)
                     .into_iter()
-                    .map(|column| crate::events::RuleColumnDependency {
+                    .map(|column| crate::catalog::events::RuleColumnDependency {
                         relation: relation.clone(),
                         column,
                     }),
@@ -590,12 +628,16 @@ impl Engine {
             dependencies.routines.extend(action_dependencies.routines);
             let action_columns = self.rule_action_target_columns(action)?;
             dependencies.columns.extend(
-                crate::events::rule_statement_row_columns(self, action, &action_columns)?
-                    .into_iter()
-                    .map(|column| crate::events::RuleColumnDependency {
-                        relation: relation.clone(),
-                        column,
-                    }),
+                crate::semantics::rules::action_binding::rule_statement_row_columns(
+                    self.sources,
+                    action,
+                    &action_columns,
+                )?
+                .into_iter()
+                .map(|column| crate::catalog::events::RuleColumnDependency {
+                    relation: relation.clone(),
+                    column,
+                }),
             );
         }
         super::super::synchronize_rule_sql_text(definition)?;

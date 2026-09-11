@@ -8,11 +8,7 @@
 
 use crate::Engine;
 use uqa_execution::routines::privileges::{RoutinePrivilegeContext, RoutinePrivilegeNotices};
-use uqa_sql::{
-    ast::CreateFunction,
-    routines::security::{self, RoutineExecutionAuthority},
-    SQLError,
-};
+use uqa_sql::routines::security::RoutineExecutionAuthority;
 
 impl RoutineExecutionAuthority for Engine {
     fn current_user_name(&self) -> String {
@@ -35,12 +31,5 @@ impl Engine {
             role_names: self,
             notices: self,
         }
-    }
-    pub(crate) fn ensure_routine_execute_privilege_named(
-        &self,
-        definition: &CreateFunction,
-        display_name: &str,
-    ) -> Result<(), SQLError> {
-        security::ensure_routine_execute_privilege_named(self, definition, display_name)
     }
 }

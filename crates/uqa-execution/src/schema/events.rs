@@ -23,6 +23,7 @@ pub trait EventCatalogPublication {
     fn persist_triggers(&self, triggers: &TriggerCatalog) -> Result<(), SQLError>;
     fn persist_rules(&self, rules: &RuleCatalog) -> Result<(), SQLError>;
 }
+#[derive(Clone, Copy)]
 pub struct EventCatalogContext<'a> {
     pub registry: &'a dyn EventCatalogGuards,
     pub publication: &'a dyn EventCatalogPublication,
@@ -56,3 +57,6 @@ pub fn rename_relation_events(
     context.changes.catalog_registry_changed();
     Ok(())
 }
+
+pub mod context;
+mod lifecycle;

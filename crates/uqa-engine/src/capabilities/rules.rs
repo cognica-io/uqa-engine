@@ -38,7 +38,7 @@ impl Engine {
 }
 impl RuleSecurity for Engine {
     fn privilege_subject(&self, table: &str) -> Result<String, SQLError> {
-        self.rule_privilege_subject(table)
+        self.event_lookup_context().rule_privilege_subject(table)
     }
 }
 impl RuleStatements for Engine {

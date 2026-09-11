@@ -283,10 +283,10 @@ impl RoutineForeignRemoval for Engine {
 }
 impl RoutineEventRemoval for Engine {
     fn drop_rule(&self, statement: &DropRule) -> Result<(), SQLError> {
-        Engine::drop_rule(self, statement)
+        self.event_lifecycle_context().drop_rule(statement)
     }
     fn drop_trigger(&self, statement: &DropTrigger) -> Result<(), SQLError> {
-        Engine::drop_trigger(self, statement)
+        self.event_lifecycle_context().drop_trigger(statement)
     }
 }
 impl RoutineDropNotices for Engine {

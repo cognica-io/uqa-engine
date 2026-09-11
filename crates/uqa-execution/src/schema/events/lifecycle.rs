@@ -4,91 +4,42 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Transactional trigger registry mutations.
-
+//! Native rule and trigger registration, removal, rename, and enable-mode publication.
+use super::context::EventLifecycleContext;
 use std::collections::BTreeMap;
+use uqa_sql::{
+    ast::{CreateRule, CreateTrigger, DropRule, DropTrigger, EventEnableMode},
+    catalog::{
+        events::{
+            definition::{duplicate_object, undefined_object, undefined_rule},
+            StoredRule, StoredTrigger,
+        },
+        resolution::{RelationLookupMode, RelationResolution},
+    },
+    SQLError,
+};
 
-use uqa_sql::ast::{CreateRule, CreateTrigger, DropRule, DropTrigger, EventEnableMode};
-use uqa_sql::SQLError;
-
-use crate::capabilities::{RelationLookupMode, RelationResolution};
-use crate::{Engine, RelationIdentity, StoredViewKind};
-
-use super::{duplicate_object, undefined_object, undefined_rule, StoredRule, StoredTrigger};
-
-impl Engine {
-    fn event_relation_owner(
-        &self,
-        relation: &RelationIdentity,
-    ) -> Result<(String, &'static str), SQLError> {
-        if let Some(table) = self.storage.tables.read().get(relation) {
-            return Ok((table.role_owner(), "table"));
-        }
-        if let Some(view) = self.durable.views.read().get(relation) {
-            return Ok((
-                view.role_owner.clone(),
-                match view.kind {
-                    StoredViewKind::View => "view",
-                    StoredViewKind::Materialized => "materialized view",
-                },
-            ));
-        }
-        if self.durable.foreign_tables.read().contains_key(relation) {
-            let owner = self
-                .durable
-                .foreign_table_security
-                .read()
-                .get(relation)
-                .map(|security| security.role_owner.clone())
-                .ok_or_else(|| {
-                    SQLError::Internal(format!(
-                        "foreign trigger relation `{}` has no security metadata",
-                        relation.qualified_name()
-                    ))
-                })?;
-            return Ok((owner, "foreign table"));
-        }
-        Err(SQLError::Internal(format!(
-            "event relation `{}` disappeared after resolution",
-            relation.qualified_name()
-        )))
-    }
-
-    pub(in crate::events) fn ensure_event_relation_owner(
-        &self,
-        relation: &RelationIdentity,
-        error_kind: Option<&str>,
-    ) -> Result<(), SQLError> {
-        let (owner, relation_kind) = self.event_relation_owner(relation)?;
-        if self.current_user_has_role_privileges(&owner) {
-            return Ok(());
-        }
-        Err(SQLError::Routine {
-            sqlstate: "42501".into(),
-            message: format!(
-                "must be owner of {} {}",
-                error_kind.unwrap_or(relation_kind),
-                relation.name
-            ),
-        })
-    }
-
+impl EventLifecycleContext<'_> {
     fn visible_event_drop_resolution(
         &self,
         requested: &str,
         if_exists: bool,
     ) -> Result<Option<RelationResolution>, SQLError> {
-        let resolution = self.resolve_visible_relation_kind(requested)?;
+        let resolution = self
+            .lookup
+            .analysis
+            .relations
+            .resolve_visible_relation_kind(requested)?;
         match resolution {
             RelationResolution::MissingSchema(schema) if if_exists => {
-                self.push_sql_notice(
+                self.notice(
                     "NOTICE",
                     &format!("schema \"{schema}\" does not exist, skipping"),
                 );
                 Ok(None)
             }
             RelationResolution::MissingRelation if if_exists => {
-                self.push_sql_notice(
+                self.notice(
                     "NOTICE",
                     &format!("relation \"{requested}\" does not exist, skipping"),
                 );
@@ -98,8 +49,10 @@ impl Engine {
         }
     }
 
-    pub(crate) fn register_rule(&self, mut definition: CreateRule) -> Result<(), SQLError> {
+    pub fn register_rule(&self, mut definition: CreateRule) -> Result<(), SQLError> {
         let (relation, condition_plan, condition_binding, dependencies) = self
+            .lookup
+            .analysis
             .validate_rule_definition(&mut definition, RelationLookupMode::Dynamic, None, None)?;
         if definition.event == uqa_sql::ast::RuleEvent::Select {
             if !definition.or_replace {
@@ -110,23 +63,29 @@ impl Engine {
                 ));
             }
             let existing = self
+                .lookup
+                .analysis
+                .privileges
                 .view_definition(&definition.table)?
                 .ok_or_else(|| SQLError::UnknownTable(definition.table.clone()))?;
             let action = definition.actions.into_iter().next().ok_or_else(|| {
                 SQLError::Internal("validated ON SELECT rule lost its action".into())
             })?;
-            let plan = uqa_planner::UnifiedPlan::lower_with(action, &|name: &str| {
-                self.has_registered_aggregate_function(name)
+            let plan = uqa_sql::plan::UnifiedPlan::lower_with(action, &|name: &str| {
+                self.lookup
+                    .analysis
+                    .routines
+                    .has_registered_aggregate_function(name)
             });
-            let uqa_planner::UnifiedPlan::Query(plan) = plan else {
+            let uqa_sql::plan::UnifiedPlan::Query(plan) = plan else {
                 return Err(SQLError::Internal(
                     "ON SELECT rule action lowered to a command".into(),
                 ));
             };
             let output_columns = existing.output_columns.unwrap_or_default();
-            uqa_execution::schema::view_creation::register_view_plan(
-                self,
-                uqa_execution::schema::view_creation::ViewRegistration {
+            crate::schema::view_creation::register_view_plan(
+                self.views,
+                crate::schema::view_creation::ViewRegistration {
                     name: &definition.table,
                     column_names: &output_columns,
                     plan: *plan,
@@ -138,8 +97,8 @@ impl Engine {
             )?;
             return Ok(());
         }
-        self.prepare_explicit_transaction_writer()?;
-        let mut rules = self.durable.rules.write();
+        self.writer.prepare_writer()?;
+        let mut rules = self.catalog.registry.rules();
         let mut next = rules.clone();
         let relation_rules = next.entry(relation).or_default();
         if relation_rules.contains_key(&definition.name) && !definition.or_replace {
@@ -162,38 +121,50 @@ impl Engine {
                 dependencies: Some(dependencies),
             },
         );
-        self.persist_rule_catalog_snapshot(&next)?;
-        *rules = next;
+        self.catalog.publication.persist_rules(&next)?;
+        **rules = next;
         drop(rules);
-        self.note_catalog_registry_changed();
+        self.catalog.changes.catalog_registry_changed();
         Ok(())
     }
 
-    pub(crate) fn drop_rule_sql(&self, statement: &DropRule) -> Result<(), SQLError> {
+    pub fn drop_rule_sql(&self, statement: &DropRule) -> Result<(), SQLError> {
         let Some(resolution) =
             self.visible_event_drop_resolution(&statement.table, statement.if_exists)?
         else {
             return Ok(());
         };
-        let (relation, _) = Self::event_relation_from_resolution(&statement.table, resolution)?;
+        let (relation, _) = uqa_sql::catalog::events::definition::EventAnalysisContext::event_relation_from_resolution(&statement.table, resolution)?;
         let mut bound = statement.clone();
         bound.table = relation.qualified_name();
         let rule_exists = self
-            .durable
-            .rules
-            .read()
+            .lookup
+            .registry
+            .read_rules()
             .get(&relation)
             .is_some_and(|rules| rules.contains_key(&bound.name));
         if rule_exists {
-            self.ensure_event_relation_owner(&relation, Some("relation"))?;
+            self.lookup
+                .analysis
+                .ensure_event_relation_owner(&relation, Some("relation"))?;
         }
         self.drop_rule(&bound)
     }
 
-    pub(crate) fn drop_rule(&self, statement: &DropRule) -> Result<(), SQLError> {
-        let relation = self.resolve_rule_relation(&statement.table)?;
+    pub fn drop_rule(&self, statement: &DropRule) -> Result<(), SQLError> {
+        let relation = self
+            .lookup
+            .analysis
+            .resolve_rule_relation(&statement.table)?;
         let table = relation.qualified_name();
-        if statement.name == "_RETURN" && self.view_definition(&table)?.is_some() {
+        if statement.name == "_RETURN"
+            && self
+                .lookup
+                .analysis
+                .privileges
+                .view_definition(&table)?
+                .is_some()
+        {
             return Err(SQLError::Routine {
                 sqlstate: "2BP01".into(),
                 message: format!(
@@ -202,15 +173,15 @@ impl Engine {
                 ),
             });
         }
-        self.prepare_explicit_transaction_writer()?;
-        let mut rules = self.durable.rules.write();
+        self.writer.prepare_writer()?;
+        let mut rules = self.catalog.registry.rules();
         let mut next = rules.clone();
         let removed = next
             .get_mut(&relation)
             .and_then(|entries| entries.remove(&statement.name));
         if removed.is_none() {
             if statement.if_exists {
-                self.push_sql_notice(
+                self.notice(
                     "NOTICE",
                     &format!(
                         "rule \"{}\" for relation \"{}\" does not exist, skipping",
@@ -224,17 +195,24 @@ impl Engine {
         if next.get(&relation).is_some_and(BTreeMap::is_empty) {
             next.remove(&relation);
         }
-        self.persist_rule_catalog_snapshot(&next)?;
-        *rules = next;
+        self.catalog.publication.persist_rules(&next)?;
+        **rules = next;
         drop(rules);
-        self.note_catalog_registry_changed();
+        self.catalog.changes.catalog_registry_changed();
         Ok(())
     }
 
-    pub(crate) fn rename_rule(&self, table: &str, from: &str, to: &str) -> Result<(), SQLError> {
-        let relation = self.resolve_rule_relation(table)?;
-        self.ensure_event_relation_owner(&relation, None)?;
-        let is_view = self.view_definition(&relation.qualified_name())?.is_some();
+    pub fn rename_rule(&self, table: &str, from: &str, to: &str) -> Result<(), SQLError> {
+        let relation = self.lookup.analysis.resolve_rule_relation(table)?;
+        self.lookup
+            .analysis
+            .ensure_event_relation_owner(&relation, None)?;
+        let is_view = self
+            .lookup
+            .analysis
+            .privileges
+            .view_definition(&relation.qualified_name())?
+            .is_some();
         if is_view && from == "_RETURN" {
             return Err(SQLError::Routine {
                 sqlstate: "42P17".into(),
@@ -244,8 +222,8 @@ impl Engine {
         if is_view && to == "_RETURN" {
             return Err(duplicate_object("rule", to, &relation.qualified_name()));
         }
-        self.prepare_explicit_transaction_writer()?;
-        let mut rules = self.durable.rules.write();
+        self.writer.prepare_writer()?;
+        let mut rules = self.catalog.registry.rules();
         let mut next = rules.clone();
         let entries = next.entry(relation).or_default();
         if entries.contains_key(to) {
@@ -256,43 +234,44 @@ impl Engine {
             .ok_or_else(|| undefined_rule(from, table))?;
         rule.definition.name = to.to_string();
         entries.insert(to.to_string(), rule);
-        self.persist_rule_catalog_snapshot(&next)?;
-        *rules = next;
-        self.note_catalog_registry_changed();
+        self.catalog.publication.persist_rules(&next)?;
+        **rules = next;
+        self.catalog.changes.catalog_registry_changed();
         Ok(())
     }
 
-    pub(crate) fn set_rule_enable_mode(
+    pub fn set_rule_enable_mode(
         &self,
         table: &str,
         name: &str,
         mode: EventEnableMode,
     ) -> Result<(), SQLError> {
-        let relation = self.resolve_rule_relation(table)?;
-        self.ensure_event_relation_owner(&relation, None)?;
-        self.prepare_explicit_transaction_writer()?;
-        let mut rules = self.durable.rules.write();
+        let relation = self.lookup.analysis.resolve_rule_relation(table)?;
+        self.lookup
+            .analysis
+            .ensure_event_relation_owner(&relation, None)?;
+        self.writer.prepare_writer()?;
+        let mut rules = self.catalog.registry.rules();
         let mut next = rules.clone();
         next.entry(relation)
             .or_default()
             .get_mut(name)
             .ok_or_else(|| undefined_rule(name, table))?
             .enabled = mode;
-        self.persist_rule_catalog_snapshot(&next)?;
-        *rules = next;
-        self.note_catalog_registry_changed();
+        self.catalog.publication.persist_rules(&next)?;
+        **rules = next;
+        self.catalog.changes.catalog_registry_changed();
         Ok(())
     }
 
-    pub(crate) fn rule_privilege_subject(&self, table: &str) -> Result<String, SQLError> {
-        let relation = self.resolve_rule_relation(table)?;
-        self.event_relation_owner(&relation).map(|(owner, _)| owner)
-    }
-
-    pub(crate) fn register_trigger(&self, mut definition: CreateTrigger) -> Result<(), SQLError> {
-        let (relation, _) =
-            self.validate_trigger_definition(&mut definition, RelationLookupMode::Dynamic)?;
+    pub fn register_trigger(&self, mut definition: CreateTrigger) -> Result<(), SQLError> {
+        let (relation, _) = self
+            .lookup
+            .analysis
+            .validate_trigger_definition(&mut definition, RelationLookupMode::Dynamic)?;
         let function_object_id = self
+            .lookup
+            .analysis
             .resolve_trigger_function(&definition.function, RelationLookupMode::Bound)?
             .def
             .object_id
@@ -302,13 +281,13 @@ impl Engine {
                     definition.function
                 ))
             })?;
-        self.ensure_partition_trigger_name_available(
+        self.lookup.ensure_partition_trigger_name_available(
             &relation,
             &definition.name,
             definition.or_replace,
         )?;
-        self.prepare_explicit_transaction_writer()?;
-        let mut triggers = self.durable.triggers.write();
+        self.writer.prepare_writer()?;
+        let mut triggers = self.catalog.registry.triggers();
         let mut next = triggers.clone();
         let table_triggers = next.entry(relation).or_default();
         if definition.or_replace
@@ -343,113 +322,51 @@ impl Engine {
                 constraint_name,
             },
         );
-        self.persist_trigger_catalog_snapshot(&next)?;
-        *triggers = next;
+        self.catalog.publication.persist_triggers(&next)?;
+        **triggers = next;
         drop(triggers);
-        self.note_catalog_registry_changed();
+        self.catalog.changes.catalog_registry_changed();
         Ok(())
     }
 
-    pub(crate) fn drop_trigger_sql(&self, statement: &DropTrigger) -> Result<(), SQLError> {
+    pub fn drop_trigger_sql(&self, statement: &DropTrigger) -> Result<(), SQLError> {
         let Some(resolution) =
             self.visible_event_drop_resolution(&statement.table, statement.if_exists)?
         else {
             return Ok(());
         };
-        let (relation, _) = Self::trigger_relation_from_resolution(&statement.table, resolution)?;
+        let (relation, _) = uqa_sql::catalog::events::definition::EventAnalysisContext::trigger_relation_from_resolution(&statement.table, resolution)?;
         let mut bound = statement.clone();
         bound.table = relation.qualified_name();
         let trigger_exists = {
-            let triggers = self.durable.triggers.read();
+            let triggers = self.lookup.registry.read_triggers();
             triggers
                 .get(&relation)
                 .is_some_and(|triggers| triggers.contains_key(&bound.name))
         };
         if trigger_exists {
-            self.ensure_event_relation_owner(&relation, Some("relation"))?;
+            self.lookup
+                .analysis
+                .ensure_event_relation_owner(&relation, Some("relation"))?;
         }
         self.drop_trigger(&bound)
     }
 
-    fn ensure_partition_trigger_name_available(
-        &self,
-        relation: &RelationIdentity,
-        name: &str,
-        replacing_local: bool,
-    ) -> Result<(), SQLError> {
-        let ancestor_sources = self
-            .partition_trigger_sources(&relation.qualified_name())?
-            .into_iter()
-            .skip(1)
-            .collect::<Vec<_>>();
-        let mut descendant_relations = Vec::new();
-        for table in self
-            .table_names()
-            .map_err(|error| SQLError::Internal(format!("read trigger partitions: {error}")))?
-        {
-            if table == relation.qualified_name() {
-                continue;
-            }
-            let sources = self.partition_trigger_sources(&table)?;
-            if sources.iter().skip(1).any(|source| source == relation) {
-                descendant_relations.push(RelationIdentity::from_legacy_name(&table).map_err(
-                    |error| {
-                        SQLError::Internal(format!("decode trigger partition `{table}`: {error}"))
-                    },
-                )?);
-            }
-        }
-        let triggers = self.durable.triggers.read();
-        for source in ancestor_sources {
-            if triggers
-                .get(&source)
-                .is_some_and(|entries| entries.contains_key(name))
-            {
-                return Err(duplicate_object(
-                    "trigger",
-                    name,
-                    &relation.qualified_name(),
-                ));
-            }
-        }
-        for descendant in descendant_relations {
-            if triggers
-                .get(&descendant)
-                .is_some_and(|entries| entries.contains_key(name))
-            {
-                return Err(duplicate_object(
-                    "trigger",
-                    name,
-                    &descendant.qualified_name(),
-                ));
-            }
-        }
-        if !replacing_local
-            && triggers
-                .get(relation)
-                .is_some_and(|entries| entries.contains_key(name))
-        {
-            return Err(duplicate_object(
-                "trigger",
-                name,
-                &relation.qualified_name(),
-            ));
-        }
-        Ok(())
-    }
-
-    pub(crate) fn drop_trigger(&self, statement: &DropTrigger) -> Result<(), SQLError> {
-        let relation = self.resolve_trigger_table(&statement.table)?;
+    pub fn drop_trigger(&self, statement: &DropTrigger) -> Result<(), SQLError> {
+        let relation = self
+            .lookup
+            .analysis
+            .resolve_trigger_table(&statement.table)?;
         let table = relation.qualified_name();
-        self.prepare_explicit_transaction_writer()?;
-        let mut triggers = self.durable.triggers.write();
+        self.writer.prepare_writer()?;
+        let mut triggers = self.catalog.registry.triggers();
         let mut next = triggers.clone();
         let removed = next
             .get_mut(&relation)
             .and_then(|entries| entries.remove(&statement.name));
         let Some(removed) = removed else {
             if statement.if_exists {
-                self.push_sql_notice(
+                self.notice(
                     "NOTICE",
                     &format!(
                         "trigger \"{}\" for relation \"{}\" does not exist, skipping",
@@ -463,21 +380,23 @@ impl Engine {
         if next.get(&relation).is_some_and(BTreeMap::is_empty) {
             next.remove(&relation);
         }
-        self.persist_trigger_catalog_snapshot(&next)?;
-        *triggers = next;
+        self.catalog.publication.persist_triggers(&next)?;
+        **triggers = next;
         drop(triggers);
         if removed.definition.constraint {
-            self.forget_constraint_trigger_events(&Self::constraint_trigger_identity(&removed)?);
+            self.pending.forget(&removed.constraint_identity()?);
         }
-        self.note_catalog_registry_changed();
+        self.catalog.changes.catalog_registry_changed();
         Ok(())
     }
 
-    pub(crate) fn rename_trigger(&self, table: &str, from: &str, to: &str) -> Result<(), SQLError> {
-        let relation = self.resolve_trigger_table(table)?;
-        self.ensure_event_relation_owner(&relation, None)?;
-        self.prepare_explicit_transaction_writer()?;
-        let mut triggers = self.durable.triggers.write();
+    pub fn rename_trigger(&self, table: &str, from: &str, to: &str) -> Result<(), SQLError> {
+        let relation = self.lookup.analysis.resolve_trigger_table(table)?;
+        self.lookup
+            .analysis
+            .ensure_event_relation_owner(&relation, None)?;
+        self.writer.prepare_writer()?;
+        let mut triggers = self.catalog.registry.triggers();
         let mut next = triggers.clone();
         let entries = next.entry(relation).or_default();
         if entries.contains_key(to) {
@@ -489,52 +408,28 @@ impl Engine {
         let constraint_identity = trigger
             .definition
             .constraint
-            .then(|| Self::constraint_trigger_identity(&trigger))
+            .then(|| trigger.constraint_identity())
             .transpose()?;
         trigger.definition.name = to.to_string();
         entries.insert(to.to_string(), trigger);
-        self.persist_trigger_catalog_snapshot(&next)?;
-        *triggers = next;
+        self.catalog.publication.persist_triggers(&next)?;
+        **triggers = next;
         drop(triggers);
         if let Some(identity) = constraint_identity.as_ref() {
-            self.rename_pending_constraint_trigger(identity, to);
+            self.pending.rename_trigger(identity, to);
         }
-        self.note_catalog_registry_changed();
+        self.catalog.changes.catalog_registry_changed();
         Ok(())
     }
 
-    pub(crate) fn constraint_trigger_by_constraint_name(
-        &self,
-        table: &str,
-        name: &str,
-    ) -> Result<Option<StoredTrigger>, SQLError> {
-        let relation = self.resolve_trigger_table(table)?;
-        Ok(self
-            .durable
-            .triggers
-            .read()
-            .get(&relation)
-            .into_iter()
-            .flat_map(BTreeMap::values)
-            .find(|trigger| {
-                trigger.definition.constraint
-                    && trigger
-                        .constraint_name
-                        .as_deref()
-                        .unwrap_or(&trigger.definition.name)
-                        == name
-            })
-            .cloned())
-    }
-
-    pub(crate) fn rename_trigger_constraint(
+    pub fn rename_trigger_constraint(
         &self,
         table: &str,
         from: &str,
         to: &str,
     ) -> Result<(), SQLError> {
-        let relation = self.resolve_trigger_table(table)?;
-        if uqa_execution::catalog::projection::runtime_constraints(&self.catalog_execution())?
+        let relation = self.lookup.analysis.resolve_trigger_table(table)?;
+        if crate::catalog::projection::runtime_constraints(&self.projection)?
             .iter()
             .any(|constraint| {
                 constraint.identity.relation == relation && constraint.identity.name == to
@@ -548,8 +443,8 @@ impl Engine {
                 ),
             });
         }
-        self.prepare_explicit_transaction_writer()?;
-        let mut triggers = self.durable.triggers.write();
+        self.writer.prepare_writer()?;
+        let mut triggers = self.catalog.registry.triggers();
         let mut next = triggers.clone();
         let entries = next.entry(relation.clone()).or_default();
         let trigger = entries
@@ -569,25 +464,25 @@ impl Engine {
                     relation.name
                 ),
             })?;
-        let old_identity = Self::constraint_trigger_identity(trigger)?;
+        let old_identity = trigger.constraint_identity()?;
         trigger.constraint_name = Some(to.to_string());
-        self.persist_trigger_catalog_snapshot(&next)?;
-        *triggers = next;
+        self.catalog.publication.persist_triggers(&next)?;
+        **triggers = next;
         drop(triggers);
-        self.rename_constraint_trigger_identity(&old_identity, to);
-        self.note_catalog_registry_changed();
+        self.pending.rename_constraint(&old_identity, to);
+        self.catalog.changes.catalog_registry_changed();
         Ok(())
     }
 
-    pub(crate) fn set_trigger_enable_mode(
+    pub fn set_trigger_enable_mode(
         &self,
         table: &str,
         name: Option<&str>,
         mode: EventEnableMode,
     ) -> Result<(), SQLError> {
-        let relation = self.resolve_trigger_table(table)?;
-        self.prepare_explicit_transaction_writer()?;
-        let mut triggers = self.durable.triggers.write();
+        let relation = self.lookup.analysis.resolve_trigger_table(table)?;
+        self.writer.prepare_writer()?;
+        let mut triggers = self.catalog.registry.triggers();
         let mut next = triggers.clone();
         let entries = next.entry(relation).or_default();
         if let Some(name) = name {
@@ -600,9 +495,9 @@ impl Engine {
                 trigger.enabled = mode;
             }
         }
-        self.persist_trigger_catalog_snapshot(&next)?;
-        *triggers = next;
-        self.note_catalog_registry_changed();
+        self.catalog.publication.persist_triggers(&next)?;
+        **triggers = next;
+        self.catalog.changes.catalog_registry_changed();
         Ok(())
     }
 }
@@ -618,4 +513,12 @@ fn new_trigger_object_id() -> Result<[u8; 16], SQLError> {
         object_id[15] = 1;
     }
     Ok(object_id)
+}
+
+impl EventLifecycleContext<'_> {
+    fn notice(&self, level: &str, message: &str) {
+        self.notices
+            .lock()
+            .push((level.to_string(), message.to_string()));
+    }
 }

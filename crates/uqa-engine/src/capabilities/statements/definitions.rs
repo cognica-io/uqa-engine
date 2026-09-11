@@ -7,31 +7,13 @@
 //! Bind named catalog definition operations to the owning Engine registries.
 
 use uqa_sql::{
-    ast::{
-        ColumnDef, CreateRule, CreateTrigger, DeferredCreateForeignTable, DropRule, DropTrigger,
-        GrantTableStmt, TableCheck,
-    },
+    ast::{ColumnDef, DeferredCreateForeignTable, GrantTableStmt, TableCheck},
     SQLError,
 };
 
 use crate::Engine;
-use uqa_execution::statement::context::definitions::{
-    EventDefinitions, ForeignDefinitions, TablePrivileges,
-};
-impl EventDefinitions for Engine {
-    fn register_trigger(&self, statement: CreateTrigger) -> Result<(), SQLError> {
-        Engine::register_trigger(self, statement)
-    }
-    fn drop_trigger_sql(&self, statement: &DropTrigger) -> Result<(), SQLError> {
-        Engine::drop_trigger_sql(self, statement)
-    }
-    fn register_rule(&self, statement: CreateRule) -> Result<(), SQLError> {
-        Engine::register_rule(self, statement)
-    }
-    fn drop_rule_sql(&self, statement: &DropRule) -> Result<(), SQLError> {
-        Engine::drop_rule_sql(self, statement)
-    }
-}
+use uqa_execution::statement::context::definitions::{ForeignDefinitions, TablePrivileges};
+
 impl TablePrivileges for Engine {
     fn grant_table_privileges(&self, statement: &GrantTableStmt) -> Result<(), SQLError> {
         Engine::grant_table_privileges(self, statement)
