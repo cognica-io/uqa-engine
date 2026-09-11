@@ -105,3 +105,5 @@ pub(crate) fn document_store_read_error(action: &str, err: &StorageBackendError)
 
 #[cfg(test)]
 mod tests;
+
+mod truncate;

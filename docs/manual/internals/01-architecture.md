@@ -199,6 +199,7 @@ Responsibility roots remain facades over semantic children rather than line-coun
 | Catalog projection policy | [`crates/uqa-execution/src/catalog/projection/helpers.rs`](../../../crates/uqa-execution/src/catalog/projection/helpers.rs) |
 | SQL schema and parameter binding | [`crates/uqa-sql/src/binding`](../../../crates/uqa-sql/src/binding) |
 | Statement binding context | [`crates/uqa-execution/src/query/binding/context.rs`](../../../crates/uqa-execution/src/query/binding/context.rs) |
+| TRUNCATE binding and execution | [`SQL target binding`](../../../crates/uqa-sql/src/schema/truncate.rs), [`execution scheduling`](../../../crates/uqa-execution/src/schema/truncate.rs) |
 | Executable statement analysis | [`crates/uqa-sql/src/binding/statements.rs`](../../../crates/uqa-sql/src/binding/statements.rs) |
 | Analysis before optimization | [`crates/uqa-planner/src/statement_planning/executable.rs`](../../../crates/uqa-planner/src/statement_planning/executable.rs) |
 | Scoped Engine query callbacks | [`crates/uqa-engine/src/capabilities/query_expressions.rs`](../../../crates/uqa-engine/src/capabilities/query_expressions.rs) |

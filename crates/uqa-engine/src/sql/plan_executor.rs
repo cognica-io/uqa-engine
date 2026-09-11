@@ -662,8 +662,8 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 tables,
                 cascade,
                 restart_identity,
-            } => crate::truncate::execute_sql_truncate(
-                self.engine,
+            } => uqa_execution::schema::truncate::execute(
+                &self.engine.truncate_context(),
                 tables,
                 *cascade,
                 *restart_identity,

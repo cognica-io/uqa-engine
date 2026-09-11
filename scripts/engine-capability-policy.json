@@ -91,6 +91,7 @@
         "crates/uqa-engine/src/capabilities/table_reads/tests.rs",
         "crates/uqa-engine/src/capabilities/tests.rs",
         "crates/uqa-engine/src/capabilities/triggers.rs",
+        "crates/uqa-engine/src/capabilities/truncate.rs",
         "crates/uqa-engine/src/capabilities/view_alteration.rs",
         "crates/uqa-engine/src/capabilities/view_creation.rs",
         "crates/uqa-engine/src/capabilities/view_dependencies.rs",

@@ -40,3 +40,5 @@ pub mod namespaces;
 
 pub mod view_references;
 pub mod view_removal;
+
+pub mod truncate;
