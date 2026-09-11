@@ -8,7 +8,10 @@
 use super::EventAnalysisContext;
 use crate::{
     ast::TableHierarchy,
-    catalog::events::{reads::EventCatalogReads, StoredTrigger},
+    catalog::events::{
+        reads::{EventCatalogReads, EventLookupState},
+        StoredTrigger,
+    },
     SQLError,
 };
 use std::collections::BTreeMap;
@@ -24,6 +27,7 @@ pub struct EventLookupContext<'a> {
     pub analysis: EventAnalysisContext<'a>,
     pub partitions: &'a dyn EventPartitionCatalog,
     pub registry: &'a dyn EventCatalogReads,
+    pub state: &'a dyn EventLookupState,
 }
 impl EventLookupContext<'_> {
     pub fn partition_trigger_sources(
@@ -157,3 +161,5 @@ impl EventLookupContext<'_> {
             .cloned())
     }
 }
+
+mod selections;

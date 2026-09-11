@@ -12,13 +12,13 @@ use uqa_sql::{ast::RuleEvent, catalog::events::StoredRule, SQLError};
 
 impl uqa_sql::semantics::rules::RuleCatalog for Engine {
     fn relation_has_rules(&self, table: &str) -> Result<bool, SQLError> {
-        Engine::relation_has_rules(self, table)
+        self.event_lookup_context().relation_has_rules(table)
     }
     fn resolve_rule_relation(&self, table: &str) -> Result<RelationIdentity, SQLError> {
         self.event_analysis_context().resolve_rule_relation(table)
     }
     fn rules_for(&self, table: &str, event: RuleEvent) -> Result<Vec<StoredRule>, SQLError> {
-        Engine::rules_for(self, table, event)
+        self.event_lookup_context().rules_for(table, event)
     }
     fn resolve_mutation_target(&self, name: &str, bound: bool) -> Result<String, SQLError> {
         self.resolve_mutation_target_name(name, bound)

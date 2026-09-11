@@ -43,7 +43,7 @@ impl TriggerCatalog for Engine {
         table: &str,
         event: uqa_sql::ast::TriggerEvent,
     ) -> Result<bool, SQLError> {
-        Engine::has_row_triggers(self, table, event)
+        self.event_lookup_context().has_row_triggers(table, event)
     }
     fn rule_relation_columns(&self, table: &str) -> Result<Vec<(String, ColumnType)>, SQLError> {
         self.event_analysis_context().rule_relation_columns(table)
@@ -56,7 +56,8 @@ impl TriggerCatalog for Engine {
         row: bool,
         updated_columns: &[String],
     ) -> Result<Vec<StoredTrigger>, SQLError> {
-        Engine::triggers_for(self, table, timing, event, row, updated_columns)
+        self.event_lookup_context()
+            .triggers_for(table, timing, event, row, updated_columns)
     }
     fn has_trigger_definition(
         &self,
@@ -65,7 +66,8 @@ impl TriggerCatalog for Engine {
         event: TriggerEvent,
         row: bool,
     ) -> Result<bool, SQLError> {
-        Engine::has_trigger_definition(self, table, timing, event, row)
+        self.event_lookup_context()
+            .has_trigger_definition(table, timing, event, row)
     }
     fn hierarchy_scan_tables(
         &self,

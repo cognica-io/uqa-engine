@@ -258,3 +258,5 @@ fn restoration_requires_the_current_bound_function_object_identity() {
 }
 
 mod partitions;
+
+mod selections;

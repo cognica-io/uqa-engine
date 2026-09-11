@@ -18,6 +18,7 @@ fn stored_rule_conditions_use_only_structural_event_row_references() {
         )
         .unwrap();
     let rule = engine
+        .event_lookup_context()
         .rules_for("public.structural_rule_items", RuleEvent::Insert)
         .unwrap()
         .pop()
@@ -79,13 +80,13 @@ fn renamed_deferred_triggers_fire_and_dropped_triggers_forget_pending_events() {
 fn failed_constraint_trigger_replacement_preserves_registered_identity_and_definition() {
     let engine = crate::Engine::new();
     engine.sql("CREATE TABLE event_items(id integer); CREATE FUNCTION event_handler() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$; CREATE CONSTRAINT TRIGGER event_check AFTER INSERT ON event_items DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION event_handler()",&[]).unwrap();
-    let before = serde_json::to_string(&engine.list_triggers()).unwrap();
+    let before = serde_json::to_string(&engine.event_lookup_context().list_triggers()).unwrap();
     let error=engine.sql("CREATE OR REPLACE TRIGGER event_check BEFORE UPDATE ON event_items FOR EACH ROW EXECUTE FUNCTION event_handler()",&[]).unwrap_err();
     assert!(
         matches!(error,uqa_sql::SQLError::Routine {sqlstate,message} if sqlstate=="0A000" && message=="CREATE OR REPLACE CONSTRAINT TRIGGER is not supported")
     );
     assert_eq!(
-        serde_json::to_string(&engine.list_triggers()).unwrap(),
+        serde_json::to_string(&engine.event_lookup_context().list_triggers()).unwrap(),
         before
     );
 }
