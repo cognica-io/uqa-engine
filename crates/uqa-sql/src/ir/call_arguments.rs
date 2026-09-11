@@ -193,3 +193,15 @@ fn validate_marker_shape(
 fn malformed_call_argument(message: &str) -> SQLError {
     SQLError::Internal(format!("malformed call argument: {message}"))
 }
+
+/// Decode SQL call markers carried by expression plans without evaluating arguments.
+pub fn analyze_expression_call_arguments(
+    arguments: &[crate::plan::ExpressionPlan],
+) -> Result<(Vec<ScalarCallArgument<'_>>, bool), SQLError> {
+    let decoded = arguments
+        .iter()
+        .map(|argument| scalar_call_argument(&argument.scalar))
+        .collect::<Result<Vec<_>, _>>()?;
+    let explicit_variadic = validate_scalar_call_arguments(&decoded)?;
+    Ok((decoded, explicit_variadic))
+}

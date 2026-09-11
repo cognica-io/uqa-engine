@@ -10,9 +10,7 @@ use crate::{Arc, Engine};
 use uqa_sql::{
     ast::{ColumnType, FunctionBinding},
     routines::{
-        resolution::{
-            RoutineCallKind, RoutineOverloadCatalog, RoutineOverloadContext, RoutineTypeSnapshot,
-        },
+        resolution::{RoutineOverloadCatalog, RoutineOverloadContext, RoutineTypeSnapshot},
         RoutineResolution, SQLUserFunction, StaticFunctionMatch,
     },
     type_resolution::{BuiltinFunctionOverload, FunctionTypeResolver, ResolvedFunctionOverload},
@@ -265,26 +263,6 @@ impl Engine {
                 argument_types,
                 explicit_variadic,
                 builtins,
-            )
-    }
-
-    pub(crate) fn resolve_static_sql_routine_match(
-        &self,
-        name: &str,
-        binding: Option<&FunctionBinding>,
-        argument_names: &[Option<String>],
-        argument_types: &[Option<ColumnType>],
-        explicit_variadic: bool,
-        kind: RoutineCallKind,
-    ) -> Result<Option<StaticFunctionMatch>, SQLError> {
-        self.routine_overload_context()
-            .resolve_static_sql_routine_match(
-                name,
-                binding,
-                argument_names,
-                argument_types,
-                explicit_variadic,
-                kind,
             )
     }
 }

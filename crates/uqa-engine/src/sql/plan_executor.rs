@@ -24,70 +24,6 @@ use super::scalar::{
 use super::{run_explain, select, Engine};
 use crate::capabilities::routine_invocation;
 
-pub(super) fn analyze_call_result_schema(
-    engine: &Engine,
-    name: &str,
-    arguments: &[ExpressionPlan],
-    params: &[SQLParam],
-) -> Result<Option<uqa_execution::RowSchema>, SQLError> {
-    if arguments
-        .iter()
-        .any(|argument| !argument.subqueries.is_empty())
-    {
-        return Err(SQLError::Unsupported(
-            "cannot use subquery in CALL argument".into(),
-        ));
-    }
-    let (call_arguments, explicit_variadic) = analyze_physical_call_arguments(arguments)?;
-    let argument_names = call_arguments
-        .iter()
-        .map(|argument| argument.name.map(str::to_string))
-        .collect::<Vec<_>>();
-    let scope = crate::capabilities::query_scope::new_for_current_routine(engine);
-    let argument_types = arguments
-        .iter()
-        .zip(&call_arguments)
-        .map(|(argument, call_argument)| {
-            if matches!(
-                call_argument.value,
-                uqa_execution::ScalarExpr::Literal(Value::Str(_) | Value::Null)
-            ) {
-                Ok(None)
-            } else {
-                select::bind_expression_plan_type(engine, argument, params, &scope)
-            }
-        })
-        .collect::<Result<Vec<_>, SQLError>>()?;
-    let Some(resolved) = engine.resolve_static_sql_routine_match(
-        name,
-        None,
-        &argument_names,
-        &argument_types,
-        explicit_variadic,
-        crate::user_functions::RoutineCallKind::Procedure,
-    )?
-    else {
-        let signature = argument_types
-            .iter()
-            .map(|argument| {
-                argument
-                    .as_ref()
-                    .map_or_else(|| "unknown", super::column_type_name)
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Err(SQLError::Routine {
-            sqlstate: "42883".into(),
-            message: format!("procedure {name}({signature}) does not exist"),
-        });
-    };
-    uqa_sql::routines::invocation::call_output_schema(
-        engine,
-        &resolved.function.def,
-        &resolved.invocation.parameter_types,
-    )
-}
-
 /// Owns top-level plan orchestration. Relational, mutation, DDL, procedural,
 /// and prepared-plan execution all enter through this exhaustive dispatcher;
 /// leaf executors never choose a second top-level SQL path.
@@ -406,31 +342,16 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         name: &str,
         arguments: &[ExpressionPlan],
     ) -> Result<SQLResult, SQLError> {
-        if arguments
-            .iter()
-            .any(|argument| !argument.subqueries.is_empty())
-        {
-            return Err(SQLError::Unsupported(
-                "cannot use subquery in CALL argument".into(),
-            ));
-        }
+        uqa_sql::routines::call::validate_call_arguments(arguments)?;
         let scope = crate::capabilities::query_scope::new_for_current_routine(self.engine);
         let (call_arguments, explicit_variadic) = analyze_physical_call_arguments(arguments)?;
-        let argument_types = arguments
-            .iter()
-            .zip(&call_arguments)
-            .map(|(argument, call_argument)| {
-                let value = call_argument.value;
-                if matches!(
-                    value,
-                    uqa_execution::ScalarExpr::Literal(Value::Str(_) | Value::Null)
-                ) {
-                    Ok(None)
-                } else {
-                    select::bind_expression_plan_type(self.engine, argument, self.params, &scope)
-                }
-            })
-            .collect::<Result<Vec<_>, SQLError>>()?;
+        let argument_types = uqa_sql::routines::call::infer_call_argument_types(
+            arguments,
+            &call_arguments,
+            &mut |argument| {
+                select::bind_expression_plan_type(self.engine, argument, self.params, &scope)
+            },
+        )?;
         let hook = select::ScopedEngineHook::new(self.engine, &scope);
         let context = PhysicalEvalContext::new(None, self.params)
             .with_function_hook(&hook)
