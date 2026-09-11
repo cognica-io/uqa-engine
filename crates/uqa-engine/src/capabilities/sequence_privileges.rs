@@ -139,23 +139,6 @@ impl Engine {
         self.sequence_privilege_inquiry()
             .has_sequence_privilege_value(arguments)
     }
-    pub(crate) fn role_has_sequence_table_privilege(
-        &self,
-        relation: &RelationIdentity,
-        subject: &str,
-        privilege: crate::table_security::TableAclPrivilege,
-        grant_option: bool,
-    ) -> Result<bool, SQLError> {
-        self.sequence_privilege_inquiry()
-            .role_has_sequence_table_privilege(relation, subject, privilege, grant_option)
-    }
-    pub(crate) fn resolve_sequence_privilege_oid(
-        &self,
-        oid: i64,
-    ) -> Result<Option<(String, RelationIdentity)>, SQLError> {
-        self.sequence_privilege_context()
-            .resolve_sequence_privilege_oid(oid)
-    }
     pub(crate) fn ensure_sequence_owner(
         &self,
         name: &str,

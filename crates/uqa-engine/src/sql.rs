@@ -37,7 +37,6 @@ use crate::Engine;
 
 mod aggregates;
 mod catalog;
-pub(crate) use catalog::snapshot_table_relation_oid;
 pub(crate) use catalog::{rename_view_column_query, view_query_references_column};
 mod api;
 mod catalog_statement_routines;
@@ -96,11 +95,10 @@ pub(crate) use triggers::fire_statement_triggers;
 pub(crate) use triggers::{fire_deferred_constraint_trigger_event, DeferredConstraintTriggerEvent};
 
 pub(crate) use catalog::{
-    foreign_table_relation_oid, resolve_age_label_relation_name, resolve_catalog_column_type,
-    resolve_catalog_column_type_name, resolve_regclass_kind_by_oid, resolve_regclass_oid,
-    resolve_regnamespace_oid, resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid,
-    resolve_regtype_oid, resolve_regtype_output, runtime_constraints, sequence_relation_oid,
-    view_relation_oid,
+    resolve_age_label_relation_name, resolve_catalog_column_type, resolve_catalog_column_type_name,
+    resolve_regclass_oid, resolve_regnamespace_oid, resolve_regobject_oid,
+    resolve_regprocedure_oid, resolve_regrole_oid, resolve_regtype_oid, resolve_regtype_output,
+    runtime_constraints, sequence_relation_oid,
 };
 use from_rows::engine_func_intercept;
 pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_columns};

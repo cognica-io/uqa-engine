@@ -17,7 +17,6 @@ use uqa_sql::SQLError;
 mod acl;
 mod columns;
 mod grants;
-mod inquiry;
 
 use acl::{
     requested_acl_privileges, role_has_privilege, RequestedTablePrivileges, TablePrivilegeCheck,
@@ -37,20 +36,6 @@ use crate::roles::role_can_set;
 use crate::schema_security::SchemaAclPrivilege;
 use crate::state::{SequenceSecurity, TableSecurity};
 use crate::{Engine, RelationIdentity, TableState};
-
-enum ResolvedTablePrivilegeTarget {
-    Table(RelationIdentity),
-    View(RelationIdentity),
-    ForeignTable(RelationIdentity),
-    Sequence(RelationIdentity),
-}
-
-enum ResolvedColumnPrivilegeTarget {
-    User(String),
-    System,
-}
-
-const POSTGRES_SYSTEM_COLUMNS: [&str; 6] = ["ctid", "xmin", "cmin", "xmax", "cmax", "tableoid"];
 
 pub(crate) use uqa_execution::catalog::security::table::role_has_table_privilege;
 
