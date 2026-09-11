@@ -183,15 +183,10 @@ impl RoutineCompilationSession for Engine {
 use uqa_execution::routines::{
     catalog::RoutineMutationContext,
     configuration::{RoutineConfigurationGuard, RoutineConfigurationSession},
-    registration::{RoutineCreationNamespace, RoutineRegistrationContext},
+    registration::RoutineRegistrationContext,
 };
 use uqa_sql::routines::registration::RoutineSupportAuthority;
 
-impl RoutineCreationNamespace for Engine {
-    fn routine_name_for_create(&self, name: &str) -> Result<String, SQLError> {
-        self.try_relation_name_for_sql_create(name)
-    }
-}
 impl RoutineSupportAuthority for Engine {
     fn current_user_is_superuser(&self) -> bool {
         Engine::current_user_is_superuser(self)
@@ -223,7 +218,7 @@ impl Engine {
     pub(crate) fn routine_registration_context(&self) -> RoutineRegistrationContext<'_> {
         RoutineRegistrationContext {
             catalog: self.routine_mutation_context(),
-            namespace: self,
+            namespace: self.relation_creation_context(),
             definition: self.routine_definition_context(),
             support: self,
             configuration: self,

@@ -25,12 +25,9 @@ use uqa_sql::{
     SQLError,
 };
 
-pub trait RoutineCreationNamespace {
-    fn routine_name_for_create(&self, name: &str) -> Result<String, SQLError>;
-}
 pub struct RoutineRegistrationContext<'a> {
     pub catalog: RoutineMutationContext<'a>,
-    pub namespace: &'a dyn RoutineCreationNamespace,
+    pub namespace: crate::schema::namespaces::relations::RelationCreationContext<'a>,
     pub definition: RoutineDefinitionContext<'a>,
     pub support: &'a dyn RoutineSupportAuthority,
     pub configuration: &'a dyn RoutineConfigurationSession,
@@ -62,7 +59,7 @@ pub fn register_sql_function(
 ) -> Result<(), SQLError> {
     context.catalog.writer.prepare_writer()?;
     let requested_name = def.name.clone();
-    def.name = context.namespace.routine_name_for_create(&requested_name)?;
+    def.name = context.namespace.persistent_name(&requested_name)?;
     resolve_routine_type_references(context.definition.compilation.analysis.types, &mut def)?;
     if def.owner.is_empty() {
         def.owner = context.catalog.names.current_user_name();

@@ -15,8 +15,6 @@ use uqa_sql::SQLError;
 use uqa_storage::{SequenceOwner, SequenceOwnerDependency, StorageBackendResult};
 
 pub trait SequenceCreationNamespace {
-    fn temporary_name(&self, name: &str) -> Result<String, SQLError>;
-    fn persistent_name(&self, name: &str) -> Result<String, SQLError>;
     fn refresh_sequences(&self) -> StorageBackendResult<()>;
     fn relation_exists(&self, name: &str) -> StorageBackendResult<bool>;
 }
@@ -33,6 +31,7 @@ pub trait SequenceCreationPublication {
 
 #[derive(Clone, Copy)]
 pub struct SequenceCreationContext<'a> {
+    pub creation: crate::schema::namespaces::relations::RelationCreationContext<'a>,
     pub namespace: &'a dyn SequenceCreationNamespace,
     pub owners: &'a dyn SequenceOwnerCatalog,
     pub publication: &'a dyn SequenceCreationPublication,
@@ -64,9 +63,9 @@ pub fn create_sequence(
 ) -> Result<bool, SQLError> {
     validate_sequence_definition(&state.definition(), None)?;
     let name = if persistence == RelationPersistence::Temporary {
-        context.namespace.temporary_name(name)?
+        context.creation.temporary_name(name)?
     } else {
-        context.namespace.persistent_name(name)?
+        context.creation.persistent_name(name)?
     };
     let relation = RelationIdentity::from_legacy_name(&name)
         .map_err(|error| SQLError::Internal(format!("resolve sequence `{name}`: {error}")))?;

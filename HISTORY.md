@@ -19,6 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Moved creation-namespace selection, schema creation privileges, and index-target visibility out of Engine. Table, CTAS, view, sequence, domain, routine, foreign-table, index, and key-constraint consumers share native namespace inputs while preserving live guards, deferred writer retry, and error order.
 - Moved table-to-training-data conversion and JSON/table training orchestration into execution, removed whole-training Engine callbacks, and relocated the original pure label and IVF-catalog validation tests to their owning crates. Engine retains generated-column reads and model persistence transactions.
 - Implemented `CREATE SCHEMA AUTHORIZATION` with named and session-role owners, omitted schema names, PostgreSQL authorization and duplicate-schema checks, and durable transaction behavior. Schema owner transfer now checks database `CREATE` on the invoking role.
 - Moved sequence value diagnostics into SQL and value resolution, cache consumption, reservation, and publication scheduling into execution, retaining actual Engine session guards, transaction history, and physical session ownership.

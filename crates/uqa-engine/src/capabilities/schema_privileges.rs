@@ -82,3 +82,69 @@ impl Engine {
             .require_schema_privilege(schema, role, privilege)
     }
 }
+
+use uqa_core::RelationIdentity;
+use uqa_execution::schema::namespaces::relations::{
+    RelationCreationContext, RelationCreationRuntime,
+};
+use uqa_sql::catalog::resolution::creation::{CreationRelationGuards, CreationRelationNames};
+use uqa_storage::StorageBackendResult;
+
+struct CreationNamesGuard<G>(G);
+impl<T, G: std::ops::Deref<Target = BTreeMap<RelationIdentity, T>>> CreationRelationNames
+    for CreationNamesGuard<G>
+{
+    fn contains(&self, relation: &RelationIdentity) -> bool {
+        self.0.contains_key(relation)
+    }
+}
+impl CreationRelationGuards for Engine {
+    fn tables(&self) -> Box<dyn CreationRelationNames + '_> {
+        Box::new(CreationNamesGuard(self.storage.tables.read()))
+    }
+    fn views(&self) -> Box<dyn CreationRelationNames + '_> {
+        Box::new(CreationNamesGuard(self.durable.views.read()))
+    }
+    fn sequences(&self) -> Box<dyn CreationRelationNames + '_> {
+        Box::new(CreationNamesGuard(self.durable.sequences.read()))
+    }
+    fn foreign_tables(&self) -> Box<dyn CreationRelationNames + '_> {
+        Box::new(CreationNamesGuard(self.durable.foreign_tables.read()))
+    }
+    fn indexes(&self) -> Box<dyn CreationRelationNames + '_> {
+        Box::new(CreationNamesGuard(self.durable.catalog_indexes.read()))
+    }
+}
+impl RelationCreationRuntime for Engine {
+    fn synchronize_catalog_registries(&self) -> StorageBackendResult<()> {
+        Engine::synchronize_catalog_registries(self)
+    }
+    fn synchronize_table_catalog(&self) -> StorageBackendResult<()> {
+        Engine::synchronize_table_catalog(self)
+    }
+    fn synchronize_table_data(&self) -> StorageBackendResult<()> {
+        Engine::synchronize_table_data(self)
+    }
+    fn backend_transaction_is_deferred(&self) -> bool {
+        Engine::backend_transaction_is_deferred(self)
+    }
+    fn fence_catalog_writer_and_refresh_snapshot(&self) -> Result<(), SQLError> {
+        Engine::fence_catalog_writer_and_refresh_snapshot(self)
+    }
+    fn allocate_temporary_namespace(&self) {
+        self.session.state.write().temporary_namespace_allocated = true;
+    }
+}
+impl Engine {
+    pub(crate) fn relation_creation_context(&self) -> RelationCreationContext<'_> {
+        RelationCreationContext {
+            names: self,
+            roles: self,
+            schemas: self,
+            database: self,
+            state: self,
+            relations: self,
+            runtime: self,
+        }
+    }
+}

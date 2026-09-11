@@ -82,7 +82,7 @@ pub fn register_materialized_view_plan(
                 uqa_sql::schema::columns::validate_postgres_relation_column_type(column, ty)?;
             }
         }
-        let name = context.access.target_name(name)?;
+        let name = context.namespace.resolve_persistent_name(name)?;
         if let Some(kind) = context
             .names
             .relation_kind_at(&name)
@@ -96,7 +96,7 @@ pub fn register_materialized_view_plan(
                 message: format!("relation \"{name}\" already exists as {kind}"),
             });
         }
-        context.access.ensure_create(&name)?;
+        context.namespace.ensure_create(&name)?;
         let materialized_column_types = query_schema.column_types().to_vec();
         let materialized_rows = if with_no_data {
             Vec::new()

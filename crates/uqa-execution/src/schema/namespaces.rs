@@ -211,3 +211,5 @@ pub fn alter_schema_owner(
     context.changes.catalog_registry_changed();
     Ok(())
 }
+
+pub mod relations;

@@ -115,7 +115,7 @@ fn register_view_plan_inner(
         .map_err(|err| SQLError::Internal(format!("refresh view catalog: {err}")))?;
     let uses_temporary_relation = context.bindings.bind_relations(&mut plan)?;
     let (name, persistence) = view_creation_target(
-        context.namespace,
+        &context.namespace,
         name,
         persistence,
         uses_temporary_relation,

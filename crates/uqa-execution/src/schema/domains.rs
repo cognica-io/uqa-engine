@@ -24,6 +24,7 @@ pub trait DomainPublication {
     fn publish_domain(&self, domain: StoredDomain) -> Result<(), SQLError>;
 }
 pub struct DomainCreationContext<'a> {
+    pub creation: crate::schema::namespaces::relations::RelationCreationContext<'a>,
     pub writer: &'a dyn SchemaStatementWriter,
     pub catalog: &'a dyn DomainCreationCatalog,
     pub bindings: &'a dyn DomainDeclarationBinding,
@@ -37,6 +38,7 @@ pub fn create_domain(
     mut definition: CreateDomain,
 ) -> Result<(), SQLError> {
     context.writer.prepare_writer()?;
+    definition.name = context.creation.persistent_name(&definition.name)?;
     let identity = bind_domain_creation_target(context.catalog, &mut definition)?;
     context.bindings.bind_domain_declaration(&mut definition)?;
     let object_id = (context.allocate_identity)()?;

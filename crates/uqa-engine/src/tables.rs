@@ -167,10 +167,12 @@ impl Engine {
         on_commit: uqa_sql::ast::OnCommitAction,
     ) -> StorageBackendResult<()> {
         let name = if persistence == uqa_sql::ast::RelationPersistence::Temporary {
-            self.try_temporary_relation_name_for_create(raw_name)
+            self.relation_creation_context()
+                .temporary_name(raw_name)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?
         } else {
-            self.try_relation_name_for_create(raw_name)
+            self.relation_creation_context()
+                .api_name(raw_name)
                 .map_err(StorageBackendError::Other)?
         };
         let relation = Self::resolved_relation_identity(&name)?;

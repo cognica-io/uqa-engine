@@ -127,12 +127,12 @@ fn run_alter_table_action<S: Clone + 'static>(
             .table_persistence(&stmt.table)
             .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
         if persistence == Some(uqa_sql::ast::RelationPersistence::Temporary) {
-            context.addition.namespace.ensure_temporary_creation()?;
+            context.addition.namespace.ensure_temporary_privilege()?;
         } else {
             context
                 .addition
                 .namespace
-                .ensure_existing_creation(&stmt.table)?;
+                .ensure_existing_create(&stmt.table)?;
         }
     }
     if !matches!(

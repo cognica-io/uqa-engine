@@ -25,11 +25,7 @@ pub trait TableAsQuerySource {
     fn execute(&self, plan: &QueryPlan, params: &[SQLParam]) -> Result<SQLResult, SQLError>;
 }
 pub trait TableAsNamespace {
-    fn ensure_temporary_privilege(&self) -> Result<(), SQLError>;
-    fn temporary_target_name(&self, name: &str) -> Result<String, SQLError>;
-    fn target_name(&self, name: &str) -> Result<String, SQLError>;
     fn relation_exists(&self, name: &str) -> Result<bool, SQLError>;
-    fn ensure_create_privilege(&self, name: &str) -> Result<(), SQLError>;
     fn prepare_writer(&self) -> Result<bool, SQLError>;
 }
 pub trait TableAsPublication {
@@ -55,6 +51,7 @@ pub trait TableAsPublication {
     ) -> Result<(), SQLError>;
 }
 pub struct CreateTableAsContext<'a, S: Clone> {
+    pub creation: crate::schema::namespaces::relations::RelationCreationContext<'a>,
     pub analysis_scope: &'a CteScope<S>,
     pub routines: &'a dyn RoutineResolution,
     pub queries: &'a dyn TableAsQuerySource,
@@ -80,7 +77,7 @@ pub fn run_create_table_as<S: Clone>(
     // PostgreSQL analyzes the CTAS source before target namespace resolution, collisions, or schema CREATE. Source execution still follows target validation, so an existing target wins over runtime expression errors and row locks.
     let temporary_privilege_error =
         if execution.persistence == uqa_sql::ast::RelationPersistence::Temporary {
-            context.namespace.ensure_temporary_privilege().err()
+            context.creation.ensure_temporary_privilege().err()
         } else {
             None
         };
@@ -94,7 +91,7 @@ pub fn run_create_table_as<S: Clone>(
     if let Some(error) = temporary_privilege_error {
         return Err(error);
     }
-    let preliminary_name = create_table_as_target_name(context.namespace, execution)?;
+    let preliminary_name = create_table_as_target_name(&context.creation, execution)?;
     if should_skip_existing_create_table_as(
         context.namespace,
         &preliminary_name,
@@ -104,9 +101,7 @@ pub fn run_create_table_as<S: Clone>(
     }
     let columns = create_table_as_columns(&query_schema, execution.column_names)?;
     if execution.persistence != uqa_sql::ast::RelationPersistence::Temporary {
-        context
-            .namespace
-            .ensure_create_privilege(&preliminary_name)?;
+        context.creation.ensure_create(&preliminary_name)?;
     }
     let executable = if execution.with_no_data {
         None
@@ -124,12 +119,12 @@ pub fn run_create_table_as<S: Clone>(
     if execution.persistence != uqa_sql::ast::RelationPersistence::Temporary {
         context.namespace.prepare_writer()?;
     }
-    let name = create_table_as_target_name(context.namespace, execution)?;
+    let name = create_table_as_target_name(&context.creation, execution)?;
     if should_skip_existing_create_table_as(context.namespace, &name, execution.if_not_exists)? {
         return Ok(SQLResult::empty().with_command_tag("CREATE TABLE AS"));
     }
     if execution.persistence != uqa_sql::ast::RelationPersistence::Temporary {
-        context.namespace.ensure_create_privilege(&name)?;
+        context.creation.ensure_create(&name)?;
     }
     let result = if execution.with_no_data {
         None
@@ -172,13 +167,13 @@ pub fn run_create_table_as<S: Clone>(
 }
 
 fn create_table_as_target_name(
-    namespace: &dyn TableAsNamespace,
+    namespace: &crate::schema::namespaces::relations::RelationCreationContext<'_>,
     execution: &CreateTableAsExecution<'_>,
 ) -> Result<String, SQLError> {
     if execution.persistence == uqa_sql::ast::RelationPersistence::Temporary {
-        namespace.temporary_target_name(execution.name)
+        namespace.temporary_name(execution.name)
     } else {
-        namespace.target_name(execution.name)
+        namespace.resolve_persistent_name(execution.name)
     }
 }
 

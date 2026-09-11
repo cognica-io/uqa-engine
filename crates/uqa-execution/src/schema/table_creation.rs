@@ -27,8 +27,6 @@ pub mod entry;
 
 pub trait TableCreationNamespace {
     fn prepare_writer(&self) -> Result<bool, SQLError>;
-    fn temporary_name(&self, name: &str) -> Result<String, SQLError>;
-    fn persistent_name(&self, name: &str) -> Result<String, SQLError>;
     fn relation_exists(&self, name: &str) -> Result<bool, SQLError>;
 }
 pub trait TableCreationPublication {
@@ -50,6 +48,7 @@ pub trait TableCreationPublication {
     fn refresh_value_indexes(&self, table: &str) -> StorageBackendResult<()>;
 }
 pub struct CreateTableContext<'a> {
+    pub creation: crate::schema::namespaces::relations::RelationCreationContext<'a>,
     pub namespace: &'a dyn TableCreationNamespace,
     pub analysis: CreateTableAnalysisContext<'a>,
     pub sequences: ImplicitSequenceContext<'a>,
@@ -96,9 +95,9 @@ fn preflight(
         context.namespace.prepare_writer()?;
     }
     let name = if persistence == RelationPersistence::Temporary {
-        context.namespace.temporary_name(name)?
+        context.creation.temporary_name(name)?
     } else {
-        context.namespace.persistent_name(name)?
+        context.creation.persistent_name(name)?
     };
     if context.namespace.relation_exists(&name)? {
         let local = uqa_core::RelationIdentity::from_legacy_name(&name)

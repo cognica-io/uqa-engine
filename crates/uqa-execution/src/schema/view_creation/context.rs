@@ -12,12 +12,9 @@ use super::super::{
 };
 use crate::catalog::view::{StoredView, ViewIdentityAllocation, ViewPublication};
 use uqa_sql::{
-    catalog::regrole_dependencies::StoredRegroleResolver,
-    plan::QueryPlan,
-    routines::RoutineResolution,
-    schema::{relation_alteration::RelationAlterNames, view_creation::ViewCreationNamespace},
-    semantics::view_rewrite::context::ViewRewriteContext,
-    RowSchema, SQLError, SQLParam, SQLResult,
+    catalog::regrole_dependencies::StoredRegroleResolver, plan::QueryPlan,
+    routines::RoutineResolution, schema::relation_alteration::RelationAlterNames,
+    semantics::view_rewrite::context::ViewRewriteContext, RowSchema, SQLError, SQLParam, SQLResult,
 };
 use uqa_storage::StorageBackendResult;
 
@@ -34,8 +31,6 @@ pub trait ViewPlanBinding {
 }
 pub trait MaterializedViewAccess {
     fn current_user_name(&self) -> String;
-    fn target_name(&self, name: &str) -> Result<String, SQLError>;
-    fn ensure_create(&self, name: &str) -> Result<(), SQLError>;
     fn ensure_maintenance(&self, name: &str, view: &StoredView) -> Result<(), SQLError>;
 }
 pub type ViewOwnerQuery<'a> =
@@ -47,7 +42,7 @@ pub trait ViewQueryOwners {
 pub struct ViewCreationContext<'a> {
     pub catalog: &'a dyn ViewCreationCatalog,
     pub views: &'a dyn ViewAlterCatalog,
-    pub namespace: &'a dyn ViewCreationNamespace,
+    pub namespace: crate::schema::namespaces::relations::RelationCreationContext<'a>,
     pub names: &'a dyn RelationAlterNames,
     pub owners: &'a dyn ViewAlterAccess,
     pub access: &'a dyn MaterializedViewAccess,

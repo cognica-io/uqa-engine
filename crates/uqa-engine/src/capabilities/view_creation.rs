@@ -15,8 +15,7 @@ use uqa_execution::schema::view_creation::{
     },
 };
 use uqa_sql::{
-    catalog::stored_view::StoredView, plan::QueryPlan,
-    schema::view_creation::ViewCreationNamespace, RowSchema, SQLError, SQLParam, SQLResult,
+    catalog::stored_view::StoredView, plan::QueryPlan, RowSchema, SQLError, SQLParam, SQLResult,
 };
 use uqa_storage::StorageBackendResult;
 
@@ -32,7 +31,7 @@ impl Engine {
         ViewCreationContext {
             catalog: self,
             views: self,
-            namespace: self,
+            namespace: self.relation_creation_context(),
             names: self,
             owners: self,
             access: self,
@@ -78,27 +77,12 @@ impl ViewPlanBinding for Engine {
         )
     }
 }
-impl ViewCreationNamespace for Engine {
-    fn temporary_schema_name(&self) -> String {
-        self.temporary_schema_name()
-    }
-    fn temporary_target(&self, name: &str) -> Result<String, SQLError> {
-        self.try_temporary_relation_name_for_create(name)
-    }
-    fn persistent_target(&self, name: &str) -> Result<String, SQLError> {
-        self.try_relation_name_for_sql_create(name)
-    }
-}
+
 impl MaterializedViewAccess for Engine {
     fn current_user_name(&self) -> String {
         self.current_user_name()
     }
-    fn target_name(&self, name: &str) -> Result<String, SQLError> {
-        self.resolve_relation_name_for_sql_create(name)
-    }
-    fn ensure_create(&self, name: &str) -> Result<(), SQLError> {
-        self.ensure_relation_creation_privilege(name)
-    }
+
     fn ensure_maintenance(&self, name: &str, view: &StoredView) -> Result<(), SQLError> {
         uqa_sql::catalog::security::view_ownership::ensure_materialized_view_maintenance(
             self.view_ownership_context(),
