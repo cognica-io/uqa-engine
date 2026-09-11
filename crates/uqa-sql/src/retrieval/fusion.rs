@@ -8,14 +8,14 @@
 
 use super::{
     const_bool, const_f64, const_f64_vector, const_gating, const_usize, lower_signal_arg,
-    named_arg_expr, BTreeSet, DriverResult, GatingSpec, OperatorTree, SQLError, SQLParam,
-    ScalarExpr,
+    named_arg_expr, BTreeSet, BindingResult, GatingSpec, RetrievalConstants, RetrievalExpr,
+    SQLError, ScalarExpr,
 };
 
 pub(super) fn lower_positive_evidence_pool(
     args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Option<OperatorTree> {
+    constants: &RetrievalConstants<'_>,
+) -> Option<RetrievalExpr> {
     // `pool_positive_evidence(signal_1, signal_2, ...[, alpha[, gating]])`.
     // The UQA SQL contract defaults alpha to 0.5 when no numeric option is supplied;
     // don't treat the last signal as an alpha argument.
@@ -33,27 +33,27 @@ pub(super) fn lower_positive_evidence_pool(
         let option = &args[signal_end - 1];
         if let Some((name, value_expr)) = named_arg_expr(option) {
             if name.eq_ignore_ascii_case("alpha") {
-                alpha = const_f64(value_expr, params)?;
+                alpha = const_f64(value_expr, constants)?;
             } else if name.eq_ignore_ascii_case("gating") {
-                gating = const_gating(value_expr, params)?;
+                gating = const_gating(value_expr, constants)?;
             } else if name.eq_ignore_ascii_case("weights") {
-                weights = Some(const_f64_vector(value_expr, params)?);
+                weights = Some(const_f64_vector(value_expr, constants)?);
             } else if name.eq_ignore_ascii_case("logit_min") {
-                logit_min = Some(const_f64_vector(value_expr, params)?);
+                logit_min = Some(const_f64_vector(value_expr, constants)?);
             } else if name.eq_ignore_ascii_case("logit_max") {
-                logit_max = Some(const_f64_vector(value_expr, params)?);
+                logit_max = Some(const_f64_vector(value_expr, constants)?);
             } else {
                 return None;
             }
             signal_end -= 1;
             continue;
         }
-        if let Some(g) = const_gating(option, params) {
+        if let Some(g) = const_gating(option, constants) {
             gating = g;
             signal_end -= 1;
             continue;
         }
-        if let Some(v) = const_f64(option, params) {
+        if let Some(v) = const_f64(option, constants) {
             alpha = v;
             signal_end -= 1;
             continue;
@@ -87,11 +87,11 @@ pub(super) fn lower_positive_evidence_pool(
         }
     }
 
-    let mut signals: Vec<OperatorTree> = Vec::with_capacity(signal_end);
+    let mut signals: Vec<RetrievalExpr> = Vec::with_capacity(signal_end);
     for a in &args[..signal_end] {
-        signals.push(lower_signal_arg(a, params)?);
+        signals.push(lower_signal_arg(a, constants)?);
     }
-    Some(OperatorTree::RobustPositiveEvidencePool {
+    Some(RetrievalExpr::RobustPositiveEvidencePool {
         signals,
         alpha,
         gating,
@@ -104,8 +104,8 @@ pub(super) fn lower_positive_evidence_pool(
 
 pub(super) fn lower_bayesian_evidence_fusion(
     args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Option<OperatorTree> {
+    constants: &RetrievalConstants<'_>,
+) -> Option<RetrievalExpr> {
     if args.len() < 2 {
         return None;
     }
@@ -115,7 +115,7 @@ pub(super) fn lower_bayesian_evidence_fusion(
         if !name.eq_ignore_ascii_case("base_rate") {
             return None;
         }
-        let value = const_f64(value_expr, params)?;
+        let value = const_f64(value_expr, constants)?;
         if !value.is_finite() || value <= 0.0 || value >= 1.0 {
             return None;
         }
@@ -127,9 +127,9 @@ pub(super) fn lower_bayesian_evidence_fusion(
     }
     let signals = args[..signal_end]
         .iter()
-        .map(|argument| lower_signal_arg(argument, params))
+        .map(|argument| lower_signal_arg(argument, constants))
         .collect::<Option<Vec<_>>>()?;
-    Some(OperatorTree::BayesianEvidenceFusion { signals, base_rate })
+    Some(RetrievalExpr::BayesianEvidenceFusion { signals, base_rate })
 }
 
 struct AttentionLoweringOptions<'a> {
@@ -144,8 +144,8 @@ struct AttentionLoweringOptions<'a> {
 fn parse_attention_options<'a>(
     function_name: &str,
     args: &'a [ScalarExpr],
-    params: &[SQLParam],
-) -> DriverResult<AttentionLoweringOptions<'a>> {
+    constants: &RetrievalConstants<'_>,
+) -> BindingResult<AttentionLoweringOptions<'a>> {
     let multi_head = function_name.eq_ignore_ascii_case("fuse_multihead");
     let valid_options: &[&str] = if multi_head {
         &["n_heads", "normalized", "alpha"]
@@ -180,28 +180,28 @@ fn parse_attention_options<'a>(
             }
             match option_name.as_str() {
                 "alpha" => {
-                    options.alpha = const_f64(value, params).ok_or_else(|| {
+                    options.alpha = const_f64(value, constants).ok_or_else(|| {
                         SQLError::TypeMismatch(format!(
                             "{function_name}.alpha must be a constant number"
                         ))
                     })?;
                 }
                 "normalized" => {
-                    options.normalized = const_bool(value, params).ok_or_else(|| {
+                    options.normalized = const_bool(value, constants).ok_or_else(|| {
                         SQLError::TypeMismatch(format!(
                             "{function_name}.normalized must be a constant boolean"
                         ))
                     })?;
                 }
                 "base_rate" => {
-                    options.base_rate = Some(const_f64(value, params).ok_or_else(|| {
+                    options.base_rate = Some(const_f64(value, constants).ok_or_else(|| {
                         SQLError::TypeMismatch(format!(
                             "{function_name}.base_rate must be a constant number"
                         ))
                     })?);
                 }
                 "n_heads" => {
-                    options.n_heads = const_usize(value, params).ok_or_else(|| {
+                    options.n_heads = const_usize(value, constants).ok_or_else(|| {
                         SQLError::TypeMismatch(format!(
                             "{function_name}.n_heads must be a constant non-negative integer"
                         ))
@@ -210,7 +210,7 @@ fn parse_attention_options<'a>(
                 _ => unreachable!("valid attention option was matched above"),
             }
         } else {
-            if uqa_execution::scalar_call_argument(argument)
+            if crate::scalar_call_argument(argument)
                 .ok()
                 .is_some_and(|argument| argument.name.is_some())
             {
@@ -234,7 +234,7 @@ fn parse_attention_options<'a>(
 fn validate_attention_options(
     function_name: &str,
     options: &AttentionLoweringOptions<'_>,
-) -> DriverResult<()> {
+) -> BindingResult<()> {
     if options.signal_args.len() < 2 {
         return Err(SQLError::BadArity {
             name: function_name.to_string(),
@@ -268,17 +268,15 @@ fn validate_attention_options(
 pub(super) fn try_lower_attention_fusion(
     function_name: &str,
     args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> DriverResult<OperatorTree> {
-    use std::sync::Arc;
-    use uqa_fusion::{AttentionFusion, MultiHeadAttentionFusion, N_QUERY_FEATURES};
-    use uqa_operators::tree::AttentionRef;
+    constants: &RetrievalConstants<'_>,
+) -> BindingResult<RetrievalExpr> {
+    use super::AttentionSpec;
 
-    let options = parse_attention_options(function_name, args, params)?;
+    let options = parse_attention_options(function_name, args, constants)?;
 
     let mut signals = Vec::with_capacity(options.signal_args.len());
     for (index, argument) in options.signal_args.into_iter().enumerate() {
-        signals.push(lower_signal_arg(argument, params).ok_or_else(|| {
+        signals.push(lower_signal_arg(argument, constants).ok_or_else(|| {
             SQLError::TypeMismatch(format!(
                 "{function_name} signal {} cannot be lowered to a probability-valued operator",
                 index + 1
@@ -286,59 +284,46 @@ pub(super) fn try_lower_attention_fusion(
         })?);
     }
 
-    let attention: AttentionRef = if options.multi_head {
-        Arc::new(
-            MultiHeadAttentionFusion::try_new(
-                options.n_heads,
-                signals.len(),
-                N_QUERY_FEATURES,
-                options.alpha,
-                options.normalized,
-            )
-            .map_err(|error| SQLError::TypeMismatch(format!("{function_name}: {error}")))?,
-        )
+    let options = if options.multi_head {
+        AttentionSpec::MultiHead {
+            n_heads: options.n_heads,
+            alpha: options.alpha,
+            normalized: options.normalized,
+        }
     } else {
-        Arc::new(
-            AttentionFusion::new(signals.len(), N_QUERY_FEATURES, options.alpha)
-                .with_options(options.normalized, options.base_rate)
-                .map_err(|error| SQLError::TypeMismatch(format!("{function_name}: {error}")))?,
-        )
+        AttentionSpec::Single {
+            alpha: options.alpha,
+            normalized: options.normalized,
+            base_rate: options.base_rate,
+        }
     };
-
-    // Query features are filled in lazily at execute time from the engine
-    // snapshot, so the IR carries an empty explicit vector.
-    Ok(OperatorTree::AttentionFusion {
+    Ok(RetrievalExpr::AttentionFusion {
         signals,
-        attention,
-        query_features: Vec::new(),
+        options,
+        function_name: function_name.into(),
     })
 }
 
 pub(super) fn lower_learned_fusion(
     args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Option<OperatorTree> {
-    use std::sync::Arc;
-    use uqa_fusion::LearnedFusion;
-    use uqa_operators::tree::LearnedFusionRef;
-
+    constants: &RetrievalConstants<'_>,
+) -> Option<RetrievalExpr> {
     let mut signal_end = args.len();
     let mut alpha = 0.5;
     if let Some((name, value)) = args.last().and_then(named_arg_expr) {
         if !name.eq_ignore_ascii_case("alpha") {
             return None;
         }
-        alpha = const_f64(value, params)?;
+        alpha = const_f64(value, constants)?;
         signal_end -= 1;
     }
     if signal_end < 2 || !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
         return None;
     }
 
-    let mut signals: Vec<OperatorTree> = Vec::with_capacity(signal_end);
+    let mut signals: Vec<RetrievalExpr> = Vec::with_capacity(signal_end);
     for a in &args[..signal_end] {
-        signals.push(lower_signal_arg(a, params)?);
+        signals.push(lower_signal_arg(a, constants)?);
     }
-    let learned: LearnedFusionRef = Arc::new(LearnedFusion::new(signals.len(), alpha));
-    Some(OperatorTree::LearnedFusion { signals, learned })
+    Some(RetrievalExpr::LearnedFusion { signals, alpha })
 }

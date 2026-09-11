@@ -5,7 +5,7 @@
 //
 
 use super::{
-    engine_query_optimizer, lower_where_bound, operator_execution_error, posting_list_to_scored,
+    engine_query_optimizer, operator_execution_error, posting_list_to_scored,
     DirectVectorRetrieval, DriverResult, Engine, EngineDriver, OperatorOutput, OperatorTree,
     SQLError, SQLParam, ScalarExpr, ScoredEntry,
 };
@@ -15,7 +15,7 @@ pub(crate) fn direct_vector_retrieval(
     expression: &ScalarExpr,
     params: &[SQLParam],
 ) -> Result<Option<DirectVectorRetrieval>, SQLError> {
-    let Some(tree) = lower_where_bound(engine, expression, params)? else {
+    let Some(tree) = engine.retrieval_binding().lower_where(expression, params)? else {
         return Ok(None);
     };
     Ok(match tree {
@@ -48,7 +48,7 @@ pub fn run_optimised(
     let Some(expr) = where_expr else {
         return Ok(None);
     };
-    let Some(tree) = lower_where_bound(engine, expr, params)? else {
+    let Some(tree) = engine.retrieval_binding().lower_where(expr, params)? else {
         return Ok(None);
     };
     let pl = expect_posting_output(
@@ -71,7 +71,7 @@ pub(crate) fn run_accelerated(
     let Some(expression) = where_expr else {
         return Ok(None);
     };
-    let Some(tree) = lower_where_bound(engine, expression, params)? else {
+    let Some(tree) = engine.retrieval_binding().lower_where(expression, params)? else {
         return Ok(None);
     };
     let optimized = engine_query_optimizer(engine, table, &tree)?.optimize(tree);

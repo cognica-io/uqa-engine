@@ -9,34 +9,34 @@
 mod fts;
 
 use super::{
-    column_name, const_f64, const_string, const_usize, const_vector, eval_scalar, lower_function,
-    named_arg_expr, BTreeSet, DriverResult, Engine, ExternalPriorMode, MultiStageCutoff,
-    MultiStageEntry, OperatorTree, SQLError, SQLParam, ScalarEvalContext, ScalarExpr,
-    TextScoringMode, Value,
+    column_name, const_f64, const_string, const_usize, const_vector, lower_function,
+    named_arg_expr, BTreeSet, BindingResult, ExternalPriorMode, MultiStageCutoff, MultiStageEntry,
+    RetrievalArguments, RetrievalConstants, RetrievalExpr, SQLError, ScalarExpr, TextScoringMode,
+    Value,
 };
 
 pub(super) fn try_lower_checked_retrieval(
     name: &str,
     args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Option<DriverResult<OperatorTree>> {
+    constants: &RetrievalConstants<'_>,
+) -> Option<BindingResult<RetrievalExpr>> {
     match name.to_ascii_lowercase().as_str() {
         "text_match" => Some(try_lower_text_match(
             "text_match",
             args,
-            params,
+            constants,
             TextScoringMode::BM25,
         )),
         "bayesian_match" => Some(try_lower_text_match(
             "bayesian_match",
             args,
-            params,
+            constants,
             TextScoringMode::BayesianBM25,
         )),
-        "fts_match" => Some(try_lower_fts_match(args, params)),
-        "bayesian_match_with_prior" => Some(try_lower_bayesian_match_with_prior(args, params)),
-        "knn_match" => Some(try_lower_knn_match(args, params)),
-        "calibrated_vector_match" => Some(try_lower_calibrated_vector_match(args, params)),
+        "fts_match" => Some(try_lower_fts_match(args, constants)),
+        "bayesian_match_with_prior" => Some(try_lower_bayesian_match_with_prior(args, constants)),
+        "knn_match" => Some(try_lower_knn_match(args, constants)),
+        "calibrated_vector_match" => Some(try_lower_calibrated_vector_match(args, constants)),
         _ => None,
     }
 }
@@ -44,9 +44,9 @@ pub(super) fn try_lower_checked_retrieval(
 pub(super) fn validate_checked_retrieval_call_tree(
     name: &str,
     args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> DriverResult<()> {
-    if let Some(result) = try_lower_checked_retrieval(name, args, params) {
+    constants: &RetrievalConstants<'_>,
+) -> BindingResult<()> {
+    if let Some(result) = try_lower_checked_retrieval(name, args, constants) {
         result?;
     }
     for argument in args {
@@ -56,7 +56,7 @@ pub(super) fn validate_checked_retrieval_call_tree(
             ..
         } = argument
         {
-            validate_checked_retrieval_call_tree(child_name, child_args, params)?;
+            validate_checked_retrieval_call_tree(child_name, child_args, constants)?;
         }
     }
     Ok(())
@@ -88,10 +88,10 @@ pub(super) fn checked_retrieval_call_tree_present(name: &str, args: &[ScalarExpr
 }
 
 pub(super) fn bind_operator_argument(
-    engine: &Engine,
+    source: &dyn RetrievalArguments,
     expression: &ScalarExpr,
-    params: &[SQLParam],
-) -> DriverResult<ScalarExpr> {
+    constants: &RetrievalConstants<'_>,
+) -> BindingResult<ScalarExpr> {
     match expression {
         ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. } => Ok(expression.clone()),
         ScalarExpr::Func {
@@ -101,10 +101,10 @@ pub(super) fn bind_operator_argument(
             distinct,
             order_by,
             filter,
-        } if uqa_execution::scalar_call_argument(expression)
+        } if crate::scalar_call_argument(expression)
             .ok()
             .is_some_and(|argument| argument.name.is_some())
-            || uqa_sql::registry::lookup(name).is_some() =>
+            || crate::registry::lookup(name).is_some() =>
         {
             if *distinct || !order_by.is_empty() || filter.is_some() {
                 return Err(SQLError::TypeMismatch(format!(
@@ -116,21 +116,20 @@ pub(super) fn bind_operator_argument(
                 binding: binding.clone(),
                 args: args
                     .iter()
-                    .map(|argument| bind_operator_argument(engine, argument, params))
+                    .map(|argument| bind_operator_argument(source, argument, constants))
                     .collect::<Result<Vec<_>, _>>()?,
                 distinct: false,
                 order_by: Vec::new(),
                 filter: None,
             })
         }
-        other => {
-            let context = ScalarEvalContext::new(None, params).with_function_hook(engine);
-            eval_scalar(other, &context).map(ScalarExpr::Literal)
-        }
+        other => source
+            .evaluate_argument(other, constants.params)
+            .map(ScalarExpr::Literal),
     }
 }
 
-pub(super) fn validate_operator_function_arity(name: &str, actual: usize) -> DriverResult<()> {
+pub(super) fn validate_operator_function_arity(name: &str, actual: usize) -> BindingResult<()> {
     let lower = name.to_ascii_lowercase();
     let expected = match lower.as_str() {
         "text_match" | "bayesian_match" | "fts_match" | "sparse_threshold" => {
@@ -172,7 +171,7 @@ pub(super) fn validate_operator_function_arity(name: &str, actual: usize) -> Dri
 pub(super) fn validate_probability_signal_contract(
     name: &str,
     args: &[ScalarExpr],
-) -> DriverResult<()> {
+) -> BindingResult<()> {
     if !matches!(
         name.to_ascii_lowercase().as_str(),
         "fuse_bayesian_evidence"
@@ -210,9 +209,9 @@ pub(super) fn bad_operator_arity(name: &str, expected: &str, actual: usize) -> S
 pub(super) fn try_lower_text_match(
     function_name: &str,
     args: &[ScalarExpr],
-    params: &[SQLParam],
+    constants: &RetrievalConstants<'_>,
     scoring: TextScoringMode,
-) -> DriverResult<OperatorTree> {
+) -> BindingResult<RetrievalExpr> {
     if args.len() != 2 {
         return Err(bad_operator_arity(function_name, "2", args.len()));
     }
@@ -232,21 +231,20 @@ pub(super) fn try_lower_text_match(
             )))
         }
     };
-    let query = const_string(&args[1], params).ok_or_else(|| {
+    let query = const_string(&args[1], constants).ok_or_else(|| {
         SQLError::TypeMismatch(format!("{function_name}.query must be a constant string"))
     })?;
-    Ok(OperatorTree::Term {
+    Ok(RetrievalExpr::Term {
         query,
         field,
         scoring: Some(scoring),
-        top_k: None,
     })
 }
 
 pub(super) fn try_lower_fts_match(
     args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> DriverResult<OperatorTree> {
+    constants: &RetrievalConstants<'_>,
+) -> BindingResult<RetrievalExpr> {
     const FUNCTION_NAME: &str = "fts_match";
     if args.len() != 2 {
         return Err(bad_operator_arity(FUNCTION_NAME, "2", args.len()));
@@ -256,7 +254,7 @@ pub(super) fn try_lower_fts_match(
             "fts_match.field must be a column reference, '_all', or an empty string".into(),
         )
     })?;
-    let query = const_string(&args[1], params).ok_or_else(|| {
+    let query = const_string(&args[1], constants).ok_or_else(|| {
         SQLError::TypeMismatch("fts_match.query must be a constant string".into())
     })?;
     let tree = fts::compile_query_string(&query, default_field.as_deref())
@@ -266,8 +264,8 @@ pub(super) fn try_lower_fts_match(
 
 pub(super) fn try_lower_bayesian_match_with_prior(
     args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> DriverResult<OperatorTree> {
+    constants: &RetrievalConstants<'_>,
+) -> BindingResult<RetrievalExpr> {
     const FUNCTION_NAME: &str = "bayesian_match_with_prior";
     if args.len() != 4 {
         return Err(bad_operator_arity(FUNCTION_NAME, "4", args.len()));
@@ -275,7 +273,7 @@ pub(super) fn try_lower_bayesian_match_with_prior(
     let field = column_name(&args[0]).ok_or_else(|| {
         SQLError::TypeMismatch("bayesian_match_with_prior.field must be a column reference".into())
     })?;
-    let query = const_string(&args[1], params).ok_or_else(|| {
+    let query = const_string(&args[1], constants).ok_or_else(|| {
         SQLError::TypeMismatch("bayesian_match_with_prior.query must be a constant string".into())
     })?;
     let prior_field = column_name(&args[2]).ok_or_else(|| {
@@ -283,7 +281,7 @@ pub(super) fn try_lower_bayesian_match_with_prior(
             "bayesian_match_with_prior.prior_field must be a column reference".into(),
         )
     })?;
-    let mode_name = const_string(&args[3], params).ok_or_else(|| {
+    let mode_name = const_string(&args[3], constants).ok_or_else(|| {
         SQLError::TypeMismatch("bayesian_match_with_prior.mode must be a constant string".into())
     })?;
     let mode = match mode_name.to_ascii_lowercase().as_str() {
@@ -295,7 +293,7 @@ pub(super) fn try_lower_bayesian_match_with_prior(
             )))
         }
     };
-    Ok(OperatorTree::BayesianMatchWithPrior {
+    Ok(RetrievalExpr::BayesianMatchWithPrior {
         field,
         query,
         prior_field,
@@ -305,15 +303,15 @@ pub(super) fn try_lower_bayesian_match_with_prior(
 
 pub(super) fn lower_bayesian_match_with_prior(
     args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Option<OperatorTree> {
-    try_lower_bayesian_match_with_prior(args, params).ok()
+    constants: &RetrievalConstants<'_>,
+) -> Option<RetrievalExpr> {
+    try_lower_bayesian_match_with_prior(args, constants).ok()
 }
 
 pub(super) fn try_lower_knn_match(
     args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> DriverResult<OperatorTree> {
+    constants: &RetrievalConstants<'_>,
+) -> BindingResult<RetrievalExpr> {
     const FUNCTION_NAME: &str = "knn_match";
     if args.len() != 3 {
         return Err(bad_operator_arity(FUNCTION_NAME, "3", args.len()));
@@ -326,7 +324,7 @@ pub(super) fn try_lower_knn_match(
             "knn_match.field cannot be empty".into(),
         ));
     }
-    let query_vector = const_vector(&args[1], params).ok_or_else(|| {
+    let query_vector = const_vector(&args[1], constants).ok_or_else(|| {
         SQLError::TypeMismatch("knn_match.vector must be a constant numeric vector".into())
     })?;
     if query_vector.is_empty() || query_vector.iter().any(|component| !component.is_finite()) {
@@ -334,7 +332,7 @@ pub(super) fn try_lower_knn_match(
             "knn_match.vector must be non-empty and contain only finite values".into(),
         ));
     }
-    let k = const_usize(&args[2], params).ok_or_else(|| {
+    let k = const_usize(&args[2], constants).ok_or_else(|| {
         SQLError::TypeMismatch("knn_match.k must be a non-negative integer".into())
     })?;
     if k == 0 || i64::try_from(k).is_err() {
@@ -342,7 +340,7 @@ pub(super) fn try_lower_knn_match(
             "knn_match.k must be positive and fit in a SQL BIGINT, got {k}"
         )));
     }
-    Ok(OperatorTree::KNN {
+    Ok(RetrievalExpr::KNN {
         query_vector,
         k,
         field,
@@ -351,13 +349,13 @@ pub(super) fn try_lower_knn_match(
 
 pub(super) fn try_lower_calibrated_vector_match(
     args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> DriverResult<OperatorTree> {
+    constants: &RetrievalConstants<'_>,
+) -> BindingResult<RetrievalExpr> {
     const FUNCTION_NAME: &str = "calibrated_vector_match";
     if !(3..=4).contains(&args.len()) {
         return Err(bad_operator_arity(FUNCTION_NAME, "3..=4", args.len()));
     }
-    let field = field_name_arg(&args[0], params).ok_or_else(|| {
+    let field = field_name_arg(&args[0], constants).ok_or_else(|| {
         SQLError::TypeMismatch(
             "calibrated_vector_match.field must be a column reference or constant string".into(),
         )
@@ -367,7 +365,7 @@ pub(super) fn try_lower_calibrated_vector_match(
             "calibrated_vector_match.field cannot be empty".into(),
         ));
     }
-    let query_vector = const_vector(&args[1], params).ok_or_else(|| {
+    let query_vector = const_vector(&args[1], constants).ok_or_else(|| {
         SQLError::TypeMismatch(
             "calibrated_vector_match.vector must be a constant numeric vector".into(),
         )
@@ -378,7 +376,7 @@ pub(super) fn try_lower_calibrated_vector_match(
                 .into(),
         ));
     }
-    let k = const_usize(&args[2], params).ok_or_else(|| {
+    let k = const_usize(&args[2], constants).ok_or_else(|| {
         SQLError::TypeMismatch("calibrated_vector_match.k must be a non-negative integer".into())
     })?;
     if k == 0 || i64::try_from(k).is_err() {
@@ -389,7 +387,7 @@ pub(super) fn try_lower_calibrated_vector_match(
     let threshold = args
         .get(3)
         .map(|argument| {
-            const_f64(argument, params).ok_or_else(|| {
+            const_f64(argument, constants).ok_or_else(|| {
                 SQLError::TypeMismatch(
                     "calibrated_vector_match.threshold must be a constant number".into(),
                 )
@@ -402,7 +400,7 @@ pub(super) fn try_lower_calibrated_vector_match(
             threshold.expect("checked Some above")
         )));
     }
-    Ok(OperatorTree::CalibratedVectorMatch {
+    Ok(RetrievalExpr::CalibratedVectorMatch {
         field,
         query_vector,
         k,
@@ -412,15 +410,15 @@ pub(super) fn try_lower_calibrated_vector_match(
 
 pub(super) fn lower_calibrated_vector_match(
     args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Option<OperatorTree> {
-    try_lower_calibrated_vector_match(args, params).ok()
+    constants: &RetrievalConstants<'_>,
+) -> Option<RetrievalExpr> {
+    try_lower_calibrated_vector_match(args, constants).ok()
 }
 
 pub(super) fn lower_multi_field_match(
     args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Option<OperatorTree> {
+    constants: &RetrievalConstants<'_>,
+) -> Option<RetrievalExpr> {
     if args.len() < 3 {
         return None;
     }
@@ -431,7 +429,7 @@ pub(super) fn lower_multi_field_match(
                 .iter()
                 .map(column_name)
                 .collect::<Option<Vec<_>>>()?;
-            let query = const_string(args.get(query_idx)?, params)?;
+            let query = const_string(args.get(query_idx)?, constants)?;
             let weight_args = &args[query_idx + 1..];
             let weights = if weight_args.is_empty() {
                 None
@@ -442,11 +440,11 @@ pub(super) fn lower_multi_field_match(
                 Some(
                     weight_args
                         .iter()
-                        .map(|arg| const_f64(arg, params))
+                        .map(|arg| const_f64(arg, constants))
                         .collect::<Option<Vec<_>>>()?,
                 )
             };
-            return Some(OperatorTree::MultiFieldSearch {
+            return Some(RetrievalExpr::MultiFieldSearch {
                 fields,
                 queries: vec![query; query_idx],
                 weights,
@@ -462,9 +460,9 @@ pub(super) fn lower_multi_field_match(
     let mut queries = Vec::with_capacity(n_fields);
     for i in 0..n_fields {
         fields.push(column_name(&args[2 * i])?);
-        queries.push(const_string(&args[2 * i + 1], params)?);
+        queries.push(const_string(&args[2 * i + 1], constants)?);
     }
-    Some(OperatorTree::MultiFieldSearch {
+    Some(RetrievalExpr::MultiFieldSearch {
         fields,
         queries,
         weights: None,
@@ -473,8 +471,8 @@ pub(super) fn lower_multi_field_match(
 
 pub(super) fn lower_staged_retrieval(
     args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Option<OperatorTree> {
+    constants: &RetrievalConstants<'_>,
+) -> Option<RetrievalExpr> {
     let mut stages = Vec::new();
     if matches!(args.first(), Some(ScalarExpr::Func { .. }))
         && named_arg_expr(args.first()?).is_none()
@@ -484,8 +482,8 @@ pub(super) fn lower_staged_retrieval(
         }
         for pair in args.chunks(2) {
             stages.push(MultiStageEntry {
-                child: lower_signal_arg(&pair[0], params)?,
-                cutoff: MultiStageCutoff::TopK(const_usize(&pair[1], params)?),
+                child: lower_signal_arg(&pair[0], constants)?,
+                cutoff: MultiStageCutoff::TopK(const_usize(&pair[1], constants)?),
             });
         }
     } else {
@@ -494,48 +492,47 @@ pub(super) fn lower_staged_retrieval(
         }
         for stage in args.chunks(3) {
             stages.push(MultiStageEntry {
-                child: OperatorTree::Term {
-                    query: const_string(&stage[1], params)?,
+                child: RetrievalExpr::Term {
+                    query: const_string(&stage[1], constants)?,
                     field: Some(column_name(&stage[0])?),
                     scoring: Some(TextScoringMode::BM25),
-                    top_k: None,
                 },
-                cutoff: MultiStageCutoff::TopK(const_usize(&stage[2], params)?),
+                cutoff: MultiStageCutoff::TopK(const_usize(&stage[2], constants)?),
             });
         }
     }
-    (!stages.is_empty()).then_some(OperatorTree::MultiStage { stages })
+    (!stages.is_empty()).then_some(RetrievalExpr::MultiStage { stages })
 }
 
 /// Compile a signal-function call into a node on the `[0, 1]` evidence scale:
 /// exact fusion, robust pooling, attention, and learned combinations all need
 /// a common numeric boundary even though they make different semantic claims.
 ///
-/// - `bayesian_match` --> [`OperatorTree::Term`] with Bayesian BM25 scoring.
-/// - `fts_match` text trees --> [`OperatorTree::BayesianScore`] around the
+/// - `bayesian_match` --> [`RetrievalExpr::Term`] with Bayesian BM25 scoring.
+/// - `fts_match` text trees --> [`RetrievalExpr::BayesianScore`] around the
 ///   complete raw BM25 Boolean query.
-/// - `knn_match` --> [`OperatorTree::CosineProbability`] wrapping a
-///   [`OperatorTree::KNN`] child. At a fusion boundary the driver uses this
+/// - `knn_match` --> [`RetrievalExpr::CosineProbability`] wrapping a
+///   [`RetrievalExpr::KNN`] child. At a fusion boundary the driver uses this
 ///   marker to fit prior-free evidence from the selected cosine query pool.
 pub(super) fn lower_calibrated_signal(
     name: &str,
     args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Option<OperatorTree> {
+    constants: &RetrievalConstants<'_>,
+) -> Option<RetrievalExpr> {
     match name {
         "bayesian_match" => try_lower_text_match(
             "bayesian_match",
             args,
-            params,
+            constants,
             TextScoringMode::BayesianBM25,
         )
         .ok(),
-        "fts_match" => try_lower_fts_match(args, params).ok(),
-        "bayesian_match_with_prior" => lower_bayesian_match_with_prior(args, params),
-        "knn_match" => try_lower_knn_match(args, params)
+        "fts_match" => try_lower_fts_match(args, constants).ok(),
+        "bayesian_match_with_prior" => lower_bayesian_match_with_prior(args, constants),
+        "knn_match" => try_lower_knn_match(args, constants)
             .ok()
-            .map(|tree| OperatorTree::CosineProbability(Box::new(tree))),
-        "calibrated_vector_match" => lower_calibrated_vector_match(args, params),
+            .map(|tree| RetrievalExpr::CosineProbability(Box::new(tree))),
+        "calibrated_vector_match" => lower_calibrated_vector_match(args, constants),
         _ => None,
     }
 }
@@ -543,11 +540,14 @@ pub(super) fn lower_calibrated_signal(
 /// Lower a function-call argument into a probability-domain signal node. Used
 /// by exact evidence fusion, robust pooling, attention, and learned fusion so
 /// the rewrite stays consistent across combination policies.
-pub(super) fn lower_signal_arg(arg: &ScalarExpr, params: &[SQLParam]) -> Option<OperatorTree> {
+pub(super) fn lower_signal_arg(
+    arg: &ScalarExpr,
+    constants: &RetrievalConstants<'_>,
+) -> Option<RetrievalExpr> {
     match arg {
         ScalarExpr::Func { name, args, .. } => {
             let lower = name.to_ascii_lowercase();
-            lower_calibrated_signal(&lower, args, params)
+            lower_calibrated_signal(&lower, args, constants)
         }
         _ => None,
     }
@@ -556,15 +556,21 @@ pub(super) fn lower_signal_arg(arg: &ScalarExpr, params: &[SQLParam]) -> Option<
 /// Lower any registered posting-list function used as an operator input.
 /// Unlike fusion signals, sparse thresholding accepts raw BM25 scores, so
 /// this path intentionally does not require probability calibration.
-pub(super) fn lower_operator_arg(arg: &ScalarExpr, params: &[SQLParam]) -> Option<OperatorTree> {
+pub(super) fn lower_operator_arg(
+    arg: &ScalarExpr,
+    constants: &RetrievalConstants<'_>,
+) -> Option<RetrievalExpr> {
     let ScalarExpr::Func { name, args, .. } = arg else {
         return None;
     };
-    lower_function(name, args, params)
+    lower_function(name, args, constants)
 }
 
-pub(super) fn field_name_arg(expr: &ScalarExpr, params: &[SQLParam]) -> Option<String> {
-    column_name(expr).or_else(|| const_string(expr, params))
+pub(super) fn field_name_arg(
+    expr: &ScalarExpr,
+    constants: &RetrievalConstants<'_>,
+) -> Option<String> {
+    column_name(expr).or_else(|| const_string(expr, constants))
 }
 
 enum FtsDefaultField {
@@ -592,42 +598,42 @@ fn fts_default_field(expr: &ScalarExpr) -> Option<FtsDefaultField> {
     }
 }
 
-pub(super) fn prepare_fts_probability_tree(tree: OperatorTree) -> OperatorTree {
+pub(super) fn prepare_fts_probability_tree(tree: RetrievalExpr) -> RetrievalExpr {
     if is_text_query_tree(&tree) {
         let field = common_text_field(&tree);
-        return OperatorTree::BayesianScore {
+        return RetrievalExpr::BayesianScore {
             source: Box::new(bind_fts_bm25_tree(tree)),
             field,
         };
     }
 
     match tree {
-        OperatorTree::KNN {
+        RetrievalExpr::KNN {
             query_vector,
             k,
             field,
-        } => OperatorTree::CosineProbability(Box::new(OperatorTree::KNN {
+        } => RetrievalExpr::CosineProbability(Box::new(RetrievalExpr::KNN {
             query_vector,
             k,
             field,
         })),
-        OperatorTree::Intersect(children) => OperatorTree::Intersect(
+        RetrievalExpr::Intersect(children) => RetrievalExpr::Intersect(
             children
                 .into_iter()
                 .map(prepare_fts_probability_tree)
                 .collect(),
         ),
-        OperatorTree::Union(children) => OperatorTree::Union(
+        RetrievalExpr::Union(children) => RetrievalExpr::Union(
             children
                 .into_iter()
                 .map(prepare_fts_probability_tree)
                 .collect(),
         ),
-        OperatorTree::Complement(child) => {
-            OperatorTree::Complement(Box::new(prepare_fts_probability_tree(*child)))
+        RetrievalExpr::Complement(child) => {
+            RetrievalExpr::Complement(Box::new(prepare_fts_probability_tree(*child)))
         }
-        OperatorTree::BayesianEvidenceFusion { signals, base_rate } => {
-            OperatorTree::BayesianEvidenceFusion {
+        RetrievalExpr::BayesianEvidenceFusion { signals, base_rate } => {
+            RetrievalExpr::BayesianEvidenceFusion {
                 signals: signals
                     .into_iter()
                     .map(prepare_fts_probability_tree)
@@ -635,7 +641,7 @@ pub(super) fn prepare_fts_probability_tree(tree: OperatorTree) -> OperatorTree {
                 base_rate,
             }
         }
-        OperatorTree::RobustPositiveEvidencePool {
+        RetrievalExpr::RobustPositiveEvidencePool {
             signals,
             alpha,
             gating,
@@ -643,7 +649,7 @@ pub(super) fn prepare_fts_probability_tree(tree: OperatorTree) -> OperatorTree {
             logit_min,
             logit_max,
             adaptive_weights,
-        } => OperatorTree::RobustPositiveEvidencePool {
+        } => RetrievalExpr::RobustPositiveEvidencePool {
             signals: signals
                 .into_iter()
                 .map(prepare_fts_probability_tree)
@@ -655,65 +661,59 @@ pub(super) fn prepare_fts_probability_tree(tree: OperatorTree) -> OperatorTree {
             logit_max,
             adaptive_weights,
         },
-        OperatorTree::CosineProbability(child) => OperatorTree::CosineProbability(child),
+        RetrievalExpr::CosineProbability(child) => RetrievalExpr::CosineProbability(child),
         other => other,
     }
 }
 
-pub(super) fn is_text_query_tree(tree: &OperatorTree) -> bool {
+pub(super) fn is_text_query_tree(tree: &RetrievalExpr) -> bool {
     match tree {
-        OperatorTree::Empty | OperatorTree::Term { .. } => true,
-        OperatorTree::Intersect(children)
-        | OperatorTree::Union(children)
-        | OperatorTree::Composed(children) => children.iter().all(is_text_query_tree),
-        OperatorTree::Complement(child) => is_text_query_tree(child),
+        RetrievalExpr::Empty | RetrievalExpr::Term { .. } => true,
+        RetrievalExpr::Intersect(children)
+        | RetrievalExpr::Union(children)
+        | RetrievalExpr::Composed(children) => children.iter().all(is_text_query_tree),
+        RetrievalExpr::Complement(child) => is_text_query_tree(child),
         _ => false,
     }
 }
 
-pub(super) fn bind_fts_bm25_tree(tree: OperatorTree) -> OperatorTree {
+pub(super) fn bind_fts_bm25_tree(tree: RetrievalExpr) -> RetrievalExpr {
     match tree {
-        OperatorTree::Term {
-            query,
-            field,
-            top_k,
-            ..
-        } => OperatorTree::Term {
+        RetrievalExpr::Term { query, field, .. } => RetrievalExpr::Term {
             query,
             field,
             scoring: Some(TextScoringMode::BM25),
-            top_k,
         },
-        OperatorTree::Intersect(children) => {
-            OperatorTree::Intersect(children.into_iter().map(bind_fts_bm25_tree).collect())
+        RetrievalExpr::Intersect(children) => {
+            RetrievalExpr::Intersect(children.into_iter().map(bind_fts_bm25_tree).collect())
         }
-        OperatorTree::Union(children) => {
-            OperatorTree::Union(children.into_iter().map(bind_fts_bm25_tree).collect())
+        RetrievalExpr::Union(children) => {
+            RetrievalExpr::Union(children.into_iter().map(bind_fts_bm25_tree).collect())
         }
-        OperatorTree::Composed(children) => {
-            OperatorTree::Composed(children.into_iter().map(bind_fts_bm25_tree).collect())
+        RetrievalExpr::Composed(children) => {
+            RetrievalExpr::Composed(children.into_iter().map(bind_fts_bm25_tree).collect())
         }
-        OperatorTree::Complement(child) => {
-            OperatorTree::Complement(Box::new(bind_fts_bm25_tree(*child)))
+        RetrievalExpr::Complement(child) => {
+            RetrievalExpr::Complement(Box::new(bind_fts_bm25_tree(*child)))
         }
         other => other,
     }
 }
 
-pub(super) fn common_text_field(tree: &OperatorTree) -> Option<String> {
-    fn collect_fields(tree: &OperatorTree, fields: &mut BTreeSet<Option<String>>) {
+pub(super) fn common_text_field(tree: &RetrievalExpr) -> Option<String> {
+    fn collect_fields(tree: &RetrievalExpr, fields: &mut BTreeSet<Option<String>>) {
         match tree {
-            OperatorTree::Term { field, .. } => {
+            RetrievalExpr::Term { field, .. } => {
                 fields.insert(field.clone());
             }
-            OperatorTree::Intersect(children)
-            | OperatorTree::Union(children)
-            | OperatorTree::Composed(children) => {
+            RetrievalExpr::Intersect(children)
+            | RetrievalExpr::Union(children)
+            | RetrievalExpr::Composed(children) => {
                 for child in children {
                     collect_fields(child, fields);
                 }
             }
-            OperatorTree::Complement(child) => collect_fields(child, fields),
+            RetrievalExpr::Complement(child) => collect_fields(child, fields),
             _ => {}
         }
     }

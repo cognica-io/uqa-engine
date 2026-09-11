@@ -4,18 +4,18 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Engine-owned lowering from the syntax-only FTS AST to retrieval operators.
+//! FTS syntax lowering to logical retrieval expressions.
 
-use uqa_operators::OperatorTree;
-use uqa_sql::{FTSNode, SQLError};
+use super::super::RetrievalExpr;
+use crate::{FTSNode, SQLError};
 
 const VECTOR_K: usize = 10_000;
 
 pub(super) fn compile_query_string(
     query: &str,
     default_field: Option<&str>,
-) -> Result<OperatorTree, SQLError> {
-    let ast = uqa_sql::parse_fts_query_string(query)?;
+) -> Result<RetrievalExpr, SQLError> {
+    let ast = crate::parse_fts_query_string(query)?;
     Ok(compile(&ast, default_field, &tokenize_phrase))
 }
 
@@ -30,7 +30,7 @@ fn compile(
     node: &FTSNode,
     default_field: Option<&str>,
     phrase_tokenizer: &dyn Fn(Option<&str>, &str) -> Vec<String>,
-) -> OperatorTree {
+) -> RetrievalExpr {
     match node {
         FTSNode::Term { field, term } => {
             term_operator(term.clone(), resolve_field(field.as_deref(), default_field))
@@ -40,28 +40,28 @@ fn compile(
             let terms = phrase_tokenizer(resolved.as_deref(), phrase);
             compile_phrase(terms, resolved)
         }
-        FTSNode::Vector { field, values } => OperatorTree::KNN {
+        FTSNode::Vector { field, values } => RetrievalExpr::KNN {
             query_vector: values.clone(),
             k: VECTOR_K,
             field: resolve_field(field.as_deref(), default_field)
                 .unwrap_or_else(|| "embedding".into()),
         },
         FTSNode::And(left, right) => compile_and(left, right, default_field, phrase_tokenizer),
-        FTSNode::Or(left, right) => OperatorTree::Union(vec![
+        FTSNode::Or(left, right) => RetrievalExpr::Union(vec![
             compile(left, default_field, phrase_tokenizer),
             compile(right, default_field, phrase_tokenizer),
         ]),
         FTSNode::Not(operand) => {
-            OperatorTree::Complement(Box::new(compile(operand, default_field, phrase_tokenizer)))
+            RetrievalExpr::Complement(Box::new(compile(operand, default_field, phrase_tokenizer)))
         }
     }
 }
 
-fn compile_phrase(terms: Vec<String>, field: Option<String>) -> OperatorTree {
+fn compile_phrase(terms: Vec<String>, field: Option<String>) -> RetrievalExpr {
     match terms.as_slice() {
-        [] => OperatorTree::Empty,
+        [] => RetrievalExpr::Empty,
         [query] => term_operator(query.clone(), field),
-        _ => OperatorTree::Intersect(
+        _ => RetrievalExpr::Intersect(
             terms
                 .into_iter()
                 .map(|query| term_operator(query, field.clone()))
@@ -75,7 +75,7 @@ fn compile_and(
     right: &FTSNode,
     default_field: Option<&str>,
     phrase_tokenizer: &dyn Fn(Option<&str>, &str) -> Vec<String>,
-) -> OperatorTree {
+) -> RetrievalExpr {
     let mut conjuncts = Vec::new();
     collect_conjuncts(left, &mut conjuncts);
     collect_conjuncts(right, &mut conjuncts);
@@ -102,13 +102,13 @@ fn compile_and(
                 .filter(|conjunct| matches!(conjunct, FTSNode::Vector { .. }))
                 .map(|conjunct| compile(conjunct, default_field, phrase_tokenizer)),
         );
-        return OperatorTree::BayesianEvidenceFusion {
+        return RetrievalExpr::BayesianEvidenceFusion {
             signals,
             base_rate: None,
         };
     }
 
-    OperatorTree::Intersect(vec![
+    RetrievalExpr::Intersect(vec![
         compile(left, default_field, phrase_tokenizer),
         compile(right, default_field, phrase_tokenizer),
     ])
@@ -123,20 +123,19 @@ fn collect_conjuncts<'a>(node: &'a FTSNode, output: &mut Vec<&'a FTSNode>) {
     }
 }
 
-fn intersect_or_single(mut trees: Vec<OperatorTree>) -> OperatorTree {
+fn intersect_or_single(mut trees: Vec<RetrievalExpr>) -> RetrievalExpr {
     if trees.len() == 1 {
         trees.pop().expect("one text tree exists")
     } else {
-        OperatorTree::Intersect(trees)
+        RetrievalExpr::Intersect(trees)
     }
 }
 
-fn term_operator(query: String, field: Option<String>) -> OperatorTree {
-    OperatorTree::Term {
+fn term_operator(query: String, field: Option<String>) -> RetrievalExpr {
+    RetrievalExpr::Term {
         query,
         field,
         scoring: None,
-        top_k: None,
     }
 }
 
@@ -163,15 +162,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn phrase_is_lowered_after_engine_tokenization() {
+    fn phrase_is_lowered_after_whitespace_tokenization() {
         let tree = compile_query_string("body:\"Rust Ferris Crab\"", None).unwrap();
-        let OperatorTree::Intersect(terms) = tree else {
+        let RetrievalExpr::Intersect(terms) = tree else {
             panic!("expected phrase terms to intersect");
         };
         assert_eq!(terms.len(), 3);
         assert!(terms.iter().all(|term| matches!(
             term,
-            OperatorTree::Term {
+            RetrievalExpr::Term {
                 field: Some(field),
                 scoring: None,
                 ..
@@ -185,7 +184,7 @@ mod tests {
             compile_query_string("body:search AND embedding:[0.1, 0.9]", Some("_all")).unwrap();
         assert!(matches!(
             tree,
-            OperatorTree::BayesianEvidenceFusion {
+            RetrievalExpr::BayesianEvidenceFusion {
                 base_rate: None,
                 ..
             }
@@ -199,17 +198,17 @@ mod tests {
             Some("_all"),
         )
         .unwrap();
-        let OperatorTree::BayesianEvidenceFusion { signals, .. } = tree else {
+        let RetrievalExpr::BayesianEvidenceFusion { signals, .. } = tree else {
             panic!("exact hybrid fusion expected");
         };
         assert_eq!(signals.len(), 2);
-        assert!(matches!(&signals[0], OperatorTree::Intersect(parts) if parts.len() == 2));
-        assert!(matches!(&signals[1], OperatorTree::KNN { .. }));
+        assert!(matches!(&signals[0], RetrievalExpr::Intersect(parts) if parts.len() == 2));
+        assert!(matches!(&signals[1], RetrievalExpr::KNN { .. }));
     }
 
     #[test]
-    fn all_field_is_resolved_at_the_engine_boundary() {
+    fn all_field_is_resolved_during_logical_lowering() {
         let tree = compile_query_string("database", Some("_all")).unwrap();
-        assert!(matches!(tree, OperatorTree::Term { field: None, .. }));
+        assert!(matches!(tree, RetrievalExpr::Term { field: None, .. }));
     }
 }

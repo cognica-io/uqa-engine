@@ -13,7 +13,7 @@ pub trait GraphNameCatalog {
     fn list_graphs(&self) -> Result<Vec<String>, SQLError>;
 }
 
-fn default_graph_name(
+pub(crate) fn default_graph_name(
     catalog: &dyn GraphNameCatalog,
     function_name: &str,
 ) -> Result<String, SQLError> {

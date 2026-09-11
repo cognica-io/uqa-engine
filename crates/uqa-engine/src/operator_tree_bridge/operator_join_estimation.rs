@@ -13,8 +13,8 @@ use uqa_planner::{
 use uqa_sql::ast::OperatorJoinRelations;
 
 use super::{
-    engine_query_optimizer, lower_operator_join_table_function, operator_tree_paradigm,
-    DriverResult, Engine, OperatorTree, SQLError, SQLParam, ScalarExpr,
+    engine_query_optimizer, operator_tree_paradigm, DriverResult, Engine, OperatorTree, SQLError,
+    SQLParam, ScalarExpr,
 };
 
 struct OperatorJoinSideEstimate {
@@ -230,7 +230,8 @@ pub(crate) fn estimate_operator_join_table_function(
     args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> DriverResult<uqa_planner::LocalAccessEstimate> {
-    let (relations, tree) =
-        lower_operator_join_table_function(engine, name, relations, args, params)?;
+    let (relations, tree) = engine
+        .retrieval_binding()
+        .lower_join(name, relations, args, params)?;
     estimate_cross_relation_operator_join(engine, &relations, tree)
 }

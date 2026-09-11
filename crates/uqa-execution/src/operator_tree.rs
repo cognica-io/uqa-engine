@@ -613,3 +613,6 @@ pub mod driver;
 
 pub mod joins;
 pub mod runtime;
+
+pub mod binding;
+pub mod instantiate;

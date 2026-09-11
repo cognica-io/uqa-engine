@@ -132,7 +132,6 @@ pub(in crate::sql) use crate::capabilities::routine_invocation::analyze_call_res
 use select::run_explain;
 pub(crate) use select::CteScope;
 pub(crate) use session_portal_worker::start_session_portal_worker;
-pub(crate) use uqa_sql::semantics::expr_is_null_free as expr_is_null_free_public;
 
 /// Analyze the declared RETURNING row type of a rewrite-rule action without executing the action.
 pub(crate) fn analyze_rule_action_returning_schema(

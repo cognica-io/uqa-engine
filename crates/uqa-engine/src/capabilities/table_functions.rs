@@ -69,9 +69,8 @@ impl OperatorJoinBinding for Engine {
         args: &[ScalarExpr],
         params: &[SQLParam],
     ) -> Result<(OperatorJoinRelations, OperatorTree), SQLError> {
-        crate::operator_tree_bridge::lower_operator_join_table_function(
-            self, name, relations, args, params,
-        )
+        self.retrieval_binding()
+            .lower_join(name, relations, args, params)
     }
 }
 impl Engine {
