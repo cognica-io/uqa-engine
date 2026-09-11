@@ -28,10 +28,6 @@ struct ResolvedSequenceGrantTarget {
     kind: &'static str,
 }
 
-pub(crate) use uqa_execution::catalog::security::sequence::{
-    role_can_read_sequence_value, role_can_select_sequence, role_can_view_sequence,
-};
-
 impl Engine {
     pub(crate) fn grant_sequence_privileges(
         &self,

@@ -103,7 +103,6 @@ mod roles;
 mod schema_security;
 mod search;
 mod sequence_catalog;
-mod sequence_introspection;
 mod sequence_ownership;
 mod sequence_security;
 mod sequence_values;
