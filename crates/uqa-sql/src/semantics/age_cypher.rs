@@ -4,34 +4,20 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Apache AGE-compatible SQL table-function adapter for Cypher.
-//!
-//! The graph crate owns parsing and execution. This module maps
-//! PostgreSQL-style `FROM cypher(...) AS (...)` calls onto the
-//! engine's registered graph workspaces and coerces each output
-//! column to its declared SQL type exactly like AGE 1.6.0:
-//! `agtype` columns carry canonical agtype text (vertices render as
-//! `{...}::vertex`, strings stay JSON-quoted), scalar columns coerce
-//! with AGE's cast rules (float -> int rounds half-to-even, strings
-//! re-parse through agtype, entities refuse to cast).
+//! SQL argument rules and result-column conversions for Apache AGE Cypher calls.
 
 use std::collections::BTreeMap;
 
-use uqa_core::Value;
-use uqa_execution::ScalarExpr;
-use uqa_graph::agtype;
-use uqa_sql::SQLError;
+use uqa_core::{agtype, Value};
 
-use crate::Engine;
+use crate::{SQLError, ScalarExpr};
 
-pub(super) fn build_rows(
-    engine: &Engine,
+/// Validate the call shape before any graph state is inspected.
+pub fn analyze_call(
     args: &[ScalarExpr],
     evaluated: &[Value],
-    _qualifier: Option<&str>,
     column_aliases: &[String],
-    column_types: &[String],
-) -> Result<Vec<Vec<Value>>, SQLError> {
+) -> Result<(String, String), SQLError> {
     if !(2..=3).contains(&evaluated.len()) {
         return Err(SQLError::TypeMismatch(
             "cypher requires 2-3 args (graph_name, query_string[, parameters])".into(),
@@ -64,69 +50,16 @@ pub(super) fn build_rows(
             ))
         }
     };
-    if engine.current_transaction_is_read_only() && query_is_mutating(&query)? {
-        return Err(SQLError::Routine {
-            sqlstate: "25006".into(),
-            message: "cannot execute SELECT in a read-only transaction".into(),
-        });
-    }
-    if !engine
-        .has_graph(&graph)
-        .map_err(|err| SQLError::Internal(format!("read graph catalog: {err}")))?
-    {
-        return Err(SQLError::Unsupported(format!(
-            "graph \"{graph}\" does not exist"
-        )));
-    }
-
-    let params = match evaluated.get(2) {
-        Some(value) => parameter_map(value)?,
-        None => BTreeMap::new(),
-    };
-    let (cypher_columns, cypher_rows) =
-        engine
-            .run_cypher(&graph, &query, params)
-            .map_err(|error| match error {
-                uqa_graph::cypher::CypherError::MissingLabelRelation(relation) => {
-                    SQLError::UnknownTable(relation)
-                }
-                uqa_graph::cypher::CypherError::SerializationFailure(message) => {
-                    SQLError::Routine {
-                        sqlstate: "40001".into(),
-                        message,
-                    }
-                }
-                other => SQLError::Unsupported(format!("cypher: {other}")),
-            })?;
-    if !cypher_columns.is_empty() && cypher_columns.len() != column_aliases.len() {
-        return Err(SQLError::TypeMismatch(
-            "return row and column definition list do not match".into(),
-        ));
-    }
-
-    let mut out = Vec::with_capacity(cypher_rows.len());
-    for src in cypher_rows {
-        let mut row = Vec::with_capacity(column_aliases.len());
-        for (idx, target_col) in column_aliases.iter().enumerate() {
-            let value = cypher_columns
-                .get(idx)
-                .and_then(|source_col| src.get(source_col))
-                .cloned()
-                .unwrap_or(Value::Null);
-            let declared = column_types.get(idx).map_or("agtype", String::as_str);
-            let value = coerce_to_column_type(value, declared, target_col)?;
-            row.push(value);
-        }
-        out.push(row);
-    }
-    Ok(out)
+    Ok((graph, query))
 }
-
-pub(super) use uqa_execution::query::graph_effects::query_is_mutating;
 
 /// Coerce one cypher output value to the SQL type declared in the
 /// record definition, following AGE's cast behavior.
-fn coerce_to_column_type(value: Value, declared: &str, column: &str) -> Result<Value, SQLError> {
+pub fn coerce_to_column_type(
+    value: Value,
+    declared: &str,
+    column: &str,
+) -> Result<Value, SQLError> {
     match declared {
         // No type available (plain alias list) behaves like agtype.
         "agtype" | "" => Ok(match value {
@@ -255,14 +188,14 @@ fn is_valid_parameter_expr(expr: &ScalarExpr) -> bool {
     )
 }
 
-fn parameter_map(value: &Value) -> Result<BTreeMap<String, Value>, SQLError> {
+pub fn parameter_map(value: &Value) -> Result<BTreeMap<String, Value>, SQLError> {
     match value {
         Value::Null => Ok(BTreeMap::new()),
         Value::Map(map) => Ok(map.clone()),
         Value::Str(s) | Value::Json(s) | Value::JsonB(s) => {
             let parsed = serde_json::from_str::<serde_json::Value>(s)
                 .map_err(|e| SQLError::TypeMismatch(format!("invalid cypher parameters: {e}")))?;
-            match super::json_to_core_value(parsed) {
+            match crate::assignment::conversion::json_to_core_value(parsed) {
                 Value::Map(map) => Ok(map),
                 _ => Err(SQLError::TypeMismatch(
                     "cypher parameters must be a map".into(),

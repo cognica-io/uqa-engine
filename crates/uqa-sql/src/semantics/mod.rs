@@ -6,6 +6,7 @@
 
 //! SQL semantics shared by static analysis and runtime adapters.
 
+pub mod age_cypher;
 pub mod aggregates;
 mod ctes;
 mod expression_shape;

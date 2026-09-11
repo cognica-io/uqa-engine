@@ -7,7 +7,7 @@
 //! Built-in and registered table-function row dispatch.
 
 use super::{
-    age_cypher, checked_integer_value, doc_id_value, eval_call_arguments, execute_tree_entries,
+    checked_integer_value, doc_id_value, eval_call_arguments, execute_tree_entries,
     expect_optional_graph_value, generate_series_values, graph_betweenness_entries,
     graph_hits_entries, graph_pagerank_entries, json_table_arg, json_table_value_to_text,
     unnest_row_stream, PlanSubqueryArena, SQLError, ScalarEvalContext, SourceEvalContext,
@@ -426,11 +426,10 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
         }
         "cypher" => Ok(TableFunctionRows::materialized(
             column_aliases.to_vec(),
-            age_cypher::build_rows(
+            uqa_execution::query::cypher::build_rows(
                 engine,
                 args,
                 &evaluated,
-                alias,
                 column_aliases,
                 column_types,
             )?,

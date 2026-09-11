@@ -24,7 +24,7 @@
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
-use uqa_core::{Edge, Value, Vertex};
+use crate::{Edge, Value, Vertex};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AgtypeConversionError {
@@ -214,7 +214,7 @@ pub fn agtype_type_name(value: &Value) -> &'static str {
 // Float formatting
 // ---------------------------------------------------------------------
 
-pub use uqa_core::format_float_pg;
+pub use crate::format_float_pg;
 
 /// agtype float rendering: `float8out` plus a trailing `.0` when the
 /// output has no `.` / exponent / special marker, so floats stay

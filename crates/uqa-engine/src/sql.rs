@@ -35,7 +35,6 @@ use uqa_sql::{SQLError, SQLParam, SQLResult};
 
 use crate::Engine;
 
-mod age_cypher;
 mod aggregates;
 mod catalog;
 pub(crate) use catalog::snapshot_table_relation_oid;
@@ -119,9 +118,7 @@ use row_functions::{
     run_age_graph_exists_with_evaluator, run_graph_create_with_evaluator,
     run_graph_drop_with_evaluator,
 };
-use uqa_sql::assignment::conversion::{
-    column_type_name, json_table_arg, json_table_value_to_text, json_to_core_value,
-};
+use uqa_sql::assignment::conversion::{column_type_name, json_table_arg, json_table_value_to_text};
 pub(crate) use uqa_sql::assignment::conversion::{
     convert_value_to_column_type, validate_vector_dimensions,
 };

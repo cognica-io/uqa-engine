@@ -593,6 +593,8 @@ mod column_removal;
 
 mod copy;
 
+mod cypher;
+
 mod maintenance;
 
 mod index_removal;

@@ -33,6 +33,7 @@ pub mod output;
 
 pub mod catalog_expression;
 
+pub mod cypher;
 pub mod graph_effects;
 pub mod retrieval;
 

@@ -85,7 +85,7 @@ The executable dependency policy is stored in [`scripts/workspace-dependency-pol
 
 | Crate | Ownership |
 | --- | --- |
-| `uqa-core` | Canonical relation identities, index catalog rows, values, exact decimal representation and operations, document sets, relations, posting lists, ranked views, generalized postings, predicates, and shared graph value types |
+| `uqa-core` | Canonical relation identities, index catalog rows, values, exact decimal representation and operations, document sets, relations, posting lists, ranked views, generalized postings, predicates, and shared graph value types including agtype envelopes, ordering, and rendering |
 | `uqa-analysis` | Character filters, tokenizers, token filters, analyzers, stemming, and highlighting primitives |
 | `uqa-storage` | Backend-neutral document, inverted, vector, tensor, B-tree, block-max, spatial, catalog, ordered catalog-version migration, and Key/Value contracts |
 | `uqa-storage-sqlite` | SQLite connections, catalog migrations, document and retrieval indexes, transactions, graph persistence, Key/Value storage, encryption, and compressed VFS |
@@ -96,8 +96,8 @@ The executable dependency policy is stored in [`scripts/workspace-dependency-pol
 | `uqa-graph` | Named graph stores, Cypher, RPQ automata, graph algebra, centrality, temporal traversal, and graph indexes |
 | `uqa-joins` | Relational and cross-paradigm join algorithms |
 | `uqa-pg-query` | Imported PostgreSQL 18 `libpg_query` pin used through the `pg_query` library name |
-| `uqa-sql` | Parser frontend, AST, scalar and statement IR, lowering, catalog definitions, name and type binding, routine signature and stored-definition binding, overload ranking, replacement and privilege rules, prepared parameter inference, SQL validation, and value expressions |
-| `uqa-execution` | Physical rows and buffers, runtime scalar evaluation, batches, materialization, spill structures, distinctness, sorting, grouping, windows, joins, and routine definition, invocation, scoped caller-state restoration, and privilege execution |
+| `uqa-sql` | Parser frontend, AST, scalar and statement IR, lowering, catalog definitions, name and type binding, routine signature and stored-definition binding, overload ranking, replacement and privilege rules, prepared parameter inference, Cypher call and result-column rules, SQL validation, and value expressions |
+| `uqa-execution` | Physical rows and buffers, runtime scalar evaluation, batches, materialization, spill structures, distinctness, sorting, grouping, windows, joins, routine definition, invocation, scoped caller-state restoration, privilege execution, and SQL Cypher invocation and result rows |
 | `uqa-planner` | Cardinality, cost, statement statistics, prepared-plan estimates, rewrite-rule input pruning, DPccp join ordering, unified-plan optimization, and physical access selection |
 | `uqa-engine` | Composition, SQL lifecycle, sessions, transactions, restore, publication, and public API |
 | `uqa` | Application facade over `uqa-engine` with the core `Value` type re-exported |
@@ -171,6 +171,7 @@ Responsibility roots remain facades over semantic children rather than line-coun
 | Area | Entry point |
 | --- | --- |
 | Core carriers | [`crates/uqa-core/src/lib.rs`](../../../crates/uqa-core/src/lib.rs) |
+| Shared graph values | [`crates/uqa-core/src/agtype.rs`](../../../crates/uqa-core/src/agtype.rs) |
 | Exact decimal value | [`crates/uqa-core/src/types/decimal`](../../../crates/uqa-core/src/types/decimal) |
 | SQL compiler | [`crates/uqa-sql/src/compiler.rs`](../../../crates/uqa-sql/src/compiler.rs) |
 | SQL value expressions and casting | [`crates/uqa-sql/src/expr`](../../../crates/uqa-sql/src/expr) |
