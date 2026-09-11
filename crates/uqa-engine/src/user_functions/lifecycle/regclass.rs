@@ -10,21 +10,7 @@ use uqa_core::Value;
 use uqa_sql::ast::{ColumnType, CreateFunction, Expr, FunctionBody};
 
 use super::{Engine, SQLError};
-
-pub(super) fn is_regclass(name: &str) -> bool {
-    name.eq_ignore_ascii_case("regclass") || name.eq_ignore_ascii_case("pg_catalog.regclass")
-}
-
-pub(super) fn regclass_oid(expression: &Expr) -> Option<i64> {
-    match expression {
-        Expr::TypedLiteral {
-            value: Value::Int(oid),
-            ty,
-        } if is_regclass(ty) => Some(*oid),
-        Expr::Cast { expr, ty } if is_regclass(ty) => regclass_oid(expr),
-        _ => None,
-    }
-}
+use uqa_sql::routines::lifecycle::relations::is_regclass;
 
 impl Engine {
     fn regclass_base_type(&self, name: &str) -> bool {

@@ -8,7 +8,6 @@
 
 mod ctes;
 use ctes::{collect_cte_relation_dependencies, collect_cte_source_routine_dependencies};
-pub(crate) use uqa_sql::catalog::stored_ast::stored_statement_relation_names;
 pub(crate) use uqa_sql::catalog::stored_ast::visit_stored_statement_merges;
 pub(crate) use uqa_sql::catalog::stored_ast::{
     copy_stored_source_column_shapes, visit_stored_statement_sources,
@@ -32,7 +31,7 @@ use super::{RuleDependencies, RuleRoutineDependency};
 pub(crate) use uqa_sql::catalog::stored_ast::{
     bind_stored_expression_routines, bind_stored_statement_routines,
     expression_references_routine_identity, rewrite_expression_routine_identity,
-    rewrite_statement_routine_identity, statement_references_routine_identity,
+    rewrite_statement_routine_identity,
 };
 
 impl Engine {

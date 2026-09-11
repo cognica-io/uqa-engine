@@ -99,7 +99,7 @@ pub(crate) use triggers::{fire_deferred_constraint_trigger_event, DeferredConstr
 pub(crate) use catalog::query_source_column_names;
 pub(crate) use catalog::{
     foreign_table_relation_oid, plpgsql_catalog, resolve_age_label_relation_name,
-    resolve_bound_regclass_oid, resolve_catalog_column_type, resolve_catalog_column_type_name,
+    resolve_catalog_column_type, resolve_catalog_column_type_name,
     resolve_catalog_domain_type_by_oid, resolve_regclass_kind_by_oid, resolve_regclass_oid,
     resolve_regnamespace_oid, resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid,
     resolve_regtype_oid, resolve_regtype_output, runtime_constraints, schema_object_oid,

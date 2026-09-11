@@ -6,17 +6,14 @@
 
 //! Creation-time binding and lifecycle traversal for routine-owned routine dependencies.
 
-use std::collections::BTreeMap;
-
 use uqa_sql::ast::{CreateFunction, FunctionBody};
 use uqa_sql::SQLError;
 
 use crate::capabilities::RelationLookupMode;
-use crate::{Arc, Engine};
+use crate::Engine;
 
 use super::super::declaration::compile_function_body;
-use super::super::resolution::routine_signature_types;
-use super::{CompiledFunctionBody, RoutineDropTarget, SQLUserFunction};
+use super::CompiledFunctionBody;
 
 #[derive(Clone, Copy)]
 pub(super) enum RoutineCompilationMode {
@@ -166,52 +163,4 @@ impl Engine {
         }
         Ok(changed)
     }
-}
-
-pub(super) fn stored_routine_dependents(
-    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
-    target: &RoutineDropTarget,
-) -> Result<Vec<RoutineDropTarget>, SQLError> {
-    let binding = target.binding();
-    let mut dependents = Vec::new();
-    for (name, overloads) in registry {
-        for function in overloads {
-            if routine_definition_references(&function.def, &binding)? {
-                dependents.push(RoutineDropTarget {
-                    object_id: function.def.object_id,
-                    name: name.clone(),
-                    argument_types: routine_signature_types(&function.def),
-                    is_procedure: function.def.is_procedure,
-                });
-            }
-        }
-    }
-    dependents.retain(|dependent| dependent != target);
-    dependents.sort();
-    dependents.dedup();
-    Ok(dependents)
-}
-
-fn routine_definition_references(
-    def: &CreateFunction,
-    target: &uqa_sql::ast::FunctionBinding,
-) -> Result<bool, SQLError> {
-    for default in def
-        .params
-        .iter()
-        .filter_map(|parameter| parameter.default.as_ref())
-    {
-        if crate::events::expression_references_routine_identity(default, target)? {
-            return Ok(true);
-        }
-    }
-    let FunctionBody::Statements(statements) = &def.body else {
-        return Ok(false);
-    };
-    for statement in statements {
-        if crate::events::statement_references_routine_identity(statement, target)? {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }

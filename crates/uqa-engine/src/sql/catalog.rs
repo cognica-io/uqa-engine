@@ -104,15 +104,6 @@ pub(crate) fn resolve_catalog_column_type(engine: &Engine, type_name: &str) -> O
 pub(crate) fn format_type_value(engine: &Engine, args: &[Value]) -> Result<Value, SQLError> {
     uqa_execution::catalog::projection::format_type_value(&engine.catalog_execution(), args)
 }
-pub(crate) fn resolve_bound_regclass_oid(
-    engine: &Engine,
-    name: &str,
-) -> Result<Option<i64>, SQLError> {
-    uqa_execution::catalog::projection::resolve_bound_regclass_oid(
-        &engine.catalog_execution(),
-        name,
-    )
-}
 pub(crate) fn rename_view_column_query(
     engine: &Engine,
     query: &mut QueryPlan,

@@ -13,4 +13,3 @@ pub(crate) use uqa_sql::binding::view_dependencies::{
 
 #[cfg(test)]
 pub(crate) use uqa_sql::binding::view_dependencies::sequence_function_reference_mut;
-pub(crate) use uqa_sql::routines::function_binding_matches;

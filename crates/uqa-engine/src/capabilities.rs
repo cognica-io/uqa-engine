@@ -531,6 +531,7 @@ mod table_reads;
 mod view_rewrite;
 
 mod routine_execution;
+mod routine_removal;
 
 mod query_sources;
 
