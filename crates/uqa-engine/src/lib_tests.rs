@@ -5,7 +5,6 @@
 //
 
 use super::*;
-use crate::relations::value_to_usize;
 
 fn doc<const N: usize>(pairs: [(&str, Value); N]) -> Document {
     pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()

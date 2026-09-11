@@ -72,3 +72,6 @@ impl IVFIndexParams {
         .validate()
     }
 }
+
+#[cfg(test)]
+mod tests;

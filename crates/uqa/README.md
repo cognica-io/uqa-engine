@@ -339,6 +339,8 @@ Contributor checks, benchmark build gates, and repository conventions are docume
 
 The repository is a Rust workspace with small crates for the algebra, storage, scoring, graph, SQL, planning, execution, engine, CLI, APIs, and language bindings. The full dependency map and ownership rules live in the [system architecture](https://github.com/cognica-io/uqa-engine/blob/v0.2.3/docs/design/architecture.md), keeping this README focused on using the project.
 
+Model training uses shared native execution for Rust and SQL callers: `uqa-execution` converts projected table rows, parses training JSON, invokes `uqa-ml`, and publishes the trained result through Engine’s model transaction boundary. Pure training-input and persisted IVF-parameter tests live with their owning crates. See the [ownership design](https://github.com/cognica-io/uqa-engine/blob/v0.2.3/docs/design/sql-crate-boundaries.md).
+
 ## Contributing
 
 See [CONTRIBUTING.md](https://github.com/cognica-io/uqa-engine/blob/v0.2.3/CONTRIBUTING.md) for local gates, test conventions, crate boundaries, pull request guidelines, and the current contributor-licensing requirement.
