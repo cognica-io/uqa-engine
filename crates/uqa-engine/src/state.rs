@@ -30,8 +30,7 @@ pub(super) struct StorageContext {
 }
 
 pub(crate) use uqa_execution::catalog::security::{
-    DatabaseAclEntry, DatabasePrivileges, DatabaseSecurity, SchemaSecurity, SequenceSecurity,
-    TableSecurity,
+    DatabaseSecurity, SchemaSecurity, SequenceSecurity, TableSecurity,
 };
 
 impl StorageContext {

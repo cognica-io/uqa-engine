@@ -9,8 +9,8 @@
 use uqa_sql::ast::RoleAttribute;
 use uqa_sql::SQLError;
 
-use crate::database_security::DatabaseAclPrivilege;
 use crate::Engine;
+use uqa_sql::catalog::security::database::DatabaseAclPrivilege;
 
 impl Engine {
     /// Open an independent session for a role authenticated by the embedding host. This checks role existence, LOGIN, and database CONNECT privileges; credential verification and connection limits belong to the host's connection manager.

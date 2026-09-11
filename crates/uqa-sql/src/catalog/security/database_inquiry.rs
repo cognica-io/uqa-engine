@@ -4,25 +4,71 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `has_database_privilege` resolution and evaluation.
+//! Database privilege inquiry with ordered identity, catalog and security reads.
 
+use super::database::{
+    parse_privilege_checks, role_has_database_privilege, role_has_database_privilege_check,
+    DatabaseAclPrivilege, DatabaseSecurity,
+};
+use crate::{
+    catalog::{
+        roles::{guards::RoleCatalogGuards, RoleDefinition, RoleReferenceNames},
+        DATABASE_NAME, DATABASE_OID,
+    },
+    SQLError,
+};
 use std::collections::BTreeMap;
+use uqa_core::Value;
 
-use super::acl::{parse_privilege_checks, role_has_database_privilege_check};
-use super::{Engine, RoleDefinition, SQLError, DATABASE_NAME, DATABASE_OID};
-use crate::Value;
+pub type DatabaseSecurityRead<'a> = Box<dyn std::ops::Deref<Target = DatabaseSecurity> + 'a>;
 
-impl Engine {
-    pub(crate) fn has_database_privilege_value(
+pub trait DatabasePrivilegeCatalog {
+    fn refresh_privilege_catalog(&self) -> Result<(), SQLError>;
+    fn security(&self) -> DatabaseSecurityRead<'_>;
+}
+
+pub struct DatabasePrivilegeInquiry<'a> {
+    pub catalog: &'a dyn DatabasePrivilegeCatalog,
+    pub names: &'a dyn RoleReferenceNames,
+    pub roles: &'a dyn RoleCatalogGuards,
+}
+
+impl DatabasePrivilegeInquiry<'_> {
+    pub fn ensure_database_privilege(
         &self,
-        arguments: &[Value],
-    ) -> Result<Value, SQLError> {
+        role: &str,
+        privilege: DatabaseAclPrivilege,
+    ) -> Result<(), SQLError> {
+        if role_has_database_privilege(
+            &self.catalog.security(),
+            role,
+            privilege,
+            &self.roles.role_definitions(),
+            &self.roles.role_memberships(),
+        ) {
+            return Ok(());
+        }
+        let message = match privilege {
+            DatabaseAclPrivilege::Temporary => {
+                format!(
+                    "permission denied to create temporary tables in database \"{DATABASE_NAME}\""
+                )
+            }
+            DatabaseAclPrivilege::Connect | DatabaseAclPrivilege::Create => {
+                format!("permission denied for database {DATABASE_NAME}")
+            }
+        };
+        Err(SQLError::Routine {
+            sqlstate: "42501".into(),
+            message,
+        })
+    }
+
+    pub fn has_database_privilege_value(&self, arguments: &[Value]) -> Result<Value, SQLError> {
         if arguments.iter().any(|argument| argument == &Value::Null) {
             return Ok(Value::Null);
         }
-        self.synchronize_catalog_registries().map_err(|error| {
-            SQLError::Internal(format!("load database privileges for inquiry: {error}"))
-        })?;
+        self.catalog.refresh_privilege_catalog()?;
         let (subject_value, database_value, privilege_value) = match arguments {
             [database, privilege] => (None, database, privilege),
             [subject, database, privilege] => (Some(subject), database, privilege),
@@ -34,9 +80,11 @@ impl Engine {
                 })
             }
         };
-        let current_user = subject_value.is_none().then(|| self.current_user_name());
+        let current_user = subject_value
+            .is_none()
+            .then(|| self.names.current_user_name());
         let subject = {
-            let roles = self.durable.roles.read();
+            let roles = self.roles.role_definitions();
             subject_value.map_or_else(
                 || Ok(current_user),
                 |value| resolve_database_privilege_role(value, &roles),
@@ -52,12 +100,12 @@ impl Engine {
             }
         };
         let checks = parse_privilege_checks(privilege)?;
-        let roles = self.durable.roles.read();
-        let memberships = self.durable.role_memberships.read();
+        let roles = self.roles.role_definitions();
+        let memberships = self.roles.role_memberships();
         let subject_is_superuser = subject.as_ref().is_some_and(|subject| {
             roles
                 .get(subject)
-                .is_some_and(|role| role.has(uqa_sql::ast::RoleAttribute::Superuser))
+                .is_some_and(|role| role.has(crate::ast::RoleAttribute::Superuser))
         });
         if !database_exists {
             return if subject_is_superuser {
@@ -69,7 +117,7 @@ impl Engine {
         let Some(subject) = subject else {
             return Ok(Value::Bool(false));
         };
-        let security = self.durable.database_security.read();
+        let security = self.catalog.security();
         Ok(Value::Bool(checks.into_iter().any(|check| {
             role_has_database_privilege_check(&security, &subject, check, &roles, &memberships)
         })))

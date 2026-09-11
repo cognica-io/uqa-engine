@@ -72,7 +72,10 @@ impl SchemaAuthority for Engine {
         Engine::current_user_is_superuser(self)
     }
     fn ensure_database_create(&self, role: &str) -> Result<(), SQLError> {
-        self.ensure_database_privilege(role, crate::database_security::DatabaseAclPrivilege::Create)
+        self.ensure_database_privilege(
+            role,
+            uqa_sql::catalog::security::database::DatabaseAclPrivilege::Create,
+        )
     }
 }
 impl SchemaRegistrationState for MutationCoordinator<'_> {

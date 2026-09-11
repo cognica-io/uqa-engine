@@ -621,3 +621,5 @@ mod graph_lifecycle;
 mod sequence_introspection;
 
 mod schema_privileges;
+
+mod database_privileges;
