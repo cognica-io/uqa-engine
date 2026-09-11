@@ -130,3 +130,6 @@ pub fn require_set_role(
         message: format!("must be able to SET ROLE \"{target}\""),
     })
 }
+
+pub mod guards;
+pub mod inquiry;

@@ -589,39 +589,7 @@ impl Engine {
     }
 
     pub(crate) fn pg_has_role_value(&self, arguments: &[Value]) -> Result<Value, SQLError> {
-        if arguments.iter().any(|argument| argument == &Value::Null) {
-            return Ok(Value::Null);
-        }
-        let (subject_value, target_value, privilege_value) = match arguments {
-            [target, privilege] => (None, target, privilege),
-            [subject, target, privilege] => (Some(subject), target, privilege),
-            _ => {
-                return Err(SQLError::BadArity {
-                    name: "pg_has_role".into(),
-                    expected: "2 or 3".into(),
-                    actual: arguments.len(),
-                });
-            }
-        };
-        let current_user = subject_value.is_none().then(|| self.current_user_name());
-        let roles = self.durable.roles.read();
-        let subject = subject_value.map_or_else(
-            || Ok(current_user),
-            |value| resolve_pg_has_role_identifier(value, &roles),
-        )?;
-        let target = resolve_pg_has_role_identifier(target_value, &roles)?;
-        let privileges = parse_pg_has_role_privileges(role_privilege_text(privilege_value)?)?;
-        let memberships = self.durable.role_memberships.read();
-        let allowed = privileges.into_iter().any(|privilege| {
-            pg_has_role_privilege(
-                &roles,
-                &memberships,
-                subject.as_deref(),
-                target.as_deref(),
-                privilege,
-            )
-        });
-        Ok(Value::Bool(allowed))
+        uqa_sql::catalog::roles::inquiry::pg_has_role_value(self, self, arguments)
     }
 
     fn persist_roles_snapshot(
@@ -784,7 +752,6 @@ fn database_depends_on_role(security: &crate::state::DatabaseSecurity, role: &st
 mod memberships;
 use memberships::{
     apply_grant_role_statement, insert_membership, insufficient_privilege,
-    parse_pg_has_role_privileges, pg_has_role_privilege, require_role_attribute_authority,
-    resolve_pg_has_role_identifier, role_has_admin, role_is_superuser, role_privilege_text,
+    require_role_attribute_authority, role_has_admin, role_is_superuser,
 };
 pub(crate) use memberships::{role_can_set, role_inherits};
