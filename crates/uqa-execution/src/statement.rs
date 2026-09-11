@@ -6,6 +6,8 @@
 
 //! SQL statement execution, transaction boundaries, and batch scheduling.
 
+pub mod batch;
+pub mod cursor;
 pub mod transactions;
 
 pub mod context;

@@ -7,7 +7,6 @@
 //! Compose planner and SQL plan-effect analysis for the active session.
 
 use crate::Engine;
-pub(super) use uqa_sql::semantics::effects::is_transaction_control;
 use uqa_sql::{plan::QueryPlan, SQLError};
 
 pub(super) fn query_may_mutate_engine(engine: &Engine, plan: &QueryPlan) -> Result<bool, SQLError> {

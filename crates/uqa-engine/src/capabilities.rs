@@ -646,4 +646,5 @@ mod view_removal;
 
 pub(crate) mod truncate;
 
+mod batch;
 mod statements;

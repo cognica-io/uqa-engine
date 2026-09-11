@@ -79,7 +79,11 @@ impl RoutineStatements for Engine {
         crate::sql::execute_compiled_statement(self, statement, params)
     }
     fn execute_text(&self, text: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
-        crate::sql::execute_nested(self, text, params)
+        uqa_execution::statement::batch::execute_nested(
+            &self.batch_execution_context(),
+            text,
+            params,
+        )
     }
     fn optimize_plan(&self, plan: UnifiedPlan) -> Result<UnifiedPlan, SQLError> {
         crate::sql::optimize_engine_plan(self, plan)

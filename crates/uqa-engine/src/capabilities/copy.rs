@@ -69,6 +69,6 @@ impl CopyStatements for Engine {
         crate::sql::execute_compiled_statement(self, statement, params)
     }
     fn execute_text(&self, text: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
-        crate::sql::execute(self, text, params)
+        uqa_execution::statement::batch::execute(&self.batch_execution_context(), text, params)
     }
 }

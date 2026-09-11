@@ -24,6 +24,8 @@ use crate::ir::{ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, Sc
 
 mod command_children;
 mod model;
+mod optimization;
+pub use optimization::ExecutablePlanOptimizer;
 mod query;
 mod rewrite;
 mod scalar;

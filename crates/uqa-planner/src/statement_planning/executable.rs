@@ -25,6 +25,16 @@ pub struct StatementPlanningContext<'a> {
     pub constant_evaluator: ConstantEvaluator,
 }
 
+impl uqa_sql::plan::ExecutablePlanOptimizer for StatementPlanningContext<'_> {
+    fn plan_for_execution(
+        &self,
+        plan: UnifiedPlan,
+        params: &[SQLParam],
+    ) -> Result<UnifiedPlan, SQLError> {
+        plan_for_execution(self, plan, params)
+    }
+}
+
 pub fn plan_for_execution(
     context: &StatementPlanningContext<'_>,
     plan: UnifiedPlan,

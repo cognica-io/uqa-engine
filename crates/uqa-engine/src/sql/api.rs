@@ -6,10 +6,7 @@
 
 use uqa_execution::ColumnarBatch;
 
-use super::{
-    cursor, execute, execute_nested, Engine, SQLCursor, SQLCursorSummary, SQLError, SQLParam,
-    SQLResult,
-};
+use super::{Engine, SQLCursor, SQLCursorSummary, SQLError, SQLParam, SQLResult};
 
 struct SQLExecutionScope<'a> {
     depth: &'a std::sync::atomic::AtomicUsize,
@@ -70,7 +67,13 @@ impl Engine {
         self.synchronize_catalog_registries().map_err(|error| {
             SQLError::Internal(format!("refresh durable catalog registries: {error}"))
         })?;
-        super::driver::execute_simple_query(self, query, params, nested, &mut consume)
+        uqa_execution::statement::batch::execute_simple_query(
+            &self.batch_execution_context(),
+            query,
+            params,
+            nested,
+            &mut consume,
+        )
     }
 
     /// Run a single SQL statement against the engine.
@@ -85,9 +88,13 @@ impl Engine {
             SQLError::Internal(format!("refresh durable catalog registries: {err}"))
         })?;
         if nested {
-            execute_nested(self, query, params)
+            uqa_execution::statement::batch::execute_nested(
+                &self.batch_execution_context(),
+                query,
+                params,
+            )
         } else {
-            execute(self, query, params)
+            uqa_execution::statement::batch::execute(&self.batch_execution_context(), query, params)
         }
     }
 
@@ -105,7 +112,7 @@ impl Engine {
         self.synchronize_catalog_registries().map_err(|err| {
             SQLError::Internal(format!("refresh durable catalog registries: {err}"))
         })?;
-        cursor::execute(self, query, params)
+        uqa_execution::statement::cursor::execute(&self.batch_execution_context(), query, params)
     }
 
     /// Consume the bounded cursor synchronously without retaining batches.
