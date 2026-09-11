@@ -78,12 +78,7 @@ pub trait GraphNeighborLookup: Send + Sync {
     ) -> StorageBackendResult<Vec<u64>>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Direction {
-    Out,
-    In,
-    Both,
-}
+pub use uqa_core::retrieval::Direction;
 
 impl ExecutionContext {
     pub fn new() -> Self {

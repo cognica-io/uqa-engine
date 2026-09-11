@@ -65,8 +65,9 @@ pub(in crate::sql) fn execute_function_with_top_k(
         | FunctionKind::GraphEdges
         | FunctionKind::AttentionFusion
         | FunctionKind::LearnedFusion => {
-            let tree =
-                crate::operator_tree_bridge::lower_sql_function_bound(engine, name, args, params)?;
+            let tree = engine
+                .retrieval_binding()
+                .lower_function(name, args, params)?;
             let tree = match top_k {
                 Some(k) => plan_bound_text_top_k(engine, table, tree, k)?,
                 None => tree,

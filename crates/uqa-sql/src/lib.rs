@@ -73,3 +73,5 @@ pub use uqa_core::RelationIdentity;
 pub mod assignment;
 
 pub mod maintenance;
+
+pub mod retrieval;

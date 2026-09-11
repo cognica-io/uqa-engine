@@ -11,7 +11,8 @@ use super::{
     lower_calibrated_vector_match, lower_graph_function, lower_learned_fusion,
     lower_multi_field_match, lower_operator_arg, lower_positive_evidence_pool,
     lower_staged_retrieval, try_lower_attention_fusion, try_lower_fts_match, try_lower_knn_match,
-    try_lower_text_match, BinaryOp, OperatorTree, Predicate, SQLParam, ScalarExpr, TextScoringMode,
+    try_lower_text_match, BinaryOp, Predicate, RetrievalConstants, RetrievalExpr, ScalarExpr,
+    TextScoringMode,
 };
 
 /// Build document-level SQL Boolean algebra without weakening the carrier
@@ -19,7 +20,10 @@ use super::{
 /// their `GraphPostingList` carrier and its explicit subgraph merge policy.
 /// Only a heterogeneous SQL predicate inserts the lossless Phi codec at each
 /// graph/document boundary.
-pub(super) fn lower_document_boolean(mut children: Vec<OperatorTree>, union: bool) -> OperatorTree {
+pub(super) fn lower_document_boolean(
+    mut children: Vec<RetrievalExpr>,
+    union: bool,
+) -> RetrievalExpr {
     let graph_children = children
         .iter()
         .filter(|child| tree_returns_graph(child))
@@ -29,7 +33,7 @@ pub(super) fn lower_document_boolean(mut children: Vec<OperatorTree>, union: boo
             .into_iter()
             .map(|child| {
                 if tree_returns_graph(&child) {
-                    OperatorTree::EncodeGraphPosting {
+                    RetrievalExpr::EncodeGraphPosting {
                         source: Box::new(child),
                     }
                 } else {
@@ -39,29 +43,24 @@ pub(super) fn lower_document_boolean(mut children: Vec<OperatorTree>, union: boo
             .collect();
     }
     if union {
-        OperatorTree::Union(children)
+        RetrievalExpr::Union(children)
     } else {
-        OperatorTree::Intersect(children)
+        RetrievalExpr::Intersect(children)
     }
 }
 
-pub(super) fn tree_returns_graph(tree: &OperatorTree) -> bool {
+pub(super) fn tree_returns_graph(tree: &RetrievalExpr) -> bool {
     match tree {
-        OperatorTree::Traverse { .. }
-        | OperatorTree::PatternMatch { .. }
-        | OperatorTree::RegularPathQuery { .. }
-        | OperatorTree::WeightedPathQuery { .. }
-        | OperatorTree::MessagePassing { .. }
-        | OperatorTree::GraphEmbedding { .. }
-        | OperatorTree::PageRank { .. }
-        | OperatorTree::HITS { .. }
-        | OperatorTree::BetweennessCentrality { .. }
-        | OperatorTree::TemporalTraverse { .. }
-        | OperatorTree::TemporalPatternMatch { .. } => true,
-        OperatorTree::Intersect(children) | OperatorTree::Union(children) => {
+        RetrievalExpr::Traverse { .. }
+        | RetrievalExpr::RegularPathQuery { .. }
+        | RetrievalExpr::PageRank { .. }
+        | RetrievalExpr::HITS { .. }
+        | RetrievalExpr::BetweennessCentrality { .. }
+        | RetrievalExpr::TemporalTraverse { .. } => true,
+        RetrievalExpr::Intersect(children) | RetrievalExpr::Union(children) => {
             !children.is_empty() && children.iter().all(tree_returns_graph)
         }
-        OperatorTree::Composed(children) => children.last().is_some_and(tree_returns_graph),
+        RetrievalExpr::Composed(children) => children.last().is_some_and(tree_returns_graph),
         _ => false,
     }
 }
@@ -69,46 +68,48 @@ pub(super) fn tree_returns_graph(tree: &OperatorTree) -> bool {
 pub(super) fn lower_function(
     name: &str,
     args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Option<OperatorTree> {
+    constants: &RetrievalConstants<'_>,
+) -> Option<RetrievalExpr> {
     let lower = name.to_ascii_lowercase();
     match lower.as_str() {
         "text_match" => {
-            try_lower_text_match("text_match", args, params, TextScoringMode::BM25).ok()
+            try_lower_text_match("text_match", args, constants, TextScoringMode::BM25).ok()
         }
         "bayesian_match" => try_lower_text_match(
             "bayesian_match",
             args,
-            params,
+            constants,
             TextScoringMode::BayesianBM25,
         )
         .ok(),
-        "fts_match" => try_lower_fts_match(args, params).ok(),
-        "bayesian_match_with_prior" => lower_bayesian_match_with_prior(args, params),
-        "calibrated_vector_match" => lower_calibrated_vector_match(args, params),
+        "fts_match" => try_lower_fts_match(args, constants).ok(),
+        "bayesian_match_with_prior" => lower_bayesian_match_with_prior(args, constants),
+        "calibrated_vector_match" => lower_calibrated_vector_match(args, constants),
         // Standalone knn_match preserves raw cosine similarities;
         // calibration to (0, 1) only fires inside fusion contexts.
-        "knn_match" => try_lower_knn_match(args, params).ok(),
-        "fuse_bayesian_evidence" | "fuse_log_odds" => lower_bayesian_evidence_fusion(args, params),
-        "pool_positive_evidence" => lower_positive_evidence_pool(args, params),
-        "multi_field_match" => lower_multi_field_match(args, params),
-        "staged_retrieval" => lower_staged_retrieval(args, params),
-        "attention" | "fuse_attention" | "fuse_multihead" => {
-            try_lower_attention_fusion(&lower, args, params).ok()
+        "knn_match" => try_lower_knn_match(args, constants).ok(),
+        "fuse_bayesian_evidence" | "fuse_log_odds" => {
+            lower_bayesian_evidence_fusion(args, constants)
         }
-        "learned_fusion" | "fuse_learned" => lower_learned_fusion(args, params),
+        "pool_positive_evidence" => lower_positive_evidence_pool(args, constants),
+        "multi_field_match" => lower_multi_field_match(args, constants),
+        "staged_retrieval" => lower_staged_retrieval(args, constants),
+        "attention" | "fuse_attention" | "fuse_multihead" => {
+            try_lower_attention_fusion(&lower, args, constants).ok()
+        }
+        "learned_fusion" | "fuse_learned" => lower_learned_fusion(args, constants),
         "sparse_threshold" => {
             if args.len() != 2 {
                 return None;
             }
-            let source = lower_operator_arg(args.first()?, params)?;
-            let threshold = const_f64(args.get(1)?, params)?;
-            Some(OperatorTree::SparseThreshold {
+            let source = lower_operator_arg(args.first()?, constants)?;
+            let threshold = const_f64(args.get(1)?, constants)?;
+            Some(RetrievalExpr::SparseThreshold {
                 source: Box::new(source),
                 threshold,
             })
         }
-        _ => lower_graph_function(&lower, args, params),
+        _ => lower_graph_function(&lower, args, constants),
     }
 }
 
@@ -116,8 +117,8 @@ pub(super) fn lower_comparison(
     op: BinaryOp,
     lhs: &ScalarExpr,
     rhs: &ScalarExpr,
-    params: &[SQLParam],
-) -> Option<OperatorTree> {
+    constants: &RetrievalConstants<'_>,
+) -> Option<RetrievalExpr> {
     // Allow either `col OP literal` or `literal OP col` (we normalise).
     let (col_expr, val_expr, swap) = match (column_name(lhs), column_name(rhs)) {
         (Some(_), _) => (lhs, rhs, false),
@@ -125,7 +126,7 @@ pub(super) fn lower_comparison(
         _ => return None,
     };
     let field = column_name(col_expr)?;
-    let value = const_value(val_expr, params)?;
+    let value = const_value(val_expr, constants)?;
     let predicate = match (op, swap) {
         (BinaryOp::Equal, _) => Predicate::Equals(value),
         (BinaryOp::NotEqual, _) => Predicate::NotEquals(value),
@@ -139,7 +140,7 @@ pub(super) fn lower_comparison(
         }
         _ => return None,
     };
-    Some(OperatorTree::Filter {
+    Some(RetrievalExpr::Filter {
         field,
         predicate,
         source: None,

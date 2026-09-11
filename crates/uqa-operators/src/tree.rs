@@ -18,6 +18,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+pub use uqa_core::retrieval::{ExternalPriorMode, GatingSpec, MultiStageCutoff, TemporalFilterIR};
 use uqa_core::{Predicate, Value};
 
 use crate::aggregation::AggregationMonoid;
@@ -218,22 +219,6 @@ pub enum ProbBoolMode {
     Or,
 }
 
-#[derive(Clone, Debug)]
-pub enum GatingSpec {
-    /// Lucene-compatible softplus gating.
-    Softplus,
-    /// Raw signal score scales the fused logit.
-    Pass,
-    /// Sigmoid gating with the named feature.
-    Sigmoid { feature: String },
-    /// `ReLU` gate.
-    ReLU,
-    /// Swish gate.
-    Swish,
-    /// GELU gate.
-    Gelu,
-}
-
 /// Neighborhood reduction used by a graph-aware deep-fusion propagation
 /// layer. This lives in the algebra crate so the IR does not depend on the ML
 /// runtime crate.
@@ -280,13 +265,6 @@ pub enum TextTopKStrategy {
 pub struct TextTopKPlan {
     pub k: usize,
     pub strategy: TextTopKStrategy,
-}
-
-/// External document prior used by [`OperatorTree::BayesianMatchWithPrior`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ExternalPriorMode {
-    Authority,
-    Recency,
 }
 
 /// Concrete logical operator tree used by planning and rewrite passes.
@@ -626,15 +604,6 @@ pub struct MultiStageEntry {
     pub cutoff: MultiStageCutoff,
 }
 
-/// Candidate cutoff for one stage of a multi-stage cascade.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum MultiStageCutoff {
-    /// Top-K results -- final cardinality is `k`.
-    TopK(usize),
-    /// Fractional cutoff -- final cardinality is `n * ratio`.
-    Ratio(f64),
-}
-
 /// One stage of a [`OperatorTree::ProgressiveFusion`].
 #[derive(Clone)]
 pub struct ProgressiveFusionEntry {
@@ -680,15 +649,6 @@ pub enum DeepFusionLayer {
     Dropout {
         probability: f64,
     },
-}
-
-/// Tree-local view of a temporal filter. The filter accepts
-/// either an exact timestamp or a `[low, high]` time range; both can
-/// be present simultaneously.
-#[derive(Clone, Debug, Default)]
-pub struct TemporalFilterIR {
-    pub timestamp: Option<f64>,
-    pub time_range: Option<(f64, f64)>,
 }
 
 impl OperatorTree {

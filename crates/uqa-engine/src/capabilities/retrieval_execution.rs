@@ -48,3 +48,14 @@ impl VectorPoolRetrieval for Engine {
         self.query_pool_vector_search_leaf(table, field, query_vector, k)
     }
 }
+
+impl Engine {
+    pub(crate) fn retrieval_binding(
+        &self,
+    ) -> uqa_execution::operator_tree::binding::RetrievalBinding<'_> {
+        uqa_execution::operator_tree::binding::RetrievalBinding {
+            hook: self,
+            graphs: self,
+        }
+    }
+}
