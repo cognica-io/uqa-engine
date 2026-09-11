@@ -26,7 +26,6 @@ mod schemas;
 mod settings;
 mod settings_parse;
 mod views;
-pub(crate) use views::catalog_view_row;
 
 use analyze_helpers::{build_histogram, build_mcv, collect_analyze_values, distinct_count};
 use settings_parse::parse_search_path_list;

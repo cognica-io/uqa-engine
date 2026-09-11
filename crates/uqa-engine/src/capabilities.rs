@@ -663,3 +663,5 @@ mod foreign_creation;
 mod foreign_definitions;
 
 mod foreign_catalog;
+
+mod table_grants;

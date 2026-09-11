@@ -12,8 +12,6 @@ use super::{QueryPlan, RelationIdentity, StorageBackendError, StorageBackendResu
 #[cfg(test)]
 use uqa_sql::binding::view_dependencies::restoration::bind_stored_view_relations;
 
-pub(crate) use uqa_execution::catalog::view::catalog_view_row;
-
 impl Engine {
     #[cfg(test)]
     pub(super) fn bind_stored_view_plan(

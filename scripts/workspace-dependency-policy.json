@@ -246,7 +246,11 @@
         "src/events/persistence.rs",
         "src/events/rule_binding.rs",
         "src/events/rule_condition_binding.rs",
-        "src/fdw/schema.rs"
+        "src/fdw/schema.rs",
+        "src/capabilities/statements/definitions.rs",
+        "src/table_security/grants.rs",
+        "src/table_security/acl.rs",
+        "src/table_security/columns.rs"
       ]
     },
     "crates/uqa-storage": {
