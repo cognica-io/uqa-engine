@@ -255,7 +255,8 @@
         "src/table_security.rs",
         "src/sequence_ownership.rs",
         "src/table_storage/dependencies/sequences.rs",
-        "src/sequences/dependencies.rs"
+        "src/sequences/dependencies.rs",
+        "src/sequence_values.rs"
       ]
     },
     "crates/uqa-storage": {
