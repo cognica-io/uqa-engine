@@ -13,10 +13,10 @@ mod registration;
 mod restoration;
 
 use super::{
-    bind_query_plan_relations, bind_query_plan_sequence_references,
-    canonical_virtual_relation_reference, query_plan_references_relation,
-    query_plan_references_sequence, Engine, QueryPlan, RelationIdentity, SQLError,
-    StorageBackendError, StorageBackendResult, StoredView, StoredViewKind,
+    bind_query_plan_relations, canonical_virtual_relation_reference,
+    query_plan_references_relation, query_plan_references_sequence, Engine, QueryPlan,
+    RelationIdentity, SQLError, StorageBackendError, StorageBackendResult, StoredView,
+    StoredViewKind,
 };
 use uqa_sql::ast::FunctionBinding;
 
@@ -210,13 +210,16 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         bind_stored_view_relations(plan, relations)?;
         let mut refreshed = false;
-        bind_query_plan_sequence_references(plan, &mut |reference| {
-            if !refreshed {
-                self.refresh_sequences_from_catalog()?;
-                refreshed = true;
-            }
-            self.resolve_stored_sequence_reference_from_loaded_registry(reference)
-        })
+        uqa_sql::binding::view_dependencies::bind_query_plan_sequence_references(
+            plan,
+            &mut |reference| {
+                if !refreshed {
+                    self.refresh_sequences_from_catalog()?;
+                    refreshed = true;
+                }
+                self.resolve_stored_sequence_reference_from_loaded_registry(reference)
+            },
+        )
     }
 
     pub fn drop_view(&self, name: &str) -> Result<bool, SQLError> {

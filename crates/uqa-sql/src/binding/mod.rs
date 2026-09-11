@@ -967,6 +967,7 @@ mod fixture;
 pub mod correlation;
 
 pub mod stored_columns;
+pub mod stored_relations;
 pub mod stored_routines;
 
 pub mod scoped_types;

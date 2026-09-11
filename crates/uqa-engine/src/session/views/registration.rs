@@ -7,132 +7,13 @@
 //! Regular-view creation, source binding, and replacement validation.
 
 use super::{
-    bind_query_plan_relations, bind_query_plan_sequence_references,
-    canonical_virtual_relation_reference, catalog_view_row, create_view_output_columns,
-    named_view_schema, validate_replacement_schema, Engine, QueryPlan, RelationIdentity, SQLError,
-    StoredView, StoredViewKind, ViewRegistration,
+    catalog_view_row, create_view_output_columns, named_view_schema, validate_replacement_schema,
+    Engine, QueryPlan, RelationIdentity, SQLError, StoredView, StoredViewKind, ViewRegistration,
 };
-
-fn resolve_loaded_sequence_reference_for_query_binding(
-    engine: &Engine,
-    reference: &str,
-) -> crate::StorageBackendResult<String> {
-    let sequences = engine.durable.sequences.read();
-    engine
-        .relation_lookup_candidates(reference)?
-        .into_iter()
-        .find(|candidate| sequences.contains_key(candidate))
-        .map(|candidate| candidate.qualified_name())
-        .ok_or_else(|| {
-            crate::StorageBackendError::Other(format!("Sequence `{reference}` does not exist"))
-        })
-}
 
 impl Engine {
     pub(super) fn bind_view_plan_for_create(&self, plan: &mut QueryPlan) -> Result<bool, SQLError> {
         self.bind_stored_query_relations(plan, "CREATE VIEW", true)
-    }
-
-    /// Bind the relation identities owned by a stored SQL query. The resulting plan no longer participates in the executing session's relation namespace.
-    pub(crate) fn bind_stored_query_relations(
-        &self,
-        plan: &mut QueryPlan,
-        context: &str,
-        reject_transition_relations: bool,
-    ) -> Result<bool, SQLError> {
-        self.bind_stored_query_relations_with_loaded_catalog(
-            plan,
-            context,
-            reject_transition_relations,
-            false,
-        )
-    }
-
-    /// Bind a stored query while catalog restoration already owns the synchronization boundary.
-    pub(crate) fn bind_loaded_stored_query_relations(
-        &self,
-        plan: &mut QueryPlan,
-        context: &str,
-        reject_transition_relations: bool,
-    ) -> Result<bool, SQLError> {
-        self.bind_stored_query_relations_with_loaded_catalog(
-            plan,
-            context,
-            reject_transition_relations,
-            true,
-        )
-    }
-
-    fn bind_stored_query_relations_with_loaded_catalog(
-        &self,
-        plan: &mut QueryPlan,
-        context: &str,
-        reject_transition_relations: bool,
-        loaded_catalog: bool,
-    ) -> Result<bool, SQLError> {
-        let temporary_schema = self.temporary_schema_name();
-        let transition_relations = crate::sql::active_trigger_transition_relation_names();
-        let mut uses_temporary_relation = false;
-        bind_query_plan_relations(plan, &std::collections::BTreeSet::new(), &mut |reference| {
-            // Catalog relations win for their supported spellings just
-            // as they do in FROM execution (notably unqualified
-            // `pg_class`). Explicit user schemas remain ordinary catalog
-            // identities.
-            if let Some(canonical) = canonical_virtual_relation_reference(reference) {
-                return Ok(canonical);
-            }
-            if let Some(canonical) = crate::sql::resolve_age_label_relation_name(self, reference)? {
-                return Ok(canonical);
-            }
-            if RelationIdentity::parse_reference(reference)
-                .ok()
-                .is_some_and(|(schema, relation)| {
-                    schema.is_none() && transition_relations.contains(&relation)
-                })
-            {
-                if reject_transition_relations {
-                    return Err(SQLError::Routine {
-                        sqlstate: "0A000".into(),
-                        message: "transition tables cannot be referenced in a view definition"
-                            .into(),
-                    });
-                }
-                return Ok(reference.to_string());
-            }
-            let resolved = if loaded_catalog {
-                self.resolve_loaded_visible_relation_kind(reference)?
-                    .into_found()
-            } else {
-                self.try_resolve_visible_relation_kind(reference)?
-            };
-            match resolved {
-                Some((canonical, "table" | "view" | "materialized view" | "foreign table")) => {
-                    uses_temporary_relation |= RelationIdentity::from_legacy_name(&canonical)
-                        .is_ok_and(|relation| relation.schema == temporary_schema);
-                    Ok(canonical)
-                }
-                Some((canonical, kind)) => Err(SQLError::Routine {
-                    sqlstate: "42809".into(),
-                    message: format!(
-                        "{context} source \"{canonical}\" is a {kind}, not a row relation"
-                    ),
-                }),
-                None => Err(SQLError::UnknownTable(reference.to_string())),
-            }
-        })?;
-        bind_query_plan_sequence_references(plan, &mut |reference| {
-            let resolved = if loaded_catalog {
-                resolve_loaded_sequence_reference_for_query_binding(self, reference)
-            } else {
-                self.resolve_sequence_reference_for_binding(reference)
-            };
-            resolved.map_err(|error| {
-                SQLError::Unsupported(format!(
-                    "{context} sequence reference `{reference}`: {error}"
-                ))
-            })
-        })?;
-        Ok(uses_temporary_relation)
     }
 
     pub fn register_view(

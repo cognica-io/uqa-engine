@@ -60,6 +60,7 @@
         "crates/uqa-engine/src/capabilities/sequences.rs",
         "crates/uqa-engine/src/capabilities/statement_effects.rs",
         "crates/uqa-engine/src/capabilities/stored_columns.rs",
+        "crates/uqa-engine/src/capabilities/stored_relations.rs",
         "crates/uqa-engine/src/capabilities/table_alteration.rs",
         "crates/uqa-engine/src/capabilities/table_creation.rs",
         "crates/uqa-engine/src/capabilities/table_reads.rs",

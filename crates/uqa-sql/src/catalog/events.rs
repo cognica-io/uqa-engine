@@ -112,6 +112,7 @@ pub type RuleCatalog = std::collections::BTreeMap<
     uqa_core::RelationIdentity,
     std::collections::BTreeMap<String, StoredRule>,
 >;
+pub mod dependencies;
 pub mod renames;
 
 pub fn synchronize_rule_sql_text(definition: &mut CreateRule) -> Result<(), SQLError> {
