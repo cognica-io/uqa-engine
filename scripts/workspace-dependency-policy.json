@@ -229,6 +229,7 @@
         "src/session/views/materialized.rs",
         "src/session/views/ownership.rs",
         "src/session/views/registration.rs",
+        "src/session/views/restoration.rs",
         "src/sql/prepared.rs",
         "src/sql/read_only.rs"
       ]

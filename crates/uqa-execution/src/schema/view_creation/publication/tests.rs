@@ -5,7 +5,9 @@
 //
 
 use super::*;
-use crate::catalog::view::{StoredViewKind, ViewRegistryWrite};
+use crate::catalog::view::{
+    StoredViewKind, ViewRegistryRead, ViewRegistryState, ViewRegistryWrite,
+};
 use std::{
     cell::{Cell, RefCell, RefMut},
     collections::BTreeMap,
@@ -71,14 +73,6 @@ impl ViewPublication for Publication {
         }
         self.saved.borrow_mut().push(row.clone());
         Ok(())
-    }
-    fn views_write(&self) -> ViewRegistryWrite<'_> {
-        assert!(!self.held.replace(true));
-        self.events.borrow_mut().push("lock");
-        Box::new(Guard {
-            publication: self,
-            views: self.views.borrow_mut(),
-        })
     }
 }
 impl CatalogPublicationChanges for Publication {
@@ -200,5 +194,19 @@ fn temporary_and_memory_views_publish_without_durable_writes() {
         .unwrap();
         assert_eq!(*publication.events.borrow(), expected);
         assert!(publication.saved.borrow().is_empty());
+    }
+}
+
+impl ViewRegistryState for Publication {
+    fn views_read(&self) -> ViewRegistryRead<'_> {
+        Box::new(self.views.borrow())
+    }
+    fn views_write(&self) -> ViewRegistryWrite<'_> {
+        assert!(!self.held.replace(true));
+        self.events.borrow_mut().push("lock");
+        Box::new(Guard {
+            publication: self,
+            views: self.views.borrow_mut(),
+        })
     }
 }

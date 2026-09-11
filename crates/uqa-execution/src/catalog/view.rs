@@ -27,8 +27,20 @@ pub type ViewRegistryWrite<'a> = Box<
     dyn std::ops::DerefMut<Target = std::collections::BTreeMap<RelationIdentity, StoredView>> + 'a,
 >;
 
-pub trait ViewPublication {
-    fn has_catalog(&self) -> bool;
-    fn save_view(&self, row: &ViewRow) -> uqa_storage::StorageBackendResult<()>;
+pub type ViewRegistryRead<'a> = Box<
+    dyn std::ops::Deref<Target = std::collections::BTreeMap<RelationIdentity, StoredView>> + 'a,
+>;
+
+pub trait ViewRegistryState {
+    fn views_read(&self) -> ViewRegistryRead<'_>;
     fn views_write(&self) -> ViewRegistryWrite<'_>;
 }
+pub trait ViewIdentityAllocation {
+    fn allocate_identity(&self) -> uqa_storage::StorageBackendResult<[u8; 16]>;
+}
+pub trait ViewPublication: ViewRegistryState {
+    fn has_catalog(&self) -> bool;
+    fn save_view(&self, row: &ViewRow) -> uqa_storage::StorageBackendResult<()>;
+}
+
+pub mod restoration;

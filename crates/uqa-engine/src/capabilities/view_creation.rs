@@ -62,9 +62,6 @@ impl ViewCreationCatalog for Engine {
     fn synchronize(&self) -> StorageBackendResult<()> {
         self.synchronize_catalog_registries()
     }
-    fn allocate_identity(&self) -> StorageBackendResult<[u8; 16]> {
-        crate::new_view_object_id()
-    }
 }
 impl ViewPlanBinding for Engine {
     fn bind_relations(&self, plan: &mut QueryPlan) -> Result<bool, SQLError> {
@@ -156,5 +153,11 @@ impl Engine {
 impl uqa_sql::catalog::security::view_ownership::ViewOwnerSchemas for Engine {
     fn schema_security(&self, schema: &str) -> Option<uqa_sql::catalog::security::SchemaSecurity> {
         self.schema_security_for_privilege(schema)
+    }
+}
+
+impl uqa_execution::catalog::view::ViewIdentityAllocation for Engine {
+    fn allocate_identity(&self) -> StorageBackendResult<[u8; 16]> {
+        crate::new_view_object_id()
     }
 }

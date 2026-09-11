@@ -10,7 +10,7 @@ use super::super::{
     publication::dependencies::CatalogPublicationChanges,
     view_alteration::{ViewAlterAccess, ViewAlterCatalog},
 };
-use crate::catalog::view::{StoredView, ViewPublication};
+use crate::catalog::view::{StoredView, ViewIdentityAllocation, ViewPublication};
 use uqa_sql::{
     catalog::regrole_dependencies::StoredRegroleResolver,
     plan::QueryPlan,
@@ -21,9 +21,8 @@ use uqa_sql::{
 };
 use uqa_storage::StorageBackendResult;
 
-pub trait ViewCreationCatalog {
+pub trait ViewCreationCatalog: ViewIdentityAllocation {
     fn synchronize(&self) -> StorageBackendResult<()>;
-    fn allocate_identity(&self) -> StorageBackendResult<[u8; 16]>;
 }
 pub trait ViewPlanBinding {
     fn bind_relations(&self, plan: &mut QueryPlan) -> Result<bool, SQLError>;

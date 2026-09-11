@@ -606,6 +606,7 @@ mod foreign_table_alteration;
 mod relation_alteration;
 mod view_alteration;
 mod view_creation;
+mod view_restoration;
 
 mod domains;
 mod namespaces;
