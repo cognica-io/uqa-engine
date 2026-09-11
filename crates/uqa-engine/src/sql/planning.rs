@@ -52,65 +52,29 @@ pub(crate) fn plan_for_execution(
     plan: uqa_planner::UnifiedPlan,
     params: &[SQLParam],
 ) -> Result<uqa_planner::UnifiedPlan, SQLError> {
-    analyze_executable_plan(engine, &plan, params)?;
-    optimize_engine_plan(engine, plan)
-}
-
-fn analyze_executable_plan(
-    engine: &Engine,
-    plan: &uqa_planner::UnifiedPlan,
-    params: &[SQLParam],
-) -> Result<(), SQLError> {
-    use uqa_planner::{CommandPlan, UnifiedPlan};
-    let scope = crate::capabilities::query_scope::new_for_current_routine(engine);
-    match plan {
-        UnifiedPlan::Query(query) => {
-            super::select::analyze_query_plan_schema(engine, query, params, &scope, None)?;
-        }
-        UnifiedPlan::Command(command) => match command.as_ref() {
-            CommandPlan::Explain { body, .. } => analyze_executable_plan(engine, body, params)?,
-            CommandPlan::CreateTableAs { query, .. }
-            | CommandPlan::CreateMaterializedView { query, .. }
-            | CommandPlan::DeclareCursor { query, .. } => {
-                super::select::analyze_query_plan_schema(engine, query, params, &scope, None)?;
-            }
-            _ => {
-                if command.mutation_target().is_some() {
-                    uqa_execution::query::binding::analyze_command_parameters(
-                        engine, command, params, &scope,
-                    )?;
-                }
-                super::select::analyze_prepared_command_schema(engine, command, params, &scope)?;
-            }
-        },
-    }
-    Ok(())
+    uqa_planner::statement_planning::executable::plan_for_execution(
+        &engine.statement_planning_context(),
+        plan,
+        params,
+    )
 }
 
 pub(crate) fn optimize_engine_query(
     engine: &Engine,
     query: &uqa_planner::QueryPlan,
 ) -> Result<uqa_planner::QueryPlan, SQLError> {
-    match optimize_engine_plan(
-        engine,
-        uqa_planner::UnifiedPlan::Query(Box::new(query.clone())),
-    )? {
-        uqa_planner::UnifiedPlan::Query(query) => Ok(*query),
-        uqa_planner::UnifiedPlan::Command(_) => Err(SQLError::Internal(
-            "query optimization produced a command".into(),
-        )),
-    }
+    uqa_planner::statement_planning::executable::optimize_query(
+        &engine.statement_planning_context(),
+        query,
+    )
 }
 
 pub(crate) fn optimize_engine_plan(
     engine: &Engine,
     plan: uqa_planner::UnifiedPlan,
 ) -> Result<uqa_planner::UnifiedPlan, SQLError> {
-    uqa_planner::statement_planning::optimize_plan(
-        engine.statement_statistics_context(),
-        &engine.rule_input_planning_context(),
-        &|name: &str| engine.has_registered_aggregate_function(name),
-        uqa_execution::scalar::eval_constant_scalar,
+    uqa_planner::statement_planning::executable::optimize_plan(
+        &engine.statement_planning_context(),
         plan,
     )
 }

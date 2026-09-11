@@ -103,3 +103,5 @@ fn optimize_plan_with_statistics(
 }
 
 pub mod prepared;
+
+pub mod executable;

@@ -13,13 +13,15 @@ use uqa_sql::expr::RowLookup;
 
 use crate::capabilities::QueryRuntimeView;
 
-use super::super::{Engine, SQLError, SQLParam, ScalarExpr, Value};
-use super::CteScope;
+use super::query_scope::CteScope;
+use crate::Engine;
+use uqa_core::Value;
+use uqa_sql::{SQLError, SQLParam, ScalarExpr};
 
 pub(crate) struct ScopedEngineHook<'a> {
-    pub(super) engine: &'a Engine,
-    pub(super) runtime: QueryRuntimeView<'a>,
-    pub(super) ctes: std::borrow::Cow<'a, CteScope>,
+    engine: &'a Engine,
+    runtime: QueryRuntimeView<'a>,
+    ctes: std::borrow::Cow<'a, CteScope>,
 }
 
 impl<'a> ScopedEngineHook<'a> {
@@ -81,10 +83,10 @@ impl uqa_execution::scalar::plan::QueryExpressionContext for ScopedEngineHook<'_
 }
 
 /// Capture the engine's current execution scope for a shared physical evaluator.
-pub(in crate::sql) struct EngineExpressionEvaluator;
+struct EngineExpressionEvaluator;
 
 impl EngineExpressionEvaluator {
-    pub(in crate::sql) fn shared<'a>(
+    fn shared<'a>(
         engine: &'a Engine,
         params: &'a [SQLParam],
         ctes: &CteScope,
@@ -121,23 +123,40 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         &self,
         name: &str,
     ) -> std::result::Result<Option<uqa_sql::ast::ColumnType>, String> {
-        Ok(crate::sql::resolve_catalog_column_type(self.engine, name))
+        Ok(
+            uqa_execution::catalog::projection::resolve_catalog_column_type(
+                &self.engine.catalog_execution(),
+                name,
+            ),
+        )
     }
 
     fn resolve_regclass_input(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
-        crate::sql::resolve_regclass_oid(self.engine, name)
+        uqa_execution::catalog::projection::resolve_regclass_oid(
+            &self.engine.catalog_execution(),
+            name,
+        )
     }
 
     fn resolve_regprocedure(&self, name: &str) -> std::result::Result<Option<i64>, String> {
-        crate::sql::resolve_regprocedure_oid(self.engine, name)
+        uqa_execution::catalog::projection::resolve_regprocedure_oid(
+            &self.engine.catalog_execution(),
+            name,
+        )
     }
 
     fn resolve_regrole(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
-        crate::sql::resolve_regrole_oid(self.engine, name)
+        uqa_execution::catalog::projection::resolve_regrole_oid(
+            &self.engine.catalog_execution(),
+            name,
+        )
     }
 
     fn resolve_regnamespace(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
-        crate::sql::resolve_regnamespace_oid(self.engine, name)
+        uqa_execution::catalog::projection::resolve_regnamespace_oid(
+            &self.engine.catalog_execution(),
+            name,
+        )
     }
 
     fn resolve_regobject(
@@ -145,7 +164,11 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         ty: &uqa_sql::ast::ColumnType,
         name: &str,
     ) -> std::result::Result<Option<i64>, SQLError> {
-        crate::sql::resolve_regobject_oid(self.engine, ty, name)
+        uqa_execution::catalog::projection::resolve_regobject_oid(
+            &self.engine.catalog_execution(),
+            ty,
+            name,
+        )
     }
 
     fn resolve_regtype_output(
@@ -153,7 +176,11 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         ty: &uqa_sql::ast::ColumnType,
         oid: i64,
     ) -> std::result::Result<Option<String>, String> {
-        crate::sql::resolve_regtype_output(self.engine, ty, oid)
+        uqa_execution::catalog::projection::resolve_regtype_output(
+            &self.engine.catalog_execution(),
+            ty,
+            oid,
+        )
     }
 
     fn nextval(&self, name: &str) -> std::result::Result<i64, SQLError> {
@@ -244,7 +271,7 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         name: &str,
         args: &[(Option<String>, Value)],
     ) -> Option<std::result::Result<Value, SQLError>> {
-        crate::sql::call_user_scalar_function(self.engine, name, args)
+        crate::capabilities::routine_invocation::call_user_scalar_function(self.engine, name, args)
     }
 
     fn call_bound_user_function(
@@ -252,7 +279,11 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         binding: &uqa_sql::ast::FunctionBinding,
         args: &[(Option<String>, Value)],
     ) -> Option<std::result::Result<Value, SQLError>> {
-        crate::sql::call_bound_user_scalar_function(self.engine, binding, args)
+        crate::capabilities::routine_invocation::call_bound_user_scalar_function(
+            self.engine,
+            binding,
+            args,
+        )
     }
 }
 
@@ -273,3 +304,6 @@ impl uqa_execution::query::expression::ScalarExpressionContext for ScopedEngineH
         )
     }
 }
+
+mod function_invocation;
+mod type_resolution;

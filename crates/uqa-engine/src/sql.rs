@@ -27,7 +27,6 @@
 
 use std::sync::Arc;
 
-use uqa_core::Value;
 use uqa_sql::ast::Statement;
 #[cfg(test)]
 use uqa_sql::compile;
@@ -59,9 +58,7 @@ pub(crate) fn active_trigger_transition_relation_names() -> std::collections::BT
 }
 mod window;
 
-pub(crate) use crate::capabilities::routine_invocation::{
-    call_bound_user_scalar_function, call_user_scalar_function,
-};
+pub(crate) use crate::capabilities::routine_invocation::call_user_scalar_function;
 pub use catalog::{postgres_result_type, SQLTypeMetadata};
 pub(crate) use catalog_statement_routines::{
     bind_catalog_statement_routines, collect_expression_routine_references,

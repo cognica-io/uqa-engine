@@ -10,10 +10,9 @@ use uqa_execution::ScalarExpr;
 use uqa_planner::{QueryBlockPlan, QueryPlan};
 
 use super::from_rows::execute_lateral_subquery_output;
-use super::{Engine, SQLError, SQLParam, SQLResult, Value};
+use super::{Engine, SQLError, SQLParam, SQLResult};
 
 mod cte_execution;
-mod evaluation;
 mod filter_pushdown;
 mod physical_plan;
 mod row_lock_retry_cache;
@@ -21,8 +20,8 @@ mod row_locking;
 mod schema_binding;
 mod set_projection;
 
+pub(crate) use crate::capabilities::query_scope::CteScope;
 pub(in crate::sql) use cte_execution::*;
-pub(crate) use evaluation::CteScope;
 pub(in crate::sql) use filter_pushdown::*;
 pub(in crate::sql) use physical_plan::*;
 pub(crate) use row_lock_retry_cache::RowLockRetryCache;
@@ -45,5 +44,5 @@ pub(in crate::sql) use uqa_execution::query::output::QueryOutput;
 mod execution;
 pub(super) use execution::{execute_query_plan_output, execute_query_plan_with_ctes};
 
-pub(crate) use evaluation::ScopedEngineHook;
+pub(crate) use crate::capabilities::ScopedEngineHook;
 pub(crate) use row_locking::attach_lock_rows;

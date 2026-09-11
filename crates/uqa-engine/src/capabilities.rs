@@ -514,7 +514,9 @@ pub(crate) mod query_scope;
 
 mod query_semantics;
 
+mod query_expressions;
 mod query_operators;
+pub(crate) use query_expressions::ScopedEngineHook;
 mod subqueries;
 
 mod schema_analysis;

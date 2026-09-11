@@ -2,6 +2,8 @@
 
 Every compiled statement follows one top-level path: SQL statement, unified lowering, semantic analysis, plan-native optimization, and `UnifiedPlanExecutor`. There is no separate top-level row dispatcher that bypasses the unified executor.
 
+[Statement planning](../../../crates/uqa-planner/src/statement_planning/executable.rs) schedules [SQL statement analysis](../../../crates/uqa-sql/src/binding/statements.rs) before capturing optimizer inputs or evaluating constants. Each recursive EXPLAIN analysis captures a fresh statement scope; query-bearing commands analyze their query schema, while mutation commands validate parameters before their result schema. Engine supplies scope capture and the existing planner metadata through typed adapters. Scoped Engine function callbacks live under [`capabilities/query_expressions.rs`](../../../crates/uqa-engine/src/capabilities/query_expressions.rs); scalar-subquery result types bind through execution after checking the query-arena slot and retain the original outer schema and declared parameter types.
+
 ## End-to-end pipeline
 
 ```mermaid
@@ -14,10 +16,11 @@ sequenceDiagram
     participant Store as storage and indexes
     App->>Engine: SQL text
     Engine->>SQL: Parse and lower SQL-owned UnifiedPlan
-    Engine->>SQL: Bind with immutable catalog and namespace inputs
-    SQL-->>Engine: Validated names, types, and parameters
-    Engine->>Planner: Optimize UnifiedPlan with source statistics
-    Planner-->>Engine: Optimized plan and access decisions
+    Engine->>Planner: Validate and optimize UnifiedPlan
+    Planner->>SQL: Bind with immutable catalog and namespace inputs
+    SQL-->>Planner: Validated names, types, and parameters
+    Planner->>Planner: Optimize with source statistics
+    Planner-->>Engine: Executable plan and access decisions
     Engine->>Exec: Construct and run physical operators
     Exec->>Store: Pull through provided row and retrieval sources
     Store-->>Exec: Values, postings, vectors, graph data
@@ -131,7 +134,7 @@ Schema binding, prepared parameter inference, and stored routine binding live un
 
 Top-level SELECT execution is owned by [`query/statement/`](../../../crates/uqa-execution/src/query/statement), correlated filter-pushdown lowering by [`uqa-planner/src/filter_pushdown/subqueries.rs`](../../../crates/uqa-planner/src/filter_pushdown/subqueries.rs), and physical row-lock leaf validation by [`query/locking/leaf_validation.rs`](../../../crates/uqa-execution/src/query/locking/leaf_validation.rs). Engine implements the state and extension contracts consumed by these owners.
 
-Reusable scalar IR traversal is owned by [`uqa-sql/src/ir/traversal.rs`](../../../crates/uqa-sql/src/ir/traversal.rs), with call-argument validation beside it. The execution [`scalar`](../../../crates/uqa-execution/src/scalar) owner retains the subquery execution protocol, evaluation context, argument evaluation, and runtime operations. SELECT expression-shape and volatility checks use the shared traversal instead of maintaining incomplete recursive copies. The planner [statement-planning owner](../../../crates/uqa-planner/src/statement_planning.rs) assembles hierarchy statistics, estimates prepared-plan costs, prunes unused rewrite-rule inputs, and selects optimizer configuration through catalog and retrieval contracts. It retains each loaded table generation through dependent metadata reads and preserves the first callback failure and the original validation and evaluation order. Canonical index catalog rows live in `uqa-core` and retain their storage re-export. Engine supplies live metadata, retrieval access estimates, and the shared scalar constant evaluator; the planner has no dependency on physical execution.
+Reusable scalar IR traversal is owned by [`uqa-sql/src/ir/traversal.rs`](../../../crates/uqa-sql/src/ir/traversal.rs), with call-argument validation beside it. The execution [`scalar`](../../../crates/uqa-execution/src/scalar) owner retains the subquery execution protocol, evaluation context, argument evaluation, and runtime operations. SELECT expression-shape and volatility checks use the shared traversal instead of maintaining incomplete recursive copies. The planner [statement-planning owner](../../../crates/uqa-planner/src/statement_planning.rs) assembles hierarchy statistics, estimates prepared-plan costs, prunes unused rewrite-rule inputs, and selects optimizer configuration through catalog and retrieval contracts. It retains each loaded table generation through dependent metadata reads and preserves the first callback failure and the original validation and evaluation order. Canonical index catalog rows live in `uqa-core` and retain their storage re-export. Engine supplies live metadata, retrieval access estimates, and the shared scalar constant evaluator; the planner has no runtime dependency on physical execution.
 
 ## Access path selection
 

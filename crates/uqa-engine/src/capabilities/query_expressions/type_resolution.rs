@@ -17,7 +17,11 @@ impl FunctionTypeResolver for ScopedEngineHook<'_> {
     }
 
     fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
-        crate::sql::resolve_catalog_column_type_name(self.engine, name).map(Some)
+        uqa_execution::catalog::projection::resolve_catalog_column_type_name(
+            &self.engine.catalog_execution(),
+            name,
+        )
+        .map(Some)
     }
 
     fn resolve_function_type(
@@ -83,18 +87,12 @@ impl FunctionTypeResolver for ScopedEngineHook<'_> {
         outer_schema: &uqa_execution::RowSchema,
         params: &[SQLParam],
     ) -> Result<Option<ColumnType>, SQLError> {
-        let plan = self.ctes.scalar_subqueries.get(subquery).ok_or_else(|| {
-            SQLError::Internal(format!(
-                "physical scalar subquery slot {subquery} is out of bounds"
-            ))
-        })?;
-        let output = super::super::bind_query_plan_schema(
+        uqa_execution::query::binding::resolve_scalar_subquery_type(
             self.engine,
-            plan,
+            subquery,
+            outer_schema,
             params,
             &self.ctes,
-            Some(outer_schema),
-        )?;
-        Ok(output.column_type(0).cloned())
+        )
     }
 }

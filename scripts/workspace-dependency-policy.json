@@ -235,7 +235,9 @@
         "src/session/views/columns.rs",
         "src/session/view_binding.rs",
         "src/sql/select/evaluation/subqueries.rs",
-        "src/sql/correlation.rs"
+        "src/sql/correlation.rs",
+        "src/sql/select/evaluation",
+        "src/sql/select/evaluation.rs"
       ]
     },
     "crates/uqa-storage": {
