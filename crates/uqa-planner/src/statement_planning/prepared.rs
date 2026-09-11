@@ -49,5 +49,7 @@ pub fn specialize_parameters(plan: &mut crate::UnifiedPlan, parameters: &[uqa_sq
     });
 }
 
+pub mod selection;
+
 #[cfg(test)]
 mod tests;

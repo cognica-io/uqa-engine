@@ -8,6 +8,8 @@ Every compiled statement follows one top-level path: SQL statement, unified lowe
 
 [Compiled-statement execution](../../../crates/uqa-execution/src/statement/compiled.rs) lowers routine and rule statements, retains catalog-bound relation identities before planning, and captures execution inputs only after analysis and optimization succeed. Engine owns the [query API gate and statement clock](../../../crates/uqa-engine/src/queries.rs), including nested calls and error restoration, while [document reads](../../../crates/uqa-engine/src/table_storage/reads.rs) retain the current command overlay and count cache. The public `uqa_engine::sql` namespace re-exports [native result definitions](../../../crates/uqa-execution/src/result.rs); there is no Engine SQL implementation tree.
 
+[Prepared definition analysis](../../../crates/uqa-sql/src/prepared/definition.rs) resolves declarations before separately retaining parameter-inference and result-descriptor scopes. [Native registration](../../../crates/uqa-execution/src/statement/prepared.rs) takes the session registry write guard before constructing cached metadata and sampling the registration clock. [Prepared selection](../../../crates/uqa-planner/src/statement_planning/prepared/selection.rs) validates changed result descriptors, rechecks the first generic plan’s cost and specializes custom parameters before recording usage. Engine preserves the original read-clone and write-publication boundaries, including the logical-plan Arc identity check when a definition was replaced or deallocated.
+
 ## End-to-end pipeline
 
 ```mermaid

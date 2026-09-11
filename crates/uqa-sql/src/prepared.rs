@@ -9,6 +9,9 @@
 use crate::{ColumnType, RowSchema, SQLError, SQLParam};
 use uqa_core::Value;
 pub mod arguments;
+pub mod definition;
+pub mod entry;
+pub mod planning;
 
 pub fn declared_parameter_types(
     resolver: &dyn crate::FunctionTypeResolver,

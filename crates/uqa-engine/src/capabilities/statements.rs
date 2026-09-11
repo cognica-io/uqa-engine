@@ -48,6 +48,8 @@ impl Engine {
             prepared: context::session::PreparedStatements {
                 state: self,
                 arguments: self,
+                definitions: self.prepared_registration_context(),
+                plans: self,
             },
             settings: self,
             notifications: self,

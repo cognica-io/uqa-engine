@@ -28,40 +28,8 @@ pub(crate) struct CachedSQLStatement {
     catalog_epochs: CatalogEpochs,
 }
 
-#[derive(Clone)]
-pub(super) struct PreparedStatementPlan {
-    pub(super) logical_plan: Arc<uqa_planner::UnifiedPlan>,
-    pub(super) plan: Option<uqa_planner::UnifiedPlan>,
-    pub(super) parameter_types: Vec<Option<uqa_sql::ast::ColumnType>>,
-    pub(super) result_schema: Option<uqa_execution::RowSchema>,
-    pub(crate) source_sql: Option<Arc<str>>,
-    pub(crate) prepared_at_micros: i64,
-    pub(crate) from_sql: bool,
-    pub(crate) generic_plans: i64,
-    pub(crate) custom_plans: i64,
-    pub(super) generic_cost: Option<f64>,
-    pub(super) total_custom_cost: f64,
-}
-
 pub(crate) use uqa_sql::catalog::session::PreparedStatementMetadata;
-
-impl PreparedStatementPlan {
-    pub(super) fn metadata(&self, name: &str) -> PreparedStatementMetadata {
-        PreparedStatementMetadata {
-            name: name.to_string(),
-            parameter_types: self.parameter_types.clone(),
-            result_types: self
-                .result_schema
-                .as_ref()
-                .map(|schema| schema.column_types().to_vec()),
-            source_sql: self.source_sql.clone(),
-            prepared_at_micros: self.prepared_at_micros,
-            from_sql: self.from_sql,
-            generic_plans: self.generic_plans,
-            custom_plans: self.custom_plans,
-        }
-    }
-}
+pub(super) use uqa_sql::prepared::entry::PreparedStatementPlan;
 
 impl SQLStatementCache {
     pub(super) fn get(&self, sql: &str) -> Option<CachedSQLStatement> {
