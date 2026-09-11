@@ -126,11 +126,6 @@ pub(crate) fn view_query_references_column(
         column,
     )
 }
-pub(crate) fn plpgsql_catalog(
-    engine: &Engine,
-) -> Result<uqa_sql::plpgsql::PlpgsqlCatalog, SQLError> {
-    uqa_execution::catalog::projection::plpgsql_catalog(&engine.catalog_execution())
-}
 pub(crate) fn runtime_constraints(engine: &Engine) -> Result<Vec<RuntimeConstraint>, SQLError> {
     uqa_execution::catalog::projection::runtime_constraints(&engine.catalog_execution())
 }

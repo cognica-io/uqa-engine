@@ -77,13 +77,13 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
     let record_definition = (!column_types.is_empty()).then_some((column_aliases, column_types));
     let user_result = match binding {
         Some(binding) if binding.builtin => None,
-        None => crate::sql::plpgsql_exec::call_user_table_function(
+        None => crate::capabilities::routine_invocation::call_user_table_function(
             engine,
             &identity,
             &call_args,
             record_definition,
         ),
-        Some(binding) => crate::sql::plpgsql_exec::call_bound_user_table_function(
+        Some(binding) => crate::capabilities::routine_invocation::call_bound_user_table_function(
             engine,
             binding,
             &call_args,

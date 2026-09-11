@@ -53,7 +53,6 @@ mod mutability;
 pub(crate) mod plan_executor;
 pub use uqa_sql::result::format_postgres_text;
 mod planning;
-mod plpgsql_exec;
 mod prepared;
 pub(crate) use prepared::{
     analyze_prepared_plan, infer_prepared_parameter_types, prepared_result_schema_matches,
@@ -72,6 +71,9 @@ pub(crate) fn active_trigger_transition_relation_names() -> std::collections::BT
 mod volatility;
 mod window;
 
+pub(crate) use crate::capabilities::routine_invocation::{
+    call_bound_user_scalar_function, call_user_scalar_function,
+};
 pub use catalog::{postgres_result_type, SQLTypeMetadata};
 pub(crate) use catalog_statement_routines::{
     bind_catalog_statement_routines, collect_expression_routine_references,
@@ -89,7 +91,6 @@ pub(super) use planning::{
     execute_compiled_statement_with_privilege_subject, optimize_engine_plan, optimize_engine_query,
     plan_for_execution,
 };
-pub(crate) use plpgsql_exec::{call_bound_user_scalar_function, call_user_scalar_function};
 use select::query_has_row_locks;
 pub(crate) use select::{execute_query_plan, RowLockRetryCache};
 pub(crate) use triggers::fire_statement_triggers;
@@ -234,4 +235,4 @@ pub(crate) use triggers::current_transition_relations;
 
 pub(crate) use select::{attach_lock_rows, prepare_correlated_exists_predicate, ScopedEngineHook};
 
-pub(crate) use plpgsql_exec::execute_trigger_routine;
+pub(crate) use crate::capabilities::routine_invocation::execute_trigger_routine;

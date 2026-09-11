@@ -45,12 +45,6 @@ impl Engine {
     pub(crate) fn grant_sql_routine(&self, stmt: &GrantRoutineStmt) -> Result<(), SQLError> {
         privileges::grant_sql_routine(&self.routine_privilege_context(), stmt)
     }
-    pub(crate) fn ensure_routine_execute_privilege(
-        &self,
-        definition: &CreateFunction,
-    ) -> Result<(), SQLError> {
-        security::ensure_routine_execute_privilege(self, definition)
-    }
     pub(crate) fn ensure_routine_execute_privilege_named(
         &self,
         definition: &CreateFunction,

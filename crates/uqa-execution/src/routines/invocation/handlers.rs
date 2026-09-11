@@ -4,87 +4,30 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! SQL statement handlers and scalar/table routine entry points.
-
-use super::routine::nonatomic_routine_entry_allowed;
+//! Invoke scalar, table, and procedure routines and materialize their physical results.
 use super::{
-    call_signature, execute_routine, output_column_names, resolve_bound_routine, resolve_routine,
-    routine_local_name, routine_resolution_error, CreateFunction, DepthGuard, DropFunctionStmt,
-    Engine, FunctionBinding, FunctionReturns, Interpreter, ResolvedRoutine, ResultRow,
-    RoutineTransactionGuard, SQLError, SQLResult, SQLTableFunctionResult, Value,
+    context::RoutineInvocationContext,
+    execution::execute_routine,
+    resolution::{resolve_bound_routine, resolve_routine, ResolvedRoutine},
 };
-
-pub(in crate::sql) fn run_create_function(
-    engine: &Engine,
-    def: CreateFunction,
-) -> Result<SQLResult, SQLError> {
-    engine.register_sql_function(def)?;
-    Ok(SQLResult::empty())
-}
-
-pub(in crate::sql) fn run_drop_function(
-    engine: &Engine,
-    stmt: &DropFunctionStmt,
-) -> Result<SQLResult, SQLError> {
-    engine.drop_sql_functions(stmt)?;
-    Ok(SQLResult::empty())
-}
-
-pub(in crate::sql) fn run_do_block(
-    engine: &Engine,
-    language: &str,
-    body: &str,
-    nested_statement: bool,
-) -> Result<SQLResult, SQLError> {
-    if language != "plpgsql" {
-        return Err(SQLError::Routine {
-            sqlstate: "42704".into(),
-            message: format!("language \"{language}\" does not exist"),
-        });
-    }
-    let catalog = crate::sql::catalog::plpgsql_catalog(engine)?;
-    let mut parsed = uqa_sql::plpgsql::parse_do_block_with_catalog(body, &catalog)?;
-    crate::user_functions::resolve_plpgsql_datum_types(engine, &mut parsed)?;
-    let def = CreateFunction {
-        object_id: None,
-        name: "inline_code_block".into(),
-        or_replace: false,
-        is_procedure: false,
-        params: Vec::new(),
-        returns: FunctionReturns::Scalar {
-            type_name: "void".into(),
+use crate::{
+    functions::SQLTableFunctionResult, routines::transaction::nonatomic_routine_entry_allowed,
+};
+use uqa_core::Value;
+use uqa_sql::{
+    ast::FunctionBinding,
+    routines::{
+        invocation::{
+            anonymous_record_shape_error, call_output_schema, call_signature,
+            coerce_anonymous_record_value, output_column_names, routine_resolution_error,
+            runtime_record_column_type, validate_anonymous_record_column_types,
         },
-        return_type_reference: None,
-        language: "plpgsql".into(),
-        body: uqa_sql::ast::FunctionBody::Source(body.to_string()),
-        creation_search_path: Vec::new(),
-        volatility: uqa_sql::ast::FunctionVolatility::Volatile,
-        strict: false,
-        owner: String::new(),
-        security: uqa_sql::ast::RoutineSecurityAttributes::default(),
-        parallel: uqa_sql::ast::FunctionParallel::Unsafe,
-        support: None,
-        config: Vec::new(),
-        config_actions: Vec::new(),
-        execute_acl: None,
-    };
-    let _guard = DepthGuard::enter(engine)?;
-    let _transaction_context = RoutineTransactionGuard::enter(
-        engine.routine_session_id(),
-        nonatomic_routine_entry_allowed(engine, nested_statement),
-    );
-    let mut interpreter = Interpreter::new(
-        engine.routine_execution_context(),
-        &def,
-        &parsed,
-        Vec::new(),
-    )?;
-    interpreter.run(&parsed.action)?;
-    Ok(SQLResult::empty())
-}
-
-pub(in crate::sql) fn run_call(
-    engine: &Engine,
+        routine_local_name,
+    },
+    ResultRow, SQLError, SQLResult,
+};
+pub fn run_call(
+    context: &RoutineInvocationContext<'_>,
     name: &str,
     call_args: &[(Option<String>, Value)],
     argument_types: &[Option<uqa_sql::ast::ColumnType>],
@@ -92,7 +35,7 @@ pub(in crate::sql) fn run_call(
     nested_statement: bool,
 ) -> Result<SQLResult, SQLError> {
     let function = match resolve_routine(
-        engine,
+        context,
         name,
         call_args,
         Some(argument_types),
@@ -121,46 +64,19 @@ pub(in crate::sql) fn run_call(
         });
     }
     let outcome = execute_routine(
-        engine,
+        context,
         &function,
         bound,
         &invocation,
-        nonatomic_routine_entry_allowed(engine, nested_statement),
+        nonatomic_routine_entry_allowed(context.runtime.session, nested_statement),
     )?;
-    let out_params = function.def.output_params();
-    if out_params.is_empty() {
+    let Some(schema) =
+        call_output_schema(context.types, &function.def, &invocation.parameter_types)?
+    else {
         return Ok(SQLResult::empty());
-    }
-    let columns = output_column_names(&function.def);
-    let output_indices = function
-        .def
-        .params
-        .iter()
-        .enumerate()
-        .filter_map(|(index, parameter)| {
-            matches!(
-                parameter.mode,
-                uqa_sql::ast::FunctionParamMode::Out
-                    | uqa_sql::ast::FunctionParamMode::InOut
-                    | uqa_sql::ast::FunctionParamMode::Table
-            )
-            .then_some(index)
-        });
-    let column_types = output_indices
-        .map(|index| {
-            crate::sql::resolve_catalog_column_type(engine, &invocation.parameter_types[index])
-                .or_else(|| {
-                    uqa_sql::ast::ColumnType::from_sql_name(&invocation.parameter_types[index]).ok()
-                })
-                .map(Some)
-                .ok_or_else(|| {
-                    SQLError::TypeMismatch(format!(
-                        "unknown type `{}`",
-                        invocation.parameter_types[index]
-                    ))
-                })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    };
+    let columns = schema.columns().to_vec();
+    let column_types = schema.column_types().to_vec();
     let mut row = ResultRow::new();
     for (column, value) in columns.iter().zip(outcome.out_values.iter()) {
         row.insert(column.clone(), value.clone());
@@ -177,34 +93,34 @@ pub(in crate::sql) fn run_call(
 }
 
 /// Scalar-context invocation used by the expression evaluator's
-/// engine hook. `None` means no routine with this name exists.
-pub(crate) fn call_user_scalar_function(
-    engine: &Engine,
+/// context hook. `None` means no routine with this name exists.
+pub fn call_user_scalar_function(
+    context: &RoutineInvocationContext<'_>,
     name: &str,
     args: &[(Option<String>, Value)],
 ) -> Option<Result<Value, SQLError>> {
-    let resolved = match resolve_routine(engine, name, args, None, "function", false) {
+    let resolved = match resolve_routine(context, name, args, None, "function", false) {
         Ok(Some(resolved)) => resolved,
         Ok(None) => return None,
         Err(e) => return Some(Err(e)),
     };
     Some(execute_resolved_scalar_function(
-        engine, name, args, resolved,
+        context, name, args, resolved,
     ))
 }
 
-pub(crate) fn call_bound_user_scalar_function(
-    engine: &Engine,
+pub fn call_bound_user_scalar_function(
+    context: &RoutineInvocationContext<'_>,
     binding: &FunctionBinding,
     args: &[(Option<String>, Value)],
 ) -> Option<Result<Value, SQLError>> {
-    let resolved = match resolve_bound_routine(engine, binding, args) {
+    let resolved = match resolve_bound_routine(context, binding, args) {
         Ok(Some(resolved)) => resolved,
         Ok(None) => return None,
         Err(error) => return Some(Err(error)),
     };
     Some(execute_resolved_scalar_function(
-        engine,
+        context,
         &binding.name,
         args,
         resolved,
@@ -212,7 +128,7 @@ pub(crate) fn call_bound_user_scalar_function(
 }
 
 fn execute_resolved_scalar_function(
-    engine: &Engine,
+    context: &RoutineInvocationContext<'_>,
     name: &str,
     args: &[(Option<String>, Value)],
     resolved: ResolvedRoutine,
@@ -235,10 +151,13 @@ fn execute_resolved_scalar_function(
         });
     }
     if function.def.strict && bound.iter().any(|v| matches!(v, Value::Null)) {
-        engine.ensure_routine_execute_privilege(&function.def)?;
+        uqa_sql::routines::security::ensure_routine_execute_privilege(
+            context.authority,
+            &function.def,
+        )?;
         return Ok(Value::Null);
     }
-    let outcome = execute_routine(engine, &function, bound, &invocation, false)?;
+    let outcome = execute_routine(context, &function, bound, &invocation, false)?;
     let out_params = function.def.output_params();
     if outcome.out_values.len() != out_params.len() {
         return Err(SQLError::Internal(format!(
@@ -272,12 +191,12 @@ fn execute_resolved_scalar_function(
 /// Resolve a user function call far enough for the projection planner to
 /// choose scalar or set execution. `None` means no routine with this name
 /// exists; argument-resolution errors remain observable at execution time.
-pub(crate) fn resolved_user_function_returns_set(
-    engine: &Engine,
+pub fn resolved_user_function_returns_set(
+    context: &RoutineInvocationContext<'_>,
     name: &str,
     args: &[(Option<String>, Value)],
 ) -> Option<Result<bool, SQLError>> {
-    let resolved = match resolve_routine(engine, name, args, None, "function", false) {
+    let resolved = match resolve_routine(context, name, args, None, "function", false) {
         Ok(Some(resolved)) => resolved,
         Ok(None) => return None,
         Err(error) => return Some(Err(error)),
@@ -292,12 +211,12 @@ pub(crate) fn resolved_user_function_returns_set(
     Some(Ok(function.def.returns_set()))
 }
 
-pub(crate) fn resolved_bound_user_function_returns_set(
-    engine: &Engine,
+pub fn resolved_bound_user_function_returns_set(
+    context: &RoutineInvocationContext<'_>,
     binding: &FunctionBinding,
     args: &[(Option<String>, Value)],
 ) -> Option<Result<bool, SQLError>> {
-    let resolved = match resolve_bound_routine(engine, binding, args) {
+    let resolved = match resolve_bound_routine(context, binding, args) {
         Ok(Some(resolved)) => resolved,
         Ok(None) => return None,
         Err(error) => return Some(Err(error)),
@@ -315,19 +234,19 @@ pub(crate) fn resolved_bound_user_function_returns_set(
 /// FROM-clause invocation: any user routine is callable as a table
 /// source (`SELECT * FROM f(...)`); scalar functions produce a single
 /// row. `None` means no routine with this name exists.
-pub(crate) fn call_user_table_function(
-    engine: &Engine,
+pub fn call_user_table_function(
+    context: &RoutineInvocationContext<'_>,
     name: &str,
     args: &[(Option<String>, Value)],
     record_definition: Option<AnonymousRecordDefinition<'_>>,
 ) -> Option<Result<SQLTableFunctionResult, SQLError>> {
-    let resolved = match resolve_routine(engine, name, args, None, "function", false) {
+    let resolved = match resolve_routine(context, name, args, None, "function", false) {
         Ok(Some(resolved)) => resolved,
         Ok(None) => return None,
         Err(e) => return Some(Err(e)),
     };
     Some(execute_resolved_table_function(
-        engine,
+        context,
         name,
         args,
         resolved,
@@ -337,19 +256,19 @@ pub(crate) fn call_user_table_function(
 
 type AnonymousRecordDefinition<'a> = (&'a [String], &'a [String]);
 
-pub(crate) fn call_bound_user_table_function(
-    engine: &Engine,
+pub fn call_bound_user_table_function(
+    context: &RoutineInvocationContext<'_>,
     binding: &FunctionBinding,
     args: &[(Option<String>, Value)],
     record_definition: Option<AnonymousRecordDefinition<'_>>,
 ) -> Option<Result<SQLTableFunctionResult, SQLError>> {
-    let resolved = match resolve_bound_routine(engine, binding, args) {
+    let resolved = match resolve_bound_routine(context, binding, args) {
         Ok(Some(resolved)) => resolved,
         Ok(None) => return None,
         Err(error) => return Some(Err(error)),
     };
     Some(execute_resolved_table_function(
-        engine,
+        context,
         &binding.name,
         args,
         resolved,
@@ -358,7 +277,7 @@ pub(crate) fn call_bound_user_table_function(
 }
 
 fn execute_resolved_table_function(
-    engine: &Engine,
+    context: &RoutineInvocationContext<'_>,
     name: &str,
     args: &[(Option<String>, Value)],
     resolved: ResolvedRoutine,
@@ -384,7 +303,10 @@ fn execute_resolved_table_function(
         output_column_names(&function.def)
     };
     if function.def.strict && bound.iter().any(|v| matches!(v, Value::Null)) {
-        engine.ensure_routine_execute_privilege(&function.def)?;
+        uqa_sql::routines::security::ensure_routine_execute_privilege(
+            context.authority,
+            &function.def,
+        )?;
         let rows = if function.def.returns_set() {
             Vec::new()
         } else {
@@ -392,16 +314,16 @@ fn execute_resolved_table_function(
         };
         return Ok(SQLTableFunctionResult::new(columns, rows));
     }
-    let outcome = execute_routine(engine, &function, bound, &invocation, false)?;
+    let outcome = execute_routine(context, &function, bound, &invocation, false)?;
     if let Some((columns, types)) = record_definition {
-        if !crate::user_functions::routine_returns_anonymous_record(&function.def) {
+        if !uqa_sql::routines::routine_returns_anonymous_record(&function.def) {
             return Err(SQLError::Internal(format!(
                 "non-anonymous routine `{}` reached record-definition shaping",
                 function.def.name
             )));
         }
         return shape_anonymous_record_outcome(
-            engine,
+            context,
             outcome,
             function.def.returns_set(),
             columns,
@@ -419,8 +341,8 @@ fn execute_resolved_table_function(
 }
 
 fn shape_anonymous_record_outcome(
-    engine: &Engine,
-    outcome: super::RoutineOutcome,
+    context: &RoutineInvocationContext<'_>,
+    outcome: crate::routines::RoutineOutcome,
     returns_set: bool,
     columns: &[String],
     types: &[String],
@@ -460,69 +382,9 @@ fn shape_anonymous_record_outcome(
             validate_anonymous_record_column_types(&source_types, types)?;
         }
         for (value, type_name) in values.iter_mut().zip(types) {
-            *value = coerce_anonymous_record_value(engine, value, type_name)?;
+            *value = coerce_anonymous_record_value(context.runtime.expressions, value, type_name)?;
         }
         rows.push(values);
     }
     Ok(SQLTableFunctionResult::new(columns.iter().cloned(), rows))
-}
-
-fn validate_anonymous_record_column_types(
-    source_types: &[Option<uqa_sql::ast::ColumnType>],
-    target_types: &[String],
-) -> Result<(), SQLError> {
-    if source_types.len() != target_types.len() {
-        return Err(anonymous_record_shape_error());
-    }
-    for (source, target) in source_types.iter().zip(target_types) {
-        let Some(source) = source else {
-            continue;
-        };
-        let source = uqa_execution::canonical_column_type_name(source);
-        let target = crate::user_functions::canonical_routine_type_name(target);
-        if !uqa_execution::routine_type_accepts_implicit_cast(&source, &target) {
-            return Err(anonymous_record_shape_error());
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn runtime_record_column_type(value: &Value) -> Option<uqa_sql::ast::ColumnType> {
-    if matches!(value, Value::Null) {
-        return None;
-    }
-    uqa_sql::ast::ColumnType::from_sql_name(uqa_sql::expr::value_type_name(value)).ok()
-}
-
-fn coerce_anonymous_record_value(
-    engine: &Engine,
-    value: &Value,
-    type_name: &str,
-) -> Result<Value, SQLError> {
-    let target = crate::sql::resolve_catalog_column_type(engine, type_name)
-        .or_else(|| uqa_sql::ast::ColumnType::from_sql_name(type_name).ok());
-    let Some(target) = target else {
-        return super::coerce_routine_value(engine, value, type_name);
-    };
-    uqa_sql::assignment::conversion::convert_value_to_column_type_with_context(
-        engine,
-        value.clone(),
-        &target,
-    )
-    .map_err(|error| match error {
-        SQLError::TypeMismatch(message) if message.starts_with("value too long for type ") => {
-            SQLError::Routine {
-                sqlstate: "22001".into(),
-                message,
-            }
-        }
-        other => other,
-    })
-}
-
-fn anonymous_record_shape_error() -> SQLError {
-    SQLError::Routine {
-        sqlstate: "42P13".into(),
-        message: "return type mismatch in function declared to return record".into(),
-    }
 }
