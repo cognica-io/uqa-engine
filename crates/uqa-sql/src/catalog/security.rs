@@ -73,3 +73,5 @@ pub struct SequenceSecurity {
     pub role_owner: String,
     pub acl: Option<Vec<uqa_core::catalog_sequence::SequenceAclEntry>>,
 }
+
+pub mod table_inquiry;

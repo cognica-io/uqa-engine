@@ -8,6 +8,45 @@ use super::*;
 use crate::StoredViewKind;
 
 #[test]
+fn privilege_readers_retain_registry_guards_and_table_generations() {
+    use uqa_execution::catalog::security::table_inquiry::TablePrivilegeRegistry;
+
+    let engine = Engine::new();
+    engine
+        .sql("CREATE TABLE inquiry_items (old_value integer)", &[])
+        .unwrap();
+    engine
+        .sql("GRANT SELECT ON inquiry_items TO PUBLIC", &[])
+        .unwrap();
+    let relation = crate::RelationIdentity::new("public", "inquiry_items");
+    let selected = {
+        let registry = TablePrivilegeRegistry::tables(&engine);
+        assert!(engine.storage.tables.try_write().is_none());
+        assert!(registry.keys().any(|name| name == &relation));
+        assert_eq!(
+            registry.get(&relation).unwrap().column_names(),
+            ["old_value"]
+        );
+        registry.retained(&relation).unwrap()
+    };
+    assert!(engine.storage.tables.try_write().is_some());
+    let security = selected.security();
+    assert!(security.acl.is_some());
+
+    engine.sql("DROP TABLE inquiry_items", &[]).unwrap();
+    engine
+        .sql("CREATE TABLE inquiry_items (new_value text)", &[])
+        .unwrap();
+    let replacement = TablePrivilegeRegistry::tables(&engine)
+        .retained(&relation)
+        .unwrap();
+    assert_eq!(replacement.column_names(), ["new_value"]);
+    assert!(replacement.security().acl.is_none());
+    assert_eq!(selected.column_names(), ["old_value"]);
+    assert_eq!(selected.security(), security);
+}
+
+#[test]
 fn catalog_views_share_schema_and_graph_allocations_until_mutation() {
     let engine = Engine::new();
     engine

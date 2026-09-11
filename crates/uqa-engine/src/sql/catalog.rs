@@ -51,15 +51,6 @@ pub(crate) fn pg_get_viewdef_value(
 pub(crate) fn resolve_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {
     uqa_execution::catalog::projection::resolve_regclass_oid(&engine.catalog_execution(), name)
 }
-pub(crate) fn resolve_regclass_kind_by_oid(
-    engine: &Engine,
-    oid: i64,
-) -> Result<Option<(String, String)>, SQLError> {
-    uqa_execution::catalog::projection::resolve_regclass_kind_by_oid(
-        &engine.catalog_execution(),
-        oid,
-    )
-}
 pub(crate) fn resolve_regprocedure_oid(engine: &Engine, name: &str) -> Result<Option<i64>, String> {
     uqa_execution::catalog::projection::resolve_regprocedure_oid(&engine.catalog_execution(), name)
 }
