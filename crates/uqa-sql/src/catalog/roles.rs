@@ -131,5 +131,8 @@ pub fn require_set_role(
     })
 }
 
+pub mod definition;
+pub mod dependencies;
 pub mod guards;
 pub mod inquiry;
+pub mod restoration;

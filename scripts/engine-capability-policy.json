@@ -62,6 +62,7 @@
         "crates/uqa-engine/src/capabilities/retrieval_planning.rs",
         "crates/uqa-engine/src/capabilities/retrieval_planning/tests.rs",
         "crates/uqa-engine/src/capabilities/returning.rs",
+        "crates/uqa-engine/src/capabilities/roles.rs",
         "crates/uqa-engine/src/capabilities/routine_catalog.rs",
         "crates/uqa-engine/src/capabilities/routine_definitions.rs",
         "crates/uqa-engine/src/capabilities/routine_execution.rs",

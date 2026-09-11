@@ -576,6 +576,7 @@ mod table_functions;
 
 mod index_creation;
 
+mod roles;
 mod sequences;
 
 mod schema_publication;

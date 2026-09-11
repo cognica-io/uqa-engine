@@ -8,18 +8,11 @@
 
 use uqa_sql::{
     ast::{
-        AlterRoleStmt, ColumnDef, CreateRoleStmt, CreateRule, CreateTrigger,
-        DeferredCreateForeignTable, DropRoleStmt, DropRule, DropTrigger, GrantRoleStmt,
+        ColumnDef, CreateRule, CreateTrigger, DeferredCreateForeignTable, DropRule, DropTrigger,
         GrantTableStmt, TableCheck,
     },
     SQLError,
 };
-pub trait RoleDefinitions {
-    fn create_role(&self, statement: &CreateRoleStmt) -> Result<(), SQLError>;
-    fn alter_role(&self, statement: &AlterRoleStmt) -> Result<(), SQLError>;
-    fn drop_roles(&self, statement: &DropRoleStmt) -> Result<(), SQLError>;
-    fn grant_roles(&self, statement: &GrantRoleStmt) -> Result<(), SQLError>;
-}
 pub trait EventDefinitions {
     fn register_trigger(&self, statement: CreateTrigger) -> Result<(), SQLError>;
     fn drop_trigger_sql(&self, statement: &DropTrigger) -> Result<(), SQLError>;

@@ -55,7 +55,7 @@ impl Engine {
             notifications: self,
             controls: self,
             portals: self.portal_execution_context(),
-            roles: self,
+            roles: self.role_execution_context(),
             events: self,
             foreign: self,
             table_privileges: self,

@@ -8,8 +8,7 @@
 
 use uqa_sql::{
     ast::{
-        AlterRoleStmt, ColumnDef, CreateRoleStmt, CreateRule, CreateTrigger,
-        DeferredCreateForeignTable, DropRoleStmt, DropRule, DropTrigger, GrantRoleStmt,
+        ColumnDef, CreateRule, CreateTrigger, DeferredCreateForeignTable, DropRule, DropTrigger,
         GrantTableStmt, TableCheck,
     },
     SQLError,
@@ -17,22 +16,8 @@ use uqa_sql::{
 
 use crate::Engine;
 use uqa_execution::statement::context::definitions::{
-    EventDefinitions, ForeignDefinitions, RoleDefinitions, TablePrivileges,
+    EventDefinitions, ForeignDefinitions, TablePrivileges,
 };
-impl RoleDefinitions for Engine {
-    fn create_role(&self, statement: &CreateRoleStmt) -> Result<(), SQLError> {
-        Engine::create_role(self, statement)
-    }
-    fn alter_role(&self, statement: &AlterRoleStmt) -> Result<(), SQLError> {
-        Engine::alter_role(self, statement)
-    }
-    fn drop_roles(&self, statement: &DropRoleStmt) -> Result<(), SQLError> {
-        Engine::drop_roles(self, statement)
-    }
-    fn grant_roles(&self, statement: &GrantRoleStmt) -> Result<(), SQLError> {
-        Engine::grant_roles(self, statement)
-    }
-}
 impl EventDefinitions for Engine {
     fn register_trigger(&self, statement: CreateTrigger) -> Result<(), SQLError> {
         Engine::register_trigger(self, statement)
