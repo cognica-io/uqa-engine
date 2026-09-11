@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::security::SchemaSecurity;
 use crate::{
     ast::RelationPersistence,
     catalog::roles::{

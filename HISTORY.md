@@ -20,6 +20,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - Implemented `CREATE SCHEMA AUTHORIZATION` with named and session-role owners, omitted schema names, PostgreSQL authorization and duplicate-schema checks, and durable transaction behavior. Schema owner transfer now checks database `CREATE` on the invoking role.
+- Moved table-owner transfer into native execution, preserving sequence-before-table persistence, complete schema capture, ACL rewrites, rollback, and retained table generations. Removed Engine’s table-security implementation and whole-command owner callback.
 - Moved table and foreign-table access checks, maintenance authorization, and foreign security persistence into native execution; view access rules now live in SQL while Engine retains actual catalog guards and table generations.
 
 - Opened compressed SQLite lock sidecars with read-only access for read-only connections, preserving cross-process lock coordination without requiring write permissions or creating lock paths.

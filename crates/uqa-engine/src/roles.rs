@@ -78,10 +78,6 @@ impl Engine {
             .is_some_and(|role| role.has(RoleAttribute::Superuser))
     }
 
-    pub(crate) fn resolve_role_reference(&self, name: &str) -> String {
-        uqa_sql::catalog::roles::resolve_role_reference(self, name)
-    }
-
     pub(crate) fn current_user_has_role_privileges(&self, target: &str) -> bool {
         let current = self.current_user_name();
         let roles = self.durable.roles.read();
@@ -162,7 +158,7 @@ impl Engine {
     }
 }
 
-pub(crate) use uqa_sql::catalog::roles::{role_can_set, role_inherits};
+pub(crate) use uqa_sql::catalog::roles::role_inherits;
 
 #[cfg(test)]
 mod tests;

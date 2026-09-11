@@ -156,7 +156,7 @@ impl Engine {
                 .iter()
                 .map(|column| column.name.clone())
                 .collect::<Vec<_>>();
-            crate::table_security::validate_table_security_invariants(
+            uqa_sql::catalog::security::table::validate_table_security_invariants(
                 &security,
                 Some(&column_names),
                 &self.durable.roles.read(),

@@ -35,3 +35,5 @@ pub mod table_grants;
 pub mod foreign_authorization;
 pub mod table_authorization;
 pub mod table_maintenance;
+
+pub mod table_ownership;

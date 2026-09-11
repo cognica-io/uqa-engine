@@ -150,7 +150,9 @@ fn run_alter_table_action<S: Clone + 'static>(
     }
     match action {
         AlterTableAction::ChangeOwner { owner } => {
-            context.lifecycle.change_owner(&stmt.table, &owner)?;
+            context
+                .ownership
+                .alter_table_role_owner(&stmt.table, &owner)?;
         }
         action @ (AlterTableAction::AddInheritance { .. }
         | AlterTableAction::DropInheritance { .. }

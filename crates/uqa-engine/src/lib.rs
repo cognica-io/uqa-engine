@@ -113,7 +113,6 @@ mod statistics;
 pub use statistics::AutomaticStatisticsStatus;
 mod row_locks;
 mod statement_cache;
-mod table_security;
 mod table_storage;
 mod tables;
 mod transactions;
