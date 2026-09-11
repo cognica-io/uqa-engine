@@ -231,7 +231,9 @@
         "src/session/views/registration.rs",
         "src/session/views/restoration.rs",
         "src/sql/prepared.rs",
-        "src/sql/read_only.rs"
+        "src/sql/read_only.rs",
+        "src/session/views/columns.rs",
+        "src/session/view_binding.rs"
       ]
     },
     "crates/uqa-storage": {

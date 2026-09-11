@@ -532,7 +532,7 @@ pub(super) fn bind_session_portal_query_relations(
         if cte.recursive {
             definition_scope.insert(cte.name.clone());
         }
-        super::super::view_binding::bind_cte_plan_relations(
+        uqa_sql::binding::view_dependencies::bind_cte_plan_relations(
             &mut cte.body,
             &definition_scope,
             &mut |name| {

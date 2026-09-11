@@ -37,3 +37,6 @@ pub mod view_dependencies;
 pub mod domains;
 pub mod foreign_table_alteration;
 pub mod namespaces;
+
+pub mod view_references;
+pub mod view_removal;

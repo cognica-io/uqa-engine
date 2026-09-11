@@ -138,17 +138,6 @@ impl Engine {
             view,
         )
     }
-    pub(crate) fn ensure_view_drop_authority(
-        &self,
-        name: &str,
-        view: &StoredView,
-    ) -> Result<(), SQLError> {
-        uqa_sql::catalog::security::view_ownership::ensure_view_drop_authority(
-            self.view_ownership_context(),
-            name,
-            view,
-        )
-    }
 }
 impl uqa_sql::catalog::security::view_ownership::ViewOwnerSchemas for Engine {
     fn schema_security(&self, schema: &str) -> Option<uqa_sql::catalog::security::SchemaSecurity> {

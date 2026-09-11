@@ -25,17 +25,17 @@ pub(crate) use portals::StatementReadSnapshot;
 mod schemas;
 mod settings;
 mod settings_parse;
-mod view_binding;
 mod views;
 pub(crate) use views::catalog_view_row;
 
 use analyze_helpers::{build_histogram, build_mcv, collect_analyze_values, distinct_count};
 use settings_parse::parse_search_path_list;
-pub(crate) use view_binding::{bind_query_plan_relations, canonical_virtual_relation_reference};
-use view_binding::{bind_query_plan_sequence_references, query_plan_references_relation};
+use uqa_sql::binding::view_dependencies::{
+    bind_query_plan_sequence_references, canonical_virtual_relation_reference,
+};
 
 #[cfg(test)]
-use view_binding::sequence_function_reference_mut;
+use uqa_sql::binding::view_dependencies::sequence_function_reference_mut;
 
 #[cfg(test)]
 mod tests;

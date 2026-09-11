@@ -91,6 +91,8 @@
         "crates/uqa-engine/src/capabilities/view_alteration.rs",
         "crates/uqa-engine/src/capabilities/view_creation.rs",
         "crates/uqa-engine/src/capabilities/view_dependencies.rs",
+        "crates/uqa-engine/src/capabilities/view_references.rs",
+        "crates/uqa-engine/src/capabilities/view_removal.rs",
         "crates/uqa-engine/src/capabilities/view_restoration.rs",
         "crates/uqa-engine/src/capabilities/view_rewrite.rs"
       ]

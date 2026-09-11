@@ -12,7 +12,7 @@ use uqa_sql::{ast::FunctionBinding, SQLError};
 use uqa_storage::StorageBackendResult;
 
 impl Engine {
-    fn view_dependency_context(&self) -> ViewDependencyContext<'_> {
+    pub(crate) fn view_dependency_context(&self) -> ViewDependencyContext<'_> {
         ViewDependencyContext {
             views: self,
             publication: self,
