@@ -34,12 +34,16 @@ use uqa_sql::{
 };
 use uqa_storage::StorageBackendResult;
 
+pub type TableColumnsRead<'a> = Box<dyn Deref<Target = Vec<uqa_sql::ast::ColumnDef>> + 'a>;
 pub trait TablePrivilegeState {
+    fn role_owner(&self) -> String;
+    fn columns(&self) -> TableColumnsRead<'_>;
     fn security(&self) -> TableSecurity;
     fn column_names(&self) -> Vec<String>;
 }
 /// Borrowed lookups hold the registry guard; retained lookups keep the selected table generation after releasing it.
 pub trait TablePrivilegeRead {
+    fn security_entries(&self) -> Box<dyn Iterator<Item = (RelationIdentity, TableSecurity)> + '_>;
     fn keys(&self) -> Box<dyn Iterator<Item = &RelationIdentity> + '_>;
     fn get(&self, relation: &RelationIdentity) -> Option<&dyn TablePrivilegeState>;
     fn retained(&self, relation: &RelationIdentity) -> Option<Arc<dyn TablePrivilegeState>>;

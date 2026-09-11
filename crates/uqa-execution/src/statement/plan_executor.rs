@@ -617,10 +617,12 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             CommandPlan::CreateSchema {
                 name,
                 if_not_exists,
+                authorization,
             } => crate::schema::namespaces::create_schema(
                 &self.context.schemas.inputs.schema_creation_context(),
-                name,
+                name.as_deref(),
                 *if_not_exists,
+                authorization.as_ref(),
             ),
             CommandPlan::AlterSchemaOwner { name, new_owner } => self
                 .context

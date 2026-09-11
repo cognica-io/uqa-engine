@@ -87,24 +87,58 @@ pub trait SchemaRegistration {
 pub struct SchemaCreationContext<'a> {
     pub writer: &'a dyn SchemaStatementWriter,
     pub session: &'a dyn RoleReferenceNames,
+    pub roles: &'a dyn RoleCatalogGuards,
     pub authority: &'a dyn SchemaAuthority,
     pub registration: &'a dyn SchemaRegistration,
+    pub catalog: &'a dyn SchemaSecurityCatalog,
+    pub notices: &'a dyn crate::catalog::notices::CatalogNotices,
 }
 
 pub fn create_schema(
     context: &SchemaCreationContext<'_>,
-    name: &str,
+    name: Option<&str>,
     if_not_exists: bool,
+    authorization: Option<&uqa_sql::ast::SchemaAuthorization>,
 ) -> Result<SQLResult, SQLError> {
     context.writer.prepare_writer()?;
-    let role_owner = context.session.current_user_name();
-    context.authority.ensure_database_create(&role_owner)?;
-    context
-        .registration
-        .register_schema(name, if_not_exists, &role_owner)
-        .map_err(|error| {
-            SQLError::Internal(format!("CREATE SCHEMA catalog write failed: {error}"))
-        })?;
+    let current_user = context.session.current_user_name();
+    let target = uqa_sql::schema::namespaces::creation::schema_creation_target(
+        context.session,
+        context.roles,
+        &current_user,
+        name,
+        authorization,
+    )?;
+    context.authority.ensure_database_create(&current_user)?;
+    roles::require_set_role(
+        &context.roles.role_definitions(),
+        &context.roles.role_memberships(),
+        &current_user,
+        &target.role_owner,
+    )?;
+    uqa_sql::schema::namespaces::creation::validate_schema_creation_name(&target.name)?;
+    let created = if context.catalog.schema_security(&target.name).is_some() {
+        false
+    } else {
+        context
+            .registration
+            .register_schema(&target.name, true, &target.role_owner)
+            .map_err(|error| {
+                SQLError::Internal(format!("CREATE SCHEMA catalog write failed: {error}"))
+            })?
+    };
+    if !created {
+        if !if_not_exists {
+            return Err(SQLError::Routine {
+                sqlstate: "42P06".into(),
+                message: format!(r#"schema "{}" already exists"#, target.name),
+            });
+        }
+        context.notices.notice(
+            "NOTICE",
+            &format!(r#"schema "{}" already exists, skipping"#, target.name),
+        );
+    }
     Ok(SQLResult::empty())
 }
 
@@ -167,7 +201,9 @@ pub fn alter_schema_owner(
             &context.session.current_user_name(),
             &new_owner,
         )?;
-        context.authority.ensure_database_create(&new_owner)?;
+        context
+            .authority
+            .ensure_database_create(&context.session.current_user_name())?;
     }
     rewrite_schema_acl_owner(&mut security, &new_owner);
     context.persistence.persist_security(name, &security)?;

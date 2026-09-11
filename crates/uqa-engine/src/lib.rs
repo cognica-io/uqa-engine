@@ -89,7 +89,6 @@ mod catalog_indexes;
 mod domains;
 mod events;
 mod fdw;
-mod foreign_table_security;
 mod fts;
 mod generated;
 mod graphs;

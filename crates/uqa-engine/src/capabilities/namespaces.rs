@@ -24,6 +24,9 @@ impl Engine {
         SchemaCreationContext {
             writer: self,
             session: self,
+            roles: self,
+            catalog: self,
+            notices: self,
             authority: self,
             registration: self,
         }

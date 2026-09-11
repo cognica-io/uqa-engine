@@ -264,9 +264,11 @@ impl UnifiedPlan {
             Statement::CreateSchema {
                 name,
                 if_not_exists,
+                authorization,
             } => Self::Command(Box::new(CommandPlan::CreateSchema {
                 name,
                 if_not_exists,
+                authorization,
             })),
             Statement::AlterSchemaOwner { name, new_owner } => {
                 Self::Command(Box::new(CommandPlan::AlterSchemaOwner { name, new_owner }))

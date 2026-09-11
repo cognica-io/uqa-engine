@@ -37,9 +37,7 @@ pub trait TableGrantRead<'a> {
 pub trait TableGrantRegistry {
     fn tables(&self) -> Box<dyn TableGrantRead<'_> + '_>;
 }
-pub trait TableGrantNotices {
-    fn notice(&self, level: &str, message: &str);
-}
+pub use crate::catalog::notices::CatalogNotices as TableGrantNotices;
 pub struct TableGrantContext<'a> {
     pub writer: &'a dyn SchemaStatementWriter,
     pub resolution: &'a dyn TableGrantResolution,

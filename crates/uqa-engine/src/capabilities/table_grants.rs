@@ -56,6 +56,12 @@ impl<'a> TableGrantRead<'a> for GrantTables<'a> {
     }
 }
 impl TablePrivilegeState for GrantTable<'_> {
+    fn role_owner(&self) -> String {
+        self.state.role_owner()
+    }
+    fn columns(&self) -> uqa_execution::catalog::security::table_inquiry::TableColumnsRead<'_> {
+        Box::new(self.state.columns.read())
+    }
     fn security(&self) -> TableSecurity {
         self.state.security()
     }

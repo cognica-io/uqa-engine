@@ -19,6 +19,13 @@ use uqa_storage::StorageBackendResult;
 
 struct TablePrivilegeGuard<'a>(RwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>);
 impl TablePrivilegeRead for TablePrivilegeGuard<'_> {
+    fn security_entries(&self) -> Box<dyn Iterator<Item = (RelationIdentity, TableSecurity)> + '_> {
+        Box::new(
+            self.0
+                .iter()
+                .map(|(relation, table)| (relation.clone(), table.security())),
+        )
+    }
     fn keys(&self) -> Box<dyn Iterator<Item = &RelationIdentity> + '_> {
         Box::new(self.0.keys())
     }
@@ -35,6 +42,12 @@ impl TablePrivilegeRead for TablePrivilegeGuard<'_> {
     }
 }
 impl TablePrivilegeState for TableState {
+    fn role_owner(&self) -> String {
+        self.role_owner()
+    }
+    fn columns(&self) -> uqa_execution::catalog::security::table_inquiry::TableColumnsRead<'_> {
+        Box::new(self.columns.read())
+    }
     fn security(&self) -> TableSecurity {
         self.security()
     }
