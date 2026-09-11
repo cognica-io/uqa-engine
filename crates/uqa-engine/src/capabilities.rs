@@ -643,3 +643,5 @@ mod statement_transactions;
 
 mod view_references;
 mod view_removal;
+
+pub(crate) mod truncate;

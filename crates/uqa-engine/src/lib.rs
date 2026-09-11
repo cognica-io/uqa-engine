@@ -116,7 +116,6 @@ mod table_security;
 mod table_storage;
 mod tables;
 mod transactions;
-mod truncate;
 mod user_functions;
 mod value_index;
 

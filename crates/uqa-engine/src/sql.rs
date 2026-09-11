@@ -78,7 +78,6 @@ pub(super) use planning::{
 };
 use select::query_has_row_locks;
 pub(crate) use select::RowLockRetryCache;
-pub(crate) use triggers::fire_statement_triggers;
 pub(crate) use triggers::{fire_deferred_constraint_trigger_event, DeferredConstraintTriggerEvent};
 
 pub(crate) use catalog::{
