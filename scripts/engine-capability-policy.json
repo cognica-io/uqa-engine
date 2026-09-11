@@ -41,6 +41,7 @@
         "crates/uqa-engine/src/capabilities/namespaces.rs",
         "crates/uqa-engine/src/capabilities/partitions.rs",
         "crates/uqa-engine/src/capabilities/physical_retrieval.rs",
+        "crates/uqa-engine/src/capabilities/prepared.rs",
         "crates/uqa-engine/src/capabilities/query_execution.rs",
         "crates/uqa-engine/src/capabilities/query_locking.rs",
         "crates/uqa-engine/src/capabilities/query_operators.rs",

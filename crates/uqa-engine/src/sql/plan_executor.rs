@@ -250,7 +250,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         body: &UnifiedPlan,
     ) -> Result<SQLResult, SQLError> {
         if self.engine.lookup_prepared(name).is_some() {
-            return Err(super::prepared::statement_error(
+            return Err(uqa_sql::prepared::statement_error(
                 "42P05",
                 name,
                 "already exists",
@@ -270,19 +270,20 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         name: &str,
         params: &[ExpressionPlan],
     ) -> Result<SQLResult, SQLError> {
-        let bound =
-            super::prepared::bind_execute_parameters(self.engine, name, params, self.params)?;
+        let bound = self
+            .engine
+            .bind_execute_parameters(name, params, self.params)?;
         let plan = self
             .engine
             .prepared_plan_for_execution(name, &bound)?
-            .ok_or_else(|| super::prepared::statement_error("26000", name, "does not exist"))?;
+            .ok_or_else(|| uqa_sql::prepared::statement_error("26000", name, "does not exist"))?;
         UnifiedPlanExecutor::new_nested(self.engine, &bound).execute(&plan)
     }
 
     fn execute_deallocate(&self, name: Option<&str>) -> Result<SQLResult, SQLError> {
         if let Some(name) = name {
             if self.engine.lookup_prepared(name).is_none() {
-                return Err(super::prepared::statement_error(
+                return Err(uqa_sql::prepared::statement_error(
                     "26000",
                     name,
                     "does not exist",
@@ -378,7 +379,12 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         ) {
             // Semantic errors precede the view's rewrite-time mutation rejection.
             let ctes = crate::capabilities::query_scope::new_for_current_routine(self.engine);
-            super::prepared::analyze_command_parameters(self.engine, command, self.params, &ctes)?;
+            uqa_execution::query::binding::analyze_command_parameters(
+                self.engine,
+                command,
+                self.params,
+                &ctes,
+            )?;
             return Err(error);
         }
         match command {

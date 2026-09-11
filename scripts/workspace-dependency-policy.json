@@ -224,6 +224,9 @@
     "crates/uqa-engine": {
       "forbidden_component_prefixes": [
         "engine_"
+      ],
+      "forbidden_paths": [
+        "src/sql/prepared.rs"
       ]
     },
     "crates/uqa-storage": {
