@@ -56,7 +56,7 @@ impl Engine {
             controls: self,
             portals: self.portal_execution_context(),
             roles: self.role_execution_context(),
-            events: self,
+            events: self.event_lifecycle_context(),
             foreign: self,
             table_privileges: self,
             explain: uqa_planner::explain::run_explain,

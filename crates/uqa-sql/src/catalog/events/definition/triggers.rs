@@ -4,20 +4,31 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{
-    bind_expr, canonical_routine_type_name, is_boolean_type, routine_signature_types,
-    validate_trigger_condition_references, validate_trigger_transition_relation, Arc, ColumnDef,
-    ColumnType, CompiledFunctionBody, CreateTrigger, Engine, Expr, FunctionReturns,
-    RelationIdentity, RelationLookupMode, RelationResolution, SQLError, SQLUserFunction,
-    TriggerConditionTypeResolver, TriggerEvent, TriggerTiming, Value,
+use super::EventAnalysisContext;
+use crate::{
+    ast::{
+        ColumnDef, ColumnType, CreateTrigger, Expr, FunctionReturns, TriggerEvent, TriggerTiming,
+    },
+    catalog::{
+        events::validation::{
+            is_boolean_type, validate_trigger_condition_references,
+            validate_trigger_transition_relation, TriggerConditionTypeResolver,
+        },
+        resolution::{RelationLookupMode, RelationResolution},
+        security::table::TableAclPrivilege,
+    },
+    plpgsql::bind_expr,
+    routines::{routine_signature_types, CompiledFunctionBody, SQLUserFunction},
+    type_resolution::canonical_routine_type_name,
+    SQLError,
 };
+use std::sync::Arc;
+use uqa_core::{RelationIdentity, Value};
 
-impl Engine {
-    pub(in crate::events) fn resolve_trigger_table(
-        &self,
-        name: &str,
-    ) -> Result<RelationIdentity, SQLError> {
-        let RelationResolution::Found(canonical, kind) = self.resolve_bound_relation_kind(name)?
+impl EventAnalysisContext<'_> {
+    pub fn resolve_trigger_table(&self, name: &str) -> Result<RelationIdentity, SQLError> {
+        let RelationResolution::Found(canonical, kind) =
+            self.relations.resolve_bound_relation_kind(name)?
         else {
             return Err(SQLError::UnknownTable(name.to_string()));
         };
@@ -41,28 +52,27 @@ impl Engine {
     ) -> Result<Vec<ColumnDef>, SQLError> {
         if kind == "table" {
             return self
+                .returning
+                .catalog
                 .try_describe_table_row_type(&relation.qualified_name())
                 .map_err(|error| SQLError::Internal(format!("read trigger columns: {error}")))?
                 .ok_or_else(|| SQLError::UnknownTable(relation.qualified_name()));
         }
         if kind == "foreign table" {
-            let table = self
-                .durable
-                .foreign_tables
-                .read()
-                .get(relation)
-                .cloned()
+            let columns = self
+                .catalog
+                .foreign_columns(relation)
                 .ok_or_else(|| SQLError::UnknownTable(relation.qualified_name()))?;
-            return Ok(table
-                .columns
+            return Ok(columns
                 .into_iter()
                 .map(|column| trigger_column(column.name, column.ty))
                 .collect());
         }
         let view = self
+            .catalog
             .restored_catalog_view_definition(&relation.qualified_name())?
             .ok_or_else(|| SQLError::UnknownTable(relation.qualified_name()))?;
-        let schema = self.stored_view_schema(&view)?;
+        let schema = self.catalog.stored_view_schema(&view)?;
         Ok(schema
             .columns()
             .iter()
@@ -79,7 +89,7 @@ impl Engine {
             .collect())
     }
 
-    pub(in crate::events) fn trigger_relation_from_resolution(
+    pub fn trigger_relation_from_resolution(
         name: &str,
         resolution: RelationResolution,
     ) -> Result<(RelationIdentity, &'static str), SQLError> {
@@ -96,14 +106,14 @@ impl Engine {
         }
     }
 
-    pub(in crate::events) fn resolve_trigger_relation_kind(
+    pub fn resolve_trigger_relation_kind(
         &self,
         name: &str,
         lookup_mode: RelationLookupMode,
     ) -> Result<(RelationIdentity, &'static str), SQLError> {
         let resolution = match lookup_mode {
-            RelationLookupMode::Dynamic => self.resolve_visible_relation_kind(name)?,
-            RelationLookupMode::Bound => self.resolve_bound_relation_kind(name)?,
+            RelationLookupMode::Dynamic => self.relations.resolve_visible_relation_kind(name)?,
+            RelationLookupMode::Bound => self.relations.resolve_bound_relation_kind(name)?,
         };
         Self::trigger_relation_from_resolution(name, resolution)
     }
@@ -114,8 +124,8 @@ impl Engine {
         lookup_mode: RelationLookupMode,
     ) -> Result<Arc<SQLUserFunction>, SQLError> {
         let candidates = match lookup_mode {
-            RelationLookupMode::Dynamic => self.lookup_visible_sql_functions(name)?,
-            RelationLookupMode::Bound => self.lookup_bound_sql_functions(name),
+            RelationLookupMode::Dynamic => self.routines.lookup_visible_sql_functions(name)?,
+            RelationLookupMode::Bound => self.routines.lookup_bound_sql_functions(name),
         }
         .unwrap_or_default()
         .into_iter()
@@ -162,7 +172,7 @@ impl Engine {
         Ok(())
     }
 
-    pub(crate) fn resolve_trigger_function(
+    pub fn resolve_trigger_function(
         &self,
         name: &str,
         lookup_mode: RelationLookupMode,
@@ -172,7 +182,7 @@ impl Engine {
         Ok(function)
     }
 
-    pub(crate) fn resolve_bound_trigger_function(
+    pub fn resolve_bound_trigger_function(
         &self,
         name: &str,
         object_id: Option<[u8; 16]>,
@@ -180,7 +190,7 @@ impl Engine {
         let Some(object_id) = object_id else {
             return self.resolve_trigger_function(name, RelationLookupMode::Bound);
         };
-        let binding = uqa_sql::ast::FunctionBinding {
+        let binding = crate::ast::FunctionBinding {
             object_id: Some(object_id),
             name: name.to_string(),
             argument_types: Vec::new(),
@@ -190,6 +200,7 @@ impl Engine {
             resolution_error: None,
         };
         let candidates = self
+            .routines
             .lookup_bound_sql_functions_by_binding(&binding)
             .unwrap_or_default()
             .into_iter()
@@ -222,29 +233,33 @@ impl Engine {
     ) -> Result<(), SQLError> {
         let canonical = relation.qualified_name();
         match relation_kind {
-            "table" => self.ensure_table_privilege(
-                &canonical,
-                crate::table_security::TableAclPrivilege::Trigger,
-            ),
+            "table" => {
+                let current_user = self.authority.current_user_name();
+                self.privileges.ensure_table_privilege_for(
+                    &canonical,
+                    &current_user,
+                    TableAclPrivilege::Trigger,
+                )
+            }
             "view" => {
                 let view = self
+                    .catalog
                     .restored_catalog_view_definition(&canonical)?
                     .ok_or_else(|| {
                         SQLError::Internal(format!(
                             "resolved trigger view `{canonical}` has no catalog definition"
                         ))
                     })?;
-                self.ensure_view_privilege_for(
+                self.privileges.ensure_view_privilege_for(
                     &canonical,
                     &view,
-                    &self.current_user_name(),
-                    crate::table_security::TableAclPrivilege::Trigger,
+                    &self.authority.current_user_name(),
+                    TableAclPrivilege::Trigger,
                 )
             }
-            "foreign table" => self.ensure_foreign_table_privilege(
-                &canonical,
-                crate::table_security::TableAclPrivilege::Trigger,
-            ),
+            "foreign table" => self
+                .foreign_privileges
+                .ensure_foreign_table_privilege(&canonical, TableAclPrivilege::Trigger),
             _ => Ok(()),
         }
     }
@@ -319,7 +334,7 @@ impl Engine {
         }
     }
 
-    pub(in crate::events) fn validate_trigger_definition(
+    pub fn validate_trigger_definition(
         &self,
         definition: &mut CreateTrigger,
         lookup_mode: RelationLookupMode,
@@ -370,7 +385,11 @@ impl Engine {
         let requested_function = definition.function.clone();
         let function = self.resolve_trigger_function_candidate(&requested_function, lookup_mode)?;
         if lookup_mode == RelationLookupMode::Dynamic {
-            self.ensure_routine_execute_privilege_named(&function.def, &requested_function)?;
+            crate::routines::security::ensure_routine_execute_privilege_named(
+                self.authority,
+                &function.def,
+                &requested_function,
+            )?;
         }
         Self::validate_trigger_function(&function)?;
         definition.function.clone_from(&function.def.name);
@@ -424,12 +443,15 @@ impl Engine {
         if definition.transition_relations.is_empty() {
             return Ok(());
         }
-        let hierarchy = self.loaded_table_hierarchy(relation).ok_or_else(|| {
-            SQLError::Internal(format!(
-                "trigger table `{}` disappeared during validation",
-                definition.table
-            ))
-        })?;
+        let hierarchy = self
+            .catalog
+            .loaded_table_hierarchy(relation)
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "trigger table `{}` disappeared during validation",
+                    definition.table
+                ))
+            })?;
         if definition.row && hierarchy.partition_spec.is_some() {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
@@ -467,23 +489,20 @@ impl Engine {
     fn validate_trigger_condition(
         &self,
         definition: &CreateTrigger,
-        columns: &[uqa_sql::ast::ColumnDef],
+        columns: &[crate::ast::ColumnDef],
         condition: &mut Expr,
     ) -> Result<bool, SQLError> {
         validate_trigger_condition_references(definition, columns, condition)?;
         let bound = bind_expr(condition, &mut TriggerConditionTypeResolver { columns })?;
-        let mut plan = uqa_planner::ExpressionPlan::lower_with(bound, &|name: &str| {
-            self.has_registered_aggregate_function(name)
+        let mut plan = crate::plan::ExpressionPlan::lower_with(bound, &|name: &str| {
+            self.routines.has_registered_aggregate_function(name)
         });
-        let ty = crate::capabilities::stored_routines::bind_catalog_expression_routines_with_outer(
-            self,
-            &mut plan,
-            &[],
-            &uqa_execution::RowSchema::default(),
-        )?;
+        let ty =
+            self.stored_routines
+                .bind_expression(&mut plan, &[], &crate::RowSchema::default())?;
         if !ty.as_ref().is_some_and(is_boolean_type) {
             if let Expr::Literal(value @ (Value::Str(_) | Value::FixedChar(_))) = condition {
-                *value = uqa_sql::expr::cast_value(value, "boolean")?;
+                *value = crate::expr::cast_value(value, "boolean")?;
             } else if let Some(ty) = ty {
                 return Err(SQLError::TypeMismatch(format!(
                     "argument of WHEN must be type boolean, not type {}",
@@ -496,12 +515,14 @@ impl Engine {
                 };
             }
         }
-        uqa_sql::catalog::regrole_dependencies::reject_stored_regrole_constants(
-            self, condition, None,
+        crate::catalog::regrole_dependencies::reject_stored_regrole_constants_with(
+            self.regroles,
+            condition,
+            None,
         )?;
         let references =
-            uqa_sql::binding::stored_routines::collect_expression_routine_references(&plan)?;
-        super::super::bind_stored_expression_routines(condition, &references)
+            crate::binding::stored_routines::collect_expression_routine_references(&plan)?;
+        crate::catalog::stored_ast::bind_stored_expression_routines(condition, &references)
     }
 }
 

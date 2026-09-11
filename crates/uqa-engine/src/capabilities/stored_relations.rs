@@ -8,14 +8,10 @@
 
 use crate::Engine;
 use uqa_sql::{
-    ast::{Expr, Statement},
     binding::stored_relations::{
         self as analysis, StoredQueryBindingContext, StoredQuerySequences, StoredRelationCatalog,
     },
-    catalog::{
-        events::RuleDependencies,
-        resolution::{RelationLookupMode, RelationResolution},
-    },
+    catalog::resolution::RelationResolution,
     plan::QueryPlan,
     SQLError,
 };
@@ -80,19 +76,5 @@ impl Engine {
             reject_transition_relations,
             false,
         )
-    }
-    pub(crate) fn bind_rule_action_relation_dependencies(
-        &self,
-        statement: &mut Statement,
-        lookup_mode: RelationLookupMode,
-    ) -> Result<RuleDependencies, SQLError> {
-        analysis::bind_rule_action_relation_dependencies(self, statement, lookup_mode)
-    }
-    pub(crate) fn bind_rule_condition_relation_dependencies(
-        &self,
-        expression: &mut Expr,
-        lookup_mode: RelationLookupMode,
-    ) -> Result<RuleDependencies, SQLError> {
-        analysis::bind_rule_condition_relation_dependencies(self, expression, lookup_mode)
     }
 }

@@ -223,8 +223,8 @@ impl Engine {
                     super::rewrite_statement_routine_identity(action, target, new_name)?;
                 }
                 super::synchronize_rule_sql_text(&mut rule.definition)?;
-                let (validated_relation, condition_plan, condition_binding, dependencies) = self
-                    .validate_rule_definition(
+                let (validated_relation, condition_plan, condition_binding, dependencies) =
+                    self.event_analysis_context().validate_rule_definition(
                         &mut rule.definition,
                         RelationLookupMode::Bound,
                         None,
@@ -423,6 +423,7 @@ impl Engine {
                 ))
             })?;
         let (validated_relation, condition_plan, condition_binding, dependencies) = self
+            .event_analysis_context()
             .validate_rule_definition(&mut rule.definition, RelationLookupMode::Bound, None, None)
             .map_err(|error| {
                 StorageBackendError::Other(format!(
@@ -463,11 +464,14 @@ impl Engine {
             })?;
         }
         for action in &mut rule.definition.actions {
-            let action_columns = self.rule_action_target_columns(action).map_err(|error| {
-                StorageBackendError::Other(format!(
-                    "read rule action columns during rename: {error}"
-                ))
-            })?;
+            let action_columns = self
+                .event_analysis_context()
+                .rule_action_target_columns(action)
+                .map_err(|error| {
+                    StorageBackendError::Other(format!(
+                        "read rule action columns during rename: {error}"
+                    ))
+                })?;
             *action = super::bind_rule_action(
                 self,
                 action,
@@ -549,6 +553,7 @@ impl Engine {
                     ))
                 })?;
             let (validated_relation, condition_plan, condition_binding, dependencies) = self
+                .event_analysis_context()
                 .validate_rule_definition(
                     &mut rule.definition,
                     RelationLookupMode::Bound,
@@ -631,7 +636,7 @@ impl Engine {
             });
         }
         for name in dependent_triggers {
-            self.drop_trigger(&DropTrigger {
+            self.event_lifecycle_context().drop_trigger(&DropTrigger {
                 name: name.clone(),
                 table: table.to_string(),
                 if_exists: false,
@@ -644,7 +649,7 @@ impl Engine {
         }
         for (event_relation, name) in dependent_rules {
             let event_table = event_relation.qualified_name();
-            self.drop_rule(&DropRule {
+            self.event_lifecycle_context().drop_rule(&DropRule {
                 name: name.clone(),
                 table: event_table.clone(),
                 if_exists: false,

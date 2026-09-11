@@ -73,7 +73,8 @@ impl ConstraintAlterAccess for Engine {
         self.ensure_no_pending_trigger_events(table, action)
     }
     fn constraint_trigger_name(&self, table: &str, name: &str) -> Result<Option<String>, SQLError> {
-        self.constraint_trigger_by_constraint_name(table, name)
+        self.event_lookup_context()
+            .constraint_trigger_by_constraint_name(table, name)
             .map(|trigger| trigger.map(|trigger| trigger.definition.name))
     }
 }

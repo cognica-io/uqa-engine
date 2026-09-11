@@ -237,7 +237,12 @@
         "src/session/portals/dependencies.rs",
         "src/sql",
         "src/sql.rs",
-        "src/roles/memberships.rs"
+        "src/roles/memberships.rs",
+        "src/events/validation.rs",
+        "src/events/validation",
+        "src/events/registry.rs",
+        "src/events/rule_binding.rs",
+        "src/events/rule_condition_binding.rs"
       ]
     },
     "crates/uqa-storage": {

@@ -15,7 +15,7 @@ impl uqa_sql::semantics::rules::RuleCatalog for Engine {
         Engine::relation_has_rules(self, table)
     }
     fn resolve_rule_relation(&self, table: &str) -> Result<RelationIdentity, SQLError> {
-        Engine::resolve_rule_relation(self, table)
+        self.event_analysis_context().resolve_rule_relation(table)
     }
     fn rules_for(&self, table: &str, event: RuleEvent) -> Result<Vec<StoredRule>, SQLError> {
         Engine::rules_for(self, table, event)
@@ -41,6 +41,6 @@ impl uqa_sql::semantics::rules::action_binding::RuleSourceCatalog for Engine {
         &self,
         name: &str,
     ) -> Result<Vec<(String, uqa_sql::ColumnType)>, SQLError> {
-        Engine::rule_relation_columns(self, name)
+        self.event_analysis_context().rule_relation_columns(name)
     }
 }

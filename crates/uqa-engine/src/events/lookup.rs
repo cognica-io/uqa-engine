@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use uqa_sql::ast::{RuleEvent, TriggerEvent, TriggerTiming};
 use uqa_sql::SQLError;
 
-use crate::{Engine, RelationIdentity};
+use crate::Engine;
 
 use super::{StoredRule, StoredTrigger};
 
@@ -21,7 +21,7 @@ impl Engine {
         table: &str,
         event: RuleEvent,
     ) -> Result<Vec<StoredRule>, SQLError> {
-        let relation = self.resolve_rule_relation(table)?;
+        let relation = self.event_analysis_context().resolve_rule_relation(table)?;
         if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
             return Ok(snapshot
                 .rules
@@ -49,7 +49,7 @@ impl Engine {
         table: &str,
         event: RuleEvent,
     ) -> Result<Vec<StoredRule>, SQLError> {
-        let relation = self.resolve_rule_relation(table)?;
+        let relation = self.event_analysis_context().resolve_rule_relation(table)?;
         let replica = self.session_replication_role_is_replica();
         Ok(self
             .durable
@@ -70,7 +70,7 @@ impl Engine {
     }
 
     pub(crate) fn relation_has_rules(&self, table: &str) -> Result<bool, SQLError> {
-        let relation = self.resolve_rule_relation(table)?;
+        let relation = self.event_analysis_context().resolve_rule_relation(table)?;
         Ok(self
             .durable
             .rules
@@ -87,10 +87,11 @@ impl Engine {
         row: bool,
         updated_columns: &[String],
     ) -> Result<Vec<StoredTrigger>, SQLError> {
-        let relation = self.resolve_trigger_table(table)?;
+        let relation = self.event_analysis_context().resolve_trigger_table(table)?;
         let replica = self.session_replication_role_is_replica();
         let relations = if row {
-            self.partition_trigger_sources(&relation.qualified_name())?
+            self.event_lookup_context()
+                .partition_trigger_sources(&relation.qualified_name())?
         } else {
             vec![relation.clone()]
         };
@@ -135,7 +136,7 @@ impl Engine {
         event: TriggerEvent,
         row: bool,
     ) -> Result<bool, SQLError> {
-        let relation = self.resolve_trigger_table(table)?;
+        let relation = self.event_analysis_context().resolve_trigger_table(table)?;
         let matches = |entries: &BTreeMap<String, StoredTrigger>| {
             entries.values().any(|trigger| {
                 trigger.definition.timing == timing
@@ -159,8 +160,10 @@ impl Engine {
         table: &str,
         event: TriggerEvent,
     ) -> Result<bool, SQLError> {
-        let relation = self.resolve_trigger_table(table)?;
-        let sources = self.partition_trigger_sources(&relation.qualified_name())?;
+        let relation = self.event_analysis_context().resolve_trigger_table(table)?;
+        let sources = self
+            .event_lookup_context()
+            .partition_trigger_sources(&relation.qualified_name())?;
         let replica = self.session_replication_role_is_replica();
         let triggers = self.durable.triggers.read();
         Ok(sources.iter().any(|source| {
@@ -175,40 +178,6 @@ impl Engine {
                 })
             })
         }))
-    }
-
-    pub(crate) fn partition_trigger_sources(
-        &self,
-        table: &str,
-    ) -> Result<Vec<RelationIdentity>, SQLError> {
-        let mut current = self.resolve_trigger_table(table)?;
-        let mut sources = vec![current.clone()];
-        if !self.storage.tables.read().contains_key(&current) {
-            return Ok(sources);
-        }
-        loop {
-            let hierarchy = self
-                .try_table_hierarchy(&current.qualified_name())
-                .map_err(|error| {
-                    SQLError::Internal(format!("read trigger partition hierarchy: {error}"))
-                })?;
-            if hierarchy.partition_bound.is_none() {
-                break;
-            }
-            let Some(parent) = hierarchy.parents.first() else {
-                return Err(SQLError::Internal(format!(
-                    "partition `{}` has no parent",
-                    current.qualified_name()
-                )));
-            };
-            current = RelationIdentity::from_legacy_name(parent).map_err(|error| {
-                SQLError::Internal(format!(
-                    "decode trigger partition parent `{parent}`: {error}"
-                ))
-            })?;
-            sources.push(current.clone());
-        }
-        Ok(sources)
     }
 
     pub(crate) fn list_triggers(&self) -> Vec<StoredTrigger> {

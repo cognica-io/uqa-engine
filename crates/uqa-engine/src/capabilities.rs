@@ -653,3 +653,7 @@ mod statements;
 
 mod cte;
 pub(crate) mod stored_routines;
+
+mod event_definitions;
+
+mod event_registry;

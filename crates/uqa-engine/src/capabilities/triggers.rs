@@ -46,7 +46,7 @@ impl TriggerCatalog for Engine {
         Engine::has_row_triggers(self, table, event)
     }
     fn rule_relation_columns(&self, table: &str) -> Result<Vec<(String, ColumnType)>, SQLError> {
-        Engine::rule_relation_columns(self, table)
+        self.event_analysis_context().rule_relation_columns(table)
     }
     fn triggers_for(
         &self,
@@ -81,7 +81,8 @@ impl TriggerRoutineInvoker for Engine {
         name: &str,
         object_id: Option<[u8; 16]>,
     ) -> Result<Arc<SQLUserFunction>, SQLError> {
-        Engine::resolve_bound_trigger_function(self, name, object_id)
+        self.event_analysis_context()
+            .resolve_bound_trigger_function(name, object_id)
     }
     fn execute_trigger_routine(
         &self,

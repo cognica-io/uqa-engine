@@ -7,10 +7,9 @@
 //! Bind stored column analysis to relation metadata without embedding its AST algorithms.
 
 use crate::Engine;
-use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
 use uqa_sql::{
-    ast::{CreateRule, Expr, Statement},
+    ast::CreateRule,
     binding::stored_columns::{
         self as analysis, StoredColumnBindingContext, StoredColumnCatalog, StoredSourceCatalog,
         StoredSourceColumns,
@@ -35,21 +34,6 @@ impl Engine {
             sources: self,
             merge: self,
         }
-    }
-    pub(crate) fn bind_rule_condition_column_dependencies(
-        &self,
-        condition: &mut Expr,
-    ) -> Result<BTreeSet<RuleColumnDependency>, SQLError> {
-        analysis::bind_rule_condition_column_dependencies(
-            self.stored_column_binding_context(),
-            condition,
-        )
-    }
-    pub(crate) fn bind_rule_action_column_dependencies(
-        &self,
-        action: &mut Statement,
-    ) -> Result<BTreeSet<RuleColumnDependency>, SQLError> {
-        analysis::bind_rule_action_column_dependencies(self.stored_column_binding_context(), action)
     }
     pub(crate) fn rewrite_rule_column_references(
         &self,

@@ -48,6 +48,10 @@ impl RoutineOverloadCatalog for Engine {
 }
 
 impl RoutineResolution for Engine {
+    fn lookup_bound_sql_functions(&self, name: &str) -> Option<Vec<Arc<SQLUserFunction>>> {
+        Engine::lookup_bound_sql_functions(self, name)
+    }
+
     fn lookup_bound_sql_functions_by_binding(
         &self,
         binding: &FunctionBinding,

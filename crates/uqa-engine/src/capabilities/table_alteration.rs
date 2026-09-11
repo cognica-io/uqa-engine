@@ -105,13 +105,15 @@ impl TableLifecycle for Engine {
 }
 impl TableEventLifecycle for Engine {
     fn rename_trigger(&self, table: &str, from: &str, to: &str) -> Result<(), SQLError> {
-        Engine::rename_trigger(self, table, from, to)
+        self.event_lifecycle_context()
+            .rename_trigger(table, from, to)
     }
     fn rename_trigger_constraint(&self, table: &str, from: &str, to: &str) -> Result<(), SQLError> {
-        Engine::rename_trigger_constraint(self, table, from, to)
+        self.event_lifecycle_context()
+            .rename_trigger_constraint(table, from, to)
     }
     fn rename_rule(&self, table: &str, from: &str, to: &str) -> Result<(), SQLError> {
-        Engine::rename_rule(self, table, from, to)
+        self.event_lifecycle_context().rename_rule(table, from, to)
     }
     fn set_trigger_enable_mode(
         &self,
@@ -119,7 +121,8 @@ impl TableEventLifecycle for Engine {
         name: Option<&str>,
         mode: EventEnableMode,
     ) -> Result<(), SQLError> {
-        Engine::set_trigger_enable_mode(self, table, name, mode)
+        self.event_lifecycle_context()
+            .set_trigger_enable_mode(table, name, mode)
     }
     fn set_rule_enable_mode(
         &self,
@@ -127,7 +130,8 @@ impl TableEventLifecycle for Engine {
         name: &str,
         mode: EventEnableMode,
     ) -> Result<(), SQLError> {
-        Engine::set_rule_enable_mode(self, table, name, mode)
+        self.event_lifecycle_context()
+            .set_rule_enable_mode(table, name, mode)
     }
 }
 impl ColumnRemovalCatalog for Engine {

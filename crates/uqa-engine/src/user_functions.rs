@@ -6,10 +6,7 @@
 
 //! User-defined routine API, session controls, and canonical SQL type exports.
 
-pub(crate) use uqa_sql::routines::routine_signature_types;
-pub(crate) use uqa_sql::type_resolution::canonical_routine_type_name;
-
-pub(crate) use uqa_sql::routines::{CompiledFunctionBody, SQLUserFunction};
+pub(crate) use uqa_sql::routines::SQLUserFunction;
 
 use crate::Engine;
 impl Engine {
