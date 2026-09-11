@@ -17,6 +17,7 @@
       ],
       "engine_allowlist": [
         "crates/uqa-engine/src/capabilities.rs",
+        "crates/uqa-engine/src/capabilities/batch.rs",
         "crates/uqa-engine/src/capabilities/catalog_execution.rs",
         "crates/uqa-engine/src/capabilities/column_removal.rs",
         "crates/uqa-engine/src/capabilities/column_rewrites.rs",

@@ -41,6 +41,11 @@ pub struct StatementValidationContext<'a> {
     pub transactions: &'a dyn super::transactions::StatementTransactions,
 }
 
+/// Capture live subsystem inputs only when a statement is ready to execute.
+pub trait StatementExecutionInputs<S: Clone + 'static> {
+    fn statement_execution_context(&self) -> StatementExecutionContext<'_, S>;
+}
+
 pub trait StatementMutationInputs<S: Clone + 'static> {
     fn mutation_context(&self) -> crate::mutation::entry::MutationEntryContext<'_, S>;
 }

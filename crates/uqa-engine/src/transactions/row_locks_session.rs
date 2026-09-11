@@ -595,6 +595,22 @@ pub(crate) struct RowLockStatementScope<'engine> {
     engine: &'engine Engine,
 }
 
+impl uqa_execution::statement::batch::context::RowLockStatementGuard for RowLockStatementScope<'_> {}
+
+impl uqa_execution::statement::batch::context::BatchRowLocks for Engine {
+    fn begin_row_lock_statement(
+        &self,
+    ) -> Box<dyn uqa_execution::statement::batch::context::RowLockStatementGuard + '_> {
+        Box::new(Engine::begin_row_lock_statement(self))
+    }
+    fn statement_row_lock_cache(
+        &self,
+    ) -> Result<std::sync::Arc<uqa_execution::row_locks::retry_cache::RowLockRetryCache>, SQLError>
+    {
+        Engine::statement_row_lock_cache(self)
+    }
+}
+
 impl Drop for RowLockStatementScope<'_> {
     fn drop(&mut self) {
         self.engine.session.row_lock_statements.lock().pop();

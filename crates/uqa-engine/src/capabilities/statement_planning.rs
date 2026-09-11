@@ -19,6 +19,20 @@ use uqa_planner::{
 };
 use uqa_sql::{ast::OperatorJoinRelations, SQLError, ScalarExpr};
 
+impl uqa_sql::plan::ExecutablePlanOptimizer for Engine {
+    fn plan_for_execution(
+        &self,
+        plan: uqa_sql::plan::UnifiedPlan,
+        params: &[uqa_sql::SQLParam],
+    ) -> Result<uqa_sql::plan::UnifiedPlan, SQLError> {
+        uqa_sql::plan::ExecutablePlanOptimizer::plan_for_execution(
+            &self.statement_planning_context(),
+            plan,
+            params,
+        )
+    }
+}
+
 impl Engine {
     pub(crate) fn statement_statistics_context(&self) -> StatementStatisticsContext<'_> {
         StatementStatisticsContext {

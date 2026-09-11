@@ -25,6 +25,7 @@
     clippy::unnested_or_patterns
 )]
 
+#[cfg(test)]
 use std::sync::Arc;
 
 use uqa_sql::ast::Statement;
@@ -37,11 +38,9 @@ use crate::Engine;
 mod api;
 mod catalog;
 mod catalog_statement_routines;
-mod completion;
-mod cursor;
-mod driver;
 mod from_rows;
 mod generated;
+#[cfg(test)]
 mod mutability;
 pub use uqa_sql::result::format_postgres_text;
 mod planning;
@@ -61,13 +60,11 @@ pub use catalog::{postgres_result_type, SQLTypeMetadata};
 pub(crate) use catalog_statement_routines::{
     bind_catalog_statement_routines, collect_expression_routine_references,
 };
-pub use cursor::{SQLCursor, SQLCursorSummary};
-pub(crate) use driver::{execute, execute_nested};
-use mutability::{
-    is_transaction_control, query_may_mutate_engine, query_requires_statement_transaction,
-};
+#[cfg(test)]
+use mutability::{query_may_mutate_engine, query_requires_statement_transaction};
 #[cfg(test)]
 use planning::compile_logical_plans;
+#[cfg(test)]
 use planning::lower_statement;
 pub(super) use planning::{
     estimate_engine_plan, execute_compiled_statement,
@@ -77,6 +74,7 @@ pub(super) use planning::{
 use select::query_has_row_locks;
 pub(crate) use select::RowLockRetryCache;
 pub(crate) use triggers::{fire_deferred_constraint_trigger_event, DeferredConstraintTriggerEvent};
+pub use uqa_execution::query::cursor::{SQLCursor, SQLCursorSummary};
 
 pub(crate) use catalog::{
     resolve_age_label_relation_name, resolve_catalog_column_type, resolve_catalog_column_type_name,

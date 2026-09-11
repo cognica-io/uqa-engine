@@ -240,7 +240,10 @@
         "src/sql/select/evaluation.rs",
         "src/truncate.rs",
         "src/sql/plan_executor.rs",
-        "src/sql/cte_validation.rs"
+        "src/sql/cte_validation.rs",
+        "src/sql/driver.rs",
+        "src/sql/cursor.rs",
+        "src/sql/completion.rs"
       ]
     },
     "crates/uqa-storage": {

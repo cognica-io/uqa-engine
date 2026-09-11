@@ -40,6 +40,7 @@ pub(super) fn compile_logical_plans(
     Ok(plans)
 }
 
+#[cfg(test)]
 pub(super) fn lower_statement(engine: &Engine, statement: Statement) -> uqa_planner::UnifiedPlan {
     uqa_planner::UnifiedPlan::lower_with(statement, &|name: &str| {
         engine.has_registered_aggregate_function(name)
