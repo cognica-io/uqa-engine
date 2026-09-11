@@ -7,14 +7,16 @@
 //! Engine-backed scalar interception, scoring projections, and highlighting.
 
 use super::{
-    checked_integer_value, expect_column_name, run_age_alter_graph_with_evaluator,
+    checked_integer_value, run_age_alter_graph_with_evaluator,
     run_age_create_elabel_with_evaluator, run_age_create_graph_with_evaluator,
     run_age_create_vlabel_with_evaluator, run_age_drop_graph_with_evaluator,
     run_age_drop_label_with_evaluator, run_age_graph_exists_with_evaluator,
     run_graph_create_with_evaluator, run_graph_drop_with_evaluator, BTreeMap, Engine, SQLError,
     ScalarExpr, Value,
 };
+use uqa_execution::query::scalar_projection::{run_uqa_highlight, score_projection_value};
 use uqa_sql::expr::RowLookup;
+use uqa_sql::semantics::scalar_projection::validate_score_projection_args;
 
 pub(in crate::sql) fn engine_func_intercept(
     engine: Option<&Engine>,
@@ -210,34 +212,6 @@ fn notification_text_argument<'a>(value: &'a Value, label: &str) -> Result<&'a s
     }
 }
 
-pub(in crate::sql) fn score_projection_value(
-    function: &str,
-    args: &[ScalarExpr],
-    row: &dyn RowLookup,
-) -> Result<Value, SQLError> {
-    let qualifier = (args.len() == 2)
-        .then(|| match &args[0] {
-            ScalarExpr::QualifiedColumn { qualifier, .. } => Some(qualifier.as_str()),
-            _ => None,
-        })
-        .flatten();
-    if row.score_source_is_ambiguous(qualifier) {
-        return Err(SQLError::Unsupported(format!(
-            "{function}() has multiple score-bearing retrieval rows; qualify its field argument"
-        )));
-    }
-    if let Some(Value::Float(score)) = row.score_source(qualifier) {
-        return Ok(Value::Float(*score));
-    }
-    Err(score_projection_context_error(function))
-}
-
-pub(in crate::sql) fn score_projection_context_error(function: &str) -> SQLError {
-    SQLError::Unsupported(format!(
-        "{function}() requires a score-bearing retrieval row"
-    ))
-}
-
 pub(in crate::sql) fn require_projection_engine<'a>(
     engine: Option<&'a Engine>,
     function: &str,
@@ -300,154 +274,4 @@ pub(in crate::sql) fn run_deep_learn_projection(
         checked_integer_value(output.report.class_count, "class count")?,
     );
     Ok(Value::Map(report))
-}
-
-pub(in crate::sql) fn validate_score_projection_args(
-    name: &str,
-    args: &[ScalarExpr],
-    evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
-) -> Result<(), SQLError> {
-    if !(1..=2).contains(&args.len()) {
-        return Err(SQLError::BadArity {
-            name: name.into(),
-            expected: "1..=2".into(),
-            actual: args.len(),
-        });
-    }
-    let query_idx = args.len() - 1;
-    if args.len() == 2 {
-        let _ = expect_column_name(&args[0], &format!("{name}.field"))?;
-    }
-    match evaluate(&args[query_idx])? {
-        Value::Str(_) => Ok(()),
-        other => Err(SQLError::TypeMismatch(format!(
-            "{name}.query must be a string, got {other:?}"
-        ))),
-    }
-}
-
-/// Evaluate a `uqa_highlight(field, query[, start_tag, end_tag,
-/// max_fragments, fragment_size])` projection. `field` can be either a
-/// bare column reference (looked up on the row) or a literal string;
-/// the rest of the args are scalar literals after evaluation.
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves source schema and row identity"
-)]
-pub(in crate::sql) fn run_uqa_highlight(
-    row: &dyn RowLookup,
-    args: &[ScalarExpr],
-    evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
-) -> Result<Value, SQLError> {
-    if args.len() < 2 || args.len() > 6 {
-        return Err(SQLError::BadArity {
-            name: "uqa_highlight".into(),
-            expected: "2..=6".into(),
-            actual: args.len(),
-        });
-    }
-    let text = match &args[0] {
-        ScalarExpr::Column(c) => match row.column(c) {
-            Some(Value::Str(s)) => s.clone(),
-            Some(Value::Null) => return Ok(Value::Null),
-            Some(other) => format!("{other:?}"),
-            None => return Ok(Value::Null),
-        },
-        ScalarExpr::QualifiedColumn { qualifier, column } => {
-            match row.qualified_column(qualifier, column) {
-                Some(Value::Str(s)) => s.clone(),
-                Some(Value::Null) => return Ok(Value::Null),
-                Some(other) => format!("{other:?}"),
-                None => return Ok(Value::Null),
-            }
-        }
-        other => match evaluate(other)? {
-            Value::Str(s) => s,
-            Value::Null => return Ok(Value::Null),
-            v => format!("{v:?}"),
-        },
-    };
-    let query_str = match evaluate(&args[1])? {
-        Value::Str(s) => s,
-        Value::Null => return Ok(Value::Str(text)),
-        other => {
-            return Err(SQLError::TypeMismatch(format!(
-                "uqa_highlight query must be string, got {other:?}"
-            )));
-        }
-    };
-    let start_tag = match args.get(2) {
-        Some(e) => match evaluate(e)? {
-            Value::Str(s) => s,
-            Value::Null => "<b>".into(),
-            other => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "uqa_highlight start_tag must be string, got {other:?}"
-                )));
-            }
-        },
-        None => "<b>".into(),
-    };
-    let end_tag = match args.get(3) {
-        Some(e) => match evaluate(e)? {
-            Value::Str(s) => s,
-            Value::Null => "</b>".into(),
-            other => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "uqa_highlight end_tag must be string, got {other:?}"
-                )));
-            }
-        },
-        None => "</b>".into(),
-    };
-    let max_fragments = match args.get(4) {
-        Some(e) => match evaluate(e)? {
-            Value::Int(n) if n >= 0 => usize::try_from(n).map_err(|_| {
-                SQLError::TypeMismatch(format!(
-                    "uqa_highlight max_fragments {n} exceeds the platform usize range"
-                ))
-            })?,
-            Value::Null => 0,
-            other => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "uqa_highlight max_fragments must be non-negative integer, got {other:?}"
-                )));
-            }
-        },
-        None => 0,
-    };
-    let fragment_size = match args.get(5) {
-        Some(e) => match evaluate(e)? {
-            Value::Int(n) if n > 0 => usize::try_from(n).map_err(|_| {
-                SQLError::TypeMismatch(format!(
-                    "uqa_highlight fragment_size {n} exceeds the platform usize range"
-                ))
-            })?,
-            Value::Null => 150,
-            other => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "uqa_highlight fragment_size must be positive integer, got {other:?}"
-                )));
-            }
-        },
-        None => 150,
-    };
-    let opts = uqa_analysis::HighlightOptions {
-        start_tag,
-        end_tag,
-        max_fragments,
-        fragment_size,
-    };
-    // Pull every whitespace-separated token from the query string as a
-    // candidate match term. A simple split matches the documented highlighting
-    // surface and its regression fixtures.
-    let terms: Vec<String> = query_str
-        .split_whitespace()
-        .filter(|t| !matches!(t.to_ascii_lowercase().as_str(), "and" | "or" | "not"))
-        .map(std::string::ToString::to_string)
-        .collect();
-    let analyzer = uqa_analysis::standard_analyzer("english");
-    let out = uqa_analysis::highlight(&text, &terms, Some(&analyzer), &opts)
-        .map_err(|error| SQLError::Internal(format!("highlight analysis failed: {error}")))?;
-    Ok(Value::Str(out))
 }

@@ -3799,6 +3799,7 @@ dependencies = [
  "smallvec",
  "tempfile",
  "thiserror 1.0.69",
+ "uqa-analysis",
  "uqa-core",
  "uqa-fdw",
  "uqa-fusion",

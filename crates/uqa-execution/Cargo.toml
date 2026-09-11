@@ -13,6 +13,7 @@ documentation = "https://docs.rs/uqa-execution"
 exclude.workspace = true
 
 [dependencies]
+uqa-analysis = { workspace = true }
 uqa-core = { workspace = true }
 uqa-sql = { workspace = true }
 uqa-storage = { workspace = true }

@@ -16,6 +16,7 @@ flowchart TD
     Engine --> Storage[storage and retrieval implementations]
     Planner --> SQL
     Execution --> SQL
+    Execution --> Analysis[uqa-analysis: text rendering]
     SQL --> Core[uqa-core: shared values]
     SQL --> Parser[uqa-pg-query: parser import]
 ```
@@ -120,6 +121,8 @@ Shared agtype values, ordering, and text rendering belong to core, with the grap
 Table-function stream scheduling and result materialization belong to execution. The consumer composes live registry and cancellation handles with separate session introspection, analyzer, graph-name, Cypher, routine, and retrieval inputs. SQL validates analyzer and graph argument shapes before state access. Extension registrations retain their original lookup and release points; cancellation and ordinality remain lazy. Built-ins handled by the streaming path have no duplicate materialized dispatch. Provider-independent full-text inspection rows live in storage and retain their public Engine re-export.
 
 Procedure CALL argument and result-schema analysis is SQL-owned. Named and variadic markers share the SQL IR decoder, while expression evaluation remains in execution. Separate validation and analysis entry points preserve the different catalog-scope capture order used by result description and actual invocation. Engine supplies scope and type-binding adapters.
+
+Scalar score and highlight argument rules belong to SQL. Execution interprets score provenance and calls the canonical analysis highlighter directly; NULL short circuits and optional-argument order are unchanged. No Engine callback substitutes for the rendering algorithm.
 
 The Engine still contains the unified statement dispatcher, remaining DDL command execution, scalar projection intercepts, and operator-tree integration code. These remaining implementations must move to their owning crates through narrow contracts before the Engine SQL tree can be removed. The current policy protects the completed extractions and SQLite provider boundary; it does not yet assert that the Engine SQL tree is absent.
 

@@ -55,6 +55,7 @@ pub mod effects;
 
 pub mod partition;
 
+pub mod scalar_projection;
 pub mod source_filters;
 
 pub mod join_predicates;

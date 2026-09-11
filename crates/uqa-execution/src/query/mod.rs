@@ -37,6 +37,7 @@ pub mod cypher;
 pub mod graph_effects;
 pub mod retrieval;
 
+pub mod scalar_projection;
 pub mod source_projection;
 
 pub mod locking;
