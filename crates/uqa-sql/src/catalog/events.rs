@@ -144,3 +144,5 @@ pub mod restoration;
 pub mod reads;
 
 pub mod removal;
+
+pub mod persistence;
