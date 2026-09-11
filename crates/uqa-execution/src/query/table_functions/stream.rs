@@ -4,56 +4,33 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Table-function evaluation context, stream entry point, and scalar row shaping.
+//! Lazy table-function evaluation, host callback streams, cancellation, and ordinality.
 
 use super::{
-    build_table_function_rows_with_row, eval_call_arguments, generate_series_values,
-    json_array_values, json_each_row_stream, json_object_key_values, regexp_split_values,
-    registered_table_function_row_stream, scalar_table_function_default_column,
-    string_to_table_values, unnest_row_stream, Engine, PhysicalSubqueryRunner, PlanSubqueryArena,
-    QueryPlan, SQLError, SQLParam, ScalarEvalContext, Value,
-};
-
-pub(in crate::sql) struct SourceEvalContext<'a> {
-    pub(super) engine: &'a Engine,
-    pub(super) params: &'a [SQLParam],
-    pub(super) eval_hook: &'a dyn uqa_sql::expr::EngineHook,
-    pub(super) subquery_runner: &'a dyn PhysicalSubqueryRunner,
-    pub(super) subqueries: &'a [QueryPlan],
-}
-
-impl<'a> SourceEvalContext<'a> {
-    pub(in crate::sql) fn new(
-        engine: &'a Engine,
-        params: &'a [SQLParam],
-        eval_hook: &'a dyn uqa_sql::expr::EngineHook,
-        subquery_runner: &'a dyn PhysicalSubqueryRunner,
-        subqueries: &'a [QueryPlan],
-    ) -> Self {
-        Self {
-            engine,
-            params,
-            eval_hook,
-            subquery_runner,
-            subqueries,
-        }
-    }
-}
-
-pub(in crate::sql) use uqa_execution::query::table_functions::{
+    context::TableFunctionContext,
+    dispatch::build_table_function_rows_with_row,
+    registered_table_function_row_stream,
+    values::{
+        generate_series_values, json_array_values, json_each_row_stream, json_object_key_values,
+        regexp_split_values, string_to_table_values, unnest_row_stream,
+    },
     TableFunctionCall, TableFunctionRows,
 };
+use crate::scalar::plan::PlanSubqueryArena;
+use crate::{eval_call_arguments, ScalarEvalContext};
+use uqa_core::Value;
+use uqa_sql::{semantics::scalar_table_function_default_column, SQLError};
 
 /// Build a table-function result as a fallible owned row stream. Built-in cardinality-producing functions are evaluated lazily; registered/user functions keep their existing vector-valued API and are adapted at this explicit extension boundary. A correlated lateral caller supplies its physical outer row so function arguments are evaluated in the same scope used during binding.
 #[allow(clippy::similar_names)]
-pub(in crate::sql) fn build_table_function_row_stream_with_row(
-    context: &SourceEvalContext<'_>,
+pub fn build_table_function_row_stream_with_row(
+    context: &TableFunctionContext<'_>,
     call: TableFunctionCall<'_>,
-    row: Option<&uqa_execution::OwnedPhysicalRow>,
+    row: Option<&crate::OwnedPhysicalRow>,
 ) -> Result<TableFunctionRows, SQLError> {
     let ordinality = call.ordinality;
     let mut output = build_table_function_value_row_stream_with_row(context, call, row)?;
-    let cancellation = context.engine.cancellation_token();
+    let cancellation = context.runtime.cancellation_token();
     let mut rows = output.rows;
     let mut cancelled = false;
     output.rows = Box::new(std::iter::from_fn(move || {
@@ -79,7 +56,7 @@ pub(in crate::sql) fn build_table_function_row_stream_with_row(
     output.rows = Box::new(output.rows.map(move |row| {
         let row = row?;
         let ordinal = next.ok_or_else(|| {
-            uqa_execution::ExecError::SQL(SQLError::Routine {
+            crate::ExecError::SQL(SQLError::Routine {
                 sqlstate: "22003".into(),
                 message: "WITH ORDINALITY counter exceeds bigint".into(),
             })
@@ -96,9 +73,9 @@ pub(in crate::sql) fn build_table_function_row_stream_with_row(
     reason = "preserves source schema and row identity"
 )]
 fn build_table_function_value_row_stream_with_row(
-    context: &SourceEvalContext<'_>,
+    context: &TableFunctionContext<'_>,
     call: TableFunctionCall<'_>,
-    row: Option<&uqa_execution::OwnedPhysicalRow>,
+    row: Option<&crate::OwnedPhysicalRow>,
 ) -> Result<TableFunctionRows, SQLError> {
     let TableFunctionCall {
         name,
@@ -111,7 +88,7 @@ fn build_table_function_value_row_stream_with_row(
         ..
     } = call;
     let identity = name.to_ascii_lowercase();
-    let lower = crate::sql::builtin_function_dispatch_name(&identity);
+    let lower = uqa_sql::semantics::builtin_function_dispatch_name(&identity);
     if binding.is_none_or(|binding| binding.builtin)
         && matches!(
             lower.as_str(),
@@ -160,16 +137,12 @@ fn build_table_function_value_row_stream_with_row(
 
         let values: Box<dyn Iterator<Item = Value> + Send> = match lower.as_str() {
             "pg_listening_channels" => {
-                if !evaluated.is_empty() {
-                    return Err(SQLError::BadArity {
-                        name: lower,
-                        expected: "0".into(),
-                        actual: evaluated.len(),
-                    });
-                }
+                uqa_sql::semantics::table_function_arguments::require_no_arguments(
+                    &lower, &evaluated,
+                )?;
                 Box::new(
                     context
-                        .engine
+                        .session
                         .listening_channels()
                         .into_iter()
                         .map(Value::Str),
@@ -194,12 +167,12 @@ fn build_table_function_value_row_stream_with_row(
         };
         return Ok(TableFunctionRows::new(
             vec![default_col],
-            Box::new(values.map(|value| Ok(uqa_execution::PhysicalRow::from_values(vec![value])))),
+            Box::new(values.map(|value| Ok(crate::PhysicalRow::from_values(vec![value])))),
         ));
     }
 
     if binding.is_none_or(|binding| binding.builtin)
-        && context.engine.has_registered_table_function(&identity)
+        && context.runtime.has_table_function(&identity)
     {
         let subquery_arena =
             PlanSubqueryArena::new(context.subqueries, Some(context.subquery_runner));
@@ -220,8 +193,9 @@ fn build_table_function_value_row_stream_with_row(
             .map(|(_, value)| value)
             .collect::<Vec<_>>();
         let result = context
-            .engine
-            .call_registered_table_function_stream(&identity, &evaluated)
+            .runtime
+            .lookup_table_function(&identity)
+            .map(|registration| registration.function.call_stream(&evaluated))
             .ok_or_else(|| {
                 SQLError::Internal(format!(
                     "registered table function `{name}` disappeared during execution"

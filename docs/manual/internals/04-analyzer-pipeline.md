@@ -173,7 +173,8 @@ Named definition and assignment publication advances catalog or table epochs. Ot
 | Token filters | [`crates/uqa-analysis/src/token_filter.rs`](../../../crates/uqa-analysis/src/token_filter.rs) |
 | Engine catalog lifecycle | [`crates/uqa-engine/src/analyzers.rs`](../../../crates/uqa-engine/src/analyzers.rs) |
 | Field registration and rebuild | [`crates/uqa-engine/src/table_storage/fts.rs`](../../../crates/uqa-engine/src/table_storage/fts.rs) |
-| SQL table functions | [`crates/uqa-engine/src/sql/from_rows/table_function_dispatch.rs`](../../../crates/uqa-engine/src/sql/from_rows/table_function_dispatch.rs) |
+| SQL argument rules | [`crates/uqa-sql/src/semantics/table_function_arguments.rs`](../../../crates/uqa-sql/src/semantics/table_function_arguments.rs) |
+| SQL table-function execution | [`crates/uqa-execution/src/query/table_functions/analyzers.rs`](../../../crates/uqa-execution/src/query/table_functions/analyzers.rs) |
 | Inverted-index contract | [`crates/uqa-storage/src/inverted_index/contract.rs`](../../../crates/uqa-storage/src/inverted_index/contract.rs) |
 
 ## Related documentation

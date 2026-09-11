@@ -110,15 +110,13 @@ pub(crate) use regrole_dependencies::{
     reject_stored_regrole_constants,
 };
 use row_functions::{
-    execute_tree_entries, expect_column_name, expect_optional_graph_value,
-    graph_betweenness_entries, graph_hits_entries, graph_pagerank_entries,
-    run_age_alter_graph_with_evaluator, run_age_create_elabel_with_evaluator,
+    expect_column_name, run_age_alter_graph_with_evaluator, run_age_create_elabel_with_evaluator,
     run_age_create_graph_with_evaluator, run_age_create_vlabel_with_evaluator,
     run_age_drop_graph_with_evaluator, run_age_drop_label_with_evaluator,
     run_age_graph_exists_with_evaluator, run_graph_create_with_evaluator,
     run_graph_drop_with_evaluator,
 };
-use uqa_sql::assignment::conversion::{column_type_name, json_table_arg, json_table_value_to_text};
+use uqa_sql::assignment::conversion::column_type_name;
 pub(crate) use uqa_sql::assignment::conversion::{
     convert_value_to_column_type, validate_vector_dimensions,
 };
@@ -219,8 +217,6 @@ pub(crate) use uqa_execution::query::document_projection::{
 };
 
 pub(crate) use uqa_sql::semantics::builtin_function_dispatch_name;
-
-use uqa_sql::semantics::doc_id_value;
 
 #[cfg(test)]
 #[path = "sql/tests.rs"]

@@ -6,7 +6,7 @@
 
 use super::{
     Arc, Engine, RegisteredSQLFunction, SQLAggregateFunction, SQLError, SQLFunctionOptions,
-    SQLFunctionVolatility, SQLScalarFunction, SQLTableFunction, SQLTableFunctionResult, Value,
+    SQLFunctionVolatility, SQLScalarFunction, SQLTableFunction, Value,
 };
 
 impl Engine {
@@ -147,26 +147,8 @@ impl Engine {
         self.query_runtime_view().has_scalar_function(name)
     }
 
-    pub(crate) fn call_registered_table_function(
-        &self,
-        name: &str,
-        args: &[Value],
-    ) -> Option<std::result::Result<SQLTableFunctionResult, SQLError>> {
-        let registration = self.query_runtime_view().lookup_table_function(name)?;
-        Some(registration.function.call(args))
-    }
-
     pub(crate) fn has_registered_table_function(&self, name: &str) -> bool {
         self.query_runtime_view().has_table_function(name)
-    }
-
-    pub(crate) fn call_registered_table_function_stream(
-        &self,
-        name: &str,
-        args: &[Value],
-    ) -> Option<std::result::Result<crate::SQLTableFunctionStream, SQLError>> {
-        let registration = self.query_runtime_view().lookup_table_function(name)?;
-        Some(registration.function.call_stream(args))
     }
 
     pub(crate) fn has_registered_aggregate_function(&self, name: &str) -> bool {

@@ -105,13 +105,11 @@ impl uqa_execution::query::set_projection::SetFunctionRuntime for ScopedEngineHo
         params: &[SQLParam],
         row: Option<&uqa_execution::OwnedPhysicalRow>,
     ) -> Result<TableFunctionRows, SQLError> {
-        let context = crate::sql::from_rows::SourceEvalContext::new(
-            self.engine,
-            params,
-            self,
-            self,
-            &self.ctes.scalar_subqueries,
-        );
-        crate::sql::from_rows::build_table_function_row_stream_with_row(&context, call, row)
+        let context =
+            self.engine
+                .table_function_context(params, self, self, &self.ctes.scalar_subqueries);
+        uqa_execution::query::table_functions::build_table_function_row_stream_with_row(
+            &context, call, row,
+        )
     }
 }

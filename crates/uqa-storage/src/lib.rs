@@ -65,3 +65,6 @@ pub use vector_index::{
     cosine_similarity, HNSWIndexParams, IVFIndexParams, MemoryVectorIndex, VectorIndex,
     VectorIndexOpenMode, VectorIndexSpec,
 };
+
+mod fts_index_stat;
+pub use fts_index_stat::FtsIndexStat;

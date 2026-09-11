@@ -71,6 +71,7 @@
         "crates/uqa-engine/src/capabilities/stored_relations.rs",
         "crates/uqa-engine/src/capabilities/table_alteration.rs",
         "crates/uqa-engine/src/capabilities/table_creation.rs",
+        "crates/uqa-engine/src/capabilities/table_functions.rs",
         "crates/uqa-engine/src/capabilities/table_reads.rs",
         "crates/uqa-engine/src/capabilities/table_reads/query_tests.rs",
         "crates/uqa-engine/src/capabilities/table_reads/tests.rs",
