@@ -6,10 +6,9 @@
 
 //! Function-registry dispatch, operator lowering, and top-K planning.
 
-use super::{
-    lookup, run_graph_create, run_graph_drop, Engine, FunctionKind, SQLError, SQLParam, ScalarExpr,
-    ScoredEntry,
-};
+use super::{lookup, Engine, FunctionKind, SQLError, SQLParam, ScalarExpr, ScoredEntry};
+
+use uqa_execution::query::graph_lifecycle::{run_graph_create, run_graph_drop};
 
 pub(in crate::sql) fn execute_function_with_top_k(
     engine: &Engine,
@@ -22,8 +21,8 @@ pub(in crate::sql) fn execute_function_with_top_k(
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     let kind = lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.to_string()))?;
     match kind {
-        FunctionKind::GraphCreate => run_graph_create(engine, args, params),
-        FunctionKind::GraphDrop => run_graph_drop(engine, args, params),
+        FunctionKind::GraphCreate => run_graph_create(engine, args, params, engine),
+        FunctionKind::GraphDrop => run_graph_drop(engine, args, params, engine),
         FunctionKind::GraphExists
         | FunctionKind::GraphLabelCreate
         | FunctionKind::GraphLabelDrop

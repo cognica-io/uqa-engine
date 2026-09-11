@@ -6,13 +6,13 @@
 
 //! Engine-backed scalar interception, scoring projections, and highlighting.
 
-use super::{
-    checked_integer_value, run_age_alter_graph_with_evaluator,
-    run_age_create_elabel_with_evaluator, run_age_create_graph_with_evaluator,
-    run_age_create_vlabel_with_evaluator, run_age_drop_graph_with_evaluator,
-    run_age_drop_label_with_evaluator, run_age_graph_exists_with_evaluator,
-    run_graph_create_with_evaluator, run_graph_drop_with_evaluator, BTreeMap, Engine, SQLError,
-    ScalarExpr, Value,
+use super::{checked_integer_value, BTreeMap, Engine, SQLError, ScalarExpr, Value};
+use uqa_execution::query::graph_lifecycle::{
+    run_age_alter_graph_with_evaluator, run_age_create_elabel_with_evaluator,
+    run_age_create_graph_with_evaluator, run_age_create_vlabel_with_evaluator,
+    run_age_drop_graph_with_evaluator, run_age_drop_label_with_evaluator,
+    run_age_graph_exists_with_evaluator, run_graph_create_with_evaluator,
+    run_graph_drop_with_evaluator,
 };
 use uqa_execution::query::scalar_projection::{run_uqa_highlight, score_projection_value};
 use uqa_sql::expr::RowLookup;

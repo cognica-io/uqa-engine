@@ -443,3 +443,45 @@ fn verify_renamed_graph_and_recreate(database: &std::path::Path) {
         vec!["_ag_label_vertex", "_ag_label_edge"]
     );
 }
+
+#[test]
+fn graph_command_options_keep_their_catalog_lookup_order() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    let engine = Engine::new();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let callback_calls = Arc::clone(&calls);
+    engine
+        .register_scalar_function("graph_option", move |_args: &[Value]| {
+            callback_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Value::Bool(false))
+        })
+        .unwrap();
+
+    let error = engine
+        .sql("SELECT drop_graph('missing_graph', graph_option())", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("3F000"));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT graph_drop('missing_graph', graph_option())"
+        ),
+        Value::Bool(false)
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let error = engine
+        .sql(
+            "SELECT drop_label('missing_graph', 'label', graph_option())",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("3F000"));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}

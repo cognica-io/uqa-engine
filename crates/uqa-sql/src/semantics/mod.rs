@@ -113,3 +113,5 @@ pub mod merge;
 pub mod view_mutation;
 
 pub mod mutation_rows;
+
+pub mod graph_commands;

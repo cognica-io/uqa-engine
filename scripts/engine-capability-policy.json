@@ -26,6 +26,7 @@
         "crates/uqa-engine/src/capabilities/cypher.rs",
         "crates/uqa-engine/src/capabilities/domains.rs",
         "crates/uqa-engine/src/capabilities/foreign_table_alteration.rs",
+        "crates/uqa-engine/src/capabilities/graph_lifecycle.rs",
         "crates/uqa-engine/src/capabilities/hierarchy.rs",
         "crates/uqa-engine/src/capabilities/index_creation.rs",
         "crates/uqa-engine/src/capabilities/index_removal.rs",
