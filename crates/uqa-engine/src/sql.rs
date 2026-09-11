@@ -116,7 +116,6 @@ use row_functions::{
     run_age_graph_exists_with_evaluator, run_graph_create_with_evaluator,
     run_graph_drop_with_evaluator,
 };
-use uqa_sql::assignment::conversion::column_type_name;
 pub(crate) use uqa_sql::assignment::conversion::{
     convert_value_to_column_type, validate_vector_dimensions,
 };
@@ -138,14 +137,7 @@ pub(crate) fn execute_nested_optimized_command(
     ))
 }
 
-pub(in crate::sql) fn analyze_call_result_schema(
-    engine: &Engine,
-    name: &str,
-    arguments: &[uqa_planner::ExpressionPlan],
-    params: &[SQLParam],
-) -> Result<Option<uqa_execution::RowSchema>, SQLError> {
-    plan_executor::analyze_call_result_schema(engine, name, arguments, params)
-}
+pub(in crate::sql) use crate::capabilities::routine_invocation::analyze_call_result_schema;
 
 pub(crate) fn call_bound_engine_builtin(
     engine: &Engine,

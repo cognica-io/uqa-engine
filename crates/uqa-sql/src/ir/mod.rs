@@ -9,7 +9,8 @@
 mod call_arguments;
 mod traversal;
 pub use call_arguments::{
-    scalar_call_argument, scalar_call_arguments, validate_scalar_call_arguments, ScalarCallArgument,
+    analyze_expression_call_arguments, scalar_call_argument, scalar_call_arguments,
+    validate_scalar_call_arguments, ScalarCallArgument,
 };
 
 use crate::ast::{BinaryOp, ColumnType, FrameMode, FunctionBinding, InternalColumnRef, NullsOrder};

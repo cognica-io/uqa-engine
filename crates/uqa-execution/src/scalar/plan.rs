@@ -12,8 +12,8 @@ use uqa_sql::plan::{ExpressionPlan, QueryPlan};
 use uqa_sql::{ResultRow, SQLError, SQLParam};
 
 use crate::{
-    eval_scalar, scalar_call_argument, validate_scalar_call_arguments, PhysicalRow, RowSchema,
-    ScalarEvalContext, ScalarExpr, ScalarSubqueryRunner, SubqueryId, SubqueryResult,
+    eval_scalar, PhysicalRow, RowSchema, ScalarEvalContext, ScalarExpr, ScalarSubqueryRunner,
+    SubqueryId, SubqueryResult,
 };
 
 /// Expression services needed by physical grouping and window operators.
@@ -168,16 +168,7 @@ pub fn eval_physical_call_arguments(
         .collect()
 }
 
-pub fn analyze_physical_call_arguments(
-    arguments: &[ExpressionPlan],
-) -> Result<(Vec<crate::ScalarCallArgument<'_>>, bool), SQLError> {
-    let decoded = arguments
-        .iter()
-        .map(|argument| scalar_call_argument(&argument.scalar))
-        .collect::<Result<Vec<_>, _>>()?;
-    let explicit_variadic = validate_scalar_call_arguments(&decoded)?;
-    Ok((decoded, explicit_variadic))
-}
+pub use uqa_sql::ir::analyze_expression_call_arguments as analyze_physical_call_arguments;
 
 pub fn eval_physical_scalar(
     expression: &ScalarExpr,

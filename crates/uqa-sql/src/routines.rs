@@ -228,4 +228,5 @@ pub fn routine_kind(def: &CreateFunction) -> &'static str {
 }
 
 pub mod anonymous_block;
+pub mod call;
 pub mod invocation;
