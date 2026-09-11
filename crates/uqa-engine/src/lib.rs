@@ -147,9 +147,9 @@ use uqa_storage::{
     ColumnStatsRow, DocumentStore, HNSWIndex, HNSWIndexParams, IVFIndex, IVFIndexParams,
     InvertedIndex, MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex,
     PersistentStorageBackend, PersistentStorageProvider, PersistentStorageSession,
-    RelationIdentity, SequenceOwnerDependency, SequenceReservationResult, SequenceRow,
-    StorageBackendError, StorageBackendResult, StorageSavepointId, StoredDocument, TableSchema,
-    VectorFieldSchema, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
+    RelationIdentity, SequenceReservationResult, SequenceRow, StorageBackendError,
+    StorageBackendResult, StorageSavepointId, StoredDocument, TableSchema, VectorFieldSchema,
+    VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
 };
 use uqa_storage_sqlite::{
     ManagedConnection, SQLiteCompressedContainerAnchor, SQLiteStorageProvider,

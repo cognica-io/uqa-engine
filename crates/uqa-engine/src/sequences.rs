@@ -9,8 +9,6 @@ use super::{
     StorageBackendError, StorageBackendResult,
 };
 
-mod dependencies;
-
 impl Engine {
     /// Resolve a sequence reference at DDL binding time using the current
     /// `search_path`. Persisted expressions must store the returned canonical

@@ -41,10 +41,7 @@ pub trait RelationRemovalViews {
     fn drop_views(&self, names: &[String], cascade: bool, kind: &str) -> Result<(), SQLError>;
     fn drop_views_depending_on_relations(&self, names: &[String]) -> StorageBackendResult<()>;
 }
-pub trait RelationRemovalSequences {
-    fn drop_sequences_sql_inner(&self, names: &[String], cascade: bool) -> Result<(), SQLError>;
-    fn drop_owned_sequence(&self, name: &str, cascade: bool) -> StorageBackendResult<()>;
-}
+
 pub trait RelationRemovalLocks {
     fn lock_exclusive(&self, table: &str) -> Result<(), SQLError>;
 }
@@ -62,7 +59,7 @@ pub struct RelationRemovalContext<'a> {
     pub events: &'a dyn RelationRemovalEvents,
     pub foreign_tables: super::super::foreign_removal::ForeignTableRemovalContext<'a>,
     pub views: &'a dyn RelationRemovalViews,
-    pub sequences: &'a dyn RelationRemovalSequences,
+    pub sequences: &'a dyn crate::schema::sequences::removal::SequenceRemovalInputs,
     pub locks: &'a dyn RelationRemovalLocks,
     pub transactions: &'a dyn RelationRemovalTransactions,
     pub notices: &'a parking_lot::Mutex<Vec<(String, String)>>,

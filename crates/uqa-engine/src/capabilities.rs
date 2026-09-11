@@ -673,3 +673,5 @@ mod table_ownership;
 mod sequence_ownership;
 
 mod sequence_dependencies;
+
+mod sequence_removal;
