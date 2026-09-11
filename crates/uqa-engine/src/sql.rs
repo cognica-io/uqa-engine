@@ -75,7 +75,6 @@ mod window;
 pub use catalog::{postgres_result_type, SQLTypeMetadata};
 pub(crate) use catalog_statement_routines::{
     bind_catalog_statement_routines, collect_expression_routine_references,
-    mark_catalog_statement_relations_bound,
 };
 pub use cursor::{SQLCursor, SQLCursorSummary};
 pub(crate) use driver::{execute, execute_nested};
@@ -98,9 +97,8 @@ pub(crate) use triggers::{fire_deferred_constraint_trigger_event, DeferredConstr
 
 pub(crate) use catalog::query_source_column_names;
 pub(crate) use catalog::{
-    foreign_table_relation_oid, plpgsql_catalog, resolve_age_label_relation_name,
-    resolve_catalog_column_type, resolve_catalog_column_type_name,
-    resolve_catalog_domain_type_by_oid, resolve_regclass_kind_by_oid, resolve_regclass_oid,
+    foreign_table_relation_oid, resolve_age_label_relation_name, resolve_catalog_column_type,
+    resolve_catalog_column_type_name, resolve_regclass_kind_by_oid, resolve_regclass_oid,
     resolve_regnamespace_oid, resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid,
     resolve_regtype_oid, resolve_regtype_output, runtime_constraints, schema_object_oid,
     sequence_relation_oid, view_relation_oid,
@@ -110,7 +108,7 @@ pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_c
 use plan_executor::UnifiedPlanExecutor;
 pub(crate) use regrole_dependencies::{
     reject_stored_plan_regrole_constants, reject_stored_query_regrole_constants,
-    reject_stored_regrole_constants, StoredRegroleConstants,
+    reject_stored_regrole_constants,
 };
 use row_functions::{
     execute_tree_entries, expect_column_name, expect_optional_graph_value,
@@ -192,17 +190,6 @@ pub(crate) fn bind_catalog_query_routines(
 ) -> Result<uqa_execution::RowSchema, SQLError> {
     let ctes = crate::capabilities::query_scope::new_for_catalog_binding(engine);
     select::bind_query_plan_routines_for_storage(engine, query, params, &ctes, None)
-}
-
-/// Bind a catalog-owned query whose expressions may reference a statically typed routine parameter scope.
-pub(crate) fn bind_catalog_query_routines_with_outer(
-    engine: &Engine,
-    query: &mut uqa_planner::QueryPlan,
-    params: &[SQLParam],
-    outer: &uqa_execution::RowSchema,
-) -> Result<uqa_execution::RowSchema, SQLError> {
-    let ctes = crate::capabilities::query_scope::new_for_catalog_binding(engine);
-    select::bind_query_plan_routines_for_storage(engine, query, params, &ctes, Some(outer))
 }
 
 /// Bind a catalog-owned scalar expression, including all nested query plans, against a statically typed outer row.

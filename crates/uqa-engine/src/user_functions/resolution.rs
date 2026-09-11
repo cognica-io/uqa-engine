@@ -780,13 +780,7 @@ pub(super) fn routine_kind(def: &CreateFunction) -> &'static str {
     }
 }
 
-pub(crate) fn routine_local_name(name: &str) -> Result<String, SQLError> {
-    RelationIdentity::from_legacy_name(name)
-        .map(|relation| relation.name)
-        .map_err(|error| SQLError::Internal(format!("invalid routine name `{name}`: {error}")))
-}
-
 pub(crate) use uqa_sql::routines::{
-    routine_returns_anonymous_record, routine_signature_types, RoutineResolution,
-    StaticFunctionMatch,
+    routine_local_name, routine_returns_anonymous_record, routine_signature_types,
+    RoutineResolution, StaticFunctionMatch,
 };

@@ -32,17 +32,13 @@ pub fn commit_sql_function_drop(
             .iter()
             .map(|(table, column, _)| (table.clone(), column.clone())),
     );
-    let rewritten = context
-        .bodies
-        .prepare_routine_column_alias_drop(columns, &bindings)?;
+    let rewritten = super::prepare_routine_column_alias_drop(context, columns, &bindings)?;
     domain_dependencies::drop_domain_routine_checks(&context.domains, &bindings)?;
     drop_routine_object_dependents(context, &dependents)?;
     domain_dependencies::commit_domain_drop(&context.domains, &domains)?;
     commit_routine_registry_drop(context, &targets)?;
-    context
-        .bodies
-        .publish_stored_routine_body_rewrites(rewritten)?;
-    context.bodies.refresh_stored_merge_target_plans()?;
+    crate::routines::rewrites::publish_stored_routine_body_rewrites(&context.bodies, rewritten)?;
+    crate::routines::rewrites::refresh_stored_merge_target_plans(&context.bodies)?;
     for (level, message) in notices {
         context.notices.routine_drop_notice(level, &message);
     }

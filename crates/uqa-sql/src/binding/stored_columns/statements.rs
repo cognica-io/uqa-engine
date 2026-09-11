@@ -6,33 +6,31 @@
 
 //! Column dependencies of stored MERGE actions, including target assignments.
 
-use uqa_sql::ast::{MergeStmt, MergeWhen, RuleEvent};
+use crate::ast::{MergeStmt, MergeWhen, RuleEvent};
 
 use super::{
-    action_returning_scope, ColumnBindingContext, ColumnBindingMode, ColumnScope, Engine,
-    RelationIdentity, RuleColumnBinder, RuleColumnDependency, SQLError, Statement,
+    action_returning_scope, ColumnBindingContext, ColumnBindingMode, ColumnScope, RelationIdentity,
+    RuleColumnDependency, SQLError, Statement, StoredColumnBinder, StoredColumnBindingContext,
 };
 
-impl Engine {
-    pub(crate) fn rewrite_stored_statement_column(
-        &self,
-        statement: &mut Statement,
-        relation: &RelationIdentity,
-        from: &str,
-        to: &str,
-    ) -> Result<bool, SQLError> {
-        let mode = ColumnBindingMode::Rename { relation, from, to };
-        let mut binder = RuleColumnBinder::new(self, mode);
-        binder.bind_statement(statement, &[], &ColumnBindingContext::default())?;
-        let shape_changed = binder.alias_shape_changed();
-        Ok(binder.finish().contains(&RuleColumnDependency {
-            relation: relation.clone(),
-            column: from.to_string(),
-        }) || shape_changed)
-    }
+pub fn rewrite_stored_statement_column(
+    catalog: StoredColumnBindingContext<'_>,
+    statement: &mut Statement,
+    relation: &RelationIdentity,
+    from: &str,
+    to: &str,
+) -> Result<bool, SQLError> {
+    let mode = ColumnBindingMode::Rename { relation, from, to };
+    let mut binder = StoredColumnBinder::new(catalog, mode);
+    binder.bind_statement(statement, &[], &ColumnBindingContext::default())?;
+    let shape_changed = binder.alias_shape_changed();
+    Ok(binder.finish().contains(&RuleColumnDependency {
+        relation: relation.clone(),
+        column: from.to_string(),
+    }) || shape_changed)
 }
 
-impl RuleColumnBinder<'_> {
+impl StoredColumnBinder<'_> {
     pub(super) fn bind_merge(
         &mut self,
         merge: &mut MergeStmt,
@@ -50,7 +48,8 @@ impl RuleColumnBinder<'_> {
         )?;
         let (local, scopes) =
             self.bind_dml_source(Some(&mut merge.source), &target, outer, &context)?;
-        let dropped_targets = self.engine.dropped_stored_merge_targets(merge);
+        let dropped_targets =
+            crate::routines::merge_columns::dropped_stored_merge_targets(self.catalog.merge, merge);
         self.bind_expr(&mut merge.join_condition, &scopes, &context)?;
         for action in &mut merge.when_clauses {
             let condition = match action {

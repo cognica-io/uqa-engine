@@ -11,6 +11,7 @@ pub mod dependencies;
 pub mod diagnostics;
 pub mod names;
 pub mod relations;
+pub mod rewrites;
 
 use super::SQLUserFunction;
 use crate::{

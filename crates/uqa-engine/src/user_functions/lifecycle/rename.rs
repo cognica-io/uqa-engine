@@ -8,16 +8,16 @@
 
 use std::collections::BTreeMap;
 
-use uqa_sql::ast::{CreateFunction, FunctionBinding, FunctionBody, RenameRoutineStmt};
+use uqa_sql::ast::{FunctionBinding, FunctionBody, RenameRoutineStmt};
 use uqa_sql::SQLError;
 
 use crate::{
     roles::role_inherits, schema_security::SchemaAclPrivilege, Arc, Engine, RelationIdentity,
 };
 
-use super::super::declaration::resolve_routine_identity_types;
 use super::super::resolution::routine_signature_types;
 use super::super::SQLUserFunction;
+use uqa_sql::routines::declaration::resolve_routine_identity_types;
 
 struct RoutineRenameTarget {
     old_name: String,
@@ -27,87 +27,6 @@ struct RoutineRenameTarget {
 }
 
 impl Engine {
-    pub(crate) fn rewrite_routine_relation_references(
-        &self,
-        from: &RelationIdentity,
-        to: &RelationIdentity,
-    ) -> Result<(), SQLError> {
-        self.rewrite_stored_routine_bodies(|statement| {
-            crate::events::rewrite_stored_statement_relation(statement, from, to)
-        })
-    }
-
-    pub(crate) fn rewrite_routine_column_references(
-        &self,
-        relation: &RelationIdentity,
-        from: &str,
-        to: &str,
-    ) -> Result<(), SQLError> {
-        self.rewrite_stored_routine_bodies(|statement| {
-            self.rewrite_stored_statement_column(statement, relation, from, to)
-        })
-    }
-
-    pub(super) fn rewrite_stored_routine_bodies(
-        &self,
-        mut rewrite: impl FnMut(&mut uqa_sql::ast::Statement) -> Result<bool, SQLError>,
-    ) -> Result<(), SQLError> {
-        let registry = self.durable.sql_user_functions.read().clone();
-        let mut definitions = Vec::new();
-        for overloads in registry.values() {
-            for function in overloads {
-                let mut definition = function.def.clone();
-                let mut changed = false;
-                if let FunctionBody::Statements(statements) = &mut definition.body {
-                    for statement in statements {
-                        changed |= rewrite(statement)?;
-                    }
-                }
-                if changed {
-                    definitions.push(definition);
-                }
-            }
-        }
-        self.publish_stored_routine_body_rewrites(definitions)
-    }
-
-    pub(crate) fn publish_stored_routine_body_rewrites(
-        &self,
-        definitions: Vec<CreateFunction>,
-    ) -> Result<(), SQLError> {
-        if definitions.is_empty() {
-            return Ok(());
-        }
-        let mut rewritten = self.durable.sql_user_functions.read().clone();
-        for definition in definitions {
-            let signature = routine_signature_types(&definition);
-            let function = rewritten
-                .get_mut(&definition.name)
-                .and_then(|overloads| {
-                    overloads.iter_mut().find(|function| {
-                        function.def.object_id == definition.object_id
-                            && function.def.is_procedure == definition.is_procedure
-                            && routine_signature_types(&function.def) == signature
-                    })
-                })
-                .ok_or_else(|| {
-                    SQLError::Internal(format!(
-                        "stored routine {} disappeared before its body rewrite",
-                        definition.name
-                    ))
-                })?;
-            let compiled = self.compile_persisted_sql_function(&definition)?;
-            *function = Arc::new(SQLUserFunction {
-                def: definition,
-                compiled,
-            });
-        }
-        self.persist_sql_functions_snapshot(&rewritten)?;
-        *self.durable.sql_user_functions.write() = rewritten;
-        self.note_catalog_registry_changed();
-        Ok(())
-    }
-
     pub(crate) fn rename_sql_routine(&self, stmt: &RenameRoutineStmt) -> Result<(), SQLError> {
         self.with_implicit_transaction(|engine| engine.rename_sql_routine_inner(stmt))
     }

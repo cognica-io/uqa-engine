@@ -14,6 +14,15 @@ use uqa_core::Value;
 
 use crate::expr::EngineHook;
 
+pub trait StoredRegroleResolver {
+    fn resolve_stored_regrole(&self, name: &str) -> Result<Option<i64>, SQLError>;
+}
+impl<T: EngineHook + ?Sized> StoredRegroleResolver for T {
+    fn resolve_stored_regrole(&self, name: &str) -> Result<Option<i64>, SQLError> {
+        EngineHook::resolve_regrole(self, name)
+    }
+}
+
 fn scalar_regrole_type(ty: &ColumnType) -> bool {
     match ty {
         ColumnType::Regrole => true,
@@ -87,14 +96,28 @@ impl StoredRegroleConstants {
     }
 
     pub fn validate_inputs(&self, context: &dyn EngineHook) -> Result<(), SQLError> {
+        self.validate_inputs_with(context)
+    }
+
+    pub fn validate_inputs_with<C: StoredRegroleResolver + ?Sized>(
+        &self,
+        context: &C,
+    ) -> Result<(), SQLError> {
         for input in &self.inputs {
-            context.resolve_regrole(input)?;
+            context.resolve_stored_regrole(input)?;
         }
         Ok(())
     }
 
     pub fn reject(&self, context: &dyn EngineHook) -> Result<(), SQLError> {
-        self.validate_inputs(context)?;
+        self.reject_with(context)
+    }
+
+    pub fn reject_with<C: StoredRegroleResolver + ?Sized>(
+        &self,
+        context: &C,
+    ) -> Result<(), SQLError> {
+        self.validate_inputs_with(context)?;
         if self.inputs.is_empty() {
             Ok(())
         } else {

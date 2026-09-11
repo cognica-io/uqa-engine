@@ -6,6 +6,7 @@
 
 //! Routine DROP preflight and ordered dependency-aware publication.
 
+mod aliases;
 mod cascade;
 mod columns;
 pub mod context;
@@ -14,6 +15,7 @@ mod labels;
 mod publication;
 mod relations;
 
+pub use aliases::prepare_routine_column_alias_drop;
 pub use cascade::{drop_domain_types_and_routines, drop_schema_types_and_routines};
 use cascade::{expand_routine_domain_column_drop, expand_routine_domain_drop};
 pub use columns::{drop_column_routine_dependents, expand_column_drop_dependencies};

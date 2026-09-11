@@ -4,27 +4,31 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Routine type resolution, declaration validation, and body compilation.
+//! Routine type references, polymorphic signatures, and declaration validation.
 
-use uqa_execution::ScalarExpr;
-use uqa_planner::UnifiedPlan;
-use uqa_sql::ast::{
-    AlterRoutineStmt, ColumnType, CreateFunction, FunctionBody, FunctionParamMode, FunctionReturns,
-    RoutineColumnTypeReference, Statement,
+use crate::{
+    ast::{
+        AlterRoutineStmt, ColumnDef, ColumnType, CreateFunction, FunctionBody, FunctionParamMode,
+        FunctionReturns, RoutineColumnTypeReference,
+    },
+    type_resolution::canonical_routine_type_name,
+    SQLError,
 };
-use uqa_sql::SQLError;
 
-use crate::Engine;
+pub trait RoutineTypeCatalog {
+    fn try_describe_table(&self, reference: &str) -> Result<Option<Vec<ColumnDef>>, String>;
+    fn resolve_catalog_column_type(&self, name: &str) -> Option<ColumnType>;
+    fn resolve_catalog_column_type_name(&self, name: &str) -> Result<ColumnType, SQLError>;
+    fn resolve_catalog_domain_type_by_oid(&self, oid: u32) -> Option<ColumnType>;
+}
 
-use super::{canonical_routine_type_name, routine_local_name, CompiledFunctionBody};
-
-pub(super) fn resolve_routine_type_references(
-    engine: &Engine,
+pub fn resolve_routine_type_references(
+    catalog: &dyn RoutineTypeCatalog,
     def: &mut CreateFunction,
 ) -> Result<(), SQLError> {
     for parameter in &mut def.params {
         parameter.type_name = resolve_routine_type_name_with_reference(
-            engine,
+            catalog,
             &parameter.type_name,
             ROUTINE_PARAMETER_PSEUDO_TYPES,
             parameter.type_reference.as_ref(),
@@ -34,7 +38,7 @@ pub(super) fn resolve_routine_type_references(
     match &mut def.returns {
         FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
             *type_name = resolve_routine_type_name_with_reference(
-                engine,
+                catalog,
                 type_name,
                 ROUTINE_RESULT_PSEUDO_TYPES,
                 def.return_type_reference.as_ref(),
@@ -46,20 +50,20 @@ pub(super) fn resolve_routine_type_references(
     Ok(())
 }
 
-pub(super) fn resolve_alter_routine_identity_types(
-    engine: &Engine,
+pub fn resolve_alter_routine_identity_types(
+    catalog: &dyn RoutineTypeCatalog,
     stmt: &AlterRoutineStmt,
 ) -> Result<Option<Vec<String>>, SQLError> {
     resolve_routine_identity_types(
-        engine,
+        catalog,
         stmt.arg_types.as_deref(),
         &stmt.arg_type_references,
         "ALTER routine",
     )
 }
 
-pub(super) fn resolve_routine_identity_types(
-    engine: &Engine,
+pub fn resolve_routine_identity_types(
+    catalog: &dyn RoutineTypeCatalog,
     types: Option<&[String]>,
     references: &[Option<RoutineColumnTypeReference>],
     context: &str,
@@ -84,7 +88,7 @@ pub(super) fn resolve_routine_identity_types(
         .enumerate()
         .map(|(index, type_name)| {
             resolve_routine_type_name_with_reference(
-                engine,
+                catalog,
                 type_name,
                 ROUTINE_PARAMETER_PSEUDO_TYPES,
                 references.get(index).and_then(Option::as_ref),
@@ -154,7 +158,7 @@ const ROUTINE_RESULT_PSEUDO_TYPES: &[&str] = &[
 ];
 
 fn resolve_routine_type_name_with_reference(
-    engine: &Engine,
+    catalog: &dyn RoutineTypeCatalog,
     type_name: &str,
     allowed_pseudo_types: &[&str],
     structured_reference: Option<&RoutineColumnTypeReference>,
@@ -175,7 +179,7 @@ fn resolve_routine_type_name_with_reference(
             ))
         })?;
         let table = reference.relation_reference();
-        let columns = engine
+        let columns = catalog
             .try_describe_table(&table)
             .map_err(|error| {
                 SQLError::Internal(format!(
@@ -199,7 +203,7 @@ fn resolve_routine_type_name_with_reference(
             }
             return Ok(canonical);
         }
-        crate::sql::resolve_catalog_column_type_name(engine, base)?
+        catalog.resolve_catalog_column_type_name(base)?
     };
     let mut resolved = resolved;
     for _ in 0..array_dimensions {
@@ -208,25 +212,25 @@ fn resolve_routine_type_name_with_reference(
     Ok(resolved.sql_name())
 }
 
-pub(crate) fn resolve_plpgsql_datum_types(
-    engine: &Engine,
-    function: &mut uqa_sql::plpgsql::PLpgSQLFunction,
+pub fn resolve_plpgsql_datum_types(
+    catalog: &dyn RoutineTypeCatalog,
+    function: &mut crate::plpgsql::PLpgSQLFunction,
 ) -> Result<(), SQLError> {
     for datum in &mut function.datums {
-        let uqa_sql::plpgsql::PLpgSQLDatum::Var(variable) = datum else {
+        let crate::plpgsql::PLpgSQLDatum::Var(variable) = datum else {
             continue;
         };
         if variable.type_reference.is_none() {
             if let Some(ty) = variable
                 .type_oid
-                .and_then(|oid| crate::sql::resolve_catalog_domain_type_by_oid(engine, oid))
+                .and_then(|oid| catalog.resolve_catalog_domain_type_by_oid(oid))
             {
                 variable.type_name = ty.sql_name();
                 continue;
             }
         }
         variable.type_name = resolve_routine_type_name_with_reference(
-            engine,
+            catalog,
             &variable.type_name,
             &[
                 "record",
@@ -250,8 +254,11 @@ pub(crate) fn resolve_plpgsql_datum_types(
     Ok(())
 }
 
-fn validate_routine_declaration(engine: &Engine, def: &CreateFunction) -> Result<(), SQLError> {
-    validate_variadic_declaration(engine, def)?;
+pub(super) fn validate_routine_declaration(
+    catalog: &dyn RoutineTypeCatalog,
+    def: &CreateFunction,
+) -> Result<(), SQLError> {
+    validate_variadic_declaration(catalog, def)?;
     let inputs = validate_routine_input_types(def)?;
     if matches!(def.body, FunctionBody::Statements(_)) && inputs.any {
         return Err(routine_definition_error(
@@ -261,23 +268,27 @@ fn validate_routine_declaration(engine: &Engine, def: &CreateFunction) -> Result
     validate_routine_output_types(def, &inputs)
 }
 
-fn routine_parameter_regrole_constants(
-    engine: &Engine,
+pub(super) fn routine_parameter_regrole_constants(
+    catalog: &dyn RoutineTypeCatalog,
     def: &CreateFunction,
-) -> crate::sql::StoredRegroleConstants {
-    let mut constants = crate::sql::StoredRegroleConstants::default();
+) -> crate::catalog::regrole_dependencies::StoredRegroleConstants {
+    let mut constants = crate::catalog::regrole_dependencies::StoredRegroleConstants::default();
     for parameter in &def.params {
         let Some(default) = parameter.default.as_ref() else {
             continue;
         };
-        let target = crate::sql::resolve_catalog_column_type(engine, &parameter.type_name)
+        let target = catalog
+            .resolve_catalog_column_type(&parameter.type_name)
             .or_else(|| ColumnType::from_sql_name(&parameter.type_name).ok());
         constants.collect_expression(default, target.as_ref());
     }
     constants
 }
 
-fn validate_variadic_declaration(engine: &Engine, def: &CreateFunction) -> Result<(), SQLError> {
+fn validate_variadic_declaration(
+    catalog: &dyn RoutineTypeCatalog,
+    def: &CreateFunction,
+) -> Result<(), SQLError> {
     let variadic_positions = def
         .params
         .iter()
@@ -293,7 +304,7 @@ fn validate_variadic_declaration(engine: &Engine, def: &CreateFunction) -> Resul
     }
     if let Some(&variadic_index) = variadic_positions.first() {
         let parameter = &def.params[variadic_index];
-        if !routine_declaration_is_array(engine, &parameter.type_name) {
+        if !routine_declaration_is_array(catalog, &parameter.type_name) {
             return Err(routine_definition_error(
                 "VARIADIC parameter must be an array",
             ));
@@ -418,14 +429,15 @@ fn polymorphic_family(type_name: &str) -> Option<RoutinePolymorphicFamily> {
     })
 }
 
-fn routine_declaration_is_array(engine: &Engine, type_name: &str) -> bool {
+fn routine_declaration_is_array(catalog: &dyn RoutineTypeCatalog, type_name: &str) -> bool {
     let canonical = canonical_routine_type_name(type_name);
     canonical.ends_with("[]")
         || matches!(
             canonical.as_str(),
             "anyarray" | "anycompatiblearray" | "int2vector" | "oidvector"
         )
-        || crate::sql::resolve_catalog_column_type(engine, &canonical)
+        || catalog
+            .resolve_catalog_column_type(&canonical)
             .is_some_and(|ty| routine_column_type_is_array(&ty))
 }
 
@@ -437,189 +449,9 @@ fn routine_column_type_is_array(ty: &ColumnType) -> bool {
     }
 }
 
-fn routine_definition_error(message: impl Into<String>) -> SQLError {
+pub(super) fn routine_definition_error(message: impl Into<String>) -> SQLError {
     SQLError::Routine {
         sqlstate: "42P13".into(),
         message: message.into(),
     }
-}
-
-/// Compile a routine body per its language. Shared by DDL
-/// registration and restore-from-catalog.
-pub(super) fn compile_function_body(
-    engine: &Engine,
-    def: &CreateFunction,
-) -> Result<CompiledFunctionBody, SQLError> {
-    compile_function_body_inner(engine, def, false, false)
-}
-
-pub(super) fn compile_persisted_function_body(
-    engine: &Engine,
-    def: &CreateFunction,
-) -> Result<CompiledFunctionBody, SQLError> {
-    compile_function_body_inner(engine, def, true, false)
-}
-
-pub(super) fn compile_persisted_function_dependencies(
-    engine: &Engine,
-    def: &CreateFunction,
-) -> Result<CompiledFunctionBody, SQLError> {
-    compile_function_body_inner(engine, def, true, true)
-}
-
-fn compile_function_body_inner(
-    engine: &Engine,
-    def: &CreateFunction,
-    persisted_definition: bool,
-    preserve_target_expressions: bool,
-) -> Result<CompiledFunctionBody, SQLError> {
-    if !matches!(def.language.as_str(), "plpgsql" | "sql") {
-        return Err(SQLError::Routine {
-            sqlstate: "42704".into(),
-            message: format!("language \"{}\" does not exist", def.language),
-        });
-    }
-    if def.language == "plpgsql" && matches!(def.body, FunctionBody::Statements(_)) {
-        return Err(routine_definition_error(
-            "inline SQL function body only valid for language SQL",
-        ));
-    }
-    let mut stored_regrole_constants = routine_parameter_regrole_constants(engine, def);
-    stored_regrole_constants.validate_inputs(engine)?;
-    validate_routine_declaration(engine, def)?;
-    match def.language.as_str() {
-        "plpgsql" => {
-            stored_regrole_constants.reject(engine)?;
-            let catalog = crate::sql::plpgsql_catalog(engine)?;
-            let mut function = uqa_sql::plpgsql::parse_function_with_catalog(def, &catalog)?;
-            resolve_plpgsql_datum_types(engine, &mut function)?;
-            Ok(CompiledFunctionBody::PLpgSQL(function))
-        }
-        "sql" => {
-            let (statements, bind_catalog_dependencies) = match &def.body {
-                FunctionBody::Source(source) => {
-                    stored_regrole_constants.reject(engine)?;
-                    (uqa_sql::compile(source)?, false)
-                }
-                FunctionBody::Statements(statements) => (statements.clone(), true),
-            };
-            let mut plans = compile_sql_routine_plans(
-                engine,
-                def,
-                statements,
-                bind_catalog_dependencies,
-                persisted_definition && matches!(def.body, FunctionBody::Statements(_)),
-                preserve_target_expressions,
-            )?;
-            if bind_catalog_dependencies {
-                for plan in &mut plans {
-                    stored_regrole_constants.collect_plan(plan);
-                }
-                stored_regrole_constants.reject(engine)?;
-            }
-            Ok(CompiledFunctionBody::SQL(plans))
-        }
-        _ => unreachable!("routine language was validated above"),
-    }
-}
-
-fn compile_sql_routine_plans(
-    engine: &Engine,
-    def: &CreateFunction,
-    statements: Vec<Statement>,
-    bind_catalog_dependencies: bool,
-    persisted_definition: bool,
-    preserve_target_expressions: bool,
-) -> Result<Vec<UnifiedPlan>, SQLError> {
-    let local_name = routine_local_name(&def.name)?;
-    let signature_params = def.signature_params();
-    let parameter_names: Vec<String> = signature_params
-        .iter()
-        .map(|parameter| parameter.name.clone())
-        .collect();
-    let parameter_types = signature_params
-        .iter()
-        .map(|parameter| {
-            crate::sql::resolve_catalog_column_type(engine, &parameter.type_name)
-                .or_else(|| ColumnType::from_sql_name(&parameter.type_name).ok())
-        })
-        .collect::<Vec<_>>();
-    let positional_parameters = parameter_types
-        .iter()
-        .map(|parameter_type| match parameter_type {
-            Some(parameter_type) => {
-                uqa_sql::SQLParam::typed_scalar(crate::Value::Null, parameter_type.clone())
-            }
-            None => uqa_sql::SQLParam::scalar(crate::Value::Null),
-        })
-        .collect::<Vec<_>>();
-    let parameter_scope = uqa_execution::RowSchema::with_qualified_types(
-        &local_name,
-        parameter_names.clone(),
-        parameter_types,
-    );
-    statements
-        .into_iter()
-        .map(|mut statement| {
-            if bind_catalog_dependencies && !preserve_target_expressions {
-                engine.normalize_stored_merge_target_columns(&mut statement)?;
-            }
-            let mut plan = UnifiedPlan::lower_with(statement, &|name: &str| {
-                engine.has_registered_aggregate_function(name)
-            });
-            if persisted_definition {
-                plan.rewrite_scalar_expressions(&mut |expression| {
-                    let ScalarExpr::Func { name, binding, .. } = expression else {
-                        return;
-                    };
-                    uqa_sql::ast::FunctionBinding::upgrade_legacy_serialized_dispatch(
-                        name, binding,
-                    );
-                });
-            }
-            if bind_catalog_dependencies {
-                match &mut plan {
-                    UnifiedPlan::Query(query) => {
-                        if persisted_definition {
-                            engine.bind_loaded_stored_query_relations(
-                                query,
-                                "SQL routine body",
-                                false,
-                            )?;
-                        } else {
-                            engine.bind_stored_query_relations(query, "SQL routine body", false)?;
-                        }
-                        crate::sql::bind_catalog_query_routines_with_outer(
-                            engine,
-                            query,
-                            &positional_parameters,
-                            &parameter_scope,
-                        )?;
-                    }
-                    UnifiedPlan::Command(_) => {
-                        crate::sql::mark_catalog_statement_relations_bound(&mut plan)?;
-                    }
-                }
-            }
-            plan.rewrite_scalar_expressions(&mut |expression| {
-                let parameter = match expression {
-                    ScalarExpr::Column(name) => parameter_names
-                        .iter()
-                        .position(|parameter| !parameter.is_empty() && parameter == name),
-                    ScalarExpr::QualifiedColumn {
-                        qualifier, column, ..
-                    } if qualifier == &local_name => parameter_names
-                        .iter()
-                        .position(|parameter| !parameter.is_empty() && parameter == column),
-                    _ => None,
-                };
-                if let Some(position) = parameter {
-                    *expression = ScalarExpr::Param(position + 1);
-                }
-            });
-            // Stored definitions retain their analyzed logical expressions;
-            // immutable evaluation belongs to invocation planning.
-            Ok(plan)
-        })
-        .collect()
 }

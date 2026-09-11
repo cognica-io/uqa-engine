@@ -8,20 +8,13 @@
 
 use super::{RoutineDropResolution, RoutineDropTarget, RoutineRegistry};
 use crate::{
-    ast::{CreateFunction, Expr, FunctionBody, Statement},
-    catalog::events::RuleColumnDependency,
+    ast::{CreateFunction, Expr, FunctionBody},
     routines::routine_signature_types,
     SQLError,
 };
 use std::collections::BTreeSet;
 use uqa_core::Value;
 
-pub trait RoutineColumnBinding {
-    fn stored_statement_column_dependencies(
-        &self,
-        statement: &Statement,
-    ) -> Result<BTreeSet<RuleColumnDependency>, SQLError>;
-}
 pub trait RoutineRelationOids {
     fn bound_regclass_oid(&self, name: &str) -> Result<Option<i64>, SQLError>;
 }
@@ -42,7 +35,7 @@ pub fn regclass_oid(expression: &Expr) -> Option<i64> {
 }
 
 pub fn stored_routine_references_columns(
-    catalog: &dyn RoutineColumnBinding,
+    catalog: crate::binding::stored_columns::StoredColumnBindingContext<'_>,
     definition: &CreateFunction,
     columns: &BTreeSet<(String, String)>,
 ) -> Result<bool, SQLError> {
@@ -53,7 +46,9 @@ pub fn stored_routine_references_columns(
         return Ok(false);
     }
     for statement in statements {
-        let dependencies = catalog.stored_statement_column_dependencies(statement)?;
+        let dependencies = crate::binding::stored_columns::stored_statement_column_dependencies(
+            catalog, statement,
+        )?;
         if dependencies.iter().any(|dependency| {
             columns.contains(&(
                 dependency.relation.qualified_name(),

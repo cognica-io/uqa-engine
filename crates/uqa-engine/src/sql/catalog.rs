@@ -89,12 +89,6 @@ pub(crate) fn resolve_regtype_output(
 ) -> Result<Option<String>, String> {
     uqa_execution::catalog::projection::resolve_regtype_output(&engine.catalog_execution(), ty, oid)
 }
-pub(crate) fn resolve_catalog_domain_type_by_oid(engine: &Engine, oid: u32) -> Option<ColumnType> {
-    uqa_execution::catalog::projection::resolve_catalog_domain_type_by_oid(
-        &engine.catalog_execution(),
-        oid,
-    )
-}
 pub(crate) fn resolve_catalog_column_type(engine: &Engine, type_name: &str) -> Option<ColumnType> {
     uqa_execution::catalog::projection::resolve_catalog_column_type(
         &engine.catalog_execution(),

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Creation-time column binding for durable rewrite rules.
+//! Stored statement column identities, durable source shapes, and rewrite-rule binding.
 
 mod expressions;
 mod helpers;
@@ -12,24 +12,43 @@ mod lifecycle;
 mod sources;
 mod statements;
 
+pub use lifecycle::{
+    bind_rule_action_column_dependencies, bind_rule_condition_column_dependencies,
+    bind_stored_statement_source_columns, remove_rule_source_column_aliases,
+    remove_stored_statement_source_column_aliases, rewrite_rule_column_references,
+    stored_statement_column_dependencies,
+};
+pub use statements::rewrite_stored_statement_column;
+
+/// Current names of a bound row relation, resolved when a binding pass needs them.
+pub trait StoredColumnCatalog {
+    fn stored_relation_column_names(&self, name: &str) -> Result<Option<Vec<String>>, SQLError>;
+}
+
+#[derive(Clone, Copy)]
+pub struct StoredColumnBindingContext<'a> {
+    pub sources: &'a dyn StoredColumnCatalog,
+    pub merge: &'a dyn crate::routines::merge_columns::StoredMergeColumnCatalog,
+}
+
 use std::collections::{BTreeMap, BTreeSet};
 
-use uqa_sql::ast::{
+use crate::ast::{
     DeleteStmt, Expr, FromClause, InsertStmt, OnConflictAction, Projection, SelectStmt, Statement,
     UpdateStmt, CTE,
 };
-use uqa_sql::SQLError;
+use crate::SQLError;
 
-use crate::{Engine, RelationIdentity};
+use uqa_core::RelationIdentity;
 
-use super::RuleColumnDependency;
+use crate::catalog::events::RuleColumnDependency;
 use helpers::{
     action_returning_scope, apply_positional_aliases, is_default_values_insert, is_output_alias,
     opaque_scope, preserve_table_column_name, same_identifier, select_output_names,
     table_alias_count_error, unique_current_name,
 };
 
-fn cte_output_names(body: &uqa_sql::ast::CteBody) -> Vec<String> {
+fn cte_output_names(body: &crate::ast::CteBody) -> Vec<String> {
     if let Some(query) = body.query() {
         return select_output_names(query);
     }
@@ -125,17 +144,17 @@ struct ColumnBindingContext {
     ctes: BTreeMap<String, Vec<String>>,
 }
 
-struct RuleColumnBinder<'a> {
-    engine: &'a Engine,
+struct StoredColumnBinder<'a> {
+    catalog: StoredColumnBindingContext<'a>,
     mode: ColumnBindingMode<'a>,
     dependencies: BTreeSet<RuleColumnDependency>,
     alias_shape_changed: bool,
 }
 
-impl<'a> RuleColumnBinder<'a> {
-    fn new(engine: &'a Engine, mode: ColumnBindingMode<'a>) -> Self {
+impl<'a> StoredColumnBinder<'a> {
+    fn new(catalog: StoredColumnBindingContext<'a>, mode: ColumnBindingMode<'a>) -> Self {
         Self {
-            engine,
+            catalog,
             mode,
             dependencies: BTreeSet::new(),
             alias_shape_changed: false,
@@ -197,7 +216,10 @@ impl<'a> RuleColumnBinder<'a> {
         }
         let columns = match bound_columns {
             Some(columns) => columns.to_vec(),
-            None => crate::sql::query_source_column_names(self.engine, name, true)?
+            None => self
+                .catalog
+                .sources
+                .stored_relation_column_names(name)?
                 .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?,
         };
         if column_aliases.len() > columns.len() {
@@ -339,7 +361,7 @@ impl<'a> RuleColumnBinder<'a> {
         let returning = action_returning_scope(
             &target,
             &target,
-            uqa_sql::ast::RuleEvent::Insert,
+            crate::ast::RuleEvent::Insert,
             &insert.returning_aliases,
         );
         let mut returning_scopes = vec![returning.clone()];
@@ -379,7 +401,7 @@ impl<'a> RuleColumnBinder<'a> {
         let returning = action_returning_scope(
             &local,
             &target,
-            uqa_sql::ast::RuleEvent::Update,
+            crate::ast::RuleEvent::Update,
             &update.returning_aliases,
         );
         let mut returning_scopes = vec![returning.clone()];
@@ -415,7 +437,7 @@ impl<'a> RuleColumnBinder<'a> {
         let returning = action_returning_scope(
             &local,
             &target,
-            uqa_sql::ast::RuleEvent::Delete,
+            crate::ast::RuleEvent::Delete,
             &delete.returning_aliases,
         );
         let mut returning_scopes = vec![returning.clone()];
@@ -699,8 +721,8 @@ impl<'a> RuleColumnBinder<'a> {
                         .any(|column| same_identifier(column, from))
                 })
             {
-                preserve_table_column_name(self.engine, left, relation, from, to)?;
-                preserve_table_column_name(self.engine, right, relation, from, to)?;
+                preserve_table_column_name(self.catalog, left, relation, from, to)?;
+                preserve_table_column_name(self.catalog, right, relation, from, to)?;
             }
         }
         let left_scope = self.bind_from(left, outer, context)?;
@@ -728,7 +750,7 @@ impl<'a> RuleColumnBinder<'a> {
                 })
                 .map(|column| column.name.clone())
                 .collect();
-            *using = Some(uqa_sql::ast::JoinUsing {
+            *using = Some(crate::ast::JoinUsing {
                 columns,
                 alias: None,
             });
@@ -749,7 +771,7 @@ impl<'a> RuleColumnBinder<'a> {
         &mut self,
         left: ColumnScope,
         right: ColumnScope,
-        using: Option<&mut uqa_sql::ast::JoinUsing>,
+        using: Option<&mut crate::ast::JoinUsing>,
         alias: Option<&str>,
         column_aliases: &[String],
     ) -> Result<ColumnScope, SQLError> {

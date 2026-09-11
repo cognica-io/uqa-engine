@@ -8,10 +8,6 @@
 
 mod ctes;
 use ctes::{collect_cte_relation_dependencies, collect_cte_source_routine_dependencies};
-pub(crate) use uqa_sql::catalog::stored_ast::visit_stored_statement_merges;
-pub(crate) use uqa_sql::catalog::stored_ast::{
-    copy_stored_source_column_shapes, visit_stored_statement_sources,
-};
 pub(crate) use uqa_sql::catalog::stored_ast::{
     visit_stored_expression, visit_stored_statement_expressions,
 };
@@ -216,8 +212,6 @@ impl Engine {
         Ok(changed)
     }
 }
-
-pub(crate) use uqa_sql::catalog::events::renames::rewrite_stored_statement_relation;
 
 pub(super) fn collect_query_relation_dependencies(
     query: &QueryPlan,

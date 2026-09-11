@@ -12,7 +12,6 @@ use uqa_sql::SQLError;
 use crate::capabilities::RelationLookupMode;
 use crate::Engine;
 
-use super::super::declaration::compile_function_body;
 use super::CompiledFunctionBody;
 
 #[derive(Clone, Copy)]
@@ -61,7 +60,7 @@ impl Engine {
         mode: RoutineCompilationMode,
     ) -> Result<CompiledFunctionBody, SQLError> {
         match mode {
-            RoutineCompilationMode::Definition => compile_function_body(self, def),
+            RoutineCompilationMode::Definition => self.compile_sql_function_body(def),
             RoutineCompilationMode::Persisted => self.compile_persisted_sql_function(def),
         }
     }

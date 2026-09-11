@@ -14,28 +14,21 @@ use crate::{
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
-    ops::{Deref, DerefMut},
+    ops::Deref,
     sync::Arc,
 };
 use uqa_core::RelationIdentity;
 use uqa_sql::{
-    ast::{ColumnDef, CreateFunction, DropRule, DropTrigger, FunctionBinding, TableCheck},
-    routines::lifecycle::{
-        names::RoutineNameCatalog, relations::RoutineColumnBinding, RoutineRegistry,
-    },
+    ast::{ColumnDef, DropRule, DropTrigger, FunctionBinding, TableCheck},
+    routines::lifecycle::names::RoutineNameCatalog,
     schema::sequences::dependents::SequenceSchemaDependent,
     SQLError,
 };
 use uqa_storage::StorageBackendResult;
 
-pub type RoutineRegistryWrite<'a> = Box<dyn DerefMut<Target = RoutineRegistry> + 'a>;
-pub trait RoutineRegistryState {
-    fn routine_snapshot(&self) -> RoutineRegistry;
-    fn routines_write(&self) -> RoutineRegistryWrite<'_>;
-}
-pub trait RoutineRegistryPublication {
-    fn persist_routine_definitions(&self, registry: &RoutineRegistry) -> Result<(), SQLError>;
-}
+pub use crate::routines::catalog::{
+    RoutineRegistryPublication, RoutineRegistryState, RoutineRegistryWrite,
+};
 pub type RoutineColumnRead<'a> = Box<dyn Deref<Target = Vec<ColumnDef>> + 'a>;
 pub type RoutineCheckRead<'a> = Box<dyn Deref<Target = Vec<TableCheck>> + 'a>;
 pub trait RoutineTableMetadata {
@@ -99,19 +92,7 @@ pub struct RoutineDependencyContext<'a> {
     pub events: &'a dyn RoutineEventDependencies,
     pub indexes: &'a dyn RoutineIndexDependencies,
     pub sequences: &'a dyn RoutineSequenceDependencies,
-    pub columns: &'a dyn RoutineColumnBinding,
-}
-pub trait RoutineBodyRewrites {
-    fn prepare_routine_column_alias_drop(
-        &self,
-        columns: BTreeSet<(String, String)>,
-        removed: &[FunctionBinding],
-    ) -> Result<Vec<CreateFunction>, SQLError>;
-    fn publish_stored_routine_body_rewrites(
-        &self,
-        definitions: Vec<CreateFunction>,
-    ) -> Result<(), SQLError>;
-    fn refresh_stored_merge_target_plans(&self) -> Result<(), SQLError>;
+    pub columns: uqa_sql::binding::stored_columns::StoredColumnBindingContext<'a>,
 }
 pub trait RoutineTableRemoval {
     fn set_column_default_none(&self, table: &str, column: &str) -> StorageBackendResult<bool>;
@@ -149,7 +130,7 @@ pub struct RoutineRemovalContext<'a> {
     pub catalog: CatalogContext<'a>,
     pub domains: DomainDependencyContext<'a>,
     pub dependencies: RoutineDependencyContext<'a>,
-    pub bodies: &'a dyn RoutineBodyRewrites,
+    pub bodies: crate::routines::rewrites::RoutineRewriteContext<'a>,
     pub tables: &'a dyn RoutineTableRemoval,
     pub foreign: &'a dyn RoutineForeignRemoval,
     pub events: &'a dyn RoutineEventRemoval,
