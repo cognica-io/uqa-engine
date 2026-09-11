@@ -214,9 +214,9 @@ pub struct ColumnStatsRow {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SequenceOptions {
     pub data_type: String,
-    /// `None` is accepted only while decoding a legacy row and is resolved from its increment direction by the engine.
+    /// `None` is accepted only while decoding a legacy row and is resolved from its increment direction by native sequence restoration.
     pub min_value: Option<i64>,
-    /// `None` is accepted only while decoding a legacy row and is resolved from its increment direction by the engine.
+    /// `None` is accepted only while decoding a legacy row and is resolved from its increment direction by native sequence restoration.
     pub max_value: Option<i64>,
     pub cycle: bool,
     #[serde(default = "default_sequence_cache_size")]
