@@ -109,5 +109,35 @@ impl RetrievalBinding<'_> {
     }
 }
 
+impl RetrievalBinding<'_> {
+    /// Describe a predicate that owns one bounded vector candidate pool across a relation hierarchy.
+    pub fn direct_vector_retrieval(
+        &self,
+        expression: &ScalarExpr,
+        params: &[SQLParam],
+    ) -> Result<Option<crate::query::table_sources::retrieval::DirectVectorRetrieval>, SQLError>
+    {
+        use crate::query::table_sources::retrieval::DirectVectorRetrieval;
+        let Some(tree) = self.lower_where(expression, params)? else {
+            return Ok(None);
+        };
+        Ok(match tree {
+            OperatorTree::KNN { k, .. } => Some(DirectVectorRetrieval::Knn { top_k: k }),
+            OperatorTree::CalibratedVectorMatch {
+                field,
+                query_vector,
+                k,
+                threshold,
+            } => Some(DirectVectorRetrieval::Calibrated {
+                field,
+                query_vector,
+                top_k: k,
+                threshold,
+            }),
+            _ => None,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests;

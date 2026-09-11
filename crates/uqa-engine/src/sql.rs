@@ -57,7 +57,6 @@ pub(crate) use prepared::{
 };
 mod read_only;
 mod regrole_dependencies;
-mod row_functions;
 pub(crate) mod scalar;
 mod select;
 pub(crate) mod session_portal_worker;

@@ -612,6 +612,7 @@ mod tests {
 pub mod driver;
 
 pub mod joins;
+pub mod query;
 pub mod runtime;
 
 pub mod binding;

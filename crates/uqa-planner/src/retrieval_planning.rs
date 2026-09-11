@@ -6,7 +6,11 @@
 
 //! Retrieval optimizer setup and checked access estimates over retained catalog inputs.
 
+mod access;
 mod catalog;
+mod top_k;
+pub use access::accelerated_tree;
+pub use top_k::{plan_bound_text_top_k, plan_text_top_k_tree};
 mod indexes;
 mod joins;
 mod paradigm;
@@ -25,6 +29,8 @@ use uqa_operators::OperatorTree;
 use uqa_sql::SQLError;
 type PlanningResult<T> = Result<T, SQLError>;
 
+#[cfg(test)]
+mod testing;
 #[cfg(test)]
 mod tests;
 fn operator_execution_error(operator: &str, error: impl std::fmt::Display) -> SQLError {

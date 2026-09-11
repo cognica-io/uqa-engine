@@ -51,7 +51,7 @@ pub(super) fn block_max_scorer_fingerprint(params: BM25Params, stats: &IndexStat
     )
 }
 
-pub(super) fn storage_sql_error(action: &str, error: impl Into<StorageBackendError>) -> SQLError {
+pub(crate) fn storage_sql_error(action: &str, error: impl Into<StorageBackendError>) -> SQLError {
     let error = error.into();
     SQLError::Internal(format!("{action}: {error}"))
 }

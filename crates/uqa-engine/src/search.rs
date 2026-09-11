@@ -32,6 +32,6 @@ mod text_scoring;
 mod top_k;
 mod vector;
 
-use helpers::{
-    block_max_scorer_fingerprint, raw_bm25_params, search_stats_for_terms, storage_sql_error,
-};
+pub(crate) use helpers::storage_sql_error;
+
+use helpers::{block_max_scorer_fingerprint, raw_bm25_params, search_stats_for_terms};
