@@ -9,7 +9,6 @@ use super::{
 };
 
 mod definition;
-mod routines;
 pub(crate) use definition::{index_definition, IndexDefinition};
 
 impl Engine {

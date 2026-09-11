@@ -605,3 +605,6 @@ mod view_alteration;
 
 mod domains;
 mod namespaces;
+
+mod index_routines;
+mod view_dependencies;

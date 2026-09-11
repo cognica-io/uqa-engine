@@ -87,3 +87,5 @@ impl StoredView {
             .row_schema(routines, catalog, resolution)
     }
 }
+
+pub mod dependencies;
