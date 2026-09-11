@@ -7,7 +7,7 @@
 //! Bind sequence authorization and ACL publication to live state and catalog services.
 
 use crate::Engine;
-use uqa_core::{RelationIdentity, Value};
+use uqa_core::RelationIdentity;
 use uqa_execution::catalog::security::sequence_lifecycle::{
     SequencePrivilegeContext, SequencePrivilegePublication, SequenceSecurityWrite,
 };
@@ -131,13 +131,6 @@ impl Engine {
     ) -> Result<(), SQLError> {
         self.sequence_privilege_inquiry()
             .ensure_sequence_setval_privilege(name, relation)
-    }
-    pub(crate) fn has_sequence_privilege_value(
-        &self,
-        arguments: &[Value],
-    ) -> Result<Value, SQLError> {
-        self.sequence_privilege_inquiry()
-            .has_sequence_privilege_value(arguments)
     }
     pub(crate) fn ensure_sequence_owner(
         &self,

@@ -100,7 +100,6 @@ pub(crate) use catalog::{
     resolve_regprocedure_oid, resolve_regrole_oid, resolve_regtype_oid, resolve_regtype_output,
     runtime_constraints, sequence_relation_oid,
 };
-use from_rows::engine_func_intercept;
 pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_columns};
 use plan_executor::UnifiedPlanExecutor;
 pub(crate) use regrole_dependencies::{
@@ -130,20 +129,6 @@ pub(crate) fn execute_nested_optimized_command(
 
 pub(in crate::sql) use crate::capabilities::routine_invocation::analyze_call_result_schema;
 
-pub(crate) fn call_bound_engine_builtin(
-    engine: &Engine,
-    binding: &uqa_sql::ast::FunctionBinding,
-    arguments: &[(Option<String>, Value)],
-) -> Option<Result<Value, SQLError>> {
-    if !binding.builtin {
-        return None;
-    }
-    let values = arguments
-        .iter()
-        .map(|(_, value)| value.clone())
-        .collect::<Vec<_>>();
-    from_rows::engine_catalog_scalar_value(engine, &binding.name, &values)
-}
 use select::run_explain;
 pub(crate) use select::CteScope;
 pub(crate) use session_portal_worker::start_session_portal_worker;
@@ -204,8 +189,6 @@ pub(crate) use uqa_sql::semantics::builtin_function_dispatch_name;
 #[cfg(test)]
 #[path = "sql/tests.rs"]
 mod tests;
-
-pub(crate) use uqa_sql::semantics::merge_action_attribute;
 
 pub(crate) use triggers::current_transition_relations;
 

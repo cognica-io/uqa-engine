@@ -15,8 +15,8 @@ use uqa_sql::ast::{
 use uqa_sql::SQLError;
 
 use crate::{
-    Engine, SQLStatementCache, StorageBackendError, StorageBackendResult, Value,
-    ROLES_METADATA_KEY, ROLE_MEMBERSHIPS_METADATA_KEY,
+    Engine, SQLStatementCache, StorageBackendError, StorageBackendResult, ROLES_METADATA_KEY,
+    ROLE_MEMBERSHIPS_METADATA_KEY,
 };
 
 pub(crate) struct RoutineSessionStateGuard<'a> {
@@ -586,10 +586,6 @@ impl Engine {
         let roles = self.durable.roles.read();
         let memberships = self.durable.role_memberships.read();
         role_inherits(&roles, &memberships, &current, target)
-    }
-
-    pub(crate) fn pg_has_role_value(&self, arguments: &[Value]) -> Result<Value, SQLError> {
-        uqa_sql::catalog::roles::inquiry::pg_has_role_value(self, self, arguments)
     }
 
     fn persist_roles_snapshot(

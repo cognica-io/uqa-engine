@@ -8,6 +8,51 @@ use super::*;
 use uqa_sql::{semantics::source_filters::combine_filters, ResultRow};
 
 #[test]
+fn scalar_context_errors_preserve_argument_evaluation_order() {
+    let row = ResultRow::new();
+    let args = [ScalarExpr::Literal(Value::Null)];
+    for function in [
+        "pg_get_expr",
+        "pg_notify",
+        "pg_get_sequence_data",
+        "has_database_privilege",
+    ] {
+        let mut calls = 0;
+        let mut evaluate = |_: &ScalarExpr| {
+            calls += 1;
+            Err(SQLError::Internal("argument failed".into()))
+        };
+        let error = engine_func_intercept(None, function, &args, &row, &mut evaluate).unwrap_err();
+        assert!(matches!(error, SQLError::Internal(message) if message == "argument failed"));
+        assert_eq!(
+            calls, 1,
+            "{function} must evaluate arguments before requiring its context"
+        );
+    }
+    for function in [
+        "graph_create",
+        "graph_drop",
+        "create_graph",
+        "drop_graph",
+        "deep_learn",
+    ] {
+        let mut calls = 0;
+        let mut evaluate = |_: &ScalarExpr| {
+            calls += 1;
+            Err(SQLError::Internal("argument failed".into()))
+        };
+        let error = engine_func_intercept(None, function, &args, &row, &mut evaluate).unwrap_err();
+        assert!(
+            matches!(error, SQLError::Unsupported(message) if message == format!("{function} requires an engine-backed projection"))
+        );
+        assert_eq!(
+            calls, 0,
+            "{function} must require its context before evaluating arguments"
+        );
+    }
+}
+
+#[test]
 fn combine_filters_handles_empty_and_single_inputs_without_panicking() {
     assert!(combine_filters(Vec::<ScalarExpr>::new()).is_none());
     let combined = combine_filters([ScalarExpr::Literal(Value::Bool(true))]);

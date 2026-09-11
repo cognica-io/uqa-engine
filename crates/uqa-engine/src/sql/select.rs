@@ -14,7 +14,7 @@ use super::scalar::{
     eval_physical_scalar, PhysicalEvalContext, PhysicalOuterRow, PhysicalSubqueryRunner,
 };
 use super::volatility::query_contains_volatile_function;
-use super::{engine_func_intercept, Engine, SQLError, SQLParam, SQLResult, Value};
+use super::{Engine, SQLError, SQLParam, SQLResult, Value};
 
 mod cte_execution;
 mod evaluation;

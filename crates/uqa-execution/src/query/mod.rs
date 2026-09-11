@@ -64,3 +64,6 @@ pub mod block;
 pub mod statement;
 
 pub mod graph_lifecycle;
+
+pub mod model_training;
+pub mod scalar_functions;

@@ -7,7 +7,7 @@
 //! Bind sequence inspection to live registry guards and existing catalog resolution.
 
 use crate::Engine;
-use uqa_core::{RelationIdentity, Value};
+use uqa_core::RelationIdentity;
 use uqa_execution::catalog::{
     security::SequenceSecurity,
     sequence::SequenceState,
@@ -16,7 +16,7 @@ use uqa_execution::catalog::{
         SequenceStatesRead,
     },
 };
-use uqa_sql::{ast::RelationPersistence, SQLError};
+use uqa_sql::ast::RelationPersistence;
 use uqa_storage::StorageBackendResult;
 
 impl Engine {
@@ -27,34 +27,6 @@ impl Engine {
             owners: self,
             roles: self,
         }
-    }
-    pub(crate) fn pg_sequence_parameters_value(
-        &self,
-        arguments: &[Value],
-    ) -> Result<Value, SQLError> {
-        self.sequence_introspection_context()
-            .pg_sequence_parameters_value(arguments)
-    }
-    pub(crate) fn pg_get_sequence_data_value(
-        &self,
-        arguments: &[Value],
-    ) -> Result<Value, SQLError> {
-        self.sequence_introspection_context()
-            .pg_get_sequence_data_value(arguments)
-    }
-    pub(crate) fn pg_sequence_last_value_value(
-        &self,
-        arguments: &[Value],
-    ) -> Result<Value, SQLError> {
-        self.sequence_introspection_context()
-            .pg_sequence_last_value_value(arguments)
-    }
-    pub(crate) fn pg_get_serial_sequence_value(
-        &self,
-        arguments: &[Value],
-    ) -> Result<Value, SQLError> {
-        self.sequence_introspection_context()
-            .pg_get_serial_sequence_value(arguments)
     }
 }
 impl SequenceIntrospectionCatalog for Engine {

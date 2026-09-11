@@ -14,8 +14,8 @@ use uqa_sql::expr::RowLookup;
 use crate::capabilities::QueryRuntimeView;
 
 use super::super::{
-    engine_func_intercept, query_contains_volatile_function, Engine, PhysicalOuterRow, SQLError,
-    SQLParam, ScalarExpr, Value,
+    query_contains_volatile_function, Engine, PhysicalOuterRow, SQLError, SQLParam, ScalarExpr,
+    Value,
 };
 use super::subqueries::CachedCorrelatedExists;
 use super::CteScope;
@@ -239,7 +239,11 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         binding: &uqa_sql::ast::FunctionBinding,
         args: &[(Option<String>, Value)],
     ) -> Option<std::result::Result<Value, SQLError>> {
-        crate::sql::call_bound_engine_builtin(self.engine, binding, args)
+        uqa_execution::query::scalar_functions::call_bound_builtin(
+            &self.engine.scalar_function_context(),
+            binding,
+            args,
+        )
     }
 
     fn has_scalar_functions(&self) -> bool {
@@ -308,6 +312,12 @@ impl uqa_execution::query::expression::ScalarExpressionContext for ScopedEngineH
         row: &dyn RowLookup,
         evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
     ) -> Result<Option<Value>, SQLError> {
-        engine_func_intercept(Some(self.engine), name, args, row, evaluate)
+        uqa_execution::query::scalar_functions::intercept_function(
+            Some(&self.engine.scalar_function_context()),
+            name,
+            args,
+            row,
+            evaluate,
+        )
     }
 }
