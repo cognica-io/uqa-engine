@@ -63,3 +63,13 @@ pub mod schema_inquiry;
 
 pub mod database;
 pub mod database_inquiry;
+
+pub mod sequence;
+pub mod sequence_grants;
+pub mod sequence_inquiry;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SequenceSecurity {
+    pub role_owner: String,
+    pub acl: Option<Vec<uqa_core::catalog_sequence::SequenceAclEntry>>,
+}

@@ -45,3 +45,37 @@ const fn sequence_state_called_default() -> bool {
 const fn sequence_cache_size_default() -> i64 {
     1
 }
+
+use super::security::SequenceSecurity;
+use uqa_core::RelationIdentity;
+use uqa_storage::{SequenceOptions, SequenceRow, StorageBackendError, StorageBackendResult};
+
+pub fn sequence_row(
+    name: &str,
+    object_id: [u8; 16],
+    state: SequenceState,
+    persistence: uqa_sql::ast::RelationPersistence,
+    security: &SequenceSecurity,
+) -> StorageBackendResult<SequenceRow> {
+    Ok(SequenceRow {
+        relation: RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?,
+        role_owner: security.role_owner.clone(),
+        acl: security.acl.clone(),
+        object_id,
+        definition_generation: state.definition_generation,
+        start: state.start,
+        increment: state.increment,
+        current: state.current,
+        called: state.called,
+        log_count: state.log_count,
+        persistence: persistence.catalog_code().into(),
+        owner: state.owner,
+        options: SequenceOptions {
+            data_type: state.data_type.sql_name().into(),
+            min_value: Some(state.min_value),
+            max_value: Some(state.max_value),
+            cycle: state.cycle,
+            cache_size: state.cache_size,
+        },
+    })
+}

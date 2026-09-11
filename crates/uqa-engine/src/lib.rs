@@ -103,7 +103,6 @@ mod schema_security;
 mod search;
 mod sequence_catalog;
 mod sequence_ownership;
-mod sequence_security;
 mod sequence_values;
 mod sequences;
 mod session;
@@ -150,10 +149,9 @@ use uqa_storage::{
     ColumnStatsRow, DocumentStore, HNSWIndex, HNSWIndexParams, IVFIndex, IVFIndexParams,
     InvertedIndex, MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex,
     PersistentStorageBackend, PersistentStorageProvider, PersistentStorageSession,
-    RelationIdentity, SequenceOptions, SequenceOwner, SequenceOwnerDependency,
-    SequenceReservationResult, SequenceRow, StorageBackendError, StorageBackendResult,
-    StorageSavepointId, StoredDocument, TableSchema, VectorFieldSchema, VectorIndex,
-    VectorIndexOpenMode, VectorIndexSpec, ViewRow,
+    RelationIdentity, SequenceOwner, SequenceOwnerDependency, SequenceReservationResult,
+    SequenceRow, StorageBackendError, StorageBackendResult, StorageSavepointId, StoredDocument,
+    TableSchema, VectorFieldSchema, VectorIndex, VectorIndexOpenMode, VectorIndexSpec, ViewRow,
 };
 use uqa_storage_sqlite::{
     ManagedConnection, SQLiteCompressedContainerAnchor, SQLiteStorageProvider,

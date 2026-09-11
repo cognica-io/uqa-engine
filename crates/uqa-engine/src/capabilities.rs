@@ -623,3 +623,5 @@ mod sequence_introspection;
 mod schema_privileges;
 
 mod database_privileges;
+
+mod sequence_privileges;

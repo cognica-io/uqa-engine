@@ -7,8 +7,8 @@
 //! Durable sequence catalog conversion, migration, and registry hydration.
 
 use super::{
-    BTreeMap, CatalogFacade, Engine, RelationIdentity, SequenceDataType, SequenceOptions,
-    SequenceRow, SequenceState, StorageBackendError, StorageBackendResult, SEQUENCES_METADATA_KEY,
+    BTreeMap, CatalogFacade, Engine, RelationIdentity, SequenceDataType, SequenceRow,
+    SequenceState, StorageBackendError, StorageBackendResult, SEQUENCES_METADATA_KEY,
 };
 use crate::state::SequenceSecurity;
 
@@ -20,28 +20,13 @@ impl Engine {
         persistence: uqa_sql::ast::RelationPersistence,
         security: &SequenceSecurity,
     ) -> StorageBackendResult<SequenceRow> {
-        Ok(SequenceRow {
-            relation: RelationIdentity::from_legacy_name(name)
-                .map_err(StorageBackendError::Other)?,
-            role_owner: security.role_owner.clone(),
-            acl: security.acl.clone(),
+        uqa_execution::catalog::sequence::sequence_row(
+            name,
             object_id,
-            definition_generation: state.definition_generation,
-            start: state.start,
-            increment: state.increment,
-            current: state.current,
-            called: state.called,
-            log_count: state.log_count,
-            persistence: persistence.catalog_code().into(),
-            owner: state.owner,
-            options: SequenceOptions {
-                data_type: state.data_type.sql_name().into(),
-                min_value: Some(state.min_value),
-                max_value: Some(state.max_value),
-                cycle: state.cycle,
-                cache_size: state.cache_size,
-            },
-        })
+            state,
+            persistence,
+            security,
+        )
     }
 
     pub(crate) fn refresh_sequences_from_catalog(&self) -> StorageBackendResult<()> {
