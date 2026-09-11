@@ -47,8 +47,8 @@ impl RuleStatements for Engine {
         statement: Statement,
         privilege_subject: &str,
     ) -> Result<SQLResult, SQLError> {
-        crate::sql::execute_compiled_statement_with_privilege_subject(
-            self,
+        uqa_execution::statement::compiled::execute_with_privilege_subject(
+            &self.compiled_statement_context(),
             statement,
             &[],
             privilege_subject,
@@ -57,7 +57,7 @@ impl RuleStatements for Engine {
 }
 impl RuleExpressions for Engine {
     fn evaluate(&self, expression: &Expr) -> Result<Value, SQLError> {
-        crate::sql::scalar::eval_lowered_expression(self, expression, None, &[])
+        crate::capabilities::query_expressions::eval_lowered_expression(self, expression, None, &[])
     }
     fn evaluate_stored(
         &self,
@@ -66,7 +66,7 @@ impl RuleExpressions for Engine {
         row: &PhysicalRow,
         privilege_subject: &str,
     ) -> Result<Value, SQLError> {
-        crate::sql::scalar::eval_stored_expression_plan_with_row(
+        crate::capabilities::query_expressions::eval_stored_expression_plan_with_row(
             self,
             expression,
             schema,

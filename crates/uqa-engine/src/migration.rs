@@ -18,8 +18,8 @@ use uqa_core::{DocId, Edge, TemporalValue, Value, Vertex};
 use uqa_sql::ast::{ColumnDef, ColumnType, Expr};
 use uqa_storage_sqlite::ColumnStatsInput;
 
-use crate::sql::convert_value_to_column_type;
 use crate::{Engine, HNSWIndexParams, IVFIndexParams, VectorIndexSpec};
+use uqa_sql::assignment::conversion::convert_value_to_column_type;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PythonMigrationReport {

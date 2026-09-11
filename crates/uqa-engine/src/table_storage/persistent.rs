@@ -91,13 +91,13 @@ impl Engine {
             Some(uqa_sql::ast::ColumnType::Tensor(dim)) => {
                 let tensor = uqa_sql::expr::value_to_tensor(value)?;
                 for vector in &tensor {
-                    crate::sql::validate_vector_dimensions(dim, vector.len())?;
+                    uqa_sql::assignment::conversion::validate_vector_dimensions(dim, vector.len())?;
                 }
                 Ok(Some(tensor))
             }
             Some(uqa_sql::ast::ColumnType::Vector(dim)) => {
                 let vector = uqa_sql::expr::value_to_vector(value)?;
-                crate::sql::validate_vector_dimensions(dim, vector.len())?;
+                uqa_sql::assignment::conversion::validate_vector_dimensions(dim, vector.len())?;
                 Ok(Some(vec![vector]))
             }
             _ => Ok(Some(vec![uqa_sql::expr::value_to_vector(value)?])),

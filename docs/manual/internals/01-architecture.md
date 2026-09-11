@@ -203,12 +203,14 @@ Responsibility roots remain facades over semantic children rather than line-coun
 | Statement binding context | [`crates/uqa-execution/src/query/binding/context.rs`](../../../crates/uqa-execution/src/query/binding/context.rs) |
 | TRUNCATE binding and execution | [`SQL target binding`](../../../crates/uqa-sql/src/schema/truncate.rs), [`execution scheduling`](../../../crates/uqa-execution/src/schema/truncate.rs) |
 | Executable statement analysis | [`crates/uqa-sql/src/binding/statements.rs`](../../../crates/uqa-sql/src/binding/statements.rs) |
+| Compiled statement scheduling | [`crates/uqa-execution/src/statement/compiled.rs`](../../../crates/uqa-execution/src/statement/compiled.rs) |
+| Engine query API and scopes | [`crates/uqa-engine/src/queries.rs`](../../../crates/uqa-engine/src/queries.rs) |
 | Analysis before optimization | [`crates/uqa-planner/src/statement_planning/executable.rs`](../../../crates/uqa-planner/src/statement_planning/executable.rs) |
 | Scoped Engine query callbacks | [`crates/uqa-engine/src/capabilities/query_expressions.rs`](../../../crates/uqa-engine/src/capabilities/query_expressions.rs) |
 | SELECT command execution | [`crates/uqa-execution/src/query/statement/execution.rs`](../../../crates/uqa-execution/src/query/statement/execution.rs) |
 | Filter-pushdown subqueries | [`crates/uqa-planner/src/filter_pushdown/subqueries.rs`](../../../crates/uqa-planner/src/filter_pushdown/subqueries.rs) |
 | Row-lock leaf validation | [`crates/uqa-execution/src/query/locking/leaf_validation.rs`](../../../crates/uqa-execution/src/query/locking/leaf_validation.rs) |
-| Physical query construction | [`crates/uqa-engine/src/sql/select/physical_plan.rs`](../../../crates/uqa-engine/src/sql/select/physical_plan.rs) |
+| Physical query construction | [`crates/uqa-execution/src/query/relational/mod.rs`](../../../crates/uqa-execution/src/query/relational/mod.rs) |
 | Constraint rewrite and referencing policy | [`crates/uqa-execution/src/mutation/constraints/`](../../../crates/uqa-execution/src/mutation/constraints) |
 | Dependent constraint and column removal | [`schema/constraints/drop.rs`](../../../crates/uqa-execution/src/schema/constraints/drop.rs), [`schema/columns/removal.rs`](../../../crates/uqa-execution/src/schema/columns/removal.rs) |
 | MERGE action execution | [`crates/uqa-execution/src/mutation/merge/actions.rs`](../../../crates/uqa-execution/src/mutation/merge/actions.rs) |

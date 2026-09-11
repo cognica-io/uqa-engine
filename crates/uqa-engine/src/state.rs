@@ -254,8 +254,9 @@ pub(super) struct SessionContext {
     pub(super) random_state: Mutex<super::SessionRandomState>,
     pub(super) transactions: Mutex<Vec<TransactionFrame>>,
     /// One row-lock recheck context per in-flight SQL statement. Query-bearing commands, prepared execution, and `EXPLAIN ANALYZE` spawn nested plan executors that must share the outermost statement's context, while a host-callback statement nested inside another statement owns its own frame.
-    pub(super) row_lock_statements:
-        Mutex<Vec<Option<std::sync::Arc<crate::sql::RowLockRetryCache>>>>,
+    pub(super) row_lock_statements: Mutex<
+        Vec<Option<std::sync::Arc<uqa_execution::row_locks::retry_cache::RowLockRetryCache>>>,
+    >,
     pub(super) command_mutation_overlays: Mutex<Vec<CommandMutationOverlay>>,
     pub(super) portals: Mutex<BTreeMap<String, super::SessionPortalState>>,
     pub(super) next_portal_id: Mutex<usize>,

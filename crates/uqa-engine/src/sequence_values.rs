@@ -190,7 +190,7 @@ impl Engine {
         })?;
         let object_ids = self.durable.sequence_object_ids.read();
         Ok(object_ids.iter().find_map(|(relation, object_id)| {
-            (crate::sql::sequence_relation_oid(*object_id) == oid)
+            (uqa_execution::catalog::projection::sequence_relation_oid(*object_id) == oid)
                 .then(|| (relation.qualified_name(), relation.clone(), *object_id))
         }))
     }

@@ -136,3 +136,30 @@ impl uqa_planner::statement_planning::executable::StatementOptimizationContexts 
         self.rule_input_planning_context()
     }
 }
+
+pub(crate) fn estimate_engine_plan(
+    engine: &Engine,
+    plan: &uqa_planner::UnifiedPlan,
+) -> Result<uqa_planner::plan_cost::PlanCost, SQLError> {
+    uqa_planner::statement_planning::estimate_plan(engine.statement_statistics_context(), plan)
+}
+
+pub(crate) fn optimize_engine_query(
+    engine: &Engine,
+    query: &uqa_planner::QueryPlan,
+) -> Result<uqa_planner::QueryPlan, SQLError> {
+    uqa_planner::statement_planning::executable::optimize_query(
+        &engine.statement_planning_context(),
+        query,
+    )
+}
+
+pub(crate) fn optimize_engine_plan(
+    engine: &Engine,
+    plan: uqa_planner::UnifiedPlan,
+) -> Result<uqa_planner::UnifiedPlan, SQLError> {
+    uqa_planner::statement_planning::executable::optimize_plan(
+        &engine.statement_planning_context(),
+        plan,
+    )
+}

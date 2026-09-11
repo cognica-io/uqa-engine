@@ -19,7 +19,13 @@ impl uqa_sql::assignment::AssignmentContext for Engine {
         row: &uqa_sql::ResultRow,
         schema: &uqa_sql::RowSchema,
     ) -> Result<uqa_core::Value, SQLError> {
-        crate::sql::scalar::eval_lowered_expression_with_schema(self, expression, row, schema, &[])
+        crate::capabilities::query_expressions::eval_lowered_expression_with_schema(
+            self,
+            expression,
+            row,
+            schema,
+            &[],
+        )
     }
 }
 

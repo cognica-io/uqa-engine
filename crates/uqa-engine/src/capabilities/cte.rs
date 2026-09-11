@@ -4,16 +4,15 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Bind child CTE execution to the active engine statement.
-use super::{
-    execute_lateral_subquery_output, execute_query_plan_output, push_output_filter_into_query_plan,
-    CteScope, Engine, QueryOutput, QueryOutputMode, QueryPlan, SQLError, SQLParam, SQLResult,
-    ScalarExpr,
+//! Bind child CTE execution to the active session and query scopes.
+
+use crate::{capabilities::query_scope::CteScope, session::StatementReadSnapshot, Engine};
+use uqa_execution::query::{
+    cte::context::{CteBodyExecutor, CteExecutionContext, QueryOutputRewriter},
+    output::QueryOutput,
+    statement::consumer::QueryOutputMode,
 };
-use crate::session::StatementReadSnapshot;
-use uqa_execution::query::cte::context::{
-    CteBodyExecutor, CteExecutionContext, QueryOutputRewriter,
-};
+use uqa_sql::{plan::QueryPlan, SQLError, SQLParam, SQLResult, ScalarExpr};
 
 impl Engine {
     pub(crate) fn cte_execution_context(&self) -> CteExecutionContext<'_, StatementReadSnapshot> {
@@ -33,7 +32,13 @@ impl CteBodyExecutor<StatementReadSnapshot> for Engine {
         params: &[SQLParam],
         ctes: &mut CteScope,
     ) -> Result<QueryOutput, SQLError> {
-        execute_query_plan_output(self, query, params, ctes, QueryOutputMode::SharedSpill)
+        uqa_execution::query::statement::execute_query_plan_output(
+            &self.query_execution_context(),
+            query,
+            params,
+            ctes,
+            QueryOutputMode::SharedSpill,
+        )
     }
     fn execute_lateral_query(
         &self,
@@ -42,7 +47,13 @@ impl CteBodyExecutor<StatementReadSnapshot> for Engine {
         params: &[SQLParam],
         ctes: &CteScope,
     ) -> Result<QueryOutput, SQLError> {
-        execute_lateral_subquery_output(self, query, outer, params, ctes)
+        uqa_execution::query::sources::lateral_query::execute_lateral_subquery_output(
+            &self.source_execution_context(),
+            query,
+            outer,
+            params,
+            ctes,
+        )
     }
     fn execute_command(
         &self,
@@ -66,6 +77,8 @@ impl QueryOutputRewriter for Engine {
         filter: &ScalarExpr,
         columns: Option<&[String]>,
     ) -> Result<Option<QueryPlan>, SQLError> {
-        push_output_filter_into_query_plan(self, query, qualifier, filter, columns)
+        super::query_planning::push_output_filter_into_query_plan(
+            self, query, qualifier, filter, columns,
+        )
     }
 }

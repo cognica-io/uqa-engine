@@ -20,8 +20,13 @@ fn prepared_costs_distinguish_rare_and_unknown_index_keys() {
         engine.sql(sql, &[]).unwrap();
     }
     let entry = engine.session.prepared.read()["cost_query"].clone();
-    let generic = crate::sql::optimize_engine_plan(&engine, (*entry.logical_plan).clone()).unwrap();
-    let generic_cost = crate::sql::estimate_engine_plan(&engine, &generic).unwrap();
+    let generic = crate::capabilities::statement_planning::optimize_engine_plan(
+        &engine,
+        (*entry.logical_plan).clone(),
+    )
+    .unwrap();
+    let generic_cost =
+        crate::capabilities::statement_planning::estimate_engine_plan(&engine, &generic).unwrap();
     let stats = engine.try_query_column_stats("cost_distribution").unwrap();
     assert!(
         entry.total_custom_cost < generic_cost.execution,

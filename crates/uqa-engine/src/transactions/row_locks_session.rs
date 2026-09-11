@@ -539,26 +539,31 @@ impl Engine {
     /// The active statement's shared row-lock recheck context, created on first use with the statement snapshot's change epoch as its recheck baseline. A direct engine call outside any SQL statement owns an ephemeral context with the same baseline semantics.
     pub(crate) fn statement_row_lock_cache(
         &self,
-    ) -> Result<std::sync::Arc<crate::sql::RowLockRetryCache>, SQLError> {
+    ) -> Result<std::sync::Arc<uqa_execution::row_locks::retry_cache::RowLockRetryCache>, SQLError>
+    {
         let budget_bytes = self.work_mem_bytes()?;
         let baseline = self.row_lock_snapshot_change_baseline();
         let mut statements = self.session.row_lock_statements.lock();
         let Some(slot) = statements.last_mut() else {
             drop(statements);
-            return Ok(std::sync::Arc::new(crate::sql::RowLockRetryCache::new(
-                budget_bytes,
-                self.row_lock_manager(),
-                baseline,
-            )));
+            return Ok(std::sync::Arc::new(
+                uqa_execution::row_locks::retry_cache::RowLockRetryCache::new(
+                    budget_bytes,
+                    self.row_lock_manager(),
+                    baseline,
+                ),
+            ));
         };
         if let Some(cache) = slot.as_ref() {
             return Ok(std::sync::Arc::clone(cache));
         }
-        let cache = std::sync::Arc::new(crate::sql::RowLockRetryCache::new(
-            budget_bytes,
-            self.row_lock_manager(),
-            baseline,
-        ));
+        let cache = std::sync::Arc::new(
+            uqa_execution::row_locks::retry_cache::RowLockRetryCache::new(
+                budget_bytes,
+                self.row_lock_manager(),
+                baseline,
+            ),
+        );
         *slot = Some(std::sync::Arc::clone(&cache));
         Ok(cache)
     }

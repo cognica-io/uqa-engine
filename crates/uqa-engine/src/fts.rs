@@ -159,7 +159,11 @@ impl Engine {
         mut document: Document,
         known_new: bool,
     ) -> Result<(), SQLError> {
-        crate::sql::refresh_stored_generated_columns(self, table, &mut document)?;
+        uqa_execution::mutation::assignment::refresh_stored_generated_columns(
+            self.mutation_assignment_context(),
+            table,
+            &mut document,
+        )?;
         self.add_prepared_document_impl(table, doc_id, document, known_new)
     }
 

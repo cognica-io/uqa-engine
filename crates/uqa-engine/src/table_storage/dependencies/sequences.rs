@@ -142,7 +142,7 @@ impl Engine {
             .iter()
             .map(|(name, id)| {
                 (
-                    crate::sql::sequence_relation_oid(*id),
+                    uqa_execution::catalog::projection::sequence_relation_oid(*id),
                     name.qualified_name(),
                 )
             })

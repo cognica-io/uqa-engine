@@ -22,7 +22,7 @@ pub(crate) fn new_for_statement(engine: &Engine, privilege_subject: Option<&str>
     );
     scope
         .rows
-        .extend(crate::sql::current_transition_relations());
+        .extend(uqa_execution::mutation::triggers::current_transition_relations());
     if crate::roles::active_routine_reads_command_overlay() == Some(false) {
         scope.set_reads_command_overlay(false);
     }

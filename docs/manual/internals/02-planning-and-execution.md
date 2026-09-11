@@ -6,6 +6,8 @@ Every compiled statement follows one top-level path: SQL statement, unified lowe
 
 [The unified dispatcher](../../../crates/uqa-execution/src/statement/plan_executor.rs) lives in execution and exhaustively handles query and command plans. [Entry validation](../../../crates/uqa-execution/src/statement/validation.rs) checks cancellation, captures namespace inputs for SQL CTE validation, and validates transaction access before observing failed-transaction state or dispatching a command. Queries acquire relation locks before capturing their statement scope; mutations fill only missing privilege subjects. EXPLAIN ANALYZE enters the same nested executor with the caller’s privilege subject, and EXECUTE binds arguments before selecting and running its plan. CALL validates markers and argument types before borrowing expression hooks, evaluates arguments, then captures invocation inputs. Engine supplies [typed subsystem adapters](../../../crates/uqa-engine/src/capabilities/statements.rs); top-level runtime inputs contain only cancellation and notices. EXPLAIN measurements are SQL-owned values consumed by the planner renderer, so execution gains no planner dependency.
 
+[Compiled-statement execution](../../../crates/uqa-execution/src/statement/compiled.rs) lowers routine and rule statements, retains catalog-bound relation identities before planning, and captures execution inputs only after analysis and optimization succeed. Engine owns the [query API gate and statement clock](../../../crates/uqa-engine/src/queries.rs), including nested calls and error restoration, while [document reads](../../../crates/uqa-engine/src/table_storage/reads.rs) retain the current command overlay and count cache. The public `uqa_engine::sql` namespace re-exports [native result definitions](../../../crates/uqa-execution/src/result.rs); there is no Engine SQL implementation tree.
+
 ## End-to-end pipeline
 
 ```mermaid
@@ -17,13 +19,15 @@ sequenceDiagram
     participant Exec as uqa-execution
     participant Store as storage and indexes
     App->>Engine: SQL text
-    Engine->>SQL: Parse and lower SQL-owned UnifiedPlan
-    Engine->>Planner: Validate and optimize UnifiedPlan
+    Engine->>Exec: Enter batch with deferred statement inputs
+    Exec->>SQL: Parse and lower SQL-owned UnifiedPlan
+    Exec->>Planner: Validate and optimize through SQL plan contract
     Planner->>SQL: Bind with immutable catalog and namespace inputs
     SQL-->>Planner: Validated names, types, and parameters
     Planner->>Planner: Optimize with source statistics
-    Planner-->>Engine: Executable plan and access decisions
-    Engine->>Exec: Dispatch UnifiedPlan through typed statement inputs
+    Planner-->>Exec: Executable plan and access decisions
+    Exec->>Engine: Capture typed statement inputs
+    Engine-->>Exec: Current session and subsystem capabilities
     Exec->>Store: Pull through provided row and retrieval sources
     Store-->>Exec: Values, postings, vectors, graph data
     Exec-->>Engine: Physical rows and batches

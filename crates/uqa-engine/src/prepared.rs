@@ -114,8 +114,14 @@ impl Engine {
             }
         }
         if !custom && generic_plan.is_none() {
-            let plan = crate::sql::optimize_engine_plan(self, (*entry.logical_plan).clone())?;
-            generic_cost = Some(crate::sql::estimate_engine_plan(self, &plan)?.execution);
+            let plan = crate::capabilities::statement_planning::optimize_engine_plan(
+                self,
+                (*entry.logical_plan).clone(),
+            )?;
+            generic_cost = Some(
+                crate::capabilities::statement_planning::estimate_engine_plan(self, &plan)?
+                    .execution,
+            );
             generic_plan = Some(plan);
             // Building the first generic plan supplies its previously unknown cost.
             // Recheck before execution so an expensive generic plan is never used just to measure it.
@@ -128,8 +134,8 @@ impl Engine {
         let (plan, custom_cost) = if custom {
             let mut plan = (*entry.logical_plan).clone();
             uqa_planner::statement_planning::prepared::specialize_parameters(&mut plan, parameters);
-            let plan = crate::sql::optimize_engine_plan(self, plan)?;
-            let cost = crate::sql::estimate_engine_plan(self, &plan)?
+            let plan = crate::capabilities::statement_planning::optimize_engine_plan(self, plan)?;
+            let cost = crate::capabilities::statement_planning::estimate_engine_plan(self, &plan)?
                 .including_planning(&uqa_planner::CostEstimator::default());
             (plan, Some(cost))
         } else {

@@ -82,7 +82,8 @@ impl RoutineCompilationCatalog for Engine {
     fn stored_query_namespace(&self) -> StoredQueryNamespace {
         StoredQueryNamespace {
             temporary_schema: self.temporary_schema_name(),
-            transition_relations: crate::sql::active_trigger_transition_relation_names(),
+            transition_relations:
+                uqa_execution::mutation::triggers::current_transition_relation_names(),
         }
     }
 }

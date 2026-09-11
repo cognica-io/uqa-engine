@@ -41,7 +41,9 @@ impl PartitionCatalog for Engine {
 
 impl PartitionExpressions for Engine {
     fn evaluate_bound(&self, expression: &Expr, params: &[SQLParam]) -> Result<Value, SQLError> {
-        crate::sql::scalar::eval_lowered_expression(self, expression, None, params)
+        crate::capabilities::query_expressions::eval_lowered_expression(
+            self, expression, None, params,
+        )
     }
     fn evaluate_row(
         &self,
@@ -50,7 +52,7 @@ impl PartitionExpressions for Engine {
         schema: &RowSchema,
         params: &[SQLParam],
     ) -> Result<Value, SQLError> {
-        crate::sql::scalar::eval_lowered_expression_with_schema(
+        crate::capabilities::query_expressions::eval_lowered_expression_with_schema(
             self, expression, row, schema, params,
         )
     }

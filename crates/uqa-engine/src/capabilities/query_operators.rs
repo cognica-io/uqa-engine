@@ -7,8 +7,8 @@
 //! Supply expression and row-lock construction services from the active engine session.
 
 use crate::{
+    capabilities::{query_scope::CteScope, ScopedEngineHook},
     session::StatementReadSnapshot,
-    sql::{CteScope, ScopedEngineHook},
     Engine,
 };
 use std::sync::Arc;
@@ -61,7 +61,15 @@ impl RowLockOperatorFactory<StatementReadSnapshot> for Engine {
         max_rows: Option<u64>,
         recheck: Option<LockRowsRecheckSource<StatementReadSnapshot>>,
     ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
-        crate::sql::attach_lock_rows(self, operator, statement, params, scope, max_rows, recheck)
+        uqa_execution::query::locking::attach_lock_rows(
+            self.row_lock_context(),
+            operator,
+            statement,
+            params,
+            scope,
+            max_rows,
+            recheck,
+        )
     }
 }
 
