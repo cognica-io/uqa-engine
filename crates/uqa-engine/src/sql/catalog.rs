@@ -12,42 +12,6 @@ pub use uqa_sql::catalog::result_type::{postgres_result_type, SQLTypeMetadata};
 use uqa_sql::plan::QueryPlan;
 use uqa_sql::{ColumnType, SQLError};
 
-pub(crate) fn pg_get_indexdef_value(
-    engine: &Engine,
-    arguments: &[Value],
-) -> Result<Value, SQLError> {
-    uqa_execution::catalog::projection::pg_get_indexdef_value(
-        &engine.catalog_execution(),
-        arguments,
-    )
-}
-pub(crate) fn pg_get_triggerdef_value(
-    engine: &Engine,
-    arguments: &[Value],
-) -> Result<Value, SQLError> {
-    uqa_execution::catalog::projection::pg_get_triggerdef_value(
-        &engine.catalog_execution(),
-        arguments,
-    )
-}
-pub(crate) fn pg_get_ruledef_value(
-    engine: &Engine,
-    arguments: &[Value],
-) -> Result<Value, SQLError> {
-    uqa_execution::catalog::projection::pg_get_ruledef_value(&engine.catalog_execution(), arguments)
-}
-pub(crate) fn pg_get_expr_value(engine: &Engine, args: &[Value]) -> Result<Value, SQLError> {
-    uqa_execution::catalog::projection::pg_get_expr_value(&engine.catalog_execution(), args)
-}
-pub(crate) fn pg_get_partkeydef_value(engine: &Engine, args: &[Value]) -> Result<Value, SQLError> {
-    uqa_execution::catalog::projection::pg_get_partkeydef_value(&engine.catalog_execution(), args)
-}
-pub(crate) fn pg_get_viewdef_value(
-    engine: &Engine,
-    arguments: &[Value],
-) -> Result<Value, SQLError> {
-    uqa_execution::catalog::projection::pg_get_viewdef_value(&engine.catalog_execution(), arguments)
-}
 pub(crate) fn resolve_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {
     uqa_execution::catalog::projection::resolve_regclass_oid(&engine.catalog_execution(), name)
 }
@@ -85,9 +49,6 @@ pub(crate) fn resolve_catalog_column_type(engine: &Engine, type_name: &str) -> O
         &engine.catalog_execution(),
         type_name,
     )
-}
-pub(crate) fn format_type_value(engine: &Engine, args: &[Value]) -> Result<Value, SQLError> {
-    uqa_execution::catalog::projection::format_type_value(&engine.catalog_execution(), args)
 }
 pub(crate) fn rename_view_column_query(
     engine: &Engine,

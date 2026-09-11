@@ -30,10 +30,12 @@ impl TableFunctionSession for Engine {
         self.listening_channels()
     }
     fn sequence_data(&self, args: &[Value]) -> Result<Value, SQLError> {
-        self.pg_get_sequence_data_value(args)
+        self.sequence_introspection_context()
+            .pg_get_sequence_data_value(args)
     }
     fn sequence_parameters(&self, args: &[Value]) -> Result<Value, SQLError> {
-        self.pg_sequence_parameters_value(args)
+        self.sequence_introspection_context()
+            .pg_sequence_parameters_value(args)
     }
 }
 impl AnalyzerTableFunctions for Engine {

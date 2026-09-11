@@ -627,3 +627,5 @@ mod database_privileges;
 mod sequence_privileges;
 
 mod table_privileges;
+
+mod scalar_functions;

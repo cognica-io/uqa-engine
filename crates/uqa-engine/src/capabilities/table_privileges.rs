@@ -9,12 +9,12 @@
 use crate::{Engine, TableState};
 use parking_lot::RwLockReadGuard;
 use std::{collections::BTreeMap, sync::Arc};
-use uqa_core::{RelationIdentity, Value};
+use uqa_core::RelationIdentity;
 use uqa_execution::catalog::security::table_inquiry::{
     PrivilegeForeignSecurityRead, PrivilegeForeignTablesRead, PrivilegeViewsRead,
     TablePrivilegeContext, TablePrivilegeRead, TablePrivilegeRegistry, TablePrivilegeState,
 };
-use uqa_sql::{catalog::security::TableSecurity, SQLError};
+use uqa_sql::catalog::security::TableSecurity;
 use uqa_storage::StorageBackendResult;
 
 struct TablePrivilegeGuard<'a>(RwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>);
@@ -75,18 +75,5 @@ impl Engine {
             catalog: self.catalog_execution(),
             registry: self,
         }
-    }
-    pub(crate) fn has_table_privilege_value(&self, arguments: &[Value]) -> Result<Value, SQLError> {
-        self.table_privilege_context()
-            .inquiry()
-            .has_table_privilege_value(arguments)
-    }
-    pub(crate) fn has_column_privilege_value(
-        &self,
-        arguments: &[Value],
-    ) -> Result<Value, SQLError> {
-        self.table_privilege_context()
-            .inquiry()
-            .has_column_privilege_value(arguments)
     }
 }

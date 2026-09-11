@@ -109,7 +109,11 @@ impl uqa_sql::expr::EngineHook for Engine {
         binding: &uqa_sql::ast::FunctionBinding,
         args: &[(Option<String>, Value)],
     ) -> Option<std::result::Result<Value, SQLError>> {
-        crate::sql::call_bound_engine_builtin(self, binding, args)
+        uqa_execution::query::scalar_functions::call_bound_builtin(
+            &self.scalar_function_context(),
+            binding,
+            args,
+        )
     }
 
     fn has_scalar_functions(&self) -> bool {

@@ -9,7 +9,6 @@
 use crate::Engine;
 use parking_lot::MappedRwLockReadGuard;
 use std::{collections::BTreeMap, sync::Arc};
-use uqa_core::Value;
 use uqa_graph::GraphStoreHandle;
 use uqa_sql::{
     catalog::security::{
@@ -59,13 +58,6 @@ impl Engine {
             names: self,
             roles: self,
         }
-    }
-    pub(crate) fn has_schema_privilege_value(
-        &self,
-        arguments: &[Value],
-    ) -> Result<Value, SQLError> {
-        self.schema_privilege_inquiry()
-            .has_schema_privilege_value(arguments)
     }
     pub(crate) fn schema_has_privilege_for_role(
         &self,
