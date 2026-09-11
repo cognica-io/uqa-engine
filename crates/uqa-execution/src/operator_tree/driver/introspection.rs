@@ -175,26 +175,7 @@ pub fn first_child(tree: &OperatorTree) -> Option<&OperatorTree> {
     }
 }
 
-pub fn collect_graph_names(tree: &OperatorTree, names: &mut BTreeSet<String>) {
-    tree.visit(&mut |node| {
-        let graph = match node {
-            OperatorTree::Traverse { graph, .. }
-            | OperatorTree::PatternMatch { graph, .. }
-            | OperatorTree::RegularPathQuery { graph, .. }
-            | OperatorTree::WeightedPathQuery { graph, .. }
-            | OperatorTree::GraphJoin { graph, .. }
-            | OperatorTree::PageRank { graph }
-            | OperatorTree::HITS { graph }
-            | OperatorTree::BetweennessCentrality { graph }
-            | OperatorTree::TemporalTraverse { graph, .. }
-            | OperatorTree::TemporalPatternMatch { graph, .. } => Some(graph),
-            _ => None,
-        };
-        if let Some(graph) = graph {
-            names.insert(graph.clone());
-        }
-    });
-}
+pub use uqa_operators::tree::collect_graph_names;
 
 /// Walk a slice of fusion signals and find the first text-bearing node so attention's query-feature extractor has a query to score against. Returns `(field, query)` of the first matching `Term` (or `Score`-wrapped `Term`); falls back to `None` when no text signal is present in the fusion args.
 pub fn first_text_signal(signals: &[OperatorTree]) -> Option<(String, String)> {

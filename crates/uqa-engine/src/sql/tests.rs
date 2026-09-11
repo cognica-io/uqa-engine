@@ -363,13 +363,6 @@ mod unified_plan_tests {
     use uqa_planner::{CommandPlan, ComputePlan, RelationalPlan, SourcePlan, UnifiedPlan};
 
     use super::super::{compile_logical_plans, optimize_engine_plan, Engine};
-    use uqa_sql::semantics::doc_id_value;
-
-    #[test]
-    fn document_ids_outside_bigint_are_rejected_at_the_sql_boundary() {
-        assert!(doc_id_value(i64::MAX as u64).is_ok());
-        assert!(doc_id_value(i64::MAX as u64 + 1).is_err());
-    }
 
     fn one(engine: &Engine, sql: &str) -> UnifiedPlan {
         let mut plans = compile_logical_plans(engine, sql).expect("statement plans");

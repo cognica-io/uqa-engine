@@ -4,34 +4,28 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Public Engine retrieval entry points and live optimizer catalog binding.
+//! Public Engine retrieval entry points and statement-boundary composition.
 //!
 //! SQL binds predicates and retrieval calls into its runtime-independent retrieval algebra.
 //! Execution evaluates scalar arguments and instantiates physical models. The public
 //! [`lower_where`] re-export and [`EngineDriver`] preserve existing Rust entry points.
 //! The driver enters the active statement and transaction before physical execution.
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use uqa_core::{PathSegment, Value};
 use uqa_execution::operator_tree::{OperatorOutput, OperatorTreeDriver};
 use uqa_execution::parallel::ParallelExecutor;
 use uqa_execution::ScalarExpr;
 use uqa_operators::OperatorTree;
-use uqa_planner::query_optimizer::{IndexScanCandidate, QueryOptimizer};
+use uqa_planner::retrieval_planning::{
+    estimate_cross_relation_operator_join, estimate_operator_tree_access, query_optimizer,
+};
+use uqa_sql::ast::OperatorJoinRelations;
 use uqa_sql::SQLParam;
 
 use crate::{Engine, ScoredEntry};
 use uqa_sql::SQLError;
 
-mod operator_join_estimation;
-mod optimizer_binding;
-
 pub use uqa_execution::operator_tree::binding::lower_where;
 
-pub(crate) use operator_join_estimation::estimate_operator_join_table_function;
-pub(crate) use optimizer_binding::engine_query_optimizer;
-use optimizer_binding::operator_tree_paradigm;
 type DriverResult<T> = Result<T, SQLError>;
 
 fn operator_execution_error(operator: &str, error: impl std::fmt::Display) -> SQLError {
@@ -70,7 +64,7 @@ impl OperatorTreeDriver for EngineDriver<'_> {
     }
 }
 
-/// Lower a WHERE expression and run [`QueryOptimizer`] over the
+/// Lower a WHERE expression and run [`uqa_planner::query_optimizer::QueryOptimizer`] over the
 /// resulting tree without executing it. Useful for tests and
 /// `EXPLAIN`-style diagnostics that want to inspect the rewritten
 /// shape before any posting list is materialised.
@@ -83,9 +77,7 @@ pub fn optimised_tree_for(
     let Some(tree) = engine.retrieval_binding().lower_where(where_expr, params)? else {
         return Ok(None);
     };
-    Ok(Some(
-        engine_query_optimizer(engine, table, &tree)?.optimize(tree),
-    ))
+    Ok(Some(query_optimizer(engine, table, &tree)?.optimize(tree)))
 }
 
 /// Cost a relation-local SQL predicate through the same lowering and
@@ -102,43 +94,6 @@ pub(crate) fn estimate_local_access(
     estimate_operator_tree_access(engine, table, tree, true).map(Some)
 }
 
-fn estimate_operator_tree_access(
-    engine: &Engine,
-    table: &str,
-    tree: OperatorTree,
-    clamp_to_table: bool,
-) -> DriverResult<uqa_planner::LocalAccessEstimate> {
-    let optimizer = engine_query_optimizer(engine, table, &tree)?;
-    let planned_tree = optimizer.optimize(tree);
-    let total_docs = optimizer.index_stats.total_docs as f64;
-    let output_rows = optimizer
-        .estimator
-        .estimate(&planned_tree, &optimizer.index_stats);
-    if !output_rows.is_finite() || output_rows < 0.0 {
-        return Err(SQLError::Internal(format!(
-            "operator access produced invalid cardinality {output_rows}"
-        )));
-    }
-    let output_rows = if clamp_to_table {
-        output_rows.min(total_docs)
-    } else {
-        output_rows
-    };
-    let cost = optimizer
-        .cost_model
-        .estimate(&planned_tree, &optimizer.index_stats);
-    if !cost.is_finite() || cost < 0.0 {
-        return Err(SQLError::Internal(format!(
-            "operator access produced invalid cost {cost}"
-        )));
-    }
-    Ok(uqa_planner::LocalAccessEstimate {
-        output_rows,
-        cost,
-        paradigm: operator_tree_paradigm(&planned_tree),
-    })
-}
-
 pub(crate) use uqa_execution::query::table_sources::retrieval::DirectVectorRetrieval;
 
 /// Describe a complete predicate that owns one bounded vector candidate pool.
@@ -151,5 +106,17 @@ pub(crate) use execution::{
     expect_posting_output, run_accelerated,
 };
 
-use uqa_execution::operator_tree::driver::introspection::collect_graph_names;
 use uqa_execution::operator_tree::driver::posting::posting_list_to_scored;
+
+pub(crate) fn estimate_operator_join_table_function(
+    engine: &Engine,
+    name: &str,
+    relations: Option<&OperatorJoinRelations>,
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+) -> DriverResult<uqa_planner::LocalAccessEstimate> {
+    let (relations, tree) = engine
+        .retrieval_binding()
+        .lower_join(name, relations, args, params)?;
+    estimate_cross_relation_operator_join(engine, &relations, tree)
+}

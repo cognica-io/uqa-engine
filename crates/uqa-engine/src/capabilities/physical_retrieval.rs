@@ -201,7 +201,7 @@ impl uqa_execution::operator_tree::runtime::RetrievalPlanOptimizer for Engine {
         tree: &uqa_operators::OperatorTree,
     ) -> Result<uqa_operators::OperatorTree, SQLError> {
         Ok(
-            crate::operator_tree_bridge::engine_query_optimizer(self, table, tree)?
+            uqa_planner::retrieval_planning::query_optimizer(self, table, tree)?
                 .optimize(tree.clone()),
         )
     }

@@ -59,8 +59,5 @@ pub(in crate::sql) use uqa_execution::query::output::{QueryOutput, QueryRows};
 mod execution;
 pub(super) use execution::{execute_query_plan_output, execute_query_plan_with_ctes};
 
-#[cfg(test)]
-mod physical_failure_tests;
-
 pub(crate) use evaluation::{prepare_correlated_exists_predicate, ScopedEngineHook};
 pub(crate) use row_locking::attach_lock_rows;

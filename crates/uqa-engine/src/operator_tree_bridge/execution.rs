@@ -5,9 +5,8 @@
 //
 
 use super::{
-    engine_query_optimizer, operator_execution_error, posting_list_to_scored,
-    DirectVectorRetrieval, DriverResult, Engine, EngineDriver, OperatorOutput, OperatorTree,
-    SQLError, SQLParam, ScalarExpr, ScoredEntry,
+    operator_execution_error, posting_list_to_scored, DirectVectorRetrieval, DriverResult, Engine,
+    EngineDriver, OperatorOutput, OperatorTree, SQLError, SQLParam, ScalarExpr, ScoredEntry,
 };
 
 pub(crate) fn direct_vector_retrieval(
@@ -74,7 +73,8 @@ pub(crate) fn run_accelerated(
     let Some(tree) = engine.retrieval_binding().lower_where(expression, params)? else {
         return Ok(None);
     };
-    let optimized = engine_query_optimizer(engine, table, &tree)?.optimize(tree);
+    let optimized =
+        uqa_planner::retrieval_planning::query_optimizer(engine, table, &tree)?.optimize(tree);
     let mut has_index_scan = false;
     optimized.visit(&mut |node| has_index_scan |= matches!(node, OperatorTree::IndexScan { .. }));
     if !has_index_scan && !uqa_planner::optimizer::contains_retrieval(expression) {

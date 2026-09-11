@@ -101,3 +101,5 @@ pub mod explain;
 pub mod column_pruning;
 
 pub mod mutation_outputs;
+
+pub mod retrieval_planning;

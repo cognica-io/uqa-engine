@@ -84,3 +84,6 @@ pub fn projection_target_expression(target: &ProjectionTarget) -> ScalarExpr {
 pub use uqa_sql::semantics::expand_bound_projection_stars;
 
 pub use uqa_sql::semantics::visible_projection_source_position;
+
+#[cfg(test)]
+mod tests;

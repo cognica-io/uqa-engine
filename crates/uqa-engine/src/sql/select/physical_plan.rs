@@ -13,6 +13,3 @@ pub(in crate::sql) use projection::physical_exec_error;
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-pub(in crate::sql) use projection::close_after_physical_failure;
