@@ -103,7 +103,7 @@ mod roles;
 mod schema_security;
 mod search;
 mod sequence_catalog;
-mod sequence_values;
+mod sequence_session;
 mod sequences;
 mod session;
 mod sql_registry;
@@ -147,9 +147,9 @@ use uqa_storage::{
     ColumnStatsRow, DocumentStore, HNSWIndex, HNSWIndexParams, IVFIndex, IVFIndexParams,
     InvertedIndex, MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex,
     PersistentStorageBackend, PersistentStorageProvider, PersistentStorageSession,
-    RelationIdentity, SequenceReservationResult, SequenceRow, StorageBackendError,
-    StorageBackendResult, StorageSavepointId, StoredDocument, TableSchema, VectorFieldSchema,
-    VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
+    RelationIdentity, SequenceRow, StorageBackendError, StorageBackendResult, StorageSavepointId,
+    StoredDocument, TableSchema, VectorFieldSchema, VectorIndex, VectorIndexOpenMode,
+    VectorIndexSpec,
 };
 use uqa_storage_sqlite::{
     ManagedConnection, SQLiteCompressedContainerAnchor, SQLiteStorageProvider,
@@ -238,42 +238,12 @@ type FixedTransactionCatalogBaseline = BTreeMap<[u8; 16], (RelationIdentity, Vec
 type NontransactionalColumnStats = Vec<NontransactionalColumnStatsEntry>;
 type NontransactionalSequenceValues = BTreeMap<[u8; 16], NontransactionalSequenceHistory>;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct SessionSequenceValue {
-    object_id: [u8; 16],
-    value: i64,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct SessionSequenceCache {
-    object_id: [u8; 16],
-    definition_generation: [u8; 16],
-    next_value: i64,
-    remaining: i64,
-    autonomous: bool,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-struct SessionLastSequenceReference {
-    relation: RelationIdentity,
-    object_id: [u8; 16],
-}
-
 #[derive(Clone, Default)]
 struct NontransactionalSequenceHistory {
     values_by_definition: BTreeMap<[u8; 16], NontransactionalSequenceValue>,
     object_id: [u8; 16],
     session_currval: Option<SessionSequenceValue>,
     defines_lastval: bool,
-}
-
-#[derive(Clone, Copy)]
-struct NontransactionalSequenceValue {
-    object_id: [u8; 16],
-    current: i64,
-    called: bool,
-    log_count: i64,
-    autonomous: bool,
 }
 
 #[derive(Clone)]
@@ -862,3 +832,8 @@ pub struct RobustHybridSearchParams<'a> {
 mod tests;
 
 mod copy;
+
+use uqa_execution::catalog::sequence::session::{
+    NontransactionalSequenceValue, SessionLastSequenceReference, SessionSequenceCache,
+    SessionSequenceValue,
+};

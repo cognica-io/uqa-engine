@@ -49,6 +49,8 @@ The [sequence removal adapter](../../crates/uqa-engine/src/capabilities/sequence
 
 The [sequence restoration adapter](../../crates/uqa-engine/src/capabilities/sequence_restoration.rs) lends the actual persistence guard and publishes fully validated sequence, identity, persistence, and security candidates in their existing order. Native execution owns legacy migration, identity repair, durable-row validation, and temporary-entry retention. Failed validation publishes no registry, and all metadata read guards are released before publication. Engine keeps nontransactional sequence-session selection and the existing open, refresh, and rollback boundaries. Pure row-validation tests live with native execution; tests of real registry preservation and transaction behavior remain with Engine.
 
+The [sequence value adapter](../../crates/uqa-engine/src/capabilities/sequence_values.rs) lends actual allocation, persistence, cache, and session guards to native value execution. Session readers expose current values and the last-used identity under one retained lock. Native execution releases allocation and session guards before calling the unchanged Engine transaction-history recorder; discard and rollback keep their existing ownership. SQL errors and pure cache tests live with their implementations, while guard, failure-publication, and rollback tests use real Engine state.
+
 ## Atomicity and locking
 
 Transactional session values live behind one `SessionContext.state` lock. Snapshot and restore therefore cannot combine an old search path with a new prepared-plan cache, PRNG state, or sequence `currval` map.

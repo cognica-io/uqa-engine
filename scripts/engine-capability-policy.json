@@ -92,6 +92,8 @@
         "crates/uqa-engine/src/capabilities/sequence_removal/tests.rs",
         "crates/uqa-engine/src/capabilities/sequence_restoration.rs",
         "crates/uqa-engine/src/capabilities/sequence_restoration/tests.rs",
+        "crates/uqa-engine/src/capabilities/sequence_values.rs",
+        "crates/uqa-engine/src/capabilities/sequence_values/tests.rs",
         "crates/uqa-engine/src/capabilities/sequences.rs",
         "crates/uqa-engine/src/capabilities/statement_effects.rs",
         "crates/uqa-engine/src/capabilities/statement_planning.rs",

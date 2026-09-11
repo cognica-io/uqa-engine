@@ -100,30 +100,7 @@ impl Engine {
         self.sequence_privilege_context()
             .persist_sequence_security(name, relation, security)
     }
-    pub(crate) fn ensure_sequence_nextval_privilege(
-        &self,
-        name: &str,
-        relation: &RelationIdentity,
-    ) -> Result<(), SQLError> {
-        self.sequence_privilege_inquiry()
-            .ensure_sequence_nextval_privilege(name, relation)
-    }
-    pub(crate) fn ensure_sequence_currval_privilege(
-        &self,
-        name: &str,
-        relation: &RelationIdentity,
-    ) -> Result<(), SQLError> {
-        self.sequence_privilege_inquiry()
-            .ensure_sequence_currval_privilege(name, relation)
-    }
-    pub(crate) fn ensure_sequence_setval_privilege(
-        &self,
-        name: &str,
-        relation: &RelationIdentity,
-    ) -> Result<(), SQLError> {
-        self.sequence_privilege_inquiry()
-            .ensure_sequence_setval_privilege(name, relation)
-    }
+
     pub(crate) fn ensure_sequence_owner(
         &self,
         name: &str,
