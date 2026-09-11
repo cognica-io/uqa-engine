@@ -166,7 +166,7 @@ impl Engine {
             tables: self,
             routines: self,
             events: self,
-            foreign: self,
+            foreign: self.foreign_removal_context(),
             views: self,
             sequences: self,
             locks: self,
@@ -287,5 +287,17 @@ impl EmptySchemaRemovalPersistence for Engine {
             catalog.drop_schema(name)?;
         }
         Ok(())
+    }
+}
+
+impl uqa_sql::catalog::resolution::candidates::RelationCandidateState for Engine {
+    fn temporary_schema_name(&self) -> String {
+        Engine::temporary_schema_name(self)
+    }
+    fn search_path(&self) -> uqa_sql::catalog::resolution::candidates::SearchPathRead<'_> {
+        Box::new(parking_lot::RwLockReadGuard::map(
+            self.session.state.read(),
+            |state| &state.search_path,
+        ))
     }
 }

@@ -12,10 +12,9 @@ use uqa_execution::schema::removal::entry::{
     DomainRemovalWrite, DropStatementBindings, SchemaRemovalWrite,
 };
 use uqa_execution::schema::removal::{
-    RelationRemovalContext, RelationRemovalEvents, RelationRemovalForeignTables,
-    RelationRemovalLocks, RelationRemovalPrivileges, RelationRemovalRoutines,
-    RelationRemovalSequences, RelationRemovalTables, RelationRemovalTransactions,
-    RelationRemovalViews, RelationRemovalWrite,
+    RelationRemovalContext, RelationRemovalEvents, RelationRemovalLocks, RelationRemovalPrivileges,
+    RelationRemovalRoutines, RelationRemovalSequences, RelationRemovalTables,
+    RelationRemovalTransactions, RelationRemovalViews, RelationRemovalWrite,
 };
 use uqa_sql::{
     catalog::{errors::storage_error, resolution::RelationResolution},
@@ -54,7 +53,7 @@ impl Engine {
             privileges: self,
             routines: self,
             events: self,
-            foreign_tables: self,
+            foreign_tables: self.foreign_removal_context(),
             views: self,
             sequences: self,
             locks: self,
@@ -148,17 +147,6 @@ impl RelationRemovalEvents for Engine {
     ) -> StorageBackendResult<()> {
         self.event_lifecycle_context()
             .drop_rules_depending_on_relations_inner(names)
-    }
-}
-impl RelationRemovalForeignTables for Engine {
-    fn foreign_table_owned_sequence_names(
-        &self,
-        names: &[String],
-    ) -> StorageBackendResult<BTreeSet<String>> {
-        Engine::foreign_table_owned_sequence_names(self, names)
-    }
-    fn drop_foreign_table_inner(&self, table: &str) -> Result<bool, String> {
-        Engine::drop_foreign_table_inner(self, table)
     }
 }
 impl RelationRemovalViews for Engine {

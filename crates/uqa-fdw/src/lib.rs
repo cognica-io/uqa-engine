@@ -680,3 +680,5 @@ mod tests {
         assert_eq!(rows.len(), 2);
     }
 }
+
+pub mod arrays;

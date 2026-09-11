@@ -205,3 +205,6 @@ fn sql_range_subtype_to_fdw(subtype: uqa_sql::ast::RangeSubtype) -> uqa_fdw::Ran
         uqa_sql::ast::RangeSubtype::TimestampTz => uqa_fdw::RangeSubtype::TimestampTz,
     }
 }
+
+pub mod lookup;
+pub mod reads;

@@ -5,7 +5,7 @@
 //
 
 use super::{Engine, RelationIdentity};
-use uqa_core::{ArrayValue, Value};
+use uqa_fdw::arrays::{column_type_is_array, normalize_array_columns};
 
 #[cfg(test)]
 mod tests;
@@ -20,41 +20,6 @@ struct MemoryForeignRowStream<'a> {
     limit: Option<u64>,
     index: usize,
     emitted: u64,
-}
-
-fn fdw_column_type_is_array(column_type: &uqa_fdw::ColumnType) -> bool {
-    match column_type {
-        uqa_fdw::ColumnType::Array(_) => true,
-        uqa_fdw::ColumnType::Domain { base, .. } => fdw_column_type_is_array(base),
-        _ => false,
-    }
-}
-
-fn normalize_foreign_array_columns(
-    mut row: uqa_fdw::Row,
-    array_columns: &[String],
-) -> std::result::Result<uqa_fdw::Row, String> {
-    for column in array_columns {
-        let Some(value) = row.get_mut(column) else {
-            continue;
-        };
-        let normalized = match std::mem::take(value) {
-            Value::Null => Value::Null,
-            Value::Array(array) => Value::Array(array),
-            Value::List(elements) => {
-                Value::Array(ArrayValue::try_new(elements).ok_or_else(|| {
-                    format!("foreign array column `{column}` contains non-rectangular dimensions")
-                })?)
-            }
-            other => {
-                return Err(format!(
-                    "foreign array column `{column}` requires an array value, got {other:?}"
-                ));
-            }
-        };
-        *value = normalized;
-    }
-    Ok(row)
 }
 
 impl Iterator for MemoryForeignRowStream<'_> {
@@ -142,182 +107,28 @@ impl Engine {
 
     pub fn drop_foreign_table(&self, name: &str) -> Result<bool, String> {
         self.with_implicit_string_transaction(|engine| {
-            engine
-                .synchronize_catalog_registries()
-                .map_err(|error| format!("refresh FDW catalog: {error}"))?;
-            let Some(canonical) = engine
-                .resolve_foreign_table_name(name)
-                .map_err(|error| format!("resolve foreign table: {error}"))?
-            else {
-                return Ok(false);
-            };
-            let tables = vec![canonical.clone()];
-            let targets = std::collections::BTreeSet::from([canonical.clone()]);
-            let owned_sequences = engine
-                .foreign_table_owned_sequence_names(&tables)
-                .map_err(|error| format!("resolve owned sequences: {error}"))?;
-            for sequence in &owned_sequences {
-                let dependents = engine
-                    .sequence_external_dependents_for_owner_drop(sequence, &targets)
-                    .map_err(|error| format!("inspect owned sequence `{sequence}`: {error}"))?;
-                if !dependents.is_empty() {
-                    return Err(format!(
-                        "foreign table `{canonical}` has owned sequence `{sequence}` with dependent object(s) `{}`",
-                        dependents.join("`, `")
-                    ));
-                }
-            }
-            if !engine.drop_foreign_table_inner(&canonical)? {
-                return Err(format!(
-                    "foreign table `{canonical}` disappeared after DROP preflight"
-                ));
-            }
-            for sequence in owned_sequences {
-                engine
-                    .drop_owned_sequence(&sequence, false)
-                    .map_err(|error| format!("drop owned sequence `{sequence}`: {error}"))?;
-            }
-            Ok(true)
+            engine.foreign_removal_context().drop_foreign_table(name)
         })
     }
 
-    pub(crate) fn drop_foreign_table_inner(&self, name: &str) -> Result<bool, String> {
-        self.synchronize_catalog_registries()
-            .map_err(|err| format!("refresh FDW catalog: {err}"))?;
-        let Some(name) = self
-            .resolve_foreign_table_name(name)
-            .map_err(|err| format!("resolve foreign table: {err}"))?
-        else {
-            return Ok(false);
-        };
-        let relation = RelationIdentity::from_legacy_name(&name)?;
-        if !self.durable.foreign_tables.read().contains_key(&relation) {
-            return Err(format!("Foreign table `{name}` disappeared before drop"));
-        }
-        if !self
-            .durable
-            .foreign_table_security
-            .read()
-            .contains_key(&relation)
-        {
-            return Err(format!(
-                "Foreign table `{name}` has no loaded security metadata"
-            ));
-        }
-        self.event_lifecycle_context()
-            .drop_relation_events_inner(&relation)
-            .map_err(|error| format!("drop foreign table `{name}` events: {error}"))?;
-        if let Some(catalog) = self.storage.catalog.as_ref() {
-            catalog
-                .drop_foreign_table(&relation)
-                .map_err(|err| format!("drop foreign table `{name}`: {err}"))?;
-        }
-        self.extensions
-            .foreign_memory_tables
-            .write()
-            .remove(&relation);
-        let mut tables = self.durable.foreign_tables.write();
-        let mut table_security = self.durable.foreign_table_security.write();
-        let removed = tables.remove(&relation).is_some();
-        table_security.remove(&relation);
-        drop(table_security);
-        drop(tables);
-        if removed {
-            self.note_catalog_registry_changed();
-        }
-        Ok(removed)
-    }
-
     pub fn foreign_server(&self, name: &str) -> Result<Option<uqa_fdw::ForeignServer>, String> {
-        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
-            return Ok(snapshot.foreign_servers.get(name).cloned());
-        }
-        self.synchronize_catalog_registries()
-            .map_err(|err| format!("refresh FDW catalog: {err}"))?;
-        Ok(self.durable.foreign_servers.read().get(name).cloned())
+        self.foreign_lookup_context().foreign_server(name)
     }
 
     pub fn foreign_table(&self, name: &str) -> Result<Option<uqa_fdw::ForeignTable>, String> {
-        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
-            return Ok(self
-                .relation_lookup_candidates(name)
-                .map_err(|err| format!("resolve foreign table: {err}"))?
-                .into_iter()
-                .find_map(|relation| {
-                    snapshot
-                        .foreign_tables
-                        .get(&relation)
-                        .map(StoredForeignTable::fdw_definition)
-                }));
-        }
-        self.synchronize_catalog_registries()
-            .map_err(|err| format!("refresh FDW catalog: {err}"))?;
-        let Some(resolved) = self
-            .resolve_foreign_table_name(name)
-            .map_err(|err| format!("resolve foreign table: {err}"))?
-        else {
-            return Ok(None);
-        };
-        let relation = RelationIdentity::from_legacy_name(&resolved)?;
-        Ok(self
-            .durable
-            .foreign_tables
-            .read()
-            .get(&relation)
-            .map(StoredForeignTable::fdw_definition))
+        self.foreign_lookup_context().foreign_table(name)
     }
 
     pub fn list_foreign_servers(&self) -> Result<Vec<String>, String> {
-        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
-            let mut out = snapshot.foreign_servers.keys().cloned().collect::<Vec<_>>();
-            out.sort();
-            return Ok(out);
-        }
-        self.synchronize_catalog_registries()
-            .map_err(|err| format!("refresh FDW catalog: {err}"))?;
-        let mut out: Vec<String> = self
-            .durable
-            .foreign_servers
-            .read()
-            .keys()
-            .cloned()
-            .collect();
-        out.sort();
-        Ok(out)
+        self.foreign_lookup_context().list_foreign_servers()
     }
 
     pub fn list_foreign_tables(&self) -> Result<Vec<String>, String> {
-        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
-            let mut out = snapshot
-                .foreign_tables
-                .keys()
-                .map(RelationIdentity::qualified_name)
-                .collect::<Vec<_>>();
-            out.sort();
-            return Ok(out);
-        }
-        self.synchronize_catalog_registries()
-            .map_err(|err| format!("refresh FDW catalog: {err}"))?;
-        let mut out: Vec<String> = self
-            .durable
-            .foreign_tables
-            .read()
-            .keys()
-            .map(RelationIdentity::qualified_name)
-            .collect();
-        out.sort();
-        Ok(out)
+        self.foreign_lookup_context().list_foreign_tables()
     }
 
     pub fn foreign_table_columns(&self, table: &str) -> Result<Vec<String>, String> {
-        let table = self
-            .foreign_table(table)?
-            .ok_or_else(|| format!("Foreign table `{table}` does not exist"))?;
-        Ok(table
-            .columns
-            .iter()
-            .map(|column| column.name.clone())
-            .collect())
+        self.foreign_lookup_context().foreign_table_columns(table)
     }
 
     pub fn load_memory_foreign_table(
@@ -327,6 +138,7 @@ impl Engine {
     ) -> std::result::Result<(), String> {
         let table_name = table_name.into();
         let table_name = self
+            .foreign_lookup_context()
             .resolve_foreign_table_name(&table_name)
             .map_err(|err| format!("resolve foreign table: {err}"))?
             .ok_or_else(|| format!("Foreign table `{table_name}` does not exist"))?;
@@ -346,12 +158,12 @@ impl Engine {
         let array_columns = table
             .columns
             .iter()
-            .filter(|column| fdw_column_type_is_array(&column.ty))
+            .filter(|column| column_type_is_array(&column.ty))
             .map(|column| column.name.clone())
             .collect::<Vec<_>>();
         let rows = rows
             .into_iter()
-            .map(|row| normalize_foreign_array_columns(row, &array_columns))
+            .map(|row| normalize_array_columns(row, &array_columns))
             .collect::<std::result::Result<Vec<_>, _>>()?;
         self.extensions
             .foreign_memory_tables
@@ -382,7 +194,7 @@ impl Engine {
         let array_columns = table
             .columns
             .iter()
-            .filter(|column| fdw_column_type_is_array(&column.ty))
+            .filter(|column| column_type_is_array(&column.ty))
             .map(|column| column.name.clone())
             .collect::<Vec<_>>();
 
@@ -434,7 +246,7 @@ impl Engine {
                 other => return Err(format!("FDW type `{other}` is not available in this build")),
             };
         Ok(Box::new(rows.map(move |row| {
-            row.and_then(|row| normalize_foreign_array_columns(row, &array_columns))
+            row.and_then(|row| normalize_array_columns(row, &array_columns))
         })))
     }
 }

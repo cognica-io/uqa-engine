@@ -7,6 +7,7 @@
 use crate::Engine;
 
 mod definitions;
+mod runtime;
 use std::{
     cell::Cell,
     collections::BTreeMap,
@@ -47,7 +48,7 @@ struct Publication<'a> {
     held: Cell<bool>,
     changes: Cell<usize>,
 }
-impl ForeignCreationRegistry for Publication<'_> {
+impl ForeignRegistryReads for Publication<'_> {
     fn servers(&self) -> ForeignServersRead<'_> {
         Box::new(self.engine.durable.foreign_servers.read())
     }
@@ -57,6 +58,8 @@ impl ForeignCreationRegistry for Publication<'_> {
     fn security(&self) -> ForeignSecurityRead<'_> {
         Box::new(self.engine.durable.foreign_table_security.read())
     }
+}
+impl ForeignCreationRegistry for Publication<'_> {
     fn servers_write(&self) -> ForeignServersWrite<'_> {
         let guard = self.engine.durable.foreign_servers.write();
         assert!(!self.held.replace(true));
@@ -148,3 +151,5 @@ fn missing_foreign_server_rolls_back_implicit_sequence_creation_before_reopen() 
     assert!(reopened.durable.foreign_tables.read().is_empty());
     assert!(reopened.durable.sequences.read().is_empty());
 }
+
+use uqa_execution::catalog::foreign::reads::ForeignRegistryReads;
