@@ -58,3 +58,5 @@ impl SchemaSecurity {
         security
     }
 }
+
+pub mod schema_inquiry;

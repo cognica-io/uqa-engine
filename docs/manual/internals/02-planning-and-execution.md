@@ -161,6 +161,8 @@ Sequence introspection argument and owner-column binding belong to SQL. Executio
 
 Role privilege inquiry belongs to SQL, including strict NULL handling, current-user selection, role name/OID binding, privilege parsing, and membership evaluation. Shared role and membership read-guard contracts also live in SQL and remain re-exported through execution. The inquiry retains role guards while resolving arguments, acquires membership guards only after successful binding, and releases both after computing the result.
 
+Schema privilege inquiry and default security rules for virtual, temporary and graph namespaces belong to SQL. Schema and graph name readers retain the original registry guards through lookup and iteration. Subject binding releases its role guard before namespace refresh; privilege evaluation then reacquires role and membership guards in the original order. Engine supplies only namespace registry, session and persistence adapters.
+
 SQL graph-command arity, text and boolean argument rules live in [`uqa-sql/src/semantics/graph_commands.rs`](../../../crates/uqa-sql/src/semantics/graph_commands.rs). [`uqa-execution/src/query/graph_lifecycle.rs`](../../../crates/uqa-execution/src/query/graph_lifecycle.rs) owns native and AGE graph/label command scheduling, namespace and dependency checks, and result shaping. It preserves graph catalog reads between argument evaluations, canonical graph-name validation, and the public graph APIs’ existing transaction entry points; Engine supplies only narrow graph and namespace operations.
 
 ## Plan-native optimization

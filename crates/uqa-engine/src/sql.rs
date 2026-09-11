@@ -99,8 +99,8 @@ pub(crate) use catalog::{
     foreign_table_relation_oid, resolve_age_label_relation_name, resolve_catalog_column_type,
     resolve_catalog_column_type_name, resolve_regclass_kind_by_oid, resolve_regclass_oid,
     resolve_regnamespace_oid, resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid,
-    resolve_regtype_oid, resolve_regtype_output, runtime_constraints, schema_object_oid,
-    sequence_relation_oid, view_relation_oid,
+    resolve_regtype_oid, resolve_regtype_output, runtime_constraints, sequence_relation_oid,
+    view_relation_oid,
 };
 use from_rows::engine_func_intercept;
 pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_columns};
