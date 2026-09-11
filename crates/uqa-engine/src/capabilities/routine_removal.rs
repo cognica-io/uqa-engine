@@ -34,21 +34,17 @@ use uqa_core::RelationIdentity;
 use uqa_execution::routines::removal::{
     self,
     context::{
-        RoutineBodyRewrites, RoutineCheckRead, RoutineColumnRead, RoutineDependencyCatalog,
-        RoutineDependencyContext, RoutineDropNotices, RoutineEventDependencies,
-        RoutineEventRemoval, RoutineForeignRead, RoutineForeignRemoval, RoutineIndexDependencies,
-        RoutineRegistryPublication, RoutineRegistryState, RoutineRegistryWrite,
-        RoutineRemovalContext, RoutineSequenceDependencies, RoutineTableMetadata,
-        RoutineTableRemoval, RoutineViewDependencies,
+        RoutineCheckRead, RoutineColumnRead, RoutineDependencyCatalog, RoutineDependencyContext,
+        RoutineDropNotices, RoutineEventDependencies, RoutineEventRemoval, RoutineForeignRead,
+        RoutineForeignRemoval, RoutineIndexDependencies, RoutineRegistryPublication,
+        RoutineRegistryState, RoutineRegistryWrite, RoutineRemovalContext,
+        RoutineSequenceDependencies, RoutineTableMetadata, RoutineTableRemoval,
+        RoutineViewDependencies,
     },
 };
 use uqa_sql::{
-    ast::{
-        AlterRoutineKind, CreateFunction, DropFunctionStmt, DropRule, DropTrigger, FunctionBinding,
-        Statement,
-    },
-    catalog::events::RuleColumnDependency,
-    routines::lifecycle::{relations::RoutineColumnBinding, RoutineRegistry},
+    ast::{AlterRoutineKind, DropFunctionStmt, DropRule, DropTrigger, FunctionBinding},
+    routines::lifecycle::RoutineRegistry,
     schema::sequences::dependents::SequenceSchemaDependent,
 };
 use uqa_storage::StorageBackendResult;
@@ -68,9 +64,9 @@ impl Engine {
                 events: self,
                 indexes: self,
                 sequences: self,
-                columns: self,
+                columns: self.stored_column_binding_context(),
             },
-            bodies: self,
+            bodies: self.routine_rewrite_context(),
             tables: self,
             foreign: self,
             events: self,
@@ -142,23 +138,6 @@ impl Engine {
         kind: &str,
     ) -> Result<SQLError, SQLError> {
         removal::relation_dependents_drop_error(&self.routine_removal_context(), names, kind)
-    }
-    pub(crate) fn sequence_drop_column_names(
-        &self,
-        relations: &BTreeSet<String>,
-    ) -> Result<BTreeSet<(String, String)>, SQLError> {
-        removal::sequence_drop_column_names(&self.routine_removal_context(), relations)
-    }
-    pub(crate) fn expand_column_drop_dependencies(
-        &self,
-        columns: &mut BTreeSet<(String, String)>,
-        relations: &mut BTreeSet<String>,
-    ) -> Result<(), SQLError> {
-        removal::expand_column_drop_dependencies(
-            &self.routine_removal_context(),
-            columns,
-            relations,
-        )
     }
     pub(crate) fn resolve_sql_routine_alter_target(
         &self,
@@ -276,32 +255,6 @@ impl RoutineSequenceDependencies for Engine {
         column: [u8; 16],
     ) -> StorageBackendResult<BTreeSet<String>> {
         Engine::sequence_names_owned_by_column(self, table, column)
-    }
-}
-impl RoutineColumnBinding for Engine {
-    fn stored_statement_column_dependencies(
-        &self,
-        statement: &Statement,
-    ) -> Result<BTreeSet<RuleColumnDependency>, SQLError> {
-        Engine::stored_statement_column_dependencies(self, statement)
-    }
-}
-impl RoutineBodyRewrites for Engine {
-    fn prepare_routine_column_alias_drop(
-        &self,
-        columns: BTreeSet<(String, String)>,
-        removed: &[FunctionBinding],
-    ) -> Result<Vec<CreateFunction>, SQLError> {
-        Engine::prepare_routine_column_alias_drop(self, columns, removed)
-    }
-    fn publish_stored_routine_body_rewrites(
-        &self,
-        definitions: Vec<CreateFunction>,
-    ) -> Result<(), SQLError> {
-        Engine::publish_stored_routine_body_rewrites(self, definitions)
-    }
-    fn refresh_stored_merge_target_plans(&self) -> Result<(), SQLError> {
-        Engine::refresh_stored_merge_target_plans(self)
     }
 }
 impl RoutineTableRemoval for Engine {

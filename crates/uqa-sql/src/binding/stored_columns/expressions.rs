@@ -6,12 +6,12 @@
 
 //! Expression traversal for durable rewrite-rule column binding.
 
-use uqa_sql::ast::{Expr, FrameBound, OrderBy, WindowSpec};
-use uqa_sql::SQLError;
+use crate::ast::{Expr, FrameBound, OrderBy, WindowSpec};
+use crate::SQLError;
 
-use super::{same_identifier, ColumnBindingContext, ColumnScope, RuleColumnBinder};
+use super::{same_identifier, ColumnBindingContext, ColumnScope, StoredColumnBinder};
 
-impl RuleColumnBinder<'_> {
+impl StoredColumnBinder<'_> {
     pub(super) fn bind_expr(
         &mut self,
         expression: &mut Expr,

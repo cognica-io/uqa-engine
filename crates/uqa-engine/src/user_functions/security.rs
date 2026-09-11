@@ -19,9 +19,9 @@ use crate::{
     Arc, Engine,
 };
 
-use super::declaration::resolve_alter_routine_identity_types;
 use super::resolution::{routine_kind, routine_local_name};
 use super::{builtin_routine_support_oid, SQLUserFunction};
+use uqa_sql::routines::declaration::resolve_alter_routine_identity_types;
 
 impl Engine {
     pub(crate) fn alter_sql_routine_owner(

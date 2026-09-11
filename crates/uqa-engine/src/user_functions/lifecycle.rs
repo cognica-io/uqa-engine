@@ -6,10 +6,7 @@
 
 //! Routine registration, catalog persistence, alteration, and removal.
 
-mod column_aliases;
-mod compilation;
 mod dependencies;
-mod merge_columns;
 mod regclass;
 mod rename;
 
@@ -25,10 +22,12 @@ use crate::{
     StorageBackendError, StorageBackendResult, FUNCTIONS_METADATA_KEY,
 };
 
-use super::declaration::{resolve_alter_routine_identity_types, resolve_routine_type_references};
 use super::resolution::{routine_kind, routine_signature_types};
 use super::{canonical_routine_type_name, CompiledFunctionBody, SQLUserFunction};
 use dependencies::RoutineCompilationMode;
+use uqa_sql::routines::declaration::{
+    resolve_alter_routine_identity_types, resolve_routine_type_references,
+};
 pub(super) use uqa_sql::routines::lifecycle::routine_signature_label;
 
 pub(crate) struct PendingSQLFunctionRestore {

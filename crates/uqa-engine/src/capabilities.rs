@@ -519,6 +519,7 @@ mod query_operators;
 mod schema_analysis;
 
 mod statement_effects;
+mod stored_columns;
 
 mod partitions;
 
@@ -530,6 +531,7 @@ mod table_reads;
 
 mod view_rewrite;
 
+mod routine_definitions;
 mod routine_execution;
 mod routine_removal;
 

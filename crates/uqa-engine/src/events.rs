@@ -19,10 +19,9 @@ pub(crate) use rule_binding::{
 pub(crate) use rule_condition_binding::RuleConditionBinding;
 pub(crate) use rule_dependencies::{
     bind_stored_expression_routines, bind_stored_statement_routines,
-    copy_stored_source_column_shapes, expression_references_routine_identity,
-    rewrite_expression_routine_identity, rewrite_statement_routine_identity,
-    rewrite_stored_statement_relation, visit_stored_expression, visit_stored_statement_expressions,
-    visit_stored_statement_merges, visit_stored_statement_sources,
+    expression_references_routine_identity, rewrite_expression_routine_identity,
+    rewrite_statement_routine_identity, visit_stored_expression,
+    visit_stored_statement_expressions,
 };
 
 const RULE_CATALOG_FORMAT_VERSION: u32 = 3;
@@ -75,7 +74,6 @@ mod lookup;
 mod persistence;
 mod registry;
 mod rule_binding;
-mod rule_columns;
 mod rule_condition_binding;
 mod rule_dependencies;
 mod validation;

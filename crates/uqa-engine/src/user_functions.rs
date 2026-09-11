@@ -10,8 +10,7 @@
 //! from the definition at registration and restore time.
 
 mod combined_overloads;
-mod declaration;
-pub(crate) use declaration::resolve_plpgsql_datum_types;
+pub(crate) use uqa_sql::routines::declaration::resolve_plpgsql_datum_types;
 mod lifecycle;
 mod resolution;
 mod security;

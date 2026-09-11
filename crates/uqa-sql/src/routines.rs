@@ -6,7 +6,10 @@
 
 //! SQL routine definitions and static signature lookup contracts.
 
+pub mod compilation;
+pub mod declaration;
 pub mod lifecycle;
+pub mod merge_columns;
 
 use crate::ast::{
     ColumnType, CreateFunction, FunctionBinding, FunctionReturns, RoutineInvocationBinding,
@@ -202,4 +205,10 @@ pub fn function_binding_matches(binding: &FunctionBinding, target: &FunctionBind
         }
         _ => false,
     }
+}
+
+pub fn routine_local_name(name: &str) -> Result<String, SQLError> {
+    uqa_core::RelationIdentity::from_legacy_name(name)
+        .map(|relation| relation.name)
+        .map_err(|error| SQLError::Internal(format!("invalid routine name `{name}`: {error}")))
 }

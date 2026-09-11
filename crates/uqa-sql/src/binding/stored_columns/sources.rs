@@ -7,11 +7,11 @@
 //! Durable table input shapes, independent of the columns a statement actually reads.
 
 use super::{
-    ColumnBindingContext, ColumnBindingMode, ColumnScope, FromClause, RelationIdentity,
-    RuleColumnBinder, SQLError,
+    ColumnBindingContext, ColumnBindingMode, ColumnScope, FromClause, RelationIdentity, SQLError,
+    StoredColumnBinder,
 };
 
-impl RuleColumnBinder<'_> {
+impl StoredColumnBinder<'_> {
     pub(super) fn bind_table_source(
         &mut self,
         source: &mut FromClause,

@@ -8,15 +8,16 @@
 
 use std::collections::BTreeSet;
 
-use uqa_sql::ast::{Expr, FromClause, SelectStmt};
-use uqa_sql::SQLError;
+use crate::ast::{Expr, FromClause, SelectStmt};
+use crate::SQLError;
 
-use crate::{Engine, RelationIdentity};
+use super::StoredColumnBindingContext;
+use uqa_core::RelationIdentity;
 
 use super::{ColumnScope, ScopeColumn};
 
 pub(super) fn preserve_table_column_name(
-    engine: &Engine,
+    catalog: StoredColumnBindingContext<'_>,
     source: &mut FromClause,
     relation: &RelationIdentity,
     from: &str,
@@ -48,7 +49,9 @@ pub(super) fn preserve_table_column_name(
                         }
                     })
                     .collect(),
-                None => crate::sql::query_source_column_names(engine, name, true)?
+                None => catalog
+                    .sources
+                    .stored_relation_column_names(name)?
                     .ok_or_else(|| SQLError::UnknownTable(name.clone()))?,
             };
             let Some(position) = columns
@@ -71,8 +74,8 @@ pub(super) fn preserve_table_column_name(
         FromClause::Join {
             left, right, alias, ..
         } if alias.is_none() => {
-            let left_changed = preserve_table_column_name(engine, left, relation, from, to)?;
-            let right_changed = preserve_table_column_name(engine, right, relation, from, to)?;
+            let left_changed = preserve_table_column_name(catalog, left, relation, from, to)?;
+            let right_changed = preserve_table_column_name(catalog, right, relation, from, to)?;
             Ok(left_changed || right_changed)
         }
         FromClause::Join { .. }
@@ -122,12 +125,12 @@ pub(super) fn opaque_scope(columns: &[String], qualifier: Option<&str>) -> Colum
 pub(super) fn action_returning_scope(
     local: &ColumnScope,
     target: &ColumnScope,
-    event: uqa_sql::ast::RuleEvent,
-    aliases: &uqa_sql::ast::ReturningAliases,
+    event: crate::ast::RuleEvent,
+    aliases: &crate::ast::ReturningAliases,
 ) -> ColumnScope {
     let mut scope = local.clone();
-    let expose_old = event == uqa_sql::ast::RuleEvent::Insert || aliases.old_explicit;
-    let expose_new = event == uqa_sql::ast::RuleEvent::Insert || aliases.new_explicit;
+    let expose_old = event == crate::ast::RuleEvent::Insert || aliases.old_explicit;
+    let expose_new = event == crate::ast::RuleEvent::Insert || aliases.new_explicit;
     if expose_old {
         scope.insert_qualifier(&aliases.old, &target.output);
     }
@@ -149,7 +152,7 @@ pub(super) fn select_output_names(select: &SelectStmt) -> Vec<String> {
     projection_output_names(&select.projections)
 }
 
-pub(super) fn projection_output_names(projections: &[uqa_sql::ast::Projection]) -> Vec<String> {
+pub(super) fn projection_output_names(projections: &[crate::ast::Projection]) -> Vec<String> {
     projections
         .iter()
         .map(|projection| {
