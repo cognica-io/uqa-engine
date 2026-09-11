@@ -35,7 +35,6 @@ use uqa_sql::{SQLError, SQLParam, SQLResult};
 
 use crate::Engine;
 
-mod aggregates;
 mod catalog;
 pub(crate) use catalog::{rename_view_column_query, view_query_references_column};
 mod api;
@@ -51,10 +50,6 @@ mod mutability;
 pub(crate) mod plan_executor;
 pub use uqa_sql::result::format_postgres_text;
 mod planning;
-mod prepared;
-pub(crate) use prepared::{
-    analyze_prepared_plan, infer_prepared_parameter_types, prepared_result_schema_matches,
-};
 mod read_only;
 mod regrole_dependencies;
 pub(crate) mod scalar;

@@ -27,7 +27,7 @@ pub(crate) struct ScopedEngineHook<'a> {
 }
 
 impl<'a> ScopedEngineHook<'a> {
-    pub(in crate::sql) fn new(engine: &'a Engine, ctes: &'a CteScope) -> Self {
+    pub(crate) fn new(engine: &'a Engine, ctes: &'a CteScope) -> Self {
         Self {
             engine,
             runtime: engine.query_runtime_view(),

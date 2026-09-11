@@ -631,3 +631,5 @@ mod table_privileges;
 mod scalar_functions;
 
 mod retrieval_planning;
+
+mod prepared;

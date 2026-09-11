@@ -36,22 +36,11 @@ impl Engine {
         declared: &[uqa_sql::ast::ColumnType],
         source_sql: Option<&str>,
     ) -> Result<(), uqa_sql::SQLError> {
-        let mut parameter_types = declared
-            .iter()
-            .map(|ty| match ty {
-                uqa_sql::ast::ColumnType::Named(name) if is_unknown_type(name)? => Ok(None),
-                _ => uqa_sql::type_resolution::resolve_declared_column_type(self, ty).map(Some),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        logical_plan.rewrite_scalar_expressions(&mut |expression| {
-            if let uqa_execution::ScalarExpr::Param(index) = expression {
-                parameter_types.resize(parameter_types.len().max(*index), None);
-            }
-        });
         let parameter_types =
-            crate::sql::infer_prepared_parameter_types(self, &logical_plan, &parameter_types)?;
-        let result_schema =
-            crate::sql::analyze_prepared_plan(self, &logical_plan, &parameter_types)?;
+            uqa_sql::prepared::declared_parameter_types(self, &mut logical_plan, declared)?;
+        let parameter_types =
+            self.infer_prepared_parameter_types(&logical_plan, &parameter_types)?;
+        let result_schema = self.analyze_prepared_plan(&logical_plan, &parameter_types)?;
         self.session.prepared.write().insert(
             name,
             PreparedStatementPlan {
@@ -101,14 +90,20 @@ impl Engine {
         let mode = self.show_variable("plan_cache_mode")?;
         let mut generic_plan = entry.plan.clone();
         let mut generic_cost = entry.generic_cost;
-        let mut custom = choose_custom_plan(&entry, &mode, generic_cost);
+        let usage = uqa_planner::statement_planning::prepared::PreparedPlanUsage {
+            has_parameters: !entry.parameter_types.is_empty(),
+            custom_plans: entry.custom_plans,
+            total_custom_cost: entry.total_custom_cost,
+        };
+        let mut custom = uqa_planner::statement_planning::prepared::choose_custom_plan(
+            usage,
+            &mode,
+            generic_cost,
+        );
         if custom || generic_plan.is_none() {
-            let result_schema = crate::sql::analyze_prepared_plan(
-                self,
-                &entry.logical_plan,
-                &entry.parameter_types,
-            )?;
-            if !crate::sql::prepared_result_schema_matches(
+            let result_schema =
+                self.analyze_prepared_plan(&entry.logical_plan, &entry.parameter_types)?;
+            if !uqa_sql::prepared::prepared_result_schema_matches(
                 entry.result_schema.as_ref(),
                 result_schema.as_ref(),
             ) {
@@ -124,11 +119,15 @@ impl Engine {
             generic_plan = Some(plan);
             // Building the first generic plan supplies its previously unknown cost.
             // Recheck before execution so an expensive generic plan is never used just to measure it.
-            custom = choose_custom_plan(&entry, &mode, generic_cost);
+            custom = uqa_planner::statement_planning::prepared::choose_custom_plan(
+                usage,
+                &mode,
+                generic_cost,
+            );
         }
         let (plan, custom_cost) = if custom {
             let mut plan = (*entry.logical_plan).clone();
-            specialize_parameters(&mut plan, parameters);
+            uqa_planner::statement_planning::prepared::specialize_parameters(&mut plan, parameters);
             let plan = crate::sql::optimize_engine_plan(self, plan)?;
             let cost = crate::sql::estimate_engine_plan(self, &plan)?
                 .including_planning(&uqa_planner::CostEstimator::default());
@@ -174,56 +173,4 @@ impl Engine {
             None => self.session.prepared.write().clear(),
         }
     }
-}
-
-fn choose_custom_plan(
-    entry: &PreparedStatementPlan,
-    mode: &str,
-    generic_cost: Option<f64>,
-) -> bool {
-    if entry.parameter_types.is_empty() {
-        return false;
-    }
-    match mode {
-        "force_generic_plan" => false,
-        "force_custom_plan" => true,
-        _ if entry.custom_plans < 5 => true,
-        _ => generic_cost
-            .is_some_and(|cost| cost >= entry.total_custom_cost / entry.custom_plans as f64),
-    }
-}
-
-fn specialize_parameters(plan: &mut uqa_planner::UnifiedPlan, parameters: &[uqa_sql::SQLParam]) {
-    use uqa_execution::ScalarExpr;
-    use uqa_sql::SQLParam;
-    plan.rewrite_scalar_expressions(&mut |expression| {
-        let ScalarExpr::Param(index) = expression else {
-            return;
-        };
-        let Some(parameter) = index.checked_sub(1).and_then(|index| parameters.get(index)) else {
-            return;
-        };
-        *expression = match parameter {
-            SQLParam::TypedScalar { value, ty } => ScalarExpr::TypedLiteral {
-                value: value.clone(),
-                ty: ty.sql_name(),
-                bound_type: Some(ty.clone()),
-                parameter_index: Some(*index),
-            },
-            SQLParam::Scalar(value) => ScalarExpr::Literal(value.clone()),
-            SQLParam::Vector(_) | SQLParam::Tensor(_) => return,
-        };
-    });
-}
-
-fn is_unknown_type(name: &str) -> Result<bool, uqa_sql::SQLError> {
-    Ok(uqa_sql::parse_regtype_name(name)?.is_some_and(|parsed| {
-        parsed.array_dimensions == 0
-            && !parsed.has_type_modifiers
-            && match parsed.names.as_slice() {
-                [local] => local == "unknown",
-                [schema, local] => schema == "pg_catalog" && local == "unknown",
-                _ => false,
-            }
-    }))
 }

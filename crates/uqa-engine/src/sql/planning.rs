@@ -76,7 +76,9 @@ fn analyze_executable_plan(
             }
             _ => {
                 if command.mutation_target().is_some() {
-                    super::prepared::analyze_command_parameters(engine, command, params, &scope)?;
+                    uqa_execution::query::binding::analyze_command_parameters(
+                        engine, command, params, &scope,
+                    )?;
                 }
                 super::select::analyze_prepared_command_schema(engine, command, params, &scope)?;
             }
