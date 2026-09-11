@@ -24,7 +24,11 @@ fn project_stored_values(
 ) -> Vec<Value> {
     fields
         .iter()
-        .map(|field| crate::sql::project_stored_document_column(document, field, columns))
+        .map(|field| {
+            uqa_execution::query::document_projection::project_stored_document_column(
+                document, field, columns,
+            )
+        })
         .collect()
 }
 
@@ -85,8 +89,12 @@ impl Engine {
         document: &mut StoredDocument,
     ) -> Result<(), SQLError> {
         crate::generated::materialize_virtual_generated_columns(columns, document.fields_mut())?;
-        if crate::sql::projection_uses_tuple_xmin(crate::sql::XMIN_COLUMN, columns)
-            && !document.fields().contains_key(crate::sql::XMIN_COLUMN)
+        if uqa_execution::query::document_projection::projection_uses_tuple_xmin(
+            uqa_sql::semantics::XMIN_COLUMN,
+            columns,
+        ) && !document
+            .fields()
+            .contains_key(uqa_sql::semantics::XMIN_COLUMN)
         {
             let xmin = document
                 .metadata()
@@ -94,7 +102,7 @@ impl Engine {
                 .map_or(Value::Null, |xmin| Value::Int(i64::from(xmin)));
             document
                 .fields_mut()
-                .insert(crate::sql::XMIN_COLUMN.into(), xmin);
+                .insert(uqa_sql::semantics::XMIN_COLUMN.into(), xmin);
         }
         Ok(())
     }
@@ -265,8 +273,11 @@ impl Engine {
                 document.fields_mut(),
                 projection,
             )?;
-            if crate::sql::projections_use_tuple_xmin(projection, &columns)
-                && !document.fields().contains_key(crate::sql::XMIN_COLUMN)
+            if uqa_execution::query::document_projection::projections_use_tuple_xmin(
+                projection, &columns,
+            ) && !document
+                .fields()
+                .contains_key(uqa_sql::semantics::XMIN_COLUMN)
             {
                 let xmin = document
                     .metadata()
@@ -274,7 +285,7 @@ impl Engine {
                     .map_or(Value::Null, |xmin| Value::Int(i64::from(xmin)));
                 document
                     .fields_mut()
-                    .insert(crate::sql::XMIN_COLUMN.into(), xmin);
+                    .insert(uqa_sql::semantics::XMIN_COLUMN.into(), xmin);
             }
         }
         Ok(documents
@@ -295,7 +306,9 @@ impl Engine {
             .iter()
             .map(|field| (*field).to_string())
             .collect::<Vec<_>>();
-        let uses_tuple_xmin = crate::sql::projections_use_tuple_xmin(&requested, &columns);
+        let uses_tuple_xmin = uqa_execution::query::document_projection::projections_use_tuple_xmin(
+            &requested, &columns,
+        );
         if crate::generated::projection_contains_virtual_generated_column(&columns, &requested) {
             let mut projected = BTreeMap::new();
             for doc_id in doc_ids {

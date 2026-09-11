@@ -475,7 +475,7 @@ impl Engine {
         let mut plan = uqa_planner::ExpressionPlan::lower_with(bound, &|name: &str| {
             self.has_registered_aggregate_function(name)
         });
-        let ty = crate::sql::bind_catalog_expression_routines_with_outer(
+        let ty = crate::capabilities::stored_routines::bind_catalog_expression_routines_with_outer(
             self,
             &mut plan,
             &[],
@@ -496,8 +496,11 @@ impl Engine {
                 };
             }
         }
-        crate::sql::reject_stored_regrole_constants(self, condition, None)?;
-        let references = crate::sql::collect_expression_routine_references(&plan)?;
+        uqa_sql::catalog::regrole_dependencies::reject_stored_regrole_constants(
+            self, condition, None,
+        )?;
+        let references =
+            uqa_sql::binding::stored_routines::collect_expression_routine_references(&plan)?;
         super::super::bind_stored_expression_routines(condition, &references)
     }
 }

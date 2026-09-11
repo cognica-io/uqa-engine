@@ -68,7 +68,7 @@ impl Engine {
             let foreign_keys = table.foreign_keys.read().clone();
             let hierarchy = table.hierarchy.read().clone();
             if generated_requires_migration {
-                crate::sql::prepare_generated_columns(
+                uqa_sql::schema::generated::prepare_generated_columns(
                     self,
                     &table_name,
                     &mut columns,

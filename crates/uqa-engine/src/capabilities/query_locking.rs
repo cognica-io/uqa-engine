@@ -6,7 +6,7 @@
 
 //! Bind tuple-lock execution to catalog, transaction, and storage state.
 
-use crate::{session::StatementReadSnapshot, sql::CteScope, Engine};
+use crate::{capabilities::query_scope::CteScope, session::StatementReadSnapshot, Engine};
 use std::{collections::BTreeSet, sync::Arc};
 use uqa_core::DocId;
 use uqa_execution::{
@@ -109,7 +109,7 @@ impl RowLockScopeSource<StatementReadSnapshot> for Engine {
         crate::capabilities::query_scope::new_for_current_routine(self)
     }
     fn transition_relation_names(&self) -> BTreeSet<String> {
-        crate::sql::active_trigger_transition_relation_names()
+        uqa_execution::mutation::triggers::current_transition_relation_names()
     }
 }
 impl RowRecheckBuilder<StatementReadSnapshot> for Engine {

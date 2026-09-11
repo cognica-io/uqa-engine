@@ -47,7 +47,7 @@ impl Engine {
                 ))
             })?;
         Ok(Some(
-            crate::sql::sequence_relation_oid(object_id).to_string(),
+            uqa_execution::catalog::projection::sequence_relation_oid(object_id).to_string(),
         ))
     }
 

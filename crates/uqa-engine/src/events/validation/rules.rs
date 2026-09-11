@@ -280,12 +280,13 @@ impl Engine {
                 }
             }
             let schema = rule_condition_row_schema(columns, &binding);
-            let ty = crate::sql::bind_catalog_expression_routines_with_outer(
-                self,
-                &mut plan,
-                &[],
-                &schema,
-            )?;
+            let ty =
+                crate::capabilities::stored_routines::bind_catalog_expression_routines_with_outer(
+                    self,
+                    &mut plan,
+                    &[],
+                    &schema,
+                )?;
             if let Some(ty) = ty {
                 if !is_boolean_type(&ty) {
                     return Err(SQLError::TypeMismatch(format!(
@@ -294,7 +295,9 @@ impl Engine {
                     )));
                 }
             }
-            crate::sql::reject_stored_regrole_constants(self, condition, None)?;
+            uqa_sql::catalog::regrole_dependencies::reject_stored_regrole_constants(
+                self, condition, None,
+            )?;
             return Ok(Some((plan, binding)));
         }
         let bound = bind_expr(condition, &mut RuleRowTypeResolver { columns, event })?;
@@ -323,7 +326,9 @@ impl Engine {
             }
             Some(_) => {}
         }
-        crate::sql::reject_stored_regrole_constants(self, condition, None)?;
+        uqa_sql::catalog::regrole_dependencies::reject_stored_regrole_constants(
+            self, condition, None,
+        )?;
         Ok(None)
     }
 
@@ -405,12 +410,21 @@ impl Engine {
                 event,
             },
         )?;
-        let schema = crate::sql::analyze_rule_action_returning_schema(self, bound.clone())?;
+        let schema = uqa_sql::semantics::returning::dml_statement_returning_schema(
+            self.returning_analysis_context(),
+            bound.clone(),
+        )?;
         let mut stored_plan = uqa_planner::UnifiedPlan::lower_with(bound, &|name: &str| {
             self.has_registered_aggregate_function(name)
         });
-        crate::sql::reject_stored_plan_regrole_constants(self, &mut stored_plan)?;
-        let bound_routines = crate::sql::bind_catalog_statement_routines(self, &stored_plan)?;
+        uqa_sql::catalog::regrole_dependencies::reject_stored_plan_regrole_constants(
+            self,
+            &mut stored_plan,
+        )?;
+        let bound_routines = crate::capabilities::stored_routines::bind_catalog_statement_routines(
+            self,
+            &stored_plan,
+        )?;
         if let Some(routine_plan) = &bound_routines.query {
             uqa_sql::catalog::events::dependencies::collect_query_routine_dependencies(
                 routine_plan,
@@ -447,7 +461,8 @@ impl Engine {
                     &std::collections::BTreeSet::new(),
                 )?;
             }
-            let routine_references = crate::sql::collect_expression_routine_references(plan)?;
+            let routine_references =
+                uqa_sql::binding::stored_routines::collect_expression_routine_references(plan)?;
             uqa_sql::catalog::stored_ast::bind_stored_expression_routines(
                 condition,
                 &routine_references,
@@ -459,7 +474,7 @@ impl Engine {
         let mut dependency_plan = uqa_planner::ExpressionPlan::lower_with(bound, &|name: &str| {
             self.has_registered_aggregate_function(name)
         });
-        crate::sql::bind_catalog_expression_routines_with_outer(
+        crate::capabilities::stored_routines::bind_catalog_expression_routines_with_outer(
             self,
             &mut dependency_plan,
             &[],
@@ -470,7 +485,9 @@ impl Engine {
             dependencies,
         );
         let routine_references =
-            crate::sql::collect_expression_routine_references(&dependency_plan)?;
+            uqa_sql::binding::stored_routines::collect_expression_routine_references(
+                &dependency_plan,
+            )?;
         uqa_sql::catalog::stored_ast::bind_stored_expression_routines(
             condition,
             &routine_references,

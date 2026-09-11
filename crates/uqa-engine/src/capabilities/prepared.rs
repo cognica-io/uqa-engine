@@ -6,7 +6,7 @@
 
 //! Adapt current routine scope and session parameter metadata to prepared-statement services.
 
-use crate::{sql::ScopedEngineHook, Engine};
+use crate::{capabilities::ScopedEngineHook, Engine};
 use uqa_execution::query::prepared::{
     ArgumentBindingContext, PreparedArgumentScopes, ScopedArgumentOperation,
 };
@@ -53,7 +53,12 @@ impl PreparedArgumentScopes for Engine {
         let evaluation = PhysicalEvalContext::new(None, parameters)
             .with_function_hook(&hook)
             .with_subquery_runner(&hook);
-        let cast_type = |name: &str| crate::sql::resolve_catalog_column_type(self, name);
+        let cast_type = |name: &str| {
+            uqa_execution::catalog::projection::resolve_catalog_column_type(
+                &self.catalog_execution(),
+                name,
+            )
+        };
         let mut analyze_type = |argument: &ExpressionPlan| {
             uqa_execution::query::binding::analyze_expression_plan_type(
                 self, argument, parameters, &scope,

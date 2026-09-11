@@ -99,3 +99,38 @@ impl uqa_execution::catalog::services::CatalogSnapshotSource for Engine {
         self.catalog_read_view()
     }
 }
+
+use uqa_core::Value;
+impl Engine {
+    pub(crate) fn clear_regtype_output_cache(&self) {
+        self.runtime.regtype_output_cache.clear();
+    }
+}
+
+use uqa_execution::catalog::services::{
+    CatalogExpressionEvaluation, ViewCatalogCapabilities, ViewCatalogMetadata,
+};
+use uqa_sql::ast::{Expr, TriggerEvent};
+impl CatalogExpressionEvaluation for Engine {
+    fn evaluate(&self, expression: &Expr) -> Result<Value, SQLError> {
+        crate::capabilities::query_expressions::eval_lowered_expression(self, expression, None, &[])
+    }
+}
+impl ViewCatalogCapabilities for Engine {
+    fn view_updatability(&self, name: &str) -> Result<ViewCatalogMetadata, SQLError> {
+        let metadata =
+            uqa_sql::semantics::view_rewrite::view_updatability(self.view_rewrite_context(), name)?;
+        Ok(ViewCatalogMetadata {
+            catalog: metadata.catalog,
+            catalog_columns: metadata.catalog_columns,
+            check_option: metadata.check_option,
+        })
+    }
+    fn has_instead_of_trigger(&self, name: &str, event: TriggerEvent) -> Result<bool, SQLError> {
+        uqa_sql::semantics::view_rewrite::has_instead_of_trigger(
+            self.view_rewrite_context(),
+            name,
+            event,
+        )
+    }
+}

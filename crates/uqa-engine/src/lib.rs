@@ -77,7 +77,9 @@
 pub mod functions;
 pub mod migration;
 pub mod operator_tree_bridge;
-pub mod sql;
+mod queries;
+/// SQL result formatting, type metadata and bounded cursors.
+pub use uqa_execution::result as sql;
 
 mod analyzers;
 mod async_sql_engine;
@@ -399,7 +401,8 @@ struct TransactionFrame {
     row_changes: Vec<TransactionRowChange>,
     statistics_changes: statistics::StatisticsChanges,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
-    deferred_constraint_trigger_events: Vec<sql::DeferredConstraintTriggerEvent>,
+    deferred_constraint_trigger_events:
+        Vec<uqa_execution::mutation::triggers::DeferredConstraintTriggerEvent>,
     pending_listen_actions: Vec<PendingListenAction>,
     pending_notifications: Vec<PendingNotification>,
     constraint_modes: ConstraintModeState,
@@ -464,7 +467,8 @@ struct TransactionSavepoint {
     row_changes: Vec<TransactionRowChange>,
     statistics_changes: statistics::StatisticsChanges,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
-    deferred_constraint_trigger_events: Vec<sql::DeferredConstraintTriggerEvent>,
+    deferred_constraint_trigger_events:
+        Vec<uqa_execution::mutation::triggers::DeferredConstraintTriggerEvent>,
     pending_listen_actions: Vec<PendingListenAction>,
     pending_notifications: Vec<PendingNotification>,
     constraint_modes: ConstraintModeState,

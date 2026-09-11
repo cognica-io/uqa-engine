@@ -6,7 +6,7 @@
 
 //! Capture statement metadata for planner-owned predicate placement.
 
-use crate::{sql::CteScope, Engine};
+use crate::{capabilities::query_scope::CteScope, Engine};
 use std::collections::BTreeMap;
 use uqa_planner::filter_pushdown::context::{FilterPushdownContext, FilterPushdownScope};
 use uqa_sql::{
@@ -26,7 +26,9 @@ fn with_context<T>(engine: &Engine, action: impl FnOnce(FilterPushdownContext<'_
             catalog: &catalog,
             resolution: &resolution,
         },
-        optimizer: &|plan| crate::sql::optimize_engine_plan(engine, plan),
+        optimizer: &|plan| {
+            crate::capabilities::statement_planning::optimize_engine_plan(engine, plan)
+        },
     })
 }
 fn with_scope<T>(

@@ -30,7 +30,8 @@ struct StatementAbortSnapshot {
     row_changes: Vec<TransactionRowChange>,
     statistics_changes: crate::statistics::StatisticsChanges,
     deferred_foreign_key_checks: Vec<crate::DeferredForeignKeyCheck>,
-    deferred_constraint_trigger_events: Vec<crate::sql::DeferredConstraintTriggerEvent>,
+    deferred_constraint_trigger_events:
+        Vec<uqa_execution::mutation::triggers::DeferredConstraintTriggerEvent>,
     pending_listen_actions: Vec<crate::PendingListenAction>,
     pending_notifications: Vec<crate::PendingNotification>,
     constraint_modes: ConstraintModeState,

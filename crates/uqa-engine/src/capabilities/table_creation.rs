@@ -64,7 +64,7 @@ impl TableCreationTransactions for Engine {
 }
 impl TableAsQuerySource for Engine {
     fn optimize(&self, plan: &QueryPlan) -> Result<QueryPlan, SQLError> {
-        crate::sql::optimize_engine_query(self, plan)
+        crate::capabilities::statement_planning::optimize_engine_query(self, plan)
     }
     fn execute(&self, plan: &QueryPlan, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
         let mut scope = super::query_scope::new_for_current_routine(self);

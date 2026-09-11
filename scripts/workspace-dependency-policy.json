@@ -230,23 +230,13 @@
         "src/session/views/ownership.rs",
         "src/session/views/registration.rs",
         "src/session/views/restoration.rs",
-        "src/sql/prepared.rs",
-        "src/sql/read_only.rs",
         "src/session/views/columns.rs",
         "src/session/view_binding.rs",
-        "src/sql/select/evaluation/subqueries.rs",
-        "src/sql/correlation.rs",
-        "src/sql/select/evaluation",
-        "src/sql/select/evaluation.rs",
         "src/truncate.rs",
-        "src/sql/plan_executor.rs",
-        "src/sql/cte_validation.rs",
-        "src/sql/driver.rs",
-        "src/sql/cursor.rs",
-        "src/sql/completion.rs",
-        "src/sql/session_portal_worker.rs",
         "src/session/portals/binding.rs",
-        "src/session/portals/dependencies.rs"
+        "src/session/portals/dependencies.rs",
+        "src/sql",
+        "src/sql.rs"
       ]
     },
     "crates/uqa-storage": {

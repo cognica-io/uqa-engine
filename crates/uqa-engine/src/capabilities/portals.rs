@@ -124,6 +124,6 @@ impl uqa_sql::binding::portals::PortalRelationCatalog for Engine {
 
 impl uqa_sql::binding::portals::PortalTransitionRelations for Engine {
     fn active_transition_relation_names(&self) -> std::collections::BTreeSet<String> {
-        crate::sql::active_trigger_transition_relation_names()
+        uqa_execution::mutation::triggers::current_transition_relation_names()
     }
 }

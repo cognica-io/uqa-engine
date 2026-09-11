@@ -66,7 +66,8 @@ impl Engine {
         reject_transition_relations: bool,
     ) -> Result<bool, SQLError> {
         let temporary_schema = self.temporary_schema_name();
-        let transition_relations = crate::sql::active_trigger_transition_relation_names();
+        let transition_relations =
+            uqa_execution::mutation::triggers::current_transition_relation_names();
         analysis::bind_stored_query_relations(
             &StoredQueryBindingContext {
                 relations: self,

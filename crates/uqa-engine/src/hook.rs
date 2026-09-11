@@ -21,7 +21,7 @@ impl uqa_sql::expr::EngineHook for Engine {
     }
 
     fn resolve_regtype_input(&self, name: &str) -> Result<Option<i64>, SQLError> {
-        crate::sql::resolve_regtype_oid(self, name)?
+        uqa_execution::catalog::projection::resolve_regtype_oid(&self.catalog_execution(), name)?
             .map(Some)
             .ok_or_else(|| SQLError::Routine {
                 sqlstate: "42704".into(),
@@ -40,23 +40,34 @@ impl uqa_sql::expr::EngineHook for Engine {
         &self,
         name: &str,
     ) -> std::result::Result<Option<uqa_sql::ast::ColumnType>, String> {
-        Ok(crate::sql::resolve_catalog_column_type(self, name))
+        Ok(
+            uqa_execution::catalog::projection::resolve_catalog_column_type(
+                &self.catalog_execution(),
+                name,
+            ),
+        )
     }
 
     fn resolve_regclass_input(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
-        crate::sql::resolve_regclass_oid(self, name)
+        uqa_execution::catalog::projection::resolve_regclass_oid(&self.catalog_execution(), name)
     }
 
     fn resolve_regprocedure(&self, name: &str) -> std::result::Result<Option<i64>, String> {
-        crate::sql::resolve_regprocedure_oid(self, name)
+        uqa_execution::catalog::projection::resolve_regprocedure_oid(
+            &self.catalog_execution(),
+            name,
+        )
     }
 
     fn resolve_regrole(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
-        crate::sql::resolve_regrole_oid(self, name)
+        uqa_execution::catalog::projection::resolve_regrole_oid(&self.catalog_execution(), name)
     }
 
     fn resolve_regnamespace(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
-        crate::sql::resolve_regnamespace_oid(self, name)
+        uqa_execution::catalog::projection::resolve_regnamespace_oid(
+            &self.catalog_execution(),
+            name,
+        )
     }
 
     fn resolve_regobject(
@@ -64,7 +75,11 @@ impl uqa_sql::expr::EngineHook for Engine {
         ty: &uqa_sql::ast::ColumnType,
         name: &str,
     ) -> std::result::Result<Option<i64>, SQLError> {
-        crate::sql::resolve_regobject_oid(self, ty, name)
+        uqa_execution::catalog::projection::resolve_regobject_oid(
+            &self.catalog_execution(),
+            ty,
+            name,
+        )
     }
 
     fn resolve_regtype_output(
@@ -72,7 +87,11 @@ impl uqa_sql::expr::EngineHook for Engine {
         ty: &uqa_sql::ast::ColumnType,
         oid: i64,
     ) -> std::result::Result<Option<String>, String> {
-        crate::sql::resolve_regtype_output(self, ty, oid)
+        uqa_execution::catalog::projection::resolve_regtype_output(
+            &self.catalog_execution(),
+            ty,
+            oid,
+        )
     }
 
     fn nextval(&self, name: &str) -> std::result::Result<i64, SQLError> {
@@ -160,6 +179,6 @@ impl uqa_sql::expr::EngineHook for Engine {
         name: &str,
         args: &[(Option<String>, Value)],
     ) -> Option<std::result::Result<Value, SQLError>> {
-        crate::sql::call_user_scalar_function(self, name, args)
+        crate::capabilities::routine_invocation::call_user_scalar_function(self, name, args)
     }
 }

@@ -26,8 +26,11 @@ impl Engine {
                     message: format!("column \"{}\" specified more than once", column.name),
                 });
             }
-            crate::sql::validate_postgres_column_name(&column.name)?;
-            crate::sql::validate_postgres_relation_column_type(&column.name, &column.ty)?;
+            uqa_sql::schema::columns::validate_postgres_column_name(&column.name)?;
+            uqa_sql::schema::columns::validate_postgres_relation_column_type(
+                &column.name,
+                &column.ty,
+            )?;
             if column.primary_key || column.unique {
                 let kind = if column.primary_key {
                     "primary key"
@@ -128,7 +131,9 @@ impl Engine {
             if let Some(check) = &mut column.check {
                 self.prepare_foreign_table_sequence_references(check, stored)?;
                 self.validate_check_expression(table_name, &qualifier, &check_columns, check)?;
-                crate::sql::reject_stored_regrole_constants(self, check, None)?;
+                uqa_sql::catalog::regrole_dependencies::reject_stored_regrole_constants(
+                    self, check, None,
+                )?;
             }
             if let Some(generated) = &mut column.generated {
                 self.prepare_foreign_table_sequence_references(&mut generated.expression, stored)?;
@@ -142,9 +147,13 @@ impl Engine {
                 &check_columns,
                 &mut check.expr,
             )?;
-            crate::sql::reject_stored_regrole_constants(self, &check.expr, None)?;
+            uqa_sql::catalog::regrole_dependencies::reject_stored_regrole_constants(
+                self,
+                &check.expr,
+                None,
+            )?;
         }
-        crate::sql::prepare_generated_columns(self, &qualifier, columns, &[], &[])?;
+        uqa_sql::schema::generated::prepare_generated_columns(self, &qualifier, columns, &[], &[])?;
         let mut constraints = uqa_sql::ast::TableConstraintSet {
             checks: std::mem::take(checks),
             ..uqa_sql::ast::TableConstraintSet::default()

@@ -7,8 +7,8 @@
 //! Lend statement query contexts and scoped callbacks to subquery execution.
 
 use crate::{
+    capabilities::{query_scope::CteScope, ScopedEngineHook},
     session::StatementReadSnapshot,
-    sql::{CteScope, ScopedEngineHook},
     Engine,
 };
 use uqa_core::Value;

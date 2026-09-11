@@ -534,7 +534,7 @@ impl Engine {
         to: &str,
     ) -> Result<(), SQLError> {
         let relation = self.resolve_trigger_table(table)?;
-        if crate::sql::runtime_constraints(self)?
+        if uqa_execution::catalog::projection::runtime_constraints(&self.catalog_execution())?
             .iter()
             .any(|constraint| {
                 constraint.identity.relation == relation && constraint.identity.name == to

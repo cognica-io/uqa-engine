@@ -37,7 +37,8 @@ fn realize_pending_command(
         state.data = pending;
         return Ok(());
     };
-    let execution = crate::sql::execute_nested_optimized_command(engine, &command, &params);
+    let execution =
+        uqa_execution::statement::compiled::execute_optimized_command(engine, &command, &params);
     match execution {
         Ok(mut result) => {
             if null_returning_values {
@@ -150,7 +151,7 @@ fn stream_next_portal_row(
                 let schema =
                     uqa_execution::RowSchema::with_types(columns.clone(), column_types.clone());
                 let rows = uqa_execution::IndexedSpill::new(schema)
-                    .map_err(crate::sql::map_physical_exec_error)?;
+                    .map_err(uqa_execution::query::projection::physical_exec_error)?;
                 *materialized = Some(SessionPortalMaterialization {
                     columns,
                     column_types,
@@ -164,7 +165,7 @@ fn stream_next_portal_row(
                 output
                     .rows
                     .push(&uqa_execution::PhysicalRow::from_values(values))
-                    .map_err(crate::sql::map_physical_exec_error)?;
+                    .map_err(uqa_execution::query::projection::physical_exec_error)?;
                 return Ok(true);
             }
             Ok(crate::SessionPortalWorkerResponse::Eof) => {
@@ -221,7 +222,7 @@ fn stream_directional_portal_row(
                 let schema =
                     uqa_execution::RowSchema::with_types(columns.clone(), column_types.clone());
                 let rows = uqa_execution::IndexedSpill::new(schema)
-                    .map_err(crate::sql::map_physical_exec_error)?;
+                    .map_err(uqa_execution::query::projection::physical_exec_error)?;
                 *materialized = Some(SessionPortalMaterialization {
                     columns,
                     column_types,
@@ -924,7 +925,7 @@ fn select_indexed_rows(
         let row = result
             .rows
             .get(index)
-            .map_err(crate::sql::map_physical_exec_error)?;
+            .map_err(uqa_execution::query::projection::physical_exec_error)?;
         let view = schema.view(&row);
         positional_rows.push(
             (0..result.columns.len())

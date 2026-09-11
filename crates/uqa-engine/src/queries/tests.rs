@@ -4,15 +4,16 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{
-    builtin_function_dispatch_name, compile, lower_statement, query_may_mutate_engine,
-    query_requires_statement_transaction, Engine,
+use super::test_support::{
+    lower_statement, query_may_mutate_engine, query_requires_statement_transaction,
 };
+use crate::Engine;
 use crate::{SQLAggregateState, SQLFunctionOptions, SQLFunctionVolatility, SQLTableFunctionResult};
 use uqa_core::Value;
 use uqa_planner::UnifiedPlan;
 use uqa_sql::semantics::volatility::function_volatility;
 use uqa_sql::SQLError;
+use uqa_sql::{compile, semantics::builtin_function_dispatch_name};
 
 #[derive(Default)]
 struct NullAggregate;
@@ -363,7 +364,8 @@ fn reserved_catalog_aliases_resolve_only_existing_builtins() {
 mod unified_plan_tests {
     use uqa_planner::{CommandPlan, ComputePlan, RelationalPlan, SourcePlan, UnifiedPlan};
 
-    use super::super::{compile_logical_plans, optimize_engine_plan, Engine};
+    use super::super::test_support::compile_logical_plans;
+    use crate::{capabilities::statement_planning::optimize_engine_plan, Engine};
 
     fn one(engine: &Engine, sql: &str) -> UnifiedPlan {
         let mut plans = compile_logical_plans(engine, sql).expect("statement plans");

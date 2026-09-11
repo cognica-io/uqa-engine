@@ -77,3 +77,18 @@ mod queries;
 mod routines;
 mod schemas;
 mod session;
+
+impl Engine {
+    pub(crate) fn compiled_statement_context(
+        &self,
+    ) -> uqa_execution::statement::compiled::CompiledStatementContext<
+        '_,
+        crate::session::StatementReadSnapshot,
+    > {
+        uqa_execution::statement::compiled::CompiledStatementContext {
+            aggregates: self,
+            planning: self,
+            statements: self,
+        }
+    }
+}

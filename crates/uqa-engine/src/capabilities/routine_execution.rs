@@ -34,21 +34,32 @@ impl Engine {
 }
 impl RoutineValueContext for Engine {
     fn catalog_column_type(&self, name: &str) -> Option<ColumnType> {
-        crate::sql::resolve_catalog_column_type(self, name)
+        uqa_execution::catalog::projection::resolve_catalog_column_type(
+            &self.catalog_execution(),
+            name,
+        )
     }
 }
 impl RoutineExpressions for Engine {
     fn column_type_name(&self, name: &str) -> Result<ColumnType, SQLError> {
-        crate::sql::resolve_catalog_column_type_name(self, name)
+        uqa_execution::catalog::projection::resolve_catalog_column_type_name(
+            &self.catalog_execution(),
+            name,
+        )
     }
     fn evaluate(&self, expression: &Expr) -> Result<Value, SQLError> {
-        crate::sql::scalar::eval_lowered_expression(self, expression, None, &[])
+        crate::capabilities::query_expressions::eval_lowered_expression(self, expression, None, &[])
     }
     fn evaluate_with_type(
         &self,
         expression: &Expr,
     ) -> Result<(Value, Option<ColumnType>), SQLError> {
-        crate::sql::scalar::eval_lowered_expression_with_type(self, expression, None, &[])
+        crate::capabilities::query_expressions::eval_lowered_expression_with_type(
+            self,
+            expression,
+            None,
+            &[],
+        )
     }
     fn expression_type(&self, plan: &ExpressionPlan) -> Result<Option<ColumnType>, SQLError> {
         let mut scope = super::query_scope::new_for_current_routine(self);
@@ -66,9 +77,11 @@ impl RoutineExpressions for Engine {
 }
 impl RoutineStatements for Engine {
     fn execute_plan(&self, plan: &UnifiedPlan, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
-        let plan = crate::sql::plan_for_execution(self, plan.clone(), params)?;
-        crate::sql::UnifiedPlanExecutor::new_nested(self.statement_execution_context(), params)
-            .execute(&plan)
+        uqa_execution::statement::compiled::execute_plan(
+            &self.compiled_statement_context(),
+            plan.clone(),
+            params,
+        )
     }
 
     fn execute_bound(
@@ -76,7 +89,11 @@ impl RoutineStatements for Engine {
         statement: Statement,
         params: &[SQLParam],
     ) -> Result<SQLResult, SQLError> {
-        crate::sql::execute_compiled_statement(self, statement, params)
+        uqa_execution::statement::compiled::execute(
+            &self.compiled_statement_context(),
+            statement,
+            params,
+        )
     }
     fn execute_text(&self, text: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
         uqa_execution::statement::batch::execute_nested(
@@ -86,7 +103,7 @@ impl RoutineStatements for Engine {
         )
     }
     fn optimize_plan(&self, plan: UnifiedPlan) -> Result<UnifiedPlan, SQLError> {
-        crate::sql::optimize_engine_plan(self, plan)
+        crate::capabilities::statement_planning::optimize_engine_plan(self, plan)
     }
     fn assertions_enabled(&self) -> bool {
         self.plpgsql_asserts_enabled()

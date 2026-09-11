@@ -102,7 +102,8 @@ impl Engine {
         requested: &[SetConstraintName],
         deferred: bool,
     ) -> Result<BTreeSet<ConstraintIdentity>, SQLError> {
-        let constraints = crate::sql::runtime_constraints(self)?;
+        let constraints =
+            uqa_execution::catalog::projection::runtime_constraints(&self.catalog_execution())?;
         if requested.is_empty() {
             return Ok(constraints
                 .iter()
@@ -303,7 +304,10 @@ impl Engine {
                 });
             }
             for event in &events {
-                crate::sql::fire_deferred_constraint_trigger_event(self, event)?;
+                uqa_execution::mutation::triggers::fire_deferred_constraint_trigger_event(
+                    &self.trigger_execution_context(),
+                    event,
+                )?;
             }
         }
         Ok(())
@@ -353,7 +357,7 @@ impl Engine {
 
     pub(crate) fn defer_constraint_trigger_event(
         &self,
-        event: crate::sql::DeferredConstraintTriggerEvent,
+        event: uqa_execution::mutation::triggers::DeferredConstraintTriggerEvent,
     ) -> Result<(), SQLError> {
         let mut stack = self.session.transactions.lock();
         let frame = stack.last_mut().ok_or_else(|| {
@@ -443,10 +447,11 @@ impl Engine {
     }
 
     pub(crate) fn prune_constraint_modes(&self) -> Result<(), SQLError> {
-        let live = crate::sql::runtime_constraints(self)?
-            .into_iter()
-            .map(|constraint| constraint.identity)
-            .collect::<Vec<_>>();
+        let live =
+            uqa_execution::catalog::projection::runtime_constraints(&self.catalog_execution())?
+                .into_iter()
+                .map(|constraint| constraint.identity)
+                .collect::<Vec<_>>();
         let live_relations = self
             .table_names()
             .map_err(|error| SQLError::Internal(format!("read live constraint tables: {error}")))?
@@ -664,7 +669,10 @@ impl Engine {
                 self.validate_deferred_foreign_key_checks(&pending_checks, None)?;
             }
             for event in &pending_events {
-                crate::sql::fire_deferred_constraint_trigger_event(self, event)?;
+                uqa_execution::mutation::triggers::fire_deferred_constraint_trigger_event(
+                    &self.trigger_execution_context(),
+                    event,
+                )?;
             }
         })();
         if let Err(validation_error) = result {

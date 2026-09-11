@@ -514,7 +514,7 @@ pub(crate) mod query_scope;
 
 mod query_semantics;
 
-mod query_expressions;
+pub(crate) mod query_expressions;
 mod query_operators;
 pub(crate) use query_expressions::ScopedEngineHook;
 mod subqueries;
@@ -617,7 +617,7 @@ mod namespaces;
 mod index_routines;
 mod view_dependencies;
 
-mod statement_planning;
+pub(crate) mod statement_planning;
 
 pub(crate) mod routine_invocation;
 
@@ -649,3 +649,6 @@ pub(crate) mod truncate;
 mod batch;
 mod portals;
 mod statements;
+
+mod cte;
+pub(crate) mod stored_routines;

@@ -88,7 +88,7 @@ impl TriggerRoutineInvoker for Engine {
         function: &SQLUserFunction,
         context: &TriggerRoutineContext,
     ) -> Result<Value, SQLError> {
-        crate::sql::execute_trigger_routine(self, function, context)
+        crate::capabilities::routine_invocation::execute_trigger_routine(self, function, context)
     }
 }
 impl ConstraintTriggerQueue for Engine {

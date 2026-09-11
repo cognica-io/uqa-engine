@@ -75,6 +75,7 @@ pub mod project_set;
 pub mod projected_predicate;
 pub mod projected_row;
 pub mod relational;
+pub mod result;
 pub mod scalar;
 pub mod scan;
 pub mod scope_overlay;

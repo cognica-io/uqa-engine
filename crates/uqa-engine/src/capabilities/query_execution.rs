@@ -5,7 +5,7 @@
 //
 
 //! Bind statement execution capabilities to the selected session and catalog generation.
-use crate::{session::StatementReadSnapshot, sql::CteScope, Engine};
+use crate::{capabilities::query_scope::CteScope, session::StatementReadSnapshot, Engine};
 use std::collections::BTreeMap;
 use uqa_execution::query::statement::context::{
     CteFilterPlanning, DirectionalQueryFactory, QueryContext, QuerySnapshots, ScopedQueryOperation,
