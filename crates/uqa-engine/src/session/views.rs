@@ -14,9 +14,8 @@ mod restoration;
 
 use super::{
     bind_query_plan_relations, canonical_virtual_relation_reference,
-    query_plan_references_relation, query_plan_references_sequence, Engine, QueryPlan,
-    RelationIdentity, SQLError, StorageBackendError, StorageBackendResult, StoredView,
-    StoredViewKind,
+    query_plan_references_relation, Engine, QueryPlan, RelationIdentity, SQLError,
+    StorageBackendError, StorageBackendResult, StoredView, StoredViewKind,
 };
 use uqa_sql::ast::FunctionBinding;
 
@@ -511,134 +510,5 @@ impl Engine {
             .collect();
         out.sort_unstable();
         Ok(out)
-    }
-
-    /// Return stored views whose plan is bound to `canonical_name`.
-    ///
-    /// New definitions persist canonical source identities. Legacy plans are
-    /// canonicalized during restore only when an unqualified name has exactly
-    /// one catalog candidate, so normal dependency checks are exact. The
-    /// matcher remains conservative for malformed in-memory plans and fails
-    /// closed rather than permitting dangling DDL.
-    pub(crate) fn views_depending_on_relation(
-        &self,
-        canonical_name: &str,
-    ) -> StorageBackendResult<Vec<String>> {
-        self.synchronize_catalog_registries()?;
-        let target = RelationIdentity::from_legacy_name(canonical_name)
-            .map_err(StorageBackendError::Other)?;
-        let empty_ctes = std::collections::BTreeSet::new();
-        let mut dependents = self
-            .durable
-            .views
-            .read()
-            .iter()
-            .filter(|(relation, view)| {
-                *relation != &target
-                    && query_plan_references_relation(&view.query, &target, &empty_ctes)
-            })
-            .map(|(relation, _)| relation.qualified_name())
-            .collect::<Vec<_>>();
-        dependents.sort_unstable();
-        Ok(dependents)
-    }
-
-    /// Return stored views with a literal `nextval`, `currval`, or `setval`
-    /// dependency on the canonical sequence name.
-    pub(crate) fn views_depending_on_sequence(
-        &self,
-        canonical_name: &str,
-    ) -> StorageBackendResult<Vec<String>> {
-        self.synchronize_catalog_registries()?;
-        let target = RelationIdentity::from_legacy_name(canonical_name)
-            .map_err(StorageBackendError::Other)?;
-        let mut dependents = self
-            .durable
-            .views
-            .read()
-            .iter()
-            .filter(|(_, view)| query_plan_references_sequence(&view.query, &target))
-            .map(|(relation, _)| relation.qualified_name())
-            .collect::<Vec<_>>();
-        dependents.sort_unstable();
-        Ok(dependents)
-    }
-
-    pub(crate) fn cascade_view_closure(
-        &self,
-        initial: Vec<String>,
-    ) -> Result<Vec<String>, SQLError> {
-        let mut views = initial;
-        views.sort();
-        views.dedup();
-        let mut index = 0;
-        while index < views.len() {
-            let dependents = self
-                .views_depending_on_relation(&views[index])
-                .map_err(|error| {
-                    SQLError::Internal(format!("read cascading view dependencies: {error}"))
-                })?;
-            for dependent in dependents {
-                if !views.contains(&dependent) {
-                    views.push(dependent);
-                }
-            }
-            index += 1;
-        }
-        views.sort();
-        Ok(views)
-    }
-
-    /// Return stored views whose persisted query plan is bound to one exact non-builtin routine object. Return type is deliberately excluded from routine identity.
-    pub(crate) fn views_depending_on_function(
-        &self,
-        target: &FunctionBinding,
-    ) -> StorageBackendResult<Vec<String>> {
-        self.synchronize_catalog_registries()?;
-        let mut dependents = self
-            .durable
-            .views
-            .read()
-            .iter()
-            .filter(|(_, view)| {
-                super::view_binding::query_plan_references_function(&view.query, target)
-            })
-            .map(|(relation, _)| relation.qualified_name())
-            .collect::<Vec<_>>();
-        dependents.sort_unstable();
-        Ok(dependents)
-    }
-
-    pub(crate) fn rewrite_view_routine_identity(
-        &self,
-        target: &FunctionBinding,
-        new_name: &str,
-    ) -> StorageBackendResult<()> {
-        let mut next = self.durable.views.read().clone();
-        let mut changed = Vec::new();
-        for (relation, view) in &mut next {
-            if super::rewrite_query_plan_routine_identity(&mut view.query, target, new_name) {
-                changed.push(relation.clone());
-            }
-        }
-        if changed.is_empty() {
-            return Ok(());
-        }
-        if let Some(catalog) = self.storage.catalog.as_ref() {
-            for relation in &changed {
-                let view = next.get(relation).ok_or_else(|| {
-                    StorageBackendError::Other(format!(
-                        "rewritten view `{}` disappeared before persistence",
-                        relation.qualified_name()
-                    ))
-                })?;
-                if view.persistence != uqa_sql::ast::RelationPersistence::Temporary {
-                    catalog.save_view(&catalog_view_row(relation, view)?)?;
-                }
-            }
-        }
-        *self.durable.views.write() = next;
-        self.note_catalog_registry_changed();
-        Ok(())
     }
 }

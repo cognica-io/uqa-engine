@@ -139,3 +139,4 @@ pub mod options;
 pub mod vectors;
 
 pub mod removal;
+pub mod routines;

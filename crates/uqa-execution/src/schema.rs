@@ -31,6 +31,7 @@ pub mod removal;
 pub mod relation_alteration;
 
 pub mod view_alteration;
+pub mod view_dependencies;
 
 pub mod domains;
 pub mod foreign_table_alteration;

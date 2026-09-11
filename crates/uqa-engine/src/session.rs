@@ -32,12 +32,8 @@ pub(crate) use views::{catalog_view_row, MaterializedViewRegistration, ViewRegis
 
 use analyze_helpers::{build_histogram, build_mcv, collect_analyze_values, distinct_count};
 use settings_parse::parse_search_path_list;
-pub(crate) use view_binding::rewrite_query_plan_routine_identity;
 pub(crate) use view_binding::{bind_query_plan_relations, canonical_virtual_relation_reference};
-use view_binding::{
-    bind_query_plan_sequence_references, query_plan_references_relation,
-    query_plan_references_sequence,
-};
+use view_binding::{bind_query_plan_sequence_references, query_plan_references_relation};
 
 #[cfg(test)]
 use view_binding::sequence_function_reference_mut;
