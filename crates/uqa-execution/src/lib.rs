@@ -173,3 +173,5 @@ pub mod schema;
 pub mod copy;
 
 pub mod maintenance;
+
+pub mod statement;

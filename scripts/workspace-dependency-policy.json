@@ -226,7 +226,11 @@
         "engine_"
       ],
       "forbidden_paths": [
-        "src/sql/prepared.rs"
+        "src/session/views/materialized.rs",
+        "src/session/views/ownership.rs",
+        "src/session/views/registration.rs",
+        "src/sql/prepared.rs",
+        "src/sql/read_only.rs"
       ]
     },
     "crates/uqa-storage": {

@@ -605,6 +605,7 @@ mod relation_removal;
 mod foreign_table_alteration;
 mod relation_alteration;
 mod view_alteration;
+mod view_creation;
 
 mod domains;
 mod namespaces;
@@ -633,3 +634,5 @@ mod scalar_functions;
 mod retrieval_planning;
 
 mod prepared;
+
+mod statement_transactions;

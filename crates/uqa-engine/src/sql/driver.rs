@@ -4,6 +4,13 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+pub(super) use uqa_execution::statement::transactions::{
+    abort_explicit_statement_error, rollback_after_statement_error, rollback_implicit_statement,
+};
+use uqa_sql::semantics::effects::transaction_blocks::{
+    no_active_transaction_error, transaction_requires_explicit_block,
+};
+
 use super::{
     is_transaction_control, lower_statement, plan_for_execution, query_has_row_locks,
     query_may_mutate_engine, query_requires_statement_transaction, Arc, Engine, SQLError, SQLParam,
@@ -293,7 +300,9 @@ fn execute_uncached_or_snapshot_scoped(
                 }
                 engine
                     .prepare_explicit_statement_snapshot(
-                        super::read_only::plan_sets_transaction_snapshot(initial_plan.as_ref()),
+                        uqa_sql::semantics::effects::read_only::plan_sets_transaction_snapshot(
+                            initial_plan.as_ref(),
+                        ),
                     )
                     .map_err(|error| engine.abort_sql_transaction_after_error(error))?;
                 // The statement was lowered immediately above, after any earlier
@@ -518,64 +527,5 @@ fn execute_uncached_or_snapshot_scoped(
             rollback_after_statement_error(engine, error)
         }
         Err(error) => Err(error),
-    }
-}
-
-fn transaction_requires_explicit_block(transaction: &uqa_sql::ast::TransactionStmt) -> bool {
-    matches!(
-        transaction,
-        uqa_sql::ast::TransactionStmt::Savepoint(_)
-            | uqa_sql::ast::TransactionStmt::ReleaseSavepoint(_)
-            | uqa_sql::ast::TransactionStmt::RollbackToSavepoint(_)
-            | uqa_sql::ast::TransactionStmt::CommitAndChain
-            | uqa_sql::ast::TransactionStmt::RollbackAndChain
-    )
-}
-
-fn no_active_transaction_error(transaction: &uqa_sql::ast::TransactionStmt) -> SQLError {
-    let command = match transaction {
-        uqa_sql::ast::TransactionStmt::Savepoint(_) => "SAVEPOINT",
-        uqa_sql::ast::TransactionStmt::ReleaseSavepoint(_) => "RELEASE SAVEPOINT",
-        uqa_sql::ast::TransactionStmt::RollbackToSavepoint(_) => "ROLLBACK TO SAVEPOINT",
-        uqa_sql::ast::TransactionStmt::CommitAndChain => "COMMIT AND CHAIN",
-        uqa_sql::ast::TransactionStmt::RollbackAndChain => "ROLLBACK AND CHAIN",
-        _ => unreachable!("only explicit-block transaction commands use this error"),
-    };
-    SQLError::Routine {
-        sqlstate: "25P01".into(),
-        message: format!("{command} can only be used in transaction blocks"),
-    }
-}
-
-pub(super) fn abort_explicit_statement_error(engine: &Engine, error: SQLError) -> SQLError {
-    if engine.transaction_depth() == 0 {
-        error
-    } else {
-        engine.abort_sql_transaction_after_error(error)
-    }
-}
-
-pub(super) fn rollback_implicit_statement(engine: &Engine, action: &str) -> Result<(), SQLError> {
-    engine
-        .run_transaction_statement(uqa_sql::ast::TransactionStmt::Rollback)
-        .map_err(|rollback_error| {
-            SQLError::Internal(format!(
-                "{action}: autocommit rollback failed: {rollback_error}"
-            ))
-        })
-}
-
-pub(super) fn rollback_after_statement_error<T>(
-    engine: &Engine,
-    statement_error: SQLError,
-) -> Result<T, SQLError> {
-    if engine.transaction_depth() == 0 {
-        return Err(statement_error);
-    }
-    match engine.run_transaction_statement(uqa_sql::ast::TransactionStmt::Rollback) {
-        Ok(()) => Err(statement_error),
-        Err(rollback_error) => Err(SQLError::Internal(format!(
-            "statement failed: {statement_error}; autocommit rollback also failed: {rollback_error}"
-        ))),
     }
 }

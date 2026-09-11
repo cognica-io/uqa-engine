@@ -12,8 +12,8 @@ use super::{
         RelationRenameDependencies, RoleTransferContext,
     },
 };
+use crate::catalog::view::ViewPublication;
 use crate::catalog::view::{catalog_view_row, StoredView};
-use std::{collections::BTreeMap, ops::DerefMut};
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::{AlterViewAction, AlterViewKind, AlterViewStmt, RelationPersistence},
@@ -22,10 +22,9 @@ use uqa_sql::{
     semantics::view_rewrite::{context::ViewRewriteContext, validate_view_definition_check_option},
     SQLError,
 };
-use uqa_storage::{StorageBackendResult, ViewRow};
+use uqa_storage::StorageBackendResult;
 
-pub type ViewRegistryWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, StoredView>> + 'a>;
+pub use crate::catalog::view::ViewRegistryWrite;
 
 pub trait ViewAlterCatalog {
     fn view(&self, relation: &RelationIdentity) -> Option<StoredView>;
@@ -34,15 +33,12 @@ pub trait ViewAlterCatalog {
 pub trait ViewAlterAccess {
     fn ensure_owner(&self, name: &str, view: &StoredView) -> Result<String, SQLError>;
 }
-pub trait ViewAlterPublication {
-    fn has_catalog(&self) -> bool;
-    fn save_view(&self, row: &ViewRow) -> StorageBackendResult<()>;
+pub trait ViewAlterPublication: ViewPublication {
     fn persist_rename(
         &self,
         from: &RelationIdentity,
         to: &RelationIdentity,
     ) -> StorageBackendResult<Option<bool>>;
-    fn views_write(&self) -> ViewRegistryWrite<'_>;
 }
 
 pub struct ViewAlterContext<'a> {

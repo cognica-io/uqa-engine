@@ -210,3 +210,4 @@ pub mod removal;
 
 pub mod namespaces;
 pub mod relation_alteration;
+pub mod view_creation;

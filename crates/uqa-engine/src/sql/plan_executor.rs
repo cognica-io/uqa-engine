@@ -16,7 +16,7 @@ use uqa_sql::ast::{CreateForeignServer, CreateForeignTable};
 use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 
 use crate::capabilities::{QueryRuntimeView, SessionExecutionView};
-use crate::session::{MaterializedViewRegistration, ViewRegistration};
+use uqa_execution::schema::view_creation::{self, MaterializedViewRegistration, ViewRegistration};
 
 use super::scalar::{
     analyze_physical_call_arguments, eval_physical_call_arguments, PhysicalEvalContext,
@@ -75,7 +75,11 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
     pub(crate) fn execute(&mut self, plan: &UnifiedPlan) -> Result<SQLResult, SQLError> {
         self.runtime.check_cancelled()?;
         super::cte_validation::validate_plan(self.engine, plan)?;
-        super::read_only::validate_transaction_plan(self.engine, plan)?;
+        uqa_execution::statement::transactions::validate_transaction_plan(
+            self.engine,
+            &self.engine.query_effect_context(),
+            plan,
+        )?;
         let transaction_failed = self.engine.transaction_failed();
         let mut result = match plan {
             UnifiedPlan::Query(query) => self.execute_query(query),
@@ -102,7 +106,11 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
     ) -> Result<select::QueryOutput, SQLError> {
         self.runtime.check_cancelled()?;
         super::cte_validation::validate_plan(self.engine, plan)?;
-        super::read_only::validate_transaction_plan(self.engine, plan)?;
+        uqa_execution::statement::transactions::validate_transaction_plan(
+            self.engine,
+            &self.engine.query_effect_context(),
+            plan,
+        )?;
         let UnifiedPlan::Query(query) = plan else {
             return Err(SQLError::Unsupported(
                 "SQL cursor accepts exactly one query statement".into(),
@@ -187,15 +195,18 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         persistence: uqa_sql::ast::RelationPersistence,
         options: &[(String, String)],
     ) -> Result<SQLResult, SQLError> {
-        self.engine.register_view_plan(ViewRegistration {
-            name,
-            column_names,
-            plan: query.clone(),
-            or_replace,
-            persistence,
-            options,
-            params: self.params,
-        })?;
+        view_creation::register_view_plan(
+            self.engine,
+            ViewRegistration {
+                name,
+                column_names,
+                plan: query.clone(),
+                or_replace,
+                persistence,
+                options,
+                params: self.params,
+            },
+        )?;
         Ok(SQLResult::empty())
     }
 
@@ -515,17 +526,18 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 options,
                 query,
             } => {
-                let populated_rows =
-                    self.engine
-                        .register_materialized_view_plan(MaterializedViewRegistration {
-                            name,
-                            column_names,
-                            plan: (**query).clone(),
-                            if_not_exists: *if_not_exists,
-                            with_no_data: *with_no_data,
-                            options,
-                            params: self.params,
-                        })?;
+                let populated_rows = view_creation::register_materialized_view_plan(
+                    self.engine,
+                    MaterializedViewRegistration {
+                        name,
+                        column_names,
+                        plan: (**query).clone(),
+                        if_not_exists: *if_not_exists,
+                        with_no_data: *with_no_data,
+                        options,
+                        params: self.params,
+                    },
+                )?;
                 let completion = populated_rows.map_or_else(
                     || "CREATE MATERIALIZED VIEW".to_string(),
                     |rows| format!("SELECT {rows}"),
@@ -538,8 +550,12 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 concurrently,
                 with_no_data,
             } => {
-                self.engine
-                    .refresh_materialized_view(name, *concurrently, *with_no_data)?;
+                view_creation::refresh_materialized_view(
+                    self.engine,
+                    name,
+                    *concurrently,
+                    *with_no_data,
+                )?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::CreateSchema {

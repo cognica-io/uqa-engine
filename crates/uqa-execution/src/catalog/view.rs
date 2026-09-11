@@ -21,3 +21,14 @@ pub fn catalog_view_row(
         definition_json: serde_json::to_string(view)?,
     })
 }
+
+/// Actual retained registry guard; publication ordering is controlled by the executor.
+pub type ViewRegistryWrite<'a> = Box<
+    dyn std::ops::DerefMut<Target = std::collections::BTreeMap<RelationIdentity, StoredView>> + 'a,
+>;
+
+pub trait ViewPublication {
+    fn has_catalog(&self) -> bool;
+    fn save_view(&self, row: &ViewRow) -> uqa_storage::StorageBackendResult<()>;
+    fn views_write(&self) -> ViewRegistryWrite<'_>;
+}

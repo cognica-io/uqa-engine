@@ -28,7 +28,7 @@ mod settings;
 mod settings_parse;
 mod view_binding;
 mod views;
-pub(crate) use views::{catalog_view_row, MaterializedViewRegistration, ViewRegistration};
+pub(crate) use views::catalog_view_row;
 
 use analyze_helpers::{build_histogram, build_mcv, collect_analyze_values, distinct_count};
 use settings_parse::parse_search_path_list;

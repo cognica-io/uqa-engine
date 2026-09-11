@@ -8,7 +8,7 @@
 use crate::Engine;
 use uqa_core::RelationIdentity;
 use uqa_execution::{
-    catalog::view::StoredView,
+    catalog::view::{StoredView, ViewPublication},
     schema::view_alteration::{
         self, ViewAlterAccess, ViewAlterCatalog, ViewAlterContext, ViewAlterPublication,
         ViewAlterTransactions, ViewAlterWrite, ViewRegistryWrite,
@@ -61,7 +61,7 @@ impl ViewAlterAccess for Engine {
         self.ensure_view_owner(name, view)
     }
 }
-impl ViewAlterPublication for Engine {
+impl ViewPublication for Engine {
     fn has_catalog(&self) -> bool {
         self.storage.catalog.is_some()
     }
@@ -71,6 +71,12 @@ impl ViewAlterPublication for Engine {
             .as_ref()
             .map_or(Ok(()), |catalog| catalog.save_view(row))
     }
+    fn views_write(&self) -> ViewRegistryWrite<'_> {
+        Box::new(self.durable.views.write())
+    }
+}
+
+impl ViewAlterPublication for Engine {
     fn persist_rename(
         &self,
         from: &RelationIdentity,
@@ -81,8 +87,5 @@ impl ViewAlterPublication for Engine {
             .as_ref()
             .map(|catalog| catalog.rename_view(from, to))
             .transpose()
-    }
-    fn views_write(&self) -> ViewRegistryWrite<'_> {
-        Box::new(self.durable.views.write())
     }
 }

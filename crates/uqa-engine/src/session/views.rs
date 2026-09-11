@@ -7,9 +7,6 @@
 //! Durable view registration, binding, dependencies, and restoration.
 
 mod columns;
-mod materialized;
-mod ownership;
-mod registration;
 mod restoration;
 
 use super::{
@@ -37,63 +34,6 @@ fn upgrade_legacy_view_dispatches(plan: &mut QueryPlan) -> bool {
         changed |= FunctionBinding::upgrade_legacy_serialized_dispatch(name, binding);
     });
     changed
-}
-
-pub(crate) struct ViewRegistration<'a> {
-    pub name: &'a str,
-    pub column_names: &'a [String],
-    pub plan: QueryPlan,
-    pub or_replace: bool,
-    pub persistence: uqa_sql::ast::RelationPersistence,
-    pub options: &'a [(String, String)],
-    pub params: &'a [uqa_sql::SQLParam],
-}
-
-pub(crate) struct MaterializedViewRegistration<'a> {
-    pub name: &'a str,
-    pub column_names: &'a [String],
-    pub plan: QueryPlan,
-    pub if_not_exists: bool,
-    pub with_no_data: bool,
-    pub options: &'a [(String, String)],
-    pub params: &'a [uqa_sql::SQLParam],
-}
-
-use uqa_sql::catalog::view::{create_view_output_columns, named_view_schema};
-
-fn validate_replacement_schema(
-    old: &uqa_execution::RowSchema,
-    new: &uqa_execution::RowSchema,
-) -> Result<(), SQLError> {
-    if new.len() < old.len() {
-        return Err(SQLError::Routine {
-            sqlstate: "42P16".into(),
-            message: "cannot drop columns from view".into(),
-        });
-    }
-    for position in 0..old.len() {
-        let old_name = old
-            .public_name(position)
-            .unwrap_or(&old.columns()[position]);
-        let new_name = new
-            .public_name(position)
-            .unwrap_or(&new.columns()[position]);
-        if old_name != new_name {
-            return Err(SQLError::Routine {
-                sqlstate: "42P16".into(),
-                message: format!(
-                    "cannot change name of view column \"{old_name}\" to \"{new_name}\""
-                ),
-            });
-        }
-        if old.column_type(position) != new.column_type(position) {
-            return Err(SQLError::Routine {
-                sqlstate: "42P16".into(),
-                message: format!("cannot change data type of view column \"{old_name}\""),
-            });
-        }
-    }
-    Ok(())
 }
 
 fn bind_stored_view_relations(

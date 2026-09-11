@@ -124,15 +124,18 @@ impl Engine {
                 ));
             };
             let output_columns = existing.output_columns.unwrap_or_default();
-            self.register_view_plan(crate::session::ViewRegistration {
-                name: &definition.table,
-                column_names: &output_columns,
-                plan: *plan,
-                or_replace: true,
-                persistence: existing.persistence,
-                options: &existing.options,
-                params: &[],
-            })?;
+            uqa_execution::schema::view_creation::register_view_plan(
+                self,
+                uqa_execution::schema::view_creation::ViewRegistration {
+                    name: &definition.table,
+                    column_names: &output_columns,
+                    plan: *plan,
+                    or_replace: true,
+                    persistence: existing.persistence,
+                    options: &existing.options,
+                    params: &[],
+                },
+            )?;
             return Ok(());
         }
         self.prepare_explicit_transaction_writer()?;

@@ -76,6 +76,7 @@
         "crates/uqa-engine/src/capabilities/sequences.rs",
         "crates/uqa-engine/src/capabilities/statement_effects.rs",
         "crates/uqa-engine/src/capabilities/statement_planning.rs",
+        "crates/uqa-engine/src/capabilities/statement_transactions.rs",
         "crates/uqa-engine/src/capabilities/stored_columns.rs",
         "crates/uqa-engine/src/capabilities/stored_relations.rs",
         "crates/uqa-engine/src/capabilities/table_alteration.rs",
@@ -88,6 +89,7 @@
         "crates/uqa-engine/src/capabilities/tests.rs",
         "crates/uqa-engine/src/capabilities/triggers.rs",
         "crates/uqa-engine/src/capabilities/view_alteration.rs",
+        "crates/uqa-engine/src/capabilities/view_creation.rs",
         "crates/uqa-engine/src/capabilities/view_dependencies.rs",
         "crates/uqa-engine/src/capabilities/view_rewrite.rs"
       ]
