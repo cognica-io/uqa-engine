@@ -13,8 +13,8 @@ use uqa_sql::{
         roles::{guards::RoleCatalogGuards, role_inherits, RoleReferenceNames},
         security::{
             columns::role_has_column_privilege as column_privilege_check,
+            ownership::RelationOwnerSchemas,
             table::{role_has_privilege, TableAclPrivilege, TablePrivilegeCheck},
-            view_ownership::ViewOwnerSchemas,
         },
     },
     SQLError,
@@ -23,7 +23,7 @@ pub struct TableAuthorizationContext<'a> {
     pub names: &'a dyn RoleReferenceNames,
     pub roles: &'a dyn RoleCatalogGuards,
     pub registry: &'a dyn TablePrivilegeRegistry,
-    pub schemas: &'a dyn ViewOwnerSchemas,
+    pub schemas: &'a dyn RelationOwnerSchemas,
 }
 impl TableAuthorizationContext<'_> {
     pub fn ensure_table_privilege(

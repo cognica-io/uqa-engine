@@ -17,7 +17,6 @@ use uqa_sql::{ast::EventEnableMode, SQLError};
 use uqa_storage::StorageBackendResult;
 
 pub trait TableLifecycle {
-    fn change_owner(&self, table: &str, owner: &str) -> Result<(), SQLError>;
     fn has_table(&self, table: &str) -> StorageBackendResult<bool>;
     fn rename_table(&self, from: &str, to: &str) -> StorageBackendResult<bool>;
     fn rename_column(&self, table: &str, from: &str, to: &str) -> StorageBackendResult<bool>;
@@ -40,6 +39,7 @@ pub trait TableEventLifecycle {
     ) -> Result<(), SQLError>;
 }
 pub struct TableAlterContext<'a, S: Clone + 'static> {
+    pub ownership: crate::catalog::security::table_ownership::TableOwnershipContext<'a>,
     pub hierarchy: HierarchyContext<'a>,
     pub constraints: ConstraintAlterContext<'a>,
     pub addition: ColumnAdditionContext<'a, S>,

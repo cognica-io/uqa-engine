@@ -191,3 +191,44 @@ fn schema_owner_transfer_checks_database_create_on_the_invoking_owner() {
     );
     assert_eq!(owner(&engine, "delegated"), "target");
 }
+
+#[test]
+fn existing_system_schemas_use_duplicate_checks_after_role_authorization() {
+    let engine = Engine::new();
+    for name in ["ag_catalog", "information_schema"] {
+        let before = owner(&engine, name);
+        let error = engine
+            .sql(&format!("CREATE SCHEMA {name}"), &[])
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42P06"));
+        assert_eq!(
+            error.to_string(),
+            format!(r#"schema "{name}" already exists"#)
+        );
+        engine
+            .sql(&format!("CREATE SCHEMA IF NOT EXISTS {name}"), &[])
+            .unwrap();
+        assert_eq!(owner(&engine, name), before);
+        assert_error(
+            &engine,
+            &format!("CREATE SCHEMA IF NOT EXISTS {name} AUTHORIZATION missing_owner"),
+            "42704",
+            "does not exist",
+        );
+    }
+    for sql in [
+        "CREATE SCHEMA pg_catalog",
+        "CREATE SCHEMA IF NOT EXISTS pg_catalog",
+    ] {
+        assert_error(&engine, sql, "42939", "unacceptable schema name");
+    }
+    engine
+        .sql("CREATE ROLE without_create; SET ROLE without_create", &[])
+        .unwrap();
+    assert_error(
+        &engine,
+        "CREATE SCHEMA IF NOT EXISTS information_schema",
+        "42501",
+        "permission denied for database",
+    );
+}

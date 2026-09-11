@@ -45,6 +45,7 @@ impl Engine {
     }
     pub(crate) fn table_alter_context(&self) -> TableAlterContext<'_, StatementReadSnapshot> {
         TableAlterContext {
+            ownership: self.table_ownership_context(),
             hierarchy: self.hierarchy_execution_context(),
             constraints: self.constraint_alter_context(),
             addition: self.column_addition_context(),
@@ -90,9 +91,6 @@ impl RelationEventAlterTransactions for Engine {
     }
 }
 impl TableLifecycle for Engine {
-    fn change_owner(&self, table: &str, owner: &str) -> Result<(), SQLError> {
-        self.alter_table_role_owner(table, owner)
-    }
     fn has_table(&self, table: &str) -> StorageBackendResult<bool> {
         self.try_has_table(table)
     }

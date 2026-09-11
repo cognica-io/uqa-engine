@@ -116,7 +116,7 @@ impl uqa_sql::schema::foreign_keys::ForeignKeyDefinitionCatalog for Engine {
         self.ensure_column_privilege(
             table,
             column,
-            crate::table_security::TableAclPrivilege::References,
+            uqa_sql::catalog::security::table::TableAclPrivilege::References,
         )
     }
 }

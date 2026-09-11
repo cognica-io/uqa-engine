@@ -28,7 +28,11 @@ fn graph_namespaces_and_schemas_share_one_name_space() {
     exec(&engine, "DROP SCHEMA shared_ns CASCADE");
     assert!(!engine.has_graph("shared_ns").unwrap());
     let reserved = engine.sql("CREATE SCHEMA ag_catalog", &[]).unwrap_err();
-    assert!(reserved.to_string().contains("reserved"), "{reserved}");
+    assert_eq!(reserved.sqlstate(), Some("42P06"));
+    assert_eq!(
+        reserved.to_string(),
+        r#"schema "ag_catalog" already exists"#
+    );
     let protected = engine.sql("DROP SCHEMA ag_catalog", &[]).unwrap_err();
     assert!(
         protected.to_string().contains("cannot be dropped"),

@@ -667,3 +667,5 @@ mod foreign_catalog;
 mod table_grants;
 
 mod table_authorization;
+
+mod table_ownership;

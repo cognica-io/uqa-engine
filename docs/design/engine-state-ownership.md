@@ -39,6 +39,8 @@ The [table grant adapter](../../crates/uqa-engine/src/capabilities/table_grants.
 
 The [authorization adapter](../../crates/uqa-engine/src/capabilities/table_authorization.rs) supplies read-only relation catalogs and retained table generations. Column guards are acquired only when table-wide access fails; owner reads retain the original narrow security lookup. Maintenance captures security while holding the actual table registry guard, then releases role and membership guards before notices. SQL owns view access rules, and execution owns table/foreign authority and optional-provider foreign security persistence.
 
+[Table-owner transfer](../../crates/uqa-execution/src/catalog/security/table_ownership.rs) runs in execution. It retains the selected table generation, performs a fresh owner check, validates the target role, persists every owned sequence, and captures the complete table schema before reading its ACL. Only a successful table save publishes the table and sequence security candidates. Engine supplies its actual table and registry guards through the [ownership adapter](../../crates/uqa-engine/src/capabilities/table_ownership.rs); its table-security implementation and whole-command owner callback are removed. The shared read-only schema-owner contract belongs to SQL and preserves the existing view-specific export.
+
 ## Atomicity and locking
 
 Transactional session values live behind one `SessionContext.state` lock. Snapshot and restore therefore cannot combine an old search path with a new prepared-plan cache, PRNG state, or sequence `currval` map.

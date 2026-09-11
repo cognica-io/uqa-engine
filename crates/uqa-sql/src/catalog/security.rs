@@ -82,3 +82,5 @@ pub mod grants;
 pub mod table_grants;
 
 pub mod view_authorization;
+
+pub mod ownership;

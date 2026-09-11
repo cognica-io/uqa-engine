@@ -8,10 +8,7 @@
 use crate::{
     catalog::{
         roles::{guards::RoleCatalogGuards, role_inherits, RoleReferenceNames},
-        security::{
-            table::{role_has_table_privilege, TableAclPrivilege},
-            SchemaSecurity,
-        },
+        security::table::{role_has_table_privilege, TableAclPrivilege},
         stored_view::StoredView,
         view::StoredViewKind,
     },
@@ -19,9 +16,7 @@ use crate::{
 };
 use uqa_core::RelationIdentity;
 
-pub trait ViewOwnerSchemas {
-    fn schema_security(&self, schema: &str) -> Option<SchemaSecurity>;
-}
+pub use super::ownership::RelationOwnerSchemas as ViewOwnerSchemas;
 #[derive(Clone, Copy)]
 pub struct ViewOwnershipContext<'a> {
     pub session: &'a dyn RoleReferenceNames,

@@ -13,8 +13,8 @@ use uqa_sql::{
     catalog::{
         roles::{guards::RoleCatalogGuards, role_inherits, RoleReferenceNames},
         security::{
+            ownership::RelationOwnerSchemas,
             table::{role_has_table_privilege, TableAclPrivilege},
-            view_ownership::ViewOwnerSchemas,
             TableSecurity,
         },
     },
@@ -24,7 +24,7 @@ use uqa_storage::CatalogFacade;
 pub struct ForeignAuthorizationContext<'a> {
     pub names: &'a dyn RoleReferenceNames,
     pub roles: &'a dyn RoleCatalogGuards,
-    pub schemas: &'a dyn ViewOwnerSchemas,
+    pub schemas: &'a dyn RelationOwnerSchemas,
     pub catalog: &'a dyn ForeignTableAlterCatalog,
 }
 impl ForeignAuthorizationContext<'_> {
