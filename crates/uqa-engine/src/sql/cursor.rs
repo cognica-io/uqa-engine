@@ -31,7 +31,7 @@ pub(super) fn execute(
     }
     if engine.storage.backend.is_none() && engine.transaction_depth() == 0 {
         if let Some(plan) = engine.cached_optimized_sql_plan(sql) {
-            let executor = UnifiedPlanExecutor::new(engine, params);
+            let executor = UnifiedPlanExecutor::new(engine.statement_execution_context(), params);
             return execute_spilled(&executor, plan.as_ref());
         }
     }
@@ -114,7 +114,7 @@ fn execute_uncached_or_snapshot_scoped(
         }
         let optimized = plan_for_execution(engine, plan, params)
             .map_err(|error| engine.abort_sql_transaction_after_error(error))?;
-        let executor = UnifiedPlanExecutor::new(engine, params);
+        let executor = UnifiedPlanExecutor::new(engine.statement_execution_context(), params);
         return execute_spilled(&executor, &optimized)
             .map_err(|error| engine.abort_sql_transaction_after_error(error));
     }
@@ -136,7 +136,7 @@ fn execute_uncached_or_snapshot_scoped(
             engine.cache_optimized_sql_plan(sql, Arc::clone(&plan));
             plan
         };
-        let executor = UnifiedPlanExecutor::new(engine, params);
+        let executor = UnifiedPlanExecutor::new(engine.statement_execution_context(), params);
         return execute_spilled(&executor, optimized.as_ref());
     }
 
@@ -198,7 +198,7 @@ fn execute_uncached_or_snapshot_scoped(
         Ok(plan) => plan,
         Err(error) => return rollback_after_statement_error(engine, error),
     };
-    let executor = UnifiedPlanExecutor::new(engine, params);
+    let executor = UnifiedPlanExecutor::new(engine.statement_execution_context(), params);
     let cursor = match execute_spilled(&executor, &optimized) {
         Ok(cursor) => cursor,
         Err(error) => return rollback_after_statement_error(engine, error),

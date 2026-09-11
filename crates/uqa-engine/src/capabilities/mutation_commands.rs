@@ -162,3 +162,11 @@ impl Engine {
         }
     }
 }
+
+impl uqa_execution::statement::context::StatementMutationInputs<StatementReadSnapshot> for Engine {
+    fn mutation_context(
+        &self,
+    ) -> uqa_execution::mutation::entry::MutationEntryContext<'_, StatementReadSnapshot> {
+        self.mutation_entry_context()
+    }
+}

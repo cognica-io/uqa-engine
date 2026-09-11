@@ -67,7 +67,8 @@ impl RoutineExpressions for Engine {
 impl RoutineStatements for Engine {
     fn execute_plan(&self, plan: &UnifiedPlan, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
         let plan = crate::sql::plan_for_execution(self, plan.clone(), params)?;
-        crate::sql::plan_executor::UnifiedPlanExecutor::new_nested(self, params).execute(&plan)
+        crate::sql::UnifiedPlanExecutor::new_nested(self.statement_execution_context(), params)
+            .execute(&plan)
     }
 
     fn execute_bound(

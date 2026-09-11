@@ -18,9 +18,9 @@ use uqa_execution::routines::{
     TriggerRoutineContext,
 };
 use uqa_sql::{
-    ast::{CreateFunction, DropFunctionStmt, FunctionBinding},
+    ast::FunctionBinding,
     routines::{resolution::RoutineOverloadContext, SQLUserFunction},
-    SQLError, SQLResult,
+    SQLError,
 };
 impl RoutineInvocationState for crate::roles::RoutineSessionStateGuard<'_> {
     fn preserve_current_user(&mut self) {
@@ -52,7 +52,7 @@ impl Engine {
             authority: self,
         }
     }
-    fn anonymous_block_context(&self) -> AnonymousBlockContext<'_> {
+    pub(crate) fn anonymous_block_context(&self) -> AnonymousBlockContext<'_> {
         AnonymousBlockContext {
             runtime: self.routine_execution_context(),
             session: self,
@@ -120,57 +120,12 @@ pub(crate) fn call_bound_user_table_function(
         record_definition,
     )
 }
-pub(crate) fn run_call(
-    engine: &Engine,
-    name: &str,
-    call_args: &[(Option<String>, Value)],
-    argument_types: &[Option<uqa_sql::ast::ColumnType>],
-    explicit_variadic: bool,
-    nested_statement: bool,
-) -> Result<SQLResult, SQLError> {
-    invocation::run_call(
-        &engine.routine_invocation_context(),
-        name,
-        call_args,
-        argument_types,
-        explicit_variadic,
-        nested_statement,
-    )
-}
 pub(crate) fn execute_trigger_routine(
     engine: &Engine,
     function: &SQLUserFunction,
     context: &TriggerRoutineContext,
 ) -> Result<Value, SQLError> {
     invocation::execute_trigger_routine(&engine.routine_invocation_context(), function, context)
-}
-pub(crate) fn run_do_block(
-    engine: &Engine,
-    language: &str,
-    body: &str,
-    nested_statement: bool,
-) -> Result<SQLResult, SQLError> {
-    invocation::run_do_block(
-        &engine.anonymous_block_context(),
-        language,
-        body,
-        nested_statement,
-    )
-}
-pub(crate) fn run_create_function(
-    engine: &Engine,
-    def: CreateFunction,
-) -> Result<SQLResult, SQLError> {
-    engine.register_sql_function(def)?;
-    Ok(SQLResult::empty())
-}
-
-pub(crate) fn run_drop_function(
-    engine: &Engine,
-    stmt: &DropFunctionStmt,
-) -> Result<SQLResult, SQLError> {
-    engine.drop_sql_functions(stmt)?;
-    Ok(SQLResult::empty())
 }
 
 pub(crate) fn analyze_call_result_schema(

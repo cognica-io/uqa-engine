@@ -40,21 +40,6 @@ impl Engine {
             &uqa_execution::query::binding::binding_context(&scope)?,
         )
     }
-
-    pub(crate) fn bind_execute_parameters(
-        &self,
-        name: &str,
-        arguments: &[ExpressionPlan],
-        outer_parameters: &[SQLParam],
-    ) -> Result<Vec<SQLParam>, SQLError> {
-        uqa_execution::query::prepared::bind_execute_parameters(
-            self,
-            name,
-            self.prepared_parameter_types(name),
-            arguments,
-            outer_parameters,
-        )
-    }
 }
 
 impl PreparedArgumentScopes for Engine {

@@ -10,20 +10,14 @@ use uqa_core::RelationIdentity;
 use uqa_execution::{
     catalog::view::{StoredView, ViewPublication},
     schema::view_alteration::{
-        self, ViewAlterAccess, ViewAlterCatalog, ViewAlterContext, ViewAlterPublication,
+        ViewAlterAccess, ViewAlterCatalog, ViewAlterContext, ViewAlterPublication,
         ViewAlterTransactions, ViewAlterWrite,
     },
 };
-use uqa_sql::{
-    ast::{AlterViewStmt, RelationPersistence},
-    SQLError,
-};
+use uqa_sql::{ast::RelationPersistence, SQLError};
 use uqa_storage::{StorageBackendResult, ViewRow};
 
 impl Engine {
-    pub(crate) fn alter_view(&self, statement: &AlterViewStmt) -> Result<(), SQLError> {
-        view_alteration::alter_view(self, statement)
-    }
     fn view_alter_context(&self) -> ViewAlterContext<'_> {
         ViewAlterContext {
             names: self,

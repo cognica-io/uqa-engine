@@ -174,3 +174,10 @@ mod tests {
 }
 
 pub mod completion;
+
+/// Execution measurements supplied to EXPLAIN rendering.
+pub struct ExplainAnalysis {
+    pub elapsed: std::time::Duration,
+    pub rows: u64,
+    pub affected_rows: u64,
+}

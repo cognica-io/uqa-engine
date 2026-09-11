@@ -182,9 +182,9 @@ impl RoutineCompilationSession for Engine {
 use uqa_execution::routines::{
     catalog::RoutineMutationContext,
     configuration::{RoutineConfigurationGuard, RoutineConfigurationSession},
-    registration::{self, RoutineCreationNamespace, RoutineRegistrationContext},
+    registration::{RoutineCreationNamespace, RoutineRegistrationContext},
 };
-use uqa_sql::{ast::AlterRoutineStmt, routines::registration::RoutineSupportAuthority};
+use uqa_sql::routines::registration::RoutineSupportAuthority;
 
 impl RoutineCreationNamespace for Engine {
     fn routine_name_for_create(&self, name: &str) -> Result<String, SQLError> {
@@ -219,7 +219,7 @@ impl Engine {
             changes: self,
         }
     }
-    fn routine_registration_context(&self) -> RoutineRegistrationContext<'_> {
+    pub(crate) fn routine_registration_context(&self) -> RoutineRegistrationContext<'_> {
         RoutineRegistrationContext {
             catalog: self.routine_mutation_context(),
             namespace: self,
@@ -228,10 +228,11 @@ impl Engine {
             configuration: self,
         }
     }
+    #[cfg(test)]
     pub(crate) fn register_sql_function(&self, def: CreateFunction) -> Result<(), SQLError> {
-        registration::register_sql_function(&self.routine_registration_context(), def)
-    }
-    pub(crate) fn alter_sql_routine(&self, stmt: &AlterRoutineStmt) -> Result<(), SQLError> {
-        registration::alter_sql_routine(&self.routine_registration_context(), stmt)
+        uqa_execution::routines::registration::register_sql_function(
+            &self.routine_registration_context(),
+            def,
+        )
     }
 }

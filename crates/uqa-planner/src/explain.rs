@@ -13,11 +13,7 @@ use uqa_sql::{
     ResultRow, SQLError, SQLResult, ScalarExpr,
 };
 
-pub struct ExplainAnalysis {
-    pub elapsed: std::time::Duration,
-    pub rows: u64,
-    pub affected_rows: u64,
-}
+pub use uqa_sql::result::ExplainAnalysis;
 
 pub fn run_explain(
     body: &UnifiedPlan,

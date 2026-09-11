@@ -7,3 +7,8 @@
 //! SQL statement execution, transaction boundaries, and batch scheduling.
 
 pub mod transactions;
+
+pub mod context;
+pub mod plan_executor;
+
+pub mod validation;

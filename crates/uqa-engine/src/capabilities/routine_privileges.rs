@@ -7,9 +7,9 @@
 //! Bind routine privilege analysis and publication to current role and session state.
 
 use crate::Engine;
-use uqa_execution::routines::privileges::{self, RoutinePrivilegeContext, RoutinePrivilegeNotices};
+use uqa_execution::routines::privileges::{RoutinePrivilegeContext, RoutinePrivilegeNotices};
 use uqa_sql::{
-    ast::{AlterRoutineOwnerStmt, CreateFunction, GrantRoutineStmt},
+    ast::CreateFunction,
     routines::security::{self, RoutineExecutionAuthority},
     SQLError,
 };
@@ -28,22 +28,13 @@ impl RoutinePrivilegeNotices for Engine {
     }
 }
 impl Engine {
-    fn routine_privilege_context(&self) -> RoutinePrivilegeContext<'_> {
+    pub(crate) fn routine_privilege_context(&self) -> RoutinePrivilegeContext<'_> {
         RoutinePrivilegeContext {
             catalog: self.routine_mutation_context(),
             types: self,
             role_names: self,
             notices: self,
         }
-    }
-    pub(crate) fn alter_sql_routine_owner(
-        &self,
-        stmt: &AlterRoutineOwnerStmt,
-    ) -> Result<(), SQLError> {
-        privileges::alter_sql_routine_owner(&self.routine_privilege_context(), stmt)
-    }
-    pub(crate) fn grant_sql_routine(&self, stmt: &GrantRoutineStmt) -> Result<(), SQLError> {
-        privileges::grant_sql_routine(&self.routine_privilege_context(), stmt)
     }
     pub(crate) fn ensure_routine_execute_privilege_named(
         &self,

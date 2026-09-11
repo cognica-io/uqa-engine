@@ -6,55 +6,57 @@
 
 //! Exhaustive physical executor for the unified SQL plan.
 
+use crate::schema::ctas::CreateTableAsExecution;
 use uqa_core::Value;
-use uqa_execution::schema::ctas::CreateTableAsExecution;
-use uqa_planner::{
+use uqa_sql::ast::{CreateForeignServer, CreateForeignTable};
+use uqa_sql::plan::{
     CommandPlan, DeletePlan, ExpressionPlan, InsertPlan, MergePlan, QueryPlan, UnifiedPlan,
     UpdatePlan,
 };
-use uqa_sql::ast::{CreateForeignServer, CreateForeignTable};
 use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 
-use crate::capabilities::{QueryRuntimeView, SessionExecutionView};
-use uqa_execution::schema::view_creation::{self, MaterializedViewRegistration, ViewRegistration};
+use super::context::StatementExecutionContext;
+use crate::schema::view_creation::{self, MaterializedViewRegistration, ViewRegistration};
 
-use super::scalar::{
-    analyze_physical_call_arguments, eval_physical_call_arguments, PhysicalEvalContext,
+use crate::query::output::QueryOutput;
+use crate::query::statement::{
+    consumer::QueryOutputMode, execute_query_plan_output, execute_query_plan_with_ctes,
 };
-use super::{run_explain, select, Engine};
-use crate::capabilities::routine_invocation;
+use crate::scalar::plan::{analyze_physical_call_arguments, eval_physical_call_arguments};
 
 /// Owns top-level plan orchestration. Relational, mutation, DDL, procedural,
 /// and prepared-plan execution all enter through this exhaustive dispatcher;
 /// leaf executors never choose a second top-level SQL path.
-pub(crate) struct UnifiedPlanExecutor<'engine, 'params> {
-    engine: &'engine Engine,
-    session: SessionExecutionView<'engine>,
-    runtime: QueryRuntimeView<'engine>,
+pub struct UnifiedPlanExecutor<'engine, 'params, S: Clone + 'static> {
+    context: StatementExecutionContext<'engine, S>,
     params: &'params [SQLParam],
     nested_statement: bool,
     privilege_subject: Option<String>,
     source_sql: Option<String>,
 }
 
-impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
-    pub(super) fn new(engine: &'engine Engine, params: &'params [SQLParam]) -> Self {
-        Self::with_nested_statement(engine, params, false)
+impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'engine, 'params, S> {
+    pub fn new(
+        context: StatementExecutionContext<'engine, S>,
+        params: &'params [SQLParam],
+    ) -> Self {
+        Self::with_nested_statement(context, params, false)
     }
 
-    pub(crate) fn new_nested(engine: &'engine Engine, params: &'params [SQLParam]) -> Self {
-        Self::with_nested_statement(engine, params, true)
+    pub fn new_nested(
+        context: StatementExecutionContext<'engine, S>,
+        params: &'params [SQLParam],
+    ) -> Self {
+        Self::with_nested_statement(context, params, true)
     }
 
-    pub(super) fn with_nested_statement(
-        engine: &'engine Engine,
+    pub fn with_nested_statement(
+        context: StatementExecutionContext<'engine, S>,
         params: &'params [SQLParam],
         nested_statement: bool,
     ) -> Self {
         Self {
-            engine,
-            session: engine.session_execution_view(),
-            runtime: engine.query_runtime_view(),
+            context,
             params,
             nested_statement,
             privilege_subject: None,
@@ -62,53 +64,54 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         }
     }
 
-    pub(super) fn with_privilege_subject(mut self, subject: &str) -> Self {
+    pub fn with_privilege_subject(mut self, subject: &str) -> Self {
         self.privilege_subject = Some(subject.to_string());
         self
     }
 
-    pub(super) fn with_source_sql(mut self, sql: &str) -> Self {
+    pub fn with_source_sql(mut self, sql: &str) -> Self {
         self.source_sql = Some(sql.to_string());
         self
     }
 
-    pub(crate) fn execute(&mut self, plan: &UnifiedPlan) -> Result<SQLResult, SQLError> {
-        self.runtime.check_cancelled()?;
-        super::cte_validation::validate_plan(self.engine, plan)?;
-        uqa_execution::statement::transactions::validate_transaction_plan(
-            self.engine,
-            &self.engine.query_effect_context(),
+    pub fn execute(&mut self, plan: &UnifiedPlan) -> Result<SQLResult, SQLError> {
+        super::validation::validate_plan(
+            &self.context.validation,
+            self.context.runtime.cancellation,
             plan,
         )?;
-        let transaction_failed = self.engine.transaction_failed();
+        let transaction_failed = self.context.controls.transaction_failed();
         let mut result = match plan {
             UnifiedPlan::Query(query) => self.execute_query(query),
             UnifiedPlan::Command(command) => self.execute_command(command),
         }?;
-        super::completion::set_command_completion(plan, &mut result, transaction_failed);
+        uqa_sql::result::completion::set_command_completion(plan, &mut result, transaction_failed);
         Ok(result)
     }
 
     fn execute_query(&self, query: &QueryPlan) -> Result<SQLResult, SQLError> {
-        if self.session.transaction_depth() != 0 {
-            select::lock_query_relations(self.engine, query)?;
+        if self.context.validation.transactions.transaction_depth() != 0 {
+            crate::query::locking::lock_query_relations(
+                self.context.queries.row_lock_context(),
+                query,
+            )?;
         }
-        let mut ctes = crate::capabilities::query_scope::new_for_statement(
-            self.engine,
-            self.privilege_subject.as_deref(),
-        );
-        select::execute_query_plan_with_ctes(self.engine, query, self.params, &mut ctes)
+        let mut ctes = self
+            .context
+            .queries
+            .statement_scope(self.privilege_subject.as_deref());
+        execute_query_plan_with_ctes(
+            &self.context.queries.query_context(),
+            query,
+            self.params,
+            &mut ctes,
+        )
     }
 
-    pub(super) fn execute_query_to_spill(
-        &self,
-        plan: &UnifiedPlan,
-    ) -> Result<select::QueryOutput, SQLError> {
-        self.runtime.check_cancelled()?;
-        super::cte_validation::validate_plan(self.engine, plan)?;
-        uqa_execution::statement::transactions::validate_transaction_plan(
-            self.engine,
-            &self.engine.query_effect_context(),
+    pub fn execute_query_to_spill(&self, plan: &UnifiedPlan) -> Result<QueryOutput, SQLError> {
+        super::validation::validate_plan(
+            &self.context.validation,
+            self.context.runtime.cancellation,
             plan,
         )?;
         let UnifiedPlan::Query(query) = plan else {
@@ -116,19 +119,22 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 "SQL cursor accepts exactly one query statement".into(),
             ));
         };
-        if self.session.transaction_depth() != 0 {
-            select::lock_query_relations(self.engine, query)?;
+        if self.context.validation.transactions.transaction_depth() != 0 {
+            crate::query::locking::lock_query_relations(
+                self.context.queries.row_lock_context(),
+                query,
+            )?;
         }
-        let mut ctes = crate::capabilities::query_scope::new_for_statement(
-            self.engine,
-            self.privilege_subject.as_deref(),
-        );
-        select::execute_query_plan_output(
-            self.engine,
+        let mut ctes = self
+            .context
+            .queries
+            .statement_scope(self.privilege_subject.as_deref());
+        execute_query_plan_output(
+            &self.context.queries.query_context(),
             query,
             self.params,
             &mut ctes,
-            select::QueryOutputMode::SharedSpill,
+            QueryOutputMode::SharedSpill,
         )
     }
 
@@ -138,8 +144,8 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             &mut plan.statement_privilege_subject,
             &mut plan.target_privilege_subject,
         );
-        uqa_execution::mutation::entry::run_insert(
-            &self.engine.mutation_entry_context(),
+        crate::mutation::entry::run_insert(
+            &self.context.mutations.mutation_context(),
             plan,
             self.params,
             None,
@@ -152,8 +158,8 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             &mut plan.statement_privilege_subject,
             &mut plan.target_privilege_subject,
         );
-        uqa_execution::mutation::entry::run_update(
-            &self.engine.mutation_entry_context(),
+        crate::mutation::entry::run_update(
+            &self.context.mutations.mutation_context(),
             plan,
             self.params,
             None,
@@ -166,8 +172,8 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             &mut plan.statement_privilege_subject,
             &mut plan.target_privilege_subject,
         );
-        uqa_execution::mutation::entry::run_delete(
-            &self.engine.mutation_entry_context(),
+        crate::mutation::entry::run_delete(
+            &self.context.mutations.mutation_context(),
             plan,
             self.params,
             None,
@@ -196,7 +202,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         options: &[(String, String)],
     ) -> Result<SQLResult, SQLError> {
         view_creation::register_view_plan(
-            self.engine,
+            self.context.schemas.views,
             ViewRegistration {
                 name,
                 column_names,
@@ -214,7 +220,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         let mut row = ResultRow::new();
         row.insert(
             name.to_string(),
-            Value::Str(self.session.show_variable(name)?),
+            Value::Str(self.context.validation.session.show_variable(name)?),
         );
         Ok(SQLResult {
             kind: uqa_sql::SQLResultKind::Rows,
@@ -236,14 +242,14 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
     ) -> Result<SQLResult, SQLError> {
         let analysis = if analyze {
             let started = std::time::Instant::now();
-            let mut executor = UnifiedPlanExecutor::new_nested(self.engine, self.params);
+            let mut executor = UnifiedPlanExecutor::new_nested(self.context.clone(), self.params);
             executor
                 .privilege_subject
                 .clone_from(&self.privilege_subject);
             let result = executor.execute(body)?;
             let rows = u64::try_from(result.rows.len())
                 .map_err(|_| SQLError::Internal("EXPLAIN ANALYZE row count exceeds u64".into()))?;
-            Some(super::select::ExplainAnalysis {
+            Some(uqa_sql::result::ExplainAnalysis {
                 elapsed: started.elapsed(),
                 rows,
                 affected_rows: result.affected_rows,
@@ -251,7 +257,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         } else {
             None
         };
-        run_explain(body, verbose, format, analysis.as_ref())
+        (self.context.explain)(body, verbose, format, analysis.as_ref())
     }
 
     fn execute_prepare(
@@ -260,19 +266,22 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         parameter_types: &[uqa_sql::ast::ColumnType],
         body: &UnifiedPlan,
     ) -> Result<SQLResult, SQLError> {
-        if self.engine.lookup_prepared(name).is_some() {
+        if self.context.prepared.state.lookup_prepared(name).is_some() {
             return Err(uqa_sql::prepared::statement_error(
                 "42P05",
                 name,
                 "already exists",
             ));
         }
-        self.engine.register_prepared_plan_with_types(
-            name.to_string(),
-            body.clone(),
-            parameter_types,
-            self.source_sql.as_deref(),
-        )?;
+        self.context
+            .prepared
+            .state
+            .register_prepared_plan_with_types(
+                name.to_string(),
+                body.clone(),
+                parameter_types,
+                self.source_sql.as_deref(),
+            )?;
         Ok(SQLResult::empty())
     }
 
@@ -281,19 +290,25 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         name: &str,
         params: &[ExpressionPlan],
     ) -> Result<SQLResult, SQLError> {
-        let bound = self
-            .engine
-            .bind_execute_parameters(name, params, self.params)?;
+        let bound = crate::query::prepared::bind_execute_parameters(
+            self.context.prepared.arguments,
+            name,
+            self.context.prepared.state.prepared_parameter_types(name),
+            params,
+            self.params,
+        )?;
         let plan = self
-            .engine
+            .context
+            .prepared
+            .state
             .prepared_plan_for_execution(name, &bound)?
             .ok_or_else(|| uqa_sql::prepared::statement_error("26000", name, "does not exist"))?;
-        UnifiedPlanExecutor::new_nested(self.engine, &bound).execute(&plan)
+        UnifiedPlanExecutor::new_nested(self.context.clone(), &bound).execute(&plan)
     }
 
     fn execute_deallocate(&self, name: Option<&str>) -> Result<SQLResult, SQLError> {
         if let Some(name) = name {
-            if self.engine.lookup_prepared(name).is_none() {
+            if self.context.prepared.state.lookup_prepared(name).is_none() {
                 return Err(uqa_sql::prepared::statement_error(
                     "26000",
                     name,
@@ -301,7 +316,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 ));
             }
         }
-        self.engine.deallocate_prepared(name);
+        self.context.prepared.state.deallocate_prepared(name);
         Ok(SQLResult::empty())
     }
 
@@ -309,7 +324,8 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         &self,
         statement: &CreateForeignServer,
     ) -> Result<SQLResult, SQLError> {
-        self.engine
+        self.context
+            .foreign
             .register_foreign_server(
                 statement.name.clone(),
                 statement.fdw_type.clone(),
@@ -324,7 +340,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         &self,
         statement: &CreateForeignTable,
     ) -> Result<SQLResult, SQLError> {
-        self.engine.register_foreign_table_with_checks(
+        self.context.foreign.register_foreign_table_with_checks(
             statement.name.clone(),
             statement.server_name.clone(),
             statement.columns.clone(),
@@ -341,8 +357,8 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             &mut plan.statement_privilege_subject,
             &mut plan.target_privilege_subject,
         );
-        uqa_execution::mutation::entry::run_merge(
-            &self.engine.mutation_entry_context(),
+        crate::mutation::entry::run_merge(
+            &self.context.mutations.mutation_context(),
             plan,
             self.params,
             None,
@@ -355,28 +371,33 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         arguments: &[ExpressionPlan],
     ) -> Result<SQLResult, SQLError> {
         uqa_sql::routines::call::validate_call_arguments(arguments)?;
-        let scope = crate::capabilities::query_scope::new_for_current_routine(self.engine);
+        let scope = self.context.queries.statement_scope(None);
         let (call_arguments, explicit_variadic) = analyze_physical_call_arguments(arguments)?;
         let argument_types = uqa_sql::routines::call::infer_call_argument_types(
             arguments,
             &call_arguments,
             &mut |argument| {
-                select::bind_expression_plan_type(self.engine, argument, self.params, &scope)
+                crate::query::binding::bind_expression_plan_type(
+                    self.context.routines.resolution,
+                    argument,
+                    self.params,
+                    &scope,
+                )
             },
         )?;
-        let hook = select::ScopedEngineHook::new(self.engine, &scope);
-        let context = PhysicalEvalContext::new(None, self.params)
-            .with_function_hook(&hook)
-            .with_subquery_runner(&hook);
-        let args = eval_physical_call_arguments(arguments, &context)?;
-        routine_invocation::run_call(
-            self.engine,
-            name,
-            &args,
-            &argument_types,
-            explicit_variadic,
-            self.nested_statement,
-        )
+        self.context
+            .queries
+            .with_expression_context(&scope, self.params, &mut |context| {
+                let args = eval_physical_call_arguments(arguments, context)?;
+                crate::routines::invocation::run_call(
+                    &self.context.routines.inputs.invocation_context(),
+                    name,
+                    &args,
+                    &argument_types,
+                    explicit_variadic,
+                    self.nested_statement,
+                )
+            })
     }
 
     #[expect(
@@ -384,14 +405,14 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         reason = "preserves SELECT schema and row identity"
     )]
     fn execute_command(&self, command: &CommandPlan) -> Result<SQLResult, SQLError> {
-        if let Some(error) = super::catalog::virtual_relation_mutation_error(
-            &self.session.relation_name_resolution(),
+        if let Some(error) = uqa_sql::semantics::virtual_relation_mutation_error(
+            &self.context.validation.session.relation_name_resolution(),
             command,
         ) {
             // Semantic errors precede the view's rewrite-time mutation rejection.
-            let ctes = crate::capabilities::query_scope::new_for_current_routine(self.engine);
-            uqa_execution::query::binding::analyze_command_parameters(
-                self.engine,
+            let ctes = self.context.queries.statement_scope(None);
+            crate::query::binding::analyze_command_parameters(
+                self.context.routines.resolution,
                 command,
                 self.params,
                 &ctes,
@@ -400,107 +421,131 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         }
         match command {
             CommandPlan::CreateTable(statement) => {
-                uqa_execution::schema::table_creation::entry::run_create_table(
-                    self.engine,
+                crate::schema::table_creation::entry::run_create_table(
+                    self.context.schemas.creation,
                     statement.as_ref().clone(),
                 )
             }
             CommandPlan::CreateTableIfNotExists(statement) => {
-                uqa_execution::schema::table_creation::entry::run_create_table_if_not_exists(
-                    self.engine,
+                crate::schema::table_creation::entry::run_create_table_if_not_exists(
+                    self.context.schemas.creation,
                     statement.clone(),
                 )
             }
             CommandPlan::CreateIndex(statement) => {
-                uqa_execution::schema::indexes::creation::run_create_index(
-                    &self.engine.index_creation_context(),
+                crate::schema::indexes::creation::run_create_index(
+                    &self.context.schemas.inputs.index_creation_context(),
                     statement.clone(),
                 )
             }
             CommandPlan::Insert(plan) => self.execute_insert(plan),
             CommandPlan::Update(plan) => self.execute_update(plan),
             CommandPlan::Delete(plan) => self.execute_delete(plan),
-            CommandPlan::Drop(statement) => {
-                uqa_execution::schema::removal::entry::run_drop_statement(
-                    self.engine,
-                    statement.clone(),
-                )
-            }
+            CommandPlan::Drop(statement) => crate::schema::removal::entry::run_drop_statement(
+                self.context.schemas.removal,
+                statement.clone(),
+            ),
             CommandPlan::AlterRoutineOwner(statement) => {
-                self.engine.alter_sql_routine_owner(statement)?;
+                crate::routines::privileges::alter_sql_routine_owner(
+                    &self.context.routines.inputs.privilege_context(),
+                    statement,
+                )?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::RenameRoutine(statement) => {
-                self.engine.rename_sql_routine(statement)?;
+                self.context
+                    .routines
+                    .transactions
+                    .with_rename(Box::new(|context| {
+                        crate::routines::rename::rename_sql_routine(context, statement)
+                    }))?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::GrantRoutine(statement) => {
-                self.engine.grant_sql_routine(statement)?;
+                crate::routines::privileges::grant_sql_routine(
+                    &self.context.routines.inputs.privilege_context(),
+                    statement,
+                )?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::GrantTable(statement) => {
-                self.engine.grant_table_privileges(statement)?;
+                self.context
+                    .table_privileges
+                    .grant_table_privileges(statement)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::GrantSequence(statement) => {
-                self.engine.grant_sequence_privileges(statement)?;
+                self.context
+                    .schemas
+                    .inputs
+                    .sequence_privilege_context()
+                    .grant_sequence_privileges(statement)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::GrantDatabase(statement) => {
-                self.engine.grant_database_privileges(statement)?;
+                crate::catalog::security::database_lifecycle::grant_database_privileges(
+                    &self.context.schemas.inputs.database_privilege_context(),
+                    statement,
+                )?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::GrantSchema(statement) => {
-                uqa_execution::schema::namespaces::privileges::grant_schema_privileges(
-                    &self.engine.schema_privilege_context(),
+                crate::schema::namespaces::privileges::grant_schema_privileges(
+                    &self.context.schemas.inputs.schema_privilege_context(),
                     statement,
                 )?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::GrantRole(statement) => {
-                self.engine.grant_roles(statement)?;
+                self.context.roles.grant_roles(statement)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::CreateRole(statement) => {
-                self.engine.create_role(statement)?;
+                self.context.roles.create_role(statement)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::AlterRole(statement) => {
-                self.engine.alter_role(statement)?;
+                self.context.roles.alter_role(statement)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::DropRole(statement) => {
-                self.engine.drop_roles(statement)?;
+                self.context.roles.drop_roles(statement)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::CreateTrigger(statement) => {
-                self.engine.register_trigger(statement.clone())?;
+                self.context.events.register_trigger(statement.clone())?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::DropTrigger(statement) => {
-                self.engine.drop_trigger_sql(statement)?;
+                self.context.events.drop_trigger_sql(statement)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::CreateRule(statement) => {
-                self.engine.register_rule(statement.clone())?;
+                self.context.events.register_rule(statement.clone())?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::DropRule(statement) => {
-                self.engine.drop_rule_sql(statement)?;
+                self.context.events.drop_rule_sql(statement)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::AlterTable(statement) => {
-                uqa_execution::schema::table_alteration::entry::run_alter_table(
-                    &self.engine.table_alter_entry_context(),
+                crate::schema::table_alteration::entry::run_alter_table(
+                    &self.context.schemas.inputs.table_alter_entry_context(),
                     (**statement).clone(),
                 )
             }
             CommandPlan::AlterForeignTable(statement) => {
-                self.engine.alter_foreign_table(statement)?;
+                crate::schema::foreign_table_alteration::alter_foreign_table(
+                    self.context.schemas.foreign_alteration,
+                    statement,
+                )?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::AlterView(statement) => {
-                self.engine.alter_view(statement)?;
+                crate::schema::view_alteration::alter_view(
+                    self.context.schemas.view_alteration,
+                    statement,
+                )?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::CreateView {
@@ -527,7 +572,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 query,
             } => {
                 let populated_rows = view_creation::register_materialized_view_plan(
-                    self.engine,
+                    self.context.schemas.views,
                     MaterializedViewRegistration {
                         name,
                         column_names,
@@ -551,7 +596,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 with_no_data,
             } => {
                 view_creation::refresh_materialized_view(
-                    self.engine,
+                    self.context.schemas.views,
                     name,
                     *concurrently,
                     *with_no_data,
@@ -561,31 +606,29 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             CommandPlan::CreateSchema {
                 name,
                 if_not_exists,
-            } => uqa_execution::schema::namespaces::create_schema(
-                &self.engine.schema_creation_context(),
+            } => crate::schema::namespaces::create_schema(
+                &self.context.schemas.inputs.schema_creation_context(),
                 name,
                 *if_not_exists,
             ),
-            CommandPlan::AlterSchemaOwner { name, new_owner } => {
-                self.engine.with_implicit_transaction(|engine| {
-                    uqa_execution::schema::namespaces::alter_schema_owner(
-                        &engine.schema_owner_context(),
-                        name,
-                        new_owner,
-                    )?;
+            CommandPlan::AlterSchemaOwner { name, new_owner } => self
+                .context
+                .schemas
+                .owners
+                .with_owner_write(Box::new(|context| {
+                    crate::schema::namespaces::alter_schema_owner(context, name, new_owner)?;
                     Ok(SQLResult::empty())
-                })
-            }
+                })),
             CommandPlan::Notify { channel, payload } => {
-                self.engine.notify(channel, payload)?;
+                self.context.notifications.notify(channel, payload)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::Listen { channel } => {
-                self.engine.listen(channel)?;
+                self.context.notifications.listen(channel)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::Unlisten { channel } => {
-                self.engine.unlisten(channel.as_deref())?;
+                self.context.notifications.unlisten(channel.as_deref())?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::SetVariable {
@@ -594,7 +637,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 local,
                 is_default,
             } => {
-                self.engine.set_runtime_parameter(
+                self.context.settings.set_runtime_parameter(
                     name,
                     (!is_default).then_some(value.as_str()),
                     *local,
@@ -602,28 +645,33 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 Ok(SQLResult::empty())
             }
             CommandPlan::ResetVariable { name } => {
-                self.engine.set_runtime_parameter(name, None, false)?;
+                self.context
+                    .settings
+                    .set_runtime_parameter(name, None, false)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::ResetAllVariables => {
-                self.engine.reset_all_variables();
+                self.context.settings.reset_all_variables();
                 Ok(SQLResult::empty())
             }
             CommandPlan::SetConstraints {
                 constraints,
                 deferred,
             } => {
-                self.engine
-                    .set_constraints(constraints, *deferred, self.nested_statement)?;
+                self.context.controls.set_constraints(
+                    constraints,
+                    *deferred,
+                    self.nested_statement,
+                )?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::ShowVariable { name } => self.execute_show_variable(name),
             CommandPlan::Discard { target } => {
-                self.engine.discard(*target)?;
+                self.context.settings.discard(*target)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::Load { library } => {
-                self.engine.load_library(library)?;
+                self.context.settings.load_library(library)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::Explain {
@@ -633,43 +681,44 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 body,
             } => self.execute_explain(body, *analyze, *verbose, format.as_deref()),
             CommandPlan::Analyze { table } => {
+                let context = self.context.schemas.inputs.vacuum_execution_context();
                 let targets = if let Some(requested) = table.as_deref() {
                     let Some((canonical, "table")) =
-                        self.engine.try_resolve_visible_relation_kind(requested)?
+                        context.catalog.resolve_relation_kind(requested)?
                     else {
                         return Err(SQLError::UnknownTable(requested.to_string()));
                     };
-                    self.engine.ensure_table_privilege(
-                        &canonical,
-                        crate::table_security::TableAclPrivilege::Maintain,
-                    )?;
+                    context.privileges.ensure_maintain(&canonical)?;
                     vec![canonical]
                 } else {
-                    self.engine.maintenance_table_names("analyze")?
+                    context.statistics.table_names("analyze")?
                 };
                 for target in targets {
-                    self.engine
-                        .run_analyze_target(&target, &[], true)
+                    context
+                        .statistics
+                        .analyze_target(&target, &[], true)
                         .map_err(|err| SQLError::Internal(format!("ANALYZE failed: {err}")))?;
                 }
                 Ok(SQLResult::empty())
             }
-            CommandPlan::Vacuum(statement) => uqa_execution::maintenance::run_vacuum(
-                &self.engine.vacuum_execution_context(),
+            CommandPlan::Vacuum(statement) => crate::maintenance::run_vacuum(
+                &self.context.schemas.inputs.vacuum_execution_context(),
                 statement,
             ),
             CommandPlan::Truncate {
                 tables,
                 cascade,
                 restart_identity,
-            } => uqa_execution::schema::truncate::execute(
-                &self.engine.truncate_context(),
+            } => crate::schema::truncate::execute(
+                &self.context.schemas.inputs.truncate_context(),
                 tables,
                 *cascade,
                 *restart_identity,
             ),
             CommandPlan::Transaction(statement) => {
-                self.engine.run_transaction_statement(statement.clone())?;
+                self.context
+                    .controls
+                    .run_transaction_statement(statement.clone())?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::DeclareCursor {
@@ -678,42 +727,37 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 scroll,
                 hold,
                 query,
-            } => super::session_portal_worker::declare_session_portal(
-                self.engine,
-                self.params,
-                name,
-                *binary,
-                *scroll,
-                *hold,
-                query,
-            ),
-            CommandPlan::FetchCursor(fetch) => self.engine.fetch_session_portal(fetch),
+            } => self
+                .context
+                .portals
+                .declare(self.params, name, *binary, *scroll, *hold, query),
+            CommandPlan::FetchCursor(fetch) => self.context.portals.fetch_session_portal(fetch),
             CommandPlan::CloseCursor { name } => {
                 if let Some(name) = name {
-                    self.engine.close_session_portal(name)?;
+                    self.context.portals.close_session_portal(name)?;
                 } else {
-                    self.engine.close_all_session_portals();
+                    self.context.portals.close_all_session_portals();
                 }
                 Ok(SQLResult::empty())
             }
             CommandPlan::CreateSequence(statement) => {
-                uqa_execution::schema::sequences::entry::run_create_sequence(
-                    self.engine,
-                    self.runtime.notices,
+                crate::schema::sequences::entry::run_create_sequence(
+                    self.context.schemas.sequence_creation,
+                    self.context.runtime.notices,
                     statement,
                 )
             }
             CommandPlan::CreateDomain(statement) => {
-                uqa_execution::schema::domains::create_domain(
-                    &self.engine.domain_creation_context(),
+                crate::schema::domains::create_domain(
+                    &self.context.schemas.inputs.domain_creation_context(),
                     statement.clone(),
                 )?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::AlterSequence(statement) => {
-                uqa_execution::schema::sequences::entry::run_alter_sequence(
-                    self.engine,
-                    self.runtime.notices,
+                crate::schema::sequences::entry::run_alter_sequence(
+                    self.context.schemas.sequence_alteration,
+                    self.context.runtime.notices,
                     statement,
                 )
             }
@@ -725,8 +769,8 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 persistence,
                 on_commit,
                 query,
-            } => uqa_execution::schema::ctas::entry::run_create_table_as(
-                self.engine,
+            } => crate::schema::ctas::entry::run_create_table_as(
+                self.context.schemas.tables_as,
                 CreateTableAsExecution {
                     name,
                     if_not_exists: *if_not_exists,
@@ -752,23 +796,40 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 self.execute_create_foreign_table(statement)
             }
             CommandPlan::CreateForeignTableIfNotExists(statement) => self
-                .engine
+                .context
+                .foreign
                 .register_deferred_foreign_table(statement.clone())
                 .map(|()| SQLResult::empty()),
             CommandPlan::Merge(plan) => self.execute_merge(plan),
             CommandPlan::CreateFunction(definition) => {
-                routine_invocation::run_create_function(self.engine, (**definition).clone())
-            }
-            CommandPlan::DropFunction(statement) => {
-                routine_invocation::run_drop_function(self.engine, statement)
-            }
-            CommandPlan::AlterRoutine(statement) => {
-                self.engine.alter_sql_routine(statement)?;
+                crate::routines::registration::register_sql_function(
+                    &self.context.routines.inputs.registration_context(),
+                    (**definition).clone(),
+                )?;
                 Ok(SQLResult::empty())
             }
-            CommandPlan::DoBlock { language, body } => {
-                routine_invocation::run_do_block(self.engine, language, body, self.nested_statement)
+            CommandPlan::DropFunction(statement) => {
+                self.context
+                    .routines
+                    .transactions
+                    .with_removal(Box::new(|context| {
+                        crate::routines::removal::drop_sql_functions(context, statement)
+                    }))?;
+                Ok(SQLResult::empty())
             }
+            CommandPlan::AlterRoutine(statement) => {
+                crate::routines::registration::alter_sql_routine(
+                    &self.context.routines.inputs.registration_context(),
+                    statement,
+                )?;
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::DoBlock { language, body } => crate::routines::invocation::run_do_block(
+                &self.context.routines.inputs.anonymous_block_context(),
+                language,
+                body,
+                self.nested_statement,
+            ),
             CommandPlan::Call { name, args } => self.execute_call(name, args),
         }
     }

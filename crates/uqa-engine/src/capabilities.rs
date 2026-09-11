@@ -645,3 +645,5 @@ mod view_references;
 mod view_removal;
 
 pub(crate) mod truncate;
+
+mod statements;

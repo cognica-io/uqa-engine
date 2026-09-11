@@ -7,14 +7,11 @@
 //! Bind routine rename publication to catalog state, its transaction, and dependent object services.
 
 use crate::{Engine, StorageBackendResult};
-use uqa_execution::routines::rename::{self, RoutineRenameContext, RoutineRenameDependents};
-use uqa_sql::{
-    ast::{FunctionBinding, RenameRoutineStmt},
-    SQLError,
-};
+use uqa_execution::routines::rename::{RoutineRenameContext, RoutineRenameDependents};
+use uqa_sql::{ast::FunctionBinding, SQLError};
 
 impl Engine {
-    fn routine_rename_context(&self) -> RoutineRenameContext<'_> {
+    pub(crate) fn routine_rename_context(&self) -> RoutineRenameContext<'_> {
         RoutineRenameContext {
             mutation: self.routine_mutation_context(),
             refresh: self,
@@ -22,11 +19,6 @@ impl Engine {
             compilation: self.stored_routine_compilation_context(),
             dependents: self,
         }
-    }
-    pub(crate) fn rename_sql_routine(&self, stmt: &RenameRoutineStmt) -> Result<(), SQLError> {
-        self.with_implicit_transaction(|engine| {
-            rename::rename_sql_routine(&engine.routine_rename_context(), stmt)
-        })
     }
 }
 impl RoutineRenameDependents for Engine {

@@ -91,7 +91,7 @@ pub(crate) fn execute_compiled_statement(
         engine.has_registered_aggregate_function(name)
     });
     let plan = plan_for_execution(engine, plan, params)?;
-    UnifiedPlanExecutor::new_nested(engine, params).execute(&plan)
+    UnifiedPlanExecutor::new_nested(engine.statement_execution_context(), params).execute(&plan)
 }
 
 pub(crate) fn execute_compiled_statement_with_privilege_subject(
@@ -105,7 +105,7 @@ pub(crate) fn execute_compiled_statement_with_privilege_subject(
     });
     super::catalog_statement_routines::mark_catalog_statement_relations_bound(&mut plan)?;
     let plan = plan_for_execution(engine, plan, params)?;
-    UnifiedPlanExecutor::new_nested(engine, params)
+    UnifiedPlanExecutor::new_nested(engine.statement_execution_context(), params)
         .with_privilege_subject(privilege_subject)
         .execute(&plan)
 }

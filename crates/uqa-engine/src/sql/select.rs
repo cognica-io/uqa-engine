@@ -42,7 +42,7 @@ pub(in crate::sql) use uqa_execution::query::output::QueryOutput;
 
 /// Execute a physical query plan while preserving the caller's CTE scope.
 mod execution;
-pub(super) use execution::{execute_query_plan_output, execute_query_plan_with_ctes};
+pub(super) use execution::execute_query_plan_output;
 
 pub(crate) use crate::capabilities::ScopedEngineHook;
 pub(crate) use row_locking::attach_lock_rows;

@@ -11,10 +11,6 @@ use uqa_execution::{PhysicalRow, RowSchema};
 use uqa_sql::plan::ExpressionPlan;
 use uqa_sql::{ResultRow, SQLError, SQLParam};
 
-pub(super) use uqa_execution::scalar::plan::{
-    analyze_physical_call_arguments, eval_physical_call_arguments, PhysicalEvalContext,
-};
-
 use crate::Engine;
 
 pub(crate) fn eval_lowered_expression(
