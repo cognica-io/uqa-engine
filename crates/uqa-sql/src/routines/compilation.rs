@@ -12,34 +12,39 @@ use super::{
         validate_routine_declaration, RoutineTypeCatalog,
     },
     merge_columns::StoredMergeColumnCatalog,
-    routine_local_name, CompiledFunctionBody,
+    routine_local_name, CompiledFunctionBody, RoutineResolution,
 };
 use crate::{
     ast::{ColumnType, CreateFunction, FunctionBody, Statement},
+    binding::{
+        snapshot::BindingSnapshot,
+        stored_relations::{
+            self, StoredQueryBindingContext, StoredQueryNamespace, StoredQuerySequences,
+            StoredRelationCatalog,
+        },
+    },
     catalog::regrole_dependencies::StoredRegroleResolver,
-    plan::{QueryPlan, UnifiedPlan},
+    plan::UnifiedPlan,
     plpgsql::PlpgsqlCatalog,
-    RowSchema, SQLError, SQLParam, ScalarExpr,
+    SQLError, ScalarExpr,
 };
 
 pub trait RoutineParserCatalog {
     fn plpgsql_catalog(&self) -> Result<PlpgsqlCatalog, SQLError>;
 }
-pub trait RoutinePlanBinding {
+pub trait RoutineCompilationCatalog {
     fn has_registered_aggregate_function(&self, name: &str) -> bool;
-    fn bind_definition_query_relations(&self, query: &mut QueryPlan) -> Result<(), SQLError>;
-    fn bind_persisted_query_relations(&self, query: &mut QueryPlan) -> Result<(), SQLError>;
-    fn bind_query_routines(
-        &self,
-        query: &mut QueryPlan,
-        params: &[SQLParam],
-        outer: &RowSchema,
-    ) -> Result<RowSchema, SQLError>;
+    fn binding_snapshot(&self) -> Result<BindingSnapshot, SQLError>;
+    fn stored_query_namespace(&self) -> StoredQueryNamespace;
 }
+#[derive(Clone, Copy)]
 pub struct RoutineCompilationContext<'a> {
     pub types: &'a dyn RoutineTypeCatalog,
     pub parsers: &'a dyn RoutineParserCatalog,
-    pub bindings: &'a dyn RoutinePlanBinding,
+    pub catalog: &'a dyn RoutineCompilationCatalog,
+    pub routines: &'a dyn RoutineResolution,
+    pub relations: &'a dyn StoredRelationCatalog,
+    pub sequences: &'a dyn StoredQuerySequences,
     pub merge: &'a dyn StoredMergeColumnCatalog,
     pub regroles: &'a dyn StoredRegroleResolver,
 }
@@ -168,7 +173,7 @@ fn compile_sql_routine_plans(
                 )?;
             }
             let mut plan = UnifiedPlan::lower_with(statement, &|name: &str| {
-                context.bindings.has_registered_aggregate_function(name)
+                context.catalog.has_registered_aggregate_function(name)
             });
             if persisted_definition {
                 plan.rewrite_scalar_expressions(&mut |expression| {
@@ -181,15 +186,26 @@ fn compile_sql_routine_plans(
             if bind_catalog_dependencies {
                 match &mut plan {
                     UnifiedPlan::Query(query) => {
-                        if persisted_definition {
-                            context.bindings.bind_persisted_query_relations(query)?;
-                        } else {
-                            context.bindings.bind_definition_query_relations(query)?;
-                        }
-                        context.bindings.bind_query_routines(
+                        let namespace = context.catalog.stored_query_namespace();
+                        stored_relations::bind_stored_query_relations(
+                            &StoredQueryBindingContext {
+                                relations: context.relations,
+                                sequences: context.sequences,
+                                temporary_schema: &namespace.temporary_schema,
+                                transition_relations: &namespace.transition_relations,
+                            },
+                            query,
+                            "SQL routine body",
+                            false,
+                            persisted_definition,
+                        )?;
+                        let binding = context.catalog.binding_snapshot()?;
+                        crate::binding::bind_query_plan_routines_for_storage(
+                            context.routines,
                             query,
                             &positional_parameters,
-                            &parameter_scope,
+                            &binding.context(),
+                            Some(&parameter_scope),
                         )?;
                     }
                     UnifiedPlan::Command(_) => {

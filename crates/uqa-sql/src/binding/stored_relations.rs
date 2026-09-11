@@ -9,7 +9,7 @@
 mod query;
 pub use query::{
     bind_stored_query_relations, resolve_loaded_query_sequence, StoredQueryBindingContext,
-    StoredQuerySequences,
+    StoredQueryNamespace, StoredQuerySequences,
 };
 
 use crate::{

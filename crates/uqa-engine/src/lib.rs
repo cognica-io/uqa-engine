@@ -781,15 +781,7 @@ fn next_table_lifecycle_id() -> u64 {
         .expect("table lifecycle id space exhausted")
 }
 
-fn new_nonzero_catalog_identity(owner: &str, kind: &str) -> StorageBackendResult<[u8; 16]> {
-    let mut identity = [0_u8; 16];
-    getrandom::fill(&mut identity)
-        .map_err(|error| StorageBackendError::Other(format!("allocate {owner} {kind}: {error}")))?;
-    if identity == [0; 16] {
-        identity[15] = 1;
-    }
-    Ok(identity)
-}
+pub(crate) use uqa_execution::catalog::identity::new_nonzero_catalog_identity;
 
 fn new_table_object_id() -> StorageBackendResult<[u8; 16]> {
     new_nonzero_catalog_identity("table", "object identity")

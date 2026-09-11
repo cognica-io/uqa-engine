@@ -96,8 +96,8 @@ The executable dependency policy is stored in [`scripts/workspace-dependency-pol
 | `uqa-graph` | Named graph stores, Cypher, RPQ automata, graph algebra, centrality, temporal traversal, and graph indexes |
 | `uqa-joins` | Relational and cross-paradigm join algorithms |
 | `uqa-pg-query` | Imported PostgreSQL 18 `libpg_query` pin used through the `pg_query` library name |
-| `uqa-sql` | Parser frontend, AST, scalar and statement IR, lowering, catalog definitions, name and type binding, routine signature resolution, prepared parameter inference, SQL validation, and value expressions |
-| `uqa-execution` | Physical rows and buffers, runtime scalar evaluation, batches, materialization, spill structures, distinctness, sorting, grouping, windows, and joins |
+| `uqa-sql` | Parser frontend, AST, scalar and statement IR, lowering, catalog definitions, name and type binding, routine signature and stored-definition binding, replacement and privilege rules, prepared parameter inference, SQL validation, and value expressions |
+| `uqa-execution` | Physical rows and buffers, runtime scalar evaluation, batches, materialization, spill structures, distinctness, sorting, grouping, windows, joins, and routine definition and privilege execution |
 | `uqa-planner` | Cardinality, cost, DPccp join ordering, unified-plan optimization, and physical access selection |
 | `uqa-engine` | Composition, SQL lifecycle, sessions, transactions, restore, publication, and public API |
 | `uqa` | Application facade over `uqa-engine` with the core `Value` type re-exported |
@@ -180,6 +180,7 @@ Responsibility roots remain facades over semantic children rather than line-coun
 | Physical scalar evaluation | [`crates/uqa-execution/src/scalar`](../../../crates/uqa-execution/src/scalar) |
 | SQL scalar IR and traversal | [`crates/uqa-sql/src/ir`](../../../crates/uqa-sql/src/ir) |
 | Routine signature resolution | [`crates/uqa-sql/src/type_resolution/routine_signature`](../../../crates/uqa-sql/src/type_resolution/routine_signature) |
+| Routine definition and privilege execution | [`crates/uqa-execution/src/routines`](../../../crates/uqa-execution/src/routines) |
 | DISTINCT execution | [`crates/uqa-execution/src/distinct`](../../../crates/uqa-execution/src/distinct) |
 | Hash-join execution | [`crates/uqa-execution/src/join`](../../../crates/uqa-execution/src/join) |
 | Engine composition | [`crates/uqa-engine/src/lib.rs`](../../../crates/uqa-engine/src/lib.rs) |

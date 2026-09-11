@@ -6,15 +6,30 @@
 
 //! Creation-time relation identities in SQL-standard bodies and argument defaults.
 
+use super::{declaration::RoutineTypeCatalog, lifecycle::relations::is_regclass};
+use crate::{
+    ast::{ColumnType, CreateFunction, Expr, FunctionBody},
+    SQLError,
+};
 use uqa_core::Value;
-use uqa_sql::ast::{ColumnType, CreateFunction, Expr, FunctionBody};
 
-use super::{Engine, SQLError};
-use uqa_sql::routines::lifecycle::relations::is_regclass;
-
-impl Engine {
+pub trait RoutineRegclassCatalog {
+    fn resolve_routine_regclass(&self, reference: &str) -> Result<Option<i64>, SQLError>;
+}
+pub fn bind_routine_regclass_constants(
+    types: &dyn RoutineTypeCatalog,
+    relations: &dyn RoutineRegclassCatalog,
+    definition: &mut CreateFunction,
+) -> Result<bool, SQLError> {
+    RegclassBinding { types, relations }.bind_routine_constants(definition)
+}
+struct RegclassBinding<'a> {
+    types: &'a dyn RoutineTypeCatalog,
+    relations: &'a dyn RoutineRegclassCatalog,
+}
+impl RegclassBinding<'_> {
     fn regclass_base_type(&self, name: &str) -> bool {
-        let Some(mut ty) = crate::sql::resolve_catalog_column_type(self, name) else {
+        let Some(mut ty) = self.types.resolve_catalog_column_type(name) else {
             return false;
         };
         while let ColumnType::Domain { base, .. } = ty {
@@ -26,7 +41,7 @@ impl Engine {
     fn bind_regclass_literal(&self, expression: &mut Expr) -> Result<bool, SQLError> {
         if let Expr::Func { binding, args, .. } = expression {
             if binding.as_ref().and_then(|binding| binding.dispatch)
-                == Some(uqa_sql::ast::FunctionDispatch::NamedArgument)
+                == Some(crate::ast::FunctionDispatch::NamedArgument)
             {
                 return args
                     .get_mut(1)
@@ -36,12 +51,13 @@ impl Engine {
         let Expr::Literal(Value::Str(reference)) = expression else {
             return Ok(false);
         };
-        let oid = crate::sql::resolve_regclass_oid(self, reference)?.ok_or_else(|| {
-            SQLError::Routine {
+        let oid = self
+            .relations
+            .resolve_routine_regclass(reference)?
+            .ok_or_else(|| SQLError::Routine {
                 sqlstate: "42P01".into(),
                 message: format!("relation \"{reference}\" does not exist"),
-            }
-        })?;
+            })?;
         *expression = Expr::TypedLiteral {
             value: Value::Int(oid),
             ty: "regclass".into(),
@@ -89,33 +105,14 @@ impl Engine {
         }
     }
 
-    pub(super) fn bind_routine_regclass_constants(
-        &self,
-        definition: &mut CreateFunction,
-    ) -> Result<bool, SQLError> {
-        let previous = {
-            let mut state = self.session.state.write();
-            std::mem::replace(
-                &mut state.search_path,
-                definition.creation_search_path.clone(),
-            )
-        };
-        let result = self.bind_routine_regclass_constants_at_search_path(definition);
-        self.session.state.write().search_path = previous;
-        result
-    }
-
-    fn bind_routine_regclass_constants_at_search_path(
-        &self,
-        definition: &mut CreateFunction,
-    ) -> Result<bool, SQLError> {
+    fn bind_routine_constants(&self, definition: &mut CreateFunction) -> Result<bool, SQLError> {
         let mut changed = false;
         for parameter in &mut definition.params {
             if let Some(default) = &mut parameter.default {
                 if self.regclass_base_type(&parameter.type_name) {
                     changed |= self.bind_regclass_literal(default)?;
                 }
-                crate::events::visit_stored_expression(default, &mut |expression| {
+                crate::catalog::stored_ast::visit_stored_expression(default, &mut |expression| {
                     changed |= self.bind_regclass_expression(expression)?;
                     Ok(())
                 })?;
@@ -123,10 +120,13 @@ impl Engine {
         }
         if let FunctionBody::Statements(statements) = &mut definition.body {
             for statement in statements {
-                crate::events::visit_stored_statement_expressions(statement, &mut |expression| {
-                    changed |= self.bind_regclass_expression(expression)?;
-                    Ok(())
-                })?;
+                crate::catalog::stored_ast::visit_stored_statement_expressions(
+                    statement,
+                    &mut |expression| {
+                        changed |= self.bind_regclass_expression(expression)?;
+                        Ok(())
+                    },
+                )?;
             }
         }
         Ok(changed)

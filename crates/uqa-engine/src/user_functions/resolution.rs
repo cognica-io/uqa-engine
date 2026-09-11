@@ -772,14 +772,6 @@ fn static_routine_argument_types(argument_types: &[Option<ColumnType>]) -> Strin
         .join(", ")
 }
 
-pub(super) fn routine_kind(def: &CreateFunction) -> &'static str {
-    if def.is_procedure {
-        "procedure"
-    } else {
-        "function"
-    }
-}
-
 pub(crate) use uqa_sql::routines::{
     routine_local_name, routine_returns_anonymous_record, routine_signature_types,
     RoutineResolution, StaticFunctionMatch,

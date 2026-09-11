@@ -18,10 +18,8 @@ pub(crate) use rule_binding::{
 };
 pub(crate) use rule_condition_binding::RuleConditionBinding;
 pub(crate) use uqa_sql::catalog::stored_ast::{
-    bind_stored_expression_routines, bind_stored_statement_routines,
-    expression_references_routine_identity, rewrite_expression_routine_identity,
-    rewrite_statement_routine_identity, visit_stored_expression,
-    visit_stored_statement_expressions,
+    bind_stored_expression_routines, expression_references_routine_identity,
+    rewrite_expression_routine_identity, rewrite_statement_routine_identity,
 };
 
 const RULE_CATALOG_FORMAT_VERSION: u32 = 3;

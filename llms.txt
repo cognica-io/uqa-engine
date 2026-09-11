@@ -50,7 +50,7 @@ When generating SQL:
 
 ## Optional
 
-- [Internal architecture](docs/manual/internals/README.md): SQL and stored-definition binding, statement execution ownership, runtime state adapters, crate dependency direction, and subsystem navigation.
+- [Internal architecture](docs/manual/internals/README.md): SQL and stored-definition binding, routine and statement execution ownership, runtime state adapters, crate dependency direction, and subsystem navigation.
 - [Storage internals](docs/manual/internals/03-storage.md): Provider-independent storage and graph contracts, SQLite provider ownership, transaction affinity, persistent formats, and migrations.
 - [Planning and execution](docs/manual/internals/02-planning-and-execution.md): Unified plans, operator joins, optimization, statement execution, and physical retrieval.
 - [Analyzer internals](docs/manual/internals/04-analyzer-pipeline.md): Analyzer representation and index/search phases.

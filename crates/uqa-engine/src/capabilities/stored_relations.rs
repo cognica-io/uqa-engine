@@ -65,23 +65,6 @@ impl Engine {
         context: &str,
         reject_transition_relations: bool,
     ) -> Result<bool, SQLError> {
-        self.bind_stored_query_relation_inputs(plan, context, reject_transition_relations, false)
-    }
-    pub(crate) fn bind_loaded_stored_query_relations(
-        &self,
-        plan: &mut QueryPlan,
-        context: &str,
-        reject_transition_relations: bool,
-    ) -> Result<bool, SQLError> {
-        self.bind_stored_query_relation_inputs(plan, context, reject_transition_relations, true)
-    }
-    fn bind_stored_query_relation_inputs(
-        &self,
-        plan: &mut QueryPlan,
-        context: &str,
-        reject_transition_relations: bool,
-        loaded_catalog: bool,
-    ) -> Result<bool, SQLError> {
         let temporary_schema = self.temporary_schema_name();
         let transition_relations = crate::sql::active_trigger_transition_relation_names();
         analysis::bind_stored_query_relations(
@@ -94,7 +77,7 @@ impl Engine {
             plan,
             context,
             reject_transition_relations,
-            loaded_catalog,
+            false,
         )
     }
     pub(crate) fn bind_rule_action_relation_dependencies(
@@ -110,20 +93,5 @@ impl Engine {
         lookup_mode: RelationLookupMode,
     ) -> Result<RuleDependencies, SQLError> {
         analysis::bind_rule_condition_relation_dependencies(self, expression, lookup_mode)
-    }
-    pub(crate) fn bind_stored_statement_relations(
-        &self,
-        statement: &mut Statement,
-        lookup_mode: RelationLookupMode,
-        loaded_catalog: bool,
-        context: &str,
-    ) -> Result<bool, SQLError> {
-        analysis::bind_stored_statement_relations(
-            self,
-            statement,
-            lookup_mode,
-            loaded_catalog,
-            context,
-        )
     }
 }

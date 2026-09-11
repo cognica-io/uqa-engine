@@ -3787,6 +3787,7 @@ version = "0.2.3"
 dependencies = [
  "ahash",
  "ciborium",
+ "getrandom 0.3.4",
  "libc",
  "parking_lot",
  "rayon",

@@ -534,6 +534,7 @@ mod view_rewrite;
 
 mod routine_definitions;
 mod routine_execution;
+mod routine_privileges;
 mod routine_removal;
 
 mod query_sources;
