@@ -8,16 +8,12 @@
 
 use std::sync::Arc;
 
-use uqa_execution::{ExecResult, SharedExpressionEvaluator};
+use uqa_execution::SharedExpressionEvaluator;
 use uqa_sql::expr::RowLookup;
 
 use crate::capabilities::QueryRuntimeView;
 
-use super::super::{
-    query_contains_volatile_function, Engine, PhysicalOuterRow, SQLError, SQLParam, ScalarExpr,
-    Value,
-};
-use super::subqueries::CachedCorrelatedExists;
+use super::super::{Engine, SQLError, SQLParam, ScalarExpr, Value};
 use super::CteScope;
 
 pub(crate) struct ScopedEngineHook<'a> {
@@ -37,6 +33,19 @@ impl<'a> ScopedEngineHook<'a> {
 }
 
 impl<'a> ScopedEngineHook<'a> {
+    pub(crate) fn subquery_context(
+        &self,
+    ) -> uqa_execution::query::subqueries::SubqueryContext<'_, crate::session::StatementReadSnapshot>
+    {
+        uqa_execution::query::subqueries::SubqueryContext {
+            services: self.engine.subquery_services(),
+            memory: self.runtime.settings,
+            ctes: &self.ctes,
+            function_hook: self,
+            subquery_runner: self,
+        }
+    }
+
     pub(crate) fn owned(engine: &'a Engine, ctes: CteScope) -> Self {
         Self {
             engine,
@@ -86,63 +95,6 @@ impl EngineExpressionEvaluator {
             engine.cancellation_token(),
         )
     }
-}
-
-struct PreparedCorrelatedExistsPredicate<'a> {
-    engine: &'a Engine,
-    params: &'a [SQLParam],
-    ctes: CteScope,
-    lookup: Arc<CachedCorrelatedExists>,
-    negated: bool,
-}
-
-impl uqa_execution::RowPredicate for PreparedCorrelatedExistsPredicate<'_> {
-    fn keep_physical(
-        &self,
-        schema: &uqa_execution::RowSchema,
-        row: &uqa_execution::PhysicalRow,
-    ) -> ExecResult<bool> {
-        let hook = ScopedEngineHook::new(self.engine, &self.ctes);
-        let exists = hook.correlated_exists_matches(
-            &self.lookup,
-            PhysicalOuterRow::Physical { schema, row },
-            self.params,
-        )?;
-        Ok(if self.negated { !exists } else { exists })
-    }
-}
-
-/// Prepare a simple immutable correlated EXISTS before the outer scan starts. The filter then probes its key set directly, avoiding a scalar-expression walk and shared subquery-cache lock for every outer row.
-pub(crate) fn prepare_correlated_exists_predicate<'a>(
-    engine: &'a Engine,
-    expression: &ScalarExpr,
-    params: &'a [SQLParam],
-    ctes: &CteScope,
-) -> Result<Option<uqa_execution::SharedRowPredicate<'a>>, SQLError> {
-    let ScalarExpr::Exists { subquery, negated } = expression else {
-        return Ok(None);
-    };
-    let Some(plan) = ctes.scalar_subqueries.get(*subquery) else {
-        return Err(SQLError::Internal(format!(
-            "physical scalar subquery slot {subquery} is out of bounds"
-        )));
-    };
-    if query_contains_volatile_function(engine, plan)?
-        || !crate::sql::correlation::query_depends_on_outer_row(engine, plan)?
-    {
-        return Ok(None);
-    }
-    let hook = ScopedEngineHook::new(engine, ctes);
-    let Some(lookup) = hook.build_correlated_exists(plan, params)? else {
-        return Ok(None);
-    };
-    Ok(Some(Arc::new(PreparedCorrelatedExistsPredicate {
-        engine,
-        params,
-        ctes: ctes.clone(),
-        lookup,
-        negated: *negated,
-    })))
 }
 
 impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {

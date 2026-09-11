@@ -39,7 +39,6 @@ mod api;
 mod catalog;
 mod catalog_statement_routines;
 mod completion;
-mod correlation;
 mod cte_validation;
 mod cursor;
 mod driver;
@@ -58,7 +57,6 @@ mod triggers;
 pub(crate) fn active_trigger_transition_relation_names() -> std::collections::BTreeSet<String> {
     triggers::current_transition_relation_names()
 }
-mod volatility;
 mod window;
 
 pub(crate) use crate::capabilities::routine_invocation::{
@@ -160,6 +158,6 @@ mod tests;
 
 pub(crate) use triggers::current_transition_relations;
 
-pub(crate) use select::{attach_lock_rows, prepare_correlated_exists_predicate, ScopedEngineHook};
+pub(crate) use select::{attach_lock_rows, ScopedEngineHook};
 
 pub(crate) use crate::capabilities::routine_invocation::execute_trigger_routine;

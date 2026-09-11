@@ -69,3 +69,4 @@ pub mod model_training;
 pub mod scalar_functions;
 
 pub mod prepared;
+pub mod subqueries;

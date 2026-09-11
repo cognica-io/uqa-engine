@@ -42,7 +42,12 @@ impl QueryExpressionFactory<StatementReadSnapshot> for Engine {
         params: &'a [SQLParam],
         scope: &CteScope,
     ) -> Result<Option<SharedRowPredicate<'a>>, SQLError> {
-        crate::sql::prepare_correlated_exists_predicate(self, expression, params, scope)
+        uqa_execution::query::subqueries::prepare_correlated_exists_predicate(
+            &self.subquery_services(),
+            expression,
+            params,
+            scope,
+        )
     }
 }
 
@@ -59,3 +64,6 @@ impl RowLockOperatorFactory<StatementReadSnapshot> for Engine {
         crate::sql::attach_lock_rows(self, operator, statement, params, scope, max_rows, recheck)
     }
 }
+
+#[cfg(test)]
+mod tests;

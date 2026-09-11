@@ -515,6 +515,7 @@ pub(crate) mod query_scope;
 mod query_semantics;
 
 mod query_operators;
+mod subqueries;
 
 mod schema_analysis;
 
