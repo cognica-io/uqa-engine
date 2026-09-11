@@ -106,7 +106,7 @@ fn start_streaming_portal(engine: &Engine, state: &mut SessionPortalState) {
         state.transaction_origin,
     );
     state.data = SessionPortalData::Streaming {
-        worker: crate::sql::start_session_portal_worker(
+        worker: super::worker::start_session_portal_worker(
             worker_engine,
             query,
             params,

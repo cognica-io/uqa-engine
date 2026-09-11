@@ -52,7 +52,7 @@ impl Engine {
             settings: self,
             notifications: self,
             controls: self,
-            portals: self,
+            portals: self.portal_execution_context(),
             roles: self,
             events: self,
             foreign: self,

@@ -21,11 +21,9 @@ mod schema_binding;
 mod set_projection;
 
 pub(crate) use crate::capabilities::query_scope::CteScope;
-pub(in crate::sql) use cte_execution::*;
 pub(in crate::sql) use filter_pushdown::*;
 pub(in crate::sql) use physical_plan::*;
 pub(crate) use row_lock_retry_cache::RowLockRetryCache;
-pub(in crate::sql) use row_locking::*;
 pub(in crate::sql) use schema_binding::*;
 
 // -------------------------------------------------------------------------
@@ -37,7 +35,6 @@ pub(super) type QueryOutputMode<'consumer> =
         'consumer,
         crate::session::StatementReadSnapshot,
     >;
-pub(in crate::sql) use uqa_execution::query::consumer::QueryConsumerControl;
 pub(in crate::sql) use uqa_execution::query::output::QueryOutput;
 
 /// Execute a physical query plan while preserving the caller's CTE scope.

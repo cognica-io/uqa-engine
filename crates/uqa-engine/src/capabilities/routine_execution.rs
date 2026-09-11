@@ -111,7 +111,9 @@ impl RoutineTransactions for Engine {
 }
 impl RoutinePortals for Engine {
     fn ensure_available(&self, name: &str) -> Result<(), SQLError> {
-        crate::sql::session_portal_worker::ensure_plpgsql_session_portal_available(self, name)
+        uqa_execution::statement::portal::declaration::ensure_plpgsql_session_portal_available(
+            self, name,
+        )
     }
     fn open(
         &self,
@@ -120,8 +122,12 @@ impl RoutinePortals for Engine {
         scroll: Option<bool>,
         plan: &UnifiedPlan,
     ) -> Result<(), SQLError> {
-        crate::sql::session_portal_worker::open_plpgsql_session_portal(
-            self, params, name, scroll, plan,
+        uqa_execution::statement::portal::declaration::open_plpgsql_session_portal(
+            &self.portal_execution_context(),
+            params,
+            name,
+            scroll,
+            plan,
         )
     }
     fn fetch(&self, request: &FetchCursorStmt) -> Result<SQLResult, SQLError> {

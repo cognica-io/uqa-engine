@@ -8,7 +8,7 @@
 
 use uqa_sql::{
     ast::{ColumnType, DiscardTarget, FetchCursorStmt, SetConstraintName, TransactionStmt},
-    plan::{QueryPlan, UnifiedPlan},
+    plan::UnifiedPlan,
     SQLError, SQLParam, SQLResult,
 };
 
@@ -39,15 +39,16 @@ pub trait StatementControl {
     ) -> Result<(), SQLError>;
 }
 pub trait StatementPortals {
-    fn declare(
+    fn in_transaction_block(&self) -> bool;
+    fn ensure_session_portal_available(&self, name: &str) -> Result<(), SQLError>;
+    fn open_pending_session_portal(
         &self,
-        parameters: &[SQLParam],
-        name: &str,
-        binary: bool,
-        scroll: Option<bool>,
-        hold: bool,
-        query: &QueryPlan,
-    ) -> Result<SQLResult, SQLError>;
+        declaration: crate::statement::portal::SessionPortalDeclaration,
+    ) -> Result<(), SQLError>;
+    fn open_pending_command_session_portal(
+        &self,
+        declaration: crate::statement::portal::SessionPortalCommandDeclaration,
+    ) -> Result<(), SQLError>;
     fn fetch_session_portal(&self, fetch: &FetchCursorStmt) -> Result<SQLResult, SQLError>;
     fn close_session_portal(&self, name: &str) -> Result<(), SQLError>;
     fn close_all_session_portals(&self);

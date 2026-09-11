@@ -243,7 +243,8 @@
         "src/sql/cte_validation.rs",
         "src/sql/driver.rs",
         "src/sql/cursor.rs",
-        "src/sql/completion.rs"
+        "src/sql/completion.rs",
+        "src/sql/session_portal_worker.rs"
       ]
     },
     "crates/uqa-storage": {

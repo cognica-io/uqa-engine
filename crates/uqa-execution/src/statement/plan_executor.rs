@@ -727,16 +727,23 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 scroll,
                 hold,
                 query,
-            } => self
-                .context
-                .portals
-                .declare(self.params, name, *binary, *scroll, *hold, query),
-            CommandPlan::FetchCursor(fetch) => self.context.portals.fetch_session_portal(fetch),
+            } => super::portal::declaration::declare_session_portal(
+                &self.context.portals,
+                self.params,
+                name,
+                *binary,
+                *scroll,
+                *hold,
+                query,
+            ),
+            CommandPlan::FetchCursor(fetch) => {
+                self.context.portals.state.fetch_session_portal(fetch)
+            }
             CommandPlan::CloseCursor { name } => {
                 if let Some(name) = name {
-                    self.context.portals.close_session_portal(name)?;
+                    self.context.portals.state.close_session_portal(name)?;
                 } else {
-                    self.context.portals.close_all_session_portals();
+                    self.context.portals.state.close_all_session_portals();
                 }
                 Ok(SQLResult::empty())
             }

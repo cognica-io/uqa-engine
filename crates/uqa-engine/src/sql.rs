@@ -47,7 +47,6 @@ mod planning;
 mod regrole_dependencies;
 pub(crate) mod scalar;
 mod select;
-pub(crate) mod session_portal_worker;
 mod triggers;
 
 pub(crate) fn active_trigger_transition_relation_names() -> std::collections::BTreeSet<String> {
@@ -71,7 +70,6 @@ pub(super) use planning::{
     execute_compiled_statement_with_privilege_subject, optimize_engine_plan, optimize_engine_query,
     plan_for_execution,
 };
-use select::query_has_row_locks;
 pub(crate) use select::RowLockRetryCache;
 pub(crate) use triggers::{fire_deferred_constraint_trigger_event, DeferredConstraintTriggerEvent};
 pub use uqa_execution::query::cursor::{SQLCursor, SQLCursorSummary};
@@ -113,10 +111,7 @@ pub(crate) fn execute_nested_optimized_command(
     )
 }
 
-pub(in crate::sql) use crate::capabilities::routine_invocation::analyze_call_result_schema;
-
 pub(crate) use select::CteScope;
-pub(crate) use session_portal_worker::start_session_portal_worker;
 
 /// Analyze the declared RETURNING row type of a rewrite-rule action without executing the action.
 pub(crate) fn analyze_rule_action_returning_schema(
