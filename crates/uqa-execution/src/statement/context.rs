@@ -62,7 +62,7 @@ pub struct StatementExecutionContext<'a, S: Clone + 'static> {
     pub settings: &'a dyn session::StatementSettings,
     pub notifications: &'a dyn session::StatementNotifications,
     pub controls: &'a dyn session::StatementControl,
-    pub portals: &'a dyn session::StatementPortals,
+    pub portals: super::portal::context::PortalExecutionContext<'a, S>,
     pub roles: &'a dyn definitions::RoleDefinitions,
     pub events: &'a dyn definitions::EventDefinitions,
     pub foreign: &'a dyn definitions::ForeignDefinitions,

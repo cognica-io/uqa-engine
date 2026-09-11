@@ -518,27 +518,7 @@ struct SessionPortalState {
     _binary: bool,
 }
 
-pub(crate) struct SessionPortalDeclaration {
-    name: String,
-    query: uqa_planner::QueryPlan,
-    params: Vec<SQLParam>,
-    columns: Vec<String>,
-    column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
-    scrollable: bool,
-    holdable: bool,
-    binary: bool,
-}
-
-pub(crate) struct SessionPortalCommandDeclaration {
-    name: String,
-    command: Box<uqa_planner::CommandPlan>,
-    params: Vec<SQLParam>,
-    columns: Vec<String>,
-    column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
-    scrollable: bool,
-    /// `PostgreSQL` 18 materializes one `NULL`-filled tuple for each row produced by a modifying command opened with explicit `SCROLL`.
-    null_returning_values: bool,
-}
+use uqa_execution::statement::portal::{SessionPortalCommandDeclaration, SessionPortalDeclaration};
 
 enum SessionPortalData {
     Pending {
@@ -581,37 +561,9 @@ struct SessionPortalMaterialization {
     rows: uqa_execution::IndexedSpill,
 }
 
-enum SessionPortalWorkerRequest {
-    Step(uqa_execution::PhysicalScanDirection),
-    Rewind,
-    Close,
-}
-
-enum SessionPortalWorkerResponse {
-    Started {
-        columns: Vec<String>,
-        column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
-    },
-    Row(Vec<Value>),
-    Eof,
-    Rewound,
-    Error(SQLError),
-}
-
-struct SessionPortalWorker {
-    requests: std::sync::mpsc::Sender<SessionPortalWorkerRequest>,
-    responses: std::sync::mpsc::Receiver<SessionPortalWorkerResponse>,
-    join: Option<std::thread::JoinHandle<()>>,
-}
-
-impl Drop for SessionPortalWorker {
-    fn drop(&mut self) {
-        let _ = self.requests.send(SessionPortalWorkerRequest::Close);
-        if let Some(join) = self.join.take() {
-            let _ = join.join();
-        }
-    }
-}
+use uqa_execution::statement::portal::worker::{
+    SessionPortalWorker, SessionPortalWorkerRequest, SessionPortalWorkerResponse,
+};
 
 /// `PostgreSQL` distinguishes the positions before the first row and after the last row from a position on a row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

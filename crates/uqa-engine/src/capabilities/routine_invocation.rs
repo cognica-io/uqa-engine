@@ -127,23 +127,3 @@ pub(crate) fn execute_trigger_routine(
 ) -> Result<Value, SQLError> {
     invocation::execute_trigger_routine(&engine.routine_invocation_context(), function, context)
 }
-
-pub(crate) fn analyze_call_result_schema(
-    engine: &Engine,
-    name: &str,
-    arguments: &[uqa_sql::plan::ExpressionPlan],
-    params: &[uqa_sql::SQLParam],
-) -> Result<Option<uqa_sql::RowSchema>, SQLError> {
-    let analysis = uqa_sql::routines::call::ProcedureCallAnalysis::new(arguments)?;
-    let scope = crate::capabilities::query_scope::new_for_current_routine(engine);
-    analysis.result_schema(
-        name,
-        &RoutineOverloadContext { catalog: engine },
-        engine,
-        &mut |argument| {
-            uqa_execution::query::binding::bind_expression_plan_type(
-                engine, argument, params, &scope,
-            )
-        },
-    )
-}

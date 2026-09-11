@@ -8,6 +8,7 @@
 
 pub mod batch;
 pub mod cursor;
+pub mod portal;
 pub mod transactions;
 
 pub mod context;

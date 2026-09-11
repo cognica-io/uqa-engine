@@ -7,15 +7,14 @@
 //! Expose current settings, portals, notification queues and prepared registry state.
 
 use uqa_sql::{
-    ast::{ColumnType, DiscardTarget, FetchCursorStmt, SetConstraintName, TransactionStmt},
-    plan::{QueryPlan, UnifiedPlan},
-    SQLError, SQLParam, SQLResult,
+    ast::{ColumnType, DiscardTarget, SetConstraintName, TransactionStmt},
+    plan::UnifiedPlan,
+    SQLError, SQLParam,
 };
 
 use crate::Engine;
 use uqa_execution::statement::context::session::{
-    PreparedPlanState, StatementControl, StatementNotifications, StatementPortals,
-    StatementSettings,
+    PreparedPlanState, StatementControl, StatementNotifications, StatementSettings,
 };
 impl StatementSettings for Engine {
     fn set_runtime_parameter(
@@ -61,30 +60,6 @@ impl StatementControl for Engine {
         nested_statement: bool,
     ) -> Result<(), SQLError> {
         Engine::set_constraints(self, requested, deferred, nested_statement)
-    }
-}
-impl StatementPortals for Engine {
-    fn declare(
-        &self,
-        parameters: &[SQLParam],
-        name: &str,
-        binary: bool,
-        scroll: Option<bool>,
-        hold: bool,
-        query: &QueryPlan,
-    ) -> Result<SQLResult, SQLError> {
-        crate::sql::session_portal_worker::declare_session_portal(
-            self, parameters, name, binary, scroll, hold, query,
-        )
-    }
-    fn fetch_session_portal(&self, fetch: &FetchCursorStmt) -> Result<SQLResult, SQLError> {
-        Engine::fetch_session_portal(self, fetch)
-    }
-    fn close_session_portal(&self, name: &str) -> Result<(), SQLError> {
-        Engine::close_session_portal(self, name)
-    }
-    fn close_all_session_portals(&self) {
-        Engine::close_all_session_portals(self);
     }
 }
 impl PreparedPlanState for Engine {

@@ -98,7 +98,7 @@ The executable dependency policy is stored in [`scripts/workspace-dependency-pol
 | `uqa-joins` | Relational and cross-paradigm join algorithms |
 | `uqa-pg-query` | Imported PostgreSQL 18 `libpg_query` pin used through the `pg_query` library name |
 | `uqa-sql` | Parser frontend, AST, scalar and statement IR, lowering, catalog definitions, name and type binding, routine signature and stored-definition binding, overload ranking, replacement and privilege rules, prepared parameter inference, Cypher call and result-column rules, SQL validation, and value expressions |
-| `uqa-execution` | SQL batch and cursor scheduling, unified statement execution, physical rows and buffers, runtime scalar evaluation, batches, materialization, spill structures, distinctness, sorting, grouping, windows, joins, routine definition, invocation, scoped caller-state restoration, privilege execution, table-function streams and result rows, and SQL Cypher invocation |
+| `uqa-execution` | SQL batch and cursor scheduling, portal declaration and directional streaming, unified statement execution, physical rows and buffers, runtime scalar evaluation, batches, materialization, spill structures, distinctness, sorting, grouping, windows, joins, routine definition, invocation, scoped caller-state restoration, privilege execution, table-function streams and result rows, and SQL Cypher invocation |
 | `uqa-planner` | Cardinality, cost, statement statistics, prepared-plan estimates, rewrite-rule input pruning, DPccp join ordering, unified-plan optimization, and physical access selection |
 | `uqa-engine` | Composition, public SQL API boundaries, session and cache state, transactions, restore, publication, and public API |
 | `uqa` | Application facade over `uqa-engine` with the core `Value` type re-exported |
@@ -195,7 +195,7 @@ Responsibility roots remain facades over semantic children rather than line-coun
 | SQL-plan optimization contract | [`crates/uqa-sql/src/plan/optimization.rs`](../../../crates/uqa-sql/src/plan/optimization.rs) |
 | Mutation command entry | [`crates/uqa-execution/src/mutation/entry.rs`](../../../crates/uqa-execution/src/mutation/entry.rs) |
 | Shared mutation state and snapshots | [`crates/uqa-execution/src/mutation/command_scope.rs`](../../../crates/uqa-execution/src/mutation/command_scope.rs) |
-| Session portal workflow | [`crates/uqa-engine/src/sql/session_portal_worker.rs`](../../../crates/uqa-engine/src/sql/session_portal_worker.rs) |
+| Portal declaration and streaming | [`portal`](../../../crates/uqa-execution/src/statement/portal.rs), SQL [cursor restrictions](../../../crates/uqa-sql/src/semantics/portals.rs), Engine [worker lifetime](../../../crates/uqa-engine/src/session/portals/worker.rs) |
 | Catalog projection | [`crates/uqa-execution/src/catalog/projection.rs`](../../../crates/uqa-execution/src/catalog/projection.rs) |
 | Catalog relation families | [`crates/uqa-execution/src/catalog/projection/pg_catalog.rs`](../../../crates/uqa-execution/src/catalog/projection/pg_catalog.rs) |
 | Catalog projection policy | [`crates/uqa-execution/src/catalog/projection/helpers.rs`](../../../crates/uqa-execution/src/catalog/projection/helpers.rs) |

@@ -9,6 +9,7 @@
 mod binding;
 mod fetch;
 mod statement_snapshot;
+mod worker;
 pub(crate) use statement_snapshot::StatementReadSnapshot;
 
 use crate::{

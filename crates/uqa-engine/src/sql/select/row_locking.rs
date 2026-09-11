@@ -6,32 +6,12 @@
 
 //! Supply active session capabilities to physical tuple locking.
 
-use super::{CteScope, Engine, QueryBlockPlan, QueryPlan, SQLError, SQLParam};
-pub(in crate::sql) use uqa_execution::query::locking::query_has_row_locks;
+use super::{CteScope, Engine, QueryBlockPlan, SQLError, SQLParam};
 use uqa_execution::PhysicalOperator;
 pub(in crate::sql) type LockRowsRecheckSource =
     uqa_execution::query::recheck_source::LockRowsRecheckSource<
         crate::session::StatementReadSnapshot,
     >;
-
-pub(in crate::sql) fn lock_query_relations(
-    engine: &Engine,
-    query: &QueryPlan,
-) -> Result<(), SQLError> {
-    uqa_execution::query::locking::lock_query_relations(engine.row_lock_context(), query)
-}
-
-pub(in crate::sql) fn validate_query_row_locks(
-    engine: &Engine,
-    query: &QueryPlan,
-    params: &[SQLParam],
-) -> Result<(), SQLError> {
-    uqa_execution::query::locking::validate_query_row_locks(
-        engine.row_lock_context(),
-        query,
-        params,
-    )
-}
 
 pub(crate) fn attach_lock_rows<'a>(
     engine: &'a Engine,

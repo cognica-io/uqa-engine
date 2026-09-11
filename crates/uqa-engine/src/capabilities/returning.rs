@@ -50,19 +50,3 @@ impl Engine {
         }
     }
 }
-
-impl Engine {
-    pub(crate) fn cursor_command_returning_schema(
-        &self,
-        command: &uqa_sql::plan::CommandPlan,
-        params: &[uqa_sql::SQLParam],
-    ) -> Result<Option<RowSchema>, SQLError> {
-        uqa_execution::mutation::entry::cursor_command_returning_schema(
-            &self.returning_execution_context(),
-            self.returning_analysis_context(),
-            self,
-            command,
-            params,
-        )
-    }
-}

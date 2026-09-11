@@ -14,7 +14,6 @@ use crate::session::StatementReadSnapshot;
 use uqa_execution::query::cte::context::{
     CteBodyExecutor, CteExecutionContext, QueryOutputRewriter,
 };
-pub(in crate::sql) use uqa_planner::explain::*;
 
 impl Engine {
     pub(crate) fn cte_execution_context(&self) -> CteExecutionContext<'_, StatementReadSnapshot> {
