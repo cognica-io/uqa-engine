@@ -224,3 +224,5 @@ fn prepare_foreign_table_sequence_references(
 
 #[cfg(test)]
 mod tests;
+
+pub mod dependencies;

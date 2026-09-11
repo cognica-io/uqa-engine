@@ -11,7 +11,7 @@ use uqa_execution::schema::view_references::{self, ViewReferenceContext};
 use uqa_storage::StorageBackendResult;
 
 impl Engine {
-    fn view_reference_context(&self) -> ViewReferenceContext<'_> {
+    pub(crate) fn view_reference_context(&self) -> ViewReferenceContext<'_> {
         ViewReferenceContext {
             registry: self,
             publication: self,

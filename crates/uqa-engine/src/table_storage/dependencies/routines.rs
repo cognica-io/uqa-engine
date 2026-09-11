@@ -155,7 +155,8 @@ impl Engine {
                 )?;
             }
             for (relation, table) in &foreign_updates {
-                self.persist_foreign_table_definition(relation, table)?;
+                self.foreign_definition_context()
+                    .persist_foreign_table_definition(relation, table)?;
             }
         }
 

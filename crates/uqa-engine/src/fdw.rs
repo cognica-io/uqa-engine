@@ -7,12 +7,10 @@
 use super::{Engine, RelationIdentity};
 use uqa_core::{ArrayValue, Value};
 
-mod schema;
-
 #[cfg(test)]
 mod tests;
 
-pub(crate) use schema::StoredForeignTable;
+pub(crate) use uqa_execution::catalog::foreign::StoredForeignTable;
 
 struct MemoryForeignRowStream<'a> {
     engine: &'a Engine,

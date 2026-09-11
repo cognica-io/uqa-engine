@@ -208,7 +208,11 @@ impl Engine {
                 continue;
             };
             if *foreign {
-                if self.drop_foreign_table_check_dependency(table, constraint)? != Some(true) {
+                if self
+                    .foreign_definition_context()
+                    .drop_foreign_table_check_dependency(table, constraint)?
+                    != Some(true)
+                {
                     return Err(StorageBackendError::Other(format!(
                         "constraint `{constraint}` on foreign table `{table}` disappeared after sequence DROP preflight"
                     )));
@@ -228,7 +232,9 @@ impl Engine {
                 continue;
             };
             let dropped = if *foreign {
-                self.clear_foreign_table_default_dependency(table, column)? == Some(true)
+                self.foreign_definition_context()
+                    .clear_foreign_table_default_dependency(table, column)?
+                    == Some(true)
             } else {
                 self.set_column_default_inner(table, column, None)?
             };
@@ -248,7 +254,9 @@ impl Engine {
                 continue;
             };
             let dropped = if *foreign {
-                self.drop_foreign_table_generated_column_dependency(table, column)? == Some(true)
+                self.foreign_definition_context()
+                    .drop_foreign_table_column_dependency(table, column)?
+                    == Some(true)
             } else {
                 self.try_drop_column_inner(table, column)?
             };
@@ -300,7 +308,8 @@ impl Engine {
         if catalog_changed {
             self.note_table_catalog_changed();
         }
-        self.detach_foreign_table_sequence_provenance(sequence)?;
+        self.foreign_definition_context()
+            .detach_foreign_table_sequence_provenance(sequence)?;
         Ok(())
     }
 }

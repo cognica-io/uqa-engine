@@ -5,6 +5,8 @@
 //
 
 use crate::Engine;
+
+mod definitions;
 use std::{
     cell::Cell,
     collections::BTreeMap,

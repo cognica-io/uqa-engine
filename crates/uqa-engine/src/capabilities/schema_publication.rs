@@ -11,16 +11,9 @@ use uqa_execution::schema::publication::{
     SchemaPublicationContext, TableSchemaCatalog, TableSchemaState,
 };
 use uqa_sql::ast::{ColumnDef, TableConstraintSet};
-use uqa_sql::schema::constraint_metadata::{ConstraintMetadataError, ConstraintMetadataResult};
 use uqa_storage::StorageBackendResult;
 
-pub(crate) fn allocate_catalog_object_id(kind: &str) -> ConstraintMetadataResult<[u8; 16]> {
-    let mut object_id = [0_u8; 16];
-    getrandom::fill(&mut object_id).map_err(|error| {
-        ConstraintMetadataError(format!("allocate {kind} object identity: {error}"))
-    })?;
-    Ok(object_id)
-}
+pub(crate) use uqa_execution::catalog::identity::allocate_catalog_object_id;
 impl Engine {
     pub(crate) fn schema_publication_context(&self) -> SchemaPublicationContext<'_> {
         SchemaPublicationContext {
@@ -232,7 +225,8 @@ impl uqa_execution::schema::publication::dependencies::ForeignSchemaPublication 
         relation: &uqa_core::RelationIdentity,
         table: &uqa_execution::catalog::foreign::StoredForeignTable,
     ) -> StorageBackendResult<()> {
-        self.persist_foreign_table_definition(relation, table)
+        self.foreign_definition_context()
+            .persist_foreign_table_definition(relation, table)
     }
     fn publish_foreign_tables(
         &self,
