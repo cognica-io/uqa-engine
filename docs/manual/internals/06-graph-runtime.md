@@ -31,7 +31,7 @@ The Cypher parser produces an owned query representation for supported clauses. 
 
 `MERGE` separates its matched and created paths so `ON MATCH SET` and `ON CREATE SET` apply only to the correct branch. A mutation returning no values still enters SQL through a defined table-function schema.
 
-The SQL adapter in `uqa-engine/src/sql/age_cypher.rs` converts between SQL arguments, Cypher parameters, canonical `agtype`, and concrete SQL output types.
+`uqa-sql::semantics::age_cypher` validates SQL call shapes, converts Cypher parameter maps, and applies concrete SQL output types. `uqa-core::agtype` owns the shared graph value model, ordering, and rendering, and remains available through `uqa_graph::agtype`. `uqa-execution::query::cypher` checks transaction access, resolves the graph, invokes Cypher, and constructs physical rows. Engine binds the existing live graph state and public graph transaction boundary.
 
 ## Pattern matching
 
@@ -92,4 +92,6 @@ Persistent path indexes store reachability pairs in physical indexed pages. Cons
 | Cypher parser | [`crates/uqa-graph/src/cypher/parser.rs`](../../../crates/uqa-graph/src/cypher/parser.rs) |
 | RPQ implementation | [`crates/uqa-graph/src/rpq.rs`](../../../crates/uqa-graph/src/rpq.rs) |
 | Engine graph API | [`crates/uqa-engine/src/graphs.rs`](../../../crates/uqa-engine/src/graphs.rs) |
-| SQL Cypher adapter | [`crates/uqa-engine/src/sql/age_cypher.rs`](../../../crates/uqa-engine/src/sql/age_cypher.rs) |
+| Shared graph values | [`crates/uqa-core/src/agtype.rs`](../../../crates/uqa-core/src/agtype.rs) |
+| SQL Cypher rules | [`crates/uqa-sql/src/semantics/age_cypher.rs`](../../../crates/uqa-sql/src/semantics/age_cypher.rs) |
+| SQL Cypher execution | [`crates/uqa-execution/src/query/cypher.rs`](../../../crates/uqa-execution/src/query/cypher.rs) |

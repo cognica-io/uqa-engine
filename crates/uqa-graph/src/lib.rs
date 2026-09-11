@@ -14,7 +14,7 @@
 
 pub mod adapters;
 pub mod age_names;
-pub mod agtype;
+pub use uqa_core::agtype;
 mod centrality;
 mod cross_paradigm;
 pub mod cypher;

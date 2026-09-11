@@ -10,6 +10,7 @@
 //! See `docs/plans/0001-uqa-engine-implementation-plan.md` Section 2.1 for the
 //! algebraic invariants this crate must preserve.
 
+pub mod agtype;
 pub mod cancel;
 pub mod doc_set;
 mod float_text;
