@@ -615,3 +615,5 @@ mod view_dependencies;
 mod statement_planning;
 
 pub(crate) mod routine_invocation;
+
+mod graph_lifecycle;

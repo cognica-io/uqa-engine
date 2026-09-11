@@ -62,3 +62,5 @@ pub mod sources;
 pub mod block;
 
 pub mod statement;
+
+pub mod graph_lifecycle;

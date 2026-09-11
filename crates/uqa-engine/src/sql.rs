@@ -109,13 +109,6 @@ pub(crate) use regrole_dependencies::{
     reject_stored_plan_regrole_constants, reject_stored_query_regrole_constants,
     reject_stored_regrole_constants,
 };
-use row_functions::{
-    run_age_alter_graph_with_evaluator, run_age_create_elabel_with_evaluator,
-    run_age_create_graph_with_evaluator, run_age_create_vlabel_with_evaluator,
-    run_age_drop_graph_with_evaluator, run_age_drop_label_with_evaluator,
-    run_age_graph_exists_with_evaluator, run_graph_create_with_evaluator,
-    run_graph_drop_with_evaluator,
-};
 pub(crate) use uqa_sql::assignment::conversion::{
     convert_value_to_column_type, validate_vector_dimensions,
 };

@@ -124,6 +124,8 @@ Procedure CALL argument and result-schema analysis is SQL-owned. Named and varia
 
 Scalar score and highlight argument rules belong to SQL. Execution interprets score provenance and calls the canonical analysis highlighter directly; NULL short circuits and optional-argument order are unchanged. No Engine callback substitutes for the rendering algorithm.
 
+SQL graph-command arity, text and boolean argument rules live in `uqa-sql::semantics::graph_commands`. Execution owns native and AGE graph/label command scheduling, namespace and dependency checks, and result shaping. It preserves graph catalog reads between argument evaluations, canonical graph-name validation, and the public graph APIs’ existing transaction entry points; Engine supplies only narrow graph and namespace operations.
+
 The Engine still contains the unified statement dispatcher, remaining DDL command execution, scalar projection intercepts, and operator-tree integration code. These remaining implementations must move to their owning crates through narrow contracts before the Engine SQL tree can be removed. The current policy protects the completed extractions and SQLite provider boundary; it does not yet assert that the Engine SQL tree is absent.
 
 The borrowed `QueryContext` contains query sources, read-generation selection, directional execution, and CTE planning only. `MutationStatementContext` composes those read services with mutation command services. Query output factories bind a physical sink to an opaque read generation before row delivery; INSERT SELECT retains that generation through its session adapter. Query execution never receives a writable mutation context, and row consumers do not borrow the complete statement context.

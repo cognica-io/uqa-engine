@@ -4,175 +4,102 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Graph analytics, graph lifecycle, and AGE-compatible scalar helpers.
+//! Native and AGE graph command scheduling and result values.
 
-use super::{
-    eval_scalar, expect_evaluated_string, Engine, SQLError, SQLParam, ScalarEvalContext,
-    ScalarExpr, ScoredEntry, Value,
+use crate::{eval_scalar, ScalarEvalContext};
+use uqa_core::{ScoredEntry, Value};
+use uqa_graph::{GraphLabelInfo, LabelKind};
+use uqa_sql::{
+    expr::EngineHook,
+    semantics::graph_commands::{
+        age_error, eval_age_bool_with, eval_age_graph_name_with, eval_age_name_with,
+        graph_create_name, graph_drop_name, require_age_arity, validate_graph_drop_cascade,
+        AGE_DEPENDENT_OBJECTS_STILL_EXIST, AGE_DUPLICATE_SCHEMA, AGE_FEATURE_NOT_SUPPORTED,
+        AGE_INVALID_PARAMETER_VALUE, AGE_UNDEFINED_SCHEMA, AGE_UNDEFINED_TABLE,
+    },
+    SQLError, SQLParam, ScalarExpr,
 };
+use uqa_storage::StorageBackendResult;
 
-pub(in crate::sql) fn run_graph_create(
-    engine: &Engine,
+/// Graph catalog operations inside the public graph API's existing transaction boundary.
+pub trait GraphLifecycle {
+    fn has_graph(&self, name: &str) -> StorageBackendResult<bool>;
+    fn has_namespace(&self, name: &str) -> StorageBackendResult<bool>;
+    fn create_graph(&self, name: String) -> StorageBackendResult<bool>;
+    fn drop_graph(&self, name: &str) -> StorageBackendResult<bool>;
+    fn list_graph_labels(&self, graph: &str) -> StorageBackendResult<Option<Vec<GraphLabelInfo>>>;
+    fn create_graph_label(
+        &self,
+        graph: &str,
+        label: &str,
+        kind: LabelKind,
+    ) -> StorageBackendResult<bool>;
+    fn drop_graph_label(&self, graph: &str, label: &str) -> StorageBackendResult<bool>;
+    fn graph_label_relation_dependents(
+        &self,
+        graph: &str,
+        label: &str,
+    ) -> StorageBackendResult<Vec<String>>;
+    fn rename_graph(&self, from: &str, to: &str) -> StorageBackendResult<bool>;
+}
+
+pub fn run_graph_create(
+    runtime: &dyn GraphLifecycle,
     args: &[ScalarExpr],
     params: &[SQLParam],
+    hook: &dyn EngineHook,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
-    run_graph_create_with_evaluator(engine, args, &mut |expr| eval_scalar(expr, &ctx))?;
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(hook);
+    run_graph_create_with_evaluator(runtime, args, &mut |expr| eval_scalar(expr, &ctx))?;
     Ok(Vec::new())
 }
 
-pub(in crate::sql) fn run_graph_create_with_evaluator(
-    engine: &Engine,
+pub fn run_graph_create_with_evaluator(
+    runtime: &dyn GraphLifecycle,
     args: &[ScalarExpr],
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<bool, SQLError> {
-    if args.len() != 1 {
-        return Err(SQLError::BadArity {
-            name: "graph_create".into(),
-            expected: "1".into(),
-            actual: args.len(),
-        });
-    }
-    let name = expect_evaluated_string(evaluate(&args[0])?, "graph_create.name")?;
-    engine
+    let name = graph_create_name(args, evaluate)?;
+    runtime
         .create_graph(name)
         .map_err(|err| SQLError::Internal(format!("create graph: {err}")))
 }
 
-pub(in crate::sql) fn run_graph_drop(
-    engine: &Engine,
+pub fn run_graph_drop(
+    runtime: &dyn GraphLifecycle,
     args: &[ScalarExpr],
     params: &[SQLParam],
+    hook: &dyn EngineHook,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
-    run_graph_drop_with_evaluator(engine, args, &mut |expr| eval_scalar(expr, &ctx))?;
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(hook);
+    run_graph_drop_with_evaluator(runtime, args, &mut |expr| eval_scalar(expr, &ctx))?;
     Ok(Vec::new())
 }
 
-pub(in crate::sql) fn run_graph_drop_with_evaluator(
-    engine: &Engine,
+pub fn run_graph_drop_with_evaluator(
+    runtime: &dyn GraphLifecycle,
     args: &[ScalarExpr],
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<bool, SQLError> {
-    if !(1..=2).contains(&args.len()) {
-        return Err(SQLError::BadArity {
-            name: "graph_drop".into(),
-            expected: "1 or 2".into(),
-            actual: args.len(),
-        });
-    }
-    let name = expect_evaluated_string(evaluate(&args[0])?, "graph_drop.name")?;
-    let graph_exists = engine
+    let name = graph_drop_name(args, evaluate)?;
+    let graph_exists = runtime
         .has_graph(&name)
         .map_err(|err| SQLError::Internal(format!("read graph catalog: {err}")))?;
-    if let Some(cascade_expr) = args.get(1) {
-        match evaluate(cascade_expr)? {
-            Value::Bool(true) => {}
-            Value::Bool(false) if graph_exists => {
-                return Err(SQLError::Unsupported(format!(
-                    "cannot drop graph {name:?} without cascade"
-                )));
-            }
-            Value::Bool(false) => {}
-            other => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "graph_drop.cascade must be a boolean, got {other:?}"
-                )));
-            }
-        }
-    }
-    engine
+    validate_graph_drop_cascade(&name, graph_exists, args.get(1), evaluate)?;
+    runtime
         .drop_graph(&name)
         .map_err(|err| SQLError::Internal(format!("drop graph: {err}")))
-}
-
-// ---------------------------------------------------------------------
-// Apache AGE graph and label management functions.
-//
-// Messages and SQLSTATEs follow AGE's `graph_commands.c` and
-// `label_commands.c` so drivers and scripts written against AGE see the
-// same errors.
-// ---------------------------------------------------------------------
-
-const AGE_INVALID_PARAMETER_VALUE: &str = "22023";
-const AGE_UNDEFINED_SCHEMA: &str = "3F000";
-const AGE_DUPLICATE_SCHEMA: &str = "42P06";
-const AGE_UNDEFINED_TABLE: &str = "42P01";
-const AGE_FEATURE_NOT_SUPPORTED: &str = "0A000";
-const AGE_DEPENDENT_OBJECTS_STILL_EXIST: &str = "2BP01";
-
-fn age_error(sqlstate: &str, message: impl Into<String>) -> SQLError {
-    SQLError::Routine {
-        sqlstate: sqlstate.to_string(),
-        message: message.into(),
-    }
 }
 
 fn age_graph_catalog_error(err: impl std::fmt::Display) -> SQLError {
     SQLError::Internal(format!("read graph catalog: {err}"))
 }
 
-/// Evaluate a `name`/`cstring` argument of an AGE management function.
-/// `null_message` is the AGE error for a SQL NULL argument.
-fn eval_age_name_with(
-    expr: &ScalarExpr,
-    null_message: &str,
-    evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
-) -> Result<String, SQLError> {
-    match evaluate(expr)? {
-        Value::Null => Err(age_error(AGE_INVALID_PARAMETER_VALUE, null_message)),
-        Value::Str(s) | Value::FixedChar(s) => Ok(s),
-        other => Err(SQLError::TypeMismatch(format!(
-            "graph name must be a string, got {other:?}"
-        ))),
-    }
-}
-
-fn eval_age_graph_name_with(
-    expr: &ScalarExpr,
-    evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
-) -> Result<String, SQLError> {
-    eval_age_name_with(expr, "graph name can not be NULL", evaluate)
-}
-
-fn eval_age_bool_with(
-    expr: &ScalarExpr,
-    argument: &str,
-    evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
-) -> Result<bool, SQLError> {
-    match evaluate(expr)? {
-        Value::Bool(value) => Ok(value),
-        other => Err(SQLError::TypeMismatch(format!(
-            "{argument} must be a boolean, got {other:?}"
-        ))),
-    }
-}
-
-fn require_age_arity(
-    name: &str,
-    args: &[ScalarExpr],
-    range: std::ops::RangeInclusive<usize>,
-) -> Result<(), SQLError> {
-    if range.contains(&args.len()) {
-        return Ok(());
-    }
-    let expected = if range.start() == range.end() {
-        range.start().to_string()
-    } else {
-        format!("{} or {}", range.start(), range.end())
-    };
-    Err(SQLError::BadArity {
-        name: name.into(),
-        expected,
-        actual: args.len(),
-    })
-}
-
 /// `SELECT create_graph('name')` with AGE semantics: validates the name,
 /// rejects duplicate graphs and namespace collisions, and returns void
 /// (SQL NULL). The graph namespace is reserved like AGE's `CREATE SCHEMA`.
-pub(in crate::sql) fn run_age_create_graph_with_evaluator(
-    engine: &Engine,
+pub fn run_age_create_graph_with_evaluator(
+    runtime: &dyn GraphLifecycle,
     args: &[ScalarExpr],
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Value, SQLError> {
@@ -184,13 +111,13 @@ pub(in crate::sql) fn run_age_create_graph_with_evaluator(
             "graph name is invalid",
         ));
     }
-    if engine.has_graph(&name).map_err(age_graph_catalog_error)? {
+    if runtime.has_graph(&name).map_err(age_graph_catalog_error)? {
         return Err(age_error(
             AGE_UNDEFINED_SCHEMA,
             format!("graph \"{name}\" already exists"),
         ));
     }
-    if engine
+    if runtime
         .has_namespace(&name)
         .map_err(age_graph_catalog_error)?
     {
@@ -199,7 +126,7 @@ pub(in crate::sql) fn run_age_create_graph_with_evaluator(
             format!("schema \"{name}\" already exists"),
         ));
     }
-    engine
+    runtime
         .create_graph(name)
         .map_err(|err| SQLError::Internal(format!("create graph: {err}")))?;
     Ok(Value::Null)
@@ -208,14 +135,14 @@ pub(in crate::sql) fn run_age_create_graph_with_evaluator(
 /// `SELECT drop_graph('name'[, cascade])` with AGE semantics: false uses
 /// `DROP SCHEMA ... RESTRICT` and succeeds only after every label relation is
 /// gone, while true removes surviving labels; success returns void.
-pub(in crate::sql) fn run_age_drop_graph_with_evaluator(
-    engine: &Engine,
+pub fn run_age_drop_graph_with_evaluator(
+    runtime: &dyn GraphLifecycle,
     args: &[ScalarExpr],
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Value, SQLError> {
     require_age_arity("drop_graph", args, 1..=2)?;
     let name = eval_age_graph_name_with(&args[0], evaluate)?;
-    if !engine.has_graph(&name).map_err(age_graph_catalog_error)? {
+    if !runtime.has_graph(&name).map_err(age_graph_catalog_error)? {
         return Err(age_error(
             AGE_UNDEFINED_SCHEMA,
             format!("graph \"{name}\" does not exist"),
@@ -226,7 +153,7 @@ pub(in crate::sql) fn run_age_drop_graph_with_evaluator(
         None => false,
     };
     if !cascade {
-        let labels = engine
+        let labels = runtime
             .list_graph_labels(&name)
             .map_err(age_graph_catalog_error)?
             .unwrap_or_default();
@@ -237,7 +164,7 @@ pub(in crate::sql) fn run_age_drop_graph_with_evaluator(
             ));
         }
     }
-    engine
+    runtime
         .drop_graph(&name)
         .map_err(|err| SQLError::Internal(format!("drop graph: {err}")))?;
     Ok(Value::Null)
@@ -245,20 +172,20 @@ pub(in crate::sql) fn run_age_drop_graph_with_evaluator(
 
 /// `SELECT graph_exists('name')`: AGE returns an agtype boolean, which
 /// surfaces through SQL as the agtype text `true` / `false`.
-pub(in crate::sql) fn run_age_graph_exists_with_evaluator(
-    engine: &Engine,
+pub fn run_age_graph_exists_with_evaluator(
+    runtime: &dyn GraphLifecycle,
     args: &[ScalarExpr],
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Value, SQLError> {
     require_age_arity("graph_exists", args, 1..=1)?;
     let name = eval_age_graph_name_with(&args[0], evaluate)?;
-    let exists = engine.has_graph(&name).map_err(age_graph_catalog_error)?;
-    Ok(Value::Str(uqa_graph::agtype::render(&Value::Bool(exists))))
+    let exists = runtime.has_graph(&name).map_err(age_graph_catalog_error)?;
+    Ok(Value::Str(uqa_core::agtype::render(&Value::Bool(exists))))
 }
 
 /// Shared body of `create_vlabel` / `create_elabel`.
 fn run_age_create_label_with_evaluator(
-    engine: &Engine,
+    runtime: &dyn GraphLifecycle,
     function_name: &str,
     kind: uqa_graph::LabelKind,
     args: &[ScalarExpr],
@@ -279,13 +206,13 @@ fn run_age_create_label_with_evaluator(
             "label name is invalid",
         ));
     }
-    if !engine.has_graph(&graph).map_err(age_graph_catalog_error)? {
+    if !runtime.has_graph(&graph).map_err(age_graph_catalog_error)? {
         return Err(age_error(
             AGE_UNDEFINED_SCHEMA,
             format!("graph \"{graph}\" does not exist."),
         ));
     }
-    let labels = engine
+    let labels = runtime
         .list_graph_labels(&graph)
         .map_err(age_graph_catalog_error)?
         .unwrap_or_default();
@@ -301,7 +228,7 @@ fn run_age_create_label_with_evaluator(
             ),
         ));
     }
-    let created = engine
+    let created = runtime
         .create_graph_label(&graph, &label, kind)
         .map_err(|err| SQLError::Internal(format!("create label: {err}")))?;
     if !created {
@@ -314,13 +241,13 @@ fn run_age_create_label_with_evaluator(
 }
 
 /// `SELECT create_vlabel('graph', 'label')` with AGE semantics.
-pub(in crate::sql) fn run_age_create_vlabel_with_evaluator(
-    engine: &Engine,
+pub fn run_age_create_vlabel_with_evaluator(
+    runtime: &dyn GraphLifecycle,
     args: &[ScalarExpr],
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Value, SQLError> {
     run_age_create_label_with_evaluator(
-        engine,
+        runtime,
         "create_vlabel",
         uqa_graph::LabelKind::Vertex,
         args,
@@ -329,13 +256,13 @@ pub(in crate::sql) fn run_age_create_vlabel_with_evaluator(
 }
 
 /// `SELECT create_elabel('graph', 'label')` with AGE semantics.
-pub(in crate::sql) fn run_age_create_elabel_with_evaluator(
-    engine: &Engine,
+pub fn run_age_create_elabel_with_evaluator(
+    runtime: &dyn GraphLifecycle,
     args: &[ScalarExpr],
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Value, SQLError> {
     run_age_create_label_with_evaluator(
-        engine,
+        runtime,
         "create_elabel",
         uqa_graph::LabelKind::Edge,
         args,
@@ -347,8 +274,8 @@ pub(in crate::sql) fn run_age_create_elabel_with_evaluator(
 /// label relation is dropped together with every entity that carries the
 /// label, `force => true` is rejected exactly like AGE, and a default label
 /// is restricted only while user labels of the same kind inherit from it.
-pub(in crate::sql) fn run_age_drop_label_with_evaluator(
-    engine: &Engine,
+pub fn run_age_drop_label_with_evaluator(
+    runtime: &dyn GraphLifecycle,
     args: &[ScalarExpr],
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Value, SQLError> {
@@ -359,13 +286,13 @@ pub(in crate::sql) fn run_age_drop_label_with_evaluator(
         Some(expr) => eval_age_bool_with(expr, "drop_label.force", evaluate)?,
         None => false,
     };
-    if !engine.has_graph(&graph).map_err(age_graph_catalog_error)? {
+    if !runtime.has_graph(&graph).map_err(age_graph_catalog_error)? {
         return Err(age_error(
             AGE_UNDEFINED_SCHEMA,
             format!("graph \"{graph}\" does not exist"),
         ));
     }
-    let labels = engine
+    let labels = runtime
         .list_graph_labels(&graph)
         .map_err(age_graph_catalog_error)?
         .unwrap_or_default();
@@ -381,7 +308,7 @@ pub(in crate::sql) fn run_age_drop_label_with_evaluator(
             "force option is not supported yet",
         ));
     }
-    let dependent_views = engine
+    let dependent_views = runtime
         .graph_label_relation_dependents(&graph, &label)
         .map_err(|error| SQLError::Internal(format!("inspect label dependencies: {error}")))?;
     if !dependent_views.is_empty() {
@@ -404,7 +331,7 @@ pub(in crate::sql) fn run_age_drop_label_with_evaluator(
             format!("cannot drop table {graph}.{label} because other objects depend on it"),
         ));
     }
-    engine
+    runtime
         .drop_graph_label(&graph, &label)
         .map_err(|err| SQLError::Internal(format!("drop label: {err}")))?;
     Ok(Value::Null)
@@ -412,8 +339,8 @@ pub(in crate::sql) fn run_age_drop_label_with_evaluator(
 
 /// `SELECT alter_graph('graph', 'RENAME', 'new_name')` with AGE
 /// semantics; `RENAME` is the only operation AGE implements.
-pub(in crate::sql) fn run_age_alter_graph_with_evaluator(
-    engine: &Engine,
+pub fn run_age_alter_graph_with_evaluator(
+    runtime: &dyn GraphLifecycle,
     args: &[ScalarExpr],
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Value, SQLError> {
@@ -433,7 +360,7 @@ pub(in crate::sql) fn run_age_alter_graph_with_evaluator(
             "new graph name is invalid",
         ));
     }
-    if !engine.has_graph(&graph).map_err(age_graph_catalog_error)? {
+    if !runtime.has_graph(&graph).map_err(age_graph_catalog_error)? {
         return Err(age_error(
             AGE_UNDEFINED_SCHEMA,
             format!("graph \"{graph}\" does not exist"),
@@ -441,7 +368,7 @@ pub(in crate::sql) fn run_age_alter_graph_with_evaluator(
     }
     // `RenameSchema` rejects any taken name, including the graph's own
     // current name, so renaming a graph onto itself is a duplicate schema.
-    if engine
+    if runtime
         .has_namespace(&new_value)
         .map_err(age_graph_catalog_error)?
     {
@@ -450,7 +377,7 @@ pub(in crate::sql) fn run_age_alter_graph_with_evaluator(
             format!("schema \"{new_value}\" already exists"),
         ));
     }
-    engine
+    runtime
         .rename_graph(&graph, &new_value)
         .map_err(|err| SQLError::Internal(format!("rename graph: {err}")))?;
     Ok(Value::Null)
