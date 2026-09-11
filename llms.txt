@@ -18,6 +18,8 @@ When generating SQL:
 
 Model training orchestration and table-to-training-data conversion live in `crates/uqa-execution/src/query/model_training.rs` and its `data.rs` module; `uqa-ml` owns numerical training. Engine supplies retained table handles, projected document reads, and model persistence with the original transaction boundary. Pure training-label and IVF-catalog validation tests reside in execution and storage respectively.
 
+Creation-name rules and index-target selection live in `crates/uqa-sql/src/catalog/resolution/creation.rs`; ordered refresh, writer retries, and temporary-namespace publication scheduling live in `crates/uqa-execution/src/schema/namespaces/relations.rs`. Creation consumers borrow that native context instead of asking Engine to resolve a complete creation target.
+
 ## Start here
 
 - [Manual overview](docs/manual/README.md): Scope, reading paths, conventions, and compatibility target.

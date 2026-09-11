@@ -19,9 +19,7 @@ use uqa_sql::{
 };
 use uqa_storage::vector_index::{HNSWIndexParams, IVFIndexParams, VectorIndexSpec};
 pub trait IndexCreationNamespace {
-    fn resolve_index_table_name(&self, name: &str) -> Result<Option<String>, SQLError>;
     fn ensure_table_owner(&self, table: &str) -> Result<(), SQLError>;
-    fn ensure_creation_privilege(&self, table: &str) -> Result<(), SQLError>;
     fn relation_exists(&self, name: &str) -> Result<bool, SQLError>;
 }
 pub trait IndexCreationPublication {
@@ -49,6 +47,7 @@ pub trait IndexCreationPublication {
     ) -> Result<(), SQLError>;
 }
 pub struct IndexCreationContext<'a> {
+    pub creation: crate::schema::namespaces::relations::RelationCreationContext<'a>,
     pub namespace: &'a dyn IndexCreationNamespace,
     pub names: &'a dyn IndexNameCatalog,
     pub schema: &'a dyn SchemaExpressionCatalog,
@@ -63,11 +62,11 @@ pub fn run_create_index(
     mut c: CreateIndex,
 ) -> Result<SQLResult, SQLError> {
     c.table = context
-        .namespace
-        .resolve_index_table_name(&c.table)?
+        .creation
+        .resolve_index_table(&c.table)?
         .ok_or_else(|| SQLError::UnknownTable(c.table.clone()))?;
     context.namespace.ensure_table_owner(&c.table)?;
-    context.namespace.ensure_creation_privilege(&c.table)?;
+    context.creation.ensure_existing_create(&c.table)?;
     let am = uqa_sql::schema::indexes::options::index_access_method(&c)?;
 
     let table_relation = uqa_core::RelationIdentity::from_legacy_name(&c.table)

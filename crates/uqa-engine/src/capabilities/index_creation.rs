@@ -21,6 +21,7 @@ impl Engine {
     pub(crate) fn index_creation_context(&self) -> IndexCreationContext<'_> {
         let runtime = self.query_runtime_view();
         IndexCreationContext {
+            creation: self.relation_creation_context(),
             namespace: self,
             names: self,
             schema: self,
@@ -38,15 +39,10 @@ impl Engine {
     }
 }
 impl IndexCreationNamespace for Engine {
-    fn resolve_index_table_name(&self, name: &str) -> Result<Option<String>, SQLError> {
-        self.try_resolve_index_table_name(name)
-    }
     fn ensure_table_owner(&self, table: &str) -> Result<(), SQLError> {
         Engine::ensure_table_owner(self, table).map(|_| ())
     }
-    fn ensure_creation_privilege(&self, table: &str) -> Result<(), SQLError> {
-        self.ensure_existing_relation_creation_privilege(table)
-    }
+
     fn relation_exists(&self, name: &str) -> Result<bool, SQLError> {
         Ok(matches!(
             self.resolve_bound_relation_kind(name)?,

@@ -18,6 +18,7 @@ use uqa_sql::{
 impl Engine {
     pub(crate) fn domain_creation_context(&self) -> DomainCreationContext<'_> {
         DomainCreationContext {
+            creation: self.relation_creation_context(),
             writer: self,
             catalog: self,
             bindings: self,
@@ -31,9 +32,6 @@ impl Engine {
     }
 }
 impl DomainCreationCatalog for Engine {
-    fn domain_creation_name(&self, reference: &str) -> Result<String, SQLError> {
-        self.try_relation_name_for_sql_create(reference)
-    }
     fn domain_type_exists(&self, name: &str) -> bool {
         uqa_execution::catalog::projection::resolve_catalog_column_type(
             &self.catalog_execution(),

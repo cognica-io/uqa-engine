@@ -14,10 +14,7 @@ use uqa_sql::{
     SQLError,
 };
 use uqa_storage::StorageBackendResult;
-pub trait ColumnAdditionNamespace {
-    fn ensure_temporary_creation(&self) -> Result<(), SQLError>;
-    fn ensure_existing_creation(&self, table: &str) -> Result<(), SQLError>;
-}
+
 pub trait ColumnAdditionState {
     fn has_column(&self, table: &str, column: &str) -> StorageBackendResult<bool>;
     fn create_vector_field(
@@ -37,7 +34,7 @@ pub trait ColumnAdditionState {
 }
 pub struct ColumnAdditionContext<'a, S: Clone + 'static> {
     pub analysis: AddedColumnAnalysisContext<'a>,
-    pub namespace: &'a dyn ColumnAdditionNamespace,
+    pub namespace: crate::schema::namespaces::relations::RelationCreationContext<'a>,
     pub state: &'a dyn ColumnAdditionState,
     pub transactions: &'a dyn SchemaWriteTransaction,
     pub generated: GeneratedRewriteContext<'a, S>,
@@ -88,9 +85,9 @@ pub fn add_column<S: Clone + 'static>(
             .table_persistence(table)
             .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN constraint", error))?;
         if persistence == Some(uqa_sql::ast::RelationPersistence::Temporary) {
-            context.namespace.ensure_temporary_creation()?;
+            context.namespace.ensure_temporary_privilege()?;
         } else {
-            context.namespace.ensure_existing_creation(table)?;
+            context.namespace.ensure_existing_create(table)?;
         }
     }
     let generated_kind = column.generated.as_ref().map(|generated| generated.kind);

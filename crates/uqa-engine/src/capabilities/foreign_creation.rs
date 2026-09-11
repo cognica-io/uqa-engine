@@ -26,6 +26,7 @@ impl Engine {
     }
     pub(crate) fn foreign_creation_context(&self) -> ForeignCreationContext<'_> {
         ForeignCreationContext {
+            creation: self.relation_creation_context(),
             schema: self.foreign_schema_context(),
             namespace: self,
             registry: self,
@@ -60,9 +61,7 @@ impl ForeignCreationNamespace for Engine {
     fn synchronize_catalog_registries(&self) -> StorageBackendResult<()> {
         Engine::synchronize_catalog_registries(self)
     }
-    fn relation_name_for_create(&self, name: &str) -> Result<String, SQLError> {
-        self.try_relation_name_for_sql_create(name)
-    }
+
     fn relation_kind_at(&self, name: &str) -> StorageBackendResult<Option<&'static str>> {
         Engine::relation_kind_at(self, name)
     }

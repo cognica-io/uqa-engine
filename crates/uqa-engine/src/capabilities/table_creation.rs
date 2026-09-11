@@ -27,6 +27,7 @@ impl Engine {
         analysis_scope: &'a CteScope<StatementReadSnapshot>,
     ) -> CreateTableAsContext<'a, StatementReadSnapshot> {
         CreateTableAsContext {
+            creation: self.relation_creation_context(),
             analysis_scope,
             routines: self,
             queries: self,
@@ -77,23 +78,12 @@ impl TableAsQuerySource for Engine {
     }
 }
 impl TableAsNamespace for Engine {
-    fn ensure_temporary_privilege(&self) -> Result<(), SQLError> {
-        self.ensure_temporary_relation_creation_privilege()
-    }
-    fn temporary_target_name(&self, name: &str) -> Result<String, SQLError> {
-        self.try_temporary_relation_name_for_create(name)
-    }
-    fn target_name(&self, name: &str) -> Result<String, SQLError> {
-        self.resolve_relation_name_for_sql_create(name)
-    }
     fn relation_exists(&self, name: &str) -> Result<bool, SQLError> {
         self.relation_kind_at(name)
             .map(|kind| kind.is_some())
             .map_err(|error| storage_error("CREATE TABLE AS", &error))
     }
-    fn ensure_create_privilege(&self, name: &str) -> Result<(), SQLError> {
-        self.ensure_relation_creation_privilege(name)
-    }
+
     fn prepare_writer(&self) -> Result<bool, SQLError> {
         self.prepare_explicit_transaction_writer()
     }
@@ -171,6 +161,7 @@ impl Engine {
     ) -> uqa_execution::schema::table_creation::CreateTableContext<'_> {
         let runtime = self.query_runtime_view();
         uqa_execution::schema::table_creation::CreateTableContext {
+            creation: self.relation_creation_context(),
             namespace: self,
             analysis: self.table_declaration_context(),
             sequences: self.implicit_sequence_context(),
@@ -185,12 +176,7 @@ impl uqa_execution::schema::table_creation::TableCreationNamespace for Engine {
     fn prepare_writer(&self) -> Result<bool, SQLError> {
         self.prepare_explicit_transaction_writer()
     }
-    fn temporary_name(&self, name: &str) -> Result<String, SQLError> {
-        self.try_temporary_relation_name_for_create(name)
-    }
-    fn persistent_name(&self, name: &str) -> Result<String, SQLError> {
-        self.try_relation_name_for_sql_create(name)
-    }
+
     fn relation_exists(&self, name: &str) -> Result<bool, SQLError> {
         self.resolve_bound_relation_kind(name)
             .map(|resolution| matches!(resolution, super::RelationResolution::Found(_, _)))

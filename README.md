@@ -341,6 +341,8 @@ The repository is a Rust workspace with small crates for the algebra, storage, s
 
 Model training uses shared native execution for Rust and SQL callers: `uqa-execution` converts projected table rows, parses training JSON, invokes `uqa-ml`, and publishes the trained result through Engine’s model transaction boundary. Pure training-input and persisted IVF-parameter tests live with their owning crates. See the [ownership design](docs/design/sql-crate-boundaries.md).
 
+Creation namespace selection and index-target visibility run in SQL and native execution. Engine lends live schema, role, relation, and session guards; CTAS and index creation retain their existing authorization and collision-check order.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local gates, test conventions, crate boundaries, pull request guidelines, and the current contributor-licensing requirement.

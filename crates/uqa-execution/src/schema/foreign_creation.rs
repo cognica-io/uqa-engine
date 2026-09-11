@@ -36,10 +36,10 @@ pub trait ForeignCreationRegistry: ForeignRegistryReads {
 }
 pub trait ForeignCreationNamespace {
     fn synchronize_catalog_registries(&self) -> StorageBackendResult<()>;
-    fn relation_name_for_create(&self, name: &str) -> Result<String, SQLError>;
     fn relation_kind_at(&self, name: &str) -> StorageBackendResult<Option<&'static str>>;
 }
 pub struct ForeignCreationContext<'a> {
+    pub creation: crate::schema::namespaces::relations::RelationCreationContext<'a>,
     pub schema: ForeignSchemaContext<'a>,
     pub namespace: &'a dyn ForeignCreationNamespace,
     pub registry: &'a dyn ForeignCreationRegistry,
@@ -105,7 +105,7 @@ impl ForeignCreationContext<'_> {
             .map_err(|error| {
                 uqa_sql::SQLError::Internal(format!("refresh FDW catalog: {error}"))
             })?;
-        let name = self.namespace.relation_name_for_create(name)?;
+        let name = self.creation.persistent_name(name)?;
         let relation = RelationIdentity::from_legacy_name(&name).map_err(|error| {
             uqa_sql::SQLError::Internal(format!("decode foreign table `{name}`: {error}"))
         })?;

@@ -83,7 +83,7 @@ impl Engine {
                 bindings: self,
                 foreign_keys: self.foreign_key_definition_context(),
             },
-            namespace: self,
+            namespace: self.relation_creation_context(),
             state: self,
             transactions: self,
             generated: self.generated_rewrite_context(),
@@ -109,14 +109,7 @@ impl uqa_sql::schema::columns::addition::AddedColumnKeys for Engine {
         Engine::try_foreign_keys(self, table).map_err(|error| Box::new(error) as _)
     }
 }
-impl uqa_execution::schema::columns::addition::ColumnAdditionNamespace for Engine {
-    fn ensure_temporary_creation(&self) -> Result<(), SQLError> {
-        self.ensure_temporary_relation_creation_privilege()
-    }
-    fn ensure_existing_creation(&self, table: &str) -> Result<(), SQLError> {
-        self.ensure_existing_relation_creation_privilege(table)
-    }
-}
+
 impl uqa_execution::schema::columns::addition::ColumnAdditionState for Engine {
     fn has_column(&self, table: &str, column: &str) -> StorageBackendResult<bool> {
         self.try_table_has_column(table, column)

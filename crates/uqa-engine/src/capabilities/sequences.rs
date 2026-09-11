@@ -21,6 +21,7 @@ use uqa_storage::StorageBackendResult;
 impl Engine {
     pub(crate) fn sequence_creation_context(&self) -> SequenceCreationContext<'_> {
         SequenceCreationContext {
+            creation: self.relation_creation_context(),
             namespace: self,
             owners: self,
             publication: self,
@@ -35,12 +36,6 @@ impl Engine {
 }
 
 impl SequenceCreationNamespace for Engine {
-    fn temporary_name(&self, name: &str) -> Result<String, SQLError> {
-        self.try_temporary_relation_name_for_create(name)
-    }
-    fn persistent_name(&self, name: &str) -> Result<String, SQLError> {
-        self.try_relation_name_for_sql_create(name)
-    }
     fn refresh_sequences(&self) -> StorageBackendResult<()> {
         self.refresh_sequences_from_catalog()
     }

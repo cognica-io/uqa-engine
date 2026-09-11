@@ -53,6 +53,8 @@ The [sequence value adapter](../../crates/uqa-engine/src/capabilities/sequence_v
 
 Model training consumes a retained table generation and session-bound projected document reads. The table document-store guard ends after the ID scan; the retained table handle survives row materialization and conversion, then ends before numerical training and model publication. Native execution owns JSON decoding, feature/label conversion, training invocation, and report construction. Engine supplies the unchanged model-save transaction and actual catalog/cache publication. Whole-training callbacks into Engine are removed.
 
+Creation consumers share a native context that holds only references to role, schema, database, relation, session, and physical refresh services. Engine supplies actual registry and search-path guards, writer fencing, and the temporary-namespace allocation flag. SQL owns target selection and visibility; execution captures the current role before its bounded catalog refresh retry and preserves temporary authorization before name validation. No complete creation-name callback remains in Engine.
+
 ## Atomicity and locking
 
 Transactional session values live behind one `SessionContext.state` lock. Snapshot and restore therefore cannot combine an old search path with a new prepared-plan cache, PRNG state, or sequence `currval` map.
