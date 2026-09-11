@@ -89,14 +89,6 @@ fn append_sequence_schema_expression_dependents(
 }
 
 impl Engine {
-    pub(crate) fn bind_sequence_references_in_expr(
-        &self,
-        expression: &mut uqa_sql::ast::Expr,
-    ) -> StorageBackendResult<()> {
-        uqa_sql::schema::dependencies::regclass::bind_sequence_references_in_expr(self, expression)
-            .map_err(StorageBackendError::Other)
-    }
-
     pub(in crate::table_storage) fn resolve_stored_sequence_references_in_expr(
         &self,
         expression: &mut uqa_sql::ast::Expr,
@@ -107,16 +99,6 @@ impl Engine {
                 self.refresh_sequences_from_catalog()?;
                 refreshed = true;
             }
-            *reference = self.resolve_stored_sequence_reference_from_loaded_registry(reference)?;
-            Ok(())
-        })
-    }
-
-    pub(crate) fn resolve_loaded_sequence_references_in_expr(
-        &self,
-        expression: &mut uqa_sql::ast::Expr,
-    ) -> StorageBackendResult<()> {
-        rewrite_sequence_function_references(expression, &mut |reference| {
             *reference = self.resolve_stored_sequence_reference_from_loaded_registry(reference)?;
             Ok(())
         })

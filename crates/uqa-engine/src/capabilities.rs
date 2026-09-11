@@ -657,3 +657,5 @@ pub(crate) mod stored_routines;
 mod event_definitions;
 
 mod event_registry;
+
+mod foreign_creation;

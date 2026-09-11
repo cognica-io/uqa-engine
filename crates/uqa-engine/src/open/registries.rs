@@ -126,16 +126,17 @@ impl Engine {
                 )));
             }
             let schema_before_binding = table.schema_json()?;
-            self.prepare_stored_foreign_table_schema(
-                &relation_name,
-                &mut table.columns,
-                &mut table.checks,
-            )
-            .map_err(|error| {
-                StorageBackendError::Other(format!(
-                    "restore foreign table `{relation_name}` schema: {error}"
-                ))
-            })?;
+            self.foreign_schema_context()
+                .prepare_stored_foreign_table_schema(
+                    &relation_name,
+                    &mut table.columns,
+                    &mut table.checks,
+                )
+                .map_err(|error| {
+                    StorageBackendError::Other(format!(
+                        "restore foreign table `{relation_name}` schema: {error}"
+                    ))
+                })?;
             let schema_after_binding = table.schema_json()?;
             let schema_requires_migration =
                 legacy_schema || schema_before_binding != schema_after_binding;
