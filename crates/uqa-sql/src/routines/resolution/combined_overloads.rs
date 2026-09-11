@@ -8,20 +8,20 @@
 
 use std::sync::Arc;
 
-use uqa_execution::{
+use crate::ast::{ColumnType, FunctionBinding, FunctionReturns};
+use crate::type_resolution::{
     builtin_binding_matches, builtin_name_matches, match_builtin_function_overload,
     rank_function_matches, BuiltinFunctionOverload, FunctionTypeResolver, RankedFunctionMatch,
     ResolvedFunctionOverload, RoutineSignatureMatchError,
 };
-use uqa_sql::ast::{ColumnType, FunctionBinding, FunctionReturns};
-use uqa_sql::SQLError;
+use crate::SQLError;
 
-use super::resolution::{
+use super::RoutineOverloadContext;
+use super::SQLUserFunction;
+use super::{
     retain_earliest_effective_signatures, static_function_match, static_function_return_type,
     static_signature_error, RoutineCallKind, StaticFunctionMatch,
 };
-use super::SQLUserFunction;
-use crate::Engine;
 
 enum FunctionTarget {
     User(StaticFunctionMatch),
@@ -43,7 +43,7 @@ enum ResolutionContext {
 }
 
 struct ResolutionRequest<'a> {
-    engine: &'a Engine,
+    resolver: &'a RoutineOverloadContext<'a>,
     name: &'a str,
     argument_names: &'a [Option<String>],
     argument_types: &'a [Option<ColumnType>],
@@ -77,7 +77,7 @@ impl RankedFunctionMatch for FunctionMatch {
 }
 
 pub(super) fn resolve(
-    engine: &Engine,
+    resolver: &RoutineOverloadContext<'_>,
     name: &str,
     binding: Option<&FunctionBinding>,
     argument_names: &[Option<String>],
@@ -87,7 +87,7 @@ pub(super) fn resolve(
 ) -> Result<ResolvedFunctionOverload, SQLError> {
     resolve_in_context(
         &ResolutionRequest {
-            engine,
+            resolver,
             name,
             argument_names,
             argument_types,
@@ -100,7 +100,7 @@ pub(super) fn resolve(
 }
 
 pub(super) fn resolve_table(
-    engine: &Engine,
+    resolver: &RoutineOverloadContext<'_>,
     name: &str,
     binding: Option<&FunctionBinding>,
     argument_names: &[Option<String>],
@@ -110,7 +110,7 @@ pub(super) fn resolve_table(
 ) -> Result<ResolvedFunctionOverload, SQLError> {
     resolve_in_context(
         &ResolutionRequest {
-            engine,
+            resolver,
             name,
             argument_names,
             argument_types,
@@ -130,7 +130,8 @@ fn resolve_in_context(
         return resolve_bound(request, binding);
     }
     let users = request
-        .engine
+        .resolver
+        .catalog
         .lookup_sql_routine_candidates(request.name)?
         .unwrap_or_default();
     let builtins = request
@@ -148,8 +149,8 @@ fn resolve_bound(
 ) -> Result<ResolvedFunctionOverload, SQLError> {
     if !binding.builtin {
         if matches!(request.context, ResolutionContext::Scalar) {
-            return <Engine as FunctionTypeResolver>::resolve_function_overload(
-                request.engine,
+            return <RoutineOverloadContext<'_> as FunctionTypeResolver>::resolve_function_overload(
+                request.resolver,
                 request.name,
                 Some(binding),
                 request.argument_names,
@@ -159,7 +160,7 @@ fn resolve_bound(
             .ok_or_else(|| bound_function_resolution_error(binding));
         }
         let function = request
-            .engine
+            .resolver
             .resolve_static_sql_function(
                 request.name,
                 Some(binding),
@@ -171,7 +172,7 @@ fn resolve_bound(
         return Ok(ResolvedFunctionOverload {
             binding: binding.clone(),
             return_type: table_function_return_type(
-                request.engine,
+                request.resolver,
                 request.name,
                 &function.def,
                 binding.invocation.as_deref(),
@@ -180,7 +181,7 @@ fn resolve_bound(
             known_arguments: request.argument_types.iter().flatten().count(),
             preferred_matches: 0,
             precedes_pg_catalog: request
-                .engine
+                .resolver
                 .user_function_precedes_pg_catalog(&function.def.name),
         });
     }
@@ -223,7 +224,7 @@ fn resolve_candidates(
             )
         })
         .collect::<Vec<_>>();
-    apply_catalog_shadowing(request.engine, &mut candidates, &mut builtin_candidates);
+    apply_catalog_shadowing(request.resolver, &mut candidates, &mut builtin_candidates);
     candidates.extend(builtin_candidates);
     if candidates.is_empty() {
         if let Some(error) = match_error {
@@ -267,7 +268,7 @@ fn collect_user_candidates(
     let mut procedure_matches = false;
     let mut matched_users = Vec::new();
     let mut match_error = None;
-    let catalog = request.engine.catalog_read_view();
+    let catalog = request.resolver.catalog.routine_type_snapshot();
     for function in users {
         match static_function_match(
             &catalog,
@@ -303,7 +304,7 @@ fn collect_user_candidates(
 }
 
 fn apply_catalog_shadowing(
-    engine: &Engine,
+    resolver: &RoutineOverloadContext<'_>,
     user_candidates: &mut Vec<FunctionMatch>,
     builtin_candidates: &mut Vec<FunctionMatch>,
 ) {
@@ -315,7 +316,7 @@ fn apply_catalog_shadowing(
         .iter()
         .filter_map(|candidate| match &candidate.target {
             FunctionTarget::User(matched)
-                if engine.user_function_precedes_pg_catalog(&matched.function.def.name) =>
+                if resolver.user_function_precedes_pg_catalog(&matched.function.def.name) =>
             {
                 Some(candidate.argument_types.clone())
             }
@@ -329,7 +330,7 @@ fn apply_catalog_shadowing(
         let FunctionTarget::User(matched) = &candidate.target else {
             return true;
         };
-        engine.user_function_precedes_pg_catalog(&matched.function.def.name)
+        resolver.user_function_precedes_pg_catalog(&matched.function.def.name)
             || !builtin_signatures.contains(&candidate.argument_types)
     });
 }
@@ -344,13 +345,13 @@ fn resolve_selected_candidate(
             binding: matched.binding(),
             return_type: match request.context {
                 ResolutionContext::Scalar => static_function_return_type(
-                    request.engine,
+                    request.resolver,
                     request.name,
                     &matched.function.def,
                     Some(&matched.invocation),
                 )?,
                 ResolutionContext::Table => table_function_return_type(
-                    request.engine,
+                    request.resolver,
                     request.name,
                     &matched.function.def,
                     Some(&matched.invocation),
@@ -360,7 +361,7 @@ fn resolve_selected_candidate(
             known_arguments,
             preferred_matches: selected.preferred_matches,
             precedes_pg_catalog: request
-                .engine
+                .resolver
                 .user_function_precedes_pg_catalog(&matched.function.def.name),
         }),
         FunctionTarget::Builtin(builtin) => {
@@ -373,15 +374,15 @@ fn resolve_selected_candidate(
 }
 
 fn table_function_return_type(
-    engine: &Engine,
+    resolver: &RoutineOverloadContext<'_>,
     name: &str,
-    definition: &uqa_sql::ast::CreateFunction,
-    invocation: Option<&uqa_sql::ast::RoutineInvocationBinding>,
+    definition: &crate::ast::CreateFunction,
+    invocation: Option<&crate::ast::RoutineInvocationBinding>,
 ) -> Result<ColumnType, SQLError> {
     if matches!(definition.returns, FunctionReturns::Table) {
         Ok(ColumnType::Record)
     } else {
-        static_function_return_type(engine, name, definition, invocation)
+        static_function_return_type(resolver, name, definition, invocation)
     }
 }
 

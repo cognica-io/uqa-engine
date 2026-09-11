@@ -9,7 +9,10 @@
 mod indexes;
 mod privileges;
 
-use std::collections::BTreeSet;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use uqa_graph::GraphStore;
 use uqa_sql::SQLError;
@@ -450,6 +453,11 @@ impl CatalogReadView {
             .values()
             .flat_map(|rules| rules.values().cloned())
             .collect()
+    }
+
+    /// Share the captured domain allocation with static signature analysis.
+    pub fn domain_snapshot(&self) -> Arc<BTreeMap<String, uqa_sql::catalog::domain::StoredDomain>> {
+        self.snapshot.definitions.domains.clone()
     }
 
     pub fn domains(&self) -> impl Iterator<Item = &uqa_sql::catalog::domain::StoredDomain> {

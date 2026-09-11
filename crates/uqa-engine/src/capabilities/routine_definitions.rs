@@ -15,7 +15,6 @@ use uqa_sql::{
     routines::{
         compilation::{RoutineCompilationCatalog, RoutineCompilationContext, RoutineParserCatalog},
         declaration::RoutineTypeCatalog,
-        dependencies::RoutineCompilationMode,
         merge_columns::StoredMergeColumnCatalog,
         regclass::RoutineRegclassCatalog,
     },
@@ -98,11 +97,11 @@ impl RoutineRegclassCatalog for Engine {
 
 use uqa_core::RelationIdentity;
 use uqa_execution::routines::{
-    compilation::{self, RoutineCompilationSession, StoredRoutineCompilationContext},
-    definition::{self, RoutineDefinitionContext},
+    compilation::{RoutineCompilationSession, StoredRoutineCompilationContext},
+    definition::RoutineDefinitionContext,
     rewrites::{self, RoutineRewriteContext},
 };
-use uqa_sql::{ast::FunctionBinding, routines::CompiledFunctionBody};
+use uqa_sql::ast::FunctionBinding;
 
 impl Engine {
     pub(crate) fn routine_definition_context(&self) -> RoutineDefinitionContext<'_> {
@@ -111,13 +110,6 @@ impl Engine {
             sources: self,
             regclasses: self,
         }
-    }
-    pub(crate) fn compile_catalog_bound_routine(
-        &self,
-        def: &mut CreateFunction,
-        mode: RoutineCompilationMode,
-    ) -> Result<(CompiledFunctionBody, bool), SQLError> {
-        definition::compile_catalog_bound_routine(&self.routine_definition_context(), def, mode)
     }
     pub(crate) fn stored_routine_compilation_context(&self) -> StoredRoutineCompilationContext<'_> {
         StoredRoutineCompilationContext {
@@ -133,12 +125,6 @@ impl Engine {
             columns: self.stored_column_binding_context(),
             changes: self,
         }
-    }
-    pub(crate) fn compile_persisted_sql_function(
-        &self,
-        def: &CreateFunction,
-    ) -> Result<CompiledFunctionBody, SQLError> {
-        compilation::compile_persisted_sql_function(&self.stored_routine_compilation_context(), def)
     }
     pub(crate) fn rewrite_routine_relation_references(
         &self,

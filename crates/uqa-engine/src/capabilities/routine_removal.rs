@@ -43,7 +43,7 @@ use uqa_execution::routines::removal::{
     },
 };
 use uqa_sql::{
-    ast::{AlterRoutineKind, DropFunctionStmt, DropRule, DropTrigger, FunctionBinding},
+    ast::{DropFunctionStmt, DropRule, DropTrigger, FunctionBinding},
     routines::lifecycle::RoutineRegistry,
     schema::sequences::dependents::SequenceSchemaDependent,
 };
@@ -138,17 +138,6 @@ impl Engine {
         kind: &str,
     ) -> Result<SQLError, SQLError> {
         removal::relation_dependents_drop_error(&self.routine_removal_context(), names, kind)
-    }
-    pub(crate) fn resolve_sql_routine_alter_target(
-        &self,
-        registry: &RoutineRegistry,
-        name: &str,
-        types: Option<&[String]>,
-        kind: AlterRoutineKind,
-    ) -> Result<(String, usize), SQLError> {
-        uqa_sql::routines::lifecycle::binding::resolve_sql_routine_alter_target(
-            self, registry, name, types, kind,
-        )
     }
 }
 impl RoutineRegistryState for Engine {

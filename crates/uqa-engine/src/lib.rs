@@ -185,7 +185,6 @@ use statement_cache::{PreparedStatementPlan, SQLStatementCache};
 const SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
 /// Metadata key prefix for per-graph AGE label registries
 /// (`graph_label_registry::<graph>` -> JSON `GraphLabelRegistry`).
-const FUNCTIONS_METADATA_KEY: &str = "sql_functions_json";
 const DATABASE_SECURITY_METADATA_KEY: &str = "sql_database_security_json";
 const ROLES_METADATA_KEY: &str = "sql_roles_json";
 const ROLE_MEMBERSHIPS_METADATA_KEY: &str = "sql_role_memberships_json";
@@ -801,10 +800,6 @@ fn new_sequence_object_id() -> StorageBackendResult<[u8; 16]> {
 
 fn new_sequence_definition_generation() -> StorageBackendResult<[u8; 16]> {
     new_nonzero_catalog_identity("sequence", "definition generation")
-}
-
-fn new_routine_object_id() -> StorageBackendResult<[u8; 16]> {
-    new_nonzero_catalog_identity("routine", "object identity")
 }
 
 fn normalize_analyzer_config_value(value: &mut serde_json::Value) {

@@ -14,6 +14,7 @@ pub mod lifecycle;
 pub mod merge_columns;
 pub mod regclass;
 pub mod registration;
+pub mod resolution;
 pub mod security;
 
 use crate::ast::{

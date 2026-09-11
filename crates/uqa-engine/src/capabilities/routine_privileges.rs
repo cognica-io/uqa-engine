@@ -58,13 +58,4 @@ impl Engine {
     ) -> Result<(), SQLError> {
         security::ensure_routine_execute_privilege_named(self, definition, display_name)
     }
-    pub(crate) fn ensure_routine_owner_as(
-        definition: &CreateFunction,
-        current_user_has_owner_privileges: bool,
-    ) -> Result<(), SQLError> {
-        uqa_sql::routines::lifecycle::ensure_routine_owner_as(
-            definition,
-            current_user_has_owner_privileges,
-        )
-    }
 }

@@ -27,3 +27,34 @@ pub struct RoutineMutationContext<'a> {
     pub publication: &'a dyn RoutineRegistryPublication,
     pub changes: &'a dyn crate::schema::namespaces::NamespaceCatalogChanges,
 }
+
+use std::{collections::BTreeMap, sync::Arc};
+use uqa_sql::{ast::CreateFunction, routines::SQLUserFunction};
+
+pub(crate) const FUNCTIONS_METADATA_KEY: &str = "sql_functions_json";
+
+pub fn persist_sql_functions_snapshot(
+    catalog: Option<&dyn uqa_storage::CatalogFacade>,
+    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+) -> Result<(), SQLError> {
+    let Some(catalog) = catalog else {
+        return Ok(());
+    };
+    let defs: BTreeMap<String, Vec<CreateFunction>> = registry
+        .iter()
+        .map(|(name, overloads)| {
+            (
+                name.clone(),
+                overloads
+                    .iter()
+                    .map(|function| function.def.clone())
+                    .collect(),
+            )
+        })
+        .collect();
+    let json = serde_json::to_string(&defs)
+        .map_err(|err| SQLError::Internal(format!("serialize function catalog: {err}")))?;
+    catalog
+        .set_metadata(FUNCTIONS_METADATA_KEY, &json)
+        .map_err(|err| SQLError::Internal(format!("persist function catalog: {err}")))
+}
