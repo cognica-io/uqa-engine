@@ -3679,6 +3679,7 @@ dependencies = [
  "thiserror 1.0.69",
  "unicode-normalization",
  "uqa-core",
+ "uqa-nori-data",
 ]
 
 [[package]]
@@ -3895,6 +3896,14 @@ dependencies = [
  "uqa-scoring",
  "uqa-sql",
  "uqa-storage-sqlite",
+]
+
+[[package]]
+name = "uqa-nori-data"
+version = "0.2.3"
+dependencies = [
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

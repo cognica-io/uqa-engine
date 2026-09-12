@@ -39,3 +39,7 @@ mod source_offsets;
 
 #[path = "analysis/rich_tokens.rs"]
 mod rich_tokens;
+
+#[cfg(feature = "nori-tools")]
+#[path = "analysis/nori_model.rs"]
+mod nori_model;

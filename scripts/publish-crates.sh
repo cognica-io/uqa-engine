@@ -50,6 +50,7 @@ done
 
 crates=(
   uqa-pg-query
+  uqa-nori-data
   uqa-core
   uqa-pg-wire
   uqa-analysis
@@ -75,6 +76,7 @@ crates=(
 
 bootstrap_crates=(
   uqa-pg-query
+  uqa-nori-data
   uqa-core
   uqa-pg-wire
 )

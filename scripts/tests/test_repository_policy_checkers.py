@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import hashlib
+import io
+import json
 import pathlib
 import sys
 import tempfile
+import tarfile
 import unittest
 from unittest import mock
 
@@ -34,6 +38,55 @@ LICENSES = load_script("uqa_check_release_licenses", "check-release-licenses.py"
 
 
 class RepositoryPolicyCheckerTest(unittest.TestCase):
+    def test_nori_resources_require_every_notice_and_exact_artifact_hashes(self) -> None:
+        payloads = {name: name.encode() for name in LICENSES.NORI_FILES}
+        manifest = {
+            "format": "uqa-nori-bundled-resource", "format_version": 1,
+            "files": [{"path": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+                      for name, data in payloads.items()],
+        }
+        LICENSES.check_nori_payloads(json.dumps(manifest).encode(), payloads.__getitem__)
+        for name in LICENSES.NORI_FILES:
+            damaged = dict(payloads)
+            damaged[name] = b"changed"
+            with self.subTest(name=name), self.assertRaisesRegex(RuntimeError, "size or hash differs"):
+                LICENSES.check_nori_payloads(json.dumps(manifest).encode(), damaged.__getitem__)
+        manifest["files"].pop()
+        with self.assertRaisesRegex(RuntimeError, "incomplete or duplicate"):
+            LICENSES.check_nori_payloads(json.dumps(manifest).encode(), payloads.__getitem__)
+
+    def test_nori_archive_rejects_missing_and_changed_attribution_files(self) -> None:
+        payloads = {name: name.encode() for name in LICENSES.NORI_FILES}
+        manifest = json.dumps({
+            "format": "uqa-nori-bundled-resource", "format_version": 1,
+            "files": [{"path": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+                      for name, data in payloads.items()],
+        }).encode()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            path = root / "crates/uqa-nori-data/data/resource_manifest.json"
+            path.parent.mkdir(parents=True)
+            path.write_bytes(manifest)
+            archive_path = root / "uqa-nori-data-0.0.0.crate"
+            for mode in ("valid", "missing", "changed"):
+                files = {**payloads, "data/resource_manifest.json": manifest,
+                         "LICENSE": b"license", "LICENSE-NOTICE.md": b"notice"}
+                if mode == "missing":
+                    del files["THIRD-PARTY/LUCENE-NOTICE.txt"]
+                elif mode == "changed":
+                    files["THIRD-PARTY/LUCENE-NOTICE.txt"] = b"changed"
+                with tarfile.open(archive_path, "w:gz") as archive:
+                    for name, data in files.items():
+                        info = tarfile.TarInfo(f"uqa-nori-data-0.0.0/{name}")
+                        info.size = len(data)
+                        archive.addfile(info, io.BytesIO(data))
+                with mock.patch.object(LICENSES, "ROOT", root):
+                    if mode == "valid":
+                        LICENSES.check_archive(archive_path, {"LICENSE": b"license"})
+                    else:
+                        with self.subTest(mode=mode), self.assertRaises(RuntimeError):
+                            LICENSES.check_archive(archive_path, {"LICENSE": b"license"})
+
     def test_checkers_import_without_tomllib(self) -> None:
         with mock.patch.dict(sys.modules, {"tomllib": None}):
             load_script(

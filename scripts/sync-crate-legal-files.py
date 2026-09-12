@@ -30,6 +30,7 @@ LEGAL_FILES = (
 SKIP_PACKAGES = {"uqa-pg-query"}
 USER_FACING = {"uqa", "uqa-engine", "uqa-client", "uqa-cli", "uqa-api"}
 CRATE_ROLES = {
+    "uqa-nori-data": "the pinned portable Nori dictionary and its provenance",
     "uqa-core": "document sets, finite-support relations, posting storage, and value types",
     "uqa-analysis": "tokenizers, character filters, token filters, and analyzers",
     "uqa-storage": "provider-independent storage contracts, shared codecs, and in-memory data structures",
@@ -49,6 +50,8 @@ CRATE_ROLES = {
 }
 
 CRATE_NOTES = {
+    "uqa-analysis": 'The optional `nori` feature exposes a validated immutable Korean dictionary loader and lookups; `nori-tools` adds the offline packer and complete neutral-model verifier. The tokenizer and public analyzer registration are still under development. See the [bundle format](https://github.com/cognica-io/uqa-engine/blob/main/docs/design/nori-bundle-format.md) for the representation, limits, and reproducible commands.',
+    "uqa-nori-data": 'The Rust wrapper uses the workspace license. The converted dictionary retains its upstream notices in `THIRD-PARTY/`, including the complete Lucene license and notice, MeCab-ko-dic COPYING, and the pinned JDK Unicode notice. `data/resource_manifest.json` records hashes for the bundle, original export manifest, and attribution files. Conversion changes storage layout while preserving the exported model values. This crate exposes immutable bytes only; Nori tokenizer integration remains under development. See the [bundle format and regeneration commands](https://github.com/cognica-io/uqa-engine/blob/main/docs/design/nori-bundle-format.md).',
     "uqa-storage": "Concrete SQLite implementations belong to `uqa-storage-sqlite`; the common storage crate has no runtime dependency on a database provider.",
     "uqa-storage-sqlite": "Import concrete types such as `ManagedConnection`, `SQLiteStorageProvider`, `SQLiteCompressionOptions`, `SQLiteError`, and `SQLiteGraphStore` from `uqa_storage_sqlite`. This provider implements the backend-neutral contracts in `uqa-storage` and `uqa-graph`. See the [development Rust migration notes](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/reference/10-upgrading.md#sqlite-provider-ownership-in-development) for the previous import paths and error-handling changes.",
     "uqa-graph": "Memory graph stores and the backend-neutral persistent graph contract live here. The standalone `SQLiteGraphStore` adapter lives in `uqa-storage-sqlite`; graph algorithms do not depend on a SQLite driver or provider.",

@@ -117,6 +117,7 @@
       "uqa-sql",
       "uqa-storage-sqlite"
     ],
+    "uqa-nori-data": [],
     "uqa-operators": [
       "uqa-core",
       "uqa-fusion",
