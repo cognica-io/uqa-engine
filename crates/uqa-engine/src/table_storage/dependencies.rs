@@ -42,13 +42,11 @@ impl Engine {
         name: &str,
         action: &str,
     ) -> StorageBackendResult<Option<String>> {
-        match self.try_resolve_relation_kind(name)? {
-            Some((canonical, "table")) => Ok(Some(canonical)),
-            Some((canonical, kind)) => Err(StorageBackendError::Other(format!(
-                "{action}: relation `{canonical}` is a {kind}, not a table"
-            ))),
-            None => Ok(None),
-        }
+        uqa_sql::schema::removal::tables::resolved_table_ddl_target(
+            self.try_resolve_relation_kind(name)?,
+            action,
+        )
+        .map_err(StorageBackendError::Other)
     }
 
     pub(super) fn catalog_index_columns(
@@ -135,21 +133,6 @@ impl Engine {
         Ok(())
     }
 
-    pub(super) fn ensure_no_dependent_views(
-        &self,
-        action: &str,
-        canonical_name: &str,
-    ) -> StorageBackendResult<()> {
-        let dependents = self.views_depending_on_relation(canonical_name)?;
-        if dependents.is_empty() {
-            return Ok(());
-        }
-        Err(StorageBackendError::Other(format!(
-            "{action} `{canonical_name}` rejected: dependent view(s) `{}` use stored relation names that cannot be rewritten safely",
-            dependents.join("`, `")
-        )))
-    }
-
     pub(crate) fn table_entries(&self) -> Vec<(String, Arc<TableState>)> {
         self.storage
             .tables
@@ -163,33 +146,10 @@ impl Engine {
         foreign_key: &uqa_sql::ast::ForeignKey,
         target: &RelationIdentity,
     ) -> bool {
-        stored_relation_reference_matches(&foreign_key.ref_table, target)
+        uqa_sql::schema::removal::tables::foreign_key_targets(foreign_key, target)
     }
 
-    pub(super) fn table_schema_references_relation(
-        table: &TableState,
-        target: &RelationIdentity,
-    ) -> bool {
-        table.columns.read().iter().any(|column| {
-            column
-                .default
-                .as_ref()
-                .is_some_and(|expr| schema_expr_references_relation(expr, target))
-                || column
-                    .check
-                    .as_ref()
-                    .is_some_and(|expr| schema_expr_references_relation(expr, target))
-                || column.generated.as_ref().is_some_and(|generated| {
-                    schema_expr_references_relation(&generated.expression, target)
-                })
-        }) || table
-            .table_checks
-            .read()
-            .iter()
-            .any(|check| schema_expr_references_relation(&check.expr, target))
-    }
-
-    pub(super) fn persist_constraint_candidate(
+    pub(crate) fn persist_constraint_candidate(
         &self,
         name: &str,
         table: &TableState,

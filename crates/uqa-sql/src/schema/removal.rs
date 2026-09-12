@@ -244,3 +244,6 @@ pub fn foreign_table_drop_dependents(
     }
     Ok(dependents)
 }
+
+pub mod hierarchy;
+pub mod tables;

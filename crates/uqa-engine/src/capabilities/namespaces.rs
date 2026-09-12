@@ -166,7 +166,7 @@ impl Engine {
             catalog: self,
             names: self,
             types: self,
-            tables: self,
+            tables: self.table_removal_context(),
             routines: self,
             events: self,
             foreign: self.foreign_removal_context(),

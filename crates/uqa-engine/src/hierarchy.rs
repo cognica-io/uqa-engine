@@ -281,46 +281,4 @@ impl Engine {
         }
         Ok(())
     }
-
-    /// Expand a `DROP TABLE` target set through table hierarchy dependencies.
-    /// Declarative partitions are owned by their parent and are always dropped
-    /// with it, while ordinary inheritance children require `CASCADE`.
-    pub(crate) fn hierarchy_drop_targets(
-        &self,
-        roots: &[String],
-        cascade: bool,
-    ) -> (Vec<String>, Vec<String>) {
-        let mut targets = roots.iter().cloned().collect::<BTreeSet<_>>();
-        let mut blockers = BTreeSet::new();
-        loop {
-            let mut added = false;
-            let tables = self.storage.tables.read();
-            for (identity, table) in tables.iter() {
-                let candidate = identity.qualified_name();
-                if targets.contains(&candidate) {
-                    continue;
-                }
-                let hierarchy = table.hierarchy.read();
-                if !hierarchy
-                    .parents
-                    .iter()
-                    .any(|parent| targets.contains(parent))
-                {
-                    continue;
-                }
-                if hierarchy.is_partition() || cascade {
-                    added |= targets.insert(candidate);
-                } else {
-                    blockers.insert(candidate);
-                }
-            }
-            if !added {
-                break;
-            }
-        }
-        (
-            targets.into_iter().collect(),
-            blockers.into_iter().collect(),
-        )
-    }
 }

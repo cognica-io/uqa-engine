@@ -5,7 +5,7 @@
 //
 
 //! Bind native sequence removal to the transaction and concrete registry/cache publication boundary.
-use crate::{Engine, StorageBackendResult};
+use crate::Engine;
 use uqa_execution::schema::sequences::removal::{
     SequenceRemovalContext, SequenceRemovalInputs, SequenceRemovalPublication,
 };
@@ -30,14 +30,6 @@ impl Engine {
         self.with_implicit_string_transaction(|engine| {
             engine.sequence_removal_context().drop_sequence(name)
         })
-    }
-    pub(crate) fn drop_owned_sequence(
-        &self,
-        name: &str,
-        cascade: bool,
-    ) -> StorageBackendResult<()> {
-        self.sequence_removal_context()
-            .drop_owned_sequence(name, cascade)
     }
 }
 impl SequenceRemovalPublication for Engine {

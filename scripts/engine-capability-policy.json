@@ -108,6 +108,7 @@
         "crates/uqa-engine/src/capabilities/table_ownership.rs",
         "crates/uqa-engine/src/capabilities/table_privileges.rs",
         "crates/uqa-engine/src/capabilities/table_reads.rs",
+        "crates/uqa-engine/src/capabilities/table_removal.rs",
         "crates/uqa-engine/src/capabilities/tests.rs",
         "crates/uqa-engine/src/capabilities/triggers.rs",
         "crates/uqa-engine/src/capabilities/truncate.rs",
