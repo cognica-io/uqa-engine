@@ -114,7 +114,6 @@ fn failed_physical_removal_rolls_back_cascaded_views_and_foreign_keys_before_own
         .contains("injected physical table removal failure"));
     assert!(publication.reached.get());
     assert_parent_restored(&engine);
-    drop(publication);
     drop(engine);
     assert_parent_restored(&Engine::open(&path).unwrap());
 }
@@ -232,7 +231,6 @@ fn failed_later_cascade_candidate_preserves_every_live_schema_and_rolls_back_pri
         .contains("injected second schema persistence failure"));
     assert_eq!(catalog.writes.get(), 2);
     assert_children_restored(&engine);
-    drop(catalog);
     drop(engine);
     assert_children_restored(&Engine::open(&path).unwrap());
 }
