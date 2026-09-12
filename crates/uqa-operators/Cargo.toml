@@ -21,6 +21,7 @@ uqa-scoring = { workspace = true }
 uqa-fusion = { workspace = true }
 
 [dev-dependencies]
+serde_json = { workspace = true }
 proptest = { workspace = true }
 uqa-analysis = { workspace = true }
 criterion = { workspace = true }

@@ -7,8 +7,8 @@
 //! Bayesian BM25 parameter loading, staleness, sampling, and estimation.
 
 use super::{
-    storage_sql_error, BM25Params, BTreeMap, BTreeSet, BayesianBM25Params, Engine, SQLError,
-    UnsupervisedBm25ScoreEstimator,
+    analyze_query_terms, storage_sql_error, BM25Params, BTreeMap, BayesianBM25Params, Engine,
+    SQLError, TokenTermKey, UnsupervisedBm25ScoreEstimator,
 };
 
 /// Auto-estimated parameters are refreshed once the corpus doubles or
@@ -234,7 +234,7 @@ impl Engine {
         table: &str,
         field: &str,
         estimator: &UnsupervisedBm25ScoreEstimator,
-    ) -> Result<Vec<Vec<String>>, SQLError> {
+    ) -> Result<Vec<Vec<TokenTermKey>>, SQLError> {
         let Some(table_state) = self
             .try_query_table(table)
             .map_err(|error| storage_sql_error("resolve calibration table", error))?
@@ -247,51 +247,20 @@ impl Engine {
             .search_analyzer_revision(field)
             .map_err(|error| storage_sql_error("resolve calibration analyzer revision", error))?;
         let store = table_state.document_store.read();
-        let mut doc_ids = store
+        let doc_ids = store
             .doc_ids()
             .map_err(|error| storage_sql_error("read calibration document ids", error))?;
-        doc_ids.sort_unstable();
-        if doc_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let lengths = estimator.calibration_lengths();
-        let target = estimator.n_samples();
-        // Oversample document slots: short documents cannot fill the
-        // longer query lengths and get skipped.
-        let oversampled_target = target.saturating_mul(2).max(1);
-        let stride = (doc_ids.len() / oversampled_target).max(1);
-        let mut queries: Vec<Vec<String>> = Vec::new();
-        let mut length_index = 0;
-        let mut cursor = 0;
-        while queries.len() < target && cursor < doc_ids.len() {
-            let doc_id = doc_ids[cursor];
-            cursor += stride;
+        estimator.sample_document_queries(doc_ids, |doc_id| {
             let Some(uqa_core::Value::Str(text)) = store
                 .get_field(doc_id, field)
                 .map_err(|error| storage_sql_error("read calibration document field", error))?
             else {
-                continue;
+                return Ok(None);
             };
-            let mut distinct: Vec<String> = Vec::new();
-            let mut seen = BTreeSet::new();
-            for term in analyzer
-                .analyze(&text)
-                .map_err(|error| storage_sql_error("analyze calibration document field", error))?
-            {
-                if seen.insert(term.clone()) {
-                    distinct.push(term);
-                }
-            }
-            let length = lengths[length_index % lengths.len()];
-            if distinct.len() < length {
-                continue;
-            }
-            distinct.truncate(length);
-            queries.push(distinct);
-            length_index += 1;
-        }
-        Ok(queries)
+            analyze_query_terms(&analyzer, &text)
+                .map(Some)
+                .map_err(|error| storage_sql_error("analyze calibration document field", error))
+        })
     }
 
     /// Estimate unsupervised score-transform parameters from the field's indexed
@@ -314,7 +283,7 @@ impl Engine {
                 .map_err(|error| storage_sql_error("read indexed document count", error))?
                 == 0
                 || index
-                    .vocabulary_terms(field)
+                    .vocabulary_keys(field)
                     .map_err(|error| storage_sql_error("read indexed vocabulary", error))?
                     .is_empty()
             {
@@ -323,7 +292,7 @@ impl Engine {
             let params = if queries.is_empty() {
                 estimator.estimate(index.as_ref(), field, BM25Params::default())
             } else {
-                estimator.estimate_with_queries(
+                estimator.estimate_with_query_keys(
                     index.as_ref(),
                     field,
                     BM25Params::default(),

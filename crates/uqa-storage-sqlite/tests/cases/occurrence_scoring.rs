@@ -11,7 +11,9 @@ use std::collections::BTreeMap;
 use uqa_analysis::{Analyzer, AnalyzerLimits, AnalyzerResources, TokenLengthPolicy};
 use uqa_storage_sqlite::{Catalog, ManagedConnection, SQLiteInvertedIndex};
 
-use super::{Arc, BM25Scorer, Engine, InvertedIndex, ScoringMode};
+use std::sync::Arc;
+use uqa_scoring::{score_text_terms, BM25Scorer, ScoringMode, TextSearchAlgorithm};
+use uqa_storage::InvertedIndex;
 
 fn occurrence_score_fixture() -> SQLiteInvertedIndex {
     let conn = ManagedConnection::open_in_memory().unwrap();
@@ -36,9 +38,9 @@ fn occurrence_score_fixture() -> SQLiteInvertedIndex {
 #[test]
 fn occurrence_scores_keep_actual_lengths_in_exhaustive_search_and_persisted_bounds() {
     let index = occurrence_score_fixture();
-    let mode = ScoringMode::BM25(crate::BM25Params::default());
+    let mode = ScoringMode::BM25(uqa_scoring::BM25Params::default());
     let scorer = BM25Scorer::new(
-        crate::BM25Params::default(),
+        uqa_scoring::BM25Params::default(),
         Arc::new(index.field_stats("body").unwrap()),
     );
     let expected =
@@ -49,14 +51,30 @@ fn occurrence_scores_keep_actual_lengths_in_exhaustive_search_and_persisted_boun
                 scorer.score(b_frequency, length, 2),
             )
         });
-    let single = Engine::score_single_text_term(&index, "body", &["a".into()], &mode).unwrap();
-    let multiple = Engine::score_multiple_text_terms(
+    let mut single = score_text_terms(
         &index,
+        "docs",
+        "body",
+        &["a".into()],
+        &mode,
+        usize::MAX,
+        TextSearchAlgorithm::Exhaustive,
+    )
+    .unwrap()
+    .entries;
+    let mut multiple = score_text_terms(
+        &index,
+        "docs",
         "body",
         &["a".into(), "b".into(), "a".into()],
         &mode,
+        usize::MAX,
+        TextSearchAlgorithm::Exhaustive,
     )
-    .unwrap();
+    .unwrap()
+    .entries;
+    single.sort_by_key(|entry| entry.doc_id);
+    multiple.sort_by_key(|entry| entry.doc_id);
     assert_eq!(single.len(), expected.len());
     assert_eq!(multiple.len(), expected.len());
     for ((single, multiple), (doc_id, a_score, b_score)) in

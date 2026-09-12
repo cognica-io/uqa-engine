@@ -172,6 +172,19 @@ impl InvertedIndex for KeyValueInvertedIndex {
         field: &str,
         terms: &[String],
     ) -> StorageBackendResult<Vec<(u64, Vec<u64>)>> {
+        let keys = terms
+            .iter()
+            .map(|term| TokenTermKey::from_text(term))
+            .collect::<Vec<_>>();
+        self.get_scoring_inputs_keys_bulk(doc_ids, field, &keys)
+    }
+
+    fn get_scoring_inputs_keys_bulk(
+        &self,
+        doc_ids: &[DocId],
+        field: &str,
+        terms: &[TokenTermKey],
+    ) -> StorageBackendResult<Vec<(u64, Vec<u64>)>> {
         let mut output = doc_ids
             .iter()
             .map(|id| Ok((self.document_length(*id, field)?, vec![0; terms.len()])))
@@ -181,7 +194,7 @@ impl InvertedIndex for KeyValueInvertedIndex {
             positions.entry(doc_id).or_default().push(position);
         }
         for (term_index, term) in terms.iter().enumerate() {
-            let mut cursor = self.posting_cursor(field, term)?;
+            let mut cursor = self.posting_cursor_key(field, term)?;
             while let Some(entry) = cursor.current() {
                 if let Some(output_positions) = positions.get(&entry.doc_id) {
                     for position in output_positions {

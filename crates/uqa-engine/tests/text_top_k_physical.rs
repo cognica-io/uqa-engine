@@ -255,3 +255,6 @@ fn sqlite_bmw_survives_reopen_and_never_uses_stale_or_mismatched_bounds() {
         TextSearchAlgorithm::BlockMaxWand,
     );
 }
+
+#[path = "text_top_k_physical/lossless.rs"]
+mod lossless;

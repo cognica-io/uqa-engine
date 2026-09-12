@@ -51,15 +51,42 @@ pub fn extract_query_features(
     query_terms: &[String],
     field: Option<&str>,
 ) -> [f64; N_QUERY_FEATURES] {
+    extract_features(
+        stats,
+        query_terms.len(),
+        query_terms
+            .iter()
+            .map(|term| stats.doc_freq(field.unwrap_or("_default"), term)),
+    )
+}
+
+/// Extract the same query features from exact UTF-16 terms, including isolated surrogate units.
+pub fn extract_query_features_utf16(
+    stats: &IndexStats,
+    query_terms: &[Vec<u16>],
+    field: Option<&str>,
+) -> [f64; N_QUERY_FEATURES] {
+    extract_features(
+        stats,
+        query_terms.len(),
+        query_terms
+            .iter()
+            .map(|term| stats.doc_freq_utf16(field.unwrap_or("_default"), term)),
+    )
+}
+
+fn extract_features(
+    stats: &IndexStats,
+    term_count: usize,
+    frequencies: impl Iterator<Item = u64>,
+) -> [f64; N_QUERY_FEATURES] {
     let n_docs = stats.total_docs;
     if n_docs == 0 {
         return [0.0; N_QUERY_FEATURES];
     }
-    let field_name = field.unwrap_or("_default");
-    let mut idfs: Vec<f64> = Vec::with_capacity(query_terms.len());
+    let mut idfs: Vec<f64> = Vec::with_capacity(term_count);
     let mut vocab_hits: usize = 0;
-    for term in query_terms {
-        let df = stats.doc_freq(field_name, term);
+    for df in frequencies {
         if df > 0 {
             vocab_hits += 1;
             let idf = (((n_docs - df) as f64 + 0.5) / (df as f64 + 0.5) + 1.0).ln();
@@ -67,14 +94,14 @@ pub fn extract_query_features(
         }
     }
     if idfs.is_empty() {
-        return [0.0, 0.0, 0.0, 0.0, query_terms.len() as f64, 0.0];
+        return [0.0, 0.0, 0.0, 0.0, term_count as f64, 0.0];
     }
     let mean_idf: f64 = idfs.iter().sum::<f64>() / idfs.len() as f64;
     let max_idf: f64 = idfs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let min_idf: f64 = idfs.iter().copied().fold(f64::INFINITY, f64::min);
     let coverage_ratio = idfs.len() as f64 / n_docs.max(1) as f64;
-    let query_length = query_terms.len() as f64;
-    let vocab_overlap = vocab_hits as f64 / query_terms.len().max(1) as f64;
+    let query_length = term_count as f64;
+    let vocab_overlap = vocab_hits as f64 / term_count.max(1) as f64;
     [
         mean_idf,
         max_idf,
@@ -97,6 +124,26 @@ mod tests {
             s.set_doc_freq(field, *term, *df);
         }
         s
+    }
+
+    #[test]
+    fn raw_utf16_features_keep_repetition_and_replacement_characters_distinct() {
+        let mut stats = stats_with("body", &[("�", 200)]);
+        stats.set_doc_freq_utf16("body", vec![0xd83d], 5);
+        let features = extract_query_features_utf16(
+            &stats,
+            &[vec![0xd83d], vec![0xfffd], vec![0xd83d]],
+            Some("body"),
+        );
+        let scalar = stats_with("body", &[("raw", 5), ("replacement", 200)]);
+        assert_eq!(
+            features,
+            extract_query_features(
+                &scalar,
+                &["raw".into(), "replacement".into(), "raw".into()],
+                Some("body")
+            )
+        );
     }
 
     #[test]

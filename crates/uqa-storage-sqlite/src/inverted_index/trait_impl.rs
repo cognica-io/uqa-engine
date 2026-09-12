@@ -158,6 +158,38 @@ impl InvertedIndex for SQLiteInvertedIndex {
         self.cursors_for_terms(field, &keys)
     }
 
+    fn posting_cursors_keys_bulk(
+        &self,
+        field: &str,
+        terms: &[TokenTermKey],
+    ) -> StorageBackendResult<Vec<Box<dyn PostingCursor>>> {
+        self.cursors_for_terms(field, terms)
+    }
+
+    fn get_posting_lists_keys_bulk(
+        &self,
+        field: &str,
+        terms: &[TokenTermKey],
+    ) -> StorageBackendResult<Vec<PostingList>> {
+        Ok(self
+            .occurrence_postings_bulk(field, terms)?
+            .into_iter()
+            .map(project_postings)
+            .collect())
+    }
+
+    fn persisted_block_max_scores_keys_bulk(
+        &self,
+        field: &str,
+        terms: &[TokenTermKey],
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<Vec<Option<Vec<f64>>>> {
+        if scorer_fingerprint.is_empty() {
+            return Ok(vec![None; terms.len()]);
+        }
+        self.get_versioned_block_max_scores_keys_bulk(field, terms, scorer_fingerprint)
+    }
+
     fn rebuild_persisted_block_max(
         &mut self,
         field: &str,
@@ -279,6 +311,19 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         terms: &[String],
     ) -> StorageBackendResult<Vec<(u64, Vec<u64>)>> {
+        let keys = terms
+            .iter()
+            .map(|term| TokenTermKey::from_text(term))
+            .collect::<Vec<_>>();
+        self.get_scoring_inputs_keys_bulk(doc_ids, field, &keys)
+    }
+
+    fn get_scoring_inputs_keys_bulk(
+        &self,
+        doc_ids: &[DocId],
+        field: &str,
+        terms: &[TokenTermKey],
+    ) -> StorageBackendResult<Vec<(u64, Vec<u64>)>> {
         if doc_ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -302,7 +347,7 @@ impl InvertedIndex for SQLiteInvertedIndex {
             output_positions.entry(doc_id).or_default().push(position);
         }
         for (term_index, mut cursor) in self
-            .posting_cursors_bulk(field, terms)?
+            .posting_cursors_keys_bulk(field, terms)?
             .into_iter()
             .enumerate()
         {

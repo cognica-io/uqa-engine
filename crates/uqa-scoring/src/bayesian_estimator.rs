@@ -26,6 +26,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use uqa_storage::TokenTermKey;
 
 use uqa_core::DocId;
 use uqa_storage::{InvertedIndex, StorageBackendError, StorageBackendResult};
@@ -34,6 +35,8 @@ use crate::bayesian_bm25::BayesianBM25Params;
 use crate::bm25::{BM25Params, BM25Scorer};
 use crate::error::invalid_input;
 use crate::ScoringResult;
+
+mod document_queries;
 
 const DEFAULT_N_SAMPLES: usize = 50;
 const DEFAULT_TOKENS_PER_QUERY: usize = 5;
@@ -115,11 +118,11 @@ impl UnsupervisedBm25ScoreEstimator {
                     "n_samples * tokens_per_query does not fit in usize".to_string(),
                 )
             })?;
-        let vocabulary = index.vocabulary_terms(field)?;
+        let vocabulary = index.vocabulary_keys(field)?;
         let sampled_terms = reservoir_sample(&vocabulary, sample_size, self.seed);
 
         let lengths = calibration_lengths(self.tokens_per_query);
-        let mut queries: Vec<Vec<String>> = Vec::new();
+        let mut queries: Vec<Vec<TokenTermKey>> = Vec::new();
         let mut cursor = 0;
         let mut query_index = 0;
         while cursor < sampled_terms.len() {
@@ -133,7 +136,7 @@ impl UnsupervisedBm25ScoreEstimator {
             cursor = end;
         }
 
-        self.estimate_with_queries(index, field, bm25_params, &queries)
+        self.estimate_with_query_keys(index, field, bm25_params, &queries)
     }
 
     /// Estimate from caller-provided pseudo-queries, grouped by their
@@ -147,6 +150,26 @@ impl UnsupervisedBm25ScoreEstimator {
         field: &str,
         bm25_params: BM25Params,
         queries: &[Vec<String>],
+    ) -> StorageBackendResult<BayesianBM25Params> {
+        let keys = queries
+            .iter()
+            .map(|query| {
+                query
+                    .iter()
+                    .map(|term| TokenTermKey::from_text(term))
+                    .collect()
+            })
+            .collect::<Vec<_>>();
+        self.estimate_with_query_keys(index, field, bm25_params, &keys)
+    }
+
+    /// Estimate from lossless term keys, preserving the supplied query lengths and repetitions.
+    pub fn estimate_with_query_keys(
+        &self,
+        index: &dyn InvertedIndex,
+        field: &str,
+        bm25_params: BM25Params,
+        queries: &[Vec<TokenTermKey>],
     ) -> StorageBackendResult<BayesianBM25Params> {
         let doc_count = index.doc_count()? as usize;
         if doc_count == 0 || queries.is_empty() {
@@ -296,7 +319,7 @@ fn fallback_params(bm25: BM25Params) -> BayesianBM25Params {
     }
 }
 
-fn reservoir_sample(terms: &[String], sample_size: usize, seed: i64) -> Vec<String> {
+fn reservoir_sample<T: Clone>(terms: &[T], sample_size: usize, seed: i64) -> Vec<T> {
     let mut random = JavaRandom::new(seed);
     let mut reservoir = Vec::with_capacity(sample_size.min(terms.len()));
     for (index, term) in terms.iter().enumerate() {
@@ -316,10 +339,10 @@ fn reservoir_sample(terms: &[String], sample_size: usize, seed: i64) -> Vec<Stri
 fn collect_scores(
     index: &dyn InvertedIndex,
     field: &str,
-    query_terms: &[String],
+    query_terms: &[TokenTermKey],
     scorer: &BM25Scorer,
 ) -> StorageBackendResult<Vec<f64>> {
-    let mut cursors = index.posting_cursors_bulk(field, query_terms)?;
+    let mut cursors = index.posting_cursors_keys_bulk(field, query_terms)?;
     let idfs: Vec<_> = cursors
         .iter()
         .map(|cursor| scorer.idf(cursor.doc_freq()))

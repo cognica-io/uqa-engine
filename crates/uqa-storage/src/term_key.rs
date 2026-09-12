@@ -42,6 +42,11 @@ impl TokenTermKey {
         Ok(Self(bytes))
     }
 
+    /// Borrow scalar text when this key contains a valid Unicode string.
+    pub fn as_str(&self) -> Option<&str> {
+        (self.0[0] == 0).then(|| std::str::from_utf8(&self.0[1..]).expect("validated UTF-8 key"))
+    }
+
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
@@ -80,5 +85,17 @@ impl TokenTermKey {
             }
             _ => Err(invalid()),
         }
+    }
+}
+
+impl From<String> for TokenTermKey {
+    fn from(text: String) -> Self {
+        Self::from_text(&text)
+    }
+}
+
+impl From<&str> for TokenTermKey {
+    fn from(text: &str) -> Self {
+        Self::from_text(text)
     }
 }

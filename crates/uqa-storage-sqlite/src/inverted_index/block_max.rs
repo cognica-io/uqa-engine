@@ -176,8 +176,15 @@ impl SQLiteInvertedIndex {
         field: &str,
         term: &str,
     ) -> StorageBackendResult<Vec<f64>> {
+        self.get_all_block_max_scores_key(field, &TokenTermKey::from_text(term))
+    }
+
+    pub fn get_all_block_max_scores_key(
+        &self,
+        field: &str,
+        term: &TokenTermKey,
+    ) -> StorageBackendResult<Vec<f64>> {
         self.require_graph_format()?;
-        let term = TokenTermKey::from_text(term);
         let table = self.blockmax_table_name(field);
         Ok(self.conn.with(|conn| {
             if !table_exists(conn, &table)? {
@@ -226,6 +233,19 @@ impl SQLiteInvertedIndex {
         terms: &[String],
         scorer_fingerprint: &str,
     ) -> StorageBackendResult<Vec<Option<Vec<f64>>>> {
+        let keys = terms
+            .iter()
+            .map(|term| TokenTermKey::from_text(term))
+            .collect::<Vec<_>>();
+        self.get_versioned_block_max_scores_keys_bulk(field, &keys, scorer_fingerprint)
+    }
+
+    pub fn get_versioned_block_max_scores_keys_bulk(
+        &self,
+        field: &str,
+        terms: &[TokenTermKey],
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<Vec<Option<Vec<f64>>>> {
         if terms.is_empty() {
             return Ok(Vec::new());
         }
@@ -265,9 +285,11 @@ impl SQLiteInvertedIndex {
                 );
                 let mut values = Vec::with_capacity(chunk.len() + 1);
                 values.push(rusqlite::types::Value::Text(scorer_fingerprint.to_string()));
-                values.extend(chunk.iter().map(|term| {
-                    rusqlite::types::Value::Blob(TokenTermKey::from_text(term).into_bytes())
-                }));
+                values.extend(
+                    chunk
+                        .iter()
+                        .map(|term| rusqlite::types::Value::Blob(term.as_bytes().to_vec())),
+                );
                 let mut statement = conn.prepare(&sql)?;
                 let rows = statement.query_map(rusqlite::params_from_iter(values), |row| {
                     Ok((
@@ -282,11 +304,9 @@ impl SQLiteInvertedIndex {
                 }
             }
 
-            let mut decoded = std::collections::BTreeMap::<String, Option<Vec<f64>>>::new();
+            let mut decoded = std::collections::BTreeMap::<TokenTermKey, Option<Vec<f64>>>::new();
             for term in unique_terms {
-                let rows = by_term
-                    .remove(TokenTermKey::from_text(&term).as_bytes())
-                    .unwrap_or_default();
+                let rows = by_term.remove(term.as_bytes()).unwrap_or_default();
                 if rows.is_empty() {
                     decoded.insert(term, None);
                     continue;
@@ -296,7 +316,7 @@ impl SQLiteInvertedIndex {
                     let block_idx = decode_index_usize("block index", block_idx)?;
                     if block_idx != expected || !score.is_finite() || score < 0.0 {
                         return Err(SQLiteError::StorageBackend(format!(
-                            "corrupt block-max index for `{field}.{term}` at block {block_idx}"
+                            "corrupt block-max index for `{field}.{term:?}` at block {block_idx}"
                         )));
                     }
                     scores.push(score);
@@ -309,10 +329,10 @@ impl SQLiteInvertedIndex {
 
     pub fn load_block_max_into(&self, target: &mut BlockMaxIndex) -> StorageBackendResult<()> {
         for field in self.fields_with_blockmax_tables()? {
-            for term in self.terms_for_field(&field)? {
-                let scores = self.get_all_block_max_scores(&field, &term)?;
+            for term in self.vocabulary_keys(&field)? {
+                let scores = self.get_all_block_max_scores_key(&field, &term)?;
                 if !scores.is_empty() {
-                    target.set_block_maxes(&self.table, &field, &term, scores)?;
+                    target.set_block_maxes_key(&self.table, &field, &term, scores)?;
                 }
             }
         }

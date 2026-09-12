@@ -111,6 +111,19 @@ pub fn analyze_index_field(
     Ok(staged)
 }
 
+/// Analyze a complete query without projecting away non-scalar terms or changing repeated-term accounting.
+pub fn analyze_query_terms(
+    analyzer: &CompiledAnalyzer,
+    text: &str,
+) -> StorageBackendResult<Vec<TokenTermKey>> {
+    Ok(analyzer
+        .analyze_tokens(text)?
+        .tokens()
+        .iter()
+        .map(|token| TokenTermKey::from_term(token.term()))
+        .collect())
+}
+
 fn source_offsets(offsets: &SourceOffsets) -> StorageBackendResult<TokenOffsets> {
     fn offset(value: usize) -> StorageBackendResult<u64> {
         u64::try_from(value).map_err(|_| super::counter_error("source offset"))

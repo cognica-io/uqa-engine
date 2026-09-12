@@ -86,19 +86,20 @@ pub(super) fn index_stats(
         for (field, query) in text_queries {
             let (stats_field, document_frequency) = if let Some(field) = field {
                 let terms = index
-                    .analyze(&field, &query)
+                    .analyze_utf16(&field, &query)
                     .map_err(|error| operator_execution_error("analyze optimizer query", error))?;
                 let mut document_frequency = 0_u64;
                 for term in terms {
-                    document_frequency =
-                        document_frequency.saturating_add(index.doc_freq(&field, &term).map_err(
-                            |error| operator_execution_error("read document frequency", error),
-                        )?);
+                    document_frequency = document_frequency.saturating_add(
+                        index.doc_freq_utf16(&field, &term).map_err(|error| {
+                            operator_execution_error("read document frequency", error)
+                        })?,
+                    );
                 }
                 (field, document_frequency.min(row_count))
             } else {
                 let document_frequency = index
-                    .doc_freq_any_field(&query)
+                    .query_doc_freq_any_field(&query)
                     .map_err(|error| operator_execution_error("read document frequency", error))?;
                 ("_default".to_string(), document_frequency.min(row_count))
             };

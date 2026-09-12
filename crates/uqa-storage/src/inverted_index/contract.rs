@@ -228,6 +228,95 @@ pub trait InvertedIndex: Send + Sync {
             .collect()
     }
 
+    /// Open exact-key cursors in input order, retaining repeated query terms. Scalar custom backends retain their optimized bulk implementation.
+    fn posting_cursors_keys_bulk(
+        &self,
+        field: &str,
+        terms: &[TokenTermKey],
+    ) -> StorageBackendResult<Vec<Box<dyn PostingCursor>>> {
+        if let Some(scalar) = terms
+            .iter()
+            .map(|key| key.as_str().map(str::to_owned))
+            .collect::<Option<Vec<_>>>()
+        {
+            return self.posting_cursors_bulk(field, &scalar);
+        }
+        terms
+            .iter()
+            .map(|term| self.posting_cursor_key(field, term))
+            .collect()
+    }
+
+    /// Read exact-key support without projecting UTF-16 term identity.
+    fn get_posting_lists_keys_bulk(
+        &self,
+        field: &str,
+        terms: &[TokenTermKey],
+    ) -> StorageBackendResult<Vec<PostingList>> {
+        if let Some(scalar) = terms
+            .iter()
+            .map(|key| key.as_str().map(str::to_owned))
+            .collect::<Option<Vec<_>>>()
+        {
+            return self.get_posting_lists_bulk(field, &scalar);
+        }
+        terms
+            .iter()
+            .map(|term| self.get_posting_list_key(field, term))
+            .collect()
+    }
+
+    /// Load exact-key scorer-versioned bounds. Custom scalar providers expose no raw-key materialization by default.
+    fn persisted_block_max_scores_keys_bulk(
+        &self,
+        field: &str,
+        terms: &[TokenTermKey],
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<Vec<Option<Vec<f64>>>> {
+        if let Some(scalar) = terms
+            .iter()
+            .map(|key| key.as_str().map(str::to_owned))
+            .collect::<Option<Vec<_>>>()
+        {
+            return self.persisted_block_max_scores_bulk(field, &scalar, scorer_fingerprint);
+        }
+        terms
+            .iter()
+            .map(|key| match key.as_str() {
+                Some(term) => self.persisted_block_max_scores(field, term, scorer_fingerprint),
+                None => Ok(None),
+            })
+            .collect()
+    }
+
+    /// Exact-key scoring inputs aligned with both the document and query-term arrays, including repetitions.
+    fn get_scoring_inputs_keys_bulk(
+        &self,
+        doc_ids: &[DocId],
+        field: &str,
+        terms: &[TokenTermKey],
+    ) -> StorageBackendResult<Vec<(u64, Vec<u64>)>> {
+        if let Some(scalar) = terms
+            .iter()
+            .map(|key| key.as_str().map(str::to_owned))
+            .collect::<Option<Vec<_>>>()
+        {
+            return self.get_scoring_inputs_bulk(doc_ids, field, &scalar);
+        }
+        doc_ids
+            .iter()
+            .map(|id| {
+                Ok((
+                    self.get_doc_length(*id, field)?,
+                    terms
+                        .iter()
+                        .map(|key| self.get_term_freq_key(*id, field, key))
+                        .collect::<StorageBackendResult<_>>()?,
+                ))
+            })
+            .collect()
+    }
+
     /// Persist scorer-specific block maxima for every term in `field`.
     ///
     /// Backends that do not provide durable auxiliary indexes return `false`.

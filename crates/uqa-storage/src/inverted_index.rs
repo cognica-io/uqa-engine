@@ -31,7 +31,7 @@ mod metadata;
 #[cfg(test)]
 mod tests;
 
-pub use analysis::{analyze_index_field, AnalyzedField, IndexedFieldMetadata};
+pub use analysis::{analyze_index_field, analyze_query_terms, AnalyzedField, IndexedFieldMetadata};
 pub use bindings::AnalyzerBindings;
 pub use contract::{AnalyzerPhase, InvertedIndex};
 pub use metadata::IndexedFieldRevision;

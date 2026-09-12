@@ -8,7 +8,7 @@
 
 use rusqlite::params;
 use std::collections::BTreeMap;
-use uqa_storage::{BlockMaxIndex, StorageBackendError};
+use uqa_storage::{BlockMaxIndex, StorageBackendError, TokenTermKey};
 
 pub trait SQLiteBlockMaxPersistence {
     fn save_to_sqlite(&self, connection: &rusqlite::Connection) -> rusqlite::Result<()>;
@@ -28,7 +28,7 @@ impl SQLiteBlockMaxPersistence for BlockMaxIndex {
                     "INSERT INTO _global_blockmax
                         (table_name, field, term, block_idx, max_score)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![table, field, term, block_idx, *score],
+                    params![table, field, term.as_bytes(), block_idx, *score],
                 )?;
             }
         }
@@ -46,12 +46,12 @@ impl SQLiteBlockMaxPersistence for BlockMaxIndex {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
+                read_term_key(row.get_ref(2)?)?,
                 row.get::<_, i64>(3)?,
                 row.get::<_, f64>(4)?,
             ))
         })?;
-        let mut loaded = BTreeMap::<(String, String, String), Vec<f64>>::new();
+        let mut loaded = BTreeMap::<(String, String, TokenTermKey), Vec<f64>>::new();
         for row in rows {
             let (table, field, term, block_idx, score) = row?;
             let idx = usize::try_from(block_idx)
@@ -75,11 +75,33 @@ impl SQLiteBlockMaxPersistence for BlockMaxIndex {
         let mut replacement = Self::new(self.block_size()).map_err(storage_error_to_sqlite)?;
         for ((table, field, term), scores) in loaded {
             replacement
-                .set_block_maxes(&table, &field, &term, scores)
+                .set_block_maxes_key(&table, &field, &term, scores)
                 .map_err(storage_error_to_sqlite)?;
         }
         *self = replacement;
         Ok(())
+    }
+}
+
+fn read_term_key(value: rusqlite::types::ValueRef<'_>) -> rusqlite::Result<TokenTermKey> {
+    match value {
+        rusqlite::types::ValueRef::Blob(bytes) => {
+            TokenTermKey::from_bytes(bytes.to_vec()).map_err(storage_error_to_sqlite)
+        }
+        rusqlite::types::ValueRef::Text(bytes) => std::str::from_utf8(bytes)
+            .map(TokenTermKey::from_text)
+            .map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    2,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            }),
+        _ => Err(rusqlite::Error::InvalidColumnType(
+            2,
+            "term".into(),
+            value.data_type(),
+        )),
     }
 }
 
@@ -92,7 +114,7 @@ fn ensure_global_blockmax_shape(conn: &rusqlite::Connection) -> rusqlite::Result
         "CREATE TABLE IF NOT EXISTS _global_blockmax (
             table_name TEXT NOT NULL DEFAULT '',
             field     TEXT NOT NULL,
-            term      TEXT NOT NULL,
+            term      BLOB NOT NULL,
             block_idx INTEGER NOT NULL,
             max_score REAL NOT NULL,
             PRIMARY KEY (table_name, field, term, block_idx)

@@ -15,7 +15,7 @@ use uqa_core::{
     DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList, Predicate, Value,
 };
 use uqa_scoring::Scorer;
-use uqa_storage::StorageBackendError;
+use uqa_storage::{inverted_index::analyze_query_terms, StorageBackendError, TokenTermKey};
 
 use crate::base::{
     missing_backend, require_finite_score, ExecutionContext, Operator, OperatorResult,
@@ -47,13 +47,13 @@ impl Operator for TermOperator {
         // Search-time analyzer: synonym filters and similar transforms expand
         // `term` into tokens that are unioned across the field's posting lists.
         let analyzer = idx.search_analyzer_revision(&self.field)?;
-        let tokens = analyzer.analyze(&self.term)?;
+        let tokens = analyze_query_terms(&analyzer, &self.term)?;
         if tokens.is_empty() {
             return Ok(PostingList::new());
         }
-        let mut acc = idx.get_posting_list(&self.field, &tokens[0])?;
+        let mut acc = idx.get_posting_list_key(&self.field, &tokens[0])?;
         for t in &tokens[1..] {
-            acc = acc.merge_union(&idx.get_posting_list(&self.field, t)?);
+            acc = acc.merge_union(&idx.get_posting_list_key(&self.field, t)?);
         }
         Ok(acc)
     }
@@ -325,7 +325,7 @@ fn value_to_string(v: &Value) -> String {
 pub struct ScoreOperator {
     pub scorer: Arc<dyn Scorer>,
     pub source: Arc<dyn Operator>,
-    pub query_terms: Vec<String>,
+    pub query_terms: Vec<TokenTermKey>,
     pub field: FieldName,
 }
 
@@ -334,6 +334,22 @@ impl ScoreOperator {
         scorer: Arc<dyn Scorer>,
         source: Arc<dyn Operator>,
         query_terms: Vec<String>,
+        field: impl Into<FieldName>,
+    ) -> Self {
+        Self::new_keys(
+            scorer,
+            source,
+            query_terms.into_iter().map(TokenTermKey::from).collect(),
+            field,
+        )
+    }
+}
+
+impl ScoreOperator {
+    pub fn new_keys(
+        scorer: Arc<dyn Scorer>,
+        source: Arc<dyn Operator>,
+        query_terms: Vec<TokenTermKey>,
         field: impl Into<FieldName>,
     ) -> Self {
         Self {
@@ -355,12 +371,12 @@ impl Operator for ScoreOperator {
         // Pre-compute per-term IDF.
         let mut term_idfs = Vec::with_capacity(self.query_terms.len());
         for term in &self.query_terms {
-            term_idfs.push(self.scorer.idf(idx.doc_freq(&self.field, term)?));
+            term_idfs.push(self.scorer.idf(idx.doc_freq_key(&self.field, term)?));
         }
 
         let doc_ids: Vec<DocId> = source_pl.iter().map(|entry| entry.doc_id).collect();
         let scoring_inputs =
-            idx.get_scoring_inputs_bulk(&doc_ids, &self.field, &self.query_terms)?;
+            idx.get_scoring_inputs_keys_bulk(&doc_ids, &self.field, &self.query_terms)?;
         if source_pl.len() != scoring_inputs.len() {
             return Err(StorageBackendError::Other(format!(
                 "score operator received {} storage inputs for {} source documents",

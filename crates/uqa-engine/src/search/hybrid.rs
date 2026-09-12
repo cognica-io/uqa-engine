@@ -32,7 +32,10 @@ impl Engine {
         };
         let entries =
             crate::operator_tree_bridge::execute_scored_tree(self, params.table, &[], &tree)?;
-        Ok(Self::rank_scored_entries_top_k(entries, params.top_k))
+        Ok(uqa_scoring::rank_scored_entries_top_k(
+            entries,
+            params.top_k,
+        ))
     }
 
     /// Explicit robust positive-evidence hybrid ranking. This method applies
@@ -62,7 +65,10 @@ impl Engine {
         };
         let entries =
             crate::operator_tree_bridge::execute_scored_tree(self, params.table, &[], &tree)?;
-        Ok(Self::rank_scored_entries_top_k(entries, params.top_k))
+        Ok(uqa_scoring::rank_scored_entries_top_k(
+            entries,
+            params.top_k,
+        ))
     }
 
     fn build_hybrid_signals(
@@ -87,10 +93,10 @@ impl Engine {
             .search_analyzer_revision(text_field)
             .map_err(|error| storage_sql_error("resolve hybrid analyzer revision", error))?;
         let analyzed_terms = analyzer
-            .analyze(text_query)
+            .analyze_tokens(text_query)
             .map_err(|error| storage_sql_error("analyze hybrid text query", error))?;
         let mut signals = Vec::new();
-        if !analyzed_terms.is_empty() {
+        if !analyzed_terms.tokens().is_empty() {
             signals.push(uqa_operators::OperatorTree::Term {
                 query: text_query.to_string(),
                 field: Some(text_field.to_string()),

@@ -22,6 +22,10 @@ flowchart LR
 
 Index and search analyzer assignment is field-specific. Documents add analyzed text to a persistent or memory inverted index. Query analysis preserves duplicate terms as separate cursors because duplicate query terms can change scoring. Pipeline stage ownership, JSON tags, phase fallback, atomic rebuilds, catalog restoration, and synonym resources are documented in [Analyzer pipeline internals](04-analyzer-pipeline.md).
 
+Query lookup uses canonical `TokenTermKey` values throughout term support, exhaustive scoring, WAND, persisted SQLite bounds, estimator samples, and multi-field retrieval. Analyzer output with unpaired UTF-16 units stays distinct from a replacement character; repeated keys still contribute repeatedly. Planner statistics and attention features consume exact UTF-16 terms without requiring the planner or fusion crates to own analyzer resources. `WANDQuery`, `CursorWANDQuery`, and `ScoreOperator` retain keys in their public term arrays; their existing `new` constructors accept string arrays, and `new_keys` accepts canonical keys. `BlockMaxIndex::entries` exposes canonical keys for persistence. All four WAND paths keep only live cursors in the pivot array, so the maximum document ID is a valid candidate rather than an exhaustion marker.
+
+[`uqa-scoring::text`](../../../crates/uqa-scoring/src/text.rs) owns exhaustive cursor scoring, physical WAND/BMW selection, query-local statistics, scorer-versioned block validation and rebuilding, and search work counters. The scoring crate also owns deterministic result ordering and document-derived calibration-query sampling. Engine retains the selected table, index guard, and transaction boundary, adapts the planned strategy and errors, and re-exports `TextSearchAlgorithm` and `TextSearchProfile`. All-field analyzer traversal and frequency aggregation belong to `uqa-planner`; its Engine adapter supplies the retained field inventory, analyzer output, and exact frequencies.
+
 ## BM25 domains
 
 Raw BM25 is a ranking score, not a probability. For term $t$:

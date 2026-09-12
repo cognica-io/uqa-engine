@@ -3913,6 +3913,7 @@ version = "0.2.3"
 dependencies = [
  "criterion",
  "proptest",
+ "serde_json",
  "uqa-analysis",
  "uqa-core",
  "uqa-fusion",
@@ -4073,6 +4074,7 @@ dependencies = [
  "uqa-analysis",
  "uqa-core",
  "uqa-graph",
+ "uqa-scoring",
  "uqa-storage",
  "zstd",
 ]

@@ -14,10 +14,10 @@ use uqa_core::{DocId, FieldName, Payload, PostingEntry, PostingList};
 use uqa_storage::{BlockMaxIndex, InvertedIndex, StorageBackendResult};
 
 use crate::scorer::Scorer;
+use uqa_storage::TokenTermKey;
 
 use super::common::{
     invalid_wand_input, require_nonnegative_finite, update_top_k, HeapEntry, WANDResult, WANDStats,
-    INF_DOC,
 };
 
 /// Common per-term cursor state: the entry slice and current position.
@@ -31,10 +31,8 @@ struct TermCursor<'a> {
 }
 
 impl<'a> TermCursor<'a> {
-    fn current_doc(&self) -> u64 {
-        self.entries
-            .get(self.position)
-            .map_or(INF_DOC, |e| e.doc_id)
+    fn current_doc(&self) -> Option<DocId> {
+        self.entries.get(self.position).map(|e| e.doc_id)
     }
 
     fn current(&self) -> Option<&'a PostingEntry> {
@@ -62,7 +60,7 @@ pub struct WANDQuery {
     pub posting_lists: Vec<PostingList>,
     pub scorers: Vec<Arc<dyn Scorer>>,
     pub fields: Vec<FieldName>,
-    pub terms: Vec<String>,
+    pub terms: Vec<TokenTermKey>,
     pub k: usize,
 }
 
@@ -72,6 +70,24 @@ impl WANDQuery {
         scorers: Vec<Arc<dyn Scorer>>,
         fields: Vec<FieldName>,
         terms: Vec<String>,
+        k: usize,
+    ) -> StorageBackendResult<Self> {
+        Self::new_keys(
+            posting_lists,
+            scorers,
+            fields,
+            terms.into_iter().map(TokenTermKey::from).collect(),
+            k,
+        )
+    }
+}
+
+impl WANDQuery {
+    pub fn new_keys(
+        posting_lists: Vec<PostingList>,
+        scorers: Vec<Arc<dyn Scorer>>,
+        fields: Vec<FieldName>,
+        terms: Vec<TokenTermKey>,
         k: usize,
     ) -> StorageBackendResult<Self> {
         let expected = posting_lists.len();
@@ -151,7 +167,7 @@ impl<'a> BlockMaxWANDScorer<'a> {
             .iter()
             .zip(&q.terms)
             .map(|(field, term)| {
-                let Some(blocks) = bmi.block_maxes(table, field, term) else {
+                let Some(blocks) = bmi.block_maxes_key(table, field, term) else {
                     return Vec::new();
                 };
                 let mut suffix = vec![0.0_f64; blocks.len()];
@@ -168,11 +184,7 @@ impl<'a> BlockMaxWANDScorer<'a> {
             &mut cursors,
             self.inverted_index,
             |sorted_terms, cursors, bounds| {
-                for &(doc_val, ti) in sorted_terms {
-                    if doc_val == INF_DOC {
-                        bounds.push(0.0);
-                        continue;
-                    }
+                for &(_, ti) in sorted_terms {
                     let cur_block = bmi.block_index_for(cursors[ti].position)?;
                     // Take the max block-max across the remaining blocks
                     // for this term so the bound stays valid for any
@@ -282,7 +294,7 @@ where
     };
 
     let mut sorted_terms: Vec<(u64, usize)> = (0..num_terms)
-        .map(|i| (cursors[i].current_doc(), i))
+        .filter_map(|i| cursors[i].current_doc().map(|doc_id| (doc_id, i)))
         .collect();
     sorted_terms.sort_unstable();
     let mut bounds = Vec::with_capacity(num_terms);
@@ -291,19 +303,9 @@ where
     let mut doc_lengths = vec![None; field_count];
 
     while !sorted_terms.is_empty() {
-        if sorted_terms[0].0 == INF_DOC {
-            break;
-        }
-
         bounds.clear();
         if !bound_provider(&sorted_terms, cursors, &mut bounds)? {
-            bounds.extend(sorted_terms.iter().map(|&(doc_val, ti)| {
-                if doc_val == INF_DOC {
-                    0.0
-                } else {
-                    cursors[ti].upper_bound
-                }
-            }));
+            bounds.extend(sorted_terms.iter().map(|&(_, ti)| cursors[ti].upper_bound));
         }
         let Some(pivot_idx) = select_pivot(query, &sorted_terms, &bounds, threshold)? else {
             break;
@@ -338,12 +340,10 @@ where
             // Advance every cursor at pivot_doc.
             for st in &mut sorted_terms {
                 let ti = st.1;
-                if cursors[ti].current_doc() == pivot_doc {
+                if cursors[ti].current_doc() == Some(pivot_doc) {
                     cursors[ti].position += 1;
-                    st.0 = cursors[ti].current_doc();
                 }
             }
-            sorted_terms.sort_unstable();
         } else {
             // Skip first cursor forward to pivot_doc.
             let first_term = sorted_terms[0].1;
@@ -352,9 +352,16 @@ where
                 .cursor_advances
                 .checked_add(1)
                 .ok_or_else(|| invalid_wand_input("cursor-advance counter overflowed"))?;
-            sorted_terms[0].0 = cursors[first_term].current_doc();
-            sorted_terms.sort_unstable();
         }
+        sorted_terms.retain_mut(|(doc_id, term_index)| {
+            if let Some(current) = cursors[*term_index].current_doc() {
+                *doc_id = current;
+                true
+            } else {
+                false
+            }
+        });
+        sorted_terms.sort_unstable();
     }
 
     let mut entries: Vec<PostingEntry> = top_k
@@ -386,10 +393,7 @@ fn select_pivot(
     for bound in bounds {
         require_nonnegative_finite(*bound, "WAND pruning bound")?;
     }
-    for (index, &(doc_id, _)) in sorted_terms.iter().enumerate() {
-        if doc_id == INF_DOC {
-            break;
-        }
+    for index in 0..sorted_terms.len() {
         let cumulative = query.scorers[0].finalize_upper_bound(&bounds[..=index]);
         require_nonnegative_finite(cumulative, "WAND cumulative upper bound")?;
         if cumulative >= threshold {
@@ -454,7 +458,7 @@ fn score_document(
             continue;
         }
         let tf = if let Some(index) = inverted_index {
-            index.get_term_freq(target, &query.fields[i], &query.terms[i])?
+            index.get_term_freq_key(target, &query.fields[i], &query.terms[i])?
         } else if entry.payload.positions.is_empty() {
             1
         } else {

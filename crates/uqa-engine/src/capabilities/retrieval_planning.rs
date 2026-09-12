@@ -24,6 +24,34 @@ struct TableStatistics(Arc<TableState>);
 struct TextRead<'a>(RwLockReadGuard<'a, Box<dyn InvertedIndex>>);
 struct VectorRead<'a>(RwLockReadGuard<'a, BTreeMap<String, Box<dyn VectorIndex>>>);
 impl TextStatisticsRead for TextRead<'_> {
+    fn field_names(&self) -> Result<Option<Vec<String>>, String> {
+        self.0
+            .field_names()
+            .map(Some)
+            .map_err(|error| error.to_string())
+    }
+
+    fn analyze_utf16(&self, field: &str, query: &str) -> Result<Vec<Vec<u16>>, String> {
+        Ok(self
+            .0
+            .search_analyzer_revision(field)
+            .map_err(|error| error.to_string())?
+            .analyze_tokens(query)
+            .map_err(|error| error.to_string())?
+            .tokens()
+            .iter()
+            .map(|token| token.term().utf16().into_owned())
+            .collect())
+    }
+    fn doc_freq_utf16(&self, field: &str, term: &[u16]) -> Result<u64, String> {
+        let key = uqa_storage::TokenTermKey::from_term(&uqa_analysis::TokenTerm::from_utf16(
+            term.to_vec(),
+        ));
+        self.0
+            .doc_freq_key(field, &key)
+            .map_err(|error| error.to_string())
+    }
+
     fn analyze(&self, field: &str, query: &str) -> Result<Vec<String>, String> {
         self.0
             .search_analyzer_revision(field)
@@ -101,13 +129,15 @@ impl RetrievalPlanningCatalog for Engine {
             crate::search::storage_sql_error("resolve text analyzer revision", error)
         })?;
         let analyzed_terms = analyzer
-            .analyze(query)
-            .map_err(|error| crate::search::storage_sql_error("analyze text query", error))?;
+            .analyze_tokens(query)
+            .map_err(|error| crate::search::storage_sql_error("analyze text query", error))?
+            .tokens()
+            .len();
         let indexed_document_count = index.field_doc_count(field).map_err(|error| {
             crate::search::storage_sql_error("read indexed document count", error)
         })?;
         Ok(uqa_planner::TextTopKCapabilities {
-            analyzed_term_count: analyzed_terms.len(),
+            analyzed_term_count: analyzed_terms,
             indexed_document_count,
         })
     }

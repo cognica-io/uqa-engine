@@ -46,11 +46,18 @@ impl PhysicalRetrievalDriver<'_> {
                 .search_analyzer_revision(&field)
                 .map_err(|error| operator_execution_error("attention analyzer revision", error))?;
             let terms = analyzer
-                .analyze(&query)
+                .analyze_tokens(&query)
                 .map_err(|error| operator_execution_error("attention query analysis", error))?;
-            return Ok(
-                uqa_fusion::extract_query_features(&index_stats, &terms, Some(&field)).to_vec(),
-            );
+            return Ok(uqa_fusion::extract_query_features_utf16(
+                &index_stats,
+                &terms
+                    .tokens()
+                    .iter()
+                    .map(|token| token.term().utf16().into_owned())
+                    .collect::<Vec<_>>(),
+                Some(&field),
+            )
+            .to_vec());
         }
         Ok(vec![0.0; uqa_fusion::N_QUERY_FEATURES])
     }
