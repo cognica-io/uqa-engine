@@ -25,7 +25,7 @@ finally:
 
 class NoriReferenceCasesTest(unittest.TestCase):
     def test_checked_in_sources_and_complete_case_inventory_match_reviewed_hashes(self):
-        for stem, entrypoint in [("user", "NoriUserReference.java"), ("tokenizer", "NoriTokenizerReference.java"), ("analysis", "NoriAnalysisReference.java"), ("number", "NoriNumberReference.java")]:
+        for stem, entrypoint in [("user", "NoriUserReference.java"), ("tokenizer", "NoriTokenizerReference.java"), ("analysis", "NoriAnalysisReference.java"), ("number", "NoriNumberReference.java"), ("generic", "NoriNumberReference.java")]:
             cases = json.loads((ROOT / f"{stem}_cases.json").read_text(encoding="utf-8"))
             output = (ROOT / f"{stem}_expected.jsonl").read_text(encoding="utf-8")
             expected = json.loads((ROOT / f"{stem}_manifest.json").read_text(encoding="utf-8"))

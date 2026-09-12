@@ -30,7 +30,7 @@ def token_row(token):
     return "\t".join([
         hexadecimal(token["term_utf16"]), str(token["start_utf16"]), str(token["end_utf16"]),
         str(token["position_increment"]), str(token["position_length"]), str(token["keyword"]).lower(),
-        token["pos_type"], token["left_pos"], token["right_pos"],
+        token.get("pos_type") or "-", token.get("left_pos") or "-", token.get("right_pos") or "-",
         "-" if reading is None else hexadecimal(reading),
         "-" if parts is None else ";".join(part["pos"] + ":" + hexadecimal(part["surface_utf16"]) for part in parts),
     ])

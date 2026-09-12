@@ -378,7 +378,11 @@ assert_eq!(output.tokens()[0].offsets().unwrap().utf8, 3..7);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-A returned common stream can be passed directly to `TokenFilter::filter_analyzed`. Keep the stream object when chaining: serialized diagnostic tokens omit the opaque exhaustion attributes. These native conversion APIs do not register a generic or SQL analyzer; resource compilation and registration remain separate implementation items.
+A returned common stream can be passed directly to `TokenFilter::filter_analyzed` or `KoreanFilter::filter_analyzed(stream, &model)`. Both native and common streams use the same Korean filter algorithms. A common token without Korean morphology stays without it: POS stops retain the token, and reading conversion leaves its term unchanged. Simple lowercase and number composition also accept ordinary tokenizer output. Number composition inherits the lookahead token's optional morphology, including its absence.
+
+With the `nori` feature enabled, a common stream owns a shared original-text snapshot, character-edit maps, and coordinate indexes so later composition remains valid after the caller's text and `FilteredText` are dropped. Every source tokenizer records `filtered_utf16()` before source correction. A composing filter combines those raw ranges and projects the result once; it cannot combine already-corrected boundaries because deletions and empty spans can make them inconsistent. If a rewritten term exactly matches its original source span, subsequent gram filters recover precise character spans. This retained source state is absent in feature-disabled builds.
+
+`KoreanFilter::filter_analyzed_controlled(stream, &model, limits, poll)` adds the same bounds and cancellation contract as the native filter methods; the input-unit limit measures filtered input. Invalid output graphs return a typed error. Keep the stream object when chaining: serialized diagnostic tokens omit the opaque exhaustion attributes and source projector. These APIs do not register a generic or SQL analyzer; resource compilation and registration remain separate implementation items.
 
 ### Korean filters and normalization
 

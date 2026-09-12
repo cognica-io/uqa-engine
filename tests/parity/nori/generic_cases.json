@@ -1,0 +1,3574 @@
+[
+  {
+    "id": "whitespace_words_0",
+    "pipeline": "whitespace",
+    "input": "UQA 韓國 İ 𐐀",
+    "filters": []
+  },
+  {
+    "id": "whitespace_words_1",
+    "pipeline": "whitespace",
+    "input": "UQA 韓國 İ 𐐀",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_words_2",
+    "pipeline": "whitespace",
+    "input": "UQA 韓國 İ 𐐀",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_words_3",
+    "pipeline": "whitespace",
+    "input": "UQA 韓國 İ 𐐀",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_words_4",
+    "pipeline": "whitespace",
+    "input": "UQA 韓國 İ 𐐀",
+    "filters": [
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_words_5",
+    "pipeline": "whitespace",
+    "input": "UQA 韓國 İ 𐐀",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_words_6",
+    "pipeline": "whitespace",
+    "input": "UQA 韓國 İ 𐐀",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_words_7",
+    "pipeline": "whitespace",
+    "input": "UQA 韓國 İ 𐐀",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_words_8",
+    "pipeline": "whitespace",
+    "input": "UQA 韓國 İ 𐐀",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_split_number_0",
+    "pipeline": "whitespace",
+    "input": "３ ． ２ 천 원 15 , 7",
+    "filters": []
+  },
+  {
+    "id": "whitespace_split_number_1",
+    "pipeline": "whitespace",
+    "input": "３ ． ２ 천 원 15 , 7",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_split_number_2",
+    "pipeline": "whitespace",
+    "input": "３ ． ２ 천 원 15 , 7",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_split_number_3",
+    "pipeline": "whitespace",
+    "input": "３ ． ２ 천 원 15 , 7",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_split_number_4",
+    "pipeline": "whitespace",
+    "input": "３ ． ２ 천 원 15 , 7",
+    "filters": [
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_split_number_5",
+    "pipeline": "whitespace",
+    "input": "３ ． ２ 천 원 15 , 7",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_split_number_6",
+    "pipeline": "whitespace",
+    "input": "３ ． ２ 천 원 15 , 7",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_split_number_7",
+    "pipeline": "whitespace",
+    "input": "３ ． ２ 천 원 15 , 7",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_split_number_8",
+    "pipeline": "whitespace",
+    "input": "３ ． ２ 천 원 15 , 7",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_number_0",
+    "pipeline": "whitespace",
+    "input": "12",
+    "filters": []
+  },
+  {
+    "id": "whitespace_number_1",
+    "pipeline": "whitespace",
+    "input": "12",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_number_2",
+    "pipeline": "whitespace",
+    "input": "12",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_number_3",
+    "pipeline": "whitespace",
+    "input": "12",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_number_4",
+    "pipeline": "whitespace",
+    "input": "12",
+    "filters": [
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_number_5",
+    "pipeline": "whitespace",
+    "input": "12",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_number_6",
+    "pipeline": "whitespace",
+    "input": "12",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_number_7",
+    "pipeline": "whitespace",
+    "input": "12",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_number_8",
+    "pipeline": "whitespace",
+    "input": "12",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_full_decimal_0",
+    "pipeline": "whitespace",
+    "input": "３．２천",
+    "filters": []
+  },
+  {
+    "id": "whitespace_full_decimal_1",
+    "pipeline": "whitespace",
+    "input": "３．２천",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_full_decimal_2",
+    "pipeline": "whitespace",
+    "input": "３．２천",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_full_decimal_3",
+    "pipeline": "whitespace",
+    "input": "３．２천",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_full_decimal_4",
+    "pipeline": "whitespace",
+    "input": "３．２천",
+    "filters": [
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_full_decimal_5",
+    "pipeline": "whitespace",
+    "input": "３．２천",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_full_decimal_6",
+    "pipeline": "whitespace",
+    "input": "３．２천",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_full_decimal_7",
+    "pipeline": "whitespace",
+    "input": "３．２천",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_full_decimal_8",
+    "pipeline": "whitespace",
+    "input": "３．２천",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_empty_0",
+    "pipeline": "whitespace",
+    "input": "",
+    "filters": []
+  },
+  {
+    "id": "whitespace_empty_1",
+    "pipeline": "whitespace",
+    "input": "",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_empty_2",
+    "pipeline": "whitespace",
+    "input": "",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_empty_3",
+    "pipeline": "whitespace",
+    "input": "",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_empty_4",
+    "pipeline": "whitespace",
+    "input": "",
+    "filters": [
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_empty_5",
+    "pipeline": "whitespace",
+    "input": "",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_empty_6",
+    "pipeline": "whitespace",
+    "input": "",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_empty_7",
+    "pipeline": "whitespace",
+    "input": "",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "whitespace_empty_8",
+    "pipeline": "whitespace",
+    "input": "",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "keyword_words_0",
+    "pipeline": "keyword",
+    "input": "UQA 韓國 İ 𐐀",
+    "filters": []
+  },
+  {
+    "id": "keyword_words_1",
+    "pipeline": "keyword",
+    "input": "UQA 韓國 İ 𐐀",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "keyword_words_2",
+    "pipeline": "keyword",
+    "input": "UQA 韓國 İ 𐐀",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "keyword_words_3",
+    "pipeline": "keyword",
+    "input": "UQA 韓國 İ 𐐀",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "keyword_words_4",
+    "pipeline": "keyword",
+    "input": "UQA 韓國 İ 𐐀",
+    "filters": [
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "keyword_words_5",
+    "pipeline": "keyword",
+    "input": "UQA 韓國 İ 𐐀",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "keyword_words_6",
+    "pipeline": "keyword",
+    "input": "UQA 韓國 İ 𐐀",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "keyword_words_7",
+    "pipeline": "keyword",
+    "input": "UQA 韓國 İ 𐐀",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "keyword_words_8",
+    "pipeline": "keyword",
+    "input": "UQA 韓國 İ 𐐀",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "keyword_split_number_0",
+    "pipeline": "keyword",
+    "input": "３ ． ２ 천 원 15 , 7",
+    "filters": []
+  },
+  {
+    "id": "keyword_split_number_1",
+    "pipeline": "keyword",
+    "input": "３ ． ２ 천 원 15 , 7",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "keyword_split_number_2",
+    "pipeline": "keyword",
+    "input": "３ ． ２ 천 원 15 , 7",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "keyword_split_number_3",
+    "pipeline": "keyword",
+    "input": "３ ． ２ 천 원 15 , 7",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "keyword_split_number_4",
+    "pipeline": "keyword",
+    "input": "３ ． ２ 천 원 15 , 7",
+    "filters": [
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "keyword_split_number_5",
+    "pipeline": "keyword",
+    "input": "３ ． ２ 천 원 15 , 7",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "keyword_split_number_6",
+    "pipeline": "keyword",
+    "input": "３ ． ２ 천 원 15 , 7",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "keyword_split_number_7",
+    "pipeline": "keyword",
+    "input": "３ ． ２ 천 원 15 , 7",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "keyword_split_number_8",
+    "pipeline": "keyword",
+    "input": "３ ． ２ 천 원 15 , 7",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "keyword_number_0",
+    "pipeline": "keyword",
+    "input": "12",
+    "filters": []
+  },
+  {
+    "id": "keyword_number_1",
+    "pipeline": "keyword",
+    "input": "12",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "keyword_number_2",
+    "pipeline": "keyword",
+    "input": "12",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "keyword_number_3",
+    "pipeline": "keyword",
+    "input": "12",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "keyword_number_4",
+    "pipeline": "keyword",
+    "input": "12",
+    "filters": [
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "keyword_number_5",
+    "pipeline": "keyword",
+    "input": "12",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "keyword_number_6",
+    "pipeline": "keyword",
+    "input": "12",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "keyword_number_7",
+    "pipeline": "keyword",
+    "input": "12",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "keyword_number_8",
+    "pipeline": "keyword",
+    "input": "12",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "keyword_full_decimal_0",
+    "pipeline": "keyword",
+    "input": "３．２천",
+    "filters": []
+  },
+  {
+    "id": "keyword_full_decimal_1",
+    "pipeline": "keyword",
+    "input": "３．２천",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "keyword_full_decimal_2",
+    "pipeline": "keyword",
+    "input": "３．２천",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "keyword_full_decimal_3",
+    "pipeline": "keyword",
+    "input": "３．２천",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "keyword_full_decimal_4",
+    "pipeline": "keyword",
+    "input": "３．２천",
+    "filters": [
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "keyword_full_decimal_5",
+    "pipeline": "keyword",
+    "input": "３．２천",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "keyword_full_decimal_6",
+    "pipeline": "keyword",
+    "input": "３．２천",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "keyword_full_decimal_7",
+    "pipeline": "keyword",
+    "input": "３．２천",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "keyword_full_decimal_8",
+    "pipeline": "keyword",
+    "input": "３．２천",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "keyword_empty_0",
+    "pipeline": "keyword",
+    "input": "",
+    "filters": []
+  },
+  {
+    "id": "keyword_empty_1",
+    "pipeline": "keyword",
+    "input": "",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "keyword_empty_2",
+    "pipeline": "keyword",
+    "input": "",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "keyword_empty_3",
+    "pipeline": "keyword",
+    "input": "",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "keyword_empty_4",
+    "pipeline": "keyword",
+    "input": "",
+    "filters": [
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "keyword_empty_5",
+    "pipeline": "keyword",
+    "input": "",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "keyword_empty_6",
+    "pipeline": "keyword",
+    "input": "",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "keyword_empty_7",
+    "pipeline": "keyword",
+    "input": "",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "keyword_empty_8",
+    "pipeline": "keyword",
+    "input": "",
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "missing_lookahead_0",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "SN",
+        "right_pos": "SN",
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          120
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "missing_lookahead_1",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "SN",
+        "right_pos": "SN",
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          120
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "missing_lookahead_2",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "SN",
+        "right_pos": "SN",
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          120
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "missing_lookahead_3",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "SN",
+        "right_pos": "SN",
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          120
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "missing_lookahead_4",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "SN",
+        "right_pos": "SN",
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          120
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "missing_lookahead_5",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "SN",
+        "right_pos": "SN",
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          120
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "missing_lookahead_6",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "SN",
+        "right_pos": "SN",
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          120
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "missing_lookahead_7",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "SN",
+        "right_pos": "SN",
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          120
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "present_lookahead_0",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          120
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "NNG",
+        "right_pos": "NNG",
+        "reading_utf16": [
+          82,
+          69,
+          65,
+          68
+        ],
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "present_lookahead_1",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          120
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "NNG",
+        "right_pos": "NNG",
+        "reading_utf16": [
+          82,
+          69,
+          65,
+          68
+        ],
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "present_lookahead_2",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          120
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "NNG",
+        "right_pos": "NNG",
+        "reading_utf16": [
+          82,
+          69,
+          65,
+          68
+        ],
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "present_lookahead_3",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          120
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "NNG",
+        "right_pos": "NNG",
+        "reading_utf16": [
+          82,
+          69,
+          65,
+          68
+        ],
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "present_lookahead_4",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          120
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "NNG",
+        "right_pos": "NNG",
+        "reading_utf16": [
+          82,
+          69,
+          65,
+          68
+        ],
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "present_lookahead_5",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          120
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "NNG",
+        "right_pos": "NNG",
+        "reading_utf16": [
+          82,
+          69,
+          65,
+          68
+        ],
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "present_lookahead_6",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          120
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "NNG",
+        "right_pos": "NNG",
+        "reading_utf16": [
+          82,
+          69,
+          65,
+          68
+        ],
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "present_lookahead_7",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          120
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "NNG",
+        "right_pos": "NNG",
+        "reading_utf16": [
+          82,
+          69,
+          65,
+          68
+        ],
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "missing_stacked_0",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49
+        ],
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          50
+        ],
+        "start_utf16": 1,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51
+        ],
+        "start_utf16": 2,
+        "end_utf16": 3,
+        "position_increment": 0,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          52
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "missing_stacked_1",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49
+        ],
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          50
+        ],
+        "start_utf16": 1,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51
+        ],
+        "start_utf16": 2,
+        "end_utf16": 3,
+        "position_increment": 0,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          52
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "missing_stacked_2",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49
+        ],
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          50
+        ],
+        "start_utf16": 1,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51
+        ],
+        "start_utf16": 2,
+        "end_utf16": 3,
+        "position_increment": 0,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          52
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "missing_stacked_3",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49
+        ],
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          50
+        ],
+        "start_utf16": 1,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51
+        ],
+        "start_utf16": 2,
+        "end_utf16": 3,
+        "position_increment": 0,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          52
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "missing_stacked_4",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49
+        ],
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          50
+        ],
+        "start_utf16": 1,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51
+        ],
+        "start_utf16": 2,
+        "end_utf16": 3,
+        "position_increment": 0,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          52
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "missing_stacked_5",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49
+        ],
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          50
+        ],
+        "start_utf16": 1,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51
+        ],
+        "start_utf16": 2,
+        "end_utf16": 3,
+        "position_increment": 0,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          52
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "missing_stacked_6",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49
+        ],
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          50
+        ],
+        "start_utf16": 1,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51
+        ],
+        "start_utf16": 2,
+        "end_utf16": 3,
+        "position_increment": 0,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          52
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "missing_stacked_7",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49
+        ],
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          50
+        ],
+        "start_utf16": 1,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51
+        ],
+        "start_utf16": 2,
+        "end_utf16": 3,
+        "position_increment": 0,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          52
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "mixed_trailing_stop_0",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51008
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "JX",
+        "right_pos": "JX",
+        "reading_utf16": [
+          83,
+          84,
+          79,
+          80
+        ],
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "mixed_trailing_stop_1",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51008
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "JX",
+        "right_pos": "JX",
+        "reading_utf16": [
+          83,
+          84,
+          79,
+          80
+        ],
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "mixed_trailing_stop_2",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51008
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "JX",
+        "right_pos": "JX",
+        "reading_utf16": [
+          83,
+          84,
+          79,
+          80
+        ],
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "mixed_trailing_stop_3",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51008
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "JX",
+        "right_pos": "JX",
+        "reading_utf16": [
+          83,
+          84,
+          79,
+          80
+        ],
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "mixed_trailing_stop_4",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51008
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "JX",
+        "right_pos": "JX",
+        "reading_utf16": [
+          83,
+          84,
+          79,
+          80
+        ],
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "mixed_trailing_stop_5",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51008
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "JX",
+        "right_pos": "JX",
+        "reading_utf16": [
+          83,
+          84,
+          79,
+          80
+        ],
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "mixed_trailing_stop_6",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51008
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "JX",
+        "right_pos": "JX",
+        "reading_utf16": [
+          83,
+          84,
+          79,
+          80
+        ],
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "mixed_trailing_stop_7",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51008
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "JX",
+        "right_pos": "JX",
+        "reading_utf16": [
+          83,
+          84,
+          79,
+          80
+        ],
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "mixed_trailing_zero_0",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51008
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 0,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "JX",
+        "right_pos": "JX",
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "mixed_trailing_zero_1",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51008
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 0,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "JX",
+        "right_pos": "JX",
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "mixed_trailing_zero_2",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51008
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 0,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "JX",
+        "right_pos": "JX",
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "mixed_trailing_zero_3",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51008
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 0,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "JX",
+        "right_pos": "JX",
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "mixed_trailing_zero_4",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51008
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 0,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "JX",
+        "right_pos": "JX",
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "mixed_trailing_zero_5",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51008
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 0,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "JX",
+        "right_pos": "JX",
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "mixed_trailing_zero_6",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51008
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 0,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "JX",
+        "right_pos": "JX",
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "mixed_trailing_zero_7",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51008
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 0,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": "MORPHEME",
+        "left_pos": "JX",
+        "right_pos": "JX",
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "missing_keyword_0",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": true,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "missing_keyword_1",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": true,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "missing_keyword_2",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": true,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "missing_keyword_3",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": true,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "missing_keyword_4",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": true,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  },
+  {
+    "id": "missing_keyword_5",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": true,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "missing_keyword_6",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": true,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "missing_keyword_7",
+    "pipeline": "synthetic",
+    "tokens": [
+      {
+        "term_utf16": [
+          49,
+          50
+        ],
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": true,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      },
+      {
+        "term_utf16": [
+          51
+        ],
+        "start_utf16": 3,
+        "end_utf16": 4,
+        "position_increment": 1,
+        "position_length": 1,
+        "keyword": false,
+        "pos_type": null,
+        "left_pos": null,
+        "right_pos": null,
+        "reading_utf16": null,
+        "morphemes": null
+      }
+    ],
+    "final_offset_utf16": 4,
+    "final_position_increment": 2,
+    "filters": [
+      {
+        "type": "nori_number"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "nori_number"
+      }
+    ]
+  }
+]

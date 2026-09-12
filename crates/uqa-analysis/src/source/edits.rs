@@ -16,14 +16,14 @@ pub(crate) struct TextEdit {
     pub replacement: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Segment {
     output: SourceOffsets,
     input: SourceOffsets,
     copied: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct EditMap {
     segments: Vec<Segment>,
     input_len: usize,

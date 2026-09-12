@@ -7,6 +7,8 @@
 //! Structured analysis tokens and end-of-stream position state.
 
 use std::ops::Range;
+#[cfg(feature = "nori")]
+use std::sync::Arc;
 
 use serde::Serialize;
 
@@ -64,6 +66,7 @@ impl AnalysisToken {
         range: Range<usize>,
     ) -> AnalysisResult<Self> {
         let offsets = input.source_offsets(range.clone())?;
+        let filtered_utf16 = Some(input.filtered_utf16(range.clone())?);
         let term = input.as_str()[range].to_owned();
         let verbatim = input.original().get(offsets.utf8.clone()) == Some(term.as_str());
         Ok(Self {
@@ -72,7 +75,7 @@ impl AnalysisToken {
             position_increment: 1,
             position_length: 1,
             keyword: false,
-            filtered_utf16: None,
+            filtered_utf16,
             #[cfg(feature = "nori")]
             korean_morphology: None,
             verbatim,
@@ -142,6 +145,9 @@ pub struct AnalyzedText {
     #[serde(flatten)]
     pub(crate) batch: TokenBatch,
     pub(crate) final_offsets: SourceOffsets,
+    #[cfg(feature = "nori")]
+    #[serde(skip)]
+    pub(crate) projection: Arc<crate::source::SourceProjection>,
 }
 
 impl AnalyzedText {
@@ -178,6 +184,8 @@ impl AnalyzedText {
         Ok(Self {
             batch,
             final_offsets: input.final_offsets(),
+            #[cfg(feature = "nori")]
+            projection: input.projection(),
         })
     }
 }

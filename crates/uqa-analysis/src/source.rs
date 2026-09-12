@@ -9,6 +9,7 @@
 use std::borrow::Cow;
 use std::cell::OnceCell;
 use std::ops::Range;
+use std::sync::Arc;
 
 use serde::Serialize;
 
@@ -29,7 +30,7 @@ pub struct SourceOffsets {
 }
 
 /// A checked conversion index containing Unicode scalar boundaries only.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextCoordinates {
     boundaries: Vec<(usize, usize)>,
     utf8_len: usize,
@@ -162,9 +163,9 @@ impl TextCoordinates {
 pub struct FilteredText<'a> {
     original: &'a str,
     text: Cow<'a, str>,
-    maps: Vec<EditMap>,
-    original_coordinates: OnceCell<TextCoordinates>,
-    filtered_coordinates: OnceCell<TextCoordinates>,
+    maps: Vec<Arc<EditMap>>,
+    original_coordinates: OnceCell<Arc<TextCoordinates>>,
+    filtered_coordinates: OnceCell<Arc<TextCoordinates>>,
 }
 
 impl<'a> FilteredText<'a> {
@@ -244,20 +245,69 @@ impl<'a> FilteredText<'a> {
     pub(crate) fn apply_edits(&mut self, edits: Vec<TextEdit>) -> AnalysisResult<()> {
         if let Some((text, map)) = EditMap::apply(&self.text, edits)? {
             self.text = Cow::Owned(text);
-            self.maps.push(map);
+            self.maps.push(Arc::new(map));
             self.filtered_coordinates.take();
         }
         Ok(())
     }
 
-    fn original_coordinates(&self) -> &TextCoordinates {
-        self.original_coordinates
-            .get_or_init(|| TextCoordinates::new(self.original))
+    pub(crate) fn filtered_utf16(&self, range: Range<usize>) -> AnalysisResult<Range<usize>> {
+        Ok(self.filtered_coordinates().offsets(range)?.utf16)
     }
 
-    fn filtered_coordinates(&self) -> &TextCoordinates {
+    #[cfg(feature = "nori")]
+    pub(crate) fn projection(&self) -> Arc<SourceProjection> {
+        Arc::new(SourceProjection {
+            source: Arc::from(self.original),
+            maps: self.maps.clone(),
+            original: self.original_coordinates().clone(),
+            filtered: self.filtered_coordinates().clone(),
+        })
+    }
+
+    fn original_coordinates(&self) -> &Arc<TextCoordinates> {
+        self.original_coordinates
+            .get_or_init(|| Arc::new(TextCoordinates::new(self.original)))
+    }
+
+    fn filtered_coordinates(&self) -> &Arc<TextCoordinates> {
+        if self.maps.is_empty() {
+            return self.original_coordinates();
+        }
         self.filtered_coordinates
-            .get_or_init(|| TextCoordinates::new(&self.text))
+            .get_or_init(|| Arc::new(TextCoordinates::new(&self.text)))
+    }
+}
+
+/// Shared source provenance for tokens composed after the original input borrow ends.
+#[cfg(feature = "nori")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SourceProjection {
+    source: Arc<str>,
+    maps: Vec<Arc<EditMap>>,
+    original: Arc<TextCoordinates>,
+    filtered: Arc<TextCoordinates>,
+}
+
+#[cfg(feature = "nori")]
+impl SourceProjection {
+    pub fn filtered_len(&self) -> usize {
+        self.filtered.utf16_len()
+    }
+
+    pub fn project(&self, mut range: Range<usize>) -> AnalysisResult<SourceOffsets> {
+        self.filtered.validate_utf16_range(&range)?;
+        for map in self.maps.iter().rev() {
+            range = map.project_utf16(range);
+        }
+        self.original.covering_offsets_utf16(range)
+    }
+
+    pub fn is_verbatim(&self, term: &crate::TokenTerm, offsets: &SourceOffsets) -> bool {
+        term.as_str().is_some_and(|text| {
+            self.source.get(offsets.utf8.clone()) == Some(text)
+                && term.utf16_len() == offsets.utf16.len()
+        })
     }
 }
 

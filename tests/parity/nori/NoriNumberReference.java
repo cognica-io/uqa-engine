@@ -135,8 +135,10 @@ public class NoriNumberReference {
       increment.setPositionIncrement(Integer.parseInt(fields[3]));
       length.setPositionLength(Integer.parseInt(fields[4]));
       keyword.setKeyword(Boolean.parseBoolean(fields[5]));
-      pos.setToken(metadata);
-      reading.setToken(metadata);
+      if (!fields[6].equals("-")) {
+        pos.setToken(metadata);
+        reading.setToken(metadata);
+      }
       return true;
     }
     @Override public void end() throws java.io.IOException {
@@ -185,6 +187,12 @@ public class NoriNumberReference {
       TokenStream source;
       if (fields[1].equals("synthetic")) {
         source = new SyntheticStream(fields[8], Integer.parseInt(fields[9]), Integer.parseInt(fields[10]));
+      } else if (fields[1].equals("whitespace") || fields[1].equals("keyword")) {
+        org.apache.lucene.analysis.Tokenizer tokenizer = fields[1].equals("whitespace")
+            ? new org.apache.lucene.analysis.core.WhitespaceTokenizer()
+            : new org.apache.lucene.analysis.core.KeywordTokenizer();
+        tokenizer.setReader(new StringReader(input));
+        source = tokenizer;
       } else {
         String rules = fields[6].equals("-") ? null : new String(Base64.getDecoder().decode(fields[6]), StandardCharsets.UTF_8);
         UserDictionary user = rules == null ? null : UserDictionary.open(new StringReader(rules));

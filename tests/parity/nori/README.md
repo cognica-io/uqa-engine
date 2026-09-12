@@ -80,3 +80,16 @@ Native comparisons cover all 823 complete snapshots and the four original number
 ## Common-token conversion
 
 The native differential tests additionally convert all 803 successful text cases into generic `AnalyzedText`: 226 tokenizer cases, 396 analyzer/filter cases, and 181 number-chain cases. Every raw term, offset, increment, length, keyword, POS, nullable reading/morpheme, origin, and stream-end field is retained. Separate tests cover composed HTML source correction, generic filters over unpaired units, whole-word stemming, exact gram spans, hidden exhaustion attributes, and typed string-projection failures. Generic term tests round-trip every UTF-16 unit through the explicit JSON representation and verify canonical identity for supplementary pairs.
+
+## Korean filters over common tokens
+
+`run_generic_reference.py` uses `NoriNumberReference.java` to record another 138 ordered filter chains. The driver supplies actual Lucene whitespace and keyword streams plus synthetic streams with absent or mixed Korean morphology, lookahead, keyword/stack effects, and trailing removals. The three `generic_*` files pin inputs, complete output hashes, and provenance. Both Docker architectures reproduce these results. Extending the driver left all 823 existing number outputs byte-for-byte unchanged.
+
+The private Rust common-token kernel matches 1,023 successful stream results across the analysis, number, and generic corpora, including every recorded token/end attribute. Generic-tokenizer cases start from the oracle's recorded unfiltered attributes to isolate filter behavior; this does not claim parity between UQA's existing tokenizers and Lucene's tokenizers. Synthetic fixtures with a zero initial increment exercise the private filter kernel directly while public `AnalyzedText` continues to require a positive initial increment. Source-projection, original-input ownership, precise grams after rewriting, absent morphology, generic-stop interaction, cancellation, and limit regressions additionally execute through the public API.
+
+```sh
+python3 tests/parity/nori/run_generic_reference.py --offline
+python3 tests/parity/nori/run_generic_reference.py --offline --platform linux/amd64
+cargo test -p uqa-analysis --features nori --locked generic_filter_kernel_matches
+cargo test -p uqa-analysis --features nori --locked nori_shared
+```

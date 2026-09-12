@@ -52,7 +52,7 @@ mod analyzer;
 mod attributes;
 mod dictionary;
 mod error;
-mod filters;
+pub(crate) mod filters;
 mod frame;
 mod io;
 mod lexicon;
