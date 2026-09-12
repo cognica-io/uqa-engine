@@ -96,6 +96,20 @@ impl MemoryReservation {
         &self.budget
     }
 
+    /// Transfer part of an existing allocation lease without releasing or reserving bytes.
+    ///
+    /// Panics if `bytes` exceeds this lease. The original lease is unchanged on failure.
+    pub fn split(&mut self, bytes: usize) -> Self {
+        self.bytes = self
+            .bytes
+            .checked_sub(bytes)
+            .expect("insufficient reserved bytes");
+        Self {
+            budget: self.budget.clone(),
+            bytes,
+        }
+    }
+
     /// Reserve additional bytes atomically; a failed request leaves this lease unchanged.
     pub fn grow(&mut self, additional: usize) -> Result<(), MemoryError> {
         if additional == 0 {

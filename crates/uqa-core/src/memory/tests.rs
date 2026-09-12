@@ -168,3 +168,25 @@ fn failure_to_reserve_a_shared_payload_releases_the_consumed_value() {
     ));
     assert_eq!(budget.used(), 0);
 }
+
+#[test]
+fn split_leases_transfer_live_allocations_without_reacquiring_a_full_allowance() {
+    let budget = MemoryBudget::new(12);
+    let unrelated = budget.reserve(3).unwrap();
+    let mut memory = budget.reserve(9).unwrap();
+    let mut first = memory.split(5);
+    let second = memory.split(4);
+    assert_eq!(memory.bytes(), 0);
+    assert_eq!(budget.used(), 12);
+    assert_eq!(budget.peak(), 12);
+    drop(memory);
+    assert_eq!(budget.used(), 12);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| first.split(6))).is_err());
+    assert_eq!(first.bytes(), 5);
+    first.absorb(second);
+    assert_eq!(first.bytes(), 9);
+    drop(first);
+    assert_eq!(budget.used(), 3);
+    drop(unrelated);
+    assert_eq!(budget.used(), 0);
+}
