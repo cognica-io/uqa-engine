@@ -15,9 +15,12 @@ use uqa_storage::{
     inverted_index::analyze_query_terms, InvertedIndex, StorageBackendError, TokenTermKey,
 };
 
+mod candidates;
 mod exhaustive;
 mod statistics;
 mod top_k;
+
+pub use candidates::TextCandidateScorer;
 
 /// Algorithm that actually produced a text-search result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

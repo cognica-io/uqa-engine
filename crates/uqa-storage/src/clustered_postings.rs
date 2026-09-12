@@ -52,6 +52,9 @@ pub trait PostingCursor: Send {
     fn boxed_clone(&self) -> Box<dyn PostingCursor>;
 }
 
+mod read_cursor;
+pub use read_cursor::{OwnedPostingReadCursor, PostingReadCursor};
+
 impl Clone for Box<dyn PostingCursor> {
     fn clone(&self) -> Self {
         self.boxed_clone()

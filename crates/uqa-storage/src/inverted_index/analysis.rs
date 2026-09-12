@@ -124,6 +124,34 @@ pub fn analyze_query_terms(
         .collect())
 }
 
+/// Analyze the complete phrase once, preserving emitted order, duplicate terms, holes, and graph edges.
+pub fn analyze_query_graph(
+    analyzer: &CompiledAnalyzer,
+    text: &str,
+) -> StorageBackendResult<Vec<(TokenTermKey, TokenOccurrence)>> {
+    let output = analyzer.analyze_tokens(text)?;
+    let mut position = -1_i64;
+    output
+        .tokens()
+        .iter()
+        .map(|token| {
+            position = position
+                .checked_add(i64::from(token.position_increment()))
+                .ok_or(AnalysisError::TokenPositionOverflow)?;
+            let occurrence = TokenOccurrence {
+                position: u32::try_from(position)
+                    .map_err(|_| AnalysisError::TokenPositionOverflow)?,
+                position_length: token.position_length(),
+                offsets: token.offsets().map(source_offsets).transpose()?,
+            };
+            occurrence
+                .validate()
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            Ok((TokenTermKey::from_term(token.term()), occurrence))
+        })
+        .collect()
+}
+
 fn source_offsets(offsets: &SourceOffsets) -> StorageBackendResult<TokenOffsets> {
     fn offset(value: usize) -> StorageBackendResult<u64> {
         u64::try_from(value).map_err(|_| super::counter_error("source offset"))

@@ -53,8 +53,8 @@ pub use ranking::{rank_scored_entries_top_k, rank_top_k};
 pub use score_domain::{EvidenceLogit, PosteriorProbability, PriorLogit, RawBm25Score};
 pub use scorer::Scorer;
 pub use text::{
-    rebuild_text_block_max, score_text_query, score_text_terms, TextSearchAlgorithm,
-    TextSearchError, TextSearchProfile,
+    rebuild_text_block_max, score_text_query, score_text_terms, TextCandidateScorer,
+    TextSearchAlgorithm, TextSearchError, TextSearchProfile,
 };
 pub use vector_calibration::{
     VectorCalibrationModel, VectorCalibrationProvenance, VectorCalibrationStabilityReport,

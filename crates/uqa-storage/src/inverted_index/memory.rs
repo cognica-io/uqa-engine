@@ -14,6 +14,16 @@ use super::{
 };
 
 impl InvertedIndex for MemoryInvertedIndex {
+    fn posting_read_cursor_key<'a>(
+        &'a self,
+        field: &'a str,
+        term: &TokenTermKey,
+    ) -> StorageBackendResult<Box<dyn crate::clustered_postings::PostingReadCursor + 'a>> {
+        Ok(Box::new(super::read_cursor::MemoryPostingReadCursor::new(
+            self, field, term,
+        )?))
+    }
+
     fn analyzer(&self) -> &Analyzer {
         self.bindings.default_configuration()
     }

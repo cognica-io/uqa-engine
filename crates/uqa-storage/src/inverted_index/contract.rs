@@ -124,6 +124,17 @@ pub trait InvertedIndex: Send + Sync {
         self.posting_cursor(field, &term.to_term().into_string()?)
     }
 
+    /// Traverse candidates while retaining this index read. Providers with borrowed posting maps can avoid copying the entire term support; owned persistent cursors keep their incremental reads.
+    fn posting_read_cursor_key<'a>(
+        &'a self,
+        field: &'a str,
+        term: &TokenTermKey,
+    ) -> StorageBackendResult<Box<dyn crate::clustered_postings::PostingReadCursor + 'a>> {
+        Ok(Box::new(crate::clustered_postings::OwnedPostingReadCursor(
+            self.posting_cursor_key(field, term)?,
+        )))
+    }
+
     /// Complete graph edges in document order, preserving occurrence multiplicity and original source coordinates. Legacy positions cannot implement this contract without a source rebuild.
     fn get_occurrence_postings(
         &self,
