@@ -43,3 +43,15 @@ mod rich_tokens;
 #[cfg(feature = "nori-tools")]
 #[path = "analysis/nori_model.rs"]
 mod nori_model;
+
+#[cfg(feature = "nori")]
+#[path = "analysis/nori_resources.rs"]
+mod nori_resources;
+
+#[cfg(feature = "nori")]
+#[path = "analysis/nori_users.rs"]
+mod nori_users;
+
+#[cfg(feature = "nori")]
+#[path = "analysis/nori_tokenizer.rs"]
+mod nori_tokenizer;

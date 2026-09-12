@@ -211,6 +211,16 @@ NORI_FILES = (
 )
 
 
+LUCENE_FILES = ("THIRD-PARTY/LUCENE-LICENSE.txt", "THIRD-PARTY/LUCENE-NOTICE.txt")
+
+
+def check_lucene_payloads(read: Callable[[str], bytes]) -> None:
+    for relative in LUCENE_FILES:
+        expected = (ROOT / "crates/uqa-nori-data" / relative).read_bytes()
+        if read(relative) != expected:
+            raise RuntimeError(f"ported Nori code requires the complete pinned {relative}")
+
+
 def check_nori_payloads(manifest_bytes: bytes, read: Callable[[str], bytes]) -> None:
     try:
         manifest = json.loads(manifest_bytes)
@@ -261,6 +271,8 @@ def check_cargo_sources(payloads: dict[str, bytes]) -> None:
             raise RuntimeError(f"cannot read {notice_path}: {error}") from error
         if actual_notice != notice:
             raise RuntimeError(f"crate legal copy differs from canonical file: {notice_path}")
+        if name == "uqa-analysis":
+            check_lucene_payloads(lambda relative: (crate_root / relative).read_bytes())
         if name == "uqa-nori-data":
             check_nori_payloads(
                 (crate_root / "data/resource_manifest.json").read_bytes(),
@@ -345,13 +357,19 @@ def check_archive(path: pathlib.Path, payloads: dict[str, bytes]) -> None:
         members, AGPL_NOTICE
     ):
         raise RuntimeError(f"{path} omits {AGPL_NOTICE}")
-    if path.name.startswith("uqa-nori-data-") and path.name.endswith(".crate"):
+    if path.name.startswith(("uqa-analysis-", "uqa-nori-data-")) and path.name.endswith(".crate"):
         def read_nori(relative: str) -> bytes:
             matches = matching_members(members, relative)
             if len(matches) != 1:
                 raise RuntimeError(f"{path} requires exactly one {relative}")
             return matches[0][1]
 
+        if path.name.startswith("uqa-analysis-"):
+            check_lucene_payloads(read_nori)
+            source = "THIRD-PARTY/LUCENE-SOURCE.md"
+            if read_nori(source) != (ROOT / "crates/uqa-analysis" / source).read_bytes():
+                raise RuntimeError(f"{path} contains different Lucene source attribution")
+            return
         manifest = read_nori("data/resource_manifest.json")
         expected = (ROOT / "crates/uqa-nori-data/data/resource_manifest.json").read_bytes()
         if manifest != expected:

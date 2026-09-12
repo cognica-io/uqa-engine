@@ -1,6 +1,6 @@
 # Lucene-compatible Nori analyzer
 
-Status: active design, prepared on 2026-09-12 against UQA commit `bbeb1026cba9001cc5f084d24ac68ec197bd1925`. Generic source mapping and structured token APIs are now implemented and described in the [Rust analyzer reference](../manual/reference/06-text-analyzers.md#structured-tokens). Nori morphology, new Nori components and SQL functions, and graph storage contracts below remain proposals; the [SQL manual](../manual/sql/05-analyzers.md) continues to describe available behavior.
+Status: active design, prepared on 2026-09-12 against UQA commit `bbeb1026cba9001cc5f084d24ac68ec197bd1925`. Generic source mapping and structured token APIs are now implemented and described in the [Rust analyzer reference](../manual/reference/06-text-analyzers.md#structured-tokens). The standalone native Nori tokenizer and user-rule compiler are also implemented and described in the [Korean tokenization reference](../manual/reference/06-text-analyzers.md#standalone-korean-tokenization). Korean filters, generic analyzer integration, new SQL functions, and graph storage contracts below remain proposals; the [SQL manual](../manual/sql/05-analyzers.md) continues to describe available behavior.
 
 Development follows the active [Nori implementation plan](../plans/0006-nori-analyzer.md), which records the current implementation boundary, dependencies, and verification evidence.
 
@@ -14,7 +14,7 @@ Compatibility covers the ordered term stream, token offsets, position increments
 
 The design includes the three decompound modes, system and unknown dictionaries, user dictionaries, POS filtering, reading conversion, lowercase normalization, and the optional Korean number filter. It also includes the indexing, query, persistence, and binding changes needed to consume their output correctly. `standard_cjk` retains its documented character n-gram behavior.
 
-The checked-in [reference harness](../../tests/parity/nori/README.md) executed 31 cases using the real Lucene classes in Docker. Its [manifest](../../tests/parity/nori/manifest.json) pins all inputs, and its [expected output](../../tests/parity/nori/expected.jsonl) contains complete token attributes. This is design evidence; Rust parity, storage behavior, and performance have not yet been measured.
+The checked-in [reference harness](../../tests/parity/nori/README.md) executed 31 cases using the real Lucene classes in Docker. Its [manifest](../../tests/parity/nori/manifest.json) pins all inputs, and its [expected output](../../tests/parity/nori/expected.jsonl) contains complete token attributes. The expanded reference additionally compares 38 user-dictionary cases and 238 standalone tokenizer cases to native Rust, including complete token/end-state hashes for long streams. Full analyzer parity, storage behavior, actual WASM execution, and performance remain unverified.
 
 | Reference input | Pinned value |
 | --- | --- |
@@ -25,7 +25,7 @@ The checked-in [reference harness](../../tests/parity/nori/README.md) executed 3
 | Dictionary normalization during Lucene generation | `normalizeEntries = false` |
 | Reference command | `python3 tests/parity/nori/run_reference.py` |
 
-The 31 cases and complete neutral model export have been reproduced on both Docker platforms with identical output. This establishes reference reproducibility; it does not establish native Rust or WASM parity or platform performance. Changing the Docker digest, JVM, Lucene jars, dictionary, or generated Unicode tables requires an explicit fixture diff and a new compatibility fingerprint.
+The original 31 cases, expanded user/tokenizer corpora, and complete neutral model export have been reproduced on both Docker platforms with identical output. Native user/tokenizer differential checks are recorded separately in the implementation plan; they do not establish complete analyzer or WASM parity or platform performance. Changing the Docker digest, JVM, Lucene jars, dictionary, or generated Unicode tables requires an explicit fixture diff and a new compatibility fingerprint.
 
 ## Current UQA constraints
 
@@ -85,6 +85,8 @@ The default analyzer's output for `가락지나물은 한국, 중국, 일본` is
 
 ### Unicode and punctuation
 
+The expanded tokenizer oracle proves that valid UTF-8 input can produce non-scalar UTF-16 terms: the accepted user rule `🙂a 가 나` splits a surrogate pair, and unknown grouping limits can split pairs as well. The standalone runtime therefore retains raw UTF-16 term and morpheme units. The common token representation and persisted term keys must carry these units losslessly; diagnostics must expose them explicitly when no Unicode string exists. Exact UTF-16 offsets can land inside a pair, so highlighting needs UTF-8 scalar-covering source spans alongside the exact reference coordinates. Rejecting such accepted rules, replacing their units, or silently rounding away the UTF-16 coordinates does not satisfy the target. This bridge and storage contract remains an integration requirement.
+
 Lucene performs morphology over UTF-16 input units and consults Java character properties at specific points. Generate and version the character-class, script, digit, punctuation, and simple-case tables needed by those operations. Preserve the distinction between code-unit and code-point calls; replacing every call with Rust `char` classification can change unknown-word grouping. The pinned [Korean character definition](https://github.com/apache/lucene/blob/64ce863a2bea79c69c19c4d56268c26710ff0ff9/lucene/analysis/nori/src/java/org/apache/lucene/analysis/ko/dict/CharacterDefinition.java) and [Java character utilities](https://github.com/apache/lucene/blob/64ce863a2bea79c69c19c4d56268c26710ff0ff9/lucene/core/src/java/org/apache/lucene/analysis/CharacterUtils.java) are the reference.
 
 Existing UQA `lowercase` uses Rust's full lowercase conversion. The Docker fixture maps `İ ΟΣ UQA` to `i οσ uqa` with Lucene's simple lowercase filter. Preserve existing `lowercase` behavior and add the explicitly named `unicode_simple_lowercase` stage for Nori; do not silently change the vocabulary of existing English indexes. Its Unicode profile is part of the compiled analyzer fingerprint.
@@ -100,7 +102,7 @@ Keep the morphology implementation under `crates/uqa-analysis/src/nori/`, divide
 | Owner | Responsibility |
 | --- | --- |
 | `uqa-analysis` | Generic rich analysis, Nori algorithms, validation, dictionary decoding, offset maps, immutable compiled analyzers |
-| Proposed `uqa-nori-dictionary` data crate | Generated default bundle bytes and provenance; no SQL, storage, registry, or runtime morphology logic |
+| `uqa-nori-data` data crate | Generated default bundle bytes and provenance; no SQL, storage, registry, or runtime morphology logic |
 | `uqa-storage` | Provider-independent occurrence and analyzer-binding contracts, Memory and Key/Value implementations, common posting codecs |
 | `uqa-storage-sqlite` | SQLite persistence and migration of the common contracts |
 | `uqa-sql` | Configuration-call argument rules, typed phrase expressions, and diagnostic result schemas |

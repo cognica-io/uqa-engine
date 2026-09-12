@@ -31,7 +31,7 @@ fn section(
     }
 }
 
-pub(super) fn sections() -> Vec<Section> {
+pub(in crate::nori) fn sections() -> Vec<Section> {
     let lexicon = section(1, 5, |output| {
         let mut builder = Builder::new();
         for text in ["", "가", "가나", "😀", "\u{e000}"] {
@@ -126,7 +126,7 @@ pub(super) fn sections() -> Vec<Section> {
     ]
 }
 
-pub(super) fn bundle() -> Vec<u8> {
+pub(in crate::nori) fn bundle() -> Vec<u8> {
     frame::encode(&sections(), DictionaryLimits::default()).unwrap()
 }
 

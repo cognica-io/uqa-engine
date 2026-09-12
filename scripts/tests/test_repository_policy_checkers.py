@@ -38,6 +38,40 @@ LICENSES = load_script("uqa_check_release_licenses", "check-release-licenses.py"
 
 
 class RepositoryPolicyCheckerTest(unittest.TestCase):
+    def test_analysis_archive_retains_ported_lucene_notices_and_modification_attribution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            payloads = {name: name.encode() for name in LICENSES.LUCENE_FILES}
+            for name, data in payloads.items():
+                source = root / "crates/uqa-nori-data" / name
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_bytes(data)
+            attribution = "THIRD-PARTY/LUCENE-SOURCE.md"
+            source = root / "crates/uqa-analysis" / attribution
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"ported source and modifications")
+            payloads[attribution] = source.read_bytes()
+            archive_path = root / "uqa-analysis-0.0.0.crate"
+            for mode in ("valid", "missing", "changed", "attribution"):
+                files = {**payloads, "LICENSE": b"license", "LICENSE-NOTICE.md": b"notice"}
+                if mode == "missing":
+                    del files[LICENSES.LUCENE_FILES[0]]
+                elif mode == "changed":
+                    files[LICENSES.LUCENE_FILES[1]] = b"changed"
+                elif mode == "attribution":
+                    files[attribution] = b"changed"
+                with tarfile.open(archive_path, "w:gz") as archive:
+                    for name, data in files.items():
+                        info = tarfile.TarInfo(f"uqa-analysis-0.0.0/{name}")
+                        info.size = len(data)
+                        archive.addfile(info, io.BytesIO(data))
+                with mock.patch.object(LICENSES, "ROOT", root):
+                    if mode == "valid":
+                        LICENSES.check_archive(archive_path, {"LICENSE": b"license"})
+                    else:
+                        with self.subTest(mode=mode), self.assertRaises(RuntimeError):
+                            LICENSES.check_archive(archive_path, {"LICENSE": b"license"})
+
     def test_nori_resources_require_every_notice_and_exact_artifact_hashes(self) -> None:
         payloads = {name: name.encode() for name in LICENSES.NORI_FILES}
         manifest = {

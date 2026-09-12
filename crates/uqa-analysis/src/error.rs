@@ -13,6 +13,8 @@ use crate::token_filter::SynonymFileError;
 /// An invalid analyzer is an execution error, never an empty token stream.
 #[derive(Debug, thiserror::Error)]
 pub enum AnalysisError {
+    #[error("analysis cancelled")]
+    Cancelled,
     #[cfg(feature = "nori")]
     #[error(transparent)]
     Dictionary(#[from] crate::nori::DictionaryError),

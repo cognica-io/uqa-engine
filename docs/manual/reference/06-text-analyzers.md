@@ -288,6 +288,49 @@ assert_eq!(entity.utf16, 4..9);
 
 Unchanged text maps exactly. Replacements cover the full replaced source range, including regex replacements that reorder captures; inserted text maps to its original insertion boundary. Empty ranges select the following source boundary, and `final_offsets()` retains the original end even after trailing or complete deletion. These APIs are read-only analysis operations with no catalog or transaction effects. `filter` continues to return only the transformed string.
 
+## Standalone Korean tokenization
+
+With the optional `uqa-analysis/nori` feature, `NoriDictionary::from_bytes(bytes, limits)` loads and validates a portable dictionary, `UserDictionary::compile(source, &model, limits)` compiles optional UTF-8 noun rules, and `KoreanTokenizer::new(model, user, options)` constructs an immutable tokenizer. `tokenize(input)` returns a complete `NoriOutput`. Supply the shipped `uqa_nori_data::BUNDLE` or bytes conforming to the [bundle format](../../design/nori-bundle-format.md); loading and execution require no JVM, network, or dictionary download.
+
+`NoriOptions` has `decompound_mode` (`none`, `discard`, or `mixed`, default `discard`), `output_unknown_unigrams` (default `false`), and `discard_punctuation` (default `true`). These options control tokenization before any filters. `none` retains the original token, `discard` emits decomposition components when present, and `mixed` retains the original graph edge plus its components. Missing decomposition differs from an explicitly empty decomposition. Punctuation retention includes reference space tokens; unknown unigram emission follows its own punctuation behavior.
+
+User rules contain one surface followed by optional segmentation labels. Empty and comment-only sources return `None`. The compiler retains the exact source, stable UTF-16 ordering, and the first duplicate surface. Labels contribute UTF-16 lengths and may differ from the surface text or cover only its prefix; a sum longer than the surface is an error. Comment and whitespace processing follow the pinned Java implementation, including the final processed line character used for right-context selection. The compiled rules retain their model identity, and constructing a tokenizer with a different model returns an error.
+
+Each `NoriToken` contains `term_utf16`, `start_utf16`, `end_utf16`, `position_increment`, `position_length`, `pos_type`, `left_pos`, `right_pos`, nullable `reading`, nullable ordered `morphemes`, and `origin` (`known`, `unknown`, or `user`). Each morpheme contains `surface_utf16` and `pos`. Offsets address the supplied UTF-16 input; absolute graph positions start at `-1` and accumulate increments. `NoriOutput` retains the final input offset even for empty output, with tokenizer final increment zero. Null reading/decomposition differs from an empty value.
+
+Terms and morphemes use raw `Vec<u16>` because valid UTF-8 input and accepted user rules can cause Lucene to split a surrogate pair. For example, `🙂a 가 나` supplies two one-unit segment lengths and produces unpaired surrogate terms. `String::from_utf16` is therefore fallible. Shortened compound segmentations also use back-anchored reference offsets, which can differ from the substring that supplied the term. Retain these exact values when inspecting reference behavior; replacing invalid units loses information.
+
+All calls are read-only and publish no catalog, index, or transaction state. Dictionary and user-rule handles are shared through `Arc`; each tokenization call owns its lattice and output. Invalid rules, dictionary mismatch, checked size/position overflow, and resource limits return an analysis or dictionary error without a partial successful result. `tokenize_controlled(input, limits, poll)` accepts a cancellation callback returning `AnalysisResult<()>`; a callback error propagates and leaves the tokenizer reusable. `tokenize_utf16(units, limits, poll)` accepts raw UTF-16 units directly.
+
+| Limit | Default | Scope |
+| --- | --- | --- |
+| User-rule bytes / nonempty processed lines / surface UTF-16 units | 4 MiB / 100,000 / 65,535 | Compilation, including duplicate lines in the line budget |
+| Input UTF-16 units | 16 Mi units | One call |
+| Live lattice positions / candidates | 131,072 / 1,000,000 | Retained rolling lattice |
+| Emitted tokens | 4,000,000 | One call |
+| Output UTF-16 units | 64 Mi units | Terms, readings, and morpheme surfaces; prospective source-token metadata is also checked before decomposition |
+
+These are explicit operation bounds, not measured peak-memory or latency guarantees. Dictionary decode limits are documented with the bundle format.
+
+```rust
+use uqa_analysis::nori::{
+    DictionaryLimits, KoreanTokenizer, NoriDictionary, NoriOptions,
+    UserDictionary, UserDictionaryLimits,
+};
+
+let model = NoriDictionary::from_bytes(uqa_nori_data::BUNDLE, DictionaryLimits::default())?;
+let user = UserDictionary::compile("세종시 세종 시", &model, UserDictionaryLimits::default())?;
+let tokenizer = KoreanTokenizer::new(model, user, NoriOptions::default())?;
+let output = tokenizer.tokenize("세종시")?;
+let terms: Result<Vec<_>, _> = output.tokens.iter()
+    .map(|token| String::from_utf16(&token.term_utf16)).collect();
+assert_eq!(terms?, ["세종", "시"]);
+assert_eq!(output.final_offset_utf16, 3);
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The same example executes as a Nori module doctest. The native tokenizer is checked against the [Docker reference corpus](../../../tests/parity/nori/README.md). It is a standalone Rust API: Korean filters, the common `Analyzer` token bridge, Nori JSON/SQL registration, retrieval, and binding integration remain tracked in the [implementation plan](../../plans/0006-nori-analyzer.md). The existing built-in analyzer inventory remains the one listed above.
+
 ## Python, Node.js, and browser WASM
 
 Every binding can create, bind, inspect, search with, and drop analyzers by executing the SQL functions in this chapter. Python exposes `list_named_analyzers()`. Node.js and browser WASM expose `listNamedAnalyzers()`; these direct methods list custom engine-catalog names, while SQL `list_analyzers()` also includes built-ins. Direct construction from `CharFilter`, `Tokenizer`, and `TokenFilter` is a Rust API, so other bindings define the pipeline as JSON passed to SQL.

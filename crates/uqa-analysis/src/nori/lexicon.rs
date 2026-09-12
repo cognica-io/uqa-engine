@@ -10,9 +10,7 @@ use super::error::{check_limit, invalid};
 use super::io::{vector, Reader};
 use super::DictionaryResult;
 
-#[cfg(any(test, feature = "nori-tools"))]
 mod builder;
-#[cfg(any(test, feature = "nori-tools"))]
 pub(super) use builder::Builder;
 #[cfg(any(test, feature = "nori-tools"))]
 mod entries;

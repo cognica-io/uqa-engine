@@ -30,3 +30,4 @@ crates/uqa-pg-query/src/node_structs.rs linguist-generated
 crates/uqa-nori-data/data/nori.uqan binary
 crates/uqa-nori-data/data/*.json text eol=lf linguist-generated
 crates/uqa-nori-data/THIRD-PARTY/** -text -whitespace linguist-vendored
+crates/uqa-analysis/THIRD-PARTY/LUCENE-*.txt -text -whitespace linguist-vendored
