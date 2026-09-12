@@ -10,6 +10,52 @@ use uqa_core::memory::MemoryError;
 
 mod common_filters;
 
+#[test]
+fn moving_a_query_term_releases_other_attributes_without_copying_its_buffer() {
+    let budget = MemoryBudget::new(1 << 20);
+    let other = budget.reserve(7).unwrap();
+    let batch = attributes().clone_budgeted(&budget, || Ok(())).unwrap();
+    let pointer = batch.tokens()[0].term().utf16().as_ptr();
+    let term_bytes = batch.tokens()[0].term().allocation_bytes();
+    let expected = batch.tokens()[0].term().clone();
+    let input = AnalyzedText::into_token_input(batch);
+    let (token, remaining) = input.next(&mut || Ok(())).unwrap();
+    let term = AnalysisToken::into_term_budgeted(token.unwrap());
+    assert_eq!(*term, expected);
+    assert_eq!(term.utf16().as_ptr(), pointer);
+    assert_eq!(term.reserved_bytes(), term_bytes);
+    assert!(budget.used() > term_bytes + 7);
+    drop(remaining);
+    assert_eq!(budget.used(), term_bytes + 7);
+    drop(term);
+    assert_eq!(budget.used(), 7);
+    drop(other);
+}
+
+#[test]
+fn consuming_query_tokens_releases_the_unused_character_edit_projection() {
+    let budget = MemoryBudget::new(1 << 20);
+    let other = budget.reserve(7).unwrap();
+    let filtered = CharFilter::HTMLStrip
+        .filter_with_offsets_budgeted("<b>韓🙂</b>", &budget, &mut || Ok(()))
+        .unwrap();
+    let batch = Tokenizer::Whitespace
+        .tokenize_mapped_budgeted(&filtered, &budget, || Ok(()))
+        .unwrap();
+    let pointer = batch.tokens()[0].term().as_str().unwrap().as_ptr();
+    drop(filtered);
+    let input = AnalyzedText::into_token_input(batch);
+    let (token, remaining) = input.next(&mut || Ok(())).unwrap();
+    let term = AnalysisToken::into_term_budgeted(token.unwrap());
+    drop(remaining);
+    assert_eq!(term.as_str(), Some("韓🙂"));
+    assert_eq!(term.as_str().unwrap().as_ptr(), pointer);
+    assert_eq!(budget.used(), term.reserved_bytes() + 7);
+    drop(term);
+    assert_eq!(budget.used(), 7);
+    drop(other);
+}
+
 fn token_bytes(token: AnalysisToken) -> usize {
     let mut bytes = if token.term.as_str().is_some() {
         token.term.into_string().unwrap().capacity()

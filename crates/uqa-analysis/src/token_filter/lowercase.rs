@@ -9,9 +9,10 @@
 use std::iter::Peekable;
 use std::sync::OnceLock;
 
-use regex_syntax::hir::{Class, ClassUnicode, HirKind};
-use uqa_core::memory::{Budgeted, MemoryBudget};
+use regex_syntax::hir::ClassUnicode;
+use uqa_core::memory::{Budgeted, BudgetedString, MemoryBudget};
 
+use crate::character_class::{class, contains};
 use crate::{term::TermBuffer, AnalysisError, AnalysisResult, TokenTerm};
 
 #[derive(Debug)]
@@ -20,7 +21,7 @@ pub(crate) struct CaseProperties {
     ignorable: ClassUnicode,
 }
 
-pub(super) fn prepare() -> AnalysisResult<&'static CaseProperties> {
+pub(crate) fn prepare() -> AnalysisResult<&'static CaseProperties> {
     static PROPERTIES: OnceLock<Result<CaseProperties, String>> = OnceLock::new();
     PROPERTIES
         .get_or_init(|| {
@@ -36,16 +37,6 @@ pub(super) fn prepare() -> AnalysisResult<&'static CaseProperties> {
         })
 }
 
-fn class(pattern: &str) -> Result<ClassUnicode, String> {
-    let expression = regex_syntax::Parser::new()
-        .parse(pattern)
-        .map_err(|error| error.to_string())?;
-    match expression.into_kind() {
-        HirKind::Class(Class::Unicode(class)) => Ok(class),
-        _ => Err("lowercase context property is not a Unicode class".into()),
-    }
-}
-
 impl CaseProperties {
     fn cased(&self, character: char) -> bool {
         contains(&self.cased, character)
@@ -55,32 +46,44 @@ impl CaseProperties {
     }
 }
 
-fn contains(class: &ClassUnicode, character: char) -> bool {
-    class
-        .ranges()
-        .binary_search_by(|range| {
-            if range.end() < character {
-                std::cmp::Ordering::Less
-            } else if range.start() > character {
-                std::cmp::Ordering::Greater
-            } else {
-                std::cmp::Ordering::Equal
-            }
-        })
-        .is_ok()
-}
-
 pub(super) fn lower_budgeted(
     input: &TokenTerm,
     properties: &CaseProperties,
     budget: &MemoryBudget,
     poll: &mut dyn FnMut() -> AnalysisResult<()>,
 ) -> AnalysisResult<Budgeted<TokenTerm>> {
+    lower(
+        input.characters(),
+        TermBuffer::new(input, budget),
+        properties,
+        poll,
+    )
+}
+
+pub(crate) fn lower_text_budgeted(
+    input: &str,
+    properties: &CaseProperties,
+    budget: &MemoryBudget,
+    poll: &mut dyn FnMut() -> AnalysisResult<()>,
+) -> AnalysisResult<Budgeted<TokenTerm>> {
+    lower(
+        input.chars().map(Ok),
+        TermBuffer::Unicode(BudgetedString::new(budget)),
+        properties,
+        poll,
+    )
+}
+
+fn lower(
+    characters: impl Iterator<Item = Result<char, u16>> + Clone,
+    mut output: TermBuffer,
+    properties: &CaseProperties,
+    poll: &mut dyn FnMut() -> AnalysisResult<()>,
+) -> AnalysisResult<Budgeted<TokenTerm>> {
     poll()?;
-    let mut output = TermBuffer::new(input, budget);
-    let mut following = input.characters().enumerate().peekable();
+    let mut following = characters.clone().enumerate().peekable();
     let mut preceded_cased = false;
-    for (index, character) in input.characters().enumerate() {
+    for (index, character) in characters.enumerate() {
         if index % 1024 == 0 {
             poll()?;
         }

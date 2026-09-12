@@ -11,6 +11,7 @@ mod allocation;
 pub mod analyzer;
 mod cache;
 pub mod char_filter;
+mod character_class;
 pub mod descriptor;
 pub mod error;
 pub mod highlight;
@@ -32,7 +33,10 @@ pub use analyzer::{
 pub use char_filter::CharFilter;
 pub use descriptor::{AnalyzerDescriptor, AnalyzerFingerprint, AnalyzerLimits, TokenLengthPolicy};
 pub use error::{AnalysisError, AnalysisResult};
-pub use highlight::{highlight, highlight_compiled, HighlightOptions};
+pub use highlight::{
+    highlight, highlight_budgeted, highlight_compiled, highlight_compiled_budgeted,
+    HighlightOptions,
+};
 pub use registry::{
     drop_analyzer, get_analyzer, list_analyzers, register_analyzer, DEFAULT_ANALYZER_NAME,
 };

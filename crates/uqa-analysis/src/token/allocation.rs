@@ -16,9 +16,29 @@ use crate::{AnalysisResult, FilteredText, SourceOffsets};
 mod batch;
 mod cloning;
 
-pub(crate) use batch::TokenBatchAllocation;
 #[cfg(feature = "nori")]
-pub(crate) use batch::{AllocatedToken, TokenBatchInput};
+pub(crate) use batch::AllocatedToken;
+pub(crate) use batch::{TokenBatchAllocation, TokenBatchInput};
+
+impl AnalyzedText {
+    /// Transfer emitted tokens and their leases while dropping the source projection.
+    pub(crate) fn into_token_input(input: Budgeted<Self>) -> TokenBatchInput {
+        let (input, memory) = input.into_parts();
+        TokenBatchAllocation::from_budgeted(Budgeted::new(input.batch, memory)).into_input()
+    }
+}
+
+impl AnalysisToken {
+    /// Move the term's allocation after releasing unused token attributes.
+    pub(crate) fn into_term_budgeted(input: Budgeted<Self>) -> Budgeted<crate::TokenTerm> {
+        let (mut token, mut memory) = input.into_parts();
+        let term = std::mem::replace(&mut token.term, crate::TokenTerm::from(String::new()));
+        let allocation = memory.split(term.allocation_bytes());
+        drop(token);
+        drop(memory);
+        Budgeted::new(term, allocation)
+    }
+}
 
 #[cfg(test)]
 mod tests;

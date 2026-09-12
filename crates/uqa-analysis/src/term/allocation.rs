@@ -197,6 +197,45 @@ impl TokenTerm {
         }
     }
 
+    /// A representation order for internal lookup, with canonical term equality.
+    pub(crate) fn cmp_with_control(
+        &self,
+        other: &Self,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<std::cmp::Ordering> {
+        fn compare<T: Ord>(
+            left: &[T],
+            right: &[T],
+            poll: &mut dyn FnMut() -> AnalysisResult<()>,
+        ) -> AnalysisResult<std::cmp::Ordering> {
+            poll()?;
+            for (left, right) in left.chunks(1024).zip(right.chunks(1024)) {
+                poll()?;
+                let order = left.cmp(right);
+                if !order.is_eq() {
+                    return Ok(order);
+                }
+            }
+            Ok(left.len().cmp(&right.len()))
+        }
+        match (&self.0, &other.0) {
+            (Representation::Unicode(left), Representation::Unicode(right)) => {
+                compare(left.as_bytes(), right.as_bytes(), poll)
+            }
+            (Representation::UTF16(left), Representation::UTF16(right)) => {
+                compare(left, right, poll)
+            }
+            (Representation::Unicode(_), Representation::UTF16(_)) => {
+                poll()?;
+                Ok(std::cmp::Ordering::Less)
+            }
+            (Representation::UTF16(_), Representation::Unicode(_)) => {
+                poll()?;
+                Ok(std::cmp::Ordering::Greater)
+            }
+        }
+    }
+
     /// Consume reserved UTF-16 units, preserving isolated surrogates without replacement.
     ///
     /// Valid input reserves the exact UTF-8 buffer before decoding and releases the UTF-16 lease only after freeing its buffer. The input must carry the reservation for its capacity. Cancellation is checked during both validation and conversion.

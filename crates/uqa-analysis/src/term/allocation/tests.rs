@@ -15,6 +15,61 @@ fn bytes(term: &TokenTerm) -> usize {
 }
 
 #[test]
+fn internal_order_preserves_canonical_identity_and_long_prefix_order() {
+    let prefix = "한🙂".repeat(2049);
+    let values = [
+        TokenTerm::from(""),
+        TokenTerm::from("a"),
+        TokenTerm::from_utf16("a".encode_utf16().collect()),
+        TokenTerm::from(prefix.clone()),
+        TokenTerm::from(format!("{prefix}a")),
+        TokenTerm::from(format!("{prefix}b")),
+        TokenTerm::from_utf16(vec![0xd800]),
+        TokenTerm::from_utf16([vec![0xd800], prefix.encode_utf16().collect()].concat()),
+        TokenTerm::from_utf16([vec![0xd800], prefix.encode_utf16().collect(), vec![97]].concat()),
+        TokenTerm::from_utf16(vec![0xd801]),
+    ];
+    for (left_index, left) in values.iter().enumerate() {
+        for (right_index, right) in values.iter().enumerate() {
+            let order = left.cmp_with_control(right, &mut || Ok(())).unwrap();
+            assert_eq!(order.is_eq(), left == right);
+            if left != right {
+                assert_eq!(order, left_index.cmp(&right_index));
+            }
+            assert_eq!(
+                order.reverse(),
+                right.cmp_with_control(left, &mut || Ok(())).unwrap()
+            );
+        }
+    }
+    for input in [&values[5], &values[8]] {
+        let mut calls = 0;
+        assert!(input
+            .cmp_with_control(input, &mut || {
+                calls += 1;
+                Ok(())
+            })
+            .unwrap()
+            .is_eq());
+        assert!(calls > 5);
+        for stop in 1..=calls {
+            let mut count = 0;
+            assert!(matches!(
+                input.cmp_with_control(input, &mut || {
+                    count += 1;
+                    if count == stop {
+                        Err(AnalysisError::Cancelled)
+                    } else {
+                        Ok(())
+                    }
+                }),
+                Err(AnalysisError::Cancelled)
+            ));
+        }
+    }
+}
+
+#[test]
 fn complete_boundary_layout_fits_without_transient_replacement_buffers() {
     let text = "韓🙂a".repeat(2000);
     for input in [

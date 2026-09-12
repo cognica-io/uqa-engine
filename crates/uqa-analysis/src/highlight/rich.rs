@@ -6,10 +6,13 @@
 
 //! Match complete-source token spans under one retained compiled revision.
 
-use std::collections::HashSet;
-
-use super::{render_highlights, HighlightOptions};
-use crate::{AnalysisError, AnalysisResult, CompiledAnalyzer, TokenTerm};
+use super::{
+    render::{merge_spans, render, Span},
+    terms::Terms,
+    HighlightOptions,
+};
+use crate::{AnalysisError, AnalysisResult, CompiledAnalyzer};
+use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget};
 
 /// Highlight original source spans using one immutable analyzer for the source and each complete query input.
 ///
@@ -20,26 +23,51 @@ pub fn highlight_compiled(
     analyzer: &CompiledAnalyzer,
     opts: &HighlightOptions,
 ) -> AnalysisResult<String> {
+    Ok(highlight_compiled_budgeted(
+        text,
+        query_inputs,
+        analyzer,
+        opts,
+        &MemoryBudget::new(usize::MAX),
+        || Ok(()),
+    )?
+    .into_parts()
+    .0)
+}
+
+/// Retain one runtime allowance through complete-source analysis and source-span rendering.
+///
+/// Query terms keep their moved token buffers while unused morphology/source state is released. Matching preserves raw UTF-16 identity, density ties preserve source order, and a selected match remains complete inside its fragment. Errors release partial output without releasing another allocation owner's reservations.
+pub fn highlight_compiled_budgeted(
+    text: &str,
+    query_inputs: &[String],
+    analyzer: &CompiledAnalyzer,
+    opts: &HighlightOptions,
+    budget: &MemoryBudget,
+    mut poll: impl FnMut() -> AnalysisResult<()>,
+) -> AnalysisResult<Budgeted<String>> {
+    poll()?;
     if text.is_empty() || query_inputs.is_empty() {
-        return Ok(text.to_owned());
+        return crate::allocation::copy_text(text, budget, &mut poll);
     }
-    let mut terms = HashSet::<TokenTerm>::new();
+    let mut terms = Terms::new(budget);
     for query in query_inputs {
-        terms.extend(
-            analyzer
-                .analyze_tokens(query)?
-                .into_tokens()
-                .into_iter()
-                .map(|token| token.term),
-        );
+        poll()?;
+        terms.append(
+            analyzer.analyze_tokens_budgeted(query, budget, &mut poll)?,
+            false,
+            &mut poll,
+        )?;
     }
     if terms.is_empty() {
-        return Ok(text.to_owned());
+        return crate::allocation::copy_text(text, budget, &mut poll);
     }
-    let source = analyzer.analyze_tokens(text)?;
-    let mut spans = Vec::new();
+    terms.sort_unique(&mut poll)?;
+    let source = analyzer.analyze_tokens_budgeted(text, budget, &mut poll)?;
+    let mut spans = BudgetedVec::new(budget);
     for token in source.tokens() {
-        if !terms.contains(token.term()) {
+        poll()?;
+        if !terms.contains(token.term(), &mut poll)? {
             continue;
         }
         let range = &token
@@ -62,26 +90,11 @@ pub fn highlight_compiled(
             }
         }
         if !range.is_empty() {
-            spans.push((range.start, range.end));
+            spans.push(Span::new(range.start, range.end))?;
         }
     }
-    spans.sort_unstable();
-    let mut merged: Vec<(usize, usize)> = Vec::new();
-    for (start, end) in spans {
-        if let Some(previous) = merged.last_mut().filter(|previous| start < previous.1) {
-            previous.1 = previous.1.max(end);
-        } else {
-            merged.push((start, end));
-        }
-    }
-    // Walk disjoint source ranges once to obtain the renderer's Unicode character coordinates.
-    let (mut byte, mut character) = (0, 0);
-    for span in &mut merged {
-        character += text[byte..span.0].chars().count();
-        let start = character;
-        character += text[span.0..span.1].chars().count();
-        byte = span.1;
-        *span = (start, character);
-    }
-    Ok(render_highlights(text, &merged, opts))
+    drop(source);
+    drop(terms);
+    merge_spans(&mut spans, &mut poll)?;
+    render(text, spans, opts, budget, &mut poll)
 }
