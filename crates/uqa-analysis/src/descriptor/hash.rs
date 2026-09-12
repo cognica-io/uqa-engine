@@ -17,6 +17,16 @@ use crate::{AnalysisError, AnalysisResult};
 pub struct AnalyzerFingerprint([u8; 32]);
 
 impl AnalyzerFingerprint {
+    /// The binary identity carried by persistent index metadata.
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    /// Construct an identity value; descriptor restoration still verifies its contents separately.
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
     pub(super) fn digest(bytes: &[u8]) -> Self {
         let mut hash = Sha256::new();
         hash.update(b"UQA analyzer descriptor\0");

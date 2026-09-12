@@ -16,3 +16,6 @@ mod occurrences;
 
 #[path = "cases/memory_occurrences.rs"]
 mod memory_occurrences;
+
+#[path = "cases/field_metadata.rs"]
+mod field_metadata;

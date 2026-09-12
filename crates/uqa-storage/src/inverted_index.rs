@@ -26,6 +26,7 @@ mod analysis;
 mod bindings;
 mod contract;
 mod memory;
+mod metadata;
 
 #[cfg(test)]
 mod tests;
@@ -33,6 +34,7 @@ mod tests;
 pub use analysis::{analyze_index_field, AnalyzedField, IndexedFieldMetadata};
 pub use bindings::AnalyzerBindings;
 pub use contract::{AnalyzerPhase, InvertedIndex};
+pub use metadata::IndexedFieldRevision;
 
 /// Linear term/position stores cannot install Korean analysis without immutable graph revisions.
 pub fn validate_linear_analyzer(analyzer: &Analyzer) -> StorageBackendResult<()> {
