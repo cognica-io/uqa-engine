@@ -56,7 +56,11 @@ impl Error for PhraseError {
 
 impl From<StorageBackendError> for PhraseError {
     fn from(error: StorageBackendError) -> Self {
-        Self::Storage(error)
+        match error {
+            StorageBackendError::Memory(error) => error.into(),
+            StorageBackendError::Cancelled(error) => Self::Cancelled(error),
+            error => Self::Storage(error),
+        }
     }
 }
 

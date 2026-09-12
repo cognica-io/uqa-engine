@@ -5,7 +5,10 @@
 //
 
 use super::*;
-use uqa_core::{memory::MemoryBudget, PostingEntry};
+use uqa_core::{
+    memory::{MemoryBudget, MemoryError},
+    PostingEntry,
+};
 use uqa_storage::inverted_index::analyze_query_graph_budgeted;
 
 #[test]

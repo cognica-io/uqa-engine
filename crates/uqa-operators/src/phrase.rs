@@ -8,11 +8,15 @@
 
 use graph::QueryGraph;
 use uqa_core::{
-    memory::{Budgeted, BudgetedVec, MemoryError},
+    memory::{Budgeted, BudgetedVec},
     DocId, ScoredEntry, TokenOccurrence,
 };
 use uqa_scoring::{ScoringMode, TextCandidateScorer};
-use uqa_storage::{clustered_postings::PostingReadCursor, InvertedIndex, TokenTermKey};
+use uqa_storage::{
+    clustered_postings::{BudgetedPostingReadCursor, PostingReadCursor},
+    read_control::StorageReadControl,
+    InvertedIndex, TokenTermKey,
+};
 
 mod budget;
 mod error;
@@ -38,7 +42,7 @@ pub fn score_phrase(
 
 /// Retain native graph, scoring, occurrence and output reservations through the returned result.
 ///
-/// The borrowed query keeps its caller's existing ownership. Use the same allowance for complete query analysis so its key buffers coexist with matching state and results. Provider read workspaces remain with their provider implementation.
+/// The borrowed query keeps its caller's existing ownership. Use the same allowance for complete query analysis so its key buffers coexist with matching state and results. Provider input, cursor and decoded occurrence allocations share that allowance and retain their own reservations.
 pub fn score_phrase_budgeted(
     index: &dyn InvertedIndex,
     field: &str,
@@ -62,12 +66,12 @@ fn score_phrase_inner(
         return Ok(BudgetedVec::new(budget.memory()));
     }
     let graph = QueryGraph::new(query, budget)?;
-    let mut cursors: BudgetedVec<Box<dyn PostingReadCursor + '_>> =
-        BudgetedVec::new(budget.memory());
+    let control = StorageReadControl::new(budget.memory(), budget.cancellation());
+    let mut cursors: BudgetedVec<BudgetedPostingReadCursor<'_>> = BudgetedVec::new(budget.memory());
     cursors.reserve(graph.terms.len())?;
     for term in graph.terms.iter() {
         budget.check_cancelled()?;
-        cursors.push(index.posting_read_cursor_key(field, term)?)?;
+        cursors.push(index.posting_read_cursor_key_budgeted(field, term, &control)?)?;
     }
     let mut frequencies = BudgetedVec::new(budget.memory());
     frequencies.reserve(query.len())?;
@@ -77,7 +81,7 @@ fn score_phrase_inner(
     }
     let scorer = TextCandidateScorer::new_budgeted(
         mode,
-        index.field_stats_scalar(field)?,
+        index.field_stats_scalar_budgeted(field, &control)?,
         &frequencies,
         budget.memory(),
         || budget.cancellation().check().map_err(Into::into),
@@ -132,7 +136,7 @@ fn score_phrase_inner(
 
 fn next_candidate(
     graph: &QueryGraph<'_>,
-    cursors: &mut [Box<dyn PostingReadCursor + '_>],
+    cursors: &mut [BudgetedPostingReadCursor<'_>],
     budget: &PhraseBudget<'_>,
 ) -> PhraseResult<Option<DocId>> {
     loop {
@@ -170,10 +174,11 @@ fn read_candidate(
     field: &str,
     doc_id: DocId,
     graph: &QueryGraph<'_>,
-    cursors: &mut [Box<dyn PostingReadCursor + '_>],
+    cursors: &mut [BudgetedPostingReadCursor<'_>],
     occurrences: &mut [Budgeted<Vec<TokenOccurrence>>],
     budget: &PhraseBudget<'_>,
 ) -> PhraseResult<u64> {
+    let control = StorageReadControl::new(budget.memory(), budget.cancellation());
     let mut length = None;
     for ((term, cursor), values) in graph.terms.iter().zip(cursors).zip(occurrences) {
         budget.check_cancelled()?;
@@ -192,23 +197,13 @@ fn read_candidate(
         let count = usize::try_from(entry.term_freq).map_err(|_| {
             PhraseError::InvalidGraph("phrase occurrence count exceeds usize".into())
         })?;
-        let mut memory = budget.memory().reserve(
-            count
-                .checked_mul(size_of::<TokenOccurrence>())
-                .ok_or(MemoryError::SizeOverflow)?,
-        )?;
-        let records = index.get_occurrences(doc_id, field, term)?;
+        let records = index.get_occurrences_budgeted(doc_id, field, term, &control)?;
         if records.len() != count {
             return Err(PhraseError::InvalidGraph(
                 "phrase occurrences do not match the score cursor frequency".into(),
             ));
         }
-        memory.grow(
-            (records.capacity() - count)
-                .checked_mul(size_of::<TokenOccurrence>())
-                .ok_or(MemoryError::SizeOverflow)?,
-        )?;
-        *values = Budgeted::new(records, memory);
+        *values = records;
         let mut previous = None;
         for occurrence in values.iter() {
             budget.check_cancelled()?;
