@@ -1,0 +1,90 @@
+{
+  "lucene_version": "10.5.1",
+  "lucene_tag": "releases/lucene/10.5.1",
+  "lucene_commit": "64ce863a2bea79c69c19c4d56268c26710ff0ff9",
+  "uqa_source_commit": "bbeb1026cba9001cc5f084d24ac68ec197bd1925",
+  "verified_on": "2026-09-12",
+  "verified_platform": "linux/arm64",
+  "docker_image": "eclipse-temurin@sha256:3b0a98dfbdf1067c20a7854cec159551777d2ee1381bc76cd4bd0719f543b148",
+  "runtime": {
+    "java_version": "21.0.10",
+    "java_runtime_version": "21.0.10+7-LTS",
+    "java_vendor": "Eclipse Adoptium"
+  },
+  "fixture_count": 31,
+  "jars": [
+    {
+      "artifact": "lucene-core",
+      "url": "https://repo.maven.apache.org/maven2/org/apache/lucene/lucene-core/10.5.1/lucene-core-10.5.1.jar",
+      "bytes": 4744152,
+      "sha256": "2b4912cc792f462e8e7b350f7c958f538ee7ec42da4cf4b65902fb9d546bba53"
+    },
+    {
+      "artifact": "lucene-analysis-common",
+      "url": "https://repo.maven.apache.org/maven2/org/apache/lucene/lucene-analysis-common/10.5.1/lucene-analysis-common-10.5.1.jar",
+      "bytes": 1757025,
+      "sha256": "f710afd91a820987a48f3a215e076715b9237b324cf5458281109ef0d2a17b73"
+    },
+    {
+      "artifact": "lucene-analysis-nori",
+      "url": "https://repo.maven.apache.org/maven2/org/apache/lucene/lucene-analysis-nori/10.5.1/lucene-analysis-nori-10.5.1.jar",
+      "bytes": 7824879,
+      "sha256": "d186e323dca89700256d63925ac1fd6d3a410c84ec78603697aaf923e4e4df53"
+    }
+  ],
+  "dictionary_source": {
+    "name": "mecab-ko-dic-2.1.1-20180720",
+    "url": "https://s3.amazonaws.com/lucene-testdata/mecab/mecab-ko-dic-2.1.1-20180720.tar.gz",
+    "sha256": "fd62d3d6d8fa85145528065fabad4d7cb20f6b2201e71be4081a4e9701a5b330",
+    "license_file": "COPYING",
+    "license": "Apache-2.0",
+    "lucene_normalize_entries": false
+  },
+  "dictionary_resources": [
+    {
+      "path": "org/apache/lucene/analysis/ko/dict/CharacterDefinition.dat",
+      "bytes": 65564,
+      "sha256": "5ed2303b58a61819dd256f295b6cd52f869b6a15479255242133f7556c090b20"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ko/dict/ConnectionCosts.dat",
+      "bytes": 11231986,
+      "sha256": "90902b01157c383a196c7e9798dc4bec5e6aae88d17ef83c73217312d633945e"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ko/dict/TokenInfoDictionary$buffer.dat",
+      "bytes": 7288372,
+      "sha256": "73af46066a8d8138590b20c3941ee0c6cfe8b15d81ad8167d2565804128cca8b"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ko/dict/TokenInfoDictionary$fst.dat",
+      "bytes": 5632475,
+      "sha256": "c07fec77418992d104b9c217661067743ada15282c167cac3d1dfdac90e12b8b"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ko/dict/TokenInfoDictionary$posDict.dat",
+      "bytes": 2715,
+      "sha256": "12b227d6de87c7e980783ca7eed07074a69d57ef4cc0a0431221b04e3681385a"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ko/dict/TokenInfoDictionary$targetMap.dat",
+      "bytes": 816309,
+      "sha256": "47aac565e59cb80a341199f9484d6abf128084e8b6b23e6c3d7b7a8d4263a590"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ko/dict/UnknownDictionary$buffer.dat",
+      "bytes": 101,
+      "sha256": "2571f47d1e316d095d7727270538428e223da4e5c92990d0e4f8744cac739ade"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ko/dict/UnknownDictionary$posDict.dat",
+      "bytes": 1826,
+      "sha256": "76cb39a78f503b5b202d5a418b0241e4f747096ccc39d13914a7c12fcd1ae678"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ko/dict/UnknownDictionary$targetMap.dat",
+      "bytes": 36,
+      "sha256": "d5d9a3a0b35426c63b873f4b907fb9c3b51d8e6376c5ee9fbee00f960b569345"
+    }
+  ]
+}
