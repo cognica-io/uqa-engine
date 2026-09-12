@@ -83,7 +83,7 @@ impl Engine {
                 doc_id: entry.doc_id,
                 score: scorer.finalize_score(&[scorer.term_score_with_idf(
                     entry.term_freq,
-                    entry.doc_length.max(entry.term_freq),
+                    entry.doc_length,
                     idf,
                 )]),
             });
@@ -133,7 +133,7 @@ impl Engine {
                 let Some(entry) = cursor.current().filter(|entry| entry.doc_id == doc_id) else {
                     continue;
                 };
-                let doc_length = entry.doc_length.max(entry.term_freq);
+                let doc_length = entry.doc_length;
                 if let Some(previous) = candidate_length {
                     if previous != doc_length {
                         return Err(SQLError::Internal(format!(
@@ -166,3 +166,6 @@ impl Engine {
         Ok(entries)
     }
 }
+
+#[cfg(test)]
+mod tests;

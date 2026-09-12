@@ -32,6 +32,8 @@ $$
 
 and the term contribution uses frequency and length normalization with defaults $k_1 = 1.2$ and $b = 0.75$.
 
+Frequency and normalization length are independent inputs. Scoring preserves the stored length when overlapping occurrences make frequency larger. Index-backed materialized WAND obtains frequency from the index accessor; score-cursor WAND, exhaustive text scoring, persisted SQLite block maxima, and corpus calibration use the explicit score metadata. Unique-position projections cannot replace occurrence frequency. Standalone materialized WAND without an index retains its documented positional-frequency approximation.
+
 `uqa-scoring` uses distinct types for raw BM25, evidence logits, prior logits, and posterior probabilities. Conversions are named and validated so a posterior cannot be accidentally added as prior-free evidence.
 
 ## Query-level Bayesian calibration

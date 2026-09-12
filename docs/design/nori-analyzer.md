@@ -306,6 +306,8 @@ Document writes, index backfill, named registration, field rebinding, rollback, 
 
 ### Occurrences and field length
 
+The common library now implements `TokenOccurrence`, canonical lossless term keys, immutable field staging, and a [versioned occurrence codec](occurrence-posting-format.md). Provider integration, source rebuilds, and durable field revisions remain open.
+
 Add a provider-independent `TokenOccurrence` containing start position, position length, and corrected source offsets. Retain occurrence multiplicity and term frequency separately from the existing unique-position projection. The occurrence list is keyed by field, term, and document; generic posting unions cannot erase term identity before positional execution. `Payload.positions` can remain a compatibility projection for consumers needing starts only, but graph consumers use the occurrence API.
 
 Memory, Key/Value, and SQLite staging must accumulate the token increments instead of calling `enumerate()`. Store graph edges without flattening mixed compounds. Extend the clustered positional payload and its version; preserve the score-only cursor path so ordinary BM25 lookup need not decode offsets or graph edges. All provider conformance tests must exercise the same occurrence contract.

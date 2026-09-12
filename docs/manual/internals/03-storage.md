@@ -79,6 +79,8 @@ A score cursor loads the directory and reuses one decode buffer for its current 
 
 SQLite stores clustered values in `_posting_clusters` and `_posting_documents`. redb and the SQLite Key/Value implementation use the same codec under separate score, position, and document-term namespaces.
 
+The common library also provides `TokenTermKey`, `TokenOccurrence`, `analyze_index_field`, and version 2 occurrence/reverse-vocabulary codecs. These preserve raw surrogate terms, repeated same-position edges, graph lengths, and original source spans while keeping frequency independent of the declared normalization length. The [occurrence format](../../design/occurrence-posting-format.md) specifies the exact bytes and validation. Existing index providers still store linear positions; provider integration, durable descriptor metadata, and atomic source rebuilds remain in the [Nori plan](../../plans/0006-nori-analyzer.md). A codec round-trip alone does not migrate an existing index.
+
 ## Vector storage
 
 A vector field begins with exact brute-force access. `CREATE INDEX USING ivf` or `USING hnsw` installs a distinct physical index identity and durable metadata. Reopen attaches the stored structure; it does not rebuild merely because the process restarted.

@@ -335,7 +335,7 @@ fn score_cursor_document(
         }
         let term_score = query.scorers[index].term_score(
             entry.term_freq,
-            entry.doc_length.max(entry.term_freq),
+            entry.doc_length,
             cursor.cursor.doc_freq(),
         );
         require_nonnegative_finite(term_score, "cursor WAND term score")?;

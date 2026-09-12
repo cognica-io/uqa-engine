@@ -20,8 +20,10 @@ use crate::backend::{StorageBackendError, StorageBackendResult};
 use crate::block_max_index::BlockMaxScorer;
 use crate::clustered_postings::{MaterializedPostingCursor, PostingCursor, PostingScore};
 
+mod analysis;
 mod contract;
 
+pub use analysis::{analyze_index_field, AnalyzedField};
 pub use contract::{AnalyzerPhase, InvertedIndex};
 
 /// Linear term/position stores cannot install Korean analysis without immutable graph revisions.
@@ -417,8 +419,7 @@ impl InvertedIndex for MemoryInvertedIndex {
                     .get(&posting.doc_id)
                     .and_then(|lengths| lengths.get(field))
                     .copied()
-                    .unwrap_or(0)
-                    .max(term_freq);
+                    .unwrap_or(0);
                 Ok(PostingScore {
                     doc_id: posting.doc_id,
                     term_freq,

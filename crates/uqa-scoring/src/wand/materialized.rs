@@ -453,7 +453,9 @@ fn score_document(
         if entry.doc_id != target {
             continue;
         }
-        let tf = if entry.payload.positions.is_empty() {
+        let tf = if let Some(index) = inverted_index {
+            index.get_term_freq(target, &query.fields[i], &query.terms[i])?
+        } else if entry.payload.positions.is_empty() {
             1
         } else {
             u64::try_from(entry.payload.positions.len())
@@ -463,14 +465,13 @@ fn score_document(
         let doc_length = match inverted_index {
             Some(idx) => {
                 let slot = field_slots[i];
-                let length = if let Some(length) = doc_lengths[slot] {
+                if let Some(length) = doc_lengths[slot] {
                     length
                 } else {
                     let length = idx.get_doc_length(target, &query.fields[i])?;
                     doc_lengths[slot] = Some(length);
                     length
-                };
-                length.max(tf)
+                }
             }
             None => tf,
         };

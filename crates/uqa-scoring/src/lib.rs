@@ -61,3 +61,6 @@ pub use wand::{
 
 pub mod mode;
 pub use mode::ScoringMode;
+
+#[cfg(test)]
+mod occurrence_tests;

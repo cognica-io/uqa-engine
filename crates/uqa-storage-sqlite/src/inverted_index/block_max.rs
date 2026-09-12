@@ -77,7 +77,7 @@ impl SQLiteInvertedIndex {
             .map_err(|_| SQLiteError::StorageBackend("document frequency exceeds usize".into()))?;
         let mut scored_entries = Vec::with_capacity(scored_capacity);
         while let Some(entry) = cursor.current() {
-            scored_entries.push((entry.term_freq, entry.doc_length.max(entry.term_freq)));
+            scored_entries.push((entry.term_freq, entry.doc_length));
             cursor.advance()?;
         }
         self.ensure_aux_tables(field)?;

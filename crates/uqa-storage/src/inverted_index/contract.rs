@@ -5,8 +5,8 @@
 //
 
 use super::{
-    counter_error, usize_to_u64, Analyzer, Arc, BTreeMap, BlockMaxScorer, DocId, FieldName,
-    IndexStats, PostingEntry, PostingList, StorageBackendError, StorageBackendResult,
+    counter_error, Analyzer, Arc, BTreeMap, BlockMaxScorer, DocId, FieldName, IndexStats,
+    PostingEntry, PostingList, StorageBackendError, StorageBackendResult,
 };
 use crate::clustered_postings::{MaterializedPostingCursor, PostingCursor, PostingScore};
 
@@ -120,11 +120,11 @@ pub trait InvertedIndex: Send + Sync {
         let posting_list = self.get_posting_list(field, term)?;
         let mut entries = Vec::with_capacity(posting_list.len());
         for posting in posting_list {
-            let term_freq = usize_to_u64(posting.payload.positions.len().max(1), "term frequency")?;
+            let term_freq = self.get_term_freq(posting.doc_id, field, term)?;
             entries.push(PostingScore {
                 doc_id: posting.doc_id,
                 term_freq,
-                doc_length: self.get_doc_length(posting.doc_id, field)?.max(term_freq),
+                doc_length: self.get_doc_length(posting.doc_id, field)?,
             });
         }
         Ok(Box::new(MaterializedPostingCursor::new(entries)?))
@@ -201,7 +201,7 @@ pub trait InvertedIndex: Send + Sync {
 
     /// Visit `(doc_id, term_frequency)` pairs without requiring callers to
     /// materialize or decode payload details they do not use. The default
-    /// keeps every backend compatible through the posting-list contract;
+    /// uses posting support and the authoritative frequency accessor;
     /// persistent backends can stream compact frequency projections.
     fn for_each_term_freq(
         &self,
@@ -210,10 +210,7 @@ pub trait InvertedIndex: Send + Sync {
         visit: &mut dyn FnMut(DocId, u64),
     ) -> StorageBackendResult<()> {
         for entry in &self.get_posting_list(field, term)? {
-            visit(
-                entry.doc_id,
-                usize_to_u64(entry.payload.positions.len(), "term frequency")?,
-            );
+            visit(entry.doc_id, self.get_term_freq(entry.doc_id, field, term)?);
         }
         Ok(())
     }

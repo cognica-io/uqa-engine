@@ -8,3 +8,6 @@
 
 #[path = "btree_index.rs"]
 mod btree_index;
+
+#[path = "cases/occurrences.rs"]
+mod occurrences;

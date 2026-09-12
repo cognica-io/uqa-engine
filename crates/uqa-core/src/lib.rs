@@ -32,7 +32,8 @@ pub use relation_identity::RelationIdentity;
 pub use types::{
     jsonb_equality_key, ArrayValue, DecimalValue, DocId, Edge, EdgeId, FieldName,
     GeneralizedPayload, GeneralizedPostingEntry, IndexStats, PathExpr, PathSegment, Payload,
-    PostingEntry, TemporalValue, Value, Vertex, VertexId,
+    PostingEntry, TemporalValue, TokenOccurrence, TokenOccurrenceError, TokenOffsets, Value,
+    Vertex, VertexId,
 };
 
 mod scored_entry;
