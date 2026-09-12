@@ -5,73 +5,12 @@
 //
 
 use std::sync::Arc;
-use uqa_core::ScoredEntry;
 use uqa_core::Value;
 use uqa_execution::RowSchemaExecution;
 use uqa_execution::RowSource;
 use uqa_execution::{query::scored_input::*, row_locks::recheck::RecheckDoc};
 use uqa_sql::expr::RowLookup;
 use uqa_sql::ResultRow;
-
-#[test]
-fn score_cutoff_retains_the_complete_boundary_tie_group() {
-    let mut input = ScoredInput::entries(
-        vec![
-            ScoredEntry {
-                doc_id: 4,
-                score: 0.25,
-            },
-            ScoredEntry {
-                doc_id: 2,
-                score: 0.75,
-            },
-            ScoredEntry {
-                doc_id: 1,
-                score: 1.0,
-            },
-            ScoredEntry {
-                doc_id: 3,
-                score: 0.75,
-            },
-        ],
-        true,
-    );
-
-    input.retain_top_scores_with_ties(2);
-
-    let ScoredInput::Entries { mut entries, .. } = input else {
-        panic!("score-bearing input changed variants");
-    };
-    entries.sort_by_key(|entry| entry.doc_id);
-    assert_eq!(
-        entries
-            .iter()
-            .map(|entry| (entry.doc_id, entry.score))
-            .collect::<Vec<_>>(),
-        vec![(1, 1.0), (2, 0.75), (3, 0.75)]
-    );
-}
-
-#[test]
-fn zero_score_cutoff_empties_score_bearing_entries_only() {
-    let entries = vec![ScoredEntry {
-        doc_id: 1,
-        score: 1.0,
-    }];
-    let mut scored = ScoredInput::entries(entries.clone(), true);
-    scored.retain_top_scores_with_ties(0);
-    assert!(matches!(
-        scored,
-        ScoredInput::Entries { entries, .. } if entries.is_empty()
-    ));
-
-    let mut unscored = ScoredInput::entries(entries, false);
-    unscored.retain_top_scores_with_ties(0);
-    assert!(matches!(
-        unscored,
-        ScoredInput::Entries { entries, .. } if entries.len() == 1
-    ));
-}
 
 #[test]
 fn pruned_primary_key_is_not_advertised_as_output_ordering() {

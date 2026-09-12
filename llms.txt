@@ -20,7 +20,11 @@ Model training orchestration and table-to-training-data conversion live in `crat
 
 Creation-name rules and index-target selection live in `crates/uqa-sql/src/catalog/resolution/creation.rs`; ordered refresh, writer retries, and temporary-namespace publication scheduling live in `crates/uqa-execution/src/schema/namespaces/relations.rs`. Creation consumers borrow that native context instead of asking Engine to resolve a complete creation target.
 
+Cypher default-label requirements and diagnostics live in `crates/uqa-graph/src/cypher/labels.rs`; Engine retains graph selection, statement gates, and graph read/write transaction boundaries.
+
 RPQ syntax is defined in `crates/uqa-core/src/rpq.rs` and consumed directly by planner cost estimation. Graph re-exports the same syntax and owns automata and traversal.
+
+Implementation tests follow their owning crates. Engine catalog, session, guard, and persistence scenarios are grouped under `crates/uqa-engine/src/tests/`; public Engine API scenarios use its existing single integration harness. See [verification](docs/manual/internals/09-verification.md) for placement and preservation rules.
 
 ## Start here
 

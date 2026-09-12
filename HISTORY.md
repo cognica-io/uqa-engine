@@ -19,6 +19,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Moved Cypher default-label requirement analysis and diagnostics from Engine into graph, preserving catalog reads, vertex-before-edge errors, and the existing graph transaction boundaries.
+- Move pure scored-input and persisted-relation-reference tests to their implementation crates, consolidate Engine state tests under one unit-test tree, and move public model-training scenarios to the existing integration harness; remove obsolete test-only source directories and the event type reexport module.
 - Removed the planner dependency on the graph runtime by moving the shared RPQ AST, parser, and seven original parser tests into Core. Graph retains the same public syntax exports, and the commit hook forbids reintroducing the dependency.
 - Moved creation-namespace selection, schema creation privileges, and index-target visibility out of Engine. Table, CTAS, view, sequence, domain, routine, foreign-table, index, and key-constraint consumers share native namespace inputs while preserving live guards, deferred writer retry, and error order.
 - Moved table-to-training-data conversion and JSON/table training orchestration into execution, removed whole-training Engine callbacks, and relocated the original pure label and IVF-catalog validation tests to their owning crates. Engine retains generated-column reads and model persistence transactions.

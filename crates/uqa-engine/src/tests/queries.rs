@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::test_support::{
+use self::support::{
     lower_statement, query_may_mutate_engine, query_requires_statement_transaction,
 };
 use crate::Engine;
@@ -364,7 +364,7 @@ fn reserved_catalog_aliases_resolve_only_existing_builtins() {
 mod unified_plan_tests {
     use uqa_planner::{CommandPlan, ComputePlan, RelationalPlan, SourcePlan, UnifiedPlan};
 
-    use super::super::test_support::compile_logical_plans;
+    use super::support::compile_logical_plans;
     use crate::{capabilities::statement_planning::optimize_engine_plan, Engine};
 
     fn one(engine: &Engine, sql: &str) -> UnifiedPlan {
@@ -839,3 +839,10 @@ mod unified_plan_tests {
         assert!(error.to_string().contains("batch_inc"));
     }
 }
+
+mod operators;
+mod retrieval_planning;
+mod scope;
+mod score_ordering;
+mod support;
+mod table_reads;

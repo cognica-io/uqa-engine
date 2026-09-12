@@ -133,6 +133,3 @@ impl Engine {
             .sequence_owner_target(owner)
     }
 }
-
-#[cfg(test)]
-mod tests;

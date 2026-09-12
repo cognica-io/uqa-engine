@@ -4,8 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::*;
 use uqa_core::Value;
+use uqa_engine::Engine;
+use uqa_ml::{LearnOptions, TrainingSet};
 
 #[test]
 fn training_apis_share_native_execution_and_preserve_sqlite_model_transactions() {

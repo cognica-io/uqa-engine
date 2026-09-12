@@ -87,7 +87,6 @@ mod cancellation;
 mod capabilities;
 mod catalog_indexes;
 mod domains;
-mod events;
 mod fdw;
 mod fts;
 mod generated;
@@ -825,7 +824,6 @@ pub struct RobustHybridSearchParams<'a> {
 }
 
 #[cfg(test)]
-#[path = "lib_tests.rs"]
 mod tests;
 
 mod copy;

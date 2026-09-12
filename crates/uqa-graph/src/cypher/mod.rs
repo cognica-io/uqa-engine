@@ -4,12 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! openCypher subset: lexer, AST, recursive-descent parser. The
-//! compiler that lowers AST onto graph operators lives in a separate
-//! slice; this module is the front-end only.
+//! Cypher syntax, default-label validation, read execution, and graph mutation.
 
 pub mod ast;
 pub mod executor;
+mod labels;
 pub mod lexer;
 pub mod parser;
 pub mod writer;
@@ -22,6 +21,7 @@ pub use ast::{
     SetClause, SetItem, SetOperator, UnaryOp, UnwindClause, Variable, WithClause,
 };
 pub use executor::{Binding, BindingRow, CypherError, CypherExecutor, ResultRow};
+pub use labels::validate_default_label_relations;
 pub use lexer::{tokenize, LexError, Token, TokenKind};
 pub use parser::{parse_cypher, ParseError};
 pub use writer::CypherWriter;

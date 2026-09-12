@@ -5,8 +5,6 @@
 //
 
 //! Retain table generations and lend live catalog guards to native GRANT execution.
-#[cfg(test)]
-mod tests;
 use crate::{Engine, TableState};
 use parking_lot::RwLockReadGuard;
 use std::{collections::BTreeMap, sync::Arc};

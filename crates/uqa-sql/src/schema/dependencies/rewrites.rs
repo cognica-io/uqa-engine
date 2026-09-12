@@ -140,3 +140,6 @@ pub fn rename_schema_expr_qualified_column(
         Ok(())
     })
 }
+
+#[cfg(test)]
+mod tests;

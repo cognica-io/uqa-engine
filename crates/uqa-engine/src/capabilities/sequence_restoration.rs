@@ -30,6 +30,3 @@ impl SequenceRestoreRegistry for Engine {
         *self.durable.sequence_security.write() = registry.security;
     }
 }
-
-#[cfg(test)]
-mod tests;

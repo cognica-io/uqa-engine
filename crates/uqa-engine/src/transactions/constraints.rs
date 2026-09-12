@@ -335,14 +335,14 @@ impl Engine {
     }
 
     pub(crate) fn constraint_trigger_identity(
-        trigger: &crate::events::StoredTrigger,
+        trigger: &uqa_sql::catalog::events::StoredTrigger,
     ) -> Result<ConstraintIdentity, SQLError> {
         trigger.constraint_identity()
     }
 
     pub(crate) fn constraint_trigger_is_deferred(
         &self,
-        trigger: &crate::events::StoredTrigger,
+        trigger: &uqa_sql::catalog::events::StoredTrigger,
     ) -> Result<bool, SQLError> {
         if !trigger.definition.constraint || !trigger.definition.deferrability.is_deferrable() {
             return Ok(false);

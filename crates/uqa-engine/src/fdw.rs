@@ -7,9 +7,6 @@
 use super::{Engine, RelationIdentity};
 use uqa_fdw::arrays::{column_type_is_array, normalize_array_columns};
 
-#[cfg(test)]
-mod tests;
-
 pub(crate) use uqa_execution::catalog::foreign::StoredForeignTable;
 
 struct MemoryForeignRowStream<'a> {

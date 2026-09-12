@@ -18,8 +18,6 @@ impl TableRead for TableState {
         self.document_store.read()
     }
 }
-#[cfg(test)]
-mod tests;
 
 use crate::Engine;
 use uqa_execution::query::{
@@ -130,6 +128,3 @@ impl uqa_execution::query::block::context::QueryDocumentRead for Engine {
         self.command_mutation_overlay_active()
     }
 }
-
-#[cfg(test)]
-mod query_tests;

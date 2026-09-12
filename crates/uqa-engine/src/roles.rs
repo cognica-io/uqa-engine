@@ -159,6 +159,3 @@ impl Engine {
 }
 
 pub(crate) use uqa_sql::catalog::roles::role_inherits;
-
-#[cfg(test)]
-mod tests;

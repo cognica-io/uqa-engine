@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::*;
+use crate::Engine;
 
 #[test]
 fn creation_metadata_adapters_retain_actual_registry_and_session_guards() {

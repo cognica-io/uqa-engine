@@ -4,13 +4,22 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::*;
+use crate::{Engine, TableState};
+use std::sync::Arc;
 use std::{cell::Cell, collections::BTreeMap};
+use uqa_core::RelationIdentity;
+use uqa_execution::catalog::security::{
+    table_grants::context::TableSecurityWrite,
+    table_inquiry::{TableColumnsRead, TablePrivilegeState},
+    table_ownership::{TableOwnerRegistry, TableOwnerSchema, TableOwnerState},
+};
 use uqa_execution::schema::sequences::role_ownership::{
     OwnedSequenceSecurityCatalog, OwnedSequenceSecurityRead,
 };
+use uqa_sql::{ast::RelationPersistence, catalog::security::TableSecurity};
 use uqa_sql::{catalog::security::SequenceSecurity, SQLError};
 use uqa_storage::StorageBackendError;
+use uqa_storage::StorageBackendResult;
 
 #[derive(Debug, PartialEq, Clone)]
 struct SecuritySnapshot {
@@ -40,26 +49,17 @@ struct FailedTables<'a> {
     reached: Cell<bool>,
 }
 struct FailedTable<'a> {
-    table: OwnedTable<'a>,
+    table: Box<dyn TableOwnerState + 'a>,
     observer: &'a FailedTables<'a>,
 }
 impl TableOwnerRegistry for FailedTables<'_> {
     fn table(&self, relation: &RelationIdentity) -> Option<Box<dyn TableOwnerState + '_>> {
-        self.engine
-            .storage
-            .tables
-            .read()
-            .get(relation)
-            .cloned()
-            .map(|state| {
-                Box::new(FailedTable {
-                    table: OwnedTable {
-                        engine: self.engine,
-                        state,
-                    },
-                    observer: self,
-                }) as Box<dyn TableOwnerState>
-            })
+        TableOwnerRegistry::table(self.engine, relation).map(|table| {
+            Box::new(FailedTable {
+                table,
+                observer: self,
+            }) as Box<dyn TableOwnerState>
+        })
     }
 }
 impl TablePrivilegeState for FailedTable<'_> {

@@ -722,3 +722,6 @@ impl crate::RowSource for ScoredDocumentSource {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

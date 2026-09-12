@@ -37,6 +37,3 @@ impl Engine {
         std::mem::take(&mut *self.runtime.notices.lock())
     }
 }
-
-#[cfg(test)]
-mod tests;

@@ -4,9 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::*;
+use crate::Engine;
 use std::{cell::Cell, collections::BTreeMap};
 use uqa_core::RelationIdentity;
+use uqa_execution::catalog::sequence::restoration::{
+    RestoredSequenceRegistry, SequencePersistenceRead, SequenceRestoreRegistry,
+};
 use uqa_execution::catalog::sequence::{restoration::restore_sequence_rows, SequenceState};
 use uqa_sql::{ast::RelationPersistence, catalog::security::SequenceSecurity};
 use uqa_storage::SequenceRow;
