@@ -5,24 +5,32 @@
 //
 
 use super::{
-    analyzer_registry, normalize_analyzer_phase, parse_analyzer_config, Analyzer, AnalyzerPhase,
-    Arc, Engine, TableState,
+    analyzer_registry, normalize_analyzer_phase, parse_analyzer_config, AnalyzerPhase, Arc, Engine,
+    TableState,
 };
 use uqa_sql::ast::ColumnType;
+use uqa_storage::{AnalyzerBindingOwner, FieldAnalyzerBinding};
+
+mod persistence;
 
 impl Engine {
-    pub(crate) fn resolve_analyzer(&self, name: &str) -> std::result::Result<Analyzer, String> {
+    pub(crate) fn resolve_analyzer_revision(
+        &self,
+        name: &str,
+    ) -> Result<Arc<uqa_analysis::CompiledAnalyzer>, String> {
         let name = name.trim();
         if name.is_empty() {
             return Err("analyzer name cannot be empty".into());
         }
         if let Ok(analyzer) = analyzer_registry::get_analyzer(name) {
-            return Ok(analyzer);
+            return analyzer.compile().map_err(|error| error.to_string());
         }
-        let Some(config_json) = self.durable.named_analyzers.read().get(name).cloned() else {
-            return Err(format!("analyzer `{name}` is not registered"));
-        };
-        parse_analyzer_config(name, &config_json)
+        self.durable
+            .named_analyzers
+            .read()
+            .get(name)
+            .cloned()
+            .ok_or_else(|| format!("analyzer `{name}` is not registered"))
     }
 
     pub fn register_named_analyzer(
@@ -42,14 +50,28 @@ impl Engine {
     ) -> std::result::Result<(), String> {
         self.synchronize_catalog_registries()
             .map_err(|err| format!("refresh analyzer catalog: {err}"))?;
-        parse_analyzer_config(name, config_json)?;
+        let name = name.trim();
+        let compiled = parse_analyzer_config(name, config_json)?
+            .compile()
+            .map_err(|error| error.to_string())?;
+        let configuration = serde_json::to_string(
+            &compiled
+                .descriptor()
+                .configuration()
+                .map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
         let mut analyzers = self.durable.named_analyzers.write();
         if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
-                .save_analyzer(name, config_json)
+                .save_analyzer_revision(
+                    name,
+                    &configuration,
+                    compiled.descriptor().canonical_json(),
+                )
                 .map_err(|err| format!("persist analyzer `{name}`: {err}"))?;
         }
-        analyzers.insert(name.to_string(), config_json.to_string());
+        analyzers.insert(name.to_owned(), compiled);
         drop(analyzers);
         self.note_catalog_registry_changed();
         Ok(())
@@ -60,6 +82,7 @@ impl Engine {
     }
 
     fn drop_named_analyzer_inner(&self, name: &str) -> Result<bool, String> {
+        let name = name.trim();
         self.synchronize_catalog_registries()
             .map_err(|err| format!("refresh analyzer catalog: {err}"))?;
         if self
@@ -67,7 +90,7 @@ impl Engine {
             .table_field_analyzers
             .read()
             .values()
-            .any(|(analyzer, _)| analyzer == name)
+            .any(|binding| binding.uses_name(name))
         {
             return Err(format!(
                 "analyzer `{name}` is still assigned to a table field"
@@ -138,11 +161,9 @@ impl Engine {
             ));
         };
         Self::validate_table_analyzer_field(&table_name, &t, field)?;
-        let analyzer = self
-            .resolve_analyzer(analyzer_name)?
-            .compile()
-            .map_err(|error| format!("compile analyzer revision: {error}"))?;
-        let (phase_name, phase) = normalize_analyzer_phase(phase)?;
+        let analyzer_name = analyzer_name.trim();
+        let analyzer = self.resolve_analyzer_revision(analyzer_name)?;
+        let (_, phase) = normalize_analyzer_phase(phase)?;
         let (old_index, old_search) = {
             let index = t.inverted_index.read();
             (
@@ -154,6 +175,24 @@ impl Engine {
                     .map_err(|error| format!("resolve prior search analyzer: {error}"))?,
             )
         };
+        let previous = self
+            .durable
+            .table_field_analyzers
+            .read()
+            .get(&(table_name.clone(), field.to_owned()))
+            .cloned()
+            .unwrap_or_else(|| {
+                FieldAnalyzerBinding::unassigned(old_index.clone(), old_search.clone())
+            });
+        if previous.owner == AnalyzerBindingOwner::Gin {
+            return Err(format!("field `{table_name}`.`{field}` has a GIN-owned analyzer; recreate its owning index before assigning a field analyzer"));
+        }
+        let candidate = previous.assigned(
+            analyzer_name,
+            analyzer.clone(),
+            phase,
+            AnalyzerBindingOwner::Field,
+        );
         let rebuild = matches!(phase, AnalyzerPhase::Index | AnalyzerPhase::Both)
             && t.fts_fields().iter().any(|f| f == field);
         if rebuild {
@@ -168,24 +207,15 @@ impl Engine {
                 .set_field_analyzer_revision(field, analyzer, phase)
                 .map_err(|error| format!("set_table_analyzer: {error}"))?;
         }
-        if let Some(catalog) = self.storage.catalog.as_ref() {
-            if let Err(err) =
-                catalog.replace_table_field_analyzer(&table_name, field, &phase_name, analyzer_name)
-            {
-                return Err(Self::restore_analyzer_error(
-                    &t,
-                    field,
-                    old_index,
-                    old_search,
-                    rebuild,
-                    format!("persist table analyzer `{table_name}`.`{field}`: {err}"),
-                ));
-            }
+        if let Err(error) = self.persist_field_analyzer_binding(&table_name, field, &candidate) {
+            return Err(Self::restore_analyzer_error(
+                &t, field, old_index, old_search, rebuild, error,
+            ));
         }
-        self.durable.table_field_analyzers.write().insert(
-            (table_name, field.to_string()),
-            (analyzer_name.to_string(), phase_name),
-        );
+        self.durable
+            .table_field_analyzers
+            .write()
+            .insert((table_name, field.to_owned()), candidate);
         if self.is_persistent() {
             self.note_table_catalog_changed();
             self.note_catalog_registry_changed();
@@ -292,7 +322,7 @@ impl Engine {
             .table_field_analyzers
             .read()
             .get(&(table, field.to_string()))
-            .cloned())
+            .and_then(FieldAnalyzerBinding::last_assignment))
     }
 
     /// compatibility alias for [`Engine::register_named_analyzer`].
@@ -322,25 +352,53 @@ impl Engine {
 
     /// Resolve the analyzer assigned to `(table, field)` for the given
     /// phase. `phase` is `"index"`, `"search"`, or `"both"`. Returns the
-    /// analyzer config JSON in the raw persisted form.
+    /// exact bound configuration JSON. `both` requires the same named revision on both sides; an unnamed default has no explicit assignment to return.
     pub fn get_table_analyzer(
         &self,
         table: &str,
         field: &str,
         phase: &str,
     ) -> Result<Option<String>, String> {
-        let Some((name, stored_phase)) = self.table_field_analyzer(table, field)? else {
+        self.synchronize_catalog_registries()
+            .map_err(|error| error.to_string())?;
+        let (_, phase) = normalize_analyzer_phase(phase)?;
+        let Some(table) = self
+            .try_resolve_table_name(table)
+            .map_err(|error| error.to_string())?
+        else {
             return Ok(None);
         };
-        // Resolve the field's index/search analyzer based on the requested
-        // phase; "both" means the override applies on both sides.
-        let resolved = match (stored_phase.as_str(), phase) {
-            ("both", _) | ("index", "index") | ("query" | "search", "search") => name,
-            _ => return Ok(None),
+        let Some(binding) = self
+            .durable
+            .table_field_analyzers
+            .read()
+            .get(&(table, field.to_owned()))
+            .cloned()
+        else {
+            return Ok(None);
         };
-        let analyzer = self.resolve_analyzer(&resolved)?;
-        serde_json::to_string(&analyzer)
+        let side = match phase {
+            AnalyzerPhase::Index => &binding.index,
+            AnalyzerPhase::Search => &binding.search,
+            AnalyzerPhase::Both
+                if binding.index.name == binding.search.name
+                    && binding.index.compiled.descriptor().fingerprint()
+                        == binding.search.compiled.descriptor().fingerprint() =>
+            {
+                &binding.index
+            }
+            AnalyzerPhase::Both => return Ok(None),
+        };
+        if side.name.is_none() {
+            return Ok(None);
+        }
+        let configuration = side
+            .compiled
+            .descriptor()
+            .configuration()
+            .map_err(|error| error.to_string())?;
+        serde_json::to_string(&configuration)
             .map(Some)
-            .map_err(|err| format!("serialize analyzer `{resolved}`: {err}"))
+            .map_err(|error| error.to_string())
     }
 }

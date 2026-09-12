@@ -7,8 +7,7 @@
 //! Analyzer, FDW, view, index, path-index, and FTS registry restoration.
 
 use super::{
-    normalize_analyzer_phase, BTreeMap, CatalogFacade, Engine, IVFIndexParams, StorageBackendError,
-    StorageBackendResult,
+    BTreeMap, CatalogFacade, Engine, IVFIndexParams, StorageBackendError, StorageBackendResult,
 };
 use crate::{HNSWIndexParams, VectorIndexSpec};
 
@@ -29,7 +28,7 @@ impl Engine {
         let pending_sql_functions =
             self.install_sql_function_restore_placeholders(catalog, mode)?;
         self.restore_schema_routine_identities(mode)?;
-        self.restore_analyzers_from_catalog(catalog)?;
+        self.restore_analyzers_from_catalog(catalog, mode)?;
         self.restore_foreign_registries_from_catalog(catalog, mode)?;
         // Stored view plans are rebound only after every row-producing
         // relation kind is present. Legacy unqualified sources may refer to a
@@ -46,43 +45,6 @@ impl Engine {
             .restore_rules_from_metadata(catalog, mode.allows_migration())?;
         self.restore_catalog_indexes_from_catalog(catalog)?;
         self.restore_path_indexes_from_catalog(catalog)?;
-        Ok(())
-    }
-
-    fn restore_analyzers_from_catalog(
-        &self,
-        catalog: &dyn CatalogFacade,
-    ) -> StorageBackendResult<()> {
-        for (name, config_json) in catalog.load_analyzers()? {
-            super::parse_analyzer_config(&name, &config_json)
-                .map_err(StorageBackendError::Other)?;
-            self.durable
-                .named_analyzers
-                .write()
-                .insert(name, config_json);
-        }
-        for (table, field, phase, analyzer_name) in catalog.load_table_field_analyzers()? {
-            let t = self.try_table(&table)?.ok_or_else(|| {
-                StorageBackendError::Other(format!(
-                    "table-field analyzer references missing table `{table}`"
-                ))
-            })?;
-            Self::validate_table_analyzer_field(&table, &t, &field)
-                .map_err(StorageBackendError::Other)?;
-            let analyzer = self
-                .resolve_analyzer(&analyzer_name)
-                .map_err(StorageBackendError::Other)?;
-            let (phase_name, normalized_phase) =
-                normalize_analyzer_phase(&phase).map_err(StorageBackendError::Other)?;
-            t.inverted_index
-                .write()
-                .set_field_analyzer(&field, analyzer, normalized_phase)
-                .map_err(StorageBackendError::Other)?;
-            self.durable
-                .table_field_analyzers
-                .write()
-                .insert((table, field), (analyzer_name, phase_name));
-        }
         Ok(())
     }
 

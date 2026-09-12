@@ -9,13 +9,13 @@ Analyzer behavior crosses analysis, storage, engine catalog, SQL execution, and 
 | Pipeline stages and validation | `uqa-analysis` | `Analyzer`, `CharFilter`, `Tokenizer`, `TokenFilter` |
 | Source mapping and token graph | `uqa-analysis` | `FilteredText`, `TextCoordinates`, `AnalysisToken`, `AnalyzedText` |
 | Built-in and process-global registry | `uqa-analysis::registry` | Immutable built-ins plus a process-global custom map |
-| Persistent named definitions | `uqa-engine` and `CatalogFacade` | Analyzer name to JSON configuration |
-| Persistent field assignment | `uqa-engine` and `CatalogFacade` | Table, field, normalized phase, analyzer name |
+| Persistent named definitions | `uqa-engine` and `CatalogFacade` | Analyzer name to canonical descriptor and resolved diagnostic configuration |
+| Persistent field binding | `uqa-engine`, `uqa-storage`, and `CatalogFacade` | Independent named or default revisions, owner, and last-assignment label |
 | Index and search analyzer instances | `InvertedIndex` implementations | Independent immutable handles in `AnalyzerBindings` |
 | SQL lifecycle | `uqa-execution::query::table_functions::analyzers` | Mutating table functions and `fts_index_stats` |
 | Query-time resolution | `uqa-operators` and engine search paths | `search_analyzer_revision(field)` |
 
-The engine catalog stores JSON and names, while inverted-index instances retain immutable `CompiledAnalyzer` handles with resolved resources. A definition update does not mutate installed revisions; an owning GIN definition must be recreated or a field assignment must be reapplied.
+The engine catalog stores exact descriptor snapshots, while inverted-index instances retain their immutable `CompiledAnalyzer` handles with resolved resources. A definition update does not mutate installed revisions; an owning GIN definition must be recreated or a field assignment must be reapplied.
 
 ## Analysis execution
 
@@ -51,7 +51,7 @@ Validation compiles pattern tokenizers and pattern-replacement character filters
 
 ## Analyzer resolution
 
-`Engine::resolve_analyzer` trims and rejects an empty name, then resolves in this order:
+`Engine::resolve_analyzer_revision` trims and rejects an empty name, then resolves in this order:
 
 1. The process-global `uqa_analysis` registry, including built-ins.
 2. The engine's persistent named-analyzer map.
@@ -76,7 +76,7 @@ flowchart TD
 
 `AnalyzerPhase::Index` replaces only the index revision, `Search` replaces only the search revision, and `Both` installs one revision on both sides. A first phase-specific assignment retains the prior default on the unselected side. The phase parser accepts `index`, `search`, the `query` alias, and `both`; the engine persists `query` as normalized `search`.
 
-The engine currently retains one durable assignment record per `(table, field)`. Calling `set_table_field_analyzer` replaces the previous record and phase. Providers now retain two independent compiled revisions during the current lifetime. The existing catalog still restores mutable names and only the last recorded phase. Durable exact descriptors, independent phase restoration, and catalog-epoch migration remain required work in the [Nori plan](../../plans/0006-nori-analyzer.md); runtime revision retention alone does not provide that persistence contract.
+`FieldAnalyzerBinding` retains independent index and search descriptors, optional names, an `AnalyzerBindingOwner`, and the last explicit assignment phase. The versioned JSON envelope embeds each strict descriptor directly; restoration rejects unknown properties, corrupt fingerprints, invalid names, and inconsistent owner or assignment metadata. `set_field_analyzer_revisions` installs both compiled sides atomically without resolving an unused table default. A phase-specific Engine assignment persists the complete pair; the compatibility label remains only the most recent explicit assignment.
 
 ## Indexing path
 
@@ -128,17 +128,17 @@ The SQL `uqa_highlight` scalar path is an exception: it extracts whitespace-sepa
 
 ## Catalog persistence and reopen
 
-Persistent backends store named analyzer JSON separately from table-field assignment rows. Reopen validates and loads named definitions, validates each target field, resolves the assigned name, restores the normalized phase into the inverted index, and restores catalog indexes.
+Persistent backends store named descriptors separately from complete field-binding envelopes. SQLite schema version 47 adds descriptor columns to the existing catalog tables; Key/Value stores descriptors under separate name and field keys. Reopen verifies each named descriptor against its resolved diagnostic configuration, validates each field envelope and compatibility label, and installs both exact handles before restoring catalog indexes. Existing bound revisions are independent of later updates to their names. Anonymous default bindings also persist for typed tables with undeclared columns.
 
-A GIN analyzer option and a later standalone field assignment are separate catalog owners. GIN restoration replays its analyzer option as part of the index definition. Callers should use one ownership path per field instead of relying on restoration order between two competing definitions.
+GIN definitions validate the persisted owner and name without replaying mutable definitions over an existing revision. An explicit GIN owner requires the same named revision on both sides and rejects competing field assignments. Multiple explicit GIN references must agree. Removing the last explicit owner while another GIN retains the field rebuilds the source under the table default and publishes a default binding in the same transaction.
 
-Dropping a table or its last logical GIN reference removes field analyzer metadata. Dropping a named analyzer fails while any durable table-field assignment references its name. A DDL-owned analyzer must also remain resolvable for its GIN catalog index to reopen.
+Dropping a table or its last logical GIN reference removes field analyzer metadata. Dropping a named analyzer fails while any durable table-field assignment references its name. Column renames install the old revisions on the new physical field before rewriting any document, then retire the old field binding. Table and column deletion remove complete catalog envelopes along with their labels.
 
 ## Synonym resources
 
-Inline synonyms are copied into the analyzer JSON. Named file-backed configurations still persist a path. Registration, a new compilation, uncompiled analysis, and legacy catalog restoration read that file; provider bindings retain the compiled snapshot with inline resolved maps. The parser supports blank lines, `#` comments, one-way `left => right` mappings, and comma-separated equivalent groups.
+Inline synonyms and resolved file contents are copied into the analyzer descriptor. Registration, a fresh configuration compilation, uncompiled analysis, and legacy catalog migration read synonym files. Named definitions and provider bindings retain compiled snapshots with inline resolved maps. The parser supports blank lines, `#` comments, one-way `left => right` mappings, and comma-separated equivalent groups.
 
-Installed provider revisions keep their output after the file is edited or removed. An explicit new binding resolves the current contents and publishes them only after its rebuild succeeds. A missing file still fails a new registration or compilation, a deferred default that has not resolved, and current legacy reopen validation. Persisting exact descriptor snapshots is a separate remaining catalog change; the current provider snapshot does not establish file-independent reopen.
+Registered definitions and installed revisions keep their output after the file is edited or removed, including after reopen. A binding to a catalog name uses its retained revision; re-registering the name reads changed source contents. A missing file fails new registration or compilation, an unresolved deferred default, and initial migration of legacy path-only definitions. Legacy phase rows migrate to independent descriptors after all inputs and owners validate; affected indexes rebuild from original sources, and descriptor, binding, and posting writes share the owning catalog transaction.
 
 ## Transaction and cache behavior
 
@@ -164,7 +164,8 @@ Named definition and assignment publication advances catalog or table epochs. Ot
 | Component behavior and JSON round trips | `crates/uqa-analysis/tests/analysis` |
 | Invalid regex, gram bounds, and built-in registry rules | `crates/uqa-analysis/tests/analysis/validation.rs` |
 | Inline and reloadable file synonyms | `crates/uqa-analysis/tests/analysis/synonym_file.rs` |
-| In-memory and SQLite phase behavior | `crates/uqa-storage/tests/inverted_index_analyzer.rs` |
+| Provider phase behavior and atomic revision pairs | `crates/uqa-storage-sqlite/tests/cases/analyzer_revisions.rs` |
+| Durable sides, ownership, source migration, rename, rollback, and sessions | `crates/uqa-engine/tests/catalog/analyzer_revisions.rs` |
 | SQL create, list, bind, drop, rollback, and reopen | `crates/uqa-engine/tests/sql_analyzer_lifecycle.rs` |
 | GIN backfill and analyzer option restoration | `crates/uqa-engine/tests/sql_fts_index_lifecycle.rs` |
 | Statement rollback for mutating table functions | `crates/uqa-engine/tests/transaction_lifecycle.rs` |

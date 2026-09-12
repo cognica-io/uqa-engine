@@ -116,7 +116,7 @@ $analyzer$
 
 The second argument is a SQL string containing JSON. Tagged dollar quoting keeps the JSON readable without escaping double quotes. An invalid JSON document, unknown component tag, invalid regular expression, invalid gram range, or unavailable synonym file rejects the statement.
 
-Registering the same custom name replaces its stored JSON definition, but already materialized postings are not rebuilt merely because the named definition changed. Reapply an index-owned definition by recreating its GIN index, or reapply a field-owned definition with `set_table_analyzer` and an `index` or `both` phase.
+Registering a custom name compiles an immutable revision and persists its resolved descriptor, including inline snapshots of synonym files. Registering the same name replaces the revision available to future assignments. Existing index and search bindings retain their own revisions across rollback, other sessions, and reopen. Reapply an index-owned definition by recreating its GIN index, or reapply a field-owned definition with `set_table_analyzer` for the desired phase.
 
 ## LIST ANALYZERS function
 
@@ -144,7 +144,7 @@ ON articles USING gin (body)
 WITH (analyzer = 'html_vehicle');
 ```
 
-The analyzer must already resolve when the index is created. It is applied to both index and search phases, existing rows are backfilled, and the name is persisted in the index definition. To change an analyzer owned by this DDL, drop and recreate the GIN index.
+The analyzer must already resolve when the index is created. Its exact revision is applied to both index and search phases, existing rows are backfilled, and the binding and ownership are persisted with the index definition. A field assignment cannot override this owner. Another GIN analyzer option on the same field must select the same name and revision. To change an analyzer owned by this DDL, drop its owning indexes and recreate them. If a GIN without an analyzer option still references the field after the last explicit owner is dropped, the field returns to its table default and existing rows are rebuilt in the same transaction.
 
 ## SET TABLE ANALYZER function
 
@@ -155,8 +155,8 @@ Create a GIN index without an analyzer option when assignments will be managed s
 | Syntax | `set_table_analyzer(table TEXT, field TEXT, name TEXT [, phase TEXT])` in `FROM` |
 | Arguments | All operands are string values naming a table, text column, analyzer, and optional `index`, `search`/`query`, or `both` phase; `phase` defaults to `both` |
 | Result | One `set_table_analyzer TEXT` status column; a table-function column alias can rename it |
-| Effects | Replaces the field's durable assignment in the transaction; `index` and `both` rebuild current postings before publication |
-| Errors | Wrong arity or types, an unknown table, column, or analyzer, a non-`TEXT` column, a field outside a physical GIN index, and an unknown phase are rejected |
+| Effects | Replaces the selected sides of the field's durable binding in the transaction; `index` and `both` rebuild current postings before publication |
+| Errors | Wrong arity or types, an unknown table, column, or analyzer, a non-`TEXT` column, a field outside a physical GIN index, an unknown phase, and a competing GIN analyzer owner are rejected |
 
 ```sql
 CREATE INDEX articles_body_gin
@@ -178,7 +178,7 @@ The target table and column must exist, the column must be `TEXT`, and the field
 | `search` or `query` | Install for query analysis without rebuilding postings |
 | `both` | Install for both sides and rebuild all current postings |
 
-The default phase is `both`. One assignment row is retained per table field, so another call replaces its recorded analyzer and phase. A phase-specific call updates only its retained compiled side and leaves the previous revision on the other side, including the default on first assignment. Only the last assignment is restored after reopen with the current catalog format. Do not layer separate index and search assignments; prefer one `both` assignment or verify the complete asymmetric lifecycle. Do not combine a GIN `analyzer` option with a separate field assignment for the same column; select one catalog owner.
+The default phase is `both`. A phase-specific call replaces only the selected revision and retains the other side, including the table default on first assignment. Both independent descriptors are persisted and restored across rollback, catalog refresh, column or table rename, and reopen. The compatibility label reported by `table_field_analyzer` and `fts_index_stats` identifies the last explicit assignment; it does not describe both sides of an asymmetric binding. Select either GIN analyzer ownership or field-assignment ownership for each column; competing owners are rejected.
 
 ## Search behavior
 
@@ -191,7 +191,7 @@ WHERE text_match(body, 'car')
 ORDER BY _score DESC, id ASC;
 ```
 
-If no search-phase analyzer is installed, execution falls back to the field's index analyzer and then to the table's default analyzer. Multiple tokens emitted for one query leaf, including synonym expansions, are unioned across posting lists. BM25 scoring uses the analyzed term sequence.
+An index-only assignment retains the prior search revision, including the table default on the first assignment. Multiple tokens emitted for one query leaf, including synonym expansions, are unioned across posting lists. BM25 scoring uses the analyzed term sequence.
 
 ## FTS INDEX STATS function
 
@@ -259,15 +259,14 @@ For a GIN-index-owned analyzer, recreate the GIN index without that name before 
 
 Analyzer creation, assignment, and deletion are mutating SQL operations. Each standalone statement has an implicit transaction, and the operations can participate in explicit transactions. A failing outer projection or later statement rollback does not leave a partially published analyzer, assignment, or rebuilt posting set.
 
-Persistent engines store custom analyzer JSON and table-field assignments in the catalog and restore them on reopen. A file-backed synonym configuration stores only its path. Reopen and later analysis require that path to remain readable.
+Persistent engines store exact named descriptors and independent index/search bindings. Registered synonym files are resolved into the descriptor, so later assignment, document writes, search, and reopen need no original synonym file. Re-register the name to read changed file contents and then reapply the desired binding. A fresh compilation of an unresolved configuration still requires its files. Initial open migrates legacy name/phase rows, resolves any legacy files, and rebuilds affected indexes from original documents in the owning catalog transaction. Invalid descriptors, unavailable legacy resources, inconsistent ownership, or migration writes that fail abort restoration.
 
 ## Limits and deliberate differences
 
 - UQA Engine does not implement PostgreSQL text-search parser, dictionary, configuration, or template DDL.
 - SQL has no analyzer token-preview function; construct `uqa_analysis::Analyzer` and call `analyze` in Rust to inspect a pipeline directly.
-- SQL does not return the raw JSON definition for every named analyzer. Rust `Engine::get_table_analyzer` returns the normalized serialized configuration for an assigned phase.
+- SQL does not return the raw JSON definition for every named analyzer. Rust `Engine::get_table_analyzer` returns the exact bound configuration for the selected phase. Its `both` result requires the same named revision on both sides; an unnamed default or asymmetric binding returns `None`.
 - SQL `uqa_highlight` uses the built-in English `standard` analyzer rather than inheriting the field assignment.
-- One durable assignment is recorded per field, not one independently managed assignment for each phase.
 
 ## Related documentation
 
