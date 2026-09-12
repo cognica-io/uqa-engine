@@ -10,6 +10,8 @@ Every compiled statement follows one top-level path: SQL statement, unified lowe
 
 [Prepared definition analysis](../../../crates/uqa-sql/src/prepared/definition.rs) resolves declarations before separately retaining parameter-inference and result-descriptor scopes. [Native registration](../../../crates/uqa-execution/src/statement/prepared.rs) takes the session registry write guard before constructing cached metadata and sampling the registration clock. [Prepared selection](../../../crates/uqa-planner/src/statement_planning/prepared/selection.rs) validates changed result descriptors, rechecks the first generic plan’s cost and specializes custom parameters before recording usage. Engine preserves the original read-clone and write-publication boundaries, including the logical-plan Arc identity check when a definition was replaced or deallocated.
 
+[RPQ syntax](../../../crates/uqa-core/src/rpq.rs) is shared Core data: the planner reads it directly when estimating path complexity. Graph owns simplification, automaton construction, and traversal; its existing `parse_rpq`, `RPQParseError`, and `RegularPathExpr` exports retain the same types and behavior. Pure parser tests live in Core, while automaton and graph-store tests remain in graph. The dependency hook rejects a planner dependency on graph, including transitive paths.
+
 ## End-to-end pipeline
 
 ```mermaid

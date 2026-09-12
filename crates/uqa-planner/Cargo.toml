@@ -18,7 +18,6 @@ exclude.workspace = true
 uqa-core = { workspace = true }
 uqa-sql = { workspace = true }
 uqa-operators = { workspace = true }
-uqa-graph = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
