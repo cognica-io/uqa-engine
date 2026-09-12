@@ -26,7 +26,8 @@ struct VectorRead<'a>(RwLockReadGuard<'a, BTreeMap<String, Box<dyn VectorIndex>>
 impl TextStatisticsRead for TextRead<'_> {
     fn analyze(&self, field: &str, query: &str) -> Result<Vec<String>, String> {
         self.0
-            .get_search_analyzer(field)
+            .search_analyzer_revision(field)
+            .map_err(|error| error.to_string())?
             .analyze(query)
             .map_err(|error| error.to_string())
     }
@@ -96,7 +97,9 @@ impl RetrievalPlanningCatalog for Engine {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
         let index = t.inverted_index.read();
-        let analyzer = index.get_search_analyzer(field);
+        let analyzer = index.search_analyzer_revision(field).map_err(|error| {
+            crate::search::storage_sql_error("resolve text analyzer revision", error)
+        })?;
         let analyzed_terms = analyzer
             .analyze(query)
             .map_err(|error| crate::search::storage_sql_error("analyze text query", error))?;

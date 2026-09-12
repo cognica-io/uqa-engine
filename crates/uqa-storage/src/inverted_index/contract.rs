@@ -438,9 +438,47 @@ pub trait InvertedIndex: Send + Sync {
         self.analyzer().clone()
     }
 
-    /// Search-time analyzer for `field`; falls back to the index-time analyzer,
-    /// then to the default.
+    /// Compatibility configuration for search. Built-in providers return their independent retained search revision's inputs; this default preserves the index fallback for custom legacy providers. Use `search_analyzer_revision` for execution with exact resource ownership.
     fn get_search_analyzer(&self, field: &str) -> Analyzer {
         self.get_field_analyzer(field)
+    }
+
+    /// Retain the exact executable index revision. Built-in providers resolve their default once and keep field revisions immutable.
+    fn index_analyzer_revision(
+        &self,
+        field: &str,
+    ) -> StorageBackendResult<Arc<uqa_analysis::CompiledAnalyzer>> {
+        Ok(self.get_field_analyzer(field).compile()?)
+    }
+
+    /// Retain the exact executable search revision independently of subsequent index assignments.
+    fn search_analyzer_revision(
+        &self,
+        field: &str,
+    ) -> StorageBackendResult<Arc<uqa_analysis::CompiledAnalyzer>> {
+        Ok(self.get_search_analyzer(field).compile()?)
+    }
+
+    /// Install a validated revision without reopening its resources. This does not rebuild existing documents.
+    fn set_field_analyzer_revision(
+        &mut self,
+        _field: &str,
+        _revision: Arc<uqa_analysis::CompiledAnalyzer>,
+        _phase: AnalyzerPhase,
+    ) -> Result<(), String> {
+        Err("immutable analyzer revisions are not supported by this backend".into())
+    }
+
+    /// Replace the complete indexed document set and selected analyzer sides together. Failure retains the previous postings and bindings; providers must implement their own atomic publication.
+    fn rebuild_with_analyzer_revision(
+        &mut self,
+        _field: &str,
+        _revision: Arc<uqa_analysis::CompiledAnalyzer>,
+        _phase: AnalyzerPhase,
+        _documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "atomic analyzer revision rebuild is not supported by this backend".into(),
+        ))
     }
 }

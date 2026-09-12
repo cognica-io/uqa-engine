@@ -7,8 +7,8 @@
 //! Construction, analyzer selection, and physical auxiliary names.
 
 use super::{
-    Analyzer, BTreeMap, InvertedIndex, ManagedConnection, SQLiteInvertedIndex,
-    StorageBackendResult, DEFAULT_BLOCK_SIZE,
+    Analyzer, InvertedIndex, ManagedConnection, SQLiteInvertedIndex, StorageBackendResult,
+    DEFAULT_BLOCK_SIZE,
 };
 
 impl SQLiteInvertedIndex {
@@ -18,20 +18,16 @@ impl SQLiteInvertedIndex {
         Self {
             conn,
             table: table.into(),
-            analyzer,
-            index_field_analyzers: BTreeMap::new(),
-            search_field_analyzers: BTreeMap::new(),
+            bindings: uqa_storage::inverted_index::AnalyzerBindings::new(analyzer),
         }
     }
 
     /// Tokenize `text` with the analyzer bound to `field`.
     pub fn tokenize(&self, text: &str, field: &str) -> StorageBackendResult<Vec<String>> {
-        let analyzer = self
-            .index_field_analyzers
-            .get(field)
-            .unwrap_or(&self.analyzer);
-        uqa_storage::inverted_index::validate_linear_analyzer(analyzer)?;
-        Ok(analyzer.analyze(text)?)
+        uqa_storage::inverted_index::validate_linear_analyzer(
+            self.bindings.index_configuration(field),
+        )?;
+        Ok(self.bindings.index_revision(field)?.analyze(text)?)
     }
 
     pub fn skip_table_name(&self, field: &str) -> String {

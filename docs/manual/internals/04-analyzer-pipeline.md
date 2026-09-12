@@ -47,7 +47,7 @@ Configuration uses Serde tagged enums. Most serialized tags derive from Rust var
 3. Deserialize an `Analyzer`.
 4. Call `Analyzer::validate` before catalog publication.
 
-Validation compiles pattern tokenizers and pattern-replacement character filters, checks positive ordered gram bounds, and reads a configured synonym file. Execution repeats fallible checks because legacy persisted values or external resource changes can invalidate a pipeline after registration.
+Validation compiles pattern tokenizers and pattern-replacement character filters, checks positive ordered gram bounds, and reads a configured synonym file. Uncompiled execution repeats fallible checks. Index providers compile a revision before installing it and retain its resolved inputs; subsequent execution of that handle does not reread synonym files. Legacy catalog restoration still validates named configuration inputs.
 
 ## Analyzer resolution
 
@@ -62,23 +62,21 @@ The built-in default name is `standard`. `list_analyzers()` constructs a SQL-vis
 
 ## Field binding and phase resolution
 
-Each inverted index has a table-level default analyzer plus per-field index and search maps. The effective analyzers are:
+Memory, Key/Value, and SQLite indexes share `AnalyzerBindings`. It retains immutable `Arc<CompiledAnalyzer>` handles for independent index and search sides. Infallible constructors defer default validation until first successful resolution and then retain that exact default. Explicit field assignment compiles before either side changes. Effective revisions are:
 
 ```mermaid
 flowchart TD
-    A[Resolve index analyzer] --> B{Index map contains field}
-    B -->|Yes| C[Field index analyzer]
-    B -->|No| D[Table default analyzer]
-    E[Resolve search analyzer] --> F{Search map contains field}
-    F -->|Yes| G[Field search analyzer]
-    F -->|No| H{Index map contains field}
-    H -->|Yes| I[Field index analyzer]
-    H -->|No| J[Table default analyzer]
+    A[Resolve index revision] --> B{Field binding exists}
+    B -->|Yes| C[Retained index revision]
+    B -->|No| D[Retained table default]
+    E[Resolve search revision] --> F{Field binding exists}
+    F -->|Yes| G[Retained search revision]
+    F -->|No| D
 ```
 
-`AnalyzerPhase::Index` writes only the index map, `Search` writes only the search map, and `Both` writes both. The phase parser accepts `index`, `search`, the `query` alias, and `both`; the engine persists `query` as normalized `search`.
+`AnalyzerPhase::Index` replaces only the index revision, `Search` replaces only the search revision, and `Both` installs one revision on both sides. A first phase-specific assignment retains the prior default on the unselected side. The phase parser accepts `index`, `search`, the `query` alias, and `both`; the engine persists `query` as normalized `search`.
 
-The engine currently retains one durable assignment record per `(table, field)`. Calling `set_table_field_analyzer` replaces the previous record and phase. The underlying index trait can hold two different in-memory analyzer values, and a phase-specific call does not clear the unselected map, but the engine catalog API does not expose two independently persistent phase records for one field. Layered phase calls can therefore differ before and after reopen; documentation and tests must require one assignment or prove that transition explicitly.
+The engine currently retains one durable assignment record per `(table, field)`. Calling `set_table_field_analyzer` replaces the previous record and phase. Providers now retain two independent compiled revisions during the current lifetime. The existing catalog still restores mutable names and only the last recorded phase. Durable exact descriptors, independent phase restoration, and catalog-epoch migration remain required work in the [Nori plan](../../plans/0006-nori-analyzer.md); runtime revision retention alone does not provide that persistence contract.
 
 ## Indexing path
 
@@ -120,9 +118,9 @@ sequenceDiagram
     Operator-->>Query: Union support and ranked scores
 ```
 
-`TermOperator` resolves `get_search_analyzer(field)`, analyzes its term, returns empty support for zero tokens, and unions posting lists for multiple tokens. Search-time synonym expansion therefore broadens one leaf without requiring synonym postings for the source query token itself, provided each expansion already exists in the index vocabulary.
+`TermOperator` retains `search_analyzer_revision(field)`, analyzes its term, returns empty support for zero tokens, and unions posting lists for multiple tokens. Search-time synonym expansion therefore broadens one leaf without requiring synonym postings for the source query token itself, provided each expansion already exists in the index vocabulary.
 
-Engine text scoring, calibration, hybrid search, top-K execution, multi-field retrieval, and the operator-tree driver all resolve the field search analyzer. Scoring code uses the analyzed term sequence for term-frequency and query-term accounting. Duplicate analyzed terms can remain semantically relevant and must not be deduplicated casually.
+Engine text scoring, calibration, hybrid search, top-K execution, multi-field retrieval, retrieval planning, and the operator-tree driver retain the field search revision. Detached portal indexes install the exact compiled handles from their source index. Scoring code uses the analyzed term sequence for term-frequency and query-term accounting. Duplicate analyzed terms can remain semantically relevant and must not be deduplicated casually.
 
 The SQL `uqa_highlight` scalar path is an exception: it extracts whitespace-separated query candidates and uses `standard_analyzer("english")` directly. It does not receive a table and field identity, so it cannot resolve a field analyzer. The typed highlighting API accepts an explicit analyzer.
 
@@ -136,13 +134,13 @@ Dropping a table or its last logical GIN reference removes field analyzer metada
 
 ## Synonym resources
 
-Inline synonyms are copied into the analyzer JSON. File-backed synonyms persist a path and read the file during registration validation and every analysis execution. The parser supports blank lines, `#` comments, one-way `left => right` mappings, and comma-separated equivalent groups.
+Inline synonyms are copied into the analyzer JSON. Named file-backed configurations still persist a path. Registration, a new compilation, uncompiled analysis, and legacy catalog restoration read that file; provider bindings retain the compiled snapshot with inline resolved maps. The parser supports blank lines, `#` comments, one-way `left => right` mappings, and comma-separated equivalent groups.
 
-Repeated reads make file edits visible without republishing catalog state, but they also make file availability part of every indexing and search operation. A missing file during a document mutation must abort both posting and row publication. A missing file during reopen validation or query analysis must surface as an explicit error. Production deployment must version, distribute, permission, and monitor this external resource with the database.
+Installed provider revisions keep their output after the file is edited or removed. An explicit new binding resolves the current contents and publishes them only after its rebuild succeeds. A missing file still fails a new registration or compilation, a deferred default that has not resolved, and current legacy reopen validation. Persisting exact descriptor snapshots is a separate remaining catalog change; the current provider snapshot does not establish file-independent reopen.
 
 ## Transaction and cache behavior
 
-Analyzer lifecycle functions are classified as mutating SQL even though they appear as table functions under `SELECT`. Implicit statement transactions and explicit transaction snapshots include named analyzers, table assignments, table analyzer clones, and affected postings. An outer expression failure after `create_analyzer` has produced a row still rolls the creation back.
+Analyzer lifecycle functions are classified as mutating SQL even though they appear as table functions under `SELECT`. Implicit statement transactions and explicit transaction snapshots include named analyzers, table assignments, retained compiled handles, and affected postings. `rebuild_with_analyzer_revision` stages a replacement under the candidate handle and publishes its postings and selected binding sides together. Memory builds an independent replacement; Key/Value uses one batch; SQLite uses its transactional rebuild. Failed publication retains the previous binding. Memory bulk insertion also publishes only after the complete batch succeeds. An outer expression failure after `create_analyzer` has produced a row still rolls the creation back.
 
 Named definition and assignment publication advances catalog or table epochs. Other sessions synchronize registry and table catalogs before use, and prepared or stored plans cannot treat cached analyzer-dependent execution state as authoritative after those epochs change.
 

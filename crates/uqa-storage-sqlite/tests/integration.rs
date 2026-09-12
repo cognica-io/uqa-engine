@@ -6,6 +6,8 @@
 
 //! `SQLite` provider integration tests.
 
+#[path = "cases/analyzer_revisions.rs"]
+mod analyzer_revisions;
 #[path = "cases/catalog.rs"]
 mod catalog;
 #[path = "cases/inverted_index_analyzer.rs"]

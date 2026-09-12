@@ -312,7 +312,7 @@ impl Operator for MultiFieldSearchOperator {
         let mut per_field: Vec<BTreeMap<u64, f64>> = Vec::with_capacity(self.fields.len());
         let mut all_ids: BTreeSet<u64> = BTreeSet::new();
         for (field, query) in self.fields.iter().zip(&self.queries) {
-            let analyzer = idx.get_search_analyzer(field);
+            let analyzer = idx.search_analyzer_revision(field)?;
             let terms = analyzer.analyze(query)?;
             let term_op: Arc<dyn Operator> = Arc::new(TermOperator::new(query, field));
             let scorer: Arc<dyn Scorer> = Arc::new(

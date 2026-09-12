@@ -202,7 +202,9 @@ impl Engine {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
         let index = t.inverted_index.read();
-        let analyzer = index.get_search_analyzer(field);
+        let analyzer = index
+            .search_analyzer_revision(field)
+            .map_err(|error| storage_sql_error("resolve text analyzer revision", error))?;
         let analyzed_terms = analyzer
             .analyze(query)
             .map_err(|error| storage_sql_error("analyze text query", error))?;

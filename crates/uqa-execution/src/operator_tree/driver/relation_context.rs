@@ -42,7 +42,9 @@ impl PhysicalRetrievalDriver<'_> {
             .stats()
             .map_err(|error| operator_execution_error("index statistics", error))?;
         if let Some((field, query)) = first_text_signal(signals) {
-            let analyzer = idx_guard.get_search_analyzer(&field);
+            let analyzer = idx_guard
+                .search_analyzer_revision(&field)
+                .map_err(|error| operator_execution_error("attention analyzer revision", error))?;
             let terms = analyzer
                 .analyze(&query)
                 .map_err(|error| operator_execution_error("attention query analysis", error))?;

@@ -27,9 +27,7 @@ use uqa_storage::StorageBackendResult;
 pub struct SQLiteInvertedIndex {
     conn: ManagedConnection,
     table: String,
-    analyzer: Analyzer,
-    index_field_analyzers: BTreeMap<FieldName, Analyzer>,
-    search_field_analyzers: BTreeMap<FieldName, Analyzer>,
+    bindings: uqa_storage::inverted_index::AnalyzerBindings,
 }
 
 #[derive(Debug)]

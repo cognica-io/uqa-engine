@@ -215,7 +215,8 @@ impl AnalyzerDescriptor {
         self.wire.get()
     }
 
-    pub(crate) fn configuration(&self) -> AnalysisResult<Analyzer> {
+    /// Return the resolved configuration for diagnostics or compatibility APIs. Execute a retained compiled handle when exact resource ownership is required.
+    pub fn configuration(&self) -> AnalysisResult<Analyzer> {
         Ok(serde_json::from_value(self.data.pipeline.clone())?)
     }
 

@@ -81,7 +81,11 @@ impl Engine {
             return Err(SQLError::UnknownTable(table_name.to_string()));
         };
         self.validate_text_search_field(table_name, text_field)?;
-        let analyzer = table.inverted_index.read().get_search_analyzer(text_field);
+        let analyzer = table
+            .inverted_index
+            .read()
+            .search_analyzer_revision(text_field)
+            .map_err(|error| storage_sql_error("resolve hybrid analyzer revision", error))?;
         let analyzed_terms = analyzer
             .analyze(text_query)
             .map_err(|error| storage_sql_error("analyze hybrid text query", error))?;

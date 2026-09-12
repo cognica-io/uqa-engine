@@ -241,7 +241,11 @@ impl Engine {
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
-        let analyzer = table_state.inverted_index.read().get_search_analyzer(field);
+        let analyzer = table_state
+            .inverted_index
+            .read()
+            .search_analyzer_revision(field)
+            .map_err(|error| storage_sql_error("resolve calibration analyzer revision", error))?;
         let store = table_state.document_store.read();
         let mut doc_ids = store
             .doc_ids()

@@ -46,7 +46,7 @@ impl Operator for TermOperator {
         };
         // Search-time analyzer: synonym filters and similar transforms expand
         // `term` into tokens that are unioned across the field's posting lists.
-        let analyzer = idx.get_search_analyzer(&self.field);
+        let analyzer = idx.search_analyzer_revision(&self.field)?;
         let tokens = analyzer.analyze(&self.term)?;
         if tokens.is_empty() {
             return Ok(PostingList::new());

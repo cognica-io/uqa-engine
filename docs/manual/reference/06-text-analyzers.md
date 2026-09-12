@@ -156,11 +156,13 @@ SELECT * FROM set_table_analyzer(
 
 `set_table_analyzer` requires an existing `TEXT` column already present in a physical GIN index. One durable assignment is recorded per table field, so a later call replaces the previous catalog record. A phase-specific call updates only its selected in-memory side and does not clear the other side; do not layer separate index and search calls because only the last assignment is restored after reopen. Prefer one `both` assignment unless an asymmetric pipeline has a tested lifecycle. Use either DDL ownership or field-assignment ownership for a field; do not depend on a mixture of both catalog paths.
 
+Built-in storage providers retain compiled revisions for the current index lifetime. File edits or removal do not change an installed revision. Index/search assignment validates and compiles its candidate first; a rebuild publishes the candidate and replacement postings together. Legacy catalog restoration still resolves stored names and source paths, so exact descriptor persistence and independent phase restoration remain under development.
+
 ## Analyzer phases
 
 | Phase | Document writes | Existing postings | Query analysis |
 | --- | --- | --- | --- |
-| `index` | Uses the assigned analyzer | Rebuilt immediately when assigned | Uses an explicit search analyzer when present, otherwise falls back to the index analyzer |
+| `index` | Uses the assigned analyzer | Rebuilt immediately when assigned | Retains the previous search revision, including the default on first assignment |
 | `search` or `query` | Keeps the current index analyzer | Not rebuilt | Uses the assigned analyzer |
 | `both` | Uses the assigned analyzer | Rebuilt immediately when assigned | Uses the assigned analyzer |
 

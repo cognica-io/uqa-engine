@@ -16,9 +16,13 @@ fn fields<const N: usize>(pairs: [(&str, &str); N]) -> BTreeMap<FieldName, Strin
 }
 
 fn idx() -> SQLiteInvertedIndex {
+    idx_with_analyzer(standard_analyzer("english"))
+}
+
+fn idx_with_analyzer(analyzer: Analyzer) -> SQLiteInvertedIndex {
     let mc = ManagedConnection::open_in_memory().unwrap();
     let _cat = Catalog::open(mc.clone()).unwrap();
-    SQLiteInvertedIndex::new(mc, "articles", standard_analyzer("english"))
+    SQLiteInvertedIndex::new(mc, "articles", analyzer)
 }
 
 #[test]
@@ -313,21 +317,17 @@ fn sqlite_integer_counter_overflow_preserves_existing_index() {
 
 #[test]
 fn rebuild_analysis_failure_preserves_existing_index() {
-    let mut idx = idx();
+    let mut idx = idx_with_analyzer(Analyzer::new(
+        Tokenizer::NGram {
+            min_gram: 0,
+            max_gram: 1,
+        },
+        Vec::new(),
+        Vec::new(),
+    ));
+    idx.set_field_analyzer("title", standard_analyzer("english"), AnalyzerPhase::Both)
+        .unwrap();
     idx.add_document(1, fields([("title", "rust")])).unwrap();
-    idx.set_field_analyzer(
-        "body",
-        Analyzer::new(
-            Tokenizer::NGram {
-                min_gram: 0,
-                max_gram: 1,
-            },
-            Vec::new(),
-            Vec::new(),
-        ),
-        AnalyzerPhase::Index,
-    )
-    .unwrap();
 
     let error = idx
         .try_rebuild_documents(vec![
@@ -343,21 +343,17 @@ fn rebuild_analysis_failure_preserves_existing_index() {
 
 #[test]
 fn batch_analysis_failure_preserves_existing_index() {
-    let mut idx = idx();
+    let mut idx = idx_with_analyzer(Analyzer::new(
+        Tokenizer::NGram {
+            min_gram: 0,
+            max_gram: 1,
+        },
+        Vec::new(),
+        Vec::new(),
+    ));
+    idx.set_field_analyzer("title", standard_analyzer("english"), AnalyzerPhase::Both)
+        .unwrap();
     idx.add_document(1, fields([("title", "rust")])).unwrap();
-    idx.set_field_analyzer(
-        "body",
-        Analyzer::new(
-            Tokenizer::NGram {
-                min_gram: 0,
-                max_gram: 1,
-            },
-            Vec::new(),
-            Vec::new(),
-        ),
-        AnalyzerPhase::Index,
-    )
-    .unwrap();
 
     let error = idx
         .try_add_documents(vec![

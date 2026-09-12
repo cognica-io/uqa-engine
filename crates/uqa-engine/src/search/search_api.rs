@@ -94,7 +94,8 @@ impl Engine {
         let (query_term_count, stats) = {
             let index = table_state.inverted_index.read();
             let query_term_count = index
-                .get_search_analyzer(field)
+                .search_analyzer_revision(field)
+                .map_err(|error| storage_sql_error("resolve calibration analyzer revision", error))?
                 .analyze(query)
                 .map_err(|error| storage_sql_error("analyze calibration query", error))?
                 .len();

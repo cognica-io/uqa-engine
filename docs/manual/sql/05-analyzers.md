@@ -178,7 +178,7 @@ The target table and column must exist, the column must be `TEXT`, and the field
 | `search` or `query` | Install for query analysis without rebuilding postings |
 | `both` | Install for both sides and rebuild all current postings |
 
-The default phase is `both`. One assignment row is retained per table field, so another call replaces its recorded analyzer and phase. A phase-specific call updates only that in-memory side and leaves the other side unchanged, but only the last assignment is restored after reopen. Do not layer separate index and search assignments; prefer one `both` assignment or verify the complete asymmetric lifecycle. Do not combine a GIN `analyzer` option with a separate field assignment for the same column; select one catalog owner.
+The default phase is `both`. One assignment row is retained per table field, so another call replaces its recorded analyzer and phase. A phase-specific call updates only its retained compiled side and leaves the previous revision on the other side, including the default on first assignment. Only the last assignment is restored after reopen with the current catalog format. Do not layer separate index and search assignments; prefer one `both` assignment or verify the complete asymmetric lifecycle. Do not combine a GIN `analyzer` option with a separate field assignment for the same column; select one catalog owner.
 
 ## Search behavior
 

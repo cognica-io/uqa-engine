@@ -47,6 +47,7 @@ fn linear_backends_reject_korean_assignments_and_writes_before_mutation() {
         }
     };
     assert!(analyzer.uses_korean_stages());
+    let compiled = analyzer.compile().unwrap();
     let indexes = |analyzer: Analyzer| -> Vec<Box<dyn InvertedIndex>> {
         vec![
             Box::new(MemoryInvertedIndex::new(analyzer.clone())),
@@ -75,6 +76,19 @@ fn linear_backends_reject_korean_assignments_and_writes_before_mutation() {
                 .set_field_analyzer("body", analyzer.clone(), phase)
                 .unwrap_err();
             assert!(error.contains("lossless token-graph storage"));
+            let error = index
+                .set_field_analyzer_revision("body", compiled.clone(), phase)
+                .unwrap_err();
+            assert!(error.contains("lossless token-graph storage"));
+            let error = index
+                .rebuild_with_analyzer_revision(
+                    "body",
+                    compiled.clone(),
+                    phase,
+                    vec![(2, fields(&[("body", "한국")]))],
+                )
+                .unwrap_err();
+            assert!(error.to_string().contains("lossless token-graph storage"));
             assert!(!index.get_field_analyzer("body").uses_korean_stages());
             assert!(!index.get_search_analyzer("body").uses_korean_stages());
         }
@@ -150,12 +164,12 @@ fn memory_get_field_analyzer_falls_back_to_default() {
 }
 
 #[test]
-fn memory_per_field_search_falls_back_to_index() {
+fn memory_index_assignment_preserves_default_search_revision() {
     let mut idx = MemoryInvertedIndex::new(standard_analyzer("english"));
-    let custom = standard_analyzer("english");
+    let custom = keyword_analyzer();
     idx.set_field_analyzer("body", custom, AnalyzerPhase::Index)
         .unwrap();
-    // No search analyzer set: search should fall back to index
+    // An index-only change preserves the previous default search revision.
     let search = idx.get_search_analyzer("body");
     assert!(search.analyze("the").unwrap().is_empty());
 }
@@ -252,16 +266,19 @@ fn memory_keyword_analyzer_for_title_field() {
 
 #[test]
 fn memory_indexing_propagates_analysis_error_without_replacing_document() {
-    let mut index = MemoryInvertedIndex::new(whitespace_analyzer());
+    let mut index = MemoryInvertedIndex::new(invalid_pattern_analyzer());
+    index
+        .set_field_analyzer("title", whitespace_analyzer(), AnalyzerPhase::Both)
+        .unwrap();
     index
         .add_document(1, fields(&[("title", "old value")]))
         .unwrap();
-    index
-        .set_field_analyzer("title", invalid_pattern_analyzer(), AnalyzerPhase::Index)
-        .unwrap();
 
     let error = index
-        .add_document(1, fields(&[("title", "new value")]))
+        .add_document(
+            1,
+            fields(&[("title", "new value"), ("invalid_default", "bad value")]),
+        )
         .unwrap_err();
     assert!(matches!(error, StorageBackendError::Analysis(_)));
     assert_eq!(index.get_posting_list("title", "old").unwrap().len(), 1);
@@ -372,16 +389,19 @@ fn sqlite_backward_compat_no_phase_arg_uses_both() {
 #[test]
 fn sqlite_indexing_propagates_analysis_error_and_rolls_back_replacement() {
     let conn = sqlite_with_catalog();
-    let mut index = SQLiteInvertedIndex::new(conn, "analysis_error", whitespace_analyzer());
+    let mut index = SQLiteInvertedIndex::new(conn, "analysis_error", invalid_pattern_analyzer());
+    index
+        .set_field_analyzer("title", whitespace_analyzer(), AnalyzerPhase::Both)
+        .unwrap();
     index
         .add_document(1, fields(&[("title", "old value")]))
         .unwrap();
-    index
-        .set_field_analyzer("title", invalid_pattern_analyzer(), AnalyzerPhase::Index)
-        .unwrap();
 
     let error = index
-        .add_document(1, fields(&[("title", "new value")]))
+        .add_document(
+            1,
+            fields(&[("title", "new value"), ("invalid_default", "bad value")]),
+        )
         .unwrap_err();
     assert!(matches!(
         error,
@@ -395,16 +415,19 @@ fn sqlite_indexing_propagates_analysis_error_and_rolls_back_replacement() {
 #[test]
 fn key_value_indexing_propagates_analysis_error_without_mutation() {
     let store = Arc::new(MemoryKeyValueStore::new());
-    let mut index = KeyValueInvertedIndex::new(store, "analysis_error", whitespace_analyzer());
+    let mut index = KeyValueInvertedIndex::new(store, "analysis_error", invalid_pattern_analyzer());
+    index
+        .set_field_analyzer("title", whitespace_analyzer(), AnalyzerPhase::Both)
+        .unwrap();
     index
         .add_document(1, fields(&[("title", "old value")]))
         .unwrap();
-    index
-        .set_field_analyzer("title", invalid_pattern_analyzer(), AnalyzerPhase::Index)
-        .unwrap();
 
     let error = index
-        .add_document(1, fields(&[("title", "new value")]))
+        .add_document(
+            1,
+            fields(&[("title", "new value"), ("invalid_default", "bad value")]),
+        )
         .unwrap_err();
     assert!(matches!(error, StorageBackendError::Analysis(_)));
     assert_eq!(index.get_posting_list("title", "old").unwrap().len(), 1);

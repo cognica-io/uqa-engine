@@ -21,15 +21,30 @@ use crate::block_max_index::BlockMaxScorer;
 use crate::clustered_postings::{MaterializedPostingCursor, PostingCursor, PostingScore};
 
 mod analysis;
+mod bindings;
 mod contract;
 
 pub use analysis::{analyze_index_field, AnalyzedField};
+pub use bindings::AnalyzerBindings;
 pub use contract::{AnalyzerPhase, InvertedIndex};
 
 /// Linear term/position stores cannot install Korean analysis without immutable graph revisions.
 pub fn validate_linear_analyzer(analyzer: &Analyzer) -> StorageBackendResult<()> {
     if analyzer.uses_korean_stages() {
         return Err(StorageBackendError::Other("Korean analyzers require immutable analyzer revisions and lossless token-graph storage".into()));
+    }
+    Ok(())
+}
+
+/// A linear store must not accept a revision whose declared normalization policy it cannot preserve.
+pub fn validate_linear_revision(
+    revision: &uqa_analysis::CompiledAnalyzer,
+) -> StorageBackendResult<()> {
+    validate_linear_analyzer(&revision.descriptor().configuration()?)?;
+    if revision.descriptor().length_policy() != uqa_analysis::TokenLengthPolicy::EmittedTokens {
+        return Err(StorageBackendError::Other(
+            "overlap-discounted analyzer revisions require occurrence storage".into(),
+        ));
     }
     Ok(())
 }
@@ -66,7 +81,7 @@ pub(crate) fn validate_token_position_count(token_count: u64) -> StorageBackendR
 
 #[derive(Debug, Clone)]
 pub struct MemoryInvertedIndex {
-    analyzer: Analyzer,
+    bindings: AnalyzerBindings,
     /// `(field, term) -> doc_id -> entry (positions inside the doc)`
     index: BTreeMap<(FieldName, String), BTreeMap<DocId, PostingEntry>>,
     /// Reverse index for `remove_document` so we touch only relevant
@@ -81,12 +96,6 @@ pub struct MemoryInvertedIndex {
     /// `doc_lengths` (O(corpus) at query time otherwise).
     field_doc_counts: BTreeMap<FieldName, u64>,
     doc_count: u64,
-    /// Per-field analyzer override applied at index time. Falls back
-    /// to [`MemoryInvertedIndex::analyzer`] when no entry exists.
-    index_field_analyzers: BTreeMap<FieldName, Analyzer>,
-    /// Per-field analyzer override applied at search time (e.g. for
-    /// synonym expansion that must not be persisted into the postings).
-    search_field_analyzers: BTreeMap<FieldName, Analyzer>,
 }
 
 type PostingKey = (FieldName, String);
@@ -105,16 +114,18 @@ struct MemoryReplacementPlan {
 
 impl MemoryInvertedIndex {
     pub fn new(analyzer: Analyzer) -> Self {
+        Self::with_bindings(AnalyzerBindings::new(analyzer))
+    }
+
+    fn with_bindings(bindings: AnalyzerBindings) -> Self {
         Self {
-            analyzer,
+            bindings,
             index: BTreeMap::new(),
             doc_terms: BTreeMap::new(),
             doc_lengths: BTreeMap::new(),
             total_length: BTreeMap::new(),
             field_doc_counts: BTreeMap::new(),
             doc_count: 0,
-            index_field_analyzers: BTreeMap::new(),
-            search_field_analyzers: BTreeMap::new(),
         }
     }
 
@@ -127,12 +138,8 @@ impl MemoryInvertedIndex {
         let mut terms = BTreeSet::new();
         let mut postings = Vec::new();
         for (field, text) in fields {
-            let analyzer = self
-                .index_field_analyzers
-                .get(&field)
-                .unwrap_or(&self.analyzer);
-            validate_linear_analyzer(analyzer)?;
-            let tokens = analyzer.analyze(&text)?;
+            validate_linear_analyzer(self.bindings.index_configuration(&field))?;
+            let tokens = self.bindings.index_revision(&field)?.analyze(&text)?;
             let length = usize_to_u64(tokens.len(), "document token count")?;
             validate_token_position_count(length)?;
             lengths.insert(field.clone(), length);
@@ -276,7 +283,7 @@ impl MemoryInvertedIndex {
 
 impl InvertedIndex for MemoryInvertedIndex {
     fn analyzer(&self) -> &Analyzer {
-        &self.analyzer
+        self.bindings.default_configuration()
     }
 
     fn add_document(
@@ -284,10 +291,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         doc_id: DocId,
         fields: BTreeMap<FieldName, String>,
     ) -> StorageBackendResult<()> {
-        // Analysis can fail because analyzer definitions are persisted and may
-        // contain an invalid regex/gram range, or because a synonym file was
-        // removed after registration. Stage every field before touching index
-        // state so a failed replacement leaves the prior document intact.
+        // Resolve and analyze every field before touching postings. A deferred default can fail even when another field already has a valid revision.
         let staged = self.stage_document(doc_id, fields)?;
         let plan = self.plan_replacement(doc_id, &staged.lengths)?;
         self.apply_replacement(doc_id, staged, plan)
@@ -371,12 +375,23 @@ impl InvertedIndex for MemoryInvertedIndex {
         &mut self,
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
     ) -> StorageBackendResult<()> {
-        let mut replacement = self.clone();
-        replacement.clear()?;
+        let mut replacement = Self::with_bindings(self.bindings.clone());
         for (doc_id, fields) in documents {
             if !fields.is_empty() {
                 replacement.add_document(doc_id, fields)?;
             }
+        }
+        *self = replacement;
+        Ok(())
+    }
+
+    fn try_add_documents(
+        &mut self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+    ) -> StorageBackendResult<()> {
+        let mut replacement = self.clone();
+        for (doc_id, fields) in documents {
+            replacement.add_document(doc_id, fields)?;
         }
         *self = replacement;
         Ok(())
@@ -575,47 +590,67 @@ impl InvertedIndex for MemoryInvertedIndex {
         analyzer: Analyzer,
         phase: AnalyzerPhase,
     ) -> Result<(), String> {
-        validate_linear_analyzer(&analyzer).map_err(|error| error.to_string())?;
-        match phase {
-            AnalyzerPhase::Index => {
-                self.index_field_analyzers
-                    .insert(field.to_string(), analyzer);
-            }
-            AnalyzerPhase::Search => {
-                self.search_field_analyzers
-                    .insert(field.to_string(), analyzer);
-            }
-            AnalyzerPhase::Both => {
-                self.index_field_analyzers
-                    .insert(field.to_string(), analyzer.clone());
-                self.search_field_analyzers
-                    .insert(field.to_string(), analyzer);
-            }
-        }
-        Ok(())
+        crate::inverted_index::validate_linear_analyzer(&analyzer)
+            .map_err(|error| error.to_string())?;
+        self.bindings
+            .bind(field, &analyzer, phase)
+            .map_err(|error| error.to_string())
     }
 
     fn remove_field_analyzers(&mut self, field: &str) -> Result<(), String> {
-        self.index_field_analyzers.remove(field);
-        self.search_field_analyzers.remove(field);
+        self.bindings.remove(field);
         Ok(())
     }
 
     fn get_field_analyzer(&self, field: &str) -> Analyzer {
-        self.index_field_analyzers
-            .get(field)
-            .cloned()
-            .unwrap_or_else(|| self.analyzer.clone())
+        self.bindings.index_configuration(field).clone()
     }
 
     fn get_search_analyzer(&self, field: &str) -> Analyzer {
-        if let Some(a) = self.search_field_analyzers.get(field) {
-            return a.clone();
-        }
-        if let Some(a) = self.index_field_analyzers.get(field) {
-            return a.clone();
-        }
-        self.analyzer.clone()
+        self.bindings.search_configuration(field).clone()
+    }
+
+    fn index_analyzer_revision(
+        &self,
+        field: &str,
+    ) -> StorageBackendResult<Arc<uqa_analysis::CompiledAnalyzer>> {
+        Ok(self.bindings.index_revision(field)?)
+    }
+
+    fn search_analyzer_revision(
+        &self,
+        field: &str,
+    ) -> StorageBackendResult<Arc<uqa_analysis::CompiledAnalyzer>> {
+        Ok(self.bindings.search_revision(field)?)
+    }
+
+    fn set_field_analyzer_revision(
+        &mut self,
+        field: &str,
+        revision: Arc<uqa_analysis::CompiledAnalyzer>,
+        phase: AnalyzerPhase,
+    ) -> Result<(), String> {
+        crate::inverted_index::validate_linear_revision(&revision)
+            .map_err(|error| error.to_string())?;
+        self.bindings
+            .bind_revision(field, revision, phase)
+            .map_err(|error| error.to_string())
+    }
+
+    fn rebuild_with_analyzer_revision(
+        &mut self,
+        field: &str,
+        revision: Arc<uqa_analysis::CompiledAnalyzer>,
+        phase: AnalyzerPhase,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+    ) -> StorageBackendResult<()> {
+        let mut replacement = Self::with_bindings(self.bindings.clone());
+        replacement
+            .set_field_analyzer_revision(field, revision, phase)
+            .map_err(crate::StorageBackendError::Other)?;
+        replacement.try_rebuild_documents(documents)?;
+        *self = replacement;
+        Ok(())
     }
 }
 

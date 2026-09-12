@@ -42,9 +42,7 @@ const MIGRATION_PAGE_SIZE: usize = 1_024;
 pub struct KeyValueInvertedIndex {
     store: Arc<dyn KeyValueStore>,
     table: String,
-    analyzer: Analyzer,
-    index_field_analyzers: BTreeMap<FieldName, Analyzer>,
-    search_field_analyzers: BTreeMap<FieldName, Analyzer>,
+    bindings: crate::inverted_index::AnalyzerBindings,
 }
 
 type KeyValueStagedPosting = (FieldName, String, Vec<u32>);
@@ -65,9 +63,7 @@ impl KeyValueInvertedIndex {
         Self {
             store,
             table: table.into(),
-            analyzer,
-            index_field_analyzers: BTreeMap::new(),
-            search_field_analyzers: BTreeMap::new(),
+            bindings: crate::inverted_index::AnalyzerBindings::new(analyzer),
         }
     }
 
@@ -152,12 +148,10 @@ impl KeyValueInvertedIndex {
         let mut lengths = BTreeMap::new();
         let mut postings = Vec::new();
         for (field, text) in fields {
-            let analyzer = self
-                .index_field_analyzers
-                .get(&field)
-                .unwrap_or(&self.analyzer);
-            crate::inverted_index::validate_linear_analyzer(analyzer)?;
-            let tokens = analyzer.analyze(&text)?;
+            crate::inverted_index::validate_linear_analyzer(
+                self.bindings.index_configuration(&field),
+            )?;
+            let tokens = self.bindings.index_revision(&field)?.analyze(&text)?;
             let token_count = usize_to_u64(tokens.len(), "document token count")?;
             crate::inverted_index::validate_token_position_count(token_count)?;
             lengths.insert(field.clone(), token_count);
@@ -432,7 +426,7 @@ impl KeyValueInvertedIndex {
 
 impl InvertedIndex for KeyValueInvertedIndex {
     fn analyzer(&self) -> &Analyzer {
-        &self.analyzer
+        self.bindings.default_configuration()
     }
 
     fn add_document(
@@ -901,45 +895,64 @@ impl InvertedIndex for KeyValueInvertedIndex {
     ) -> Result<(), String> {
         crate::inverted_index::validate_linear_analyzer(&analyzer)
             .map_err(|error| error.to_string())?;
-        match phase {
-            AnalyzerPhase::Index => {
-                self.index_field_analyzers
-                    .insert(field.to_string(), analyzer);
-            }
-            AnalyzerPhase::Search => {
-                self.search_field_analyzers
-                    .insert(field.to_string(), analyzer);
-            }
-            AnalyzerPhase::Both => {
-                self.index_field_analyzers
-                    .insert(field.to_string(), analyzer.clone());
-                self.search_field_analyzers
-                    .insert(field.to_string(), analyzer);
-            }
-        }
-        Ok(())
+        self.bindings
+            .bind(field, &analyzer, phase)
+            .map_err(|error| error.to_string())
     }
 
     fn remove_field_analyzers(&mut self, field: &str) -> Result<(), String> {
-        self.index_field_analyzers.remove(field);
-        self.search_field_analyzers.remove(field);
+        self.bindings.remove(field);
         Ok(())
     }
 
     fn get_field_analyzer(&self, field: &str) -> Analyzer {
-        self.index_field_analyzers
-            .get(field)
-            .cloned()
-            .unwrap_or_else(|| self.analyzer.clone())
+        self.bindings.index_configuration(field).clone()
     }
 
     fn get_search_analyzer(&self, field: &str) -> Analyzer {
-        if let Some(analyzer) = self.search_field_analyzers.get(field) {
-            return analyzer.clone();
-        }
-        if let Some(analyzer) = self.index_field_analyzers.get(field) {
-            return analyzer.clone();
-        }
-        self.analyzer.clone()
+        self.bindings.search_configuration(field).clone()
+    }
+
+    fn index_analyzer_revision(
+        &self,
+        field: &str,
+    ) -> StorageBackendResult<Arc<uqa_analysis::CompiledAnalyzer>> {
+        Ok(self.bindings.index_revision(field)?)
+    }
+
+    fn search_analyzer_revision(
+        &self,
+        field: &str,
+    ) -> StorageBackendResult<Arc<uqa_analysis::CompiledAnalyzer>> {
+        Ok(self.bindings.search_revision(field)?)
+    }
+
+    fn set_field_analyzer_revision(
+        &mut self,
+        field: &str,
+        revision: Arc<uqa_analysis::CompiledAnalyzer>,
+        phase: AnalyzerPhase,
+    ) -> Result<(), String> {
+        crate::inverted_index::validate_linear_revision(&revision)
+            .map_err(|error| error.to_string())?;
+        self.bindings
+            .bind_revision(field, revision, phase)
+            .map_err(|error| error.to_string())
+    }
+
+    fn rebuild_with_analyzer_revision(
+        &mut self,
+        field: &str,
+        revision: Arc<uqa_analysis::CompiledAnalyzer>,
+        phase: AnalyzerPhase,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+    ) -> StorageBackendResult<()> {
+        let mut replacement = self.clone();
+        replacement
+            .set_field_analyzer_revision(field, revision, phase)
+            .map_err(crate::StorageBackendError::Other)?;
+        replacement.try_rebuild_documents(documents)?;
+        *self = replacement;
+        Ok(())
     }
 }

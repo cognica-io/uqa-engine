@@ -9,6 +9,8 @@ use super::{
     TableState, Value,
 };
 
+type TextIndexDocuments = Vec<(DocId, BTreeMap<FieldName, String>)>;
+
 impl Engine {
     pub(crate) fn fts_fields_for_table(&self, name: &str) -> Result<Vec<FieldName>, SQLError> {
         Ok(self
@@ -106,7 +108,7 @@ impl Engine {
         Ok(out)
     }
 
-    pub(crate) fn rebuild_fts_index(t: &Arc<TableState>) -> Result<(), String> {
+    pub(crate) fn project_fts_sources(t: &Arc<TableState>) -> Result<TextIndexDocuments, String> {
         let fts_fields = t.fts_fields();
         let indexed_docs = {
             let store = t.document_store.read();
@@ -129,13 +131,15 @@ impl Engine {
                 .map_err(|error| error.to_string())?;
             indexed_docs
         };
-        {
-            let mut index = t.inverted_index.write();
-            index
-                .try_rebuild_documents(indexed_docs)
-                .map_err(|error| error.to_string())?;
-        }
-        Ok(())
+        Ok(indexed_docs)
+    }
+
+    pub(crate) fn rebuild_fts_index(t: &Arc<TableState>) -> Result<(), String> {
+        let documents = Self::project_fts_sources(t)?;
+        t.inverted_index
+            .write()
+            .try_rebuild_documents(documents)
+            .map_err(|error| error.to_string())
     }
 
     pub fn add_document(

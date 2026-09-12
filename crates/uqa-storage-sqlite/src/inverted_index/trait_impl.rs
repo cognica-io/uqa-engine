@@ -17,7 +17,7 @@ use uqa_storage::clustered_postings::{cluster_id, decode_all_scores, decode_clus
 
 impl InvertedIndex for SQLiteInvertedIndex {
     fn analyzer(&self) -> &Analyzer {
-        &self.analyzer
+        self.bindings.default_configuration()
     }
 
     fn add_document(
@@ -643,45 +643,64 @@ impl InvertedIndex for SQLiteInvertedIndex {
     ) -> Result<(), String> {
         uqa_storage::inverted_index::validate_linear_analyzer(&analyzer)
             .map_err(|error| error.to_string())?;
-        match phase {
-            AnalyzerPhase::Index => {
-                self.index_field_analyzers
-                    .insert(field.to_string(), analyzer);
-            }
-            AnalyzerPhase::Search => {
-                self.search_field_analyzers
-                    .insert(field.to_string(), analyzer);
-            }
-            AnalyzerPhase::Both => {
-                self.index_field_analyzers
-                    .insert(field.to_string(), analyzer.clone());
-                self.search_field_analyzers
-                    .insert(field.to_string(), analyzer);
-            }
-        }
-        Ok(())
+        self.bindings
+            .bind(field, &analyzer, phase)
+            .map_err(|error| error.to_string())
     }
 
     fn remove_field_analyzers(&mut self, field: &str) -> Result<(), String> {
-        self.index_field_analyzers.remove(field);
-        self.search_field_analyzers.remove(field);
+        self.bindings.remove(field);
         Ok(())
     }
 
     fn get_field_analyzer(&self, field: &str) -> Analyzer {
-        self.index_field_analyzers
-            .get(field)
-            .cloned()
-            .unwrap_or_else(|| self.analyzer.clone())
+        self.bindings.index_configuration(field).clone()
     }
 
     fn get_search_analyzer(&self, field: &str) -> Analyzer {
-        if let Some(a) = self.search_field_analyzers.get(field) {
-            return a.clone();
-        }
-        if let Some(a) = self.index_field_analyzers.get(field) {
-            return a.clone();
-        }
-        self.analyzer.clone()
+        self.bindings.search_configuration(field).clone()
+    }
+
+    fn index_analyzer_revision(
+        &self,
+        field: &str,
+    ) -> StorageBackendResult<Arc<uqa_analysis::CompiledAnalyzer>> {
+        Ok(self.bindings.index_revision(field)?)
+    }
+
+    fn search_analyzer_revision(
+        &self,
+        field: &str,
+    ) -> StorageBackendResult<Arc<uqa_analysis::CompiledAnalyzer>> {
+        Ok(self.bindings.search_revision(field)?)
+    }
+
+    fn set_field_analyzer_revision(
+        &mut self,
+        field: &str,
+        revision: Arc<uqa_analysis::CompiledAnalyzer>,
+        phase: AnalyzerPhase,
+    ) -> Result<(), String> {
+        uqa_storage::inverted_index::validate_linear_revision(&revision)
+            .map_err(|error| error.to_string())?;
+        self.bindings
+            .bind_revision(field, revision, phase)
+            .map_err(|error| error.to_string())
+    }
+
+    fn rebuild_with_analyzer_revision(
+        &mut self,
+        field: &str,
+        revision: Arc<uqa_analysis::CompiledAnalyzer>,
+        phase: AnalyzerPhase,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+    ) -> StorageBackendResult<()> {
+        let mut replacement = self.clone();
+        replacement
+            .set_field_analyzer_revision(field, revision, phase)
+            .map_err(uqa_storage::StorageBackendError::Other)?;
+        replacement.try_rebuild_documents(documents)?;
+        *self = replacement;
+        Ok(())
     }
 }

@@ -138,29 +138,35 @@ impl Engine {
             ));
         };
         Self::validate_table_analyzer_field(&table_name, &t, field)?;
-        let analyzer = self.resolve_analyzer(analyzer_name)?;
+        let analyzer = self
+            .resolve_analyzer(analyzer_name)?
+            .compile()
+            .map_err(|error| format!("compile analyzer revision: {error}"))?;
         let (phase_name, phase) = normalize_analyzer_phase(phase)?;
         let (old_index, old_search) = {
             let index = t.inverted_index.read();
             (
-                index.get_field_analyzer(field),
-                index.get_search_analyzer(field),
+                index
+                    .index_analyzer_revision(field)
+                    .map_err(|error| format!("resolve prior index analyzer: {error}"))?,
+                index
+                    .search_analyzer_revision(field)
+                    .map_err(|error| format!("resolve prior search analyzer: {error}"))?,
             )
         };
         let rebuild = matches!(phase, AnalyzerPhase::Index | AnalyzerPhase::Both)
             && t.fts_fields().iter().any(|f| f == field);
-        {
-            let mut index = t.inverted_index.write();
-            index
-                .set_field_analyzer(field, analyzer, phase)
-                .map_err(|e| format!("set_table_analyzer: {e}"))?;
-        }
         if rebuild {
-            if let Err(err) = Self::rebuild_fts_index(&t) {
-                return Err(Self::restore_analyzer_error(
-                    &t, field, old_index, old_search, true, err,
-                ));
-            }
+            let documents = Self::project_fts_sources(&t)?;
+            t.inverted_index
+                .write()
+                .rebuild_with_analyzer_revision(field, analyzer, phase, documents)
+                .map_err(|error| format!("set_table_analyzer: {error}"))?;
+        } else {
+            t.inverted_index
+                .write()
+                .set_field_analyzer_revision(field, analyzer, phase)
+                .map_err(|error| format!("set_table_analyzer: {error}"))?;
         }
         if let Some(catalog) = self.storage.catalog.as_ref() {
             if let Err(err) =
@@ -225,8 +231,8 @@ impl Engine {
     fn restore_analyzer_error(
         table: &std::sync::Arc<super::TableState>,
         field: &str,
-        index_analyzer: Analyzer,
-        search_analyzer: Analyzer,
+        index_analyzer: Arc<uqa_analysis::CompiledAnalyzer>,
+        search_analyzer: Arc<uqa_analysis::CompiledAnalyzer>,
         rebuild: bool,
         original: String,
     ) -> String {
@@ -242,18 +248,29 @@ impl Engine {
     fn restore_field_analyzers(
         table: &std::sync::Arc<super::TableState>,
         field: &str,
-        index_analyzer: Analyzer,
-        search_analyzer: Analyzer,
+        index_analyzer: Arc<uqa_analysis::CompiledAnalyzer>,
+        search_analyzer: Arc<uqa_analysis::CompiledAnalyzer>,
         rebuild: bool,
     ) -> Result<(), String> {
-        {
-            let mut index = table.inverted_index.write();
-            index.set_field_analyzer(field, index_analyzer, AnalyzerPhase::Index)?;
-            index.set_field_analyzer(field, search_analyzer, AnalyzerPhase::Search)?;
+        let documents = if rebuild {
+            Some(Self::project_fts_sources(table)?)
+        } else {
+            None
+        };
+        let mut index = table.inverted_index.write();
+        if let Some(documents) = documents {
+            index
+                .rebuild_with_analyzer_revision(
+                    field,
+                    index_analyzer,
+                    AnalyzerPhase::Index,
+                    documents,
+                )
+                .map_err(|error| error.to_string())?;
+        } else {
+            index.set_field_analyzer_revision(field, index_analyzer, AnalyzerPhase::Index)?;
         }
-        if rebuild {
-            Self::rebuild_fts_index(table)?;
-        }
+        index.set_field_analyzer_revision(field, search_analyzer, AnalyzerPhase::Search)?;
         Ok(())
     }
 

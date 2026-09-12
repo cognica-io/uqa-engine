@@ -785,10 +785,6 @@ fn key_value_add_counter_overflow_is_atomic() {
 #[test]
 fn key_value_rebuild_analysis_failure_preserves_old_index() {
     let store = store();
-    let mut index = KeyValueInvertedIndex::new(store, "articles", standard_analyzer("english"));
-    index
-        .add_document(1, BTreeMap::from([("title".into(), "rust".into())]))
-        .unwrap();
     let invalid = Analyzer::new(
         Tokenizer::NGram {
             min_gram: 0,
@@ -797,8 +793,12 @@ fn key_value_rebuild_analysis_failure_preserves_old_index() {
         Vec::new(),
         Vec::new(),
     );
+    let mut index = KeyValueInvertedIndex::new(store, "articles", invalid);
     index
-        .set_field_analyzer("body", invalid, AnalyzerPhase::Index)
+        .set_field_analyzer("title", standard_analyzer("english"), AnalyzerPhase::Both)
+        .unwrap();
+    index
+        .add_document(1, BTreeMap::from([("title".into(), "rust".into())]))
         .unwrap();
 
     let error = index
@@ -816,10 +816,6 @@ fn key_value_rebuild_analysis_failure_preserves_old_index() {
 #[test]
 fn key_value_batch_analysis_failure_preserves_old_index() {
     let store = store();
-    let mut index = KeyValueInvertedIndex::new(store, "articles", standard_analyzer("english"));
-    index
-        .add_document(1, BTreeMap::from([("title".into(), "rust".into())]))
-        .unwrap();
     let invalid = Analyzer::new(
         Tokenizer::NGram {
             min_gram: 0,
@@ -828,8 +824,12 @@ fn key_value_batch_analysis_failure_preserves_old_index() {
         Vec::new(),
         Vec::new(),
     );
+    let mut index = KeyValueInvertedIndex::new(store, "articles", invalid);
     index
-        .set_field_analyzer("body", invalid, AnalyzerPhase::Index)
+        .set_field_analyzer("title", standard_analyzer("english"), AnalyzerPhase::Both)
+        .unwrap();
+    index
+        .add_document(1, BTreeMap::from([("title".into(), "rust".into())]))
         .unwrap();
 
     let error = index
