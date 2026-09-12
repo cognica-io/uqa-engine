@@ -54,6 +54,8 @@ jobs:
         run: cargo test -p uqa-engine --test integration --locked queries::manual_sql_examples::manual_sql_examples_compile_or_execute -- --exact
       - name: Test workspace
         run: cargo test --workspace --exclude uqa-fdw --locked -- --skip manual_sql_examples::manual_sql_examples_compile_or_execute
+      - name: Test Nori bundle tools and embedded model
+        run: cargo test -p uqa-analysis -p uqa-nori-data --features uqa-analysis/nori-tools --locked
 
   test-fdw-linux:
     name: test FDW Linux
@@ -88,6 +90,8 @@ jobs:
           cache-targets: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo test --workspace --locked
+      - name: Test Nori bundle tools and embedded model
+        run: cargo test -p uqa-analysis -p uqa-nori-data --features uqa-analysis/nori-tools --locked
 
   clippy:
     name: clippy ${{ matrix.label }}
@@ -117,6 +121,8 @@ jobs:
           cache-targets: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Lint Nori bundle tools and data
+        run: cargo clippy -p uqa-analysis -p uqa-nori-data --features uqa-analysis/nori-tools --all-targets --locked -- -D warnings
 
   msrv:
     name: check Rust 1.90
