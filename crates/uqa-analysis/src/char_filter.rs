@@ -13,6 +13,8 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AnalysisError, AnalysisResult};
+use crate::source::TextEdit;
+use crate::FilteredText;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -49,32 +51,46 @@ impl CharFilter {
     }
 
     pub fn filter(&self, text: &str) -> AnalysisResult<String> {
-        let filtered = match self {
+        Ok(self.filter_with_offsets(text)?.into_string())
+    }
+
+    /// Transform text while retaining source coordinates for the result.
+    pub fn filter_with_offsets<'a>(&self, text: &'a str) -> AnalysisResult<FilteredText<'a>> {
+        self.filter_mapped(FilteredText::new(text))
+    }
+
+    /// Apply this stage to previously filtered text without losing its original source.
+    pub fn filter_mapped<'a>(
+        &self,
+        mut text: FilteredText<'a>,
+    ) -> AnalysisResult<FilteredText<'a>> {
+        match self {
             CharFilter::HTMLStrip => {
-                let stripped = html_tag_re()?.replace_all(text, " ").into_owned();
-                replace_entities(&stripped)
+                replace_pattern(&mut text, html_tag_re()?, " ")?;
+                for (entity, replacement) in HTML_ENTITIES {
+                    replace_literal(&mut text, entity, replacement)?;
+                }
             }
             CharFilter::Mapping { mapping } => {
                 let ordered = mapping_longest_first(mapping);
-                let mut out = text.to_owned();
                 for (old, new) in ordered {
-                    out = out.replace(&old, &new);
+                    replace_literal(&mut text, &old, &new)?;
                 }
-                out
             }
             CharFilter::PatternReplace {
                 pattern,
                 replacement,
-            } => Regex::new(pattern)
-                .map_err(|source| AnalysisError::InvalidRegex {
-                    component: "pattern-replace character filter",
-                    pattern: pattern.clone(),
-                    source,
-                })?
-                .replace_all(text, replacement.as_str())
-                .into_owned(),
-        };
-        Ok(filtered)
+            } => {
+                let expression =
+                    Regex::new(pattern).map_err(|source| AnalysisError::InvalidRegex {
+                        component: "pattern-replace character filter",
+                        pattern: pattern.clone(),
+                        source,
+                    })?;
+                replace_pattern(&mut text, &expression, replacement)?;
+            }
+        }
+        Ok(text)
     }
 }
 
@@ -98,12 +114,38 @@ const HTML_ENTITIES: &[(&str, &str)] = &[
     ("&nbsp;", " "),
 ];
 
-fn replace_entities(text: &str) -> String {
-    let mut out = text.to_owned();
-    for (entity, replacement) in HTML_ENTITIES {
-        out = out.replace(entity, replacement);
-    }
-    out
+fn replace_literal(text: &mut FilteredText<'_>, old: &str, new: &str) -> AnalysisResult<()> {
+    let edits = text
+        .as_str()
+        .match_indices(old)
+        .map(|(start, matched)| TextEdit {
+            range: start..start + matched.len(),
+            replacement: new.to_owned(),
+        })
+        .collect();
+    text.apply_edits(edits)
+}
+
+fn replace_pattern(
+    text: &mut FilteredText<'_>,
+    pattern: &Regex,
+    replacement: &str,
+) -> AnalysisResult<()> {
+    let edits = pattern
+        .captures_iter(text.as_str())
+        .map(|captures| {
+            let matched = captures
+                .get(0)
+                .expect("regex captures contain the complete match");
+            let mut expanded = String::new();
+            captures.expand(replacement, &mut expanded);
+            TextEdit {
+                range: matched.range(),
+                replacement: expanded,
+            }
+        })
+        .collect();
+    text.apply_edits(edits)
 }
 
 /// Order mapping entries longest-key-first so that, e.g., the rule

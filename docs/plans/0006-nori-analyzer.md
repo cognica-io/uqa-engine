@@ -17,7 +17,8 @@ Work starts from UQA commit `e913303cd9ffd6662706053cc39caaaeb8f38b23` on `featu
 | Work item | Owner | Dependencies | Required result | Status |
 | --- | --- | --- | --- | --- |
 | Reference examples | `tests/parity/nori` | Pinned Docker and jars | Reproducible 31-case baseline with full token/end attributes and input hashes | Verified baseline |
-| Rich token and source mapping contracts | `uqa-analysis` | Existing analysis behavior | Checked UTF-8/UTF-16 spans, increments, lengths, stream end state, and composable character-edit maps | In progress |
+| Source coordinates and character-edit maps | `uqa-analysis` | Existing character-filter behavior | Checked UTF-8/UTF-16 spans, original end state, and composable replacement/deletion/insertion maps | Verified; 144 analysis tests including 10 new integration cases and the source-map doctest |
+| Rich token stream contracts | `uqa-analysis` | Source coordinates | Explicit token increments, lengths, end state, and metadata-preserving stage interfaces | In progress |
 | Generic stage migration | `uqa-analysis` | Rich contracts | All existing tokenizers and filters preserve metadata; `analyze` remains the ordered term projection; explicit metadata policy for every expansion/removal | Pending |
 | Complete model export | Docker reference tools | Pinned resources | Every lexicon entry, entry order, context ID, cost, reading, morpheme, unknown class, matrix cell, and Unicode value exported and compared | Pending |
 | Portable dictionary bundle | `uqa-analysis`, proposed data crate | Complete model export | Deterministic versioned packer, strict loader, content identity, shared immutable resources, corruption tests, and package provenance | Pending |
@@ -69,6 +70,6 @@ Before feature completion, run the change-aware pre-merge suites against the fin
 | Checkpoint | Evidence | Remaining work |
 | --- | --- | --- |
 | Design and executable examples | Commits `78a82b3d` and `e913303c`; Docker reference contains 31 cases; PR Checks run `34667416290` passed for that design head | No UQA Nori implementation at that checkpoint |
-| Implementation started | This plan records the full dependency and acceptance matrix; rich analysis contracts are the first code work item | Implement and verify the active item, then update this row with actual source/test evidence |
+| Original-source mapping | [`source.rs`](../../crates/uqa-analysis/src/source.rs), character-filter integration, and [`source_offsets.rs`](../../crates/uqa-analysis/tests/analysis/source_offsets.rs); `cargo test -p uqa-analysis --locked --quiet` passed 40 unit, 102 integration, and 2 doc tests; strict package Clippy passed | Rich token and analyzer pipeline propagation, morphology, and every downstream item remain active or pending |
 
 Never mark a work item verified based on intent, parser acceptance, a narrow test from another owner, or a successful compilation alone. Keep incomplete requirements visible here until their authoritative evidence is recorded.

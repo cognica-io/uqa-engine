@@ -13,6 +13,16 @@ use crate::token_filter::SynonymFileError;
 /// An invalid analyzer is an execution error, never an empty token stream.
 #[derive(Debug, thiserror::Error)]
 pub enum AnalysisError {
+    #[error("{coordinate} offset {offset} is not a Unicode scalar boundary within text of length {length}")]
+    InvalidTextOffset {
+        coordinate: &'static str,
+        offset: usize,
+        length: usize,
+    },
+    #[error("text span start {start} exceeds its end {end}")]
+    InvalidTextSpan { start: usize, end: usize },
+    #[error("character-filter edits overlap or are out of order")]
+    OverlappingTextEdits,
     #[error("invalid {component} regular expression `{pattern}`: {source}")]
     InvalidRegex {
         component: &'static str,

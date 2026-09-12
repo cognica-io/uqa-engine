@@ -33,3 +33,6 @@ mod synonym_file;
 
 #[path = "analysis/validation.rs"]
 mod validation;
+
+#[path = "analysis/source_offsets.rs"]
+mod source_offsets;

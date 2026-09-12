@@ -247,6 +247,24 @@ assert_eq!(analyzer.analyze("<p>Running</p>")?, vec!["run"]);
 
 The process-global `uqa_analysis::register_analyzer` registry is not catalog persistence. Use the engine or SQL registration path for a persistent field assignment; otherwise a later process can reopen a field mapping whose process-local analyzer was never registered.
 
+### Character-filter source coordinates
+
+`CharFilter::filter_with_offsets(input)` returns `FilteredText` with transformed text and mappings to the original input. Chain stages with `filter_mapped(previous_result)`. `source_offsets(range)` accepts a half-open UTF-8 byte range in the filtered text and returns its covering original UTF-8 and UTF-16 ranges; `source_offsets_utf16(range)` accepts filtered UTF-16 coordinates instead. Reversed ranges, out-of-range offsets, and boundaries inside UTF-8 characters or UTF-16 surrogate pairs return an `AnalysisError`.
+
+```rust
+use uqa_analysis::CharFilter;
+
+let input = "<b>한&amp;🙂</b>";
+let filtered = CharFilter::HTMLStrip.filter_with_offsets(input)?;
+assert_eq!(filtered.as_str(), " 한&🙂 ");
+let entity = filtered.source_offsets(4..5)?;
+assert_eq!(&input[entity.utf8], "&amp;");
+assert_eq!(entity.utf16, 4..9);
+# Ok::<(), uqa_analysis::AnalysisError>(())
+```
+
+Unchanged text maps exactly. Replacements cover the full replaced source range, including regex replacements that reorder captures; inserted text maps to its original insertion boundary. Empty ranges select the following source boundary, and `final_offsets()` retains the original end even after trailing or complete deletion. These APIs are read-only analysis operations with no catalog or transaction effects. `filter` continues to return only the transformed string.
+
 ## Python, Node.js, and browser WASM
 
 Every binding can create, bind, inspect, search with, and drop analyzers by executing the SQL functions in this chapter. Python exposes `list_named_analyzers()`. Node.js and browser WASM expose `listNamedAnalyzers()`; these direct methods list custom engine-catalog names, while SQL `list_analyzers()` also includes built-ins. Direct construction from `CharFilter`, `Tokenizer`, and `TokenFilter` is a Rust API, so other bindings define the pipeline as JSON passed to SQL.
