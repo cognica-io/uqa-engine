@@ -8,6 +8,13 @@
 
 #[derive(Debug, thiserror::Error)]
 pub enum DictionaryError {
+    #[error("Nori dictionary resource is unavailable: {0}")]
+    ResourceMissing(String),
+    #[error("Nori resource hash mismatch: expected {expected}, received {actual}")]
+    ResourceHashMismatch {
+        expected: super::ResourceHash,
+        actual: super::ResourceHash,
+    },
     #[error("invalid Nori {section} at byte {offset}: {reason}")]
     Invalid {
         section: &'static str,

@@ -8,12 +8,16 @@
 
 use serde_json::{json, Value};
 use std::sync::{Arc, OnceLock};
-use uqa_analysis::nori::{DictionaryLimits, NoriDictionary};
+use uqa_analysis::nori::{NoriDictionary, NoriResources};
 
 pub(super) fn model() -> &'static Arc<NoriDictionary> {
     static MODEL: OnceLock<Arc<NoriDictionary>> = OnceLock::new();
     MODEL.get_or_init(|| {
-        NoriDictionary::from_bytes(uqa_nori_data::BUNDLE, DictionaryLimits::default()).unwrap()
+        NoriResources::default()
+            .load_default()
+            .unwrap()
+            .model()
+            .clone()
     })
 }
 

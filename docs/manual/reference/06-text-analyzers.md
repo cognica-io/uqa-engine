@@ -354,6 +354,38 @@ assert_eq!(analyzer.normalize("喜悲哀歡 İ UQA")?, "喜悲哀歡 i uqa");
 
 The same example executes as a Nori module doctest. The native tokenizer is checked against the [Docker reference corpus](../../../tests/parity/nori/README.md). These are standalone Rust APIs: generic Nori configuration/compilation, JSON/SQL registration, retrieval, and binding integration remain tracked in the [implementation plan](../../plans/0006-nori-analyzer.md). The existing built-in analyzer inventory remains the one listed above.
 
+### Immutable Korean dictionary resources
+
+`NoriResources::default().load_default()` resolves the release-pinned `lucene-10.5.1` bundle through a process-shared, lazy resource owner. The optional `nori` feature includes `uqa-nori-data`; feature-disabled runtime dependency trees exclude it. The default resolver serves the static bundled bytes without copying them and performs no file access, downloads, or JVM calls. `NoriDictionary::from_bytes` remains available for direct loading.
+
+`load(&DictionaryRequest::Name(name))` resolves an alias at that call. `load(&DictionaryRequest::Sha256(hash))` requests exact artifact bytes, using an already validated cached handle when available. The returned `Arc<ResolvedDictionary>` exposes `sha256()`, `bytes()`, and `model()`. The model's `id()` is its semantic dictionary identity, distinct from the hash of the encoded artifact. Artifact hashes use the `ResourceHash` type, whose serialized representation is 64 lowercase hexadecimal digits.
+
+`NoriResources::with_resolver(Arc<dyn DictionaryResolver>, ResourceLimits)` creates independent resource ownership with an explicit host resolver. The trait also accepts a thread-safe closure. Its `resolve` method returns an optional `DictionaryArtifact` with a declared hash and `DictionaryBytes::Static` or `DictionaryBytes::Shared(Arc<[u8]>)`; those bytes and hashes are untrusted until the owner validates them. The default resolver is not a fallback for a custom resolver. An absent resource, declared or requested hash mismatch, invalid bundle, or per-resource limit returns a typed `DictionaryError` before cache publication.
+
+`compile_user(source, &model)` returns an `Arc<ResolvedUserDictionary>` keyed by semantic model identity and exact source hash. `source()`, `sha256()`, and `model_id()` retain the revision inputs; `dictionary()` returns the optional compiled user-rule handle for `KoreanTokenizer::new`. Empty or comment-only rules keep their exact source and hash while returning no compiled entries. Failed rule compilation leaves no cache entry. Existing tokenizers continue to use their immutable rules after later compilation or cache eviction.
+
+Cloning `NoriResources` shares its resolver and caches. Concurrent misses publish one validated handle while it remains cached; resolver callbacks execute outside cache locks. Aliases always consult the resolver, so updating one resolves new content without changing an existing handle. Caches evict the least recently used ownership when adding an entry would exceed a configured count or byte budget. An individually valid resource larger than the cache budget is returned without retention. Eviction does not invalidate handles held by callers.
+
+Default `ResourceLimits` retain at most 2 dictionary artifacts totaling 32 MiB of encoded bytes, and at most 64 user-rule snapshots totaling 8 MiB of UTF-8 source. Per-resource `DictionaryLimits` and `UserDictionaryLimits` also apply before publication. `cache_stats()` reports retained counts and those byte totals; they measure encoded/source sizes, not decoded heap usage or caller-owned handles. A zero entry limit disables the respective cache. These resource APIs change no catalog, field binding, or index state; canonical analyzer descriptors and generic compilation remain separate work.
+
+```rust
+use uqa_analysis::nori::{DictionaryRequest, KoreanTokenizer, NoriOptions, NoriResources};
+
+let resources = NoriResources::default();
+let dictionary = resources.load_default()?;
+let exact = resources.load(&DictionaryRequest::Sha256(dictionary.sha256()))?;
+assert!(std::sync::Arc::ptr_eq(&dictionary, &exact));
+let rules = resources.compile_user("세종시 세종 시\n", dictionary.model())?;
+let tokenizer = KoreanTokenizer::new(
+    dictionary.model().clone(), rules.dictionary().cloned(), NoriOptions::default(),
+)?;
+let tokens = tokenizer.tokenize("세종시")?;
+assert_eq!(String::from_utf16(&tokens.tokens[0].term_utf16)?, "세종");
+assert_eq!(String::from_utf16(&tokens.tokens[1].term_utf16)?, "시");
+```
+
+The same resource example executes as a Rust doctest.
+
 ### Korean analysis in the common token representation
 
 `KoreanAnalyzer::analyze_tokens(input)` returns the common `AnalyzedText`, including `TokenTerm`, exact UTF-16 and covering UTF-8 source offsets, graph attributes, keyword state, Korean morphology, and complete stream end. `analyze_mapped(&filtered_text)` accepts prior character-filter output and applies source correction once. `NoriOutput::into_analyzed(&filtered_text)` converts an already computed stream; supply the same filtered text used for tokenization. A different input length, invalid token range, or invalid graph returns a typed analysis error.

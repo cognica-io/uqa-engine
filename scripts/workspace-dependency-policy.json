@@ -35,7 +35,8 @@
       "uqa-engine"
     ],
     "uqa-analysis": [
-      "uqa-core"
+      "uqa-core",
+      "uqa-nori-data"
     ],
     "uqa-api": [
       "uqa-core",
@@ -190,6 +191,7 @@
       "uqa-graph",
       "uqa-joins",
       "uqa-ml",
+      "uqa-nori-data",
       "uqa-operators",
       "uqa-pg-query",
       "uqa-scoring",
@@ -198,12 +200,14 @@
     ],
     "uqa-storage": [
       "uqa-analysis",
-      "uqa-core"
+      "uqa-core",
+      "uqa-nori-data"
     ],
     "uqa-planner": [
       "uqa-analysis",
       "uqa-core",
       "uqa-fusion",
+      "uqa-nori-data",
       "uqa-operators",
       "uqa-pg-query",
       "uqa-scoring",
@@ -214,6 +218,7 @@
       "uqa-analysis",
       "uqa-core",
       "uqa-fusion",
+      "uqa-nori-data",
       "uqa-operators",
       "uqa-scoring",
       "uqa-storage"

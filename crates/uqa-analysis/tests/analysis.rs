@@ -73,3 +73,7 @@ mod nori_bridge;
 #[cfg(feature = "nori")]
 #[path = "analysis/nori_shared.rs"]
 mod nori_shared;
+
+#[cfg(feature = "nori")]
+#[path = "analysis/nori_resolvers.rs"]
+mod nori_resolvers;

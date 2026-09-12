@@ -58,6 +58,7 @@ mod io;
 mod lexicon;
 mod morphology;
 mod number;
+mod resources;
 mod tokenizer;
 mod unicode;
 mod user_dictionary;
@@ -73,6 +74,11 @@ pub use filters::{KoreanFilter, DEFAULT_STOP_TAGS};
 pub use frame::DictionaryId;
 pub use morphology::{DictionaryWord, MorphemeRef, POSTag, POSType};
 pub use number::{normalize_number, normalize_number_utf16};
+pub use resources::{
+    DictionaryArtifact, DictionaryBytes, DictionaryRequest, DictionaryResolver, NoriResources,
+    ResolvedDictionary, ResolvedUserDictionary, ResourceCacheStats, ResourceHash, ResourceLimits,
+    DEFAULT_NORI_DICTIONARY,
+};
 pub use unicode::UnicodeProperties;
 
 #[cfg(test)]
