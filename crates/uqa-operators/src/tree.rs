@@ -287,6 +287,12 @@ pub enum OperatorTree {
         /// and fusion parents.
         top_k: Option<TextTopKPlan>,
     },
+    /// Whole-input token-graph phrase retrieval; position filtering precedes any score limit.
+    Phrase {
+        query: String,
+        field: Option<String>,
+        scoring: Option<TextScoringMode>,
+    },
     /// `FilterOperator(field, predicate, source)`.
     Filter {
         field: String,
@@ -749,6 +755,7 @@ impl OperatorTree {
             }
             OperatorTree::Empty
             | OperatorTree::Term { .. }
+            | OperatorTree::Phrase { .. }
             | OperatorTree::BayesianMatchWithPrior { .. }
             | OperatorTree::Filter { source: None, .. }
             | OperatorTree::Facet { source: None, .. }
@@ -808,6 +815,7 @@ impl OperatorTree {
                 positive.is_membership_only() && negative.is_membership_only()
             }
             OperatorTree::Term { .. }
+            | OperatorTree::Phrase { .. }
             | OperatorTree::Facet { .. }
             | OperatorTree::Score { .. }
             | OperatorTree::BayesianScore { .. }

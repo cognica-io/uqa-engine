@@ -43,7 +43,7 @@ pub(super) fn index_stats(
     let mut vector_fields = BTreeSet::new();
     let mut query_vector_dimensions = Vec::new();
     tree.visit(&mut |node| match node {
-        OperatorTree::Term { query, field, .. } => {
+        OperatorTree::Term { query, field, .. } | OperatorTree::Phrase { query, field, .. } => {
             text_queries.push((field.clone(), query.clone()));
         }
         OperatorTree::BayesianMatchWithPrior { field, query, .. } => {

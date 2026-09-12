@@ -185,6 +185,7 @@ pub fn operator_name(op: &OperatorTree) -> String {
             ..
         } => "BlockMaxWANDTopKOp",
         OperatorTree::Term { .. } => "TermOp",
+        OperatorTree::Phrase { .. } => "PhraseOp",
         OperatorTree::Filter { .. } => "FilterOp",
         OperatorTree::Facet { .. } => "FacetOp",
         OperatorTree::Score { .. } => "ScoreOp",

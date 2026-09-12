@@ -25,6 +25,40 @@ fn membership_filter(field: &str, value: i64) -> OperatorTree {
 }
 
 #[test]
+fn optimization_preserves_complete_scored_phrase_graph_inputs() {
+    let phrase = OperatorTree::Phrase {
+        query: "Rust 서울역  fox".into(),
+        field: Some("body".into()),
+        scoring: Some(uqa_operators::TextScoringMode::BM25),
+    };
+    let optimized = QueryOptimizer::new().optimize(OperatorTree::Intersect(vec![
+        OperatorTree::Union(vec![phrase.clone(), phrase]),
+        membership_filter("year", 2026),
+    ]));
+    let mut count = 0;
+    optimized.visit(&mut |node| {
+        if let OperatorTree::Phrase {
+            query,
+            field,
+            scoring,
+        } = node
+        {
+            assert_eq!(query, "Rust 서울역  fox");
+            assert_eq!(field.as_deref(), Some("body"));
+            assert!(matches!(
+                scoring,
+                Some(uqa_operators::TextScoringMode::BM25)
+            ));
+            count += 1;
+        }
+    });
+    assert_eq!(
+        count, 2,
+        "scored phrase occurrences must not be deduplicated or split into terms"
+    );
+}
+
+#[test]
 fn empty_intersect_collapses_to_intersect_empty() {
     let op = OperatorTree::Intersect(vec![term("a"), OperatorTree::Intersect(vec![])]);
     let optimised = QueryOptimizer::new().optimize(op);

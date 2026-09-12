@@ -44,10 +44,22 @@ Register custom JSON with `create_analyzer`, bind it through a GIN `analyzer` op
 
 The query string accepts terms, quoted phrases, `AND`, `OR`, `NOT`, parentheses, field scoping, and field-scoped vector literals. Precedence is `NOT`, then `AND`, then `OR`; adjacency implies `AND`.
 
+A quoted phrase is analyzed as one complete input with the field's retained search analyzer. It matches connected token paths in order, with exact adjacency and any internal gaps left by removed tokens. Synonym and compound alternatives preserve their positions and lengths; matching follows each query and document edge's own length. Leading and trailing removed tokens do not anchor the phrase to either end of the field, and a phrase with no remaining tokens matches no documents. All-field search requires the complete phrase to match within one field. Position filtering happens before score ordering and `LIMIT`; ordinary unquoted leaves continue to union their analyzed terms.
+
+The physical phrase node remains intact through optimization. Phrase BM25 scores preserve emitted query-term multiplicity, including repeated terms; complete Boolean query calibration uses those emitted phrase units along with the existing unquoted leaf units.
+
 ```sql
 SELECT id, _score
 FROM documents
 WHERE fts_match(body, '(database OR retrieval) AND NOT legacy')
+ORDER BY _score DESC, id ASC
+LIMIT 20;
+```
+
+```sql
+SELECT id, _score
+FROM documents
+WHERE fts_match(body, '"information retrieval"')
 ORDER BY _score DESC, id ASC
 LIMIT 20;
 ```

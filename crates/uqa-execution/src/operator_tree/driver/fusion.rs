@@ -9,12 +9,12 @@
 use super::{
     collect_graph_names, combine_signal_priors, deep_runtime_gating, fuse_signal_batches_with,
     fuse_signals_with, lower_deep_batch_norm, lower_deep_conv, lower_deep_dense,
-    lower_deep_dropout, lower_deep_pool, operator_execution_error, scored_term_count,
-    scored_to_posting_list, static_operator, BTreeSet, BayesianEvidenceFusionOperator, DocId,
-    DriverResult, ExternalPriorMode, GatingSpec, GraphNeighborAccess, MultiStageCutoff,
-    MultiStageEntry, OperatorTree, Payload, PhysicalRetrievalDriver, PositiveEvidencePoolExecution,
-    PostingEntry, PostingList, RobustPositiveEvidencePoolOperator, SQLError, ScalarExpr,
-    ScoredEntry, StaticPostingList, StorageBackendError, TextScoringMode, Value,
+    lower_deep_dropout, lower_deep_pool, operator_execution_error, scored_to_posting_list,
+    static_operator, BTreeSet, BayesianEvidenceFusionOperator, DocId, DriverResult,
+    ExternalPriorMode, GatingSpec, GraphNeighborAccess, MultiStageCutoff, MultiStageEntry,
+    OperatorTree, Payload, PhysicalRetrievalDriver, PositiveEvidencePoolExecution, PostingEntry,
+    PostingList, RobustPositiveEvidencePoolOperator, SQLError, ScalarExpr, ScoredEntry,
+    StaticPostingList, StorageBackendError, TextScoringMode, Value,
 };
 
 impl PhysicalRetrievalDriver<'_> {
@@ -394,14 +394,14 @@ impl PhysicalRetrievalDriver<'_> {
     ) -> DriverResult<(PostingList, Option<f64>)> {
         match signal {
             OperatorTree::BayesianScore { source, field } => {
+                let (raw, units) = self.execute_counted_text_query(source)?;
                 let params = match field.as_deref() {
                     Some(field) => self.bayesian_params_for(field)?,
                     None => uqa_scoring::BayesianBM25Params::default(),
                 }
-                .scaled_for_query_terms(scored_term_count(source));
+                .scaled_for_query_terms(units);
                 let prior = (params.base_rate > 0.0).then_some(params.base_rate);
                 let evidence_params = params.evidence_params();
-                let raw = self.execute_posting_node(source)?;
                 let evidence = raw.with_scores(|entry| {
                     uqa_scoring::sigmoid(
                         evidence_params.alpha * (entry.payload.score - evidence_params.beta),
@@ -540,12 +540,12 @@ impl PhysicalRetrievalDriver<'_> {
         source: &OperatorTree,
         field: Option<&str>,
     ) -> DriverResult<PostingList> {
-        let raw = self.execute_posting_node(source)?;
+        let (raw, units) = self.execute_counted_text_query(source)?;
         let params = match field {
             Some(field) => self.bayesian_params_for(field)?,
             None => uqa_scoring::BayesianBM25Params::default(),
         }
-        .scaled_for_query_terms(scored_term_count(source));
+        .scaled_for_query_terms(units);
         Ok(raw.with_scores(|entry| {
             uqa_scoring::sigmoid(params.alpha * (entry.payload.score - params.beta))
         }))
