@@ -355,6 +355,26 @@ assert_eq!(budget.used(), 0);
 
 This example executes as a Rust doctest with and without Nori enabled.
 
+### Word transformation allocation ownership
+
+`uqa_analysis::porter::stem_budgeted(input, &budget, poll)` accepts borrowed scalar text and returns `Budgeted<String>`. `stem_term_budgeted(&term, &budget, poll)` accepts a complete `TokenTerm` and returns `Budgeted<TokenTerm>`, retaining isolated surrogate elements. Both reserve character/consonant scratch and output buffers before allocation. Scratch stays reserved while the result is encoded and is released before return; the result retains its own reservation. Byte-limit failures return `AnalysisError::Memory`, and callback errors propagate without a partial result. Loading, prefix scans, suffix stages, and output encoding check the callback. Consonant state for repeated `y` is computed without recursive prefix walks, so long words do not require a larger call stack. The existing `porter::stem` keeps its string result and uses the same algorithm without a byte limit.
+
+```rust
+use uqa_analysis::porter::stem_budgeted;
+use uqa_core::memory::MemoryBudget;
+
+let budget = MemoryBudget::new(4096);
+let result = stem_budgeted("relational", &budget, || Ok(()))?;
+assert_eq!(&**result, "relat");
+assert_eq!(budget.used(), result.reserved_bytes());
+assert!(budget.peak() > budget.used());
+drop(result);
+assert_eq!(budget.used(), 0);
+# Ok::<(), uqa_analysis::AnalysisError>(())
+```
+
+This example also executes as a Rust doctest in both configurations. ASCII folding emits each scalar's ASCII compatibility decomposition directly into a reserved term buffer, without a separate decomposition string or decoded raw-term segment. A scalar with no ASCII decomposition remains unchanged, and isolated UTF-16 units stay exact. Token-filter and compiled-pipeline callers still need complete budget/cancellation propagation; these native transformation changes do not connect SQL `work_mem` to the whole pipeline.
+
 ### Character-filter source coordinates
 
 `CharFilter::filter_with_offsets(input)` returns `FilteredText` with transformed text and mappings to the original input. Chain stages with `filter_mapped(previous_result)`. `source_offsets(range)` accepts a half-open UTF-8 byte range in the filtered text and returns its covering original UTF-8 and UTF-16 ranges; `source_offsets_utf16(range)` accepts filtered UTF-16 coordinates instead. Reversed ranges, out-of-range offsets, and boundaries inside UTF-8 characters or UTF-16 surrogate pairs return an `AnalysisError`.

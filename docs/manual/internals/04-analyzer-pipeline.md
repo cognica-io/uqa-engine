@@ -24,6 +24,8 @@ Character edits now stream source slices and prepared replacement fragments into
 
 ## Analysis execution
 
+Porter stemming keeps reserved character and consonant arrays. Appending or replacing suffix elements updates their classification once; prefix measure and vowel scans use that state with cancellation checks. Repeated `y` no longer recursively recomputes preceding classifications. The stemmer reserves its scalar or lossless output while scratch remains live and drops scratch before transferring the result lease. ASCII folding uses the existing normalization library's public single-scalar decomposition callback and emits directly into `TermBuffer`; scalar terms stay UTF-8, while raw terms preserve isolated units. It does not allocate a per-character normalized string or a temporary scalar segment for raw input. Common token-filter and compiled caller propagation remains open.
+
 ```mermaid
 flowchart LR
     A[Source string] --> B[CharFilter 1]

@@ -14,6 +14,26 @@ use serde::{Deserialize, Serialize, Serializer};
 use crate::{AnalysisError, AnalysisResult};
 
 mod allocation;
+pub(crate) use allocation::TermBuffer;
+
+#[derive(Clone)]
+enum Characters<'a> {
+    Unicode(std::str::Chars<'a>),
+    UTF16(std::char::DecodeUtf16<std::iter::Copied<std::slice::Iter<'a, u16>>>),
+}
+
+impl Iterator for Characters<'_> {
+    type Item = Result<char, u16>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Unicode(characters) => characters.next().map(Ok),
+            Self::UTF16(characters) => characters
+                .next()
+                .map(|value| value.map_err(|error| error.unpaired_surrogate())),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Representation {
@@ -36,6 +56,15 @@ enum Representation {
 pub struct TokenTerm(Representation);
 
 impl TokenTerm {
+    pub(crate) fn characters(&self) -> impl Iterator<Item = Result<char, u16>> + Clone + '_ {
+        match &self.0 {
+            Representation::Unicode(text) => Characters::Unicode(text.chars()),
+            Representation::UTF16(units) => {
+                Characters::UTF16(char::decode_utf16(units.iter().copied()))
+            }
+        }
+    }
+
     pub fn from_utf16(units: Vec<u16>) -> Self {
         match String::from_utf16(&units) {
             Ok(text) => Self::from(text),

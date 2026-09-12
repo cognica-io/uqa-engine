@@ -6,7 +6,7 @@
 
 //! Metadata-preserving implementations shared by rich and term-only filtering.
 
-use super::{ascii_fold, PreparedTokenFilter};
+use super::PreparedTokenFilter;
 use crate::token::TokenBatch;
 use crate::{porter, AnalysisError, AnalysisResult, AnalysisToken, TokenTerm};
 
@@ -25,7 +25,15 @@ pub(super) fn filter(
             for token in &mut batch.tokens {
                 let term = match filter {
                     PreparedTokenFilter::Lowercase => token.term.map_unicode(str::to_lowercase),
-                    PreparedTokenFilter::ASCIIFolding => token.term.map_unicode(ascii_fold),
+                    PreparedTokenFilter::ASCIIFolding => {
+                        super::ascii::fold_budgeted(
+                            &token.term,
+                            &uqa_core::memory::MemoryBudget::new(usize::MAX),
+                            &mut || Ok(()),
+                        )?
+                        .into_parts()
+                        .0
+                    }
                     _ if token.keyword => continue,
                     _ => token.term.as_str().map_or_else(
                         || TokenTerm::from_utf16(porter::stem_utf16(&token.term.utf16())),

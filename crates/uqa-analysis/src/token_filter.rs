@@ -12,10 +12,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use unicode_normalization::UnicodeNormalization;
 
 use crate::{AnalysisError, AnalysisResult};
 
+mod ascii;
 mod compiled;
 mod stream;
 mod synonyms;
@@ -190,27 +190,6 @@ fn validate_gram_bounds(
         });
     }
     Ok(())
-}
-
-fn ascii_fold(token: &str) -> String {
-    if token.is_ascii() {
-        return token.to_owned();
-    }
-    let mut out = String::with_capacity(token.len());
-    for ch in token.chars() {
-        if ch.is_ascii() {
-            out.push(ch);
-            continue;
-        }
-        let folded: String = ch.nfkd().filter(char::is_ascii).collect();
-        if folded.is_empty() {
-            // No ASCII equivalent (CJK, Korean, Arabic, etc.) — keep original.
-            out.push(ch);
-        } else {
-            out.push_str(&folded);
-        }
-    }
-    out
 }
 
 const ENGLISH_STOP_WORDS: &[&str] = &[
