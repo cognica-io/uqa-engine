@@ -17,6 +17,7 @@ use crate::{AnalysisError, AnalysisResult};
 
 mod ascii;
 mod compiled;
+mod lowercase;
 mod stream;
 mod synonyms;
 pub(crate) use compiled::PreparedTokenFilter;

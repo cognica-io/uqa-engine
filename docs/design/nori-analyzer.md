@@ -185,6 +185,8 @@ The native tokenizer now reserves input, lattice capacities, pending/output buff
 
 Word transformation helpers also use the shared allowance. Porter stemming retains character and consonant buffers, classifies repeated `y` without recursive prefix walks, polls bounded scans, and reserves scalar or lossless output before releasing scratch. ASCII folding uses public single-scalar compatibility decomposition to emit directly into a reserved term buffer. It preserves the per-character fallback when no ASCII decomposition exists and carries isolated UTF-16 units unchanged. These helpers remove per-suffix, per-character, and raw-segment temporary allocations; common filter and compiled caller propagation still needs completion.
 
+Full lowercase now uses reserved scalar/raw output and two borrowed forward traversals for original-input sigma context. Prepared Unicode property ranges require no per-call regex workspace; isolated surrogate units delimit context without intermediate scalar strings. Traversal and encoding remain cancellable, and failure drops partial output reservations. Complete scalar/context differentials match Rust lowercasing, while canonical descriptors retain the existing Unicode 16 identity only when both context-class hashes match those verified tables. Other table/version combinations carry explicit class hashes. Token/morphology cloning, removal and expansion still need controlled ownership before the common token-filter pipeline can retain one caller allowance.
+
 ## Dictionary construction and distribution
 
 ### Canonical input and exporter

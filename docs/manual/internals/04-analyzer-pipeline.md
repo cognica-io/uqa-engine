@@ -26,6 +26,8 @@ Character edits now stream source slices and prepared replacement fragments into
 
 Porter stemming keeps reserved character and consonant arrays. Appending or replacing suffix elements updates their classification once; prefix measure and vowel scans use that state with cancellation checks. Repeated `y` no longer recursively recomputes preceding classifications. The stemmer reserves its scalar or lossless output while scratch remains live and drops scratch before transferring the result lease. ASCII folding uses the existing normalization library's public single-scalar decomposition callback and emits directly into `TermBuffer`; scalar terms stay UTF-8, while raw terms preserve isolated units. It does not allocate a per-character normalized string or a temporary scalar segment for raw input. Common token-filter and compiled caller propagation remains open.
 
+Full lowercase emits into the same reserved term buffer. Two borrowed forward iterators retain original-input context for Greek final sigma without allocating scalar segments or rescanning an ignored run for each token element. Prepared `Cased` and `Case_Ignorable` ranges come from the existing regex-syntax dependency's public HIR API; execution searches those immutable ranges without a regex workspace. Isolated UTF-16 units pass through unchanged and delimit context. Both source traversals and raw-term finalization poll for cancellation. Descriptor resolution hashes the context classes and preserves the existing Rust Unicode 16 profile only for the verified matching tables; a different version or table content contributes explicit hashes. Exhaustive scalar/context comparisons verify compatibility with Rust string lowercasing.
+
 ```mermaid
 flowchart LR
     A[Source string] --> B[CharFilter 1]

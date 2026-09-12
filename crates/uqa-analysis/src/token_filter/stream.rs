@@ -19,12 +19,21 @@ pub(super) fn filter(
         PreparedTokenFilter::Nori(filter) => {
             return filter.filter_batch(batch, crate::FilteredText::new("").projection());
         }
-        PreparedTokenFilter::Lowercase
+        PreparedTokenFilter::Lowercase(_)
         | PreparedTokenFilter::ASCIIFolding
         | PreparedTokenFilter::PorterStem => {
             for token in &mut batch.tokens {
                 let term = match filter {
-                    PreparedTokenFilter::Lowercase => token.term.map_unicode(str::to_lowercase),
+                    PreparedTokenFilter::Lowercase(properties) => {
+                        super::lowercase::lower_budgeted(
+                            &token.term,
+                            properties,
+                            &uqa_core::memory::MemoryBudget::new(usize::MAX),
+                            &mut || Ok(()),
+                        )?
+                        .into_parts()
+                        .0
+                    }
                     PreparedTokenFilter::ASCIIFolding => {
                         super::ascii::fold_budgeted(
                             &token.term,

@@ -18,7 +18,7 @@ use crate::{AnalysisResult, AnalyzedText};
 pub(crate) enum PreparedTokenFilter<'a> {
     #[cfg(feature = "nori")]
     Nori(crate::nori::pipeline::PreparedNoriFilter),
-    Lowercase,
+    Lowercase(&'static super::lowercase::CaseProperties),
     Stop(BTreeSet<Cow<'a, str>>),
     PorterStem,
     ASCIIFolding,
@@ -51,7 +51,7 @@ impl TokenFilter {
                     &crate::nori::NoriResources::default(),
                 )?)
             }
-            Self::Lowercase => PreparedTokenFilter::Lowercase,
+            Self::Lowercase => PreparedTokenFilter::Lowercase(super::lowercase::prepare()?),
             Self::Stop {
                 language,
                 custom_words,
@@ -107,7 +107,7 @@ impl PreparedTokenFilter<'_> {
         match self {
             #[cfg(feature = "nori")]
             Self::Nori(filter) => PreparedTokenFilter::Nori(filter),
-            Self::Lowercase => PreparedTokenFilter::Lowercase,
+            Self::Lowercase(properties) => PreparedTokenFilter::Lowercase(properties),
             Self::Stop(words) => PreparedTokenFilter::Stop(
                 words
                     .into_iter()

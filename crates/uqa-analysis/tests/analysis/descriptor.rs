@@ -64,6 +64,39 @@ fn canonical_descriptor_has_portable_fixed_identity_and_explicit_defaults() {
 }
 
 #[test]
+fn contextual_lowercase_preserves_stored_unicode_16_analyzer_identities() {
+    for (tokenizer, fingerprint) in [
+        (
+            Tokenizer::Keyword,
+            "7c1c9abfe64d2781e713010a918aaedac65574405508416abba74de1e97f5c3d",
+        ),
+        (
+            Tokenizer::Whitespace,
+            "a586595281c69fc6600626b208ed1c3d6afe775df10af59415696830530b8b3d",
+        ),
+        (
+            Tokenizer::Standard,
+            "eb7b097ddd7ee7fc9870433a155108c52ec652d002284b70c1142f37e8bea7fb",
+        ),
+    ] {
+        let config = Analyzer::new(tokenizer, vec![TokenFilter::Lowercase], Vec::new());
+        let descriptor = resolve(&config);
+        assert_eq!(descriptor.fingerprint().to_string(), fingerprint);
+        let restored = AnalyzerResources::new(AnalyzerLimits::default())
+            .restore_json(descriptor.canonical_json())
+            .unwrap();
+        assert_eq!(
+            restored.descriptor().canonical_json(),
+            descriptor.canonical_json()
+        );
+        assert_eq!(
+            restored.analyze("ΟΣ ΟΣΑ İ").unwrap().join(" "),
+            "ος οσα i\u{307}"
+        );
+    }
+}
+
+#[test]
 fn canonical_stop_snapshots_merge_builtins_and_preserve_ordered_synonym_multiplicity() {
     let mut config = keyword();
     config.char_filters.push(CharFilter::HTMLStrip);

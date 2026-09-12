@@ -52,6 +52,13 @@ impl RuntimeProfiles {
             .token_filters
             .iter()
             .any(|filter| matches!(filter, TokenFilter::Lowercase));
+        if rust_lower {
+            let context = [
+                expression(r"\p{Cased}", "lowercase cased property")?,
+                expression(r"\p{Case_Ignorable}", "lowercase ignorable property")?,
+            ];
+            extend_lowercase_context(&mut expressions, char::UNICODE_VERSION, context);
+        }
         let normalization = config
             .token_filters
             .iter()
@@ -61,6 +68,22 @@ impl RuntimeProfiles {
             normalization_unicode: normalization.then_some(unicode_normalization::UNICODE_VERSION),
             expressions,
         })
+    }
+}
+
+// These exact context tables already belong to the Rust Unicode 16 profile. Scalar and contextual differentials verify their equivalence to str::to_lowercase. Any other version or table content must contribute its own expression identity.
+const RUST_UNICODE_16_CONTEXT: [&str; 2] = [
+    "0609b22ae1ba741f6ae6cf515ce9ba758a6ebcf7fe80b2d2e7726b25750c2f62",
+    "5af2b098843fc4e94e45a5bde9e52611f461730f85ddedca2ab9fce2f7727a82",
+];
+
+fn extend_lowercase_context(
+    expressions: &mut Vec<String>,
+    rust_unicode: (u8, u8, u8),
+    context: [String; 2],
+) {
+    if rust_unicode != (16, 0, 0) || context != RUST_UNICODE_16_CONTEXT {
+        expressions.extend(context);
     }
 }
 
@@ -165,6 +188,36 @@ fn hash_hir(root: &Hir, hash: &mut Sha256) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn changed_lowercase_context_tables_cannot_reuse_an_implicit_rust_profile() {
+        let known = RUST_UNICODE_16_CONTEXT.map(str::to_owned);
+        let mut expressions = vec!["preceding tokenizer".to_owned()];
+        extend_lowercase_context(&mut expressions, (16, 0, 0), known.clone());
+        assert_eq!(expressions, ["preceding tokenizer"]);
+        for (version, context) in [
+            ((17, 0, 0), known.clone()),
+            (
+                (16, 0, 0),
+                [
+                    expression("[A-Z]", "changed cased").unwrap(),
+                    known[1].clone(),
+                ],
+            ),
+            (
+                (16, 0, 0),
+                [
+                    known[0].clone(),
+                    expression("['.]", "changed ignorable").unwrap(),
+                ],
+            ),
+        ] {
+            let mut expressions = vec!["preceding tokenizer".to_owned()];
+            extend_lowercase_context(&mut expressions, version, context.clone());
+            assert_eq!(expressions[0], "preceding tokenizer");
+            assert_eq!(&expressions[1..], context);
+        }
+    }
 
     #[test]
     fn expression_identity_preserves_structure_and_uses_fixed_width_encoding() {

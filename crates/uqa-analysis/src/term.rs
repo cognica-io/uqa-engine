@@ -122,6 +122,7 @@ impl TokenTerm {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn map_unicode(&self, transform: impl Fn(&str) -> String) -> Self {
         if let Some(text) = self.as_str() {
             return Self::from(transform(text));
