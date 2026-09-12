@@ -14,6 +14,7 @@ pub mod agtype;
 pub mod cancel;
 pub mod doc_set;
 mod float_text;
+pub mod memory;
 pub mod posting_list;
 pub mod predicate;
 pub mod ranked_view;
