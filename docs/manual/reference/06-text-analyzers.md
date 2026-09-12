@@ -286,6 +286,19 @@ assert_eq!(entity.utf16, 4..9);
 # Ok::<(), uqa_analysis::AnalysisError>(())
 ```
 
+`source_covering_offsets_utf16(range)` explicitly accepts boundaries inside a surrogate pair. It projects the exact UTF-16 range through each edit map, then supplies the smallest UTF-8 range covering the affected original scalars. The returned `utf16` range keeps the exact original unit coordinates; the `utf8` range is safe to slice. An empty UTF-16 range inside a pair covers that scalar in UTF-8, while an empty range at a scalar boundary remains empty. `TextCoordinates::covering_offsets_utf16(range)` provides the same covering conversion without character filters. Existing strict methods still reject split pairs.
+
+```rust
+use uqa_analysis::CharFilter;
+
+let filtered = CharFilter::HTMLStrip.filter_with_offsets("<b>🙂a</b>")?;
+let source = filtered.source_covering_offsets_utf16(2..3)?;
+assert_eq!(source.utf16, 4..5);
+assert_eq!(source.utf8, 3..7);
+assert_eq!(&filtered.original()[source.utf8], "🙂");
+# Ok::<(), uqa_analysis::AnalysisError>(())
+```
+
 Unchanged text maps exactly. Replacements cover the full replaced source range, including regex replacements that reorder captures; inserted text maps to its original insertion boundary. Empty ranges select the following source boundary, and `final_offsets()` retains the original end even after trailing or complete deletion. These APIs are read-only analysis operations with no catalog or transaction effects. `filter` continues to return only the transformed string.
 
 ## Standalone Korean tokenization

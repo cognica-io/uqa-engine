@@ -19,7 +19,9 @@ mod edits;
 use edits::EditMap;
 pub(crate) use edits::TextEdit;
 
-/// Half-open ranges in the same original input, expressed in both coordinate systems.
+/// Half-open source ranges: exact UTF-16 units and the covering UTF-8 scalar range.
+///
+/// Strict projection methods require both ranges to address identical scalar boundaries. Explicit covering methods retain UTF-16 boundaries inside surrogate pairs while covering each touched scalar in UTF-8.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SourceOffsets {
     pub utf8: Range<usize>,
@@ -98,6 +100,48 @@ impl TextCoordinates {
         let utf16 = self.utf8_to_utf16(utf8.start)?..self.utf8_to_utf16(utf8.end)?;
         Ok(SourceOffsets { utf8, utf16 })
     }
+
+    /// Retain exact UTF-16 coordinates and cover split surrogate pairs in UTF-8.
+    ///
+    /// An empty range inside a pair covers that scalar; an empty range at a scalar boundary remains empty.
+    pub fn covering_offsets_utf16(&self, utf16: Range<usize>) -> AnalysisResult<SourceOffsets> {
+        self.validate_utf16_range(&utf16)?;
+        if self.boundaries.is_empty() {
+            return Ok(SourceOffsets {
+                utf8: utf16.clone(),
+                utf16,
+            });
+        }
+        let start = match self
+            .boundaries
+            .binary_search_by_key(&utf16.start, |point| point.1)
+        {
+            Ok(index) => self.boundaries[index].0,
+            Err(index) => self.boundaries[index - 1].0,
+        };
+        let end = match self
+            .boundaries
+            .binary_search_by_key(&utf16.end, |point| point.1)
+        {
+            Ok(index) | Err(index) => self.boundaries[index].0,
+        };
+        Ok(SourceOffsets {
+            utf8: start..end,
+            utf16,
+        })
+    }
+
+    fn validate_utf16_range(&self, range: &Range<usize>) -> AnalysisResult<()> {
+        validate_order(range)?;
+        if range.end > self.utf16_len {
+            return Err(AnalysisError::InvalidTextOffset {
+                coordinate: "UTF-16",
+                offset: range.end,
+                length: self.utf16_len,
+            });
+        }
+        Ok(())
+    }
 }
 
 /// Filtered text retaining its original input and the provenance of every edit.
@@ -158,11 +202,33 @@ impl<'a> FilteredText<'a> {
     /// Project filtered UTF-16 coordinates without accepting a split surrogate pair.
     pub fn source_offsets_utf16(&self, range: Range<usize>) -> AnalysisResult<SourceOffsets> {
         validate_order(&range)?;
-        let coordinates = self
-            .filtered_coordinates
-            .get_or_init(|| TextCoordinates::new(&self.text));
+        let coordinates = self.filtered_coordinates();
         let utf8 = coordinates.utf16_to_utf8(range.start)?..coordinates.utf16_to_utf8(range.end)?;
         self.source_offsets(utf8)
+    }
+
+    /// Project exact filtered UTF-16 units, preserving split pairs through every edit map.
+    ///
+    /// The returned original UTF-16 range stays exact; UTF-8 covers the original scalars. Replacements cover their source and insertions retain their source boundary, as in strict projection.
+    ///
+    /// ```
+    /// use uqa_analysis::CharFilter;
+    /// let filtered = CharFilter::HTMLStrip.filter_with_offsets("<b>🙂a</b>")?;
+    /// let source = filtered.source_covering_offsets_utf16(2..3)?;
+    /// assert_eq!(source.utf16, 4..5);
+    /// assert_eq!(source.utf8, 3..7);
+    /// assert_eq!(&filtered.original()[source.utf8], "🙂");
+    /// # Ok::<(), uqa_analysis::AnalysisError>(())
+    /// ```
+    pub fn source_covering_offsets_utf16(
+        &self,
+        mut range: Range<usize>,
+    ) -> AnalysisResult<SourceOffsets> {
+        self.filtered_coordinates().validate_utf16_range(&range)?;
+        for map in self.maps.iter().rev() {
+            range = map.project_utf16(range);
+        }
+        self.original_coordinates().covering_offsets_utf16(range)
     }
 
     /// The final input boundary, even when filters remove all source characters.
@@ -187,6 +253,11 @@ impl<'a> FilteredText<'a> {
     fn original_coordinates(&self) -> &TextCoordinates {
         self.original_coordinates
             .get_or_init(|| TextCoordinates::new(self.original))
+    }
+
+    fn filtered_coordinates(&self) -> &TextCoordinates {
+        self.filtered_coordinates
+            .get_or_init(|| TextCoordinates::new(&self.text))
     }
 }
 
