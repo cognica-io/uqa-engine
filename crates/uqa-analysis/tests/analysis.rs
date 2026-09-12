@@ -59,3 +59,7 @@ mod nori_tokenizer;
 #[cfg(feature = "nori")]
 #[path = "analysis/nori_analysis.rs"]
 mod nori_analysis;
+
+#[cfg(feature = "nori")]
+#[path = "analysis/nori_numbers.rs"]
+mod nori_numbers;

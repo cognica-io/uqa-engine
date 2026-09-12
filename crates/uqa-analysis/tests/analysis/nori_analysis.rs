@@ -173,11 +173,7 @@ fn token() -> NoriToken {
 }
 
 fn stream(tokens: Vec<NoriToken>, final_increment: u32) -> NoriOutput {
-    NoriOutput {
-        tokens,
-        final_offset_utf16: 20,
-        final_position_increment: final_increment,
-    }
+    NoriOutput::from_tokens(tokens, 20, final_increment)
 }
 
 #[test]
@@ -222,10 +218,10 @@ fn filters_preserve_nullable_metadata_stacked_edges_and_trailing_holes() {
     assert_eq!(keep_all.apply(input.clone(), model()).unwrap(), input);
     let stop = KoreanFilter::PartOfSpeech { stop_tags: None };
     original.position_increment = 2;
-    assert_eq!(
-        stop.apply(input, model()).unwrap(),
-        stream(vec![original], 6)
-    );
+    let filtered = stop.apply(input, model()).unwrap();
+    assert_eq!(filtered.tokens, vec![original]);
+    assert_eq!(filtered.final_offset_utf16, 20);
+    assert_eq!(filtered.final_position_increment, 6);
 }
 
 #[test]

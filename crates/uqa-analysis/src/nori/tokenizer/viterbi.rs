@@ -81,11 +81,7 @@ pub(super) fn analyze(
         }
     }
     (state.poll)()?;
-    Ok(NoriOutput {
-        tokens,
-        final_offset_utf16: state.position,
-        final_position_increment: 0,
-    })
+    Ok(NoriOutput::from_tokens(tokens, state.position, 0))
 }
 
 impl State<'_> {

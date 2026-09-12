@@ -60,6 +60,9 @@ pub enum KoreanFilter {
     ReadingForm,
     #[serde(rename = "unicode_simple_lowercase")]
     SimpleLowercase,
+    #[serde(rename = "nori_number")]
+    /// Optional exact number composition, including shared lookahead attributes and keyword handling.
+    Number,
 }
 
 // Empty struct variants validate that parameterless filters have no extra properties.
@@ -75,6 +78,8 @@ enum FilterConfig {
     ReadingForm {},
     #[serde(rename = "unicode_simple_lowercase")]
     SimpleLowercase {},
+    #[serde(rename = "nori_number")]
+    Number {},
 }
 
 impl<'de> Deserialize<'de> for KoreanFilter {
@@ -83,6 +88,7 @@ impl<'de> Deserialize<'de> for KoreanFilter {
             FilterConfig::PartOfSpeech { stop_tags } => Self::PartOfSpeech { stop_tags },
             FilterConfig::ReadingForm {} => Self::ReadingForm,
             FilterConfig::SimpleLowercase {} => Self::SimpleLowercase,
+            FilterConfig::Number {} => Self::Number,
         })
     }
 }
@@ -92,6 +98,7 @@ pub(super) enum CompiledFilter {
     PartOfSpeech(u64),
     ReadingForm,
     SimpleLowercase,
+    Number,
 }
 
 impl KoreanFilter {
@@ -106,6 +113,7 @@ impl KoreanFilter {
             ),
             Self::ReadingForm => CompiledFilter::ReadingForm,
             Self::SimpleLowercase => CompiledFilter::SimpleLowercase,
+            Self::Number => CompiledFilter::Number,
         }
     }
 
@@ -132,6 +140,9 @@ impl CompiledFilter {
         limits: NoriLimits,
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<NoriOutput> {
+        if matches!(self, Self::Number) {
+            return super::number::filter(input, limits, poll);
+        }
         let mut work = Work::new(poll)?;
         check_limit("Nori output tokens", input.tokens.len(), limits.max_tokens)?;
         check_limit(
@@ -142,11 +153,13 @@ impl CompiledFilter {
         let mut skipped = 0_u32;
         let mut output_units = 0_usize;
         let mut retained = 0;
+        let mut trailing_removed = false;
         for index in 0..input.tokens.len() {
             work.tick()?;
             let token = &mut input.tokens[index];
             if let Self::PartOfSpeech(bits) = self {
                 if bits & (1_u64 << token.left_pos.ordinal()) != 0 {
+                    trailing_removed = true;
                     skipped = skipped
                         .checked_add(token.position_increment)
                         .ok_or(AnalysisError::TokenPositionOverflow)?;
@@ -157,6 +170,7 @@ impl CompiledFilter {
                     .checked_add(skipped)
                     .ok_or(AnalysisError::TokenPositionOverflow)?;
                 skipped = 0;
+                trailing_removed = false;
             }
             let term_units = if matches!(self, Self::ReadingForm) {
                 token
@@ -189,12 +203,26 @@ impl CompiledFilter {
                     }
                 }
                 Self::SimpleLowercase => lowercase::apply(&mut token.term_utf16, model, &mut work)?,
-                Self::PartOfSpeech(_) => {}
+                Self::PartOfSpeech(_) | Self::Number => {}
             }
             input.tokens.swap(retained, index);
             retained += 1;
         }
+        if trailing_removed && input.terminal.is_none() {
+            // A filtering stream can change shared attributes while returning false at EOF.
+            input.terminal = input.tokens.pop().map(Box::new);
+        }
         input.tokens.truncate(retained);
+        if let Some(terminal) = &input.terminal {
+            output_units = output_units
+                .checked_add(token_units(terminal, terminal.term_utf16.len(), &mut work)?)
+                .ok_or_else(|| invalid("Nori filter", "terminal attribute size overflow"))?;
+            check_limit(
+                "Nori output UTF-16 units",
+                output_units,
+                limits.max_output_utf16,
+            )?;
+        }
         input.final_position_increment = input
             .final_position_increment
             .checked_add(skipped)
@@ -204,7 +232,11 @@ impl CompiledFilter {
     }
 }
 
-fn token_units(token: &NoriToken, term_units: usize, work: &mut Work<'_>) -> AnalysisResult<usize> {
+pub(super) fn token_units(
+    token: &NoriToken,
+    term_units: usize,
+    work: &mut Work<'_>,
+) -> AnalysisResult<usize> {
     let mut units = term_units;
     if let Some(reading) = &token.reading {
         units = units
@@ -236,6 +268,9 @@ impl<'a> Work<'a> {
             (self.poll)()?;
         }
         Ok(())
+    }
+    pub fn finish(&mut self) -> AnalysisResult<()> {
+        (self.poll)()
     }
 }
 

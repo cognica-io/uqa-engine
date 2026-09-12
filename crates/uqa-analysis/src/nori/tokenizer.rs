@@ -51,6 +51,7 @@ pub struct NoriLimits {
     pub max_lattice_positions: usize,
     pub max_lattice_candidates: usize,
     pub max_tokens: usize,
+    /// Bound token attributes, retained terminal attributes, and intermediate numeric units.
     pub max_output_utf16: usize,
 }
 
@@ -88,6 +89,7 @@ pub struct NoriToken {
     pub end_utf16: usize,
     pub position_increment: u32,
     pub position_length: u32,
+    pub keyword: bool,
     pub pos_type: POSType,
     pub left_pos: POSTag,
     pub right_pos: POSTag,
@@ -96,11 +98,30 @@ pub struct NoriToken {
     pub origin: NoriOrigin,
 }
 
+/// Tokens and stream end, retaining opaque exhaustion attributes for subsequent filters.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NoriOutput {
     pub tokens: Vec<NoriToken>,
     pub final_offset_utf16: usize,
     pub final_position_increment: u32,
+    #[serde(skip)]
+    pub(super) terminal: Option<Box<NoriToken>>,
+}
+
+impl NoriOutput {
+    /// Materialize a source that leaves shared token attributes unchanged when exhausted.
+    pub fn from_tokens(
+        tokens: Vec<NoriToken>,
+        final_offset_utf16: usize,
+        final_position_increment: u32,
+    ) -> Self {
+        Self {
+            tokens,
+            final_offset_utf16,
+            final_position_increment,
+            terminal: None,
+        }
+    }
 }
 
 /// Immutable configuration and models; every call owns its lattice and pending tokens.

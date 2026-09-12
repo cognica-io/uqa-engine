@@ -10,7 +10,8 @@
 //!
 //! ```
 //! use uqa_analysis::nori::{
-//!     DictionaryLimits, KoreanAnalyzer, KoreanTokenizer, NoriDictionary, NoriOptions,
+//!     DecompoundMode, DictionaryLimits, KoreanAnalyzer, KoreanFilter, KoreanTokenizer,
+//!     NoriDictionary, NoriOptions, POSTag,
 //!     UserDictionary, UserDictionaryLimits,
 //! };
 //!
@@ -23,11 +24,24 @@
 //! assert_eq!(terms?, ["세종", "시"]);
 //! assert_eq!(output.final_offset_utf16, 3);
 //!
-//! let analyzer = KoreanAnalyzer::new(model, None, NoriOptions::default())?;
+//! let analyzer = KoreanAnalyzer::new(model.clone(), None, NoriOptions::default())?;
 //! let output = analyzer.analyze("나물은")?;
 //! assert_eq!(String::from_utf16(&output.tokens[0].term_utf16)?, "나물");
 //! assert_eq!(output.final_position_increment, 1);
 //! assert_eq!(analyzer.normalize("喜悲哀歡 İ UQA")?, "喜悲哀歡 i uqa");
+//!
+//! let numbers = KoreanAnalyzer::with_filters(model, None, NoriOptions {
+//!     decompound_mode: DecompoundMode::None,
+//!     discard_punctuation: false,
+//!     ..NoriOptions::default()
+//! }, &[
+//!     KoreanFilter::PartOfSpeech { stop_tags: Some(vec![POSTag::SP]) },
+//!     KoreanFilter::Number,
+//! ])?;
+//! let output = numbers.analyze("３．２천 원 15,7")?;
+//! let terms: Result<Vec<_>, _> = output.tokens.iter()
+//!     .map(|token| String::from_utf16(&token.term_utf16)).collect();
+//! assert_eq!(terms?, ["3200", "원", "157"]);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
@@ -42,6 +56,7 @@ mod frame;
 mod io;
 mod lexicon;
 mod morphology;
+mod number;
 mod tokenizer;
 mod unicode;
 mod user_dictionary;
@@ -55,6 +70,7 @@ pub use error::{DictionaryError, DictionaryResult};
 pub use filters::{KoreanFilter, DEFAULT_STOP_TAGS};
 pub use frame::DictionaryId;
 pub use morphology::{DictionaryWord, MorphemeRef, POSTag, POSType};
+pub use number::{normalize_number, normalize_number_utf16};
 pub use unicode::UnicodeProperties;
 
 #[cfg(test)]

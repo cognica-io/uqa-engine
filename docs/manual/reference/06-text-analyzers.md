@@ -296,7 +296,7 @@ With the optional `uqa-analysis/nori` feature, `NoriDictionary::from_bytes(bytes
 
 User rules contain one surface followed by optional segmentation labels. Empty and comment-only sources return `None`. The compiler retains the exact source, stable UTF-16 ordering, and the first duplicate surface. Labels contribute UTF-16 lengths and may differ from the surface text or cover only its prefix; a sum longer than the surface is an error. Comment and whitespace processing follow the pinned Java implementation, including the final processed line character used for right-context selection. The compiled rules retain their model identity, and constructing a tokenizer with a different model returns an error.
 
-Each `NoriToken` contains `term_utf16`, `start_utf16`, `end_utf16`, `position_increment`, `position_length`, `pos_type`, `left_pos`, `right_pos`, nullable `reading`, nullable ordered `morphemes`, and `origin` (`known`, `unknown`, or `user`). Each morpheme contains `surface_utf16` and `pos`. Offsets address the supplied UTF-16 input; absolute graph positions start at `-1` and accumulate increments. `NoriOutput` retains the final input offset even for empty output, with tokenizer final increment zero. Null reading/decomposition differs from an empty value.
+Each `NoriToken` contains `term_utf16`, `start_utf16`, `end_utf16`, `position_increment`, `position_length`, `keyword`, `pos_type`, `left_pos`, `right_pos`, nullable `reading`, nullable ordered `morphemes`, and `origin` (`known`, `unknown`, or `user`). Each morpheme contains `surface_utf16` and `pos`. Offsets address the supplied UTF-16 input; absolute graph positions start at `-1` and accumulate increments. `NoriOutput` retains the final input offset even for empty output, with tokenizer final increment zero. Null reading/decomposition differs from an empty value. `NoriOutput::from_tokens(tokens, final_offset_utf16, final_position_increment)` constructs an explicit source stream. Filtered outputs also retain opaque attributes changed while the upstream stream is exhausted; keep the returned output when chaining filters because reconstructing it from its public token list or JSON loses that state.
 
 Terms and morphemes use raw `Vec<u16>` because valid UTF-8 input and accepted user rules can cause Lucene to split a surrogate pair. For example, `🙂a 가 나` supplies two one-unit segment lengths and produces unpaired surrogate terms. `String::from_utf16` is therefore fallible. Shortened compound segmentations also use back-anchored reference offsets, which can differ from the substring that supplied the term. Retain these exact values when inspecting reference behavior; replacing invalid units loses information.
 
@@ -308,7 +308,7 @@ All calls are read-only and publish no catalog, index, or transaction state. Dic
 | Input UTF-16 units | 16 Mi units | One call |
 | Live lattice positions / candidates | 131,072 / 1,000,000 | Retained rolling lattice |
 | Emitted tokens | 4,000,000 | One call |
-| Output UTF-16 units | 64 Mi units | Terms, readings, and morpheme surfaces; prospective source-token metadata is also checked before decomposition |
+| Output UTF-16 units | 64 Mi units | Terms, readings, morpheme surfaces, and retained terminal attributes; also bounds numeric input, intermediate coefficients, and formatting, and prospective source metadata before decomposition |
 
 These are explicit operation bounds, not measured peak-memory or latency guarantees. Dictionary decode limits are documented with the bundle format.
 
@@ -335,7 +335,7 @@ assert_eq!(analyzer.normalize("喜悲哀歡 İ UQA")?, "喜悲哀歡 i uqa");
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-The same example executes as a Nori module doctest. The native tokenizer is checked against the [Docker reference corpus](../../../tests/parity/nori/README.md). These are standalone Rust APIs: Korean number composition, the common `Analyzer` token bridge, Nori JSON/SQL registration, retrieval, and binding integration remain tracked in the [implementation plan](../../plans/0006-nori-analyzer.md). The existing built-in analyzer inventory remains the one listed above.
+The same example executes as a Nori module doctest. The native tokenizer is checked against the [Docker reference corpus](../../../tests/parity/nori/README.md). These are standalone Rust APIs: the common `Analyzer` token bridge, Nori JSON/SQL registration, retrieval, and binding integration remain tracked in the [implementation plan](../../plans/0006-nori-analyzer.md). The existing built-in analyzer inventory remains the one listed above.
 
 ### Korean filters and normalization
 
@@ -346,14 +346,47 @@ The same example executes as a Nori module doctest. The native tokenizer is chec
 | `KoreanFilter::PartOfSpeech { stop_tags }` | `nori_part_of_speech` | Removes tokens by left POS, carrying skipped increments to the next retained token or stream end |
 | `KoreanFilter::ReadingForm` | `nori_readingform` | Replaces only the term with a present reading, including a present empty string |
 | `KoreanFilter::SimpleLowercase` | `unicode_simple_lowercase` | Applies the model's pinned Java simple lowercase while retaining unpaired UTF-16 units and all metadata |
+| `KoreanFilter::Number` | `nori_number` | Optionally composes Korean numbers with exact decimals and reference lookahead attributes; excluded from the default analyzer |
 
 For the POS filter, omitted or null `stop_tags` uses `DEFAULT_STOP_TAGS`; `[]` keeps all tags. Exact tag spelling is required. The default set is `EP`, `EF`, `EC`, `ETN`, `ETM`, `IC`, `JKS`, `JKC`, `JKG`, `JKO`, `JKB`, `JKV`, `JKQ`, `JX`, `JC`, `MAG`, `MAJ`, `MM`, `SP`, `SSC`, `SSO`, `SC`, `SE`, `XPN`, `XSA`, `XSN`, `XSV`, `UNA`, `NA`, and `VSV`. Unknown filter properties or tags fail deserialization. This filter vocabulary is exposed by the standalone Rust `KoreanFilter` type; it is not yet accepted by generic analyzer registration or SQL configuration.
 
-`KoreanFilter::apply(output, &model)` applies one stage to a complete output; `apply_controlled(output, &model, limits, poll)` also enforces token/output bounds and cancellation. Retained tokens preserve offsets, position lengths, origin, and nullable morphology. POS filtering adds increments with checked arithmetic, including final skipped positions. Reading conversion and lowercase do not modify reading or morpheme metadata.
+`KoreanFilter::apply(output, &model)` applies one stage to a complete output; `apply_controlled(output, &model, limits, poll)` also enforces token/output bounds and cancellation. POS, reading-form, and lowercase filters preserve retained tokens' offsets, position lengths, keyword state, origin, and nullable morphology. POS filtering adds increments with checked arithmetic, including final skipped positions. Reading conversion and lowercase do not modify reading or morpheme metadata.
 
 `KoreanAnalyzer::normalize(input)` returns one `String` after simple lowercase of the complete input. It runs neither tokenization, user-rule matching, POS stops, nor reading conversion, and remains independent of an explicitly configured analysis chain. Thus `喜悲哀歡 İ UQA` normalizes to `喜悲哀歡 i uqa`. Existing generic `lowercase` retains its Rust full-lowercase behavior. `normalize_controlled` adds the same limits/cancellation arguments; `normalize_utf16(units, limits, poll)` exposes lossless simple normalization of raw units. A custom profile whose lowercase mapping changes UTF-16 width returns an error because the reference filter writes in place.
 
 The default constructor uses the default POS/readings/lowercase chain with `NoriOptions::default()` matching Lucene's `KoreanAnalyzer` defaults. Explicit punctuation and unigram options remain those of the tokenizer, and explicit filter order remains observable. These operations change no catalog or index state. Limits, cancellation, invalid profiles, and position overflow return errors without publishing partial successful output; the compiled analyzer remains reusable.
+
+### Optional Korean number composition
+
+`KoreanFilter::Number` composes adjacent numeric tokens and intervening decimal/grouping punctuation. It uses exact decimal arithmetic for Arabic, fullwidth, and Korean digits and powers through `해`, without floating-point rounding or SQL `NUMERIC` precision limits. It preserves Lucene's keyword protection, stacked-token fallthrough, aborted-composition state, and stream-end behavior. Resource limits and cancellation remain errors; malformed decimals retain their original units.
+
+The filter changes the composed term and covering offsets but inherits the shared attributes present after lookahead, including POS, reading, keyword, position increment, and position length. A later filter therefore observes the lookahead metadata on the normalized number. For example, composing before the default POS filter can remove a number that inherited the following space's `SP` tag. Reading conversion after number composition can replace the numeric term with the following word's reading. An exhausted upstream POS filter can also change these attributes without emitting another token.
+
+For a concrete numeric chain, retain punctuation, remove only `SP` tokens, then compose numbers. The following chain produces `3200`, `원`, and `157` from `３．２천 원 15,7`. Removing punctuation in the tokenizer changes `３．２천` to `32000`; replacing this explicitly ordered chain changes its reference behavior.
+
+```rust
+use uqa_analysis::nori::{
+    DecompoundMode, DictionaryLimits, KoreanAnalyzer, KoreanFilter,
+    NoriDictionary, NoriOptions, POSTag,
+};
+
+let model = NoriDictionary::from_bytes(uqa_nori_data::BUNDLE, DictionaryLimits::default())?;
+let numbers = KoreanAnalyzer::with_filters(model, None, NoriOptions {
+    decompound_mode: DecompoundMode::None,
+    discard_punctuation: false,
+    ..NoriOptions::default()
+}, &[
+    KoreanFilter::PartOfSpeech { stop_tags: Some(vec![POSTag::SP]) },
+    KoreanFilter::Number,
+])?;
+let output = numbers.analyze("３．２천 원 15,7")?;
+let terms: Result<Vec<_>, _> = output.tokens.iter()
+    .map(|token| String::from_utf16(&token.term_utf16)).collect();
+assert_eq!(terms?, ["3200", "원", "157"]);
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`normalize_number(input)` is a separate direct helper and does not tokenize or require a dictionary. It normalizes the successfully parsed numeric prefix, so `12원` becomes `12`, while a malformed decimal such as `1.2.3` or absent numeric prefix retains the complete input. `normalize_number_utf16(units, limits, poll)` provides the same operation for raw UTF-16 with cancellation. This prefix API differs from the filter's whole-token numeric eligibility. Both forms leave the default Korean analyzer and its simple-lowercase `normalize` operation unchanged.
 
 ## Python, Node.js, and browser WASM
 

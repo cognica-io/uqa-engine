@@ -1,6 +1,6 @@
 # Lucene Nori reference examples
 
-These fixtures support the [Nori analyzer design](../../../docs/design/nori-analyzer.md). The original 31 cases record actual Lucene 10.5.1 tokenizer, filter, analyzer, and normalization results. Separate expanded corpora now compare native Rust user-dictionary compilation and standalone tokenization against Lucene. Full analyzer, storage, binding, and performance acceptance remains in the [implementation plan](../../../docs/plans/0006-nori-analyzer.md).
+These fixtures support the [Nori analyzer design](../../../docs/design/nori-analyzer.md). The original 31 cases record actual Lucene 10.5.1 tokenizer, filter, analyzer, and normalization results. Separate expanded corpora compare native Rust user-dictionary compilation, standalone tokenization, complete Korean analysis, number composition, and normalization against Lucene. Generic analyzer integration, storage, binding, and performance acceptance remains in the [implementation plan](../../../docs/plans/0006-nori-analyzer.md).
 
 `manifest.json` pins the Lucene source commit, three Maven Central jar hashes, the Docker image digest, the JVM runtime, and the dictionary resources. `NoriReference.java` uses Lucene's real `KoreanAnalyzer`, tokenizer, filters, and token attributes. `expected.jsonl` records the runtime followed by the case results; offsets are UTF-16 code units. The dictionary archive's `COPYING` was inspected and identifies Apache-2.0. The fixture runner only downloads the three jars; it does not download or rebuild the dictionary archive.
 
@@ -61,4 +61,18 @@ python3 tests/parity/nori/run_analysis_reference.py --offline --platform linux/a
 cargo test -p uqa-analysis --features nori --locked nori_analysis
 ```
 
-Both Docker platforms produced the same 423 results and the native implementation matches them. The eight original full-analyzer examples also pass directly against their original reference file. Native regressions additionally cover present-empty readings, left-versus-right POS selection, stacked edges, trailing holes, checked position overflow, cancellation, bounds, and strict configuration properties. Korean number composition and generic pipeline/binding integration remain open acceptance items.
+Both Docker platforms produced the same 423 results and the native implementation matches them. The eight original full-analyzer examples also pass directly against their original reference file. Native regressions additionally cover present-empty readings, left-versus-right POS selection, stacked edges, trailing holes, checked position overflow, cancellation, bounds, and strict configuration properties. Generic pipeline/binding integration remains an open acceptance item.
+
+## Exact Korean numbers and shared filter state
+
+`NoriNumberReference.java` records 823 direct-normalization, real-tokenizer, and synthetic-stream cases with the actual `KoreanNumberFilter`. The raw UTF-16 transport preserves unpaired units. Synthetic streams specify all term, offset, graph, keyword, POS, reading, and morpheme attributes, plus final offsets and skipped positions. Canonical complete-output hashes include keyword state; short outputs also retain the full analysis. `number_cases.json`, `number_expected.jsonl`, and `number_manifest.json` pin the complete input and output.
+
+The corpus includes malformed/prefix parsing, mixed Korean/fullwidth decimal syntax, integers beyond 131,072 digits and fractions beyond 16,383 places, long carry and scale alignment, repeated small additions to a large coefficient, 300 fixed-seed synthetic graphs, stacked/keyword tokens, all compound modes, user nouns, ordered POS/reading/lowercase stages, and repeated number filters. It captures lookahead metadata, a prefix retained after aborted composition, and attribute changes when an upstream filter returns false at exhaustion. Reconstructing only successful tokens would lose observable behavior in these chains.
+
+```sh
+python3 tests/parity/nori/run_number_reference.py --offline
+python3 tests/parity/nori/run_number_reference.py --offline --platform linux/amd64
+cargo test -p uqa-analysis --features nori --locked nori_numbers
+```
+
+Native comparisons cover all 823 complete snapshots and the four original number examples. Both Docker platforms produce identical results. Separate native checks exercise exact arithmetic, bounded work when adding many small coefficients, resource failure versus malformed-input fallback, cancellation at multiple checkpoints, and reuse after failure. The default Korean analyzer excludes number composition; the [manual](../../../docs/manual/reference/06-text-analyzers.md#optional-korean-number-composition) specifies a verified explicit chain and the separate prefix-normalization helper.
