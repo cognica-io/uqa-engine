@@ -365,8 +365,7 @@ pub trait PersistentStorageBackend: Send + Sync {
         Ok(None)
     }
 
-    /// Whether reading [`Self::change_version`] can proceed while this
-    /// session owns its write transaction.
+    /// Whether reading [`Self::change_version`] can proceed while this session owns its pinned transaction. An independent monitor can also be unsafe for a reader when a pending writer is waiting for that reader's lock.
     fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
         Ok(true)
     }

@@ -218,7 +218,7 @@ fn deferred_transaction_snapshot_can_be_pinned_before_a_user_query() {
 }
 
 #[test]
-fn compressed_write_transaction_requires_pinned_connection_refresh() {
+fn compressed_transactions_require_pinned_connection_refresh() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("compressed-monitor.db");
     let connection =
@@ -233,13 +233,109 @@ fn compressed_write_transaction_requires_pinned_connection_refresh() {
     assert!(connection.data_version_monitor_is_nonblocking().unwrap());
     connection.begin_deferred_transaction().unwrap();
     connection.pin_transaction_snapshot().unwrap();
-    assert!(connection.data_version_monitor_is_nonblocking().unwrap());
+    assert!(!connection.data_version_monitor_is_nonblocking().unwrap());
     connection.rollback_transaction().unwrap();
 
     connection.begin_transaction().unwrap();
     assert!(!connection.data_version_monitor_is_nonblocking().unwrap());
     connection.pin_transaction_snapshot().unwrap();
     connection.rollback_transaction().unwrap();
+}
+
+#[test]
+fn compressed_reader_uses_pinned_refresh_while_writer_waits() {
+    thread_local! {
+        static COMMIT_GATE: std::cell::RefCell<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>> = const { std::cell::RefCell::new(None) };
+    }
+    fn pause_pending_writer(_: i32) -> bool {
+        COMMIT_GATE.with(|gate| {
+            let gate = gate.borrow();
+            let (entered, release) = gate.as_ref().unwrap();
+            entered.send(()).unwrap();
+            release.recv().is_ok()
+        })
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let reader = ManagedConnection::open_compressed(
+        &directory.path().join("pending-writer-monitor.db"),
+        SQLiteCompressionOptions::default(),
+    )
+    .unwrap();
+    reader
+        .with(|sqlite| {
+            sqlite.execute_batch(
+                "CREATE TABLE items(value INTEGER); INSERT INTO items VALUES (10)",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    reader.data_version().unwrap();
+    // Probe the independent monitor without waiting on the deliberately paused writer.
+    reader
+        .pool
+        .data_version_monitor
+        .lock()
+        .as_ref()
+        .unwrap()
+        .busy_timeout(Duration::ZERO)
+        .unwrap();
+    let writer = reader.new_session();
+    reader.begin_deferred_transaction().unwrap();
+    reader.pin_transaction_snapshot().unwrap();
+    writer.begin_transaction().unwrap();
+    writer
+        .with(|sqlite| {
+            sqlite.execute("UPDATE items SET value = 11", [])?;
+            Ok(())
+        })
+        .unwrap();
+
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    thread::scope(|scope| {
+        let release_tx = release_tx;
+        let commit = scope.spawn(move || {
+            COMMIT_GATE.with(|gate| {
+                *gate.borrow_mut() = Some((entered_tx, release_rx));
+            });
+            writer
+                .with(|sqlite| {
+                    sqlite.busy_handler(Some(pause_pending_writer))?;
+                    Ok(())
+                })
+                .unwrap();
+            writer.commit_transaction()
+        });
+        // COMMIT reaches its busy handler with a PENDING lock while our reader owns SHARED.
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let nonblocking = reader.data_version_monitor_is_nonblocking().unwrap();
+        let independent = reader.data_version();
+        let pinned = reader.with(|sqlite| {
+            Ok(sqlite.query_row("SELECT value FROM items", [], |row| row.get::<_, i64>(0))?)
+        });
+        reader.rollback_transaction().unwrap();
+        release_tx.send(()).unwrap();
+        commit.join().unwrap().unwrap();
+        assert!(
+            matches!(independent, Err(SQLiteError::SQLite(rusqlite::Error::SqliteFailure(error, _))) if error.code == rusqlite::ErrorCode::DatabaseBusy)
+        );
+        assert_eq!(pinned.unwrap(), 10);
+        assert!(
+            !nonblocking,
+            "a pending writer makes the independent monitor unsafe for an existing reader"
+        );
+    });
+    assert!(reader.data_version_monitor_is_nonblocking().unwrap());
+    reader
+        .with(|sqlite| {
+            assert_eq!(
+                sqlite.query_row("SELECT value FROM items", [], |row| row.get::<_, i64>(0))?,
+                11
+            );
+            Ok(())
+        })
+        .unwrap();
 }
 
 #[test]
