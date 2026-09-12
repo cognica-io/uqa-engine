@@ -593,7 +593,7 @@ car => automobile, vehicle
 fast, quick, rapid
 ```
 
-Registration reads the file once to reject a missing or unreadable path. Analysis reads it again on every execution, so edits are visible without re-registering the analyzer and later deletion or permission loss becomes an explicit indexing or search error. The catalog stores the path, not a copy of the file; every process and reopen environment must provide the same resource. Use inline synonyms when the catalog must be self-contained.
+Uncompiled `Analyzer` and token-filter execution reload the file on each call, so edits become visible and later deletion or permission loss returns an error. Compilation resolves the file contents into an immutable descriptor. Engine registration and field binding retain that compiled revision, including its resolved synonym map, across file edits and reopen. Re-register the name to load changed contents, and rebind a field to install the new revision there. The typed `highlight` helper compiles its explicit analyzer once per call; `highlight_compiled` retains the caller-provided revision.
 
 ## Validation and operational rules
 
@@ -602,7 +602,7 @@ Registration reads the file once to reject a missing or unreadable path. Analysi
 - A field assignment requires an existing table, a `TEXT` column, and a physical GIN field.
 - Index-time analysis failure aborts the document write without publishing partial row or posting state.
 - Persistent analyzer definitions and assignments are restored during engine reopen; an invalid catalog configuration makes reopen fail explicitly.
-- SQL `uqa_highlight` currently uses the built-in English `standard` analyzer and does not inherit a table-field analyzer. The typed `uqa_analysis::highlight` API accepts an explicit analyzer.
+- SQL `uqa_highlight` accepts an explicit analyzer name as its seventh argument and highlights complete-source analysis at corrected original offsets. Calls without a name retain English word scanning. The typed `uqa_analysis::highlight` helper accepts an analyzer, and `highlight_compiled` accepts an immutable compiled revision. Neither API infers a table-field analyzer; see the [highlighting contract](../sql/06-retrieval.md#highlighting-and-facets).
 
 ## Related documentation
 

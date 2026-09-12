@@ -6,21 +6,9 @@
 
 //! Search-result highlighting.
 //!
-//! Highlighting operates in two phases:
+//! Explicit analyzers process the complete source and query inputs, then highlight matching lossless terms at their original source offsets. Overlapping source spans are merged when rendering, so compound alternatives and rewritten terms do not produce nested markers.
 //!
-//! 1. Build a set of *analyzed* query terms (lower-cased + stemmed +
-//!    char/token filtered through the same [`Analyzer`] pipeline used
-//!    for indexing). When the caller does not supply an analyzer, the
-//!    fallback is a plain ASCII lower-case fold so the highlighter
-//!    still works as a stand-alone helper.
-//! 2. Walk the source text with a `\w+` tokenizer; every token whose
-//!    analyzed form intersects the query-term set becomes a highlight
-//!    span. Spans are wrapped with the configured `start_tag` /
-//!    `end_tag`, or projected into a fragment view when
-//!    `max_fragments > 0`.
-//!
-//! The matcher operates on character offsets rather than byte offsets, so
-//! highlight spans align correctly in CJK and other multibyte text.
+//! Without an analyzer, the helper scans Unicode words and compares their lower-case forms. The word-scanning entry point also preserves the existing SQL highlighting behavior.
 //!
 //! ```rust
 //! use uqa_analysis::{highlight, HighlightOptions};
@@ -87,13 +75,32 @@ fn word_regex() -> AnalysisResult<&'static Regex> {
         })
 }
 
-/// Wrap matched query terms in `text` with the configured tags.
+mod rich;
+pub use rich::highlight_compiled;
+
+/// Highlight complete-source token spans with an explicit analyzer, or lower-case word matches when omitted.
 ///
-/// `analyzer` is optional: when supplied, both the query terms and
-/// the source text are run through the same pipeline so stemming /
-/// lower-casing / accent folding agree. When omitted, ASCII
-/// lower-case is used instead.
+/// Each query input is analyzed as a whole. An explicit analyzer is compiled once per call so source and query inputs share the same resolved revision.
 pub fn highlight(
+    text: &str,
+    query_terms: &[String],
+    analyzer: Option<&Analyzer>,
+    opts: &HighlightOptions,
+) -> AnalysisResult<String> {
+    if text.is_empty() || query_terms.is_empty() {
+        return Ok(text.to_owned());
+    }
+    match analyzer {
+        Some(analyzer) => {
+            let compiled = analyzer.compile()?;
+            highlight_compiled(text, query_terms, &compiled, opts)
+        }
+        None => highlight_words(text, query_terms, None, opts),
+    }
+}
+
+/// Highlight independently analyzed regex words, retaining the word-scanning contract used by SQL calls without an explicit analyzer name.
+pub fn highlight_words(
     text: &str,
     query_terms: &[String],
     analyzer: Option<&Analyzer>,
@@ -166,19 +173,26 @@ pub fn highlight(
         }
     }
 
-    if match_spans.is_empty() {
-        if opts.max_fragments > 0 {
-            return Ok(ellipsis_prefix(text, opts.fragment_size));
-        }
-        return Ok(text.to_string());
-    }
+    Ok(render_highlights(text, &match_spans, opts))
+}
 
-    let highlighted = if opts.max_fragments > 0 {
-        build_fragments(text, &match_spans, opts)
+fn render_highlights(
+    text: &str,
+    match_spans: &[(usize, usize)],
+    opts: &HighlightOptions,
+) -> String {
+    if match_spans.is_empty() {
+        return if opts.max_fragments > 0 {
+            ellipsis_prefix(text, opts.fragment_size)
+        } else {
+            text.to_owned()
+        };
+    }
+    if opts.max_fragments > 0 {
+        build_fragments(text, match_spans, opts)
     } else {
-        wrap_full(text, &match_spans, &opts.start_tag, &opts.end_tag)
-    };
-    Ok(highlighted)
+        wrap_full(text, match_spans, &opts.start_tag, &opts.end_tag)
+    }
 }
 
 fn ellipsis_prefix(text: &str, fragment_size: usize) -> String {
@@ -284,13 +298,17 @@ fn build_fragments(text: &str, match_spans: &[(usize, usize)], opts: &HighlightO
             continue;
         };
         let centre = first.0 + last.1.saturating_sub(first.0) / 2;
-        let mut frag_start = centre.saturating_sub(half);
-        let mut frag_end = (centre + half).min(total_chars);
+        let focus = cluster
+            .iter()
+            .min_by_key(|(start, end)| (start + (end - start) / 2).abs_diff(centre))
+            .expect("nonempty highlight cluster");
+        let mut frag_start = centre.saturating_sub(half).min(focus.0);
+        let mut frag_end = centre.saturating_add(half).min(total_chars).max(focus.1);
 
         // Snap to nearest space boundary so we do not bisect a word.
         if frag_start > 0 {
             let mut probe = frag_start;
-            let limit = (frag_start + 30).min(total_chars);
+            let limit = frag_start.saturating_add(30).min(focus.0);
             while probe < limit {
                 if chars
                     .get(probe)
@@ -304,7 +322,7 @@ fn build_fragments(text: &str, match_spans: &[(usize, usize)], opts: &HighlightO
             }
         }
         if frag_end < total_chars {
-            let lower = frag_end.saturating_sub(30);
+            let lower = frag_end.saturating_sub(30).max(focus.1);
             let mut probe = frag_end;
             while probe > lower {
                 if chars

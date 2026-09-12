@@ -124,7 +124,7 @@ sequenceDiagram
 
 Engine text scoring, calibration, hybrid search, top-K execution, multi-field retrieval, retrieval planning, and the operator-tree driver retain the field search revision. Detached portal indexes install the exact compiled handles from their source index. Scoring code uses the analyzed term sequence for term-frequency and query-term accounting. Duplicate analyzed terms can remain semantically relevant and must not be deduplicated casually.
 
-The SQL `uqa_highlight` scalar path is an exception: it extracts whitespace-separated query candidates and uses `standard_analyzer("english")` directly. It does not receive a table and field identity, so it cannot resolve a field analyzer. The typed highlighting API accepts an explicit analyzer.
+SQL `uqa_highlight` accepts an analyzer name after its six existing arguments. SQL owns argument validation, execution retains the selected compiled revision through `AnalyzerRevisions`, and `uqa-analysis::highlight_compiled` analyzes complete source/query inputs, matches lossless terms, and renders their corrected original-source spans. Overlapping spans merge only for presentation; fragment windows retain a complete selected match. Engine supplies the named-resource adapter. Calls without a name retain whitespace-separated query candidates and English word scanning. Highlighting has no table/field identity and never infers a field analyzer. The typed `highlight` helper uses the rich path when given an analyzer, and `highlight_compiled` accepts a retained revision directly.
 
 ## Catalog persistence and reopen
 

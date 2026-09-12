@@ -43,6 +43,7 @@ pub struct ScalarFunctionContext<'a> {
     pub session: &'a dyn ScalarSession,
     pub graphs: &'a dyn GraphLifecycle,
     pub models: ModelTrainingContext<'a>,
+    pub analyzers: &'a dyn super::scalar_projection::AnalyzerRevisions,
 }
 use crate::query::graph_lifecycle::{
     run_age_alter_graph_with_evaluator, run_age_create_elabel_with_evaluator,
@@ -72,7 +73,12 @@ pub fn intercept_function(
             .transpose();
     }
     match lower.as_str() {
-        "uqa_highlight" => Ok(Some(run_uqa_highlight(row, args, evaluate)?)),
+        "uqa_highlight" => Ok(Some(run_uqa_highlight(
+            row,
+            args,
+            evaluate,
+            context.map(|context| context.analyzers),
+        )?)),
         "score_bm25" | "score_bayesian_bm25" => {
             validate_score_projection_args(&lower, args, evaluate)?;
             let score = score_projection_value(&lower, args, row)?;

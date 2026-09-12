@@ -14,6 +14,9 @@ use std::sync::{
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+#[path = "sql_uqa_highlight/explicit_analyzers.rs"]
+mod explicit_analyzers;
+
 fn fixture() -> Engine {
     let eng = Engine::new();
     eng.sql(

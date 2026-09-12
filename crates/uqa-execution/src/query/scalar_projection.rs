@@ -6,6 +6,8 @@
 
 //! Score provenance and highlight rendering for scalar projection rows.
 
+use std::sync::Arc;
+use uqa_analysis::CompiledAnalyzer;
 use uqa_core::Value;
 use uqa_sql::{
     expr::RowLookup,
@@ -41,10 +43,16 @@ fn score_projection_context_error(function: &str) -> SQLError {
     ))
 }
 
+/// Named resources retained independently of later registry replacement.
+pub trait AnalyzerRevisions {
+    fn analyzer_revision(&self, name: &str) -> Result<Arc<CompiledAnalyzer>, String>;
+}
+
 pub fn run_uqa_highlight(
     row: &dyn RowLookup,
     args: &[ScalarExpr],
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
+    analyzers: Option<&dyn AnalyzerRevisions>,
 ) -> Result<Value, SQLError> {
     let arguments = match highlight_arguments(row, args, evaluate)? {
         HighlightInput::Value(value) => return Ok(value),
@@ -57,6 +65,7 @@ pub fn run_uqa_highlight(
         end_tag,
         max_fragments,
         fragment_size,
+        analyzer,
     } = arguments;
     let opts = uqa_analysis::HighlightOptions {
         start_tag,
@@ -64,6 +73,19 @@ pub fn run_uqa_highlight(
         max_fragments,
         fragment_size,
     };
+    if let Some(name) = analyzer {
+        let revisions = analyzers.ok_or_else(|| {
+            SQLError::Unsupported(
+                "uqa_highlight with an analyzer requires named analyzer resources".into(),
+            )
+        })?;
+        let revision = revisions
+            .analyzer_revision(&name)
+            .map_err(SQLError::Unsupported)?;
+        let out = uqa_analysis::highlight_compiled(&text, &[query_str], &revision, &opts)
+            .map_err(|error| SQLError::Internal(format!("highlight analysis failed: {error}")))?;
+        return Ok(Value::Str(out));
+    }
     // Pull every whitespace-separated token from the query string as a
     // candidate match term. A simple split matches the documented highlighting
     // surface and its regression fixtures.
@@ -73,7 +95,10 @@ pub fn run_uqa_highlight(
         .map(std::string::ToString::to_string)
         .collect();
     let analyzer = uqa_analysis::standard_analyzer("english");
-    let out = uqa_analysis::highlight(&text, &terms, Some(&analyzer), &opts)
+    let out = uqa_analysis::highlight::highlight_words(&text, &terms, Some(&analyzer), &opts)
         .map_err(|error| SQLError::Internal(format!("highlight analysis failed: {error}")))?;
     Ok(Value::Str(out))
 }
+
+#[cfg(test)]
+mod tests;
