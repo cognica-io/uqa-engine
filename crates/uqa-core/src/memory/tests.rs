@@ -123,3 +123,48 @@ fn zero_sized_elements_need_no_buffer_reservation() {
     assert_eq!(values.len(), 10);
     assert_eq!(budget.peak(), 0);
 }
+
+#[test]
+fn unicode_string_growth_fails_without_partial_appends() {
+    let budget = MemoryBudget::new(10);
+    let mut value = BudgetedString::new(&budget);
+    value.push('한').unwrap();
+    value.push_str("🙂").unwrap();
+    assert_eq!(&*value, "한🙂");
+    assert_eq!(budget.used(), 7);
+    assert_eq!(budget.peak(), 10);
+    assert!(matches!(value.push('A'), Err(MemoryError::Limit { .. })));
+    assert_eq!(&*value, "한🙂");
+    drop(value);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn shared_values_keep_their_payload_and_buffer_leases_until_the_last_owner() {
+    let budget = MemoryBudget::new(1024);
+    let mut value = BudgetedString::new(&budget);
+    value.push_str("한🙂").unwrap();
+    let (value, memory) = value.into_parts();
+    let shared = Budgeted::new(value, memory).into_shared().unwrap();
+    let retained = shared.reserved_bytes();
+    assert_eq!(retained, 7 + std::mem::size_of::<Budgeted<String>>());
+    let other_owner = shared.clone();
+    drop(shared);
+    assert_eq!(budget.used(), retained);
+    assert_eq!(&***other_owner, "한🙂");
+    drop(other_owner);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn failure_to_reserve_a_shared_payload_releases_the_consumed_value() {
+    let budget = MemoryBudget::new(7);
+    let mut value = BudgetedString::new(&budget);
+    value.push_str("한🙂").unwrap();
+    let (value, memory) = value.into_parts();
+    assert!(matches!(
+        Budgeted::new(value, memory).into_shared(),
+        Err(MemoryError::Limit { .. })
+    ));
+    assert_eq!(budget.used(), 0);
+}

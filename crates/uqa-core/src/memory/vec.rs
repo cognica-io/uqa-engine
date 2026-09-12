@@ -26,6 +26,10 @@ impl<T> BudgetedVec<T> {
         self.values.capacity()
     }
 
+    pub fn budget(&self) -> &MemoryBudget {
+        self.memory.budget()
+    }
+
     pub fn reserve(&mut self, additional: usize) -> Result<(), MemoryError> {
         let required = self
             .values

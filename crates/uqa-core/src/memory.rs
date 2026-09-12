@@ -12,9 +12,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 mod deque;
+mod string;
 mod vec;
 
 pub use deque::BudgetedDeque;
+pub use string::BudgetedString;
 pub use vec::BudgetedVec;
 
 #[derive(Debug, thiserror::Error)]
@@ -53,6 +55,10 @@ impl MemoryBudget {
 
     pub fn used(&self) -> usize {
         self.0.used.load(Ordering::Relaxed)
+    }
+
+    pub fn shares_allowance(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
     }
 
     /// Largest simultaneous reservation, including old and replacement buffers.
@@ -160,6 +166,14 @@ impl<T> Budgeted<T> {
         self.memory.bytes()
     }
 
+    /// Share the immutable value and its lease, reserving the shared payload before allocation. Reference-count bookkeeping is outside the payload allowance.
+    pub fn into_shared(self) -> Result<Arc<Self>, MemoryError> {
+        let mut memory = self.memory.budget().reserve(std::mem::size_of::<Self>())?;
+        let (value, allocations) = self.into_parts();
+        memory.absorb(allocations);
+        Ok(Arc::new(Self::new(value, memory)))
+    }
+
     /// Move the value and lease together to another allocation owner.
     pub fn into_parts(self) -> (T, MemoryReservation) {
         (self.value, self.memory)
@@ -173,6 +187,14 @@ impl<T> std::ops::Deref for Budgeted<T> {
         &self.value
     }
 }
+
+impl<T: PartialEq> PartialEq for Budgeted<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl<T: Eq> Eq for Budgeted<T> {}
 
 fn buffer_bytes<T>(capacity: usize) -> Result<usize, MemoryError> {
     capacity
