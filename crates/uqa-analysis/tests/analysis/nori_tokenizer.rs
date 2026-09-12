@@ -9,7 +9,7 @@
 use serde_json::{json, Value};
 use uqa_analysis::nori::{KoreanTokenizer, NoriOptions, UserDictionary, UserDictionaryLimits};
 
-use super::nori_resources::model;
+use super::nori_resources::{canonical, model, raw_analysis};
 
 #[test]
 fn tokenizer_matches_all_original_tokenizer_fixtures() {
@@ -48,58 +48,14 @@ fn tokenizer_matches_all_original_tokenizer_fixtures() {
             expected["final_position_increment"],
             "{id}"
         );
-        let mut position = -1_i64;
-        let projected: Vec<_> = actual.tokens.iter().map(|token| {
-            position += i64::from(token.position_increment);
-            let parts = token.morphemes.as_ref().map(|parts| parts.iter().map(|part| json!({"surface": String::from_utf16(&part.surface_utf16).unwrap(), "pos": part.pos})).collect::<Vec<_>>());
-            json!({"term": String::from_utf16(&token.term_utf16).unwrap(), "start_utf16": token.start_utf16, "end_utf16": token.end_utf16,
-                "position": position, "position_increment": token.position_increment, "position_length": token.position_length,
-                "pos_type": token.pos_type, "left_pos": token.left_pos, "right_pos": token.right_pos, "reading": token.reading, "morphemes": parts})
-        }).collect();
-        assert_eq!(json!(projected), expected["tokens"], "{id}");
+        assert_eq!(
+            super::nori_resources::string_tokens(&actual),
+            expected["tokens"],
+            "{id}"
+        );
         checked += 1;
     }
     assert!(checked >= 15);
-}
-
-fn raw_analysis(output: &uqa_analysis::nori::NoriOutput) -> Value {
-    let tokens: Vec<_> = output.tokens.iter().map(|token| json!({
-        "term_utf16": token.term_utf16, "start_utf16": token.start_utf16, "end_utf16": token.end_utf16,
-        "position_increment": token.position_increment, "position_length": token.position_length,
-        "pos_type": token.pos_type, "left_pos": token.left_pos, "right_pos": token.right_pos,
-        "reading_utf16": token.reading.as_ref().map(|text| text.encode_utf16().collect::<Vec<_>>()), "morphemes": token.morphemes,
-    })).collect();
-    json!({"tokens": tokens, "final_offset_utf16": output.final_offset_utf16, "final_position_increment": output.final_position_increment})
-}
-
-fn canonical(value: &Value, bytes: &mut Vec<u8>) {
-    match value {
-        Value::Object(object) => {
-            bytes.push(b'{');
-            let mut keys: Vec<_> = object.keys().collect();
-            keys.sort_unstable();
-            for (index, key) in keys.into_iter().enumerate() {
-                if index > 0 {
-                    bytes.push(b',');
-                }
-                serde_json::to_writer(&mut *bytes, key).unwrap();
-                bytes.push(b':');
-                canonical(&object[key], bytes);
-            }
-            bytes.push(b'}');
-        }
-        Value::Array(array) => {
-            bytes.push(b'[');
-            for (index, value) in array.iter().enumerate() {
-                if index > 0 {
-                    bytes.push(b',');
-                }
-                canonical(value, bytes);
-            }
-            bytes.push(b']');
-        }
-        _ => serde_json::to_writer(bytes, value).unwrap(),
-    }
 }
 
 #[test]

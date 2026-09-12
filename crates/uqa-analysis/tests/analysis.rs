@@ -55,3 +55,7 @@ mod nori_users;
 #[cfg(feature = "nori")]
 #[path = "analysis/nori_tokenizer.rs"]
 mod nori_tokenizer;
+
+#[cfg(feature = "nori")]
+#[path = "analysis/nori_analysis.rs"]
+mod nori_analysis;

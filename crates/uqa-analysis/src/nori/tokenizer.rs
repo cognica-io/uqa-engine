@@ -144,15 +144,7 @@ impl KoreanTokenizer {
         limits: NoriLimits,
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<NoriOutput> {
-        let mut units = Vec::new();
-        for (index, unit) in input.encode_utf16().enumerate() {
-            if index % 1024 == 0 {
-                poll()?;
-            }
-            check_limit("Nori input UTF-16 units", index + 1, limits.max_input_utf16)?;
-            units.try_reserve(1).map_err(DictionaryError::from)?;
-            units.push(unit);
-        }
+        let units = encode_input(input, limits, poll)?;
         self.tokenize_utf16(&units, limits, poll)
     }
 
@@ -178,4 +170,21 @@ impl KoreanTokenizer {
             poll,
         )
     }
+}
+
+pub(super) fn encode_input(
+    input: &str,
+    limits: NoriLimits,
+    poll: &mut impl FnMut() -> AnalysisResult<()>,
+) -> AnalysisResult<Vec<u16>> {
+    let mut units = Vec::new();
+    for (index, unit) in input.encode_utf16().enumerate() {
+        if index % 1024 == 0 {
+            poll()?;
+        }
+        check_limit("Nori input UTF-16 units", index + 1, limits.max_input_utf16)?;
+        units.try_reserve(1).map_err(DictionaryError::from)?;
+        units.push(unit);
+    }
+    Ok(units)
 }

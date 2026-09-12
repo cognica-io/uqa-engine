@@ -1,6 +1,6 @@
 # Lucene-compatible Nori analyzer
 
-Status: active design, prepared on 2026-09-12 against UQA commit `bbeb1026cba9001cc5f084d24ac68ec197bd1925`. Generic source mapping and structured token APIs are now implemented and described in the [Rust analyzer reference](../manual/reference/06-text-analyzers.md#structured-tokens). The standalone native Nori tokenizer and user-rule compiler are also implemented and described in the [Korean tokenization reference](../manual/reference/06-text-analyzers.md#standalone-korean-tokenization). Korean filters, generic analyzer integration, new SQL functions, and graph storage contracts below remain proposals; the [SQL manual](../manual/sql/05-analyzers.md) continues to describe available behavior.
+Status: active design, prepared on 2026-09-12 against UQA commit `bbeb1026cba9001cc5f084d24ac68ec197bd1925`. Generic source mapping and structured token APIs are now implemented and described in the [Rust analyzer reference](../manual/reference/06-text-analyzers.md#structured-tokens). The standalone native Nori tokenizer, user-rule compiler, default analyzer, POS/readings/simple-lowercase filters, and separate normalization are also implemented and described in the [Korean tokenization reference](../manual/reference/06-text-analyzers.md#standalone-korean-tokenization). Korean number composition, generic analyzer integration, new SQL functions, and graph storage contracts below remain proposals; the [SQL manual](../manual/sql/05-analyzers.md) continues to describe available behavior.
 
 Development follows the active [Nori implementation plan](../plans/0006-nori-analyzer.md), which records the current implementation boundary, dependencies, and verification evidence.
 
@@ -14,7 +14,7 @@ Compatibility covers the ordered term stream, token offsets, position increments
 
 The design includes the three decompound modes, system and unknown dictionaries, user dictionaries, POS filtering, reading conversion, lowercase normalization, and the optional Korean number filter. It also includes the indexing, query, persistence, and binding changes needed to consume their output correctly. `standard_cjk` retains its documented character n-gram behavior.
 
-The checked-in [reference harness](../../tests/parity/nori/README.md) executed 31 cases using the real Lucene classes in Docker. Its [manifest](../../tests/parity/nori/manifest.json) pins all inputs, and its [expected output](../../tests/parity/nori/expected.jsonl) contains complete token attributes. The expanded reference additionally compares 38 user-dictionary cases and 238 standalone tokenizer cases to native Rust, including complete token/end-state hashes for long streams. Full analyzer parity, storage behavior, actual WASM execution, and performance remain unverified.
+The checked-in [reference harness](../../tests/parity/nori/README.md) executed 31 cases using the real Lucene classes in Docker. Its [manifest](../../tests/parity/nori/manifest.json) pins all inputs, and its [expected output](../../tests/parity/nori/expected.jsonl) contains complete token attributes. The expanded reference additionally compares 38 user-dictionary cases, 238 standalone tokenizer cases, and 423 filter/analyzer/normalization cases to native Rust, including complete token/end-state hashes for long streams. The default native analyzer and its constituent filters match the recorded cases, and simple lowercase matches a complete Unicode traversal. Optional Korean number composition, storage behavior, actual WASM execution, and performance remain unverified.
 
 | Reference input | Pinned value |
 | --- | --- |
@@ -25,7 +25,7 @@ The checked-in [reference harness](../../tests/parity/nori/README.md) executed 3
 | Dictionary normalization during Lucene generation | `normalizeEntries = false` |
 | Reference command | `python3 tests/parity/nori/run_reference.py` |
 
-The original 31 cases, expanded user/tokenizer corpora, and complete neutral model export have been reproduced on both Docker platforms with identical output. Native user/tokenizer differential checks are recorded separately in the implementation plan; they do not establish complete analyzer or WASM parity or platform performance. Changing the Docker digest, JVM, Lucene jars, dictionary, or generated Unicode tables requires an explicit fixture diff and a new compatibility fingerprint.
+The original 31 cases, expanded user/tokenizer/filter/analyzer corpora, and complete neutral model export have been reproduced on both Docker platforms with identical output. Native differential checks are recorded separately in the implementation plan; they do not establish number-filter or end-to-end retrieval parity, actual WASM execution, or platform performance. Changing the Docker digest, JVM, Lucene jars, dictionary, or generated Unicode tables requires an explicit fixture diff and a new compatibility fingerprint.
 
 ## Current UQA constraints
 

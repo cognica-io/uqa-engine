@@ -314,22 +314,46 @@ These are explicit operation bounds, not measured peak-memory or latency guarant
 
 ```rust
 use uqa_analysis::nori::{
-    DictionaryLimits, KoreanTokenizer, NoriDictionary, NoriOptions,
+    DictionaryLimits, KoreanAnalyzer, KoreanTokenizer, NoriDictionary, NoriOptions,
     UserDictionary, UserDictionaryLimits,
 };
 
 let model = NoriDictionary::from_bytes(uqa_nori_data::BUNDLE, DictionaryLimits::default())?;
 let user = UserDictionary::compile("세종시 세종 시", &model, UserDictionaryLimits::default())?;
-let tokenizer = KoreanTokenizer::new(model, user, NoriOptions::default())?;
+let tokenizer = KoreanTokenizer::new(model.clone(), user, NoriOptions::default())?;
 let output = tokenizer.tokenize("세종시")?;
 let terms: Result<Vec<_>, _> = output.tokens.iter()
     .map(|token| String::from_utf16(&token.term_utf16)).collect();
 assert_eq!(terms?, ["세종", "시"]);
 assert_eq!(output.final_offset_utf16, 3);
+
+let analyzer = KoreanAnalyzer::new(model, None, NoriOptions::default())?;
+let output = analyzer.analyze("나물은")?;
+assert_eq!(String::from_utf16(&output.tokens[0].term_utf16)?, "나물");
+assert_eq!(output.final_position_increment, 1);
+assert_eq!(analyzer.normalize("喜悲哀歡 İ UQA")?, "喜悲哀歡 i uqa");
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-The same example executes as a Nori module doctest. The native tokenizer is checked against the [Docker reference corpus](../../../tests/parity/nori/README.md). It is a standalone Rust API: Korean filters, the common `Analyzer` token bridge, Nori JSON/SQL registration, retrieval, and binding integration remain tracked in the [implementation plan](../../plans/0006-nori-analyzer.md). The existing built-in analyzer inventory remains the one listed above.
+The same example executes as a Nori module doctest. The native tokenizer is checked against the [Docker reference corpus](../../../tests/parity/nori/README.md). These are standalone Rust APIs: Korean number composition, the common `Analyzer` token bridge, Nori JSON/SQL registration, retrieval, and binding integration remain tracked in the [implementation plan](../../plans/0006-nori-analyzer.md). The existing built-in analyzer inventory remains the one listed above.
+
+### Korean filters and normalization
+
+`KoreanAnalyzer::new(model, user, options)` compiles the tokenizer with the default POS stop filter, reading-form conversion, and pinned Unicode simple lowercase, in that order. `analyze(input)` returns the same lossless `NoriOutput` representation with retained morphology and stream-end gaps. `KoreanAnalyzer::with_filters(model, user, options, filters)` compiles an explicit `&[KoreanFilter]` chain; an empty chain performs tokenization only. Both constructors share immutable dictionary/user resources and keep analysis state local to each call.
+
+| Rust filter | Serialized type | Behavior |
+| --- | --- | --- |
+| `KoreanFilter::PartOfSpeech { stop_tags }` | `nori_part_of_speech` | Removes tokens by left POS, carrying skipped increments to the next retained token or stream end |
+| `KoreanFilter::ReadingForm` | `nori_readingform` | Replaces only the term with a present reading, including a present empty string |
+| `KoreanFilter::SimpleLowercase` | `unicode_simple_lowercase` | Applies the model's pinned Java simple lowercase while retaining unpaired UTF-16 units and all metadata |
+
+For the POS filter, omitted or null `stop_tags` uses `DEFAULT_STOP_TAGS`; `[]` keeps all tags. Exact tag spelling is required. The default set is `EP`, `EF`, `EC`, `ETN`, `ETM`, `IC`, `JKS`, `JKC`, `JKG`, `JKO`, `JKB`, `JKV`, `JKQ`, `JX`, `JC`, `MAG`, `MAJ`, `MM`, `SP`, `SSC`, `SSO`, `SC`, `SE`, `XPN`, `XSA`, `XSN`, `XSV`, `UNA`, `NA`, and `VSV`. Unknown filter properties or tags fail deserialization. This filter vocabulary is exposed by the standalone Rust `KoreanFilter` type; it is not yet accepted by generic analyzer registration or SQL configuration.
+
+`KoreanFilter::apply(output, &model)` applies one stage to a complete output; `apply_controlled(output, &model, limits, poll)` also enforces token/output bounds and cancellation. Retained tokens preserve offsets, position lengths, origin, and nullable morphology. POS filtering adds increments with checked arithmetic, including final skipped positions. Reading conversion and lowercase do not modify reading or morpheme metadata.
+
+`KoreanAnalyzer::normalize(input)` returns one `String` after simple lowercase of the complete input. It runs neither tokenization, user-rule matching, POS stops, nor reading conversion, and remains independent of an explicitly configured analysis chain. Thus `喜悲哀歡 İ UQA` normalizes to `喜悲哀歡 i uqa`. Existing generic `lowercase` retains its Rust full-lowercase behavior. `normalize_controlled` adds the same limits/cancellation arguments; `normalize_utf16(units, limits, poll)` exposes lossless simple normalization of raw units. A custom profile whose lowercase mapping changes UTF-16 width returns an error because the reference filter writes in place.
+
+The default constructor uses the default POS/readings/lowercase chain with `NoriOptions::default()` matching Lucene's `KoreanAnalyzer` defaults. Explicit punctuation and unigram options remain those of the tokenizer, and explicit filter order remains observable. These operations change no catalog or index state. Limits, cancellation, invalid profiles, and position overflow return errors without publishing partial successful output; the compiled analyzer remains reusable.
 
 ## Python, Node.js, and browser WASM
 

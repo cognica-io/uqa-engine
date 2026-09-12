@@ -48,3 +48,17 @@ cargo test -p uqa-analysis --features nori --locked nori_tokenizer
 Use `--cache-dir PATH` for a nondefault verified jar cache. Each driver accepts `--write` only for an intentional reviewed reference change. Native tests check fixture identity and compare every recorded attribute, including the complete digests for long streams. Additional native lattice tests isolate forced-backtrace tie order, rebasing, and EOS connection-cost selection. Limits and cancellation tests verify failure without partial successful output and reuse of the same immutable tokenizer.
 
 The accepted rule `🙂a 가 나` demonstrates why raw UTF-16 must survive the native tokenizer: component lengths can split a surrogate pair even though the rule and input are valid UTF-8. Back-anchored component offsets can also fall inside a pair. These cases are part of the differential contract; the common-token bridge, persisted term identity, and safe original-source highlighting must preserve them before full Nori integration is complete.
+
+## Filters, complete analysis, and normalization
+
+`NoriAnalysisReference.java` adds 423 cases for individual POS/reading/lowercase filters, explicitly ordered chains, the actual `KoreanAnalyzer`, and its separate normalization API. It covers custom and empty stop sets, all compound modes, trailing gaps, Hanja and supplementary case conversion, user-rule corner cases, long streams, and source whitespace. `analysis_cases.json`, `analysis_expected.jsonl`, and `analysis_manifest.json` use the same canonical complete-output hashing and reviewed provenance as the tokenizer corpus.
+
+One case constructs every Unicode scalar in order, followed by every surrogate code unit separated by `!`, and applies Lucene `CharacterUtils.toLowerCase`. Its 2,164,736 output units have UTF-16BE SHA-256 `6e429352aa8ccd1ffb2254e036ba64cfe810aca8141bdf51c0a0f057a8994a78`. This checks the native interpretation of the entire pinned lowercase table, scalar-pair traversal, and preservation of unpaired units without checking a multi-megabyte generated string into the repository. The generator is part of the hashed Java source; the native comparison independently constructs the same specified sequence.
+
+```sh
+python3 tests/parity/nori/run_analysis_reference.py --offline
+python3 tests/parity/nori/run_analysis_reference.py --offline --platform linux/amd64
+cargo test -p uqa-analysis --features nori --locked nori_analysis
+```
+
+Both Docker platforms produced the same 423 results and the native implementation matches them. The eight original full-analyzer examples also pass directly against their original reference file. Native regressions additionally cover present-empty readings, left-versus-right POS selection, stacked edges, trailing holes, checked position overflow, cancellation, bounds, and strict configuration properties. Korean number composition and generic pipeline/binding integration remain open acceptance items.
