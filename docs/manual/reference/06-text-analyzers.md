@@ -356,6 +356,28 @@ assert_eq!(&filtered.original()[source.utf8], "🙂");
 
 Unchanged text maps exactly. Replacements cover the full replaced source range, including regex replacements that reorder captures; inserted text maps to its original insertion boundary. Empty ranges select the following source boundary, and `final_offsets()` retains the original end even after trailing or complete deletion. These APIs are read-only analysis operations with no catalog or transaction effects. `filter` continues to return only the transformed string.
 
+`CharFilter::filter_with_offsets_budgeted(input, &budget, poll)` and `filter_mapped_budgeted(previous, &budget, poll)` reserve transformed text, edit-map segments, capture-offset slots, shared data payloads, and source-coordinate buffers before allocation. The budget is `uqa_core::memory::MemoryBudget`, and the callback returns `AnalysisResult<()>`. A byte-limit error is `AnalysisError::Memory(MemoryError::Limit { required, limit })`; callback errors propagate without a partial result. Immutable preparation resources, reference-count/allocator bookkeeping, and borrowed input are separate from this runtime allowance. Polls occur between literal/regex searches and during copying, source comparison, map copying, and coordinate construction; a running library search itself does not invoke the callback. No catalog, index, or transaction state changes.
+
+`FilteredText::clone()` shares retained text, edit maps, and coordinate indexes with their reservations. A later edit keeps the older view intact and reserves any newly required map sequence from the supplied budget. Input resources that already have a different owner retain that owner's reservation. Retained Korean token contexts also keep these source reservations after the input view is dropped. `into_string()` leaves the managed source view and returns a caller-owned string. `TextCoordinates::new_budgeted(text, &budget, poll)` returns `Budgeted<TextCoordinates>` with the same failure contract; ASCII needs no scalar-boundary buffer, while other text reserves one entry per scalar plus its end boundary.
+
+```rust
+use uqa_analysis::CharFilter;
+use uqa_core::memory::MemoryBudget;
+
+let budget = MemoryBudget::new(16 * 1024);
+let filtered = CharFilter::HTMLStrip.filter_with_offsets_budgeted(
+    "<b>한&amp;🙂</b>", &budget, &mut || Ok(()),
+)?;
+let retained = filtered.clone();
+drop(filtered);
+assert_eq!(retained.as_str(), " 한&🙂 ");
+assert_eq!(retained.source_offsets(1..4)?.utf8, 3..6);
+assert!(budget.used() > 0);
+drop(retained);
+assert_eq!(budget.used(), 0);
+# Ok::<(), uqa_analysis::AnalysisError>(())
+```
+
 ## Standalone Korean tokenization
 
 With the optional `uqa-analysis/nori` feature, `NoriDictionary::from_bytes(bytes, limits)` loads and validates a portable dictionary, `UserDictionary::compile(source, &model, limits)` compiles optional UTF-8 noun rules, and `KoreanTokenizer::new(model, user, options)` constructs an immutable tokenizer. `tokenize(input)` returns a complete `NoriOutput`. Supply the shipped `uqa_nori_data::BUNDLE` or bytes conforming to the [bundle format](../../design/nori-bundle-format.md); loading and execution require no JVM, network, or dictionary download.

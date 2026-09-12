@@ -6,19 +6,22 @@
 
 //! Unicode source coordinates and composed character-filter edit maps.
 
-use std::borrow::Cow;
 use std::cell::OnceCell;
 use std::ops::Range;
 use std::sync::Arc;
 
 use serde::Serialize;
+use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget};
 
 use crate::{AnalysisError, AnalysisResult};
 
 mod edits;
+mod maps;
+mod runtime;
 
-use edits::EditMap;
-pub(crate) use edits::TextEdit;
+pub(crate) use edits::{EditBuilder, EditedText};
+use maps::EditMaps;
+use runtime::SourceText;
 
 /// Half-open source ranges: exact UTF-16 units and the covering UTF-8 scalar range.
 ///
@@ -39,25 +42,65 @@ pub struct TextCoordinates {
 
 impl TextCoordinates {
     pub fn new(text: &str) -> Self {
-        if text.is_ascii() {
-            return Self {
-                boundaries: Vec::new(),
-                utf8_len: text.len(),
-                utf16_len: text.len(),
-            };
+        Self::new_budgeted(text, &MemoryBudget::new(usize::MAX), &mut || Ok(()))
+            .expect("unbounded source coordinate allocation")
+            .into_parts()
+            .0
+    }
+
+    /// Construct a scalar index with caller-owned byte limits and cancellation. ASCII needs no boundary buffer; other input reserves one entry per scalar and its end boundary.
+    pub fn new_budgeted(
+        text: &str,
+        budget: &MemoryBudget,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<Self>> {
+        poll()?;
+        let mut ascii = true;
+        for chunk in text.as_bytes().chunks(1024) {
+            poll()?;
+            if !chunk.is_ascii() {
+                ascii = false;
+                break;
+            }
         }
+        let mut boundaries = BudgetedVec::new(budget);
+        if ascii {
+            return Ok(Budgeted::new(
+                Self {
+                    boundaries: Vec::new(),
+                    utf8_len: text.len(),
+                    utf16_len: text.len(),
+                },
+                budget.empty_reservation(),
+            ));
+        }
+        let mut scalars = 0;
+        for _ in text.chars() {
+            if scalars % 1024 == 0 {
+                poll()?;
+            }
+            scalars += 1;
+        }
+        boundaries.reserve(scalars + 1)?;
         let mut utf16 = 0;
-        let mut boundaries = Vec::new();
-        for (utf8, character) in text.char_indices() {
-            boundaries.push((utf8, utf16));
+        for (index, (utf8, character)) in text.char_indices().enumerate() {
+            if index % 1024 == 0 {
+                poll()?;
+            }
+            boundaries.push((utf8, utf16))?;
             utf16 += character.len_utf16();
         }
-        boundaries.push((text.len(), utf16));
-        Self {
-            boundaries,
-            utf8_len: text.len(),
-            utf16_len: utf16,
-        }
+        boundaries.push((text.len(), utf16))?;
+        poll()?;
+        let (boundaries, memory) = boundaries.into_parts();
+        Ok(Budgeted::new(
+            Self {
+                boundaries,
+                utf8_len: text.len(),
+                utf16_len: utf16,
+            },
+            memory,
+        ))
     }
 
     pub fn utf8_len(&self) -> usize {
@@ -162,25 +205,25 @@ impl TextCoordinates {
 #[derive(Debug, Clone)]
 pub struct FilteredText<'a> {
     original: &'a str,
-    text: Cow<'a, str>,
-    maps: Vec<Arc<EditMap>>,
-    original_coordinates: OnceCell<Arc<TextCoordinates>>,
-    filtered_coordinates: OnceCell<Arc<TextCoordinates>>,
+    text: SourceText<'a>,
+    maps: Option<Arc<EditMaps>>,
+    original_coordinates: OnceCell<Arc<Budgeted<TextCoordinates>>>,
+    filtered_coordinates: OnceCell<Arc<Budgeted<TextCoordinates>>>,
 }
 
 impl<'a> FilteredText<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             original: text,
-            text: Cow::Borrowed(text),
-            maps: Vec::new(),
+            text: SourceText::Borrowed(text),
+            maps: None,
             original_coordinates: OnceCell::new(),
             filtered_coordinates: OnceCell::new(),
         }
     }
 
     pub fn as_str(&self) -> &str {
-        &self.text
+        self.text.as_str()
     }
 
     pub fn original(&self) -> &'a str {
@@ -188,14 +231,25 @@ impl<'a> FilteredText<'a> {
     }
 
     pub fn into_string(self) -> String {
-        self.text.into_owned()
+        self.text.into_string()
+    }
+
+    pub(crate) fn unbounded_budget(&self) -> MemoryBudget {
+        self.maps
+            .as_ref()
+            .map(|maps| maps.budget())
+            .filter(|budget| budget.limit() == usize::MAX)
+            .cloned()
+            .unwrap_or_else(|| MemoryBudget::new(usize::MAX))
     }
 
     /// Project a filtered UTF-8 range into the covering original source range.
     pub fn source_offsets(&self, mut range: Range<usize>) -> AnalysisResult<SourceOffsets> {
-        validate_utf8_range(&self.text, &range)?;
-        for map in self.maps.iter().rev() {
-            range = map.project(range);
+        validate_utf8_range(self.as_str(), &range)?;
+        if let Some(maps) = &self.maps {
+            for map in maps.iter().rev() {
+                range = map.project(range);
+            }
         }
         self.original_coordinates().offsets(range)
     }
@@ -226,8 +280,10 @@ impl<'a> FilteredText<'a> {
         mut range: Range<usize>,
     ) -> AnalysisResult<SourceOffsets> {
         self.filtered_coordinates().validate_utf16_range(&range)?;
-        for map in self.maps.iter().rev() {
-            range = map.project_utf16(range);
+        if let Some(maps) = &self.maps {
+            for map in maps.iter().rev() {
+                range = map.project_utf16(range);
+            }
         }
         self.original_coordinates().covering_offsets_utf16(range)
     }
@@ -242,11 +298,43 @@ impl<'a> FilteredText<'a> {
         }
     }
 
-    pub(crate) fn apply_edits(&mut self, edits: Vec<TextEdit>) -> AnalysisResult<()> {
-        if let Some((text, map)) = EditMap::apply(&self.text, edits)? {
-            self.text = Cow::Owned(text);
-            self.maps.push(Arc::new(map));
-            self.filtered_coordinates.take();
+    pub(crate) fn apply_edited(
+        &mut self,
+        edited: Option<EditedText>,
+        budget: &MemoryBudget,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<()> {
+        let Some(edited) = edited else {
+            return Ok(());
+        };
+        poll()?;
+        let text = edited.text.into_shared()?;
+        let map = edited.map.into_shared()?;
+        EditMaps::push(&mut self.maps, map, budget, poll)?;
+        self.text = SourceText::Owned(text);
+        self.filtered_coordinates.take();
+        Ok(())
+    }
+
+    pub(crate) fn prepare_coordinates(
+        &self,
+        budget: &MemoryBudget,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<()> {
+        poll()?;
+        if self.original_coordinates.get().is_none() {
+            let coordinates =
+                TextCoordinates::new_budgeted(self.original, budget, poll)?.into_shared()?;
+            self.original_coordinates
+                .set(coordinates)
+                .expect("uninitialized original coordinates");
+        }
+        if self.maps.is_some() && self.filtered_coordinates.get().is_none() {
+            let coordinates =
+                TextCoordinates::new_budgeted(self.as_str(), budget, poll)?.into_shared()?;
+            self.filtered_coordinates
+                .set(coordinates)
+                .expect("uninitialized filtered coordinates");
         }
         Ok(())
     }
@@ -257,25 +345,35 @@ impl<'a> FilteredText<'a> {
 
     #[cfg(feature = "nori")]
     pub(crate) fn projection(&self) -> Arc<SourceProjection> {
+        let budget = MemoryBudget::new(usize::MAX);
         Arc::new(SourceProjection {
-            source: Arc::from(self.original),
+            source: runtime::copy_text(self.original, &budget, &mut || Ok(()))
+                .expect("unbounded source retention"),
             maps: self.maps.clone(),
             original: self.original_coordinates().clone(),
             filtered: self.filtered_coordinates().clone(),
         })
     }
 
-    fn original_coordinates(&self) -> &Arc<TextCoordinates> {
-        self.original_coordinates
-            .get_or_init(|| Arc::new(TextCoordinates::new(self.original)))
+    fn original_coordinates(&self) -> &Arc<Budgeted<TextCoordinates>> {
+        self.original_coordinates.get_or_init(|| {
+            let budget = MemoryBudget::new(usize::MAX);
+            TextCoordinates::new_budgeted(self.original, &budget, &mut || Ok(()))
+                .and_then(|coordinates| Ok(coordinates.into_shared()?))
+                .expect("unbounded original source coordinates")
+        })
     }
 
-    fn filtered_coordinates(&self) -> &Arc<TextCoordinates> {
-        if self.maps.is_empty() {
+    fn filtered_coordinates(&self) -> &Arc<Budgeted<TextCoordinates>> {
+        if self.maps.is_none() {
             return self.original_coordinates();
         }
-        self.filtered_coordinates
-            .get_or_init(|| Arc::new(TextCoordinates::new(&self.text)))
+        self.filtered_coordinates.get_or_init(|| {
+            let budget = MemoryBudget::new(usize::MAX);
+            TextCoordinates::new_budgeted(self.as_str(), &budget, &mut || Ok(()))
+                .and_then(|coordinates| Ok(coordinates.into_shared()?))
+                .expect("unbounded filtered source coordinates")
+        })
     }
 }
 
@@ -283,10 +381,10 @@ impl<'a> FilteredText<'a> {
 #[cfg(feature = "nori")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SourceProjection {
-    source: Arc<str>,
-    maps: Vec<Arc<EditMap>>,
-    original: Arc<TextCoordinates>,
-    filtered: Arc<TextCoordinates>,
+    source: Arc<Budgeted<String>>,
+    maps: Option<Arc<EditMaps>>,
+    original: Arc<Budgeted<TextCoordinates>>,
+    filtered: Arc<Budgeted<TextCoordinates>>,
 }
 
 #[cfg(feature = "nori")]
@@ -297,8 +395,10 @@ impl SourceProjection {
 
     pub fn project(&self, mut range: Range<usize>) -> AnalysisResult<SourceOffsets> {
         self.filtered.validate_utf16_range(&range)?;
-        for map in self.maps.iter().rev() {
-            range = map.project_utf16(range);
+        if let Some(maps) = &self.maps {
+            for map in maps.iter().rev() {
+                range = map.project_utf16(range);
+            }
         }
         self.original.covering_offsets_utf16(range)
     }

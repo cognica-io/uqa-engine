@@ -10,6 +10,11 @@ use uqa_analysis::{FilteredText, SourceOffsets, TextCoordinates};
 
 use super::*;
 
+#[path = "source_offsets/budget.rs"]
+mod budget;
+#[path = "source_offsets/replacement.rs"]
+mod replacement;
+
 fn offsets(utf8: Range<usize>, utf16: Range<usize>) -> SourceOffsets {
     SourceOffsets { utf8, utf16 }
 }

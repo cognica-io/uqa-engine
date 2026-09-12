@@ -13,10 +13,12 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AnalysisError, AnalysisResult};
-use crate::source::TextEdit;
 use crate::FilteredText;
+use uqa_core::memory::MemoryBudget;
 
 mod compiled;
+mod replacement;
+mod stream;
 pub(crate) use compiled::PreparedCharFilter;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,6 +60,44 @@ impl CharFilter {
     pub fn filter_mapped<'a>(&self, text: FilteredText<'a>) -> AnalysisResult<FilteredText<'a>> {
         self.prepare()?.filter_mapped(text)
     }
+
+    /// Transform a borrowed input while retaining source buffers under the caller's byte allowance. Immutable configuration preparation is separate. Polls occur between searches and during source copying and coordinate construction.
+    ///
+    /// ```
+    /// use uqa_analysis::CharFilter;
+    /// use uqa_core::memory::MemoryBudget;
+    /// let budget = MemoryBudget::new(16 * 1024);
+    /// let filtered = CharFilter::HTMLStrip.filter_with_offsets_budgeted(
+    ///     "<b>한&amp;🙂</b>", &budget, &mut || Ok(()),
+    /// )?;
+    /// let retained = filtered.clone();
+    /// drop(filtered);
+    /// assert_eq!(retained.as_str(), " 한&🙂 ");
+    /// assert_eq!(retained.source_offsets(1..4)?.utf8, 3..6);
+    /// assert!(budget.used() > 0);
+    /// drop(retained);
+    /// assert_eq!(budget.used(), 0);
+    /// # Ok::<(), uqa_analysis::AnalysisError>(())
+    /// ```
+    pub fn filter_with_offsets_budgeted<'a>(
+        &self,
+        text: &'a str,
+        budget: &MemoryBudget,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<FilteredText<'a>> {
+        self.filter_mapped_budgeted(FilteredText::new(text), budget, poll)
+    }
+
+    /// New source, edit, and coordinate buffers use `budget`; retained input allocations keep their original shared leases.
+    pub fn filter_mapped_budgeted<'a>(
+        &self,
+        text: FilteredText<'a>,
+        budget: &MemoryBudget,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<FilteredText<'a>> {
+        poll()?;
+        self.prepare()?.filter_mapped_budgeted(text, budget, poll)
+    }
 }
 
 fn html_tag_re() -> AnalysisResult<&'static Regex> {
@@ -79,40 +119,6 @@ const HTML_ENTITIES: &[(&str, &str)] = &[
     ("&apos;", "'"),
     ("&nbsp;", " "),
 ];
-
-fn replace_literal(text: &mut FilteredText<'_>, old: &str, new: &str) -> AnalysisResult<()> {
-    let edits = text
-        .as_str()
-        .match_indices(old)
-        .map(|(start, matched)| TextEdit {
-            range: start..start + matched.len(),
-            replacement: new.to_owned(),
-        })
-        .collect();
-    text.apply_edits(edits)
-}
-
-fn replace_pattern(
-    text: &mut FilteredText<'_>,
-    pattern: &Regex,
-    replacement: &str,
-) -> AnalysisResult<()> {
-    let edits = pattern
-        .captures_iter(text.as_str())
-        .map(|captures| {
-            let matched = captures
-                .get(0)
-                .expect("regex captures contain the complete match");
-            let mut expanded = String::new();
-            captures.expand(replacement, &mut expanded);
-            TextEdit {
-                range: matched.range(),
-                replacement: expanded,
-            }
-        })
-        .collect();
-    text.apply_edits(edits)
-}
 
 /// Order mapping entries longest-key-first so that, e.g., the rule
 /// `aa -> X` fires before `a -> Y`.

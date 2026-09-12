@@ -7,11 +7,11 @@
 //! Prepared character stages share the existing ordered source-edit semantics.
 
 use regex::Regex;
-use std::borrow::Cow;
+use uqa_core::memory::MemoryBudget;
 
-use super::{
-    html_tag_re, mapping_longest_first, replace_literal, replace_pattern, CharFilter, HTML_ENTITIES,
-};
+use super::replacement::Replacement;
+use super::stream::{replace_literal, replace_pattern};
+use super::{html_tag_re, mapping_longest_first, CharFilter, HTML_ENTITIES};
 use crate::{AnalysisError, AnalysisResult, FilteredText};
 
 #[derive(Debug)]
@@ -20,7 +20,7 @@ pub(crate) enum PreparedCharFilter<'a> {
     Mapping(Vec<(String, String)>),
     PatternReplace {
         expression: Regex,
-        replacement: Cow<'a, str>,
+        replacement: Replacement<'a>,
     },
 }
 
@@ -34,14 +34,19 @@ impl CharFilter {
             Self::PatternReplace {
                 pattern,
                 replacement,
-            } => PreparedCharFilter::PatternReplace {
-                expression: Regex::new(pattern).map_err(|source| AnalysisError::InvalidRegex {
-                    component: "pattern-replace character filter",
-                    pattern: pattern.clone(),
-                    source,
-                })?,
-                replacement: Cow::Borrowed(replacement),
-            },
+            } => {
+                let expression =
+                    Regex::new(pattern).map_err(|source| AnalysisError::InvalidRegex {
+                        component: "pattern-replace character filter",
+                        pattern: pattern.clone(),
+                        source,
+                    })?;
+                let replacement = Replacement::prepare(replacement, &expression);
+                PreparedCharFilter::PatternReplace {
+                    expression,
+                    replacement,
+                }
+            }
         })
     }
 }
@@ -56,32 +61,51 @@ impl PreparedCharFilter<'_> {
                 replacement,
             } => PreparedCharFilter::PatternReplace {
                 expression,
-                replacement: Cow::Owned(replacement.into_owned()),
+                replacement: replacement.into_owned(),
             },
         }
     }
 
     pub(crate) fn filter_mapped<'a>(
         &self,
-        mut text: FilteredText<'a>,
+        text: FilteredText<'a>,
     ) -> AnalysisResult<FilteredText<'a>> {
+        let budget = text.unbounded_budget();
+        self.filter_mapped_budgeted(text, &budget, &mut || Ok(()))
+    }
+
+    pub(crate) fn filter_mapped_budgeted<'a>(
+        &self,
+        mut text: FilteredText<'a>,
+        budget: &MemoryBudget,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<FilteredText<'a>> {
+        poll()?;
         match self {
             Self::HTMLStrip(expression) => {
-                replace_pattern(&mut text, expression, " ")?;
+                replace_pattern(
+                    &mut text,
+                    expression,
+                    &Replacement::literal(" "),
+                    budget,
+                    poll,
+                )?;
                 for (entity, replacement) in HTML_ENTITIES {
-                    replace_literal(&mut text, entity, replacement)?;
+                    replace_literal(&mut text, entity, replacement, budget, poll)?;
                 }
             }
             Self::Mapping(mapping) => {
                 for (old, new) in mapping {
-                    replace_literal(&mut text, old, new)?;
+                    replace_literal(&mut text, old, new, budget, poll)?;
                 }
             }
             Self::PatternReplace {
                 expression,
                 replacement,
-            } => replace_pattern(&mut text, expression, replacement)?,
+            } => replace_pattern(&mut text, expression, replacement, budget, poll)?,
         }
+        text.prepare_coordinates(budget, poll)?;
+        poll()?;
         Ok(text)
     }
 }

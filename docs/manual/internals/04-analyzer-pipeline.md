@@ -6,7 +6,7 @@ Analyzer behavior crosses analysis, storage, engine catalog, SQL execution, and 
 
 | Concern | Owner | Primary representation |
 | --- | --- | --- |
-| Shared byte allowances and allocation leases | `uqa-core::memory` | `MemoryBudget`, `MemoryReservation`, `Budgeted`, `BudgetedVec`, `BudgetedDeque` |
+| Shared byte allowances and allocation leases | `uqa-core::memory` | `MemoryBudget`, `MemoryReservation`, `Budgeted`, `BudgetedVec`, `BudgetedDeque`, `BudgetedString` |
 | Pipeline stages and validation | `uqa-analysis` | `Analyzer`, `CharFilter`, `Tokenizer`, `TokenFilter` |
 | Source mapping and token graph | `uqa-analysis` | `FilteredText`, `TextCoordinates`, `AnalysisToken`, `AnalyzedText` |
 | Built-in and process-global registry | `uqa-analysis::registry` | Immutable built-ins plus a process-global custom map |
@@ -19,6 +19,8 @@ Analyzer behavior crosses analysis, storage, engine catalog, SQL execution, and 
 The engine catalog stores exact descriptor snapshots, while inverted-index instances retain their immutable `CompiledAnalyzer` handles with resolved resources. A definition update does not mutate installed revisions; an owning GIN definition must be recreated or a field assignment must be reapplied.
 
 Native Korean tokenization can share a `MemoryBudget` with other allocation owners. The analysis crate reserves UTF-16 input, rolling lattice slots and candidates, pending/output token buffers, readings, and morphemes before allocation; replacement buffers coexist with their predecessors in the allowance. Removing lattice candidates does not release retained capacity. The returned `Budgeted<NoriOutput>` holds output reservations until destruction or explicit ownership transfer. Cancellation and allocation errors unwind the call without releasing another owner's reservation. These native entry points do not yet connect the common compiled analyzer, token-filter stages, source projections, provider cursors, or highlight rendering to one end-to-end allowance.
+
+Character edits now stream source slices and prepared replacement fragments into reserved string/map buffers. They do not first collect every match or materialize an expanded replacement string per capture. Scalar-coordinate buffers and shared source payloads retain leases, and source clones share those allocations. The edit sequence copies only when an older view still retains it or a new allocation owner is supplied. Korean token contexts retain the same map/coordinate leases after the original view is dropped. Literal/regex matching still uses library searches; cancellation is checked between searches and during analysis-owned loops. Caller budget propagation through the common compiled pipeline, token stages, new retained source-copy creation, provider cursors, and rendering remains open.
 
 ## Analysis execution
 

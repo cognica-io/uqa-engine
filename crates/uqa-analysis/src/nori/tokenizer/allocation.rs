@@ -6,7 +6,7 @@
 
 //! Token-owned strings and code units are reserved before materialization.
 
-use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryError};
+use uqa_core::memory::{Budgeted, BudgetedString, BudgetedVec, MemoryBudget};
 
 use crate::nori::error::check_limit;
 use crate::AnalysisResult;
@@ -71,16 +71,14 @@ pub(super) fn copy_string(
     poll: &mut dyn FnMut() -> AnalysisResult<()>,
 ) -> AnalysisResult<Budgeted<String>> {
     poll()?;
-    let memory = budget.reserve(input.len())?;
-    let mut output = String::new();
-    output
-        .try_reserve_exact(input.len())
-        .map_err(MemoryError::from)?;
+    let mut output = BudgetedString::new(budget);
+    output.reserve(input.len())?;
     for (index, character) in input.chars().enumerate() {
         if index % 1024 == 0 {
             poll()?;
         }
-        output.push(character);
+        output.push(character)?;
     }
+    let (output, memory) = output.into_parts();
     Ok(Budgeted::new(output, memory))
 }
