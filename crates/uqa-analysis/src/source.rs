@@ -30,10 +30,19 @@ pub struct SourceOffsets {
 #[derive(Debug, Clone)]
 pub struct TextCoordinates {
     boundaries: Vec<(usize, usize)>,
+    utf8_len: usize,
+    utf16_len: usize,
 }
 
 impl TextCoordinates {
     pub fn new(text: &str) -> Self {
+        if text.is_ascii() {
+            return Self {
+                boundaries: Vec::new(),
+                utf8_len: text.len(),
+                utf16_len: text.len(),
+            };
+        }
         let mut utf16 = 0;
         let mut boundaries = Vec::new();
         for (utf8, character) in text.char_indices() {
@@ -41,18 +50,25 @@ impl TextCoordinates {
             utf16 += character.len_utf16();
         }
         boundaries.push((text.len(), utf16));
-        Self { boundaries }
+        Self {
+            boundaries,
+            utf8_len: text.len(),
+            utf16_len: utf16,
+        }
     }
 
     pub fn utf8_len(&self) -> usize {
-        self.boundaries.last().map_or(0, |point| point.0)
+        self.utf8_len
     }
 
     pub fn utf16_len(&self) -> usize {
-        self.boundaries.last().map_or(0, |point| point.1)
+        self.utf16_len
     }
 
     pub fn utf8_to_utf16(&self, offset: usize) -> AnalysisResult<usize> {
+        if self.boundaries.is_empty() && offset <= self.utf8_len {
+            return Ok(offset);
+        }
         self.boundaries
             .binary_search_by_key(&offset, |point| point.0)
             .map(|index| self.boundaries[index].1)
@@ -64,6 +80,9 @@ impl TextCoordinates {
     }
 
     pub fn utf16_to_utf8(&self, offset: usize) -> AnalysisResult<usize> {
+        if self.boundaries.is_empty() && offset <= self.utf16_len {
+            return Ok(offset);
+        }
         self.boundaries
             .binary_search_by_key(&offset, |point| point.1)
             .map(|index| self.boundaries[index].0)

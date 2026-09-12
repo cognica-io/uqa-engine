@@ -247,6 +247,29 @@ assert_eq!(analyzer.analyze("<p>Running</p>")?, vec!["run"]);
 
 The process-global `uqa_analysis::register_analyzer` registry is not catalog persistence. Use the engine or SQL registration path for a persistent field assignment; otherwise a later process can reopen a field mapping whose process-local analyzer was never registered.
 
+### Structured tokens
+
+`Analyzer::analyze_tokens(input)` returns `AnalyzedText`. Its `tokens()` slice contains ordered `AnalysisToken` values with `term()`, `offsets()`, `position_increment()`, `position_length()`, and `is_keyword()`. Tokens emitted by the built-in tokenizers carry `Some(SourceOffsets)` in both original UTF-8 bytes and UTF-16 code units. Start the absolute position at `-1` and add each increment; the token's graph edge ends at that position plus its length. The first increment is positive, later increments may be zero, and lengths are positive. `final_offsets()` identifies the original input end, and `final_position_increment()` counts positions removed after the last emitted token.
+
+`Tokenizer::tokenize_with_offsets(input)` provides the same representation without character or token filters. `TokenFilter::filter_analyzed(previous_result)` applies one filter while preserving source and stream-end metadata. These operations do not alter catalog or transaction state. Invalid configuration, invalid source boundaries, and position overflow return an `AnalysisError`.
+
+```rust
+use uqa_analysis::standard_analyzer;
+
+let analyzed = standard_analyzer("english").analyze_tokens("The cats and")?;
+let token = &analyzed.tokens()[0];
+assert_eq!(token.term(), "cat");
+assert_eq!(token.offsets().unwrap().utf8, 4..8);
+assert_eq!(token.position_increment(), 2);
+assert_eq!(analyzed.final_position_increment(), 1);
+assert_eq!(analyzed.final_offsets().utf8, 12..12);
+# Ok::<(), uqa_analysis::AnalysisError>(())
+```
+
+Stop-word and length filters carry removed position increments to the next retained token or the stream end. Synonym expansions retain the original token, source range, and position length, and use increment zero; repeated configured alternatives remain repeated. N-gram and edge n-gram token filters also stack each input token's grams at its position. In contrast, the n-gram tokenizer assigns a separate position to each emitted gram. Gram filters use exact substring offsets when a token still equals its original source; after a term rewrite they retain the covering source range. Lowercase, ASCII folding, and stemming retain source ranges, and stemming leaves keyword tokens unchanged.
+
+`Analyzer::analyze`, `Tokenizer::tokenize`, and `TokenFilter::filter` remain the ordered `Vec<String>` projection. Current index and query consumers use that term projection; storing and matching graph positions is tracked in the [Nori implementation plan](../../plans/0006-nori-analyzer.md).
+
 ### Character-filter source coordinates
 
 `CharFilter::filter_with_offsets(input)` returns `FilteredText` with transformed text and mappings to the original input. Chain stages with `filter_mapped(previous_result)`. `source_offsets(range)` accepts a half-open UTF-8 byte range in the filtered text and returns its covering original UTF-8 and UTF-16 ranges; `source_offsets_utf16(range)` accepts filtered UTF-16 coordinates instead. Reversed ranges, out-of-range offsets, and boundaries inside UTF-8 characters or UTF-16 surrogate pairs return an `AnalysisError`.

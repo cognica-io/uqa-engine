@@ -23,6 +23,10 @@ pub enum AnalysisError {
     InvalidTextSpan { start: usize, end: usize },
     #[error("character-filter edits overlap or are out of order")]
     OverlappingTextEdits,
+    #[error("token graphs require a positive first increment and positive position lengths")]
+    InvalidTokenPosition,
+    #[error("token position exceeds the u32 position format")]
+    TokenPositionOverflow,
     #[error("invalid {component} regular expression `{pattern}`: {source}")]
     InvalidRegex {
         component: &'static str,

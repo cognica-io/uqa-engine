@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AnalysisError, AnalysisResult};
 
+mod stream;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Tokenizer {
@@ -50,52 +52,19 @@ impl Tokenizer {
     }
 
     pub fn tokenize(&self, text: &str) -> AnalysisResult<Vec<String>> {
-        let tokens = match self {
-            Tokenizer::Whitespace => text.split_whitespace().map(str::to_owned).collect(),
-            Tokenizer::Standard => standard_word_re()?
-                .find_iter(text)
-                .map(|m| m.as_str().to_owned())
-                .collect(),
-            Tokenizer::Letter => letter_re()?
-                .find_iter(text)
-                .map(|m| m.as_str().to_owned())
-                .collect(),
-            Tokenizer::NGram { min_gram, max_gram } => {
-                validate_gram_bounds("n-gram tokenizer", *min_gram, *max_gram)?;
-                let mut out = Vec::new();
-                for word in text.split_whitespace() {
-                    let chars: Vec<char> = word.chars().collect();
-                    for n in *min_gram..=*max_gram {
-                        if chars.len() < n {
-                            continue;
-                        }
-                        for i in 0..=(chars.len() - n) {
-                            out.push(chars[i..i + n].iter().collect());
-                        }
-                    }
-                }
-                out
-            }
-            Tokenizer::Pattern { pattern } => {
-                let re = Regex::new(pattern).map_err(|source| AnalysisError::InvalidRegex {
-                    component: "pattern tokenizer",
-                    pattern: pattern.clone(),
-                    source,
-                })?;
-                re.split(text)
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_owned)
-                    .collect()
-            }
-            Tokenizer::Keyword => {
-                if text.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![text.to_owned()]
-                }
-            }
-        };
-        Ok(tokens)
+        Ok(self.tokenize_with_offsets(text)?.into_terms())
+    }
+
+    /// Tokenize source text with explicit offsets, positions, and final source coordinates.
+    pub fn tokenize_with_offsets(&self, text: &str) -> AnalysisResult<crate::AnalyzedText> {
+        self.tokenize_mapped(&crate::FilteredText::new(text))
+    }
+
+    pub(crate) fn tokenize_mapped(
+        &self,
+        text: &crate::FilteredText<'_>,
+    ) -> AnalysisResult<crate::AnalyzedText> {
+        stream::tokenize(self, text)
     }
 }
 

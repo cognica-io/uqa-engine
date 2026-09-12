@@ -1,0 +1,195 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Structured analysis tokens and end-of-stream position state.
+
+use std::ops::Range;
+
+use serde::Serialize;
+
+use crate::{AnalysisError, AnalysisResult, FilteredText, SourceOffsets};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AnalysisToken {
+    pub(crate) term: String,
+    pub(crate) offsets: Option<SourceOffsets>,
+    pub(crate) position_increment: u32,
+    pub(crate) position_length: u32,
+    pub(crate) keyword: bool,
+    #[serde(skip)]
+    verbatim: bool,
+}
+
+impl AnalysisToken {
+    pub fn term(&self) -> &str {
+        &self.term
+    }
+
+    pub fn offsets(&self) -> Option<&SourceOffsets> {
+        self.offsets.as_ref()
+    }
+
+    pub fn position_increment(&self) -> u32 {
+        self.position_increment
+    }
+
+    pub fn position_length(&self) -> u32 {
+        self.position_length
+    }
+
+    pub fn is_keyword(&self) -> bool {
+        self.keyword
+    }
+
+    pub(crate) fn from_source(
+        input: &FilteredText<'_>,
+        range: Range<usize>,
+    ) -> AnalysisResult<Self> {
+        let offsets = input.source_offsets(range.clone())?;
+        let term = input.as_str()[range].to_owned();
+        let verbatim = input.original().get(offsets.utf8.clone()) == Some(term.as_str());
+        Ok(Self {
+            term,
+            offsets: Some(offsets),
+            position_increment: 1,
+            position_length: 1,
+            keyword: false,
+            verbatim,
+        })
+    }
+
+    fn term_only(term: String) -> Self {
+        Self {
+            term,
+            offsets: None,
+            position_increment: 1,
+            position_length: 1,
+            keyword: false,
+            verbatim: false,
+        }
+    }
+
+    pub(crate) fn replace_term(&mut self, term: String) {
+        if term != self.term {
+            self.verbatim = false;
+            self.term = term;
+        }
+    }
+
+    pub(crate) fn substring(&self, range: Range<usize>) -> Self {
+        let mut token = Self {
+            term: self.term[range.clone()].to_owned(),
+            offsets: self.offsets.clone(),
+            position_increment: self.position_increment,
+            position_length: self.position_length,
+            keyword: self.keyword,
+            verbatim: self.verbatim,
+        };
+        if self.verbatim {
+            if let Some(offsets) = &self.offsets {
+                let start_utf16 = self.term[..range.start].encode_utf16().count();
+                let length_utf16 = token.term.encode_utf16().count();
+                token.offsets = Some(SourceOffsets {
+                    utf8: offsets.utf8.start + range.start..offsets.utf8.start + range.end,
+                    utf16: offsets.utf16.start + start_utf16
+                        ..offsets.utf16.start + start_utf16 + length_utf16,
+                });
+            }
+        }
+        token
+    }
+}
+
+/// A complete analyzed input with explicit token graph and source end state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AnalyzedText {
+    #[serde(flatten)]
+    pub(crate) batch: TokenBatch,
+    pub(crate) final_offsets: SourceOffsets,
+}
+
+impl AnalyzedText {
+    pub fn tokens(&self) -> &[AnalysisToken] {
+        &self.batch.tokens
+    }
+
+    pub fn into_tokens(self) -> Vec<AnalysisToken> {
+        self.batch.tokens
+    }
+
+    pub fn into_terms(self) -> Vec<String> {
+        self.batch.into_terms()
+    }
+
+    pub fn final_offsets(&self) -> &SourceOffsets {
+        &self.final_offsets
+    }
+
+    pub fn final_position_increment(&self) -> u32 {
+        self.batch.final_position_increment
+    }
+
+    pub(crate) fn from_source(
+        tokens: Vec<AnalysisToken>,
+        input: &FilteredText<'_>,
+    ) -> AnalysisResult<Self> {
+        let batch = TokenBatch {
+            tokens,
+            final_position_increment: 0,
+        };
+        batch.validate_positions()?;
+        Ok(Self {
+            batch,
+            final_offsets: input.final_offsets(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct TokenBatch {
+    pub tokens: Vec<AnalysisToken>,
+    pub final_position_increment: u32,
+}
+
+impl TokenBatch {
+    pub fn from_terms(terms: Vec<String>) -> Self {
+        Self {
+            tokens: terms.into_iter().map(AnalysisToken::term_only).collect(),
+            final_position_increment: 0,
+        }
+    }
+
+    pub fn into_terms(self) -> Vec<String> {
+        self.tokens.into_iter().map(|token| token.term).collect()
+    }
+
+    pub fn validate_positions(&self) -> AnalysisResult<()> {
+        let mut position = -1_i64;
+        for token in &self.tokens {
+            if token.position_length == 0 || (position < 0 && token.position_increment == 0) {
+                return Err(AnalysisError::InvalidTokenPosition);
+            }
+            position = position
+                .checked_add(i64::from(token.position_increment))
+                .ok_or(AnalysisError::TokenPositionOverflow)?;
+            let position =
+                u32::try_from(position).map_err(|_| AnalysisError::TokenPositionOverflow)?;
+            position
+                .checked_add(token.position_length)
+                .ok_or(AnalysisError::TokenPositionOverflow)?;
+        }
+        let final_position = position
+            .checked_add(i64::from(self.final_position_increment))
+            .ok_or(AnalysisError::TokenPositionOverflow)?;
+        if final_position > i64::from(u32::MAX) {
+            return Err(AnalysisError::TokenPositionOverflow);
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests;

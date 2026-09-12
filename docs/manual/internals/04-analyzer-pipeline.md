@@ -7,11 +7,12 @@ Analyzer behavior crosses analysis, storage, engine catalog, SQL execution, and 
 | Concern | Owner | Primary representation |
 | --- | --- | --- |
 | Pipeline stages and validation | `uqa-analysis` | `Analyzer`, `CharFilter`, `Tokenizer`, `TokenFilter` |
+| Source mapping and token graph | `uqa-analysis` | `FilteredText`, `TextCoordinates`, `AnalysisToken`, `AnalyzedText` |
 | Built-in and process-global registry | `uqa-analysis::registry` | Immutable built-ins plus a process-global custom map |
 | Persistent named definitions | `uqa-engine` and `CatalogFacade` | Analyzer name to JSON configuration |
 | Persistent field assignment | `uqa-engine` and `CatalogFacade` | Table, field, normalized phase, analyzer name |
 | Index and search analyzer instances | `InvertedIndex` implementations | Per-field index and search analyzer maps |
-| SQL lifecycle | `uqa-engine::sql::from_rows` | Mutating table functions and `fts_index_stats` |
+| SQL lifecycle | `uqa-execution::query::table_functions::analyzers` | Mutating table functions and `fts_index_stats` |
 | Query-time resolution | `uqa-operators` and engine search paths | `get_search_analyzer(field)` |
 
 The engine catalog stores JSON and names, while inverted-index instances hold cloned, validated `Analyzer` values. A definition update therefore does not mutate every installed clone automatically; an owning GIN definition must be recreated or a field assignment must be reapplied.
@@ -25,10 +26,13 @@ flowchart LR
     C --> D[Tokenizer]
     D --> E[TokenFilter 1]
     E --> F[TokenFilter N]
-    F --> G[Vec of tokens]
+    F --> G[AnalyzedText with source and position state]
+    G --> H[Ordered term projection for existing consumers]
 ```
 
-`Analyzer::analyze` owns a mutable string through the character-filter loop, tokenizes once, and moves the token vector through each token filter. Every stage is fallible. An empty vector is a valid result; an invalid regular expression, invalid gram range, or failed synonym-file read is an error and must not be converted into an empty result.
+`Analyzer::analyze_tokens` carries `FilteredText` through the character-filter loop, tokenizes once, and moves `AnalyzedText` through the token filters. Character edits map filtered UTF-8 and UTF-16 coordinates back to the original input; token filters preserve source spans, graph increments and lengths, keyword state, and final skipped positions. `Analyzer::analyze` projects this canonical result into ordered terms. Every stage is fallible. An empty stream is a valid result; an invalid regular expression, invalid gram range, failed synonym-file read, or position overflow is an error and must not be converted into an empty result.
+
+Removal filters accumulate skipped increments, including trailing removals. Synonym and gram-filter expansions share the input position and length; tokenizer grams occupy consecutive positions. Unchanged substrings preserve precise source offsets, while rewritten terms retain covering spans. Existing storage and query consumers still call the term-only API; graph occurrence storage and phrase matching remain tracked in the [Nori implementation plan](../../plans/0006-nori-analyzer.md). The [Rust reference](../reference/06-text-analyzers.md#structured-tokens) defines the public metadata contract.
 
 Configuration uses Serde tagged enums. Most serialized tags derive from Rust variant spelling, including `n_gram` for `Tokenizer::NGram` and `ngram` for `TokenFilter::Ngram`. Acronym-bearing variants have explicit stable names: `html_strip` for `CharFilter::HTMLStrip` and `ascii_folding` for `TokenFilter::ASCIIFolding`. Deserialization also accepts the derived spellings `h_t_m_l_strip` and `a_s_c_i_i_folding` that releases up to 0.1.2 persisted, so catalogs written before the stable names still open; serialization always emits the stable names. Engine parsing normalizes string shorthand only for the tokenizer and token-filter arrays; canonical object tags remain the compatibility contract.
 

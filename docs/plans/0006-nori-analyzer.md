@@ -18,8 +18,8 @@ Work starts from UQA commit `e913303cd9ffd6662706053cc39caaaeb8f38b23` on `featu
 | --- | --- | --- | --- | --- |
 | Reference examples | `tests/parity/nori` | Pinned Docker and jars | Reproducible 31-case baseline with full token/end attributes and input hashes | Verified baseline |
 | Source coordinates and character-edit maps | `uqa-analysis` | Existing character-filter behavior | Checked UTF-8/UTF-16 spans, original end state, and composable replacement/deletion/insertion maps | Verified; 144 analysis tests including 10 new integration cases and the source-map doctest |
-| Rich token stream contracts | `uqa-analysis` | Source coordinates | Explicit token increments, lengths, end state, and metadata-preserving stage interfaces | In progress |
-| Generic stage migration | `uqa-analysis` | Rich contracts | All existing tokenizers and filters preserve metadata; `analyze` remains the ordered term projection; explicit metadata policy for every expansion/removal | Pending |
+| Rich token stream contracts | `uqa-analysis` | Source coordinates | Explicit token increments, lengths, end state, and metadata-preserving stage interfaces | Verified generic contract; Korean morphology attributes remain in the runtime item |
+| Generic stage migration | `uqa-analysis` | Rich contracts | All existing tokenizers and filters preserve metadata; `analyze` remains the ordered term projection; explicit metadata policy for every expansion/removal | Verified; 160 analysis tests and strict package Clippy |
 | Complete model export | Docker reference tools | Pinned resources | Every lexicon entry, entry order, context ID, cost, reading, morpheme, unknown class, matrix cell, and Unicode value exported and compared | Pending |
 | Portable dictionary bundle | `uqa-analysis`, proposed data crate | Complete model export | Deterministic versioned packer, strict loader, content identity, shared immutable resources, corruption tests, and package provenance | Pending |
 | Korean morphology runtime | `uqa-analysis::nori` | Rich contracts and bundle | User dictionary compilation, UTF-16 lattice, exact candidate/tie/backtrace behavior, all compound modes and unknown/punctuation options | Pending |
@@ -35,7 +35,7 @@ Implement the rich contracts and existing-stage migration first so Korean token 
 
 ## Contract checklist
 
-- [ ] Preserve existing term-only analyzer outputs, JSON tags and serialized aliases, fallible configuration behavior, and reloadable synonym-file semantics.
+- [x] Preserve existing term-only analyzer outputs, JSON tags and serialized aliases, fallible configuration behavior, and reloadable synonym-file semantics.
 - [ ] Carry UTF-8 and UTF-16 source coordinates, original-source edit maps, graph increments and lengths, optional Korean morphology, keyword state, and final skipped positions.
 - [ ] Reproduce every exported dictionary value and the reference's stable homograph ordering, user entry rules, Java classification, space penalties, integer/tie decisions, and bounded backtrace behavior.
 - [ ] Support `none`, `discard`, and `mixed`, optional unknown unigrams and punctuation retention, POS filtering, Hanja readings, simple lowercase, normalization, and Korean number composition.
@@ -71,5 +71,7 @@ Before feature completion, run the change-aware pre-merge suites against the fin
 | --- | --- | --- |
 | Design and executable examples | Commits `78a82b3d` and `e913303c`; Docker reference contains 31 cases; PR Checks run `34667416290` passed for that design head | No UQA Nori implementation at that checkpoint |
 | Original-source mapping | [`source.rs`](../../crates/uqa-analysis/src/source.rs), character-filter integration, and [`source_offsets.rs`](../../crates/uqa-analysis/tests/analysis/source_offsets.rs); `cargo test -p uqa-analysis --locked --quiet` passed 40 unit, 102 integration, and 2 doc tests; strict package Clippy passed | Rich token and analyzer pipeline propagation, morphology, and every downstream item remain active or pending |
+| Generic token graph pipeline | [`token.rs`](../../crates/uqa-analysis/src/token.rs), migrated analyzer/tokenizer/filter execution, and [`rich_tokens.rs`](../../crates/uqa-analysis/tests/analysis/rich_tokens.rs); 44 unit, 113 integration, and 3 doc tests passed; complete `uqa-storage`, `uqa-storage-sqlite`, and `uqa-operators` tests passed; strict package Clippy and repository format/header/line/harness/dependency checks passed; the 31-case Docker arm64 reference was reproduced with cached offline inputs | Korean morphology and model export, graph-aware consumers, durable revisions, bindings, and the remaining release gates |
+| Engine consumers of migrated analysis | Existing `uqa-engine` integration filters `analyzer`, `highlight`, and `fts` passed 22, 9, and 37 tests respectively; `queries::manual_sql_examples::manual_sql_examples_compile_or_execute` passed | Existing term-based behavior is verified; positional storage and morphological search remain pending |
 
 Never mark a work item verified based on intent, parser acceptance, a narrow test from another owner, or a successful compilation alone. Keep incomplete requirements visible here until their authoritative evidence is recorded.

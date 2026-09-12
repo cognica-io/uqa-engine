@@ -6,7 +6,7 @@
 
 //! Token-level filters that run after tokenization.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -14,8 +14,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use unicode_normalization::UnicodeNormalization;
 
-use crate::porter;
 use crate::{AnalysisError, AnalysisResult};
+
+mod stream;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -191,99 +192,16 @@ fn default_stop_language() -> String {
 
 impl TokenFilter {
     pub fn filter(&self, tokens: Vec<String>) -> AnalysisResult<Vec<String>> {
-        let tokens = match self {
-            TokenFilter::Lowercase => tokens.into_iter().map(|t| t.to_lowercase()).collect(),
-            TokenFilter::Stop {
-                language,
-                custom_words,
-            } => {
-                let mut words: BTreeSet<&str> =
-                    builtin_stop_words(language).iter().copied().collect();
-                let custom: Vec<&str> = custom_words.iter().map(String::as_str).collect();
-                words.extend(custom);
-                tokens
-                    .into_iter()
-                    .filter(|t| !words.contains(t.as_str()))
-                    .collect()
-            }
-            TokenFilter::PorterStem => tokens.into_iter().map(|t| porter::stem(&t)).collect(),
-            TokenFilter::ASCIIFolding => tokens.into_iter().map(|t| ascii_fold(&t)).collect(),
-            TokenFilter::Synonym {
-                synonyms,
-                synonyms_path,
-            } => {
-                let resolved: BTreeMap<String, Vec<String>> = if let Some(path) = synonyms_path {
-                    TokenFilter::parse_synonym_file(path)?
-                } else {
-                    synonyms.clone()
-                };
-                let mut out = Vec::with_capacity(tokens.len());
-                for t in tokens {
-                    if let Some(extra) = resolved.get(&t) {
-                        out.push(t);
-                        out.extend(extra.iter().cloned());
-                    } else {
-                        out.push(t);
-                    }
-                }
-                out
-            }
-            TokenFilter::Ngram {
-                min_gram,
-                max_gram,
-                keep_short,
-            } => {
-                validate_gram_bounds("n-gram token filter", *min_gram, *max_gram)?;
-                let mut out = Vec::new();
-                for t in tokens {
-                    let chars: Vec<char> = t.chars().collect();
-                    if chars.len() < *min_gram {
-                        if *keep_short {
-                            out.push(t);
-                        }
-                        continue;
-                    }
-                    for n in *min_gram..=*max_gram {
-                        if chars.len() < n {
-                            continue;
-                        }
-                        for i in 0..=(chars.len() - n) {
-                            out.push(chars[i..i + n].iter().collect());
-                        }
-                    }
-                }
-                out
-            }
-            TokenFilter::EdgeNgram { min_gram, max_gram } => {
-                validate_gram_bounds("edge n-gram token filter", *min_gram, *max_gram)?;
-                let mut out = Vec::new();
-                for t in tokens {
-                    let chars: Vec<char> = t.chars().collect();
-                    let upper = (*max_gram).min(chars.len());
-                    for n in *min_gram..=upper {
-                        out.push(chars[..n].iter().collect());
-                    }
-                }
-                out
-            }
-            TokenFilter::Length {
-                min_length,
-                max_length,
-            } => tokens
-                .into_iter()
-                .filter(|t| {
-                    let len = t.chars().count();
-                    if len < *min_length {
-                        return false;
-                    }
-                    if *max_length > 0 && len > *max_length {
-                        return false;
-                    }
-                    true
-                })
-                .collect(),
-        };
-        Ok(tokens)
+        Ok(stream::filter(self, crate::token::TokenBatch::from_terms(tokens))?.into_terms())
+    }
+
+    /// Transform tokens while retaining their source spans and graph end state.
+    pub fn filter_analyzed(
+        &self,
+        mut input: crate::AnalyzedText,
+    ) -> AnalysisResult<crate::AnalyzedText> {
+        input.batch = stream::filter(self, input.batch)?;
+        Ok(input)
     }
 }
 

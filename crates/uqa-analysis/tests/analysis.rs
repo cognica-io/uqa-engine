@@ -36,3 +36,6 @@ mod validation;
 
 #[path = "analysis/source_offsets.rs"]
 mod source_offsets;
+
+#[path = "analysis/rich_tokens.rs"]
+mod rich_tokens;

@@ -55,13 +55,31 @@ impl Analyzer {
     }
 
     pub fn analyze(&self, text: &str) -> AnalysisResult<Vec<String>> {
-        let mut filtered: String = text.to_owned();
+        Ok(self.analyze_tokens(text)?.into_terms())
+    }
+
+    /// Analyze complete input without discarding token graph or original source metadata.
+    ///
+    /// ```
+    /// use uqa_analysis::standard_analyzer;
+    ///
+    /// let analyzed = standard_analyzer("english").analyze_tokens("The cats and")?;
+    /// let token = &analyzed.tokens()[0];
+    /// assert_eq!(token.term(), "cat");
+    /// assert_eq!(token.offsets().unwrap().utf8, 4..8);
+    /// assert_eq!(token.position_increment(), 2);
+    /// assert_eq!(analyzed.final_position_increment(), 1);
+    /// assert_eq!(analyzed.final_offsets().utf8, 12..12);
+    /// # Ok::<(), uqa_analysis::AnalysisError>(())
+    /// ```
+    pub fn analyze_tokens(&self, text: &str) -> AnalysisResult<crate::AnalyzedText> {
+        let mut filtered = crate::FilteredText::new(text);
         for cf in &self.char_filters {
-            filtered = cf.filter(&filtered)?;
+            filtered = cf.filter_mapped(filtered)?;
         }
-        let mut tokens = self.tokenizer.tokenize(&filtered)?;
+        let mut tokens = self.tokenizer.tokenize_mapped(&filtered)?;
         for tf in &self.token_filters {
-            tokens = tf.filter(tokens)?;
+            tokens = tf.filter_analyzed(tokens)?;
         }
         Ok(tokens)
     }

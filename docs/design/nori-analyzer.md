@@ -1,6 +1,6 @@
 # Lucene-compatible Nori analyzer
 
-Status: proposed design, prepared on 2026-09-12 against UQA commit `bbeb1026cba9001cc5f084d24ac68ec197bd1925`. Nori is not implemented in that tree. New Rust types, JSON tags, SQL functions, and storage contracts below are proposals; the [manual](../manual/sql/05-analyzers.md) continues to describe available behavior.
+Status: active design, prepared on 2026-09-12 against UQA commit `bbeb1026cba9001cc5f084d24ac68ec197bd1925`. Generic source mapping and structured token APIs are now implemented and described in the [Rust analyzer reference](../manual/reference/06-text-analyzers.md#structured-tokens). Nori morphology, new Nori components and SQL functions, and graph storage contracts below remain proposals; the [SQL manual](../manual/sql/05-analyzers.md) continues to describe available behavior.
 
 Development follows the active [Nori implementation plan](../plans/0006-nori-analyzer.md), which records the current implementation boundary, dependencies, and verification evidence.
 
@@ -29,7 +29,7 @@ The Docker image index also provides an amd64 image. The recorded run establishe
 
 ## Current UQA constraints
 
-Implementation inspection identifies the following changes needed at the subsystem boundaries. Some manual ownership tables predate the crate extraction; use the linked source locations for implementation placement.
+The baseline inspection identified the following changes needed at the subsystem boundaries. The first two are implemented by the generic analysis foundation; their downstream consumers remain active work in the implementation plan. Some manual ownership tables predate the crate extraction; use the linked source locations for implementation placement.
 
 | Existing owner | Observed behavior | Required change |
 | --- | --- | --- |
