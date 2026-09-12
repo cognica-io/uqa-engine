@@ -283,7 +283,7 @@ impl Engine {
         provider: Arc<dyn PersistentStorageProvider>,
     ) -> StorageBackendResult<Self> {
         let identity = provider.storage_identity()?;
-        let session = provider.open_session()?;
+        let session = provider.open_initial_session()?;
         let mut engine = Self::from_persistent_session(session, Some(Arc::clone(&provider)))?;
         let row_locks = crate::row_locks::shared_provider_manager(identity.clone(), &provider);
         let notification_hub =
@@ -388,29 +388,36 @@ impl Engine {
     ) -> StorageBackendResult<Self> {
         let restore_catalog = Arc::clone(&storage_session.catalog);
         let restore_backend = Arc::clone(&storage_session.backend);
-        let cache_revisions_before = restore_catalog.cache_revisions()?;
+        let cache_revisions_before;
         let mut engine = Self::empty_persistent_session(storage_session, provider);
         if initialize_catalog {
             restore_backend.migrate_document_storage()?;
             // A clean restore remains read-only on backends that can promote a transaction, while backends without promotion reserve their writer before the atomic migration scan.
             restore_backend.begin_upgradeable_transaction()?;
             let restore_result = (|| {
+                restore_catalog.initialize_storage()?;
+                let cache_revisions = restore_catalog.cache_revisions()?;
                 restore_backend.migrate_inverted_index_storage()?;
                 Self::prepare_catalog_for_initial_restore(restore_catalog.as_ref())?;
                 engine.restore_from_catalog(
                     restore_catalog.as_ref(),
                     restore_backend.as_ref(),
                     super::CatalogRestoreMode::InitialMigration,
-                )
+                )?;
+                engine.repair_reset_fts_storage(restore_catalog.as_ref())?;
+                Ok(cache_revisions)
             })();
-            if let Err(error) = restore_result {
-                return match restore_backend.rollback_transaction() {
-                    Ok(()) => Err(error),
-                    Err(rollback_error) => Err(StorageBackendError::Other(format!(
-                        "rollback initial catalog migration after `{error}` failed: {rollback_error}"
-                    ))),
-                };
-            }
+            cache_revisions_before = match restore_result {
+                Ok(revisions) => revisions,
+                Err(error) => {
+                    return match restore_backend.rollback_transaction() {
+                        Ok(()) => Err(error),
+                        Err(rollback_error) => Err(StorageBackendError::Other(format!(
+                            "rollback initial catalog migration after `{error}` failed: {rollback_error}"
+                        ))),
+                    };
+                }
+            };
             if let Err(error) = restore_backend.commit_transaction() {
                 return match restore_backend.rollback_transaction() {
                     Ok(()) => Err(error),
@@ -420,6 +427,7 @@ impl Engine {
                 };
             }
         } else {
+            cache_revisions_before = restore_catalog.cache_revisions()?;
             engine.restore_from_catalog(
                 restore_catalog.as_ref(),
                 restore_backend.as_ref(),
@@ -427,7 +435,6 @@ impl Engine {
             )?;
         }
         if initialize_catalog {
-            engine.repair_reset_fts_storage(restore_catalog.as_ref())?;
             engine.repair_persistent_value_indexes_on_open()?;
         }
         // Eagerly and fallibly populate read caches. Once open succeeds,

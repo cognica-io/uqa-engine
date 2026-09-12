@@ -18,6 +18,9 @@ use uqa_engine::Engine;
 use uqa_storage::{document_store::Document, RelationIdentity};
 use uqa_storage_sqlite::ManagedConnection;
 
+#[path = "sql_fts_index_lifecycle/initial_restore.rs"]
+mod initial_restore;
+
 fn ids(result: &uqa_sql::SQLResult) -> Vec<i64> {
     result
         .rows

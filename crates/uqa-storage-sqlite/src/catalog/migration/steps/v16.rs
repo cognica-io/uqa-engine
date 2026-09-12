@@ -8,7 +8,7 @@
 
 use super::super::super::{Catalog, Result};
 
-pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+pub(super) fn migrate(tx: &rusqlite::Connection) -> Result<()> {
     let constraints_already_present = Catalog::table_columns(tx, "_tables")?
         .is_some_and(|columns| columns.contains_key("constraints"));
     if !constraints_already_present {

@@ -38,7 +38,7 @@ const LEGACY_SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
 
 pub struct Catalog {
     conn: ManagedConnection,
-    fts_storage_was_reset: bool,
+    fts_storage_was_reset: std::sync::atomic::AtomicBool,
 }
 
 mod analyzers;

@@ -56,7 +56,7 @@ mod v45;
 mod v46;
 mod v47;
 
-type MigrationFn = for<'a> fn(&rusqlite::Transaction<'a>) -> Result<()>;
+type MigrationFn = fn(&rusqlite::Connection) -> Result<()>;
 
 #[derive(Clone, Copy)]
 pub(super) enum MigrationAction {

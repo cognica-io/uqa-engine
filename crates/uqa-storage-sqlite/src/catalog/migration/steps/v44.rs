@@ -8,7 +8,7 @@
 
 use super::super::super::{Catalog, Result};
 
-pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+pub(super) fn migrate(tx: &rusqlite::Connection) -> Result<()> {
     tx.execute_batch(
         "
     CREATE TABLE IF NOT EXISTS _cache_revisions (

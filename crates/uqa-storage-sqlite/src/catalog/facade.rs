@@ -110,6 +110,10 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::graph_has_membership(self, kind, id, graph))
     }
 
+    fn initialize_storage(&self) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::initialize_storage(self))
+    }
+
     fn cache_revisions(&self) -> StorageBackendResult<Option<uqa_storage::CatalogCacheRevisions>> {
         into_storage_result(Catalog::cache_revisions(self)).map(Some)
     }
@@ -124,6 +128,7 @@ impl CatalogFacade for Catalog {
 
     fn fts_storage_was_reset(&self) -> bool {
         self.fts_storage_was_reset
+            .load(std::sync::atomic::Ordering::Acquire)
     }
 
     fn migrate_relation_namespace(&self) -> StorageBackendResult<()> {

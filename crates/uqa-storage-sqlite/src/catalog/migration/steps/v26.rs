@@ -8,7 +8,7 @@
 
 use super::super::super::{Catalog, Result};
 
-pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+pub(super) fn migrate(tx: &rusqlite::Connection) -> Result<()> {
     let object_id_already_present = Catalog::table_columns(tx, "_sequences")?
         .is_some_and(|columns| columns.contains_key("object_id"));
     if !object_id_already_present {

@@ -120,7 +120,7 @@ sequenceDiagram
 
 ## Migrations
 
-Provider open runs required schema and posting-format migrations before table and index handles are restored. [`migration/registry.rs`](../../../crates/uqa-storage-sqlite/src/catalog/migration/registry.rs) is the single ordered dispatcher, while [`migration/steps/`](../../../crates/uqa-storage-sqlite/src/catalog/migration/steps) gives every catalog version its own SQL or data-dependent owner and records the version only after that step commits. The clustered-posting migration is bounded, atomic, idempotent, and validates output before recording its format marker. Failure retains the legacy representation and leaves no partial new representation.
+Engine initial open calls `PersistentStorageProvider::open_initial_session` and prepares deferred catalog storage through `CatalogFacade::initialize_storage` inside the backend transaction. SQLite joins catalog schema preparation, analyzer restoration, posting conversion, and required FTS source rebuilds in that transaction. [`migration/registry.rs`](../../../crates/uqa-storage-sqlite/src/catalog/migration/registry.rs) dispatches the ordered [`migration/steps/`](../../../crates/uqa-storage-sqlite/src/catalog/migration/steps) through nested savepoints; schema versions become durable only when the owning transaction commits. A later migration, analyzer, or FTS rebuild failure restores the original schema and postings. Standalone `Catalog::open` commits its complete schema preparation atomically; ordinary session factories still return initialized catalogs.
 
 An application upgrade should test open, restore, query, mutation, close, and reopen against a copy of production-shaped data. Storage compatibility is a release boundary even when the public SQL remains unchanged.
 

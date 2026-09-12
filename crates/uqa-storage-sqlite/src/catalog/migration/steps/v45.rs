@@ -8,7 +8,7 @@
 
 use super::super::super::{quote_sql_identifier, Catalog, Result};
 
-pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+pub(super) fn migrate(tx: &rusqlite::Connection) -> Result<()> {
     // Some relational-only legacy catalogs never installed graph storage.
     // Install missing tables without replacing any existing graph contents.
     tx.execute_batch(super::v06::CREATE_SQL)?;

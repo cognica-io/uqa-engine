@@ -15,12 +15,23 @@ use super::steps::{MigrationAction, MIGRATIONS};
 impl Catalog {
     /// Open (or create) the catalog and run any pending migrations.
     pub fn open(conn: ManagedConnection) -> Result<Self> {
-        let mut cat = Self {
-            conn,
-            fts_storage_was_reset: false,
-        };
-        cat.fts_storage_was_reset = cat.run_migrations()?;
+        let cat = Self::for_initial_restore(conn);
+        cat.initialize_storage()?;
         Ok(cat)
+    }
+
+    pub(crate) fn for_initial_restore(conn: ManagedConnection) -> Self {
+        Self {
+            conn,
+            fts_storage_was_reset: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    pub(in crate::catalog) fn initialize_storage(&self) -> Result<()> {
+        let reset = self.run_migrations()?;
+        self.fts_storage_was_reset
+            .fetch_or(reset, std::sync::atomic::Ordering::Release);
+        Ok(())
     }
 
     pub fn connection(&self) -> ManagedConnection {
@@ -29,6 +40,8 @@ impl Catalog {
 
     pub(super) fn run_migrations(&self) -> Result<bool> {
         self.conn.with_mut(|conn| {
+            // A savepoint joins Engine's initial restore or owns the entire standalone catalog open. Later migration failures must also restore the original schema and postings.
+            let mut conn = conn.savepoint()?;
             // Older catalogs (pre-v7) used the table name `_meta`. v7
             // renames it to `_metadata`; promote the legacy table before
             // any migration query touches it.
@@ -80,7 +93,7 @@ impl Catalog {
             );
             for migration in &MIGRATIONS {
                 if migration.version > current {
-                    let tx = conn.transaction()?;
+                    let tx = conn.savepoint()?;
                     match migration.action {
                         MigrationAction::Sql(sql) => tx.execute_batch(sql)?,
                         MigrationAction::Custom(migrate) => migrate(&tx)?,
@@ -104,6 +117,7 @@ impl Catalog {
                 Self::install_cache_revision_tracking(&repair)?;
             }
             repair.commit()?;
+            conn.commit()?;
             Ok(fts_storage_was_reset)
         })
     }

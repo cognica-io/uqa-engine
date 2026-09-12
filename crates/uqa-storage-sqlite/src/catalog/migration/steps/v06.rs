@@ -6,7 +6,7 @@
 
 //! Normalized global graph tables and lookup indexes.
 
-pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> super::Result<()> {
+pub(super) fn migrate(tx: &rusqlite::Connection) -> super::Result<()> {
     tx.execute_batch(
         "DROP TABLE IF EXISTS _graphs;
          DROP TABLE IF EXISTS _graph_vertices;

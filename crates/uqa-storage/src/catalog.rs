@@ -364,6 +364,11 @@ pub fn sequence_value_reservation(
 
 /// Engine-facing catalog facade for persistent metadata.
 pub trait CatalogFacade: Send + Sync {
+    /// Prepare durable catalog storage inside the backend's owning initial-restore transaction. Already initialized catalogs may keep the default.
+    fn initialize_storage(&self) -> StorageBackendResult<()> {
+        Ok(())
+    }
+
     /// Read transactional cache generations without loading schemas or column
     /// statistics. Providers without change tracking use conservative reloads.
     fn cache_revisions(&self) -> StorageBackendResult<Option<CatalogCacheRevisions>> {

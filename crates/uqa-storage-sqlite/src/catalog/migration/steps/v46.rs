@@ -8,7 +8,7 @@
 use super::super::super::{Catalog, Result};
 use std::fmt::Write as _;
 
-pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+pub(super) fn migrate(tx: &rusqlite::Connection) -> Result<()> {
     tx.execute_batch(
         // Relational-only legacy catalogs may not have installed path
         // definitions. Install the optional base table without replacing

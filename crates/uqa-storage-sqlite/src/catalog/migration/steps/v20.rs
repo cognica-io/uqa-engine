@@ -18,7 +18,7 @@ struct Candidate {
 /// Correct historical `hnsw` catalog rows whose durable implementation is IVF. HNSW used to be a SQL alias for IVF, and a few releases persisted the requested spelling rather than the physical index kind. Treating those rows as native HNSW after v19 makes engine reopen fail because no `_hnsw_indexes` row can exist for them.
 ///
 /// Physical metadata is the source of truth: rewrite only when every indexed column has IVF metadata and none has HNSW metadata. Genuine persistent HNSW indexes are therefore left untouched.
-pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+pub(super) fn migrate(tx: &rusqlite::Connection) -> Result<()> {
     if !table_exists(tx, "_catalog_indexes")?
         || !table_exists(tx, "_ivf_indexes")?
         || !table_exists(tx, "_hnsw_indexes")?

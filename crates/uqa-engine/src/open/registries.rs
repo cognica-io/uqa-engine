@@ -249,11 +249,7 @@ impl Engine {
         Ok(())
     }
 
-    /// Rebuild FTS postings once after `Catalog::open` had to replace an
-    /// incompatible legacy storage shape. The catalog's reset marker is tied
-    /// to that open operation and intentionally must not be consulted by
-    /// runtime registry reloads, where rebuilding would turn reads and
-    /// rollback cleanup into writes.
+    /// Rebuild FTS postings after catalog initialization replaces an incompatible legacy storage shape, inside the initial restore transaction. Runtime registry reloads must not consult this marker, because rebuilding would turn reads and rollback cleanup into writes.
     pub(super) fn repair_reset_fts_storage(
         &self,
         catalog: &dyn CatalogFacade,

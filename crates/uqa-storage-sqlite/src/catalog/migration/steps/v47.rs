@@ -8,7 +8,7 @@
 
 use super::super::super::{Catalog, Result};
 
-pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+pub(super) fn migrate(tx: &rusqlite::Connection) -> Result<()> {
     tx.execute_batch("CREATE TABLE IF NOT EXISTS _analyzers (name TEXT PRIMARY KEY, config_json TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS _table_field_analyzers (table_name TEXT NOT NULL, field TEXT NOT NULL, phase TEXT NOT NULL, analyzer_name TEXT NOT NULL, PRIMARY KEY(table_name, field, phase));")?;
     for (table, column) in [
