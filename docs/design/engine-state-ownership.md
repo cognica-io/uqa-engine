@@ -55,6 +55,8 @@ Model training consumes a retained table generation and session-bound projected 
 
 Creation consumers share a native context that holds only references to role, schema, database, relation, session, and physical refresh services. Engine supplies actual registry and search-path guards, writer fencing, and the temporary-namespace allocation flag. SQL owns target selection and visibility; execution captures the current role before its bounded catalog refresh retry and preserves temporary authorization before name validation. No complete creation-name callback remains in Engine.
 
+Cypher default-label analysis and diagnostics live with the graph AST. Engine passes the already selected graph handle into validation at the original read and write call sites. Catalog reads precede AST traversal, and missing vertex-label errors precede edge-label errors. Graph snapshots, write candidates, path-index invalidation, and final publication remain under the existing Engine transaction guards.
+
 ## Atomicity and locking
 
 Transactional session values live behind one `SessionContext.state` lock. Snapshot and restore therefore cannot combine an old search path with a new prepared-plan cache, PRNG state, or sequence `currval` map.

@@ -45,6 +45,3 @@ impl Engine {
             .attach_sequence_owner_identity(name, owner)
     }
 }
-
-#[cfg(test)]
-mod tests;

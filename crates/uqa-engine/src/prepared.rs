@@ -6,11 +6,6 @@
 
 use super::Engine;
 
-#[cfg(test)]
-mod ownership_tests;
-#[cfg(test)]
-mod tests;
-
 impl Engine {
     pub fn register_prepared(
         &self,

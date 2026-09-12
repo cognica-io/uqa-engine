@@ -144,6 +144,3 @@ impl Engine {
             .map_err(SequenceValueError::into_sql_error)
     }
 }
-
-#[cfg(test)]
-mod tests;

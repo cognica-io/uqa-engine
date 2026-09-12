@@ -337,6 +337,8 @@ Contributor checks, benchmark build gates, and repository conventions are docume
 
 ## Project layout
 
+Cypher default-label validation belongs to `uqa-graph`; Engine supplies the selected graph snapshot and retains its transaction boundary. Graph tests cover nested pattern requirements and missing-label diagnostics, while durable graph lifecycle tests remain with Engine.
+
 RPQ syntax and its parser are shared through `uqa-core`; planner estimates no longer import the graph runtime. Existing graph syntax imports remain available, and parser tests move with their implementation.
 
 The repository is a Rust workspace with small crates for the algebra, storage, scoring, graph, SQL, planning, execution, engine, CLI, APIs, and language bindings. The full dependency map and ownership rules live in the [system architecture](docs/design/architecture.md), keeping this README focused on using the project.

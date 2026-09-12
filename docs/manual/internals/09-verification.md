@@ -27,7 +27,7 @@ flowchart TD
 | Compatibility fixtures | PostgreSQL AGE shapes, TPC-H-derived PostgreSQL 18 results, SQL golden files |
 | Binding tests | CLI integration and parity, Python, Node.js, and WASM package checks in their build workflows |
 
-Implementation tests live beside the owning crate's code: SQL rules in `uqa-sql`, costing and plan selection in `uqa-planner`, and evaluation, physical cleanup and query-scope restoration in `uqa-execution`. Move existing tests with the implementation while preserving their fixtures and assertions, then add coverage for newly exposed boundaries. Engine retains tests that require real catalog, transaction, index-guard or table-generation integration; lower-level crates must not depend on Engine to run their implementation tests.
+Implementation tests live beside the owning crate's code: SQL rules in `uqa-sql`, costing and plan selection in `uqa-planner`, and evaluation, physical cleanup and query-scope restoration in `uqa-execution`. Move existing tests with the implementation while preserving their fixtures and assertions, then add coverage for newly exposed boundaries. Engine retains tests that require real catalog, transaction, index-guard or table-generation integration; lower-level crates must not depend on Engine to run their implementation tests. Cross-module Engine state tests are grouped under `crates/uqa-engine/src/tests/`, registered by `src/tests.rs`, while unit tests for private implementation details can remain beside their owning code. Public Engine API scenarios belong under the existing single integration harness, including `tests/search/model_training.rs`. Do not leave an obsolete production module or directory solely to register tests after its implementation moves.
 
 ## Standard workspace gates
 

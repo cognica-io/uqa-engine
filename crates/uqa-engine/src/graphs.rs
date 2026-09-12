@@ -13,203 +13,6 @@ fn graph_store_error(error: impl std::fmt::Display) -> super::StorageBackendErro
     super::StorageBackendError::Other(error.to_string())
 }
 
-fn mark_cypher_path_requirements(
-    path: &uqa_graph::cypher::PathPattern,
-    required: &mut (bool, bool),
-) {
-    use uqa_graph::cypher::PathElement;
-
-    for element in &path.elements {
-        match element {
-            PathElement::Node(node) => {
-                required.0 = true;
-                if let Some(properties) = &node.properties {
-                    for expression in properties.values() {
-                        mark_cypher_expr_requirements(expression, required);
-                    }
-                }
-            }
-            PathElement::Rel(relation) => {
-                required.1 = true;
-                if let Some(properties) = &relation.properties {
-                    for expression in properties.values() {
-                        mark_cypher_expr_requirements(expression, required);
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn mark_cypher_expr_requirements(
-    expression: &uqa_graph::cypher::CypherExpr,
-    required: &mut (bool, bool),
-) {
-    use uqa_graph::cypher::CypherExpr;
-
-    match expression {
-        CypherExpr::FunctionCall(call) => {
-            for argument in &call.args {
-                mark_cypher_expr_requirements(argument, required);
-            }
-        }
-        CypherExpr::BinaryOp(binary) => {
-            mark_cypher_expr_requirements(&binary.left, required);
-            mark_cypher_expr_requirements(&binary.right, required);
-        }
-        CypherExpr::UnaryOp(unary) => {
-            mark_cypher_expr_requirements(&unary.operand, required);
-        }
-        CypherExpr::ListIndex(index) => {
-            mark_cypher_expr_requirements(&index.expr, required);
-            mark_cypher_expr_requirements(&index.index, required);
-        }
-        CypherExpr::ListSlice(slice) => {
-            mark_cypher_expr_requirements(&slice.expr, required);
-            if let Some(start) = &slice.start {
-                mark_cypher_expr_requirements(start, required);
-            }
-            if let Some(end) = &slice.end {
-                mark_cypher_expr_requirements(end, required);
-            }
-        }
-        CypherExpr::ListComprehension(comprehension) => {
-            mark_cypher_expr_requirements(&comprehension.list_expr, required);
-            if let Some(filter) = &comprehension.filter {
-                mark_cypher_expr_requirements(filter, required);
-            }
-            if let Some(map) = &comprehension.map_expr {
-                mark_cypher_expr_requirements(map, required);
-            }
-        }
-        CypherExpr::InList(list) => {
-            mark_cypher_expr_requirements(&list.expr, required);
-            mark_cypher_expr_requirements(&list.list_expr, required);
-        }
-        CypherExpr::IsNull(null) => mark_cypher_expr_requirements(&null.expr, required),
-        CypherExpr::IsNotNull(not_null) => {
-            mark_cypher_expr_requirements(&not_null.expr, required);
-        }
-        CypherExpr::CaseExpr(case) => {
-            if let Some(operand) = &case.operand {
-                mark_cypher_expr_requirements(operand, required);
-            }
-            for (condition, result) in &case.whens {
-                mark_cypher_expr_requirements(condition, required);
-                mark_cypher_expr_requirements(result, required);
-            }
-            if let Some(else_expression) = &case.else_expr {
-                mark_cypher_expr_requirements(else_expression, required);
-            }
-        }
-        CypherExpr::ListLiteral(list) => {
-            for element in &list.elements {
-                mark_cypher_expr_requirements(element, required);
-            }
-        }
-        CypherExpr::MapLiteral(map) => {
-            for (_, value) in &map.pairs {
-                mark_cypher_expr_requirements(value, required);
-            }
-        }
-        CypherExpr::ExistsPattern(path) => mark_cypher_path_requirements(path, required),
-        CypherExpr::PropertyAccess(_)
-        | CypherExpr::Parameter(_)
-        | CypherExpr::Literal(_)
-        | CypherExpr::Variable(_) => {}
-    }
-}
-
-fn mark_cypher_return_requirements(
-    items: &[uqa_graph::cypher::ReturnItem],
-    order_by: Option<&[uqa_graph::cypher::OrderByItem]>,
-    skip: Option<&uqa_graph::cypher::CypherExpr>,
-    limit: Option<&uqa_graph::cypher::CypherExpr>,
-    required: &mut (bool, bool),
-) {
-    for item in items {
-        mark_cypher_expr_requirements(&item.expr, required);
-    }
-    for item in order_by.into_iter().flatten() {
-        mark_cypher_expr_requirements(&item.expr, required);
-    }
-    if let Some(skip) = skip {
-        mark_cypher_expr_requirements(skip, required);
-    }
-    if let Some(limit) = limit {
-        mark_cypher_expr_requirements(limit, required);
-    }
-}
-
-fn cypher_label_requirements(query: &uqa_graph::cypher::CypherQuery) -> (bool, bool) {
-    use uqa_graph::cypher::CypherClause;
-
-    let mut required = (false, false);
-    for clause in &query.clauses {
-        match clause {
-            CypherClause::Match(clause) => {
-                for path in &clause.patterns {
-                    mark_cypher_path_requirements(path, &mut required);
-                }
-                if let Some(filter) = &clause.r#where {
-                    mark_cypher_expr_requirements(filter, &mut required);
-                }
-            }
-            CypherClause::Create(clause) => {
-                for path in &clause.patterns {
-                    mark_cypher_path_requirements(path, &mut required);
-                }
-            }
-            CypherClause::Merge(clause) => {
-                mark_cypher_path_requirements(&clause.pattern, &mut required);
-                for item in clause
-                    .on_create_set
-                    .iter()
-                    .chain(&clause.on_match_set)
-                    .flatten()
-                {
-                    mark_cypher_expr_requirements(&item.target, &mut required);
-                    mark_cypher_expr_requirements(&item.value, &mut required);
-                }
-            }
-            CypherClause::Set(clause) => {
-                for item in &clause.items {
-                    mark_cypher_expr_requirements(&item.target, &mut required);
-                    mark_cypher_expr_requirements(&item.value, &mut required);
-                }
-            }
-            CypherClause::Delete(clause) => {
-                for expression in &clause.expressions {
-                    mark_cypher_expr_requirements(expression, &mut required);
-                }
-            }
-            CypherClause::Return(clause) => mark_cypher_return_requirements(
-                &clause.items,
-                clause.order_by.as_deref(),
-                clause.skip.as_ref(),
-                clause.limit.as_ref(),
-                &mut required,
-            ),
-            CypherClause::With(clause) => {
-                mark_cypher_return_requirements(
-                    &clause.items,
-                    clause.order_by.as_deref(),
-                    clause.skip.as_ref(),
-                    clause.limit.as_ref(),
-                    &mut required,
-                );
-                if let Some(filter) = &clause.r#where {
-                    mark_cypher_expr_requirements(filter, &mut required);
-                }
-            }
-            CypherClause::Unwind(clause) => {
-                mark_cypher_expr_requirements(&clause.expr, &mut required);
-            }
-        }
-    }
-    required
-}
-
 impl Engine {
     pub fn create_graph(&self, name: impl Into<String>) -> StorageBackendResult<bool> {
         let name = name.into();
@@ -788,7 +591,7 @@ impl Engine {
             )
         } else {
             self.graph_with(graph, |store| {
-                Self::validate_cypher_labels(store, graph, &query)?;
+                uqa_graph::cypher::validate_default_label_relations(store, graph, &query)?;
                 CypherExecutor::new(store, graph)
                     .with_params(params)
                     .execute(&query)
@@ -796,34 +599,6 @@ impl Engine {
             .map_err(|error| CypherError::Storage(error.to_string()))?
             .ok_or_else(|| CypherError::Storage(format!("graph {graph:?} does not exist")))?
         }
-    }
-
-    fn validate_cypher_labels(
-        store: &uqa_graph::GraphStoreHandle,
-        graph: &str,
-        query: &uqa_graph::cypher::CypherQuery,
-    ) -> Result<(), uqa_graph::cypher::CypherError> {
-        use uqa_graph::cypher::CypherError;
-        let labels = store
-            .graph_labels(graph)
-            .map_err(|error| CypherError::Storage(error.to_string()))?;
-        let (requires_vertex, requires_edge) = cypher_label_requirements(query);
-        for (required, kind) in [
-            (requires_vertex, uqa_graph::LabelKind::Vertex),
-            (requires_edge, uqa_graph::LabelKind::Edge),
-        ] {
-            if required
-                && !labels
-                    .iter()
-                    .any(|label| label.id == kind.default_label_id())
-            {
-                return Err(CypherError::MissingLabelRelation(format!(
-                    "{graph}.{}",
-                    kind.default_label_name()
-                )));
-            }
-        }
-        Ok(())
     }
 
     fn run_cypher_inner(
@@ -845,7 +620,7 @@ impl Engine {
                 if !store.has_graph(graph).map_err(CypherError::from)? {
                     store.create_graph(graph).map_err(CypherError::from)?;
                 }
-                Self::validate_cypher_labels(store, graph, query)?;
+                uqa_graph::cypher::validate_default_label_relations(store, graph, query)?;
                 let result = CypherWriter::new(store, graph)
                     .with_params(params)
                     .execute(query)?;

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::Engine;
+use crate::Engine;
 
 #[test]
 fn prepared_costs_distinguish_rare_and_unknown_index_keys() {
@@ -34,3 +34,5 @@ fn prepared_costs_distinguish_rare_and_unknown_index_keys() {
         entry.total_custom_cost
     );
 }
+
+mod ownership;

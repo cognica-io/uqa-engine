@@ -68,3 +68,6 @@ mod text_search_parity;
 mod text_top_k_physical;
 #[path = "vector_calibration_model.rs"]
 mod vector_calibration_model;
+
+#[path = "search/model_training.rs"]
+mod model_training;

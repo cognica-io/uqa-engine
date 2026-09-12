@@ -4,9 +4,10 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::*;
+use crate::Engine;
 use std::cell::Cell;
 use uqa_core::RelationIdentity;
+use uqa_execution::schema::sequences::removal::SequenceRemovalPublication;
 use uqa_sql::SQLError;
 
 struct UnreachablePublication;

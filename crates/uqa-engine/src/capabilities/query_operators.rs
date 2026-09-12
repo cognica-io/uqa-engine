@@ -72,6 +72,3 @@ impl RowLockOperatorFactory<StatementReadSnapshot> for Engine {
         )
     }
 }
-
-#[cfg(test)]
-mod tests;

@@ -433,6 +433,3 @@ impl Engine {
         Ok(None)
     }
 }
-
-#[cfg(test)]
-mod tests;

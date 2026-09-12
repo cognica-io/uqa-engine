@@ -4,8 +4,18 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::*;
+use crate::{Engine, NontransactionalSequenceValue};
 use std::cell::RefCell;
+use uqa_core::RelationIdentity;
+use uqa_execution::catalog::sequence::{
+    restoration::SequencePersistenceRead,
+    values::context::{
+        SequenceCachesWrite, SequenceSessionRead, SequenceSessionWrite, SequenceStatesWrite,
+        SequenceValueRuntime,
+    },
+};
+use uqa_sql::{catalog::sequence_functions::value_error::SequenceValueError, SQLError};
+use uqa_storage::{PersistentStorageSession, StorageBackendResult};
 
 struct RuntimeObserver<'a> {
     engine: &'a Engine,

@@ -4,11 +4,21 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::*;
+use crate::{Engine, TableState};
 use std::cell::Cell;
+use std::sync::Arc;
 use uqa_core::RelationIdentity;
+use uqa_execution::{
+    catalog::foreign::reads::ForeignTablesRead,
+    schema::sequences::dependency_lifecycle::{SequenceDependencyCatalog, SequenceTableMetadata},
+};
 use uqa_sql::schema::sequences::implicit_ownership::StoredSequenceNames;
+use uqa_sql::schema::sequences::{
+    dependencies::analysis::{SequenceExpressionCatalog, SequenceExpressionObjectIdsRead},
+    dependents::SequenceSchemaDependent,
+};
 use uqa_storage::SequenceOwnerDependency;
+use uqa_storage::{SequenceOwner, StorageBackendResult};
 
 fn foreign_table(engine: &Engine, declaration: &str) {
     engine

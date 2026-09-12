@@ -4,10 +4,13 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::*;
+use crate::Engine;
+use std::sync::Arc;
+use uqa_core::Predicate;
 use uqa_core::{Edge, Value, Vertex};
 use uqa_operators::OperatorTree;
 use uqa_planner::retrieval_planning::query_optimizer;
+use uqa_planner::retrieval_planning::RetrievalPlanningCatalog;
 
 #[test]
 fn costing_index_readers_retain_guards_and_table_generation() {

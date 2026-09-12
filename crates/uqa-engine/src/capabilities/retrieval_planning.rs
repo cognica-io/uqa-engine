@@ -148,9 +148,6 @@ impl RetrievalPlanningCatalog for Engine {
     }
 }
 
-#[cfg(test)]
-mod tests;
-
 impl uqa_execution::operator_tree::query::RelationRetrievalPlanner for Engine {
     fn accelerated_tree(
         &self,

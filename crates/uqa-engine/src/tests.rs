@@ -28,11 +28,12 @@ fn vector_index_kind(engine: &Engine, table: &str, field: &str) -> String {
         .into()
 }
 
-#[path = "lib_tests/api_validation.rs"]
 mod api_validation;
 
-#[path = "lib_tests/storage_consistency.rs"]
 mod storage_consistency;
 
-#[path = "lib_tests/search_and_vectors.rs"]
 mod search_and_vectors;
+
+mod catalog;
+mod prepared;
+mod queries;

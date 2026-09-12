@@ -133,10 +133,3 @@ impl Engine {
         Ok(summary)
     }
 }
-
-#[cfg(test)]
-mod scope_tests;
-#[cfg(test)]
-mod test_support;
-#[cfg(test)]
-mod tests;

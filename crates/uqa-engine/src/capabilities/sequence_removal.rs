@@ -94,6 +94,3 @@ impl SequenceRemovalPublication for Engine {
         Ok(removed)
     }
 }
-
-#[cfg(test)]
-mod tests;

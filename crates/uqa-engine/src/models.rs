@@ -284,6 +284,3 @@ impl Engine {
         Ok(scores)
     }
 }
-
-#[cfg(test)]
-mod tests;

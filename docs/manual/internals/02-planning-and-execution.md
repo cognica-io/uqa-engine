@@ -12,6 +12,8 @@ Every compiled statement follows one top-level path: SQL statement, unified lowe
 
 [RPQ syntax](../../../crates/uqa-core/src/rpq.rs) is shared Core data: the planner reads it directly when estimating path complexity. Graph owns simplification, automaton construction, and traversal; its existing `parse_rpq`, `RPQParseError`, and `RegularPathExpr` exports retain the same types and behavior. Pure parser tests live in Core, while automaton and graph-store tests remain in graph. The dependency hook rejects a planner dependency on graph, including transitive paths.
 
+[Cypher label validation](../../../crates/uqa-graph/src/cypher/labels.rs) reads the selected graph's label catalog before traversing path, expression, and clause requirements. Missing vertex defaults are reported before missing edge defaults. Engine invokes that validator at its existing graph read and write boundaries, retaining the same selected handles, snapshot scopes, write-candidate transaction, path-index invalidation, and registry publication.
+
 ## End-to-end pipeline
 
 ```mermaid
