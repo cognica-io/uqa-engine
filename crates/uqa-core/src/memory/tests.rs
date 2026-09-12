@@ -79,6 +79,39 @@ fn wrapped_deque_retains_capacity_and_preserves_order_during_growth() {
 }
 
 #[test]
+fn deque_front_growth_and_back_removal_preserve_leases_at_a_tight_limit() {
+    let budget = MemoryBudget::new(12);
+    let other = budget.reserve(3).unwrap();
+    let mut values = BudgetedDeque::new(&budget);
+    values.reserve(4).unwrap();
+    for value in 1u8..=4 {
+        values.push_back(value).unwrap();
+    }
+    assert_eq!(values.pop_back(), Some(4));
+    values.push_front(0).unwrap();
+    values.push_front(9).unwrap();
+    assert_eq!(
+        (&values).into_iter().copied().collect::<Vec<_>>(),
+        [9, 0, 1, 2, 3]
+    );
+    assert_eq!(values.capacity(), 5);
+    assert_eq!(budget.used(), 8);
+    assert_eq!(budget.peak(), 12);
+    assert!(matches!(
+        values.push_front(8),
+        Err(MemoryError::Limit { .. })
+    ));
+    assert_eq!(values.iter().copied().collect::<Vec<_>>(), [9, 0, 1, 2, 3]);
+    assert_eq!(values.pop_front(), Some(9));
+    while values.pop_back().is_some() {}
+    assert_eq!(budget.used(), 8);
+    drop(values);
+    assert_eq!(budget.used(), 3);
+    drop(other);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn result_transfer_keeps_the_allowance_until_the_value_is_destroyed() {
     struct ChecksDrop(MemoryBudget);
     impl Drop for ChecksDrop {

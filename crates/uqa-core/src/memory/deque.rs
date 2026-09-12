@@ -61,8 +61,22 @@ impl<T> BudgetedDeque<T> {
         Ok(())
     }
 
+    pub fn push_front(&mut self, value: T) -> Result<(), MemoryError> {
+        self.reserve(1)?;
+        self.values.push_front(value);
+        Ok(())
+    }
+
     pub fn pop_front(&mut self) -> Option<T> {
         self.values.pop_front()
+    }
+
+    pub fn pop_back(&mut self) -> Option<T> {
+        self.values.pop_back()
+    }
+
+    pub fn iter(&self) -> std::collections::vec_deque::Iter<'_, T> {
+        self.values.iter()
     }
 }
 
@@ -71,6 +85,15 @@ impl<T> std::ops::Index<usize> for BudgetedDeque<T> {
 
     fn index(&self, index: usize) -> &T {
         &self.values[index]
+    }
+}
+
+impl<'a, T> IntoIterator for &'a BudgetedDeque<T> {
+    type Item = &'a T;
+    type IntoIter = std::collections::vec_deque::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
