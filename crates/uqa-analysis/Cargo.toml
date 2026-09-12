@@ -14,18 +14,19 @@ exclude.workspace = true
 
 [features]
 default = []
-nori = ["dep:sha2", "dep:miniz_oxide", "dep:uqa-nori-data"]
+nori = ["dep:miniz_oxide", "dep:uqa-nori-data"]
 nori-tools = ["nori"]
 
 [dependencies]
 uqa-core = { workspace = true }
 regex = { workspace = true }
+regex-syntax = { workspace = true }
 unicode-normalization = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["raw_value"] }
 parking_lot = { workspace = true }
 thiserror = { workspace = true }
-sha2 = { workspace = true, optional = true }
+sha2 = { workspace = true }
 miniz_oxide = { workspace = true, optional = true }
 uqa-nori-data = { workspace = true, optional = true }
 

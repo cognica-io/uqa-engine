@@ -18,7 +18,10 @@ use crate::{AnalysisError, AnalysisResult};
 
 mod compiled;
 mod stream;
+mod synonyms;
 pub(crate) use compiled::PreparedTokenFilter;
+use synonyms::parse_synonym_body;
+pub(crate) use synonyms::parse_synonym_body_bounded;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -125,62 +128,6 @@ impl TokenFilter {
     }
 }
 
-fn parse_synonym_body(body: &str) -> BTreeMap<String, Vec<String>> {
-    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for raw_line in body.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if let Some((lhs, rhs)) = line.split_once("=>") {
-            // One-way mapping: lhs members all expand to the rhs list.
-            let lhs_terms: Vec<String> = lhs
-                .split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .collect();
-            let rhs_terms: Vec<String> = rhs
-                .split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .collect();
-            for term in lhs_terms {
-                let entry = out.entry(term).or_default();
-                for r in &rhs_terms {
-                    if !entry.iter().any(|e| e == r) {
-                        entry.push(r.clone());
-                    }
-                }
-            }
-        } else {
-            // Equivalent group: each member expands to the others.
-            let members: Vec<String> = line
-                .split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .collect();
-            if members.len() < 2 {
-                continue;
-            }
-            for (i, term) in members.iter().enumerate() {
-                let entry = out.entry(term.clone()).or_default();
-                for (j, other) in members.iter().enumerate() {
-                    if i == j {
-                        continue;
-                    }
-                    if !entry.iter().any(|e| e == other) {
-                        entry.push(other.clone());
-                    }
-                }
-            }
-        }
-    }
-    out
-}
-
 fn default_stop_language() -> String {
     "english".to_string()
 }
@@ -261,7 +208,7 @@ const ENGLISH_STOP_WORDS: &[&str] = &[
     "when", "which", "who", "whom", "why", "you", "your",
 ];
 
-fn builtin_stop_words(language: &str) -> &'static [&'static str] {
+pub(crate) fn builtin_stop_words(language: &str) -> &'static [&'static str] {
     match language {
         "english" => ENGLISH_STOP_WORDS,
         _ => &[],

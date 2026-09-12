@@ -249,11 +249,11 @@ The process-global `uqa_analysis::register_analyzer` registry is not catalog per
 
 ### Immutable pipeline compilation
 
-`Analyzer::compile()` returns an `Arc<CompiledAnalyzer>` containing independently owned, prepared stages. It compiles pattern expressions, orders character mappings, fixes stop-word sets, and resolves each file-backed synonym stage during construction. Configuration errors return an `AnalysisError` in pipeline order: character filters, tokenizer, then token filters. Compilation changes no source configuration, registry, catalog, binding, or index state.
+`Analyzer::compile()` returns an `Arc<CompiledAnalyzer>` containing immutable prepared stages and a resolved descriptor. Resolution checks limits and expression syntax, validates gram bounds, and snapshots file-backed synonym stages. Compilation prepares executable expressions and can additionally reject expressions that exceed the regex program limits. Prepared stages retain ordered character mappings, fixed stop-word sets, and resolved synonym maps. Compilation changes no source configuration, registry, catalog, binding, or index state.
 
 `CompiledAnalyzer::analyze_tokens(input)` returns the complete `AnalyzedText`; `analyze(input)` returns its checked ordered string projection. Each call owns its output and source state. Cloning the `Arc` shares the prepared stages, and concurrent calls may reuse that handle. These methods execute the same token, graph, and source-edit algorithms as the uncompiled APIs, without rebuilding expressions or stop sets, cloning synonym maps, or opening synonym files during execution.
 
-The compiled handle remains stable after source configuration changes, file edits, deletion, or replacement. Compile again to observe a new synonym-file revision. Existing `Analyzer::analyze`, `analyze_tokens`, and individual uncompiled stage methods retain their current execution order and synonym-file reload behavior. A missing file therefore still fails a new compilation or an uncompiled call even when an older compiled handle remains usable. Each compilation currently creates a new handle; canonical resolved descriptors, resource-aware Nori compilation, and analyzer interning remain separate implementation items.
+The compiled handle remains stable after source configuration changes, file edits, deletion, or replacement. Compile again to observe a new synonym-file revision. Existing `Analyzer::analyze`, `analyze_tokens`, and individual uncompiled stage methods retain their current execution order and synonym-file reload behavior. A missing file therefore still fails a new compilation or an uncompiled call even when an older compiled handle remains usable. Repeated compilations share a retained handle when their resolved descriptors match.
 
 ```rust
 use uqa_analysis::standard_analyzer;
@@ -269,6 +269,32 @@ assert_eq!(compiled.analyze("Dogs")?, ["dog"]);
 ```
 
 This example executes as a Rust doctest. Existing index and query consumers still use the analyzer interfaces described below; compilation alone does not change stored occurrences or field revisions.
+
+### Resolved descriptors and compilation resources
+
+`AnalyzerDescriptor::resolve(&config, length_policy, limits)` snapshots the existing generic pipeline into an `Arc<AnalyzerDescriptor>`. `CompiledAnalyzer::descriptor()` exposes that descriptor, `fingerprint()` returns its `AnalyzerFingerprint`, and `canonical_json()` returns its portable JSON. The wire object contains `descriptor` and `fingerprint`; the fingerprint is SHA-256 over the domain `UQA analyzer descriptor` followed by a zero byte and the compact descriptor JSON with recursively sorted object keys. The descriptor declares format `uqa-analyzer`, format version 1, algorithm revision 1, source-mapping revision 1, a length policy, the resolved pipeline, and runtime profiles.
+
+Resolution writes explicit component defaults, expands built-in stop languages into a sorted unique word set, and reads each synonym file into an inline map with a null file path. Synonym file parsing retains its established ordered deduplication, including self-expansion from duplicate equivalent members; inline synonym lists retain their exact order and duplicates. File paths and comments do not identify a resolved synonym map. `TokenLengthPolicy::EmittedTokens` declares a count of every emitted token, while `DiscountOverlaps` declares a count only of tokens with a positive position increment. The policy contributes to the fingerprint; existing storage consumers still use their documented emitted-token counts.
+
+Runtime profiles identify Rust Unicode tables only for whitespace/gram tokenization or full lowercase, and normalization tables only for ASCII folding. Every regex stage also hashes its parsed expression structure with expanded Unicode character ranges; Unicode word-boundary expressions include the expanded word class. `AnalyzerDescriptor::from_json(json, limits)` rejects a changed fingerprint, unsupported revision, mismatched runtime profile, duplicate or unknown properties, implicit resolved defaults, or any remaining synonym file path. Restoration opens no synonym file. A resolved descriptor still requires executable compilation, which may reject regex program-size limits.
+
+`AnalyzerResources::default()` shares a process-local compilation cache. `AnalyzerResources::new(limits)` creates an independent owner; clones share that owner's fixed limits and retained handles. `compile(&config)` and `Analyzer::compile_with_resources(&resources)` use `EmittedTokens`; `compile_with_length_policy(&config, policy)` selects another declared policy. `restore(descriptor)` or `restore_json(json)` compiles verified immutable inputs. Compilation of a retained fingerprint reuses its handle; a cache miss prepares expressions and fixed filter state once under the owner lock. Mutable file reads occur outside that lock and still run on a new configuration compilation. Failures publish no compiled entry. Eviction removes cache ownership while existing callers retain valid handles.
+
+Default `AnalyzerLimits` allow 16 MiB of configuration/descriptor JSON and each synonym source, 256 stages including the tokenizer, and cached ownership of 128 analyzers totaling at most 8 MiB of canonical descriptor JSON. Synonym resolution checks the expanded map's JSON size before inserting another key or expansion, so a small equivalent group cannot allocate an unbounded resolved map. Final descriptor encoding is also bounded. `cache_stats()` reports retained analyzer count and descriptor bytes; these byte totals exclude executable heap allocations and caller-owned handles. A zero cache-entry limit disables retention. A valid descriptor larger than only the cache byte budget returns an uncached handle. These APIs do not persist catalog definitions or field bindings, and generic Nori resource composition remains under development.
+
+```rust
+use uqa_analysis::{standard_analyzer, AnalyzerLimits, AnalyzerResources};
+
+let resources = AnalyzerResources::new(AnalyzerLimits::default());
+let compiled = resources.compile(&standard_analyzer("english"))?;
+let saved = compiled.descriptor().canonical_json();
+let restored = resources.restore_json(saved)?;
+assert!(std::sync::Arc::ptr_eq(&compiled, &restored));
+assert_eq!(restored.analyze("The cats and")?, ["cat"]);
+# Ok::<(), uqa_analysis::AnalysisError>(())
+```
+
+This example executes as a Rust doctest. Saving descriptor JSON and restoring it through a fresh resource owner preserves its resolved inputs without requiring the original synonym files.
 
 ### Structured tokens
 
@@ -389,7 +415,7 @@ The same example executes as a Nori module doctest. The native tokenizer is chec
 
 Cloning `NoriResources` shares its resolver and caches. Concurrent misses publish one validated handle while it remains cached; resolver callbacks execute outside cache locks. Aliases always consult the resolver, so updating one resolves new content without changing an existing handle. Caches evict the least recently used ownership when adding an entry would exceed a configured count or byte budget. An individually valid resource larger than the cache budget is returned without retention. Eviction does not invalidate handles held by callers.
 
-Default `ResourceLimits` retain at most 2 dictionary artifacts totaling 32 MiB of encoded bytes, and at most 64 user-rule snapshots totaling 8 MiB of UTF-8 source. Per-resource `DictionaryLimits` and `UserDictionaryLimits` also apply before publication. `cache_stats()` reports retained counts and those byte totals; they measure encoded/source sizes, not decoded heap usage or caller-owned handles. A zero entry limit disables the respective cache. These resource APIs change no catalog, field binding, or index state; canonical analyzer descriptors and generic compilation remain separate work.
+Default `ResourceLimits` retain at most 2 dictionary artifacts totaling 32 MiB of encoded bytes, and at most 64 user-rule snapshots totaling 8 MiB of UTF-8 source. Per-resource `DictionaryLimits` and `UserDictionaryLimits` also apply before publication. `cache_stats()` reports retained counts and those byte totals; they measure encoded/source sizes, not decoded heap usage or caller-owned handles. A zero entry limit disables the respective cache. These resource APIs change no catalog, field binding, or index state; composing them with generic analyzer descriptors remains separate work.
 
 ```rust
 use uqa_analysis::nori::{DictionaryRequest, KoreanTokenizer, NoriOptions, NoriResources};

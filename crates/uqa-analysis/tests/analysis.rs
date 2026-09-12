@@ -80,3 +80,6 @@ mod nori_resolvers;
 
 #[path = "analysis/compiled.rs"]
 mod compiled;
+
+#[path = "analysis/descriptor.rs"]
+mod descriptor;

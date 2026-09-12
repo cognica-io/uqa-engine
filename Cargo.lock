@@ -3672,6 +3672,7 @@ dependencies = [
  "miniz_oxide",
  "parking_lot",
  "regex",
+ "regex-syntax",
  "serde",
  "serde_json",
  "sha2",

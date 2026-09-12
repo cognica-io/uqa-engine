@@ -13,6 +13,27 @@ use crate::token_filter::SynonymFileError;
 /// An invalid analyzer is an execution error, never an empty token stream.
 #[derive(Debug, thiserror::Error)]
 pub enum AnalysisError {
+    #[error("invalid analyzer descriptor: {0}")]
+    Descriptor(&'static str),
+    #[error("analyzer {component} revision {actual} is unavailable; expected {expected}")]
+    DescriptorRevision {
+        component: &'static str,
+        expected: u32,
+        actual: u32,
+    },
+    #[error("analyzer fingerprint mismatch: expected {expected}, received {actual}")]
+    DescriptorFingerprint {
+        expected: crate::AnalyzerFingerprint,
+        actual: crate::AnalyzerFingerprint,
+    },
+    #[error("analysis needs {required} {resource}, exceeding limit {limit}")]
+    ResourceLimit {
+        resource: &'static str,
+        required: usize,
+        limit: usize,
+    },
+    #[error("invalid analyzer JSON: {0}")]
+    Json(#[from] serde_json::Error),
     #[error("analysis cancelled")]
     Cancelled,
     #[error("token contains unpaired UTF-16 surrogate {unit:#06x}; use its lossless term units")]

@@ -8,7 +8,7 @@
 
 use std::{collections::VecDeque, sync::Arc};
 
-pub(super) struct Cache<K, V> {
+pub(crate) struct Cache<K, V> {
     entries: VecDeque<(K, Arc<V>, usize)>,
     weight: usize,
 }

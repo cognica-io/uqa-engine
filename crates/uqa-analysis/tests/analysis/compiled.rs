@@ -234,6 +234,10 @@ fn prepared_stage_parameters_preserve_existing_results_including_empty_streams()
                 char_filters.to_vec(),
             );
             let compiled = analyzer.compile().unwrap();
+            let restored =
+                uqa_analysis::AnalyzerResources::new(uqa_analysis::AnalyzerLimits::default())
+                    .restore_json(compiled.descriptor().canonical_json())
+                    .unwrap();
             for input in [
                 "",
                 "and ",
@@ -246,6 +250,10 @@ fn prepared_stage_parameters_preserve_existing_results_including_empty_streams()
                     compiled.analyze_tokens(input).unwrap(),
                     analyzer.analyze_tokens(input).unwrap(),
                     "{analyzer:?}: {input:?}"
+                );
+                assert_eq!(
+                    restored.analyze_tokens(input).unwrap(),
+                    compiled.analyze_tokens(input).unwrap()
                 );
             }
         }

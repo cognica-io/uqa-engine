@@ -17,10 +17,9 @@ use super::{
     UserDictionary, UserDictionaryLimits,
 };
 
-mod cache;
 mod hash;
 
-use cache::Cache;
+use crate::cache::Cache;
 pub use hash::ResourceHash;
 
 pub const DEFAULT_NORI_DICTIONARY: &str = "lucene-10.5.1";
