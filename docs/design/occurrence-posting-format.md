@@ -1,6 +1,6 @@
 # Lossless token occurrence format
 
-The common storage library implements the binary term keys, occurrence values, field staging, and version 2 codecs described here. The Memory provider now stores exact term keys and complete occurrence graphs with revision and original source-end metadata. Key/Value and SQLite still write their existing linear representation until atomic source rebuilds install the new contract. This document specifies the implemented memory representation and available codecs; persistent migration and complete Nori retrieval remain pending. The [Nori plan](../plans/0006-nori-analyzer.md) tracks those consumers and durable analyzer revisions.
+The common storage library implements the binary term keys, occurrence values, field staging, and version 2 codecs described here. Memory and Key/Value providers store exact term keys and complete occurrence graphs with revision and original source-end metadata. Key/Value initial open rebuilds old positional formats from original sources under restored analyzer descriptors. SQLite still writes its linear representation. The [Nori plan](../plans/0006-nori-analyzer.md) tracks SQLite migration, graph query consumers, and complete Nori retrieval.
 
 ## Values and ownership
 
@@ -10,7 +10,7 @@ Each `(field, term, document)` occurrence list preserves emission order, equal s
 
 `uqa-storage::inverted_index::analyze_index_field(&CompiledAnalyzer, text)` stages a complete source field before mutation. It accumulates the analyzer's increments, preserves source spans, groups occurrences under canonical term keys, and retains final source offsets and the final skipped-position increment. Its length follows the compiled descriptor: `EmittedTokens` counts all tokens; `DiscountOverlaps` counts tokens whose increment is positive, without counting removed-position holes. The returned `AnalyzedField` does not itself persist a field binding or mutate an index.
 
-A provider must associate the positional format with the exact analyzer descriptor and length policy in field metadata, and preserve the staged field/document end state in its document metadata. Rebuilds must publish that metadata, occurrences, reverse terms, document lengths, and dependent statistics together. Memory implements this association using `IndexedFieldMetadata` and its retained index-side compiled handle; the persistent providers still require this integration. The binary occurrence payload alone cannot identify an analyzer revision.
+A provider must associate the positional format with the exact analyzer descriptor and length policy in field metadata, and preserve the staged field/document end state in its document metadata. Rebuilds must publish that metadata, occurrences, reverse terms, document lengths, and dependent statistics together. Memory and Key/Value implement this association using `IndexedFieldMetadata` and the exact index-side compiled revision; SQLite still requires this integration. The binary occurrence payload alone cannot identify an analyzer revision.
 
 ## Memory provider access and publication
 
@@ -21,6 +21,26 @@ A provider must associate the positional format with the exact analyzer descript
 A populated memory field, including an all-stopped field, rejects changing or removing its index revision without an atomic source rebuild. A search-only assignment preserves its stored graph metadata. `rebuild_with_analyzer_revision` builds an empty candidate from supplied original sources and publishes its selected bindings with all replacement documents after success. Read-only and writable snapshots retain their original data and compiled handles. Point replacement, removal, clearing, and batch replacement update graph/end metadata together; a failed analysis or checked-counter update leaves the previous state. Bulk insertion currently stages through a full provisional copy, whose heap and throughput costs remain part of the planned benchmarks.
 
 Legacy providers' new scalar-key lookup defaults delegate to their existing methods, and unpaired keys fail checked projection. Their occurrence and field-metadata methods return explicit unsupported errors instead of fabricating missing graph information. Graph phrase matching, lossless query terms throughout ranking, and original-source highlighting remain separate consumer work.
+
+## Key/Value publication and migration
+
+`KeyValueInvertedIndex` implements the same exact-key, graph, frequency, and source-metadata accessors. All occurrence records live under a separate `e` namespace followed by a length-delimited UTF-8 table name. The next byte selects score clusters (`s`), occurrence clusters (`p`), reverse document terms (`d`), document lengths (`l`), document-field metadata (`m`), field revision/statistics (`f`), or the table format marker (`v`). The marker is `occurrences-v2`. Unknown markers, or graph records without their marker, are errors.
+
+Score and occurrence keys append a length-delimited field, a length-delimited canonical binary term key, and a big-endian cluster ID. Reverse-term and length keys append a big-endian document ID followed by a length-delimited field. Document-field metadata keys append a field followed by a big-endian document ID; field summaries append only the field. Segment lengths use big-endian `u32`. Raw surrogate keys never pass through UTF-8 projection during column or table renames.
+
+Point and batch replacements stage source analysis before opening a mutation batch, coalesce changes per posting cluster, and publish complete occurrence payloads, reverse terms, lengths, end metadata, and checked field counts/totals together. Repeated document IDs use the last replacement, including an empty field map that removes an earlier document. Empty and all-stopped fields retain their revision, zero length, and final stream state. A field summary is removed only after its last indexed document is removed. Storage or analysis failures preserve the previous bytes and selected analyzer handles.
+
+Stored field fingerprints guard index assignments after reopen, including tokenless fields. Search-only changes preserve the index revision. A source rebuild stages all supplied documents under the candidate bindings and atomically replaces the table's graph namespace, retires every legacy positional namespace, and publishes the new bindings only after the batch succeeds. Table/column rename, column deletion, truncation, and table deletion move or remove the complete graph state. Persistent snapshot handles retain their compiled bindings; the owning store transaction supplies row visibility.
+
+`InvertedIndex::source_rebuild_required` reports old per-document or clustered positional data, including zero-length fields without postings. Engine initial open restores and validates every binding before rebuilding affected tables from original documents inside its catalog transaction. The preceding conversion of the oldest per-document format joins that transaction, so descriptor or source failures roll it back too. Load-only sessions reject an unmigrated index. Standalone providers require an explicit source rebuild before reads or point mutations; the old bytes cannot supply missing graph information.
+
+## Persistent field metadata
+
+`IndexedFieldRevision` is a fixed 40-byte value. It starts with magic `UQIR`, metadata codec version `1`, occurrence format version `2`, a length-policy byte (`0` for emitted tokens, `1` for discounted overlaps), and one reserved zero byte. Bytes 8 through 39 contain the analyzer's 32-byte SHA-256 fingerprint. Restoration of the complete analyzer descriptor verifies the fingerprint separately; the field value records that identity.
+
+`IndexedFieldMetadata` is 84 bytes. Its first 40 bytes use the same revision layout with magic `UQIM`. Five little-endian `u64` values then store the declared document length and final original UTF-8 start/end and UTF-16 start/end offsets. The final four bytes store the little-endian `u32` final position increment. Decoding requires the exact size, supported versions and policy, zero reserved byte, and ordered source ranges. Graph reads also check the score length and occurrence source bounds against this metadata.
+
+A Key/Value field summary contains the 40-byte revision value followed by little-endian `u64` document count and total length. Counts include tokenless fields; a stored summary must have a positive document count. Per-document metadata must agree with the field summary's fingerprint, occurrence format, and length policy.
 
 ## Canonical term keys
 

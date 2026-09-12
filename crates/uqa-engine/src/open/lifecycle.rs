@@ -392,10 +392,10 @@ impl Engine {
         let mut engine = Self::empty_persistent_session(storage_session, provider);
         if initialize_catalog {
             restore_backend.migrate_document_storage()?;
-            restore_backend.migrate_inverted_index_storage()?;
             // A clean restore remains read-only on backends that can promote a transaction, while backends without promotion reserve their writer before the atomic migration scan.
             restore_backend.begin_upgradeable_transaction()?;
             let restore_result = (|| {
+                restore_backend.migrate_inverted_index_storage()?;
                 Self::prepare_catalog_for_initial_restore(restore_catalog.as_ref())?;
                 engine.restore_from_catalog(
                     restore_catalog.as_ref(),

@@ -6,7 +6,9 @@
 
 //! Metadata, schema, table, column, and owned-data lifecycle.
 
+use super::super::occurrence_keys as occurrence;
 use super::analyzers::{field_binding_key, field_binding_prefix};
+use super::occurrence_lifecycle::{drop_occurrence_field, rename_occurrence_field};
 use super::physical_indexes::{
     drop_field_indexes, drop_table_indexes, rename_field_indexes, rename_table_indexes,
 };
@@ -213,6 +215,7 @@ impl KeyValueCatalog {
         for storage_name in &storage_names {
             batch.delete_prefix(&document_key_prefix(storage_name)?)?;
             batch.delete_prefix(&posting_key_prefix(storage_name)?)?;
+            batch.delete_prefix(&occurrence::table_prefix(storage_name)?)?;
             batch.delete_prefix(&posting_cluster_score_key_prefix(storage_name)?)?;
             batch.delete_prefix(&posting_cluster_positions_key_prefix(storage_name)?)?;
             batch.delete_prefix(&posting_document_key_prefix(storage_name)?)?;
@@ -235,6 +238,7 @@ impl KeyValueCatalog {
         for storage_name in relation.canonical_and_legacy_public_names() {
             batch.delete_prefix(&document_key_prefix(&storage_name)?)?;
             batch.delete_prefix(&posting_key_prefix(&storage_name)?)?;
+            batch.delete_prefix(&occurrence::table_prefix(&storage_name)?)?;
             batch.delete_prefix(&posting_cluster_score_key_prefix(&storage_name)?)?;
             batch.delete_prefix(&posting_cluster_positions_key_prefix(&storage_name)?)?;
             batch.delete_prefix(&posting_document_key_prefix(&storage_name)?)?;
@@ -294,6 +298,10 @@ impl KeyValueCatalog {
         for (old_prefix, new_prefix) in [
             (document_key_prefix(from)?, document_key_prefix(to)?),
             (posting_key_prefix(from)?, posting_key_prefix(to)?),
+            (
+                occurrence::table_prefix(from)?,
+                occurrence::table_prefix(to)?,
+            ),
             (
                 posting_cluster_score_key_prefix(from)?,
                 posting_cluster_score_key_prefix(to)?,
@@ -357,6 +365,7 @@ impl KeyValueCatalog {
                 batch.put(&key, &encode_stored_document_value(&document)?)?;
             }
         }
+        drop_occurrence_field(self.store.as_ref(), batch.as_mut(), table_name, column_name)?;
         batch.delete_prefix(&posting_field_prefix(table_name, column_name)?)?;
         batch.delete_prefix(&posting_cluster_score_field_prefix(
             table_name,
@@ -486,6 +495,7 @@ impl KeyValueCatalog {
             )?;
             batch.delete(&column_stats_key(table_name, from)?)?;
         }
+        rename_occurrence_field(self.store.as_ref(), batch.as_mut(), table_name, from, to)?;
         rename_document_scoped_fts_fields(self, batch.as_mut(), table_name, from, to)?;
         for row in self.load_catalog_indexes()? {
             if row.table_name != table_name {

@@ -99,7 +99,7 @@ impl Engine {
         let gin_owners = self.restore_gin_analyzer_owners(catalog)?;
         let mut saved = load_field_bindings(catalog, &resources, &gin_owners)?;
         let migrations = self.install_catalog_field_analyzers(&mut saved, &gin_owners, mode)?;
-        // Every descriptor and owner is validated before the transaction's first migration write.
+        // Every descriptor and owner is validated before rebuilding sources or publishing analyzer metadata.
         for table_name in migrations.rebuild_tables {
             let table = self
                 .try_table(&table_name)?
@@ -182,6 +182,14 @@ impl Engine {
                     .table_field_analyzers
                     .write()
                     .insert((table_name.clone(), field), binding);
+            }
+            if table.inverted_index.read().source_rebuild_required()? {
+                if !mode.allows_migration() {
+                    return Err(corrupt(
+                        "positional index requires an initial source migration",
+                    ));
+                }
+                migrations.rebuild_tables.insert(table_name.clone());
             }
         }
         if !saved.bindings.is_empty() || !saved.labels.is_empty() {

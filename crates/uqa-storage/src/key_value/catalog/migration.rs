@@ -452,6 +452,7 @@ pub(super) fn table_data_prefixes(table_name: &str) -> StorageBackendResult<Vec<
     let mut prefixes = vec![
         document_key_prefix(table_name)?,
         posting_key_prefix(table_name)?,
+        super::super::occurrence_keys::table_prefix(table_name)?,
         posting_cluster_score_key_prefix(table_name)?,
         posting_cluster_positions_key_prefix(table_name)?,
         posting_document_key_prefix(table_name)?,

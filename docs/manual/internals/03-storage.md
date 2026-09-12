@@ -77,9 +77,9 @@ flowchart LR
 
 A score cursor loads the directory and reuses one decode buffer for its current block. Score-only ranking carries document identity, term frequency, and document length without reading positions or making per-document length lookups.
 
-SQLite stores clustered values in `_posting_clusters` and `_posting_documents`. redb and the SQLite Key/Value implementation use the same codec under separate score, position, and document-term namespaces.
+SQLite stores its linear clustered values in `_posting_clusters` and `_posting_documents`. Key/Value providers, including redb and the SQLite Key/Value adapter, store version 2 scores, complete occurrences, binary reverse terms, field revision/statistics, and original-source metadata under one table-owned occurrence namespace.
 
-The common library also provides `TokenTermKey`, `TokenOccurrence`, `analyze_index_field`, and version 2 occurrence/reverse-vocabulary codecs. These preserve raw surrogate terms, repeated same-position edges, graph lengths, and original source spans while keeping frequency independent of the declared normalization length. The [occurrence format](../../design/occurrence-posting-format.md) specifies the exact bytes and validation. Existing index providers still store linear positions; provider integration, durable descriptor metadata, and atomic source rebuilds remain in the [Nori plan](../../plans/0006-nori-analyzer.md). A codec round-trip alone does not migrate an existing index.
+The common library also provides `TokenTermKey`, `TokenOccurrence`, `analyze_index_field`, and version 2 occurrence/reverse-vocabulary codecs. These preserve raw surrogate terms, repeated same-position edges, graph lengths, and original source spans while keeping frequency independent of the declared normalization length. The [occurrence format](../../design/occurrence-posting-format.md) specifies the exact bytes and validation. Memory and Key/Value indexes publish these values with exact analyzer fingerprints and source-end metadata. Key/Value point/batch mutations are atomic, and initial Engine open rebuilds legacy positional data from original documents under restored descriptors in the catalog transaction. SQLite graph integration and graph query consumers remain in the [Nori plan](../../plans/0006-nori-analyzer.md).
 
 ## Vector storage
 

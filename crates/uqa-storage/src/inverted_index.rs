@@ -76,17 +76,6 @@ fn checked_sum_u64(
     })
 }
 
-pub(crate) fn validate_token_position_count(token_count: u64) -> StorageBackendResult<()> {
-    // Positions are zero-based, so a stream containing u32::MAX + 1 tokens
-    // still has a representable final position (u32::MAX).
-    if token_count > u64::from(u32::MAX) + 1 {
-        return Err(StorageBackendError::Other(
-            "document token positions exceed the u32 index format".into(),
-        ));
-    }
-    Ok(())
-}
-
 #[derive(Debug, Clone)]
 pub struct MemoryInvertedIndex {
     bindings: AnalyzerBindings,

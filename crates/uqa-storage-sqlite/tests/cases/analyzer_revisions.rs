@@ -23,25 +23,24 @@ fn connection() -> ManagedConnection {
 }
 
 fn providers(default: &Analyzer) -> Vec<Box<dyn InvertedIndex>> {
-    let mut providers: Vec<Box<dyn InvertedIndex>> =
-        vec![Box::new(MemoryInvertedIndex::new(default.clone()))];
-    providers.extend(linear_providers(default));
-    providers
-}
-
-fn linear_providers(default: &Analyzer) -> Vec<Box<dyn InvertedIndex>> {
-    vec![
+    let mut providers: Vec<Box<dyn InvertedIndex>> = vec![
+        Box::new(MemoryInvertedIndex::new(default.clone())),
         Box::new(KeyValueInvertedIndex::new(
             Arc::new(MemoryKeyValueStore::new()),
             "docs",
             default.clone(),
         )),
-        Box::new(SQLiteInvertedIndex::new(
-            connection(),
-            "docs",
-            default.clone(),
-        )),
-    ]
+    ];
+    providers.extend(linear_providers(default));
+    providers
+}
+
+fn linear_providers(default: &Analyzer) -> Vec<Box<dyn InvertedIndex>> {
+    vec![Box::new(SQLiteInvertedIndex::new(
+        connection(),
+        "docs",
+        default.clone(),
+    ))]
 }
 
 fn fields(text: &str) -> BTreeMap<String, String> {

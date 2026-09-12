@@ -35,7 +35,7 @@ fn fields(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
 }
 
 #[test]
-fn linear_backends_reject_korean_assignments_and_writes_before_mutation() {
+fn sqlite_rejects_korean_assignments_and_writes_before_graph_storage() {
     let config = serde_json::from_str::<Analyzer>(r#"{"tokenizer":{"type":"nori_tokenizer"}}"#);
     let analyzer = match config {
         Ok(config) => config,
@@ -49,18 +49,11 @@ fn linear_backends_reject_korean_assignments_and_writes_before_mutation() {
     assert!(analyzer.uses_korean_stages());
     let compiled = analyzer.compile().unwrap();
     let indexes = |analyzer: Analyzer| -> Vec<Box<dyn InvertedIndex>> {
-        vec![
-            Box::new(KeyValueInvertedIndex::new(
-                Arc::new(MemoryKeyValueStore::new()),
-                "korean",
-                analyzer.clone(),
-            )),
-            Box::new(SQLiteInvertedIndex::new(
-                sqlite_with_catalog(),
-                "korean",
-                analyzer,
-            )),
-        ]
+        vec![Box::new(SQLiteInvertedIndex::new(
+            sqlite_with_catalog(),
+            "korean",
+            analyzer,
+        ))]
     };
     for mut index in indexes(whitespace_analyzer()) {
         index

@@ -55,6 +55,7 @@ const TAG_RELATION: u8 = b'R';
 const TAG_VIEW: u8 = b'w';
 const TAG_DOCUMENT: u8 = b'd';
 const TAG_POSTING: u8 = b'p';
+const TAG_OCCURRENCE_INDEX: u8 = b'e';
 const TAG_POSTING_CLUSTER_SCORE: u8 = b'k';
 const TAG_POSTING_CLUSTER_POSITIONS: u8 = b'o';
 const TAG_POSTING_DOCUMENT: u8 = b'x';
@@ -239,6 +240,7 @@ mod inverted_index;
 mod ivf_index;
 mod ivf_persistence;
 mod memory_store;
+mod occurrence_keys;
 mod storage_backend;
 mod vector_index;
 

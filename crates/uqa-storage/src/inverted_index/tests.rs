@@ -114,10 +114,15 @@ fn stats_avg_doc_length_correct() {
 }
 
 #[test]
-fn token_position_format_accepts_last_u32_position_only() {
-    validate_token_position_count(u64::from(u32::MAX) + 1).unwrap();
-    let error = validate_token_position_count(u64::from(u32::MAX) + 2).unwrap_err();
-    assert!(error.to_string().contains("u32 index format"));
+fn token_position_format_requires_a_representable_end() {
+    let mut occurrence = uqa_core::TokenOccurrence {
+        position: u32::MAX - 1,
+        position_length: 1,
+        offsets: None,
+    };
+    occurrence.validate().unwrap();
+    occurrence.position = u32::MAX;
+    assert!(occurrence.validate().is_err());
 }
 
 #[test]

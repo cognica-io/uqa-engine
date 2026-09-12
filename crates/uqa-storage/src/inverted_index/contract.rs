@@ -47,6 +47,11 @@ impl std::str::FromStr for AnalyzerPhase {
 }
 
 pub trait InvertedIndex: Send + Sync {
+    /// Whether persisted positional data must be rebuilt from original sources before this index can be read or mutated. The owning engine performs this after restoring exact analyzer revisions, in the same initial-open transaction.
+    fn source_rebuild_required(&self) -> StorageBackendResult<bool> {
+        Ok(false)
+    }
+
     fn analyzer(&self) -> &Analyzer;
 
     fn add_document(
