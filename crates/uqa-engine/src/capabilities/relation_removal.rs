@@ -13,8 +13,8 @@ use uqa_execution::schema::removal::entry::{
 };
 use uqa_execution::schema::removal::{
     RelationRemovalContext, RelationRemovalEvents, RelationRemovalLocks, RelationRemovalPrivileges,
-    RelationRemovalRoutines, RelationRemovalTables, RelationRemovalTransactions,
-    RelationRemovalViews, RelationRemovalWrite,
+    RelationRemovalRoutines, RelationRemovalTransactions, RelationRemovalViews,
+    RelationRemovalWrite,
 };
 use uqa_sql::{
     catalog::{errors::storage_error, resolution::RelationResolution},
@@ -49,7 +49,7 @@ impl Engine {
         RelationRemovalContext {
             catalog: self,
             dependencies: self,
-            tables: self,
+            tables: self.table_removal_context(),
             privileges: self,
             routines: self,
             events: self,
@@ -101,24 +101,7 @@ impl ForeignTableDropDependencies for Engine {
         })
     }
 }
-impl RelationRemovalTables for Engine {
-    fn hierarchy_drop_targets(
-        &self,
-        names: &[String],
-        cascade: bool,
-    ) -> (Vec<String>, Vec<String>) {
-        Engine::hierarchy_drop_targets(self, names, cascade)
-    }
-    fn try_drop_table_restrict_dependents(
-        &self,
-        names: &[String],
-    ) -> StorageBackendResult<Vec<String>> {
-        Engine::try_drop_table_restrict_dependents(self, names)
-    }
-    fn try_drop_tables(&self, names: &[String], cascade: bool) -> StorageBackendResult<()> {
-        Engine::try_drop_tables(self, names, cascade)
-    }
-}
+
 impl RelationRemovalPrivileges for Engine {
     fn ensure_table_drop_authority(&self, table: &str) -> Result<(), SQLError> {
         Engine::ensure_table_drop_authority(self, table)

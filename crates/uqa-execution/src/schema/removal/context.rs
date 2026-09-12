@@ -11,15 +11,7 @@ use uqa_sql::{
     SQLError, SQLResult,
 };
 use uqa_storage::StorageBackendResult;
-pub trait RelationRemovalTables {
-    fn hierarchy_drop_targets(&self, names: &[String], cascade: bool)
-        -> (Vec<String>, Vec<String>);
-    fn try_drop_table_restrict_dependents(
-        &self,
-        names: &[String],
-    ) -> StorageBackendResult<Vec<String>>;
-    fn try_drop_tables(&self, names: &[String], cascade: bool) -> StorageBackendResult<()>;
-}
+
 pub trait RelationRemovalPrivileges {
     fn ensure_table_drop_authority(&self, table: &str) -> Result<(), SQLError>;
     fn ensure_foreign_table_drop_authority(&self, table: &str) -> Result<(), SQLError>;
@@ -53,7 +45,7 @@ pub trait RelationRemovalTransactions {
 pub struct RelationRemovalContext<'a> {
     pub catalog: &'a dyn RelationDropCatalog,
     pub dependencies: &'a dyn ForeignTableDropDependencies,
-    pub tables: &'a dyn RelationRemovalTables,
+    pub tables: crate::schema::table_removal::context::TableRemovalContext<'a>,
     pub privileges: &'a dyn RelationRemovalPrivileges,
     pub routines: &'a dyn RelationRemovalRoutines,
     pub events: &'a dyn RelationRemovalEvents,

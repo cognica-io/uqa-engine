@@ -15,3 +15,5 @@ mod sequences;
 mod table_authorization;
 mod table_grants;
 mod table_ownership;
+
+mod table_removal;

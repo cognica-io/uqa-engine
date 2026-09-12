@@ -60,15 +60,6 @@ impl Engine {
     ) -> Result<(), SQLError> {
         view_removal::drop_views_inner(&self.view_removal_context(), names, check_authority)
     }
-    pub(crate) fn drop_temporary_views_depending_on_relation_inner(
-        &self,
-        canonical_name: &str,
-    ) -> StorageBackendResult<()> {
-        view_removal::drop_temporary_views_depending_on_relation_inner(
-            &self.view_removal_context(),
-            canonical_name,
-        )
-    }
 }
 impl ViewRemovalTransactions for Engine {
     fn with_view_removal<R>(
