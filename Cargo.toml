@@ -101,6 +101,7 @@ sha2 = { version = "0.10", default-features = false }
 crc32fast = "1.4"
 fs2 = "0.4"
 lz4_flex = "0.13"
+miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
 getrandom = "0.3"
 icu_casemap = "=2.0.0"
 icu_properties = "=2.0.2"

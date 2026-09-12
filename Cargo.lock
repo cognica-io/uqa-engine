@@ -3669,10 +3669,12 @@ dependencies = [
 name = "uqa-analysis"
 version = "0.2.3"
 dependencies = [
+ "miniz_oxide",
  "parking_lot",
  "regex",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "unicode-normalization",

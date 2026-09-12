@@ -12,6 +12,11 @@ rust-version.workspace = true
 documentation = "https://docs.rs/uqa-analysis"
 exclude.workspace = true
 
+[features]
+default = []
+nori = ["dep:sha2", "dep:miniz_oxide"]
+nori-tools = ["nori"]
+
 [dependencies]
 uqa-core = { workspace = true }
 regex = { workspace = true }
@@ -20,9 +25,15 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 parking_lot = { workspace = true }
 thiserror = { workspace = true }
+sha2 = { workspace = true, optional = true }
+miniz_oxide = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3.13"
+
+[[example]]
+name = "pack_nori"
+required-features = ["nori-tools"]
 
 [lints]
 workspace = true

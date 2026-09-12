@@ -13,6 +13,9 @@ use crate::token_filter::SynonymFileError;
 /// An invalid analyzer is an execution error, never an empty token stream.
 #[derive(Debug, thiserror::Error)]
 pub enum AnalysisError {
+    #[cfg(feature = "nori")]
+    #[error(transparent)]
+    Dictionary(#[from] crate::nori::DictionaryError),
     #[error("{coordinate} offset {offset} is not a Unicode scalar boundary within text of length {length}")]
     InvalidTextOffset {
         coordinate: &'static str,

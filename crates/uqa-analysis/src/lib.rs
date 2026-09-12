@@ -11,6 +11,8 @@ pub mod analyzer;
 pub mod char_filter;
 pub mod error;
 pub mod highlight;
+#[cfg(feature = "nori")]
+pub mod nori;
 pub mod porter;
 pub mod registry;
 pub mod source;
