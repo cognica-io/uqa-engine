@@ -95,7 +95,7 @@ impl AnalysisToken {
         }
     }
 
-    #[cfg(any(test, feature = "nori"))]
+    #[cfg(test)]
     pub(crate) fn replace_term(&mut self, term: TokenTerm) {
         if term != self.term {
             self.verbatim = false;
@@ -193,11 +193,11 @@ impl AnalyzedText {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct TokenBatch {
-    pub tokens: Vec<AnalysisToken>,
+pub(crate) struct TokenBatch<T = AnalysisToken> {
+    pub tokens: Vec<T>,
     pub final_position_increment: u32,
     #[serde(skip)]
-    pub terminal: Option<Box<AnalysisToken>>,
+    pub terminal: Option<Box<T>>,
 }
 
 impl TokenBatch {

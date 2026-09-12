@@ -13,7 +13,7 @@ use crate::AnalysisResult;
 
 pub(super) use crate::allocation::{copy_text as copy_string, copy_units};
 
-pub(super) fn encode(
+pub(in crate::nori) fn encode(
     input: &str,
     limit: usize,
     budget: &MemoryBudget,

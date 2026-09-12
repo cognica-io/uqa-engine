@@ -8,13 +8,13 @@
 
 use super::{AnalysisToken, AnalyzedText, TokenBatch};
 use crate::nori::filters::stream::{covering_range, FilterToken};
+use crate::nori::filters::Work;
 use crate::nori::{KoreanMorphology, NoriOutput, NoriToken};
 use crate::source::SourceProjection;
 use crate::{AnalysisError, AnalysisResult, FilteredText, TokenTerm};
-use std::borrow::Cow;
 use std::ops::Range;
 use std::sync::Arc;
-use uqa_core::memory::Budgeted;
+use uqa_core::memory::{Budgeted, MemoryBudget, MemoryReservation};
 
 mod allocation;
 
@@ -92,39 +92,61 @@ impl FilterToken for AnalysisToken {
     type Span = Option<Range<usize>>;
     type Context = Arc<Budgeted<SourceProjection>>;
 
-    fn term(&self) -> Cow<'_, [u16]> {
-        self.term.utf16()
+    fn term(&self) -> impl Iterator<Item = u16> + '_ {
+        self.term.utf16_units()
     }
-    fn term_len(&self) -> usize {
-        self.term.utf16_len()
+    fn term_len(&self, work: &mut Work<'_>) -> AnalysisResult<usize> {
+        if self.term.as_str().is_none() {
+            return Ok(self.term.utf16_len());
+        }
+        let mut length = 0;
+        for _ in self.term.utf16_units() {
+            work.tick()?;
+            length += 1;
+        }
+        Ok(length)
     }
-    fn replace_term(&mut self, term: Vec<u16>, context: &Self::Context) {
-        self.replace_term(TokenTerm::from_utf16(term));
-        self.verbatim = self
-            .offsets
-            .as_ref()
-            .is_some_and(|offsets| context.is_verbatim(&self.term, offsets));
+    fn clone_reserved(
+        &self,
+        budget: &MemoryBudget,
+        work: &mut Work<'_>,
+    ) -> AnalysisResult<Budgeted<Self>> {
+        self.clone_budgeted(budget, &mut *work.poll)
     }
-    fn mutate_term(
+    fn replace_term(
         &mut self,
+        term: Budgeted<Vec<u16>>,
+        memory: &mut MemoryReservation,
         context: &Self::Context,
-        operation: impl FnOnce(&mut Vec<u16>, Option<&str>) -> AnalysisResult<()>,
+        work: &mut Work<'_>,
     ) -> AnalysisResult<()> {
-        let mut units = self.term.utf16().into_owned();
-        operation(
-            &mut units,
-            self.korean_morphology
-                .as_ref()
-                .and_then(|value| value.reading.as_deref()),
-        )?;
-        FilterToken::replace_term(self, units, context);
+        let term = TokenTerm::from_utf16_budgeted(term, &mut *work.poll)?;
+        let verbatim = if let Some(offsets) = &self.offsets {
+            context.is_verbatim_with_control(&term, offsets, work.poll)?
+        } else {
+            false
+        };
+        if !self.term.eq_with_control(&term, work.poll)? {
+            let old_bytes = self.term.allocation_bytes();
+            let (term, allocation) = term.into_parts();
+            drop(std::mem::replace(&mut self.term, term));
+            drop(memory.split(old_bytes));
+            memory.absorb(allocation);
+        }
+        self.verbatim = verbatim;
         Ok(())
     }
-    fn increment(&self) -> u32 {
-        self.position_increment
-    }
-    fn set_increment(&mut self, increment: u32) {
-        self.position_increment = increment;
+    fn refresh_context(
+        &mut self,
+        context: &Self::Context,
+        work: &mut Work<'_>,
+    ) -> AnalysisResult<()> {
+        self.verbatim = if let Some(offsets) = &self.offsets {
+            context.is_verbatim_with_control(&self.term, offsets, work.poll)?
+        } else {
+            false
+        };
+        Ok(())
     }
     fn position_length(&self) -> u32 {
         self.position_length
@@ -153,6 +175,7 @@ impl FilterToken for AnalysisToken {
         first: &Self::Span,
         last: &Self::Span,
         context: &Self::Context,
+        work: &mut Work<'_>,
     ) -> AnalysisResult<()> {
         self.filtered_utf16 = first
             .as_ref()
@@ -162,13 +185,9 @@ impl FilterToken for AnalysisToken {
         self.offsets = self
             .filtered_utf16
             .clone()
-            .map(|range| context.project(range))
+            .map(|range| context.project_with_control(range, work.poll))
             .transpose()?;
-        self.verbatim = self
-            .offsets
-            .as_ref()
-            .is_some_and(|offsets| context.is_verbatim(&self.term, offsets));
-        Ok(())
+        self.refresh_context(context, work)
     }
 }
 

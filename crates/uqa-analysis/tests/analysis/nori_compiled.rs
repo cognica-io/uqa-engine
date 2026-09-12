@@ -20,6 +20,8 @@ use super::nori_resources::model;
 
 #[path = "nori_compiled/corpus.rs"]
 mod corpus;
+#[path = "nori_compiled/memory.rs"]
+mod memory;
 #[path = "nori_compiled/resources.rs"]
 mod resources;
 

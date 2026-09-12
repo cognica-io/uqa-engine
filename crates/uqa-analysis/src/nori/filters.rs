@@ -10,12 +10,15 @@ use serde::{Deserialize, Serialize};
 
 use super::error::{check_limit, invalid};
 use super::{NoriDictionary, NoriLimits, NoriOutput, POSTag};
-use crate::{AnalysisError, AnalysisResult};
+use crate::AnalysisResult;
 
 mod lowercase;
 pub(crate) mod stream;
+#[cfg(test)]
+mod tests;
 
-use stream::{FilterStream, FilterToken};
+use stream::{AllocatedStream, FilterStream, FilterToken};
+use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget};
 
 pub const DEFAULT_STOP_TAGS: &[POSTag] = &[
     POSTag::EP,
@@ -134,6 +137,19 @@ impl KoreanFilter {
         self.compile().apply(input, model, limits, poll)
     }
 
+    /// Consume reserved native tokens and retain one allowance through filtering and numeric composition.
+    ///
+    /// Use the complete reservation returned by native budgeted tokenization. Input/output vectors, terms, morphology, hidden terminal attributes and numeric scratch keep their allocation owners until destruction. Count-limit, byte-limit and callback failures return no partial result.
+    pub fn apply_budgeted(
+        &self,
+        input: Budgeted<NoriOutput>,
+        model: &NoriDictionary,
+        limits: NoriLimits,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<NoriOutput>> {
+        self.compile().apply_budgeted(input, model, limits, poll)
+    }
+
     /// Apply the same Korean filter to a complete common token stream.
     ///
     /// Absent Korean morphology stays absent: POS filtering retains such tokens and reading conversion leaves their terms unchanged. Number composition retains the reference's lookahead metadata and projects its composed span through the original character filters.
@@ -164,31 +180,86 @@ impl KoreanFilter {
         limits: NoriLimits,
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<crate::AnalyzedText> {
+        Ok(self
+            .filter_analyzed_budgeted(
+                input.into_unlimited_with_control(poll)?,
+                model,
+                limits,
+                poll,
+            )?
+            .into_parts()
+            .0)
+    }
+
+    /// Filter a reserved common stream with count limits, allocation ownership, and cancellation.
+    ///
+    /// Existing source projections retain their shared allocation leases. All copied token buffers receive independent reservations from the input allowance, including numeric lookahead snapshots and hidden terminal state.
+    pub fn filter_analyzed_budgeted(
+        &self,
+        input: Budgeted<crate::AnalyzedText>,
+        model: &NoriDictionary,
+        limits: NoriLimits,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<crate::AnalyzedText>> {
+        self.compile()
+            .filter_analyzed_budgeted(input, Some(model), limits, poll)
+    }
+}
+
+impl CompiledFilter {
+    pub(crate) fn apply_budgeted(
+        self,
+        input: Budgeted<NoriOutput>,
+        model: &NoriDictionary,
+        limits: NoriLimits,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<NoriOutput>> {
+        let (input, memory) = input.into_parts();
+        let (output, memory) = self
+            .apply_stream_budgeted(
+                Budgeted::new(input.into(), memory),
+                Some(model),
+                limits,
+                poll,
+            )?
+            .into_parts();
+        Ok(Budgeted::new(output.into(), memory))
+    }
+
+    pub(crate) fn filter_analyzed_budgeted(
+        self,
+        input: Budgeted<crate::AnalyzedText>,
+        model: Option<&NoriDictionary>,
+        limits: NoriLimits,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<crate::AnalyzedText>> {
+        let (input, memory) = input.into_parts();
         let stream = FilterStream {
             tokens: input.batch.tokens,
             terminal: input.batch.terminal,
             final_position_increment: input.batch.final_position_increment,
             final_offset_utf16: input.projection.filtered_len(),
-            context: input.projection.clone(),
+            context: input.projection,
         };
-        let stream = self
-            .compile()
-            .apply_stream(stream, Some(model), limits, poll)?;
-        let batch = crate::token::TokenBatch {
-            tokens: stream.tokens,
-            terminal: stream.terminal,
-            final_position_increment: stream.final_position_increment,
-        };
-        batch.validate_positions()?;
-        Ok(crate::AnalyzedText {
-            batch,
-            projection: input.projection,
-            final_offsets: input.final_offsets,
-        })
+        let (stream, memory) = self
+            .apply_stream_budgeted(Budgeted::new(stream, memory), model, limits, poll)?
+            .into_parts();
+        let result = Budgeted::new(
+            crate::AnalyzedText {
+                batch: crate::token::TokenBatch {
+                    tokens: stream.tokens,
+                    terminal: stream.terminal,
+                    final_position_increment: stream.final_position_increment,
+                },
+                projection: stream.context,
+                final_offsets: input.final_offsets,
+            },
+            memory,
+        );
+        result.batch.validate_positions_with_control(poll)?;
+        poll()?;
+        Ok(result)
     }
-}
-
-impl CompiledFilter {
     pub fn apply(
         self,
         input: NoriOutput,
@@ -203,110 +274,131 @@ impl CompiledFilter {
 
     pub(crate) fn apply_stream<T: FilterToken>(
         self,
-        mut input: FilterStream<T>,
+        input: FilterStream<T>,
         model: Option<&NoriDictionary>,
         limits: NoriLimits,
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<FilterStream<T>> {
+        Ok(self
+            .apply_owned(
+                AllocatedStream::from_unreserved(input, poll)?,
+                model,
+                limits,
+                poll,
+            )?
+            .into_budgeted()
+            .into_parts()
+            .0)
+    }
+
+    pub(crate) fn apply_stream_budgeted<T: FilterToken>(
+        self,
+        input: Budgeted<FilterStream<T>>,
+        model: Option<&NoriDictionary>,
+        limits: NoriLimits,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<FilterStream<T>>> {
+        Ok(self
+            .apply_owned(AllocatedStream::from_budgeted(input), model, limits, poll)?
+            .into_budgeted())
+    }
+
+    fn apply_owned<T: FilterToken>(
+        self,
+        mut input: AllocatedStream<T>,
+        model: Option<&NoriDictionary>,
+        limits: NoriLimits,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<AllocatedStream<T>> {
         if matches!(self, Self::Number) {
             return super::number::filter(input, limits, poll);
         }
-        let mut work = Work::new(poll)?;
-        check_limit("Nori output tokens", input.tokens.len(), limits.max_tokens)?;
+        poll()?;
+        check_limit(
+            "Nori output tokens",
+            input.batch.tokens().len(),
+            limits.max_tokens,
+        )?;
         check_limit(
             "Nori input UTF-16 units",
             input.final_offset_utf16,
             limits.max_input_utf16,
         )?;
-        let mut skipped = 0_u32;
-        let mut output_units = 0_usize;
-        let mut retained = 0;
-        let mut trailing_removed = false;
-        for index in 0..input.tokens.len() {
-            work.tick()?;
-            let token = &mut input.tokens[index];
-            if let Self::PartOfSpeech(bits) = self {
-                if token
-                    .left_pos()
-                    .is_some_and(|tag| bits & (1_u64 << tag.ordinal()) != 0)
-                {
-                    trailing_removed = true;
-                    skipped = skipped
-                        .checked_add(token.increment())
-                        .ok_or(AnalysisError::TokenPositionOverflow)?;
-                    continue;
-                }
-                token.set_increment(
-                    token
-                        .increment()
-                        .checked_add(skipped)
-                        .ok_or(AnalysisError::TokenPositionOverflow)?,
-                );
-                skipped = 0;
-                trailing_removed = false;
-            }
-            let term_units = if matches!(self, Self::ReadingForm) {
-                token
-                    .reading()
-                    .map_or(token.term_len(), |text| text.encode_utf16().count())
-            } else {
-                token.term_len()
-            };
-            output_units = output_units
-                .checked_add(token_units(token, term_units, &mut work)?)
-                .ok_or_else(|| invalid("Nori filter", "UTF-16 output size overflow"))?;
-            check_limit(
-                "Nori output UTF-16 units",
-                output_units,
-                limits.max_output_utf16,
-            )?;
-            match self {
-                Self::ReadingForm => token.mutate_term(&input.context, |term, reading| {
-                    if let Some(reading) = reading {
-                        term.clear();
-                        term.try_reserve(term_units)
-                            .map_err(super::DictionaryError::from)?;
-                        for unit in reading.encode_utf16() {
-                            work.tick()?;
-                            term.push(unit);
-                        }
+        let mut output_units = 0usize;
+        input.batch = if let Self::PartOfSpeech(bits) = self {
+            input.batch.retain(
+                |token, poll| {
+                    if token
+                        .left_pos()
+                        .is_some_and(|tag| bits & (1_u64 << tag.ordinal()) != 0)
+                    {
+                        return Ok(false);
                     }
-                    Ok(())
-                })?,
-                Self::SimpleLowercase => token.mutate_term(&input.context, |term, _| {
-                    lowercase::apply(term, model, &mut work)
-                })?,
-                Self::PartOfSpeech(_) | Self::Number => {}
-            }
-            input.tokens.swap(retained, index);
-            retained += 1;
+                    let mut work = Work::new(poll)?;
+                    let term_units = token.term_len(&mut work)?;
+                    output_units =
+                        filter_units(token, term_units, output_units, limits, &mut work)?;
+                    Ok(true)
+                },
+                poll,
+            )?
+        } else {
+            let mut work = Work::new(poll)?;
+            input.batch.map_tokens(|token, memory| {
+                work.tick()?;
+                let term_units = if matches!(self, Self::ReadingForm) {
+                    if let Some(reading) = token.reading() {
+                        text_units(reading, &mut work)?
+                    } else {
+                        token.term_len(&mut work)?
+                    }
+                } else {
+                    token.term_len(&mut work)?
+                };
+                output_units = filter_units(token, term_units, output_units, limits, &mut work)?;
+                match self {
+                    Self::ReadingForm => {
+                        token.reading_form(term_units, memory, &input.context, &mut work)?;
+                    }
+                    Self::SimpleLowercase => {
+                        token.lowercase(model, memory, &input.context, &mut work)?;
+                    }
+                    Self::PartOfSpeech(_) | Self::Number => unreachable!("non-removing filter"),
+                }
+                Ok(())
+            })?
+        };
+        if let Some(terminal) = input.batch.terminal() {
+            let mut work = Work::new(poll)?;
+            let term_units = terminal.term_len(&mut work)?;
+            filter_units(terminal, term_units, output_units, limits, &mut work)?;
         }
-        if trailing_removed && input.terminal.is_none() {
-            // A filtering stream can change shared attributes while returning false at EOF.
-            input.terminal = input.tokens.pop().map(Box::new);
-        }
-        input.tokens.truncate(retained);
-        if let Some(terminal) = &input.terminal {
-            output_units = output_units
-                .checked_add(token_units(
-                    terminal.as_ref(),
-                    terminal.term_len(),
-                    &mut work,
-                )?)
-                .ok_or_else(|| invalid("Nori filter", "terminal attribute size overflow"))?;
-            check_limit(
-                "Nori output UTF-16 units",
-                output_units,
-                limits.max_output_utf16,
-            )?;
-        }
-        input.final_position_increment = input
-            .final_position_increment
-            .checked_add(skipped)
-            .ok_or(AnalysisError::TokenPositionOverflow)?;
-        (work.poll)()?;
+        poll()?;
         Ok(input)
     }
+}
+
+fn filter_units<T: FilterToken>(
+    token: &T,
+    term_units: usize,
+    previous: usize,
+    limits: NoriLimits,
+    work: &mut Work<'_>,
+) -> AnalysisResult<usize> {
+    let units = previous
+        .checked_add(token_units(token, term_units, work)?)
+        .ok_or_else(|| invalid("Nori filter", "UTF-16 output size overflow"))?;
+    check_limit("Nori output UTF-16 units", units, limits.max_output_utf16)?;
+    Ok(units)
+}
+
+fn text_units(text: &str, work: &mut Work<'_>) -> AnalysisResult<usize> {
+    let mut length = 0;
+    for character in text.chars() {
+        work.tick()?;
+        length += character.len_utf16();
+    }
+    Ok(length)
 }
 
 pub(super) fn token_units<T: FilterToken>(
@@ -317,7 +409,7 @@ pub(super) fn token_units<T: FilterToken>(
     let mut units = term_units;
     if let Some(reading) = token.reading() {
         units = units
-            .checked_add(reading.encode_utf16().count())
+            .checked_add(text_units(reading, work)?)
             .ok_or_else(|| invalid("Nori filter", "reading size overflow"))?;
     }
     for part in token.morphemes().into_iter().flatten() {
@@ -329,9 +421,9 @@ pub(super) fn token_units<T: FilterToken>(
     Ok(units)
 }
 
-pub(super) struct Work<'a> {
+pub(crate) struct Work<'a> {
     counter: usize,
-    poll: &'a mut dyn FnMut() -> AnalysisResult<()>,
+    pub(crate) poll: &'a mut dyn FnMut() -> AnalysisResult<()>,
 }
 
 impl<'a> Work<'a> {
@@ -351,12 +443,13 @@ impl<'a> Work<'a> {
     }
 }
 
-pub(super) fn normalize(
+pub(super) fn normalize_budgeted(
     input: &[u16],
     model: &NoriDictionary,
     limits: NoriLimits,
+    budget: &MemoryBudget,
     poll: &mut impl FnMut() -> AnalysisResult<()>,
-) -> AnalysisResult<Vec<u16>> {
+) -> AnalysisResult<Budgeted<Vec<u16>>> {
     let mut work = Work::new(poll)?;
     check_limit(
         "Nori input UTF-16 units",
@@ -368,9 +461,31 @@ pub(super) fn normalize(
         input.len(),
         limits.max_output_utf16,
     )?;
-    let mut output = super::io::vector(input.len())?;
-    output.extend_from_slice(input);
+    let mut output = BudgetedVec::new(budget);
+    output.reserve(input.len())?;
+    for unit in input {
+        work.tick()?;
+        output.push(*unit)?;
+    }
     lowercase::apply(&mut output, Some(model), &mut work)?;
     (work.poll)()?;
-    Ok(output)
+    let (output, memory) = output.into_parts();
+    Ok(Budgeted::new(output, memory))
+}
+
+pub(super) fn normalize_text_budgeted(
+    input: &str,
+    model: &NoriDictionary,
+    limits: NoriLimits,
+    budget: &MemoryBudget,
+    poll: &mut impl FnMut() -> AnalysisResult<()>,
+) -> AnalysisResult<Budgeted<String>> {
+    let input = super::tokenizer::allocation::encode(input, limits.max_input_utf16, budget, poll)?;
+    let output = normalize_budgeted(&input, model, limits, budget, poll)?;
+    drop(input);
+    let (term, memory) = crate::TokenTerm::from_utf16_budgeted(output, &mut *poll)?.into_parts();
+    let text = term
+        .into_string()
+        .map_err(|_| invalid("Nori normalization", "invalid scalar result"))?;
+    Ok(Budgeted::new(text, memory))
 }

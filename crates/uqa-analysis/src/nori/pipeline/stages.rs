@@ -43,9 +43,19 @@ impl PreparedNoriFilter {
         ))
     }
 
-    pub fn filter_analyzed(&self, mut input: AnalyzedText) -> AnalysisResult<AnalyzedText> {
-        input.batch = self.filter_batch(input.batch, input.projection.clone())?;
-        Ok(input)
+    pub(crate) fn filter_analyzed_budgeted(
+        &self,
+        input: Budgeted<AnalyzedText>,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<AnalyzedText>> {
+        self.filter.filter_analyzed_budgeted(
+            input,
+            self.profile
+                .as_ref()
+                .map(|profile| profile.model().as_ref()),
+            NoriLimits::default(),
+            poll,
+        )
     }
 
     pub fn filter_batch(

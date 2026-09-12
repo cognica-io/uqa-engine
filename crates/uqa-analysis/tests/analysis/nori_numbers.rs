@@ -16,6 +16,9 @@ use uqa_analysis::AnalysisResult;
 
 use super::nori_resources::{canonical, model, raw_analysis};
 
+#[path = "nori_numbers/memory.rs"]
+mod memory;
+
 fn units(value: &Value) -> Vec<u16> {
     value
         .as_array()

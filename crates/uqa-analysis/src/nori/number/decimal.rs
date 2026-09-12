@@ -6,7 +6,7 @@
 
 //! Nonnegative exact decimals with interruptible addition and powers of ten.
 
-use std::collections::VecDeque;
+use uqa_core::memory::{Budgeted, BudgetedDeque, BudgetedVec};
 
 use super::Context;
 use crate::nori::error::invalid;
@@ -14,40 +14,40 @@ use crate::AnalysisResult;
 
 #[derive(Debug)]
 pub(super) struct Decimal {
-    digits: VecDeque<u8>,
+    digits: BudgetedDeque<u8>,
     scale: usize,
 }
 
 impl Decimal {
     pub fn from_digits(
-        mut digits: Vec<u8>,
+        mut digits: BudgetedDeque<u8>,
         scale: usize,
         context: &mut Context<'_, '_>,
     ) -> AnalysisResult<Self> {
         for index in 0..digits.len() / 2 {
             context.work.tick()?;
             let other = digits.len() - index - 1;
-            digits.swap(index, other);
+            let left = digits[index];
+            digits[index] = digits[other];
+            digits[other] = left;
         }
-        while digits.len() > 1 && digits.last() == Some(&0) {
+        while digits.len() > 1 && digits[digits.len() - 1] == 0 {
             context.work.tick()?;
-            digits.pop();
+            digits.pop_back();
         }
-        Ok(Self {
-            digits: digits.into(),
-            scale,
-        })
+        Ok(Self { digits, scale })
     }
 
     pub fn power(power: usize, context: &mut Context<'_, '_>) -> AnalysisResult<Self> {
         context.check_digits(power + 1)?;
-        let mut digits = crate::nori::io::vector(power + 1)?;
-        digits.resize(power, 0);
-        digits.push(1);
-        Ok(Self {
-            digits: digits.into(),
-            scale: 0,
-        })
+        let mut digits = BudgetedDeque::new(context.budget);
+        digits.reserve(power + 1)?;
+        for _ in 0..power {
+            context.work.tick()?;
+            digits.push_back(0)?;
+        }
+        digits.push_back(1)?;
+        Ok(Self { digits, scale: 0 })
     }
 
     pub fn multiply_power(
@@ -67,12 +67,10 @@ impl Decimal {
             .checked_add(shift)
             .ok_or_else(|| invalid("Nori number", "coefficient size overflow"))?;
         context.check_digits(required)?;
-        self.digits
-            .try_reserve(shift)
-            .map_err(crate::nori::DictionaryError::from)?;
+        self.digits.reserve(shift)?;
         for _ in 0..shift {
             context.work.tick()?;
-            self.digits.push_front(0);
+            self.digits.push_front(0)?;
         }
         Ok(self)
     }
@@ -89,16 +87,14 @@ impl Decimal {
             .map(|(left, right)| left.max(right))
             .ok_or_else(|| invalid("Nori number", "aligned coefficient size overflow"))?;
         context.check_digits(length)?;
-        self.digits
-            .try_reserve(length - self.digits.len())
-            .map_err(crate::nori::DictionaryError::from)?;
+        self.digits.reserve(length - self.digits.len())?;
         for _ in 0..left_shift {
             context.work.tick()?;
-            self.digits.push_front(0);
+            self.digits.push_front(0)?;
         }
         while self.digits.len() < length {
             context.work.tick()?;
-            self.digits.push_back(0);
+            self.digits.push_back(0)?;
         }
         let mut carry = 0;
         // Touch only the added coefficient and carry chain, not every digit of an existing long sum.
@@ -114,10 +110,7 @@ impl Decimal {
             context.work.tick()?;
             if index == self.digits.len() {
                 context.check_digits(index + 1)?;
-                self.digits
-                    .try_reserve(1)
-                    .map_err(crate::nori::DictionaryError::from)?;
-                self.digits.push_back(0);
+                self.digits.push_back(0)?;
             }
             let sum = self.digits[index] + carry;
             self.digits[index] = sum % 10;
@@ -128,7 +121,7 @@ impl Decimal {
         Ok(self)
     }
 
-    pub fn format(&self, context: &mut Context<'_, '_>) -> AnalysisResult<Vec<u16>> {
+    pub fn format(&self, context: &mut Context<'_, '_>) -> AnalysisResult<Budgeted<Vec<u16>>> {
         let mut significant = self.digits.len();
         while significant > 0 && self.digits[significant - 1] == 0 {
             context.work.tick()?;
@@ -136,7 +129,10 @@ impl Decimal {
         }
         if significant == 0 {
             context.check_digits(1)?;
-            return Ok(vec![u16::from(b'0')]);
+            let mut output = BudgetedVec::new(context.budget);
+            output.push(u16::from(b'0'))?;
+            let (output, memory) = output.into_parts();
+            return Ok(Budgeted::new(output, memory));
         }
         let mut trim = 0;
         while trim < self.scale && trim < significant && self.digits[trim] == 0 {
@@ -152,21 +148,24 @@ impl Decimal {
         }
         .ok_or_else(|| invalid("Nori number", "formatted size overflow"))?;
         context.check_digits(required)?;
-        let mut output = crate::nori::io::vector(required)?;
+        let mut output = BudgetedVec::new(context.budget);
+        output.reserve(required)?;
         if digits <= scale {
-            output.extend([u16::from(b'0'), u16::from(b'.')]);
+            output.push(u16::from(b'0'))?;
+            output.push(u16::from(b'.'))?;
             for _ in 0..scale - digits {
                 context.work.tick()?;
-                output.push(u16::from(b'0'));
+                output.push(u16::from(b'0'))?;
             }
         }
         for index in (0..digits).rev() {
             context.work.tick()?;
             if digits > scale && scale > 0 && index + 1 == scale {
-                output.push(u16::from(b'.'));
+                output.push(u16::from(b'.'))?;
             }
-            output.push(u16::from(b'0' + self.digits[index + trim]));
+            output.push(u16::from(b'0' + self.digits[index + trim]))?;
         }
-        Ok(output)
+        let (output, memory) = output.into_parts();
+        Ok(Budgeted::new(output, memory))
     }
 }

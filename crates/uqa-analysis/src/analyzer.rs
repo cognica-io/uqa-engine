@@ -97,14 +97,41 @@ impl Analyzer {
     /// # Ok::<(), uqa_analysis::AnalysisError>(())
     /// ```
     pub fn analyze_tokens(&self, text: &str) -> AnalysisResult<crate::AnalyzedText> {
+        Ok(self
+            .analyze_tokens_budgeted(
+                text,
+                &uqa_core::memory::MemoryBudget::new(usize::MAX),
+                || Ok(()),
+            )?
+            .into_parts()
+            .0)
+    }
+
+    /// Analyze with one runtime allowance while retaining the uncompiled API's resource reload behavior.
+    ///
+    /// Filter preparation and caller configuration have separate ownership. Use a compiled analyzer to resolve immutable resources before execution and reuse them across calls.
+    pub fn analyze_tokens_budgeted(
+        &self,
+        text: &str,
+        budget: &uqa_core::memory::MemoryBudget,
+        mut poll: impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<uqa_core::memory::Budgeted<crate::AnalyzedText>> {
+        poll()?;
         let mut filtered = crate::FilteredText::new(text);
-        for cf in &self.char_filters {
-            filtered = cf.filter_mapped(filtered)?;
+        for filter in &self.char_filters {
+            filtered = filter
+                .prepare()?
+                .filter_mapped_budgeted(filtered, budget, &mut poll)?;
         }
-        let mut tokens = self.tokenizer.tokenize_mapped(&filtered)?;
-        for tf in &self.token_filters {
-            tokens = tf.filter_analyzed(tokens)?;
+        let mut tokens = self
+            .tokenizer
+            .prepare()?
+            .tokenize_mapped_budgeted(&filtered, budget, &mut poll)?;
+        drop(filtered);
+        for filter in &self.token_filters {
+            tokens = filter.filter_analyzed_budgeted(tokens, &mut poll)?;
         }
+        poll()?;
         Ok(tokens)
     }
 

@@ -14,6 +14,7 @@ use super::{
     UserDictionary,
 };
 use crate::AnalysisResult;
+use uqa_core::memory::{Budgeted, MemoryBudget};
 
 #[derive(Debug, Clone)]
 pub struct KoreanAnalyzer {
@@ -72,7 +73,15 @@ impl KoreanAnalyzer {
         &self,
         input: &crate::FilteredText<'_>,
     ) -> AnalysisResult<crate::AnalyzedText> {
-        self.analyze(input.as_str())?.into_analyzed(input)
+        Ok(self
+            .analyze_mapped_budgeted(
+                input,
+                NoriLimits::default(),
+                &MemoryBudget::new(usize::MAX),
+                &mut || Ok(()),
+            )?
+            .into_parts()
+            .0)
     }
 
     pub fn analyze_controlled(
@@ -81,11 +90,52 @@ impl KoreanAnalyzer {
         limits: NoriLimits,
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<NoriOutput> {
-        let mut output = self.tokenizer.tokenize_controlled(input, limits, poll)?;
+        Ok(self
+            .analyze_budgeted(input, limits, &MemoryBudget::new(usize::MAX), poll)?
+            .into_parts()
+            .0)
+    }
+
+    /// Retain one allocation allowance from native tokenization through all configured Korean filters.
+    pub fn analyze_budgeted(
+        &self,
+        input: &str,
+        limits: NoriLimits,
+        budget: &MemoryBudget,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<NoriOutput>> {
+        let mut output = self
+            .tokenizer
+            .tokenize_budgeted(input, limits, budget, poll)?;
         for filter in &self.filters {
-            output = filter.apply(output, &self.model, limits, poll)?;
+            output = filter.apply_budgeted(output, &self.model, limits, poll)?;
         }
         Ok(output)
+    }
+
+    /// Analyze into reserved common tokens and preserve the source view after the call.
+    pub fn analyze_tokens_budgeted(
+        &self,
+        input: &str,
+        limits: NoriLimits,
+        budget: &MemoryBudget,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<crate::AnalyzedText>> {
+        self.analyze_mapped_budgeted(&crate::FilteredText::new(input), limits, budget, poll)
+    }
+
+    /// Analyze mapped input without publishing newly prepared coordinate caches into the borrowed view.
+    pub fn analyze_mapped_budgeted(
+        &self,
+        input: &crate::FilteredText<'_>,
+        limits: NoriLimits,
+        budget: &MemoryBudget,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<crate::AnalyzedText>> {
+        let input = input.clone();
+        input.prepare_coordinates(budget, poll)?;
+        let output = self.analyze_budgeted(input.as_str(), limits, budget, poll)?;
+        crate::AnalyzedText::from_nori_budgeted(output, &input, poll)
     }
 
     /// The complete text receives simple lowercase; tokenization, POS stops, and readings do not run.
@@ -99,11 +149,21 @@ impl KoreanAnalyzer {
         limits: NoriLimits,
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<String> {
-        let units = super::tokenizer::encode_input(input, limits, poll)?;
-        let normalized = self.normalize_utf16(&units, limits, poll)?;
-        String::from_utf16(&normalized).map_err(|_| {
-            super::error::invalid("Nori normalization", "invalid scalar result").into()
-        })
+        Ok(self
+            .normalize_budgeted(input, limits, &MemoryBudget::new(usize::MAX), poll)?
+            .into_parts()
+            .0)
+    }
+
+    /// Normalize complete scalar input with reserved encoding and output buffers.
+    pub fn normalize_budgeted(
+        &self,
+        input: &str,
+        limits: NoriLimits,
+        budget: &MemoryBudget,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<String>> {
+        filters::normalize_text_budgeted(input, &self.model, limits, budget, poll)
     }
 
     /// Preserve raw unpaired units when normalizing a UTF-16 term.
@@ -113,6 +173,20 @@ impl KoreanAnalyzer {
         limits: NoriLimits,
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<Vec<u16>> {
-        filters::normalize(input, &self.model, limits, poll)
+        Ok(self
+            .normalize_utf16_budgeted(input, limits, &MemoryBudget::new(usize::MAX), poll)?
+            .into_parts()
+            .0)
+    }
+
+    /// Normalize raw UTF-16 while retaining output reservations and exact unpaired units.
+    pub fn normalize_utf16_budgeted(
+        &self,
+        input: &[u16],
+        limits: NoriLimits,
+        budget: &MemoryBudget,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<Vec<u16>>> {
+        filters::normalize_budgeted(input, &self.model, limits, budget, poll)
     }
 }

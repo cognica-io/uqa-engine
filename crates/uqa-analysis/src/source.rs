@@ -405,21 +405,56 @@ impl SourceProjection {
         self.filtered.utf16_len()
     }
 
-    pub fn project(&self, mut range: Range<usize>) -> AnalysisResult<SourceOffsets> {
+    pub(crate) fn project_with_control(
+        &self,
+        mut range: Range<usize>,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<SourceOffsets> {
+        poll()?;
         self.filtered.validate_utf16_range(&range)?;
         if let Some(maps) = &self.maps {
             for map in maps.iter().rev() {
+                poll()?;
                 range = map.project_utf16(range);
             }
         }
         self.original.covering_offsets_utf16(range)
     }
 
-    pub fn is_verbatim(&self, term: &crate::TokenTerm, offsets: &SourceOffsets) -> bool {
-        term.as_str().is_some_and(|text| {
-            self.source.get(offsets.utf8.clone()) == Some(text)
-                && term.utf16_len() == offsets.utf16.len()
-        })
+    pub(crate) fn is_verbatim_with_control(
+        &self,
+        term: &crate::TokenTerm,
+        offsets: &SourceOffsets,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<bool> {
+        poll()?;
+        let Some(text) = term.as_str() else {
+            return Ok(false);
+        };
+        let Some(source) = self.source.get(offsets.utf8.clone()) else {
+            return Ok(false);
+        };
+        if text.len() != source.len() {
+            return Ok(false);
+        }
+        for (text, source) in text
+            .as_bytes()
+            .chunks(1024)
+            .zip(source.as_bytes().chunks(1024))
+        {
+            poll()?;
+            if text != source {
+                return Ok(false);
+            }
+        }
+        let mut length = 0;
+        for (index, unit) in text.chars().enumerate() {
+            if index % 1024 == 0 {
+                poll()?;
+            }
+            length += unit.len_utf16();
+        }
+        Ok(length == offsets.utf16.len())
     }
 }
 

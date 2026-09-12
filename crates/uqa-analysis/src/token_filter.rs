@@ -163,6 +163,32 @@ impl TokenFilter {
     ) -> AnalysisResult<crate::AnalyzedText> {
         self.prepare()?.filter_analyzed(input)
     }
+
+    /// Consume a reserved stream and retain its allowance through every common or Korean token filter.
+    ///
+    /// The returned tokens retain their own terms, morphology, terminal state and vector reservations, and share existing source leases. Removed buffers release their reservations after destruction; replacements and copies reserve before allocation. Byte-limit and callback errors return no partial result. Immutable filter preparation and caller-owned configuration have separate ownership.
+    ///
+    /// ```
+    /// use uqa_analysis::{TokenFilter, Tokenizer};
+    /// use uqa_core::memory::MemoryBudget;
+    /// let budget = MemoryBudget::new(64 * 1024);
+    /// let tokens = Tokenizer::Whitespace.tokenize_with_offsets_budgeted(
+    ///     "UQA AND", &budget, || Ok(()),
+    /// )?;
+    /// let output = TokenFilter::Lowercase.filter_analyzed_budgeted(tokens, || Ok(()))?;
+    /// assert_eq!(output.tokens()[0].term(), "uqa");
+    /// drop(output);
+    /// assert_eq!(budget.used(), 0);
+    /// # Ok::<(), uqa_analysis::AnalysisError>(())
+    /// ```
+    pub fn filter_analyzed_budgeted(
+        &self,
+        input: uqa_core::memory::Budgeted<crate::AnalyzedText>,
+        mut poll: impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<uqa_core::memory::Budgeted<crate::AnalyzedText>> {
+        poll()?;
+        self.prepare()?.filter_analyzed_budgeted(input, &mut poll)
+    }
 }
 
 fn read_synonym_file(path: &Path) -> Result<String, SynonymFileError> {

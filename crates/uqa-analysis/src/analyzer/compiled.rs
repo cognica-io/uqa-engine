@@ -7,6 +7,7 @@
 //! Immutable prepared pipelines keep execution state local to each analyzed input.
 
 use std::sync::Arc;
+use uqa_core::memory::{Budgeted, MemoryBudget};
 
 use super::Analyzer;
 use crate::{
@@ -100,14 +101,47 @@ impl CompiledAnalyzer {
 
     /// Analyze with independent output/source state and no expression compilation or file resolution.
     pub fn analyze_tokens(&self, text: &str) -> AnalysisResult<AnalyzedText> {
+        Ok(self
+            .analyze_tokens_budgeted(text, &MemoryBudget::new(usize::MAX), || Ok(()))?
+            .into_parts()
+            .0)
+    }
+
+    /// Execute all prepared stages with one allowance for runtime buffers and retained output.
+    ///
+    /// Immutable compiled resources and borrowed input have separate owners. Character maps, tokenization, common/Korean filters and source projections share this allowance. Errors return no partial output. Library regex searches run between callback checks; the callback does not interrupt an active search inside that library.
+    ///
+    /// ```
+    /// use uqa_analysis::standard_analyzer;
+    /// use uqa_core::memory::MemoryBudget;
+    /// let compiled = standard_analyzer("english").compile()?;
+    /// let budget = MemoryBudget::new(64 * 1024);
+    /// let result = compiled.analyze_tokens_budgeted("The cats and", &budget, || Ok(()))?;
+    /// assert_eq!(result.tokens()[0].term(), "cat");
+    /// assert_eq!(result.final_position_increment(), 1);
+    /// drop(result);
+    /// assert_eq!(budget.used(), 0);
+    /// # Ok::<(), uqa_analysis::AnalysisError>(())
+    /// ```
+    pub fn analyze_tokens_budgeted(
+        &self,
+        text: &str,
+        budget: &MemoryBudget,
+        mut poll: impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<AnalyzedText>> {
+        poll()?;
         let mut filtered = FilteredText::new(text);
         for filter in &self.char_filters {
-            filtered = filter.filter_mapped(filtered)?;
+            filtered = filter.filter_mapped_budgeted(filtered, budget, &mut poll)?;
         }
-        let mut tokens = self.tokenizer.tokenize_mapped(&filtered)?;
+        let mut tokens = self
+            .tokenizer
+            .tokenize_mapped_budgeted(&filtered, budget, &mut poll)?;
+        drop(filtered);
         for filter in &self.token_filters {
-            tokens = filter.filter_analyzed(tokens)?;
+            tokens = filter.filter_analyzed_budgeted(tokens, &mut poll)?;
         }
+        poll()?;
         Ok(tokens)
     }
 
@@ -118,10 +152,24 @@ impl CompiledAnalyzer {
     /// Normalize complete input with the Korean tokenizer's fixed Unicode profile, independently of analysis stages.
     #[cfg(feature = "nori")]
     pub fn normalize(&self, text: &str) -> AnalysisResult<String> {
+        Ok(self
+            .normalize_budgeted(text, &MemoryBudget::new(usize::MAX), || Ok(()))?
+            .into_parts()
+            .0)
+    }
+
+    /// Normalize complete text with the fixed Korean profile and a retained output reservation.
+    #[cfg(feature = "nori")]
+    pub fn normalize_budgeted(
+        &self,
+        text: &str,
+        budget: &MemoryBudget,
+        mut poll: impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<String>> {
         let model = self
             .normalizer
             .as_ref()
             .ok_or(crate::AnalysisError::NormalizationUnavailable)?;
-        crate::nori::pipeline::normalize(text, model)
+        crate::nori::pipeline::normalize_budgeted(text, model, budget, &mut poll)
     }
 }

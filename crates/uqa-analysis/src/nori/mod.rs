@@ -78,7 +78,10 @@ pub use error::{DictionaryError, DictionaryResult};
 pub use filters::{KoreanFilter, DEFAULT_STOP_TAGS};
 pub use frame::DictionaryId;
 pub use morphology::{DictionaryWord, MorphemeRef, POSTag, POSType};
-pub use number::{normalize_number, normalize_number_utf16};
+pub use number::{
+    normalize_number, normalize_number_budgeted, normalize_number_utf16,
+    normalize_number_utf16_budgeted,
+};
 pub use resources::{
     DictionaryArtifact, DictionaryBytes, DictionaryRequest, DictionaryResolver, NoriResources,
     ResolvedDictionary, ResolvedUserDictionary, ResourceCacheStats, ResourceHash, ResourceLimits,

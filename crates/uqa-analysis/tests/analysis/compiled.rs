@@ -8,6 +8,9 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use uqa_analysis::{AnalysisError, Analyzer, CharFilter, CompiledAnalyzer, TokenFilter, Tokenizer};
 
+#[path = "compiled/memory.rs"]
+mod memory;
+
 #[test]
 fn compiled_pipeline_owns_configuration_and_preserves_complete_graph_and_source_state() {
     let input = "<b>HÉLLO cats</b> and";

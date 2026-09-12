@@ -9,6 +9,7 @@
 use super::decimal::Decimal;
 use super::{digit, exponent, Context};
 use crate::AnalysisError;
+use uqa_core::memory::BudgetedDeque;
 
 enum ParseError {
     Malformed,
@@ -31,18 +32,15 @@ struct Parser<'a, 'b, 'c> {
 
 impl Parser<'_, '_, '_> {
     fn basic(&mut self) -> Result<Option<Decimal>> {
-        let mut digits = Vec::new();
+        let start = self.offset;
+        let mut count = 0;
         let mut dot = false;
         let mut scale = 0;
         while let Some(&unit) = self.input.get(self.offset) {
             self.context.work.tick()?;
-            if let Some(value) = digit(unit) {
-                self.context.check_digits(digits.len() + 1)?;
-                digits
-                    .try_reserve(1)
-                    .map_err(crate::nori::DictionaryError::from)
-                    .map_err(AnalysisError::from)?;
-                digits.push(value);
+            if digit(unit).is_some() {
+                count += 1;
+                self.context.check_digits(count)?;
                 scale += usize::from(dot);
             } else if matches!(unit, 0x002e | 0xff0e) {
                 if dot {
@@ -54,12 +52,20 @@ impl Parser<'_, '_, '_> {
             }
             self.offset += 1;
         }
-        if digits.is_empty() {
+        if count == 0 {
             return if dot {
                 Err(ParseError::Malformed)
             } else {
                 Ok(None)
             };
+        }
+        let mut digits = BudgetedDeque::new(self.context.budget);
+        digits.reserve(count).map_err(AnalysisError::from)?;
+        for unit in &self.input[start..self.offset] {
+            self.context.work.tick()?;
+            if let Some(value) = digit(*unit) {
+                digits.push_back(value).map_err(AnalysisError::from)?;
+            }
         }
         Ok(Some(Decimal::from_digits(digits, scale, self.context)?))
     }

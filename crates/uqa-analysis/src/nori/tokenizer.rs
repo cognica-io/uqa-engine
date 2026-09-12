@@ -11,10 +11,10 @@ use std::sync::Arc;
 use uqa_core::memory::{Budgeted, MemoryBudget};
 
 use super::error::{check_limit, invalid};
-use super::{DictionaryError, NoriDictionary, POSTag, POSType, UserDictionary};
+use super::{NoriDictionary, POSTag, POSType, UserDictionary};
 use crate::AnalysisResult;
 
-mod allocation;
+pub(super) mod allocation;
 mod emission;
 mod lattice;
 mod viterbi;
@@ -233,21 +233,4 @@ impl KoreanTokenizer {
             poll,
         )
     }
-}
-
-pub(super) fn encode_input(
-    input: &str,
-    limits: NoriLimits,
-    poll: &mut impl FnMut() -> AnalysisResult<()>,
-) -> AnalysisResult<Vec<u16>> {
-    let mut units = Vec::new();
-    for (index, unit) in input.encode_utf16().enumerate() {
-        if index % 1024 == 0 {
-            poll()?;
-        }
-        check_limit("Nori input UTF-16 units", index + 1, limits.max_input_utf16)?;
-        units.try_reserve(1).map_err(DictionaryError::from)?;
-        units.push(unit);
-    }
-    Ok(units)
 }

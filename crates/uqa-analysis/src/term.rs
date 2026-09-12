@@ -42,6 +42,28 @@ enum Representation {
     UTF16(Vec<u16>),
 }
 
+#[derive(Clone)]
+enum UTF16Units<'a> {
+    Unicode(std::str::EncodeUtf16<'a>),
+    Raw(std::iter::Copied<std::slice::Iter<'a, u16>>),
+}
+
+impl Iterator for UTF16Units<'_> {
+    type Item = u16;
+    fn next(&mut self) -> Option<u16> {
+        match self {
+            Self::Unicode(units) => units.next(),
+            Self::Raw(units) => units.next(),
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            Self::Unicode(units) => units.size_hint(),
+            Self::Raw(units) => units.size_hint(),
+        }
+    }
+}
+
 /// Canonical term text. Valid UTF-16 is stored as a string; unpaired units remain exact.
 ///
 /// Serialization uses a JSON string for scalar text or an explicit `{"utf16":[...]}` object for unpaired units. Scalar and raw-unit construction give identical identity for the same valid text.
@@ -82,8 +104,15 @@ impl TokenTerm {
 
     pub fn utf16(&self) -> Cow<'_, [u16]> {
         match &self.0 {
-            Representation::Unicode(text) => Cow::Owned(text.encode_utf16().collect()),
+            Representation::Unicode(_) => Cow::Owned(self.utf16_units().collect()),
             Representation::UTF16(units) => Cow::Borrowed(units),
+        }
+    }
+
+    pub(crate) fn utf16_units(&self) -> impl Iterator<Item = u16> + Clone + '_ {
+        match &self.0 {
+            Representation::Unicode(text) => UTF16Units::Unicode(text.encode_utf16()),
+            Representation::UTF16(units) => UTF16Units::Raw(units.iter().copied()),
         }
     }
 

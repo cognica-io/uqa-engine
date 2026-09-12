@@ -10,6 +10,7 @@ use super::error::{check_limit, invalid};
 use super::filters::Work;
 use super::NoriLimits;
 use crate::AnalysisResult;
+use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget};
 
 mod decimal;
 mod parse;
@@ -19,6 +20,7 @@ pub(super) use stream::filter;
 
 struct Context<'a, 'b> {
     work: &'a mut Work<'b>,
+    budget: &'a MemoryBudget,
     maximum: usize,
 }
 
@@ -42,11 +44,47 @@ impl Context<'_, '_> {
 /// # Ok::<(), uqa_analysis::AnalysisError>(())
 /// ```
 pub fn normalize_number(input: &str) -> AnalysisResult<String> {
-    let limits = NoriLimits::default();
-    let units = super::tokenizer::encode_input(input, limits, &mut || Ok(()))?;
-    let normalized = normalize_number_utf16(&units, limits, &mut || Ok(()))?;
-    String::from_utf16(&normalized)
-        .map_err(|_| invalid("Nori number", "invalid scalar result").into())
+    Ok(normalize_number_budgeted(
+        input,
+        NoriLimits::default(),
+        &MemoryBudget::new(usize::MAX),
+        &mut || Ok(()),
+    )?
+    .into_parts()
+    .0)
+}
+
+/// Normalize a scalar numeral while retaining reservations for coefficients and both output encodings.
+///
+/// Input encoding, numeric coefficient buffers, and the returned text reserve bytes before allocation. A replacement coexists with its predecessor in the allowance. Count limits remain active; allocation or callback errors publish no partial result. Borrowed input and allocator bookkeeping are outside these reservations.
+///
+/// ```
+/// use uqa_analysis::nori::{normalize_number_budgeted, NoriLimits};
+/// use uqa_core::memory::MemoryBudget;
+/// let budget = MemoryBudget::new(64 * 1024);
+/// let output = normalize_number_budgeted(
+///     "３．２천", NoriLimits::default(), &budget, &mut || Ok(()),
+/// )?;
+/// assert_eq!(output.as_str(), "3200");
+/// assert_eq!(budget.used(), output.reserved_bytes());
+/// drop(output);
+/// assert_eq!(budget.used(), 0);
+/// # Ok::<(), uqa_analysis::AnalysisError>(())
+/// ```
+pub fn normalize_number_budgeted(
+    input: &str,
+    limits: NoriLimits,
+    budget: &MemoryBudget,
+    poll: &mut impl FnMut() -> AnalysisResult<()>,
+) -> AnalysisResult<Budgeted<String>> {
+    let units = super::tokenizer::allocation::encode(input, limits.max_input_utf16, budget, poll)?;
+    let normalized = normalize_number_utf16_budgeted(&units, limits, budget, poll)?;
+    drop(units);
+    let (term, memory) = crate::TokenTerm::from_utf16_budgeted(normalized, poll)?.into_parts();
+    let text = term
+        .into_string()
+        .map_err(|_| invalid("Nori number", "invalid scalar result"))?;
+    Ok(Budgeted::new(text, memory))
 }
 
 /// Apply numeric-prefix normalization to raw UTF-16 with explicit limits and cancellation.
@@ -57,29 +95,56 @@ pub fn normalize_number_utf16(
     limits: NoriLimits,
     poll: &mut impl FnMut() -> AnalysisResult<()>,
 ) -> AnalysisResult<Vec<u16>> {
+    Ok(
+        normalize_number_utf16_budgeted(input, limits, &MemoryBudget::new(usize::MAX), poll)?
+            .into_parts()
+            .0,
+    )
+}
+
+/// Normalize lossless UTF-16 with one allowance for numeric coefficients and the returned buffer.
+///
+/// Malformed decimal input and absent numeric prefixes are copied exactly, including isolated surrogates. The caller's borrowed input has separate ownership. Byte-limit and callback errors propagate without being converted into a successful unchanged result.
+pub fn normalize_number_utf16_budgeted(
+    input: &[u16],
+    limits: NoriLimits,
+    budget: &MemoryBudget,
+    poll: &mut impl FnMut() -> AnalysisResult<()>,
+) -> AnalysisResult<Budgeted<Vec<u16>>> {
     let mut work = Work::new(poll)?;
     check_limit(
         "Nori input UTF-16 units",
         input.len(),
         limits.max_input_utf16,
     )?;
-    let result = normalize(input, limits.max_output_utf16, &mut work)?;
+    let result = normalize_budgeted(input, limits.max_output_utf16, budget, &mut work)?;
     work.finish()?;
     Ok(result)
 }
 
-fn normalize(input: &[u16], maximum: usize, work: &mut Work<'_>) -> AnalysisResult<Vec<u16>> {
-    let mut context = Context { work, maximum };
+fn normalize_budgeted(
+    input: &[u16],
+    maximum: usize,
+    budget: &MemoryBudget,
+    work: &mut Work<'_>,
+) -> AnalysisResult<Budgeted<Vec<u16>>> {
+    let mut context = Context {
+        work,
+        budget,
+        maximum,
+    };
     context.check_digits(input.len())?;
     if let Some(decimal) = parse::parse(input, &mut context)? {
         return decimal.format(&mut context);
     }
-    let mut original = super::io::vector(input.len())?;
+    let mut original = BudgetedVec::new(budget);
+    original.reserve(input.len())?;
     for unit in input {
         context.work.tick()?;
-        original.push(*unit);
+        original.push(*unit)?;
     }
-    Ok(original)
+    let (original, memory) = original.into_parts();
+    Ok(Budgeted::new(original, memory))
 }
 
 fn digit(unit: u16) -> Option<u8> {
@@ -114,17 +179,17 @@ fn exponent(unit: u16) -> usize {
     }
 }
 
-fn numeral(input: &[u16], work: &mut Work<'_>) -> AnalysisResult<bool> {
+fn numeral(input: impl Iterator<Item = u16>, work: &mut Work<'_>) -> AnalysisResult<bool> {
     for unit in input {
         work.tick()?;
-        if digit(*unit).is_none() && exponent(*unit) == 0 {
+        if digit(unit).is_none() && exponent(unit) == 0 {
             return Ok(false);
         }
     }
     Ok(true)
 }
 
-fn punctuation(input: &[u16], work: &mut Work<'_>) -> AnalysisResult<bool> {
+fn punctuation(input: impl Iterator<Item = u16>, work: &mut Work<'_>) -> AnalysisResult<bool> {
     for unit in input {
         work.tick()?;
         if !matches!(unit, 0x002e | 0xff0e | 0x002c | 0xff0c) {

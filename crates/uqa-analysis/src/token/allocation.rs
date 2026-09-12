@@ -17,17 +17,19 @@ mod batch;
 mod cloning;
 
 pub(crate) use batch::TokenBatchAllocation;
+#[cfg(feature = "nori")]
+pub(crate) use batch::{AllocatedToken, TokenBatchInput};
 
 #[cfg(test)]
 mod tests;
 
-pub(crate) struct TokenBuffer {
-    pub(super) tokens: BudgetedVec<AnalysisToken>,
-    terminal: Option<Box<AnalysisToken>>,
+pub(crate) struct TokenBuffer<T = AnalysisToken> {
+    pub(super) tokens: BudgetedVec<T>,
+    terminal: Option<Box<T>>,
     pub(super) memory: MemoryReservation,
 }
 
-impl TokenBuffer {
+impl<T> TokenBuffer<T> {
     pub fn new(budget: &MemoryBudget) -> Self {
         Self {
             tokens: BudgetedVec::new(budget),
@@ -36,7 +38,7 @@ impl TokenBuffer {
         }
     }
 
-    pub fn push(&mut self, token: Budgeted<AnalysisToken>) -> AnalysisResult<()> {
+    pub fn push(&mut self, token: Budgeted<T>) -> AnalysisResult<()> {
         self.tokens.reserve(1)?;
         let (token, memory) = token.into_parts();
         self.memory.absorb(memory);
@@ -53,22 +55,19 @@ impl TokenBuffer {
         self.tokens.len()
     }
 
-    pub(crate) fn token(&self, index: usize) -> &AnalysisToken {
+    pub(crate) fn token(&self, index: usize) -> &T {
         &self.tokens[index]
     }
 
-    pub(crate) fn set_terminal_box(&mut self, terminal: Budgeted<Box<AnalysisToken>>) {
+    pub(crate) fn set_terminal_box(&mut self, terminal: Budgeted<Box<T>>) {
         assert!(self.terminal.is_none());
         let (terminal, memory) = terminal.into_parts();
         self.terminal = Some(terminal);
         self.memory.absorb(memory);
     }
 
-    pub(crate) fn set_terminal_token(
-        &mut self,
-        terminal: Budgeted<AnalysisToken>,
-    ) -> AnalysisResult<()> {
-        let payload = self.memory.budget().reserve(size_of::<AnalysisToken>())?;
+    pub(crate) fn set_terminal_token(&mut self, terminal: Budgeted<T>) -> AnalysisResult<()> {
+        let payload = self.memory.budget().reserve(size_of::<T>())?;
         let (terminal, mut memory) = terminal.into_parts();
         let terminal = Box::new(terminal);
         memory.absorb(payload);
@@ -76,6 +75,21 @@ impl TokenBuffer {
         Ok(())
     }
 
+    pub(crate) fn into_batch(self, final_position_increment: u32) -> Budgeted<TokenBatch<T>> {
+        let (tokens, mut memory) = self.tokens.into_parts();
+        memory.absorb(self.memory);
+        Budgeted::new(
+            TokenBatch {
+                tokens,
+                final_position_increment,
+                terminal: self.terminal,
+            },
+            memory,
+        )
+    }
+}
+
+impl TokenBuffer {
     #[cfg(feature = "nori")]
     pub(super) fn set_terminal(&mut self, token: AnalysisToken) -> AnalysisResult<()> {
         self.memory.grow(std::mem::size_of::<AnalysisToken>())?;
@@ -130,16 +144,7 @@ impl TokenBuffer {
         poll: &mut dyn FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<Budgeted<TokenBatch>> {
         poll()?;
-        let (tokens, mut memory) = self.tokens.into_parts();
-        memory.absorb(self.memory);
-        let output = Budgeted::new(
-            TokenBatch {
-                tokens,
-                final_position_increment,
-                terminal: self.terminal,
-            },
-            memory,
-        );
+        let output = self.into_batch(final_position_increment);
         output.validate_positions_with_control(poll)?;
         poll()?;
         Ok(output)

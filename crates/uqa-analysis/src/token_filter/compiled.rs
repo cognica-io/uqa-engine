@@ -120,13 +120,21 @@ impl PreparedTokenFilter<'_> {
     }
 
     pub(crate) fn filter_analyzed(&self, input: AnalyzedText) -> AnalysisResult<AnalyzedText> {
+        Ok(self
+            .filter_analyzed_budgeted(input.into_unlimited()?, &mut || Ok(()))?
+            .into_parts()
+            .0)
+    }
+
+    pub(crate) fn filter_analyzed_budgeted(
+        &self,
+        input: uqa_core::memory::Budgeted<AnalyzedText>,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<uqa_core::memory::Budgeted<AnalyzedText>> {
         match self {
             #[cfg(feature = "nori")]
-            Self::Nori(filter) => filter.filter_analyzed(input),
-            Self::Common(filter) => Ok(filter
-                .filter_analyzed_budgeted(input.into_unlimited()?, &mut || Ok(()))?
-                .into_parts()
-                .0),
+            Self::Nori(filter) => filter.filter_analyzed_budgeted(input, poll),
+            Self::Common(filter) => filter.filter_analyzed_budgeted(input, poll),
         }
     }
 }

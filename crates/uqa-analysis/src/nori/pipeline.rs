@@ -174,10 +174,17 @@ pub(crate) fn check_resolved(config: &Analyzer) -> AnalysisResult<()> {
     Ok(())
 }
 
-pub(crate) fn normalize(text: &str, profile: &ResolvedDictionary) -> AnalysisResult<String> {
-    let limits = super::NoriLimits::default();
-    let units = super::tokenizer::encode_input(text, limits, &mut || Ok(()))?;
-    let output = super::filters::normalize(&units, profile.model(), limits, &mut || Ok(()))?;
-    String::from_utf16(&output)
-        .map_err(|_| super::error::invalid("Nori normalization", "invalid scalar result").into())
+pub(crate) fn normalize_budgeted(
+    text: &str,
+    profile: &ResolvedDictionary,
+    budget: &uqa_core::memory::MemoryBudget,
+    poll: &mut impl FnMut() -> AnalysisResult<()>,
+) -> AnalysisResult<uqa_core::memory::Budgeted<String>> {
+    super::filters::normalize_text_budgeted(
+        text,
+        profile.model(),
+        super::NoriLimits::default(),
+        budget,
+        poll,
+    )
 }
