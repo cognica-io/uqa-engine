@@ -95,6 +95,7 @@ impl AnalysisToken {
         }
     }
 
+    #[cfg(any(test, feature = "nori"))]
     pub(crate) fn replace_term(&mut self, term: TokenTerm) {
         if term != self.term {
             self.verbatim = false;
@@ -215,6 +216,7 @@ impl TokenBatch {
             .collect()
     }
 
+    #[cfg(any(test, feature = "nori"))]
     pub fn validate_positions(&self) -> AnalysisResult<()> {
         self.validate_positions_with_control(&mut || Ok(()))
     }

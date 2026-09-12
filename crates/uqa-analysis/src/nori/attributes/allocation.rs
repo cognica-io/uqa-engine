@@ -6,7 +6,7 @@
 
 //! Morphology copies keep every reading and morpheme allocation reserved until destruction.
 
-use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryReservation};
+use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryError, MemoryReservation};
 
 use super::{KoreanMorphology, NoriMorpheme};
 use crate::allocation::{copy_text, copy_units};
@@ -43,6 +43,28 @@ fn copy_morphemes(
 }
 
 impl KoreanMorphology {
+    pub(crate) fn allocation_bytes(
+        &self,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<usize> {
+        poll()?;
+        let mut bytes = self.reading.as_ref().map_or(0, String::capacity);
+        if let Some(morphemes) = &self.morphemes {
+            bytes = bytes
+                .checked_add(morphemes.capacity() * size_of::<NoriMorpheme>())
+                .ok_or(MemoryError::SizeOverflow)?;
+            for (index, morpheme) in morphemes.iter().enumerate() {
+                if index % 1024 == 0 {
+                    poll()?;
+                }
+                bytes = bytes
+                    .checked_add(morpheme.surface_utf16.capacity() * size_of::<u16>())
+                    .ok_or(MemoryError::SizeOverflow)?;
+            }
+        }
+        Ok(bytes)
+    }
+
     pub(crate) fn clone_budgeted(
         &self,
         budget: &MemoryBudget,

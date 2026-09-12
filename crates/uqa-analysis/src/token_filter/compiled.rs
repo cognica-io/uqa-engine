@@ -4,25 +4,30 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Prepared filter state borrows live configuration or owns a complete immutable snapshot.
+//! Prepared filters retain immutable lookup state and dispatch to their owning algorithms.
 
-use std::{
-    borrow::Cow,
-    collections::{BTreeMap, BTreeSet},
-};
+use std::{borrow::Cow, collections::BTreeSet};
 
-use super::{builtin_stop_words, stream, validate_gram_bounds, TokenFilter};
+use super::{builtin_stop_words, validate_gram_bounds, TokenFilter};
 use crate::{AnalysisResult, AnalyzedText};
+
+mod lookup;
+pub(super) use lookup::{find_word, PreparedSynonyms};
 
 #[derive(Debug)]
 pub(crate) enum PreparedTokenFilter<'a> {
     #[cfg(feature = "nori")]
     Nori(crate::nori::pipeline::PreparedNoriFilter),
+    Common(PreparedCommonFilter<'a>),
+}
+
+#[derive(Debug)]
+pub(crate) enum PreparedCommonFilter<'a> {
     Lowercase(&'static super::lowercase::CaseProperties),
-    Stop(BTreeSet<Cow<'a, str>>),
+    Stop(Vec<Cow<'a, str>>),
     PorterStem,
     ASCIIFolding,
-    Synonym(Cow<'a, BTreeMap<String, Vec<String>>>),
+    Synonym(PreparedSynonyms<'a>),
     Ngram {
         min_gram: usize,
         max_gram: usize,
@@ -40,18 +45,20 @@ pub(crate) enum PreparedTokenFilter<'a> {
 
 impl TokenFilter {
     pub(crate) fn prepare(&self) -> AnalysisResult<PreparedTokenFilter<'_>> {
-        Ok(match self {
+        let filter = match self {
             #[cfg(feature = "nori")]
             Self::NoriPartOfSpeech(_)
             | Self::NoriReadingForm(_)
             | Self::UnicodeSimpleLowercase(_)
             | Self::NoriNumber(_) => {
-                PreparedTokenFilter::Nori(crate::nori::pipeline::PreparedNoriFilter::resolve(
-                    self,
-                    &crate::nori::NoriResources::default(),
-                )?)
+                return Ok(PreparedTokenFilter::Nori(
+                    crate::nori::pipeline::PreparedNoriFilter::resolve(
+                        self,
+                        &crate::nori::NoriResources::default(),
+                    )?,
+                ));
             }
-            Self::Lowercase => PreparedTokenFilter::Lowercase(super::lowercase::prepare()?),
+            Self::Lowercase => PreparedCommonFilter::Lowercase(super::lowercase::prepare()?),
             Self::Stop {
                 language,
                 custom_words,
@@ -61,16 +68,16 @@ impl TokenFilter {
                     .map(|word| Cow::Borrowed(*word))
                     .collect();
                 words.extend(custom_words.iter().map(|word| Cow::Borrowed(word.as_str())));
-                PreparedTokenFilter::Stop(words)
+                PreparedCommonFilter::Stop(words.into_iter().collect())
             }
-            Self::PorterStem => PreparedTokenFilter::PorterStem,
-            Self::ASCIIFolding => PreparedTokenFilter::ASCIIFolding,
+            Self::PorterStem => PreparedCommonFilter::PorterStem,
+            Self::ASCIIFolding => PreparedCommonFilter::ASCIIFolding,
             Self::Synonym {
                 synonyms,
                 synonyms_path,
-            } => PreparedTokenFilter::Synonym(match synonyms_path {
-                Some(path) => Cow::Owned(Self::parse_synonym_file(path)?),
-                None => Cow::Borrowed(synonyms),
+            } => PreparedCommonFilter::Synonym(match synonyms_path {
+                Some(path) => PreparedSynonyms::owned(Self::parse_synonym_file(path)?),
+                None => PreparedSynonyms::borrowed(synonyms),
             }),
             Self::Ngram {
                 min_gram,
@@ -78,7 +85,7 @@ impl TokenFilter {
                 keep_short,
             } => {
                 validate_gram_bounds("n-gram token filter", *min_gram, *max_gram)?;
-                PreparedTokenFilter::Ngram {
+                PreparedCommonFilter::Ngram {
                     min_gram: *min_gram,
                     max_gram: *max_gram,
                     keep_short: *keep_short,
@@ -86,7 +93,7 @@ impl TokenFilter {
             }
             Self::EdgeNgram { min_gram, max_gram } => {
                 validate_gram_bounds("edge n-gram token filter", *min_gram, *max_gram)?;
-                PreparedTokenFilter::EdgeNgram {
+                PreparedCommonFilter::EdgeNgram {
                     min_gram: *min_gram,
                     max_gram: *max_gram,
                 }
@@ -94,11 +101,12 @@ impl TokenFilter {
             Self::Length {
                 min_length,
                 max_length,
-            } => PreparedTokenFilter::Length {
+            } => PreparedCommonFilter::Length {
                 min_length: *min_length,
                 max_length: *max_length,
             },
-        })
+        };
+        Ok(PreparedTokenFilter::Common(filter))
     }
 }
 
@@ -107,46 +115,54 @@ impl PreparedTokenFilter<'_> {
         match self {
             #[cfg(feature = "nori")]
             Self::Nori(filter) => PreparedTokenFilter::Nori(filter),
-            Self::Lowercase(properties) => PreparedTokenFilter::Lowercase(properties),
-            Self::Stop(words) => PreparedTokenFilter::Stop(
+            Self::Common(filter) => PreparedTokenFilter::Common(filter.into_owned()),
+        }
+    }
+
+    pub(crate) fn filter_analyzed(&self, input: AnalyzedText) -> AnalysisResult<AnalyzedText> {
+        match self {
+            #[cfg(feature = "nori")]
+            Self::Nori(filter) => filter.filter_analyzed(input),
+            Self::Common(filter) => Ok(filter
+                .filter_analyzed_budgeted(input.into_unlimited()?, &mut || Ok(()))?
+                .into_parts()
+                .0),
+        }
+    }
+}
+
+impl PreparedCommonFilter<'_> {
+    fn into_owned(self) -> PreparedCommonFilter<'static> {
+        match self {
+            Self::Lowercase(properties) => PreparedCommonFilter::Lowercase(properties),
+            Self::Stop(words) => PreparedCommonFilter::Stop(
                 words
                     .into_iter()
                     .map(|word| Cow::Owned(word.into_owned()))
                     .collect(),
             ),
-            Self::PorterStem => PreparedTokenFilter::PorterStem,
-            Self::ASCIIFolding => PreparedTokenFilter::ASCIIFolding,
-            Self::Synonym(synonyms) => {
-                PreparedTokenFilter::Synonym(Cow::Owned(synonyms.into_owned()))
-            }
+            Self::PorterStem => PreparedCommonFilter::PorterStem,
+            Self::ASCIIFolding => PreparedCommonFilter::ASCIIFolding,
+            Self::Synonym(synonyms) => PreparedCommonFilter::Synonym(synonyms.into_owned()),
             Self::Ngram {
                 min_gram,
                 max_gram,
                 keep_short,
-            } => PreparedTokenFilter::Ngram {
+            } => PreparedCommonFilter::Ngram {
                 min_gram,
                 max_gram,
                 keep_short,
             },
             Self::EdgeNgram { min_gram, max_gram } => {
-                PreparedTokenFilter::EdgeNgram { min_gram, max_gram }
+                PreparedCommonFilter::EdgeNgram { min_gram, max_gram }
             }
             Self::Length {
                 min_length,
                 max_length,
-            } => PreparedTokenFilter::Length {
+            } => PreparedCommonFilter::Length {
                 min_length,
                 max_length,
             },
         }
-    }
-
-    pub(crate) fn filter_analyzed(&self, mut input: AnalyzedText) -> AnalysisResult<AnalyzedText> {
-        #[cfg(feature = "nori")]
-        if let Self::Nori(filter) = self {
-            return filter.filter_analyzed(input);
-        }
-        input.batch = stream::filter(self, input.batch)?;
-        Ok(input)
     }
 }

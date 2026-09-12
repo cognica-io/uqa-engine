@@ -4,194 +4,109 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Metadata-preserving implementations shared by rich and term-only filtering.
+//! Common filters keep the input and output allocation owners through every transformation.
 
-use super::PreparedTokenFilter;
-use crate::token::TokenBatch;
-use crate::{porter, AnalysisError, AnalysisResult, AnalysisToken, TokenTerm};
-use uqa_core::memory::{Budgeted, MemoryBudget};
+use uqa_core::memory::Budgeted;
+
+use super::compiled::{find_word, PreparedCommonFilter, PreparedTokenFilter};
+use crate::token::{allocation::TokenBatchAllocation, TokenBatch};
+use crate::{porter, AnalysisResult, AnalyzedText};
+
+mod expand;
 
 pub(super) fn filter(
     filter: &PreparedTokenFilter<'_>,
-    mut batch: TokenBatch,
+    batch: TokenBatch,
 ) -> AnalysisResult<TokenBatch> {
-    let budget = MemoryBudget::new(usize::MAX);
     match filter {
         #[cfg(feature = "nori")]
         PreparedTokenFilter::Nori(filter) => {
-            return filter.filter_batch(batch, crate::FilteredText::new("").projection());
+            filter.filter_batch(batch, crate::FilteredText::new("").projection())
         }
-        PreparedTokenFilter::Lowercase(_)
-        | PreparedTokenFilter::ASCIIFolding
-        | PreparedTokenFilter::PorterStem => {
-            for token in &mut batch.tokens {
-                let term = match filter {
-                    PreparedTokenFilter::Lowercase(properties) => {
-                        super::lowercase::lower_budgeted(
-                            &token.term,
-                            properties,
-                            &budget,
-                            &mut || Ok(()),
-                        )?
-                        .into_parts()
-                        .0
-                    }
-                    PreparedTokenFilter::ASCIIFolding => {
-                        super::ascii::fold_budgeted(&token.term, &budget, &mut || Ok(()))?
-                            .into_parts()
-                            .0
-                    }
-                    _ if token.keyword => continue,
-                    _ => {
-                        porter::stem_term_budgeted(&token.term, &budget, || Ok(()))?
-                            .into_parts()
-                            .0
-                    }
-                };
-                token.replace_term(term);
-            }
-        }
-        PreparedTokenFilter::Stop(words) => {
-            batch = retain(batch, |token| {
-                !token.term.as_str().is_some_and(|term| words.contains(term))
-            })?;
-        }
-        PreparedTokenFilter::Synonym(resolved) => {
-            let mut expanded = Vec::new();
-            for token in batch.tokens {
-                let alternatives = token.term.as_str().and_then(|term| resolved.get(term));
-                let start = expanded.len();
-                expanded.push(token);
-                if let Some(alternatives) = alternatives {
-                    for term in alternatives {
-                        let (term, memory) =
-                            crate::allocation::copy_text(term, &budget, &mut || Ok(()))?
-                                .into_parts();
-                        let (mut alternative, _memory) = expanded[start]
-                            .rewrite_budgeted(
-                                Budgeted::new(TokenTerm::from(term), memory),
-                                &budget,
-                                &mut || Ok(()),
-                            )?
-                            .into_parts();
-                        alternative.position_increment = 0;
-                        expanded.push(alternative);
-                    }
-                }
-            }
-            batch.tokens = expanded;
-        }
-        PreparedTokenFilter::Ngram {
-            min_gram,
-            max_gram,
-            keep_short,
-        } => {
-            batch = grams(batch, *min_gram, *max_gram, *keep_short, false, &budget)?;
-        }
-        PreparedTokenFilter::EdgeNgram { min_gram, max_gram } => {
-            batch = grams(batch, *min_gram, *max_gram, false, true, &budget)?;
-        }
-        PreparedTokenFilter::Length {
-            min_length,
-            max_length,
-        } => {
-            batch = retain(batch, |token| {
-                let length = token.term.character_count();
-                length >= *min_length && (*max_length == 0 || length <= *max_length)
-            })?;
-        }
+        PreparedTokenFilter::Common(filter) => Ok(filter
+            .filter_batch(
+                TokenBatchAllocation::from_unreserved(batch)?,
+                &mut || Ok(()),
+            )?
+            .into_parts()
+            .0),
     }
-    batch.validate_positions()?;
-    Ok(batch)
 }
 
-fn add_increment(left: u32, right: u32) -> AnalysisResult<u32> {
-    left.checked_add(right)
-        .ok_or(AnalysisError::TokenPositionOverflow)
-}
+impl PreparedCommonFilter<'_> {
+    pub(crate) fn filter_analyzed_budgeted(
+        &self,
+        input: Budgeted<AnalyzedText>,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<AnalyzedText>> {
+        let (input, memory) = input.into_parts();
+        let (batch, memory) = self
+            .filter_batch(
+                TokenBatchAllocation::from_budgeted(Budgeted::new(input.batch, memory)),
+                poll,
+            )?
+            .into_parts();
+        Ok(Budgeted::new(
+            AnalyzedText {
+                batch,
+                final_offsets: input.final_offsets,
+                #[cfg(feature = "nori")]
+                projection: input.projection,
+            },
+            memory,
+        ))
+    }
 
-fn retain(
-    mut batch: TokenBatch,
-    keep: impl Fn(&AnalysisToken) -> bool,
-) -> AnalysisResult<TokenBatch> {
-    let mut tokens = Vec::new();
-    let mut skipped = 0;
-    let mut trailing_removed = None;
-    for mut token in batch.tokens {
-        if keep(&token) {
-            trailing_removed = None;
-            token.position_increment = add_increment(token.position_increment, skipped)?;
-            skipped = 0;
-            tokens.push(token);
-        } else {
-            skipped = add_increment(skipped, token.position_increment)?;
-            trailing_removed = Some(token);
-        }
-    }
-    batch.tokens = tokens;
-    if batch.terminal.is_none() {
-        batch.terminal = trailing_removed.map(Box::new);
-    }
-    batch.final_position_increment = add_increment(batch.final_position_increment, skipped)?;
-    Ok(batch)
-}
-
-fn grams(
-    mut batch: TokenBatch,
-    min_gram: usize,
-    max_gram: usize,
-    keep_short: bool,
-    edge: bool,
-    budget: &MemoryBudget,
-) -> AnalysisResult<TokenBatch> {
-    let mut tokens = Vec::new();
-    let mut skipped = 0;
-    let mut trailing_removed = None;
-    for mut token in batch.tokens {
-        let boundaries = token.term.boundaries_budgeted(budget, &mut || Ok(()))?;
-        let length = boundaries.len() - 1;
-        if length < min_gram {
-            if keep_short {
-                trailing_removed = None;
-                token.position_increment = add_increment(token.position_increment, skipped)?;
-                skipped = 0;
-                tokens.push(token);
-            } else {
-                skipped = add_increment(skipped, token.position_increment)?;
-                trailing_removed = Some(token);
+    fn filter_batch(
+        &self,
+        input: TokenBatchAllocation,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<TokenBatch>> {
+        let output = match self {
+            Self::Lowercase(_) | Self::ASCIIFolding | Self::PorterStem => input.map_terms(
+                |token, budget, poll| {
+                    Ok(Some(match self {
+                        Self::Lowercase(properties) => {
+                            super::lowercase::lower_budgeted(&token.term, properties, budget, poll)?
+                        }
+                        Self::ASCIIFolding => {
+                            super::ascii::fold_budgeted(&token.term, budget, poll)?
+                        }
+                        _ if token.keyword => return Ok(None),
+                        _ => porter::stem_term_budgeted(&token.term, budget, poll)?,
+                    }))
+                },
+                poll,
+            )?,
+            Self::Stop(words) => input.retain(
+                |token, poll| match token.term.as_str() {
+                    Some(term) => Ok(!find_word(words, term, poll)?),
+                    None => Ok(true),
+                },
+                poll,
+            )?,
+            Self::Length {
+                min_length,
+                max_length,
+            } => input.retain(
+                |token, poll| {
+                    let length = token.term.character_count_with_control(poll)?;
+                    Ok(length >= *min_length && (*max_length == 0 || length <= *max_length))
+                },
+                poll,
+            )?,
+            Self::Synonym(synonyms) => return expand::synonyms(input, synonyms, poll),
+            Self::Ngram {
+                min_gram,
+                max_gram,
+                keep_short,
+            } => {
+                return expand::grams(input, *min_gram, *max_gram, *keep_short, false, poll);
             }
-            continue;
-        }
-        trailing_removed = None;
-        let mut first = true;
-        for n in min_gram..=max_gram.min(length) {
-            let last_start = if edge { 0 } else { length - n };
-            for start in 0..=last_start {
-                let (mut gram, _memory) = token
-                    .substring_budgeted(
-                        boundaries[start],
-                        boundaries[start + n],
-                        boundaries[length],
-                        budget,
-                        &mut || Ok(()),
-                    )?
-                    .into_parts();
-                gram.position_increment = if first {
-                    first = false;
-                    let increment = add_increment(token.position_increment, skipped)?;
-                    skipped = 0;
-                    increment
-                } else {
-                    0
-                };
-                tokens.push(gram);
+            Self::EdgeNgram { min_gram, max_gram } => {
+                return expand::grams(input, *min_gram, *max_gram, false, true, poll);
             }
-        }
+        };
+        output.finish(poll)
     }
-    batch.tokens = tokens;
-    if batch.terminal.is_none() {
-        batch.terminal = trailing_removed.map(Box::new);
-    }
-    batch.final_position_increment = add_increment(batch.final_position_increment, skipped)?;
-    Ok(batch)
 }

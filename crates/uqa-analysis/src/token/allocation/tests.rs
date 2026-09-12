@@ -8,6 +8,8 @@ use super::*;
 use crate::{AnalysisError, CharFilter, TokenFilter, TokenTerm, Tokenizer};
 use uqa_core::memory::MemoryError;
 
+mod common_filters;
+
 fn token_bytes(token: AnalysisToken) -> usize {
     let mut bytes = if token.term.as_str().is_some() {
         token.term.into_string().unwrap().capacity()

@@ -65,6 +65,28 @@ impl TermBuffer {
 }
 
 impl TokenTerm {
+    pub(crate) fn allocation_bytes(&self) -> usize {
+        match &self.0 {
+            Representation::Unicode(text) => text.capacity(),
+            Representation::UTF16(units) => units.capacity() * size_of::<u16>(),
+        }
+    }
+
+    pub(crate) fn character_count_with_control(
+        &self,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<usize> {
+        poll()?;
+        let mut length = 0usize;
+        for (index, _) in self.characters().enumerate() {
+            if index % 1024 == 0 {
+                poll()?;
+            }
+            length += 1;
+        }
+        Ok(length)
+    }
+
     /// Copy this term into independently reserved storage without changing scalar or raw-unit identity.
     pub fn clone_budgeted(
         &self,
@@ -91,13 +113,10 @@ impl TokenTerm {
         poll: &mut dyn FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<Budgeted<Vec<TermBoundary>>> {
         poll()?;
-        let mut length = 1usize;
-        for (index, _) in self.characters().enumerate() {
-            if index % 1024 == 0 {
-                poll()?;
-            }
-            length = length.checked_add(1).ok_or(MemoryError::SizeOverflow)?;
-        }
+        let length = self
+            .character_count_with_control(poll)?
+            .checked_add(1)
+            .ok_or(MemoryError::SizeOverflow)?;
         let scalar = self.as_str().is_some();
         let mut output = BudgetedVec::new(budget);
         output.reserve(length)?;
