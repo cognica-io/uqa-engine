@@ -20,6 +20,8 @@ Model training orchestration and table-to-training-data conversion live in `crat
 
 Creation-name rules and index-target selection live in `crates/uqa-sql/src/catalog/resolution/creation.rs`; ordered refresh, writer retries, and temporary-namespace publication scheduling live in `crates/uqa-execution/src/schema/namespaces/relations.rs`. Creation consumers borrow that native context instead of asking Engine to resolve a complete creation target.
 
+RPQ syntax is defined in `crates/uqa-core/src/rpq.rs` and consumed directly by planner cost estimation. Graph re-exports the same syntax and owns automata and traversal.
+
 ## Start here
 
 - [Manual overview](docs/manual/README.md): Scope, reading paths, conventions, and compatibility target.

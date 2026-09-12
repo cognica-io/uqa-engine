@@ -4,7 +4,7 @@
     "uqa": 2,
     "uqa-engine": 14,
     "uqa-sql": 2,
-    "uqa-planner": 4
+    "uqa-planner": 3
   },
   "runtime_workspace_dependencies": {
     "example-extensibility": [
@@ -133,7 +133,6 @@
     "uqa-pg-wire": [],
     "uqa-planner": [
       "uqa-core",
-      "uqa-graph",
       "uqa-operators",
       "uqa-sql"
     ],
@@ -204,7 +203,6 @@
       "uqa-analysis",
       "uqa-core",
       "uqa-fusion",
-      "uqa-graph",
       "uqa-operators",
       "uqa-pg-query",
       "uqa-scoring",

@@ -3958,7 +3958,6 @@ dependencies = [
  "thiserror 1.0.69",
  "uqa-core",
  "uqa-execution",
- "uqa-graph",
  "uqa-operators",
  "uqa-sql",
 ]

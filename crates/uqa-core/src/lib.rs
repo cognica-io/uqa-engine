@@ -44,3 +44,4 @@ pub mod catalog_schema;
 pub mod catalog_sequence;
 
 pub mod retrieval;
+pub mod rpq;

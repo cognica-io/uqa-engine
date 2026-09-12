@@ -281,7 +281,7 @@ Calibration quality is evaluated on held-out labels with reliability, ECE, Brier
 
 ## Graph model
 
-`uqa-graph` provides memory and backend-neutral persistent graph stores, named graph workspaces, graph pattern matching, RPQ parsing, Thompson NFA construction, DFA conversion, Cypher read and mutation execution, centrality, message passing, embeddings, path indexes, temporal traversal, and versioned deltas. The standalone SQLite graph adapter belongs to `uqa-storage-sqlite`, which implements graph's persistent-record contract without introducing a provider dependency into graph algorithms.
+`uqa-core::rpq` owns the shared RPQ AST and parser used by the planner and graph execution. `uqa-graph` retains its public syntax re-exports and provides memory and backend-neutral persistent graph stores, named graph workspaces, graph pattern matching, Thompson NFA construction, DFA conversion, Cypher read and mutation execution, centrality, message passing, embeddings, path indexes, temporal traversal, and versioned deltas. The standalone SQLite graph adapter belongs to `uqa-storage-sqlite`, which implements graph's persistent-record contract without introducing a provider dependency into graph algorithms.
 
 `GraphPostingList` requires graph payload keys to be contained in the underlying document support. Union, intersection, difference, graph-name conflicts, and overlapping subgraphs use explicit policies instead of inheriting generic payload precedence accidentally.
 
