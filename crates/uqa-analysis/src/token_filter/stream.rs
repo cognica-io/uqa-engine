@@ -15,6 +15,10 @@ pub(super) fn filter(
     mut batch: TokenBatch,
 ) -> AnalysisResult<TokenBatch> {
     match filter {
+        #[cfg(feature = "nori")]
+        PreparedTokenFilter::Nori(filter) => {
+            return filter.filter_batch(batch, crate::FilteredText::new("").projection());
+        }
         PreparedTokenFilter::Lowercase
         | PreparedTokenFilter::ASCIIFolding
         | PreparedTokenFilter::PorterStem => {

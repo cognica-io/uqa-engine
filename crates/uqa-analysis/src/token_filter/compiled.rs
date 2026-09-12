@@ -16,6 +16,8 @@ use crate::{AnalysisResult, AnalyzedText};
 
 #[derive(Debug)]
 pub(crate) enum PreparedTokenFilter<'a> {
+    #[cfg(feature = "nori")]
+    Nori(crate::nori::pipeline::PreparedNoriFilter),
     Lowercase,
     Stop(BTreeSet<Cow<'a, str>>),
     PorterStem,
@@ -39,6 +41,16 @@ pub(crate) enum PreparedTokenFilter<'a> {
 impl TokenFilter {
     pub(crate) fn prepare(&self) -> AnalysisResult<PreparedTokenFilter<'_>> {
         Ok(match self {
+            #[cfg(feature = "nori")]
+            Self::NoriPartOfSpeech(_)
+            | Self::NoriReadingForm(_)
+            | Self::UnicodeSimpleLowercase(_)
+            | Self::NoriNumber(_) => {
+                PreparedTokenFilter::Nori(crate::nori::pipeline::PreparedNoriFilter::resolve(
+                    self,
+                    &crate::nori::NoriResources::default(),
+                )?)
+            }
             Self::Lowercase => PreparedTokenFilter::Lowercase,
             Self::Stop {
                 language,
@@ -93,6 +105,8 @@ impl TokenFilter {
 impl PreparedTokenFilter<'_> {
     pub(crate) fn into_owned(self) -> PreparedTokenFilter<'static> {
         match self {
+            #[cfg(feature = "nori")]
+            Self::Nori(filter) => PreparedTokenFilter::Nori(filter),
             Self::Lowercase => PreparedTokenFilter::Lowercase,
             Self::Stop(words) => PreparedTokenFilter::Stop(
                 words
@@ -128,6 +142,10 @@ impl PreparedTokenFilter<'_> {
     }
 
     pub(crate) fn filter_analyzed(&self, mut input: AnalyzedText) -> AnalysisResult<AnalyzedText> {
+        #[cfg(feature = "nori")]
+        if let Self::Nori(filter) = self {
+            return filter.filter_analyzed(input);
+        }
         input.batch = stream::filter(self, input.batch)?;
         Ok(input)
     }

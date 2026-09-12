@@ -31,8 +31,15 @@ pub(super) fn check_config(config: &Analyzer, limits: AnalyzerLimits) -> Analysi
 
 pub(super) fn snapshot(config: &Analyzer, limits: AnalyzerLimits) -> AnalysisResult<Value> {
     let mut resolved = config.clone();
+    #[cfg(feature = "nori")]
+    crate::nori::pipeline::canonicalize(&mut resolved);
     for filter in &mut resolved.token_filters {
         match filter {
+            #[cfg(feature = "nori")]
+            TokenFilter::NoriPartOfSpeech(_)
+            | TokenFilter::NoriReadingForm(_)
+            | TokenFilter::UnicodeSimpleLowercase(_)
+            | TokenFilter::NoriNumber(_) => {}
             TokenFilter::Stop {
                 language,
                 custom_words,
@@ -95,6 +102,8 @@ fn synonym_error(path: &std::path::Path, source: std::io::Error) -> SynonymFileE
 pub(super) fn restore(value: &Value, limits: AnalyzerLimits) -> AnalysisResult<Analyzer> {
     let config: Analyzer = serde_json::from_value(value.clone())?;
     check_config(&config, limits)?;
+    #[cfg(feature = "nori")]
+    crate::nori::pipeline::check_resolved(&config)?;
     for filter in &config.token_filters {
         if matches!(
             filter,

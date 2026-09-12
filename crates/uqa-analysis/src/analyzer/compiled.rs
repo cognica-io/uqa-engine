@@ -22,6 +22,8 @@ pub struct CompiledAnalyzer {
     char_filters: Vec<PreparedCharFilter<'static>>,
     tokenizer: PreparedTokenizer,
     token_filters: Vec<PreparedTokenFilter<'static>>,
+    #[cfg(feature = "nori")]
+    normalizer: Option<Arc<crate::nori::ResolvedDictionary>>,
 }
 
 impl Analyzer {
@@ -54,24 +56,41 @@ impl Analyzer {
 }
 
 impl CompiledAnalyzer {
-    pub(crate) fn prepare(descriptor: Arc<AnalyzerDescriptor>) -> AnalysisResult<Self> {
+    pub(crate) fn prepare(
+        descriptor: Arc<AnalyzerDescriptor>,
+        #[cfg(feature = "nori")] nori: crate::nori::pipeline::ResolvedNoriPipeline,
+    ) -> AnalysisResult<Self> {
         let config = descriptor.configuration()?;
         let char_filters = config
             .char_filters
             .iter()
             .map(|filter| filter.prepare().map(PreparedCharFilter::into_owned))
             .collect::<AnalysisResult<_>>()?;
+        #[cfg(feature = "nori")]
+        let tokenizer = match &nori.tokenizer {
+            Some(tokenizer) => PreparedTokenizer::Nori(tokenizer.clone()),
+            None => config.tokenizer.prepare()?,
+        };
+        #[cfg(not(feature = "nori"))]
         let tokenizer = config.tokenizer.prepare()?;
         let token_filters = config
             .token_filters
             .iter()
-            .map(|filter| filter.prepare().map(PreparedTokenFilter::into_owned))
+            .map(|filter| {
+                #[cfg(feature = "nori")]
+                if let Some(filter) = nori.filter(filter)? {
+                    return Ok(PreparedTokenFilter::Nori(filter));
+                }
+                filter.prepare().map(PreparedTokenFilter::into_owned)
+            })
             .collect::<AnalysisResult<_>>()?;
         Ok(Self {
             descriptor,
             char_filters,
             tokenizer,
             token_filters,
+            #[cfg(feature = "nori")]
+            normalizer: nori.normalizer,
         })
     }
 
@@ -94,5 +113,15 @@ impl CompiledAnalyzer {
 
     pub fn analyze(&self, text: &str) -> AnalysisResult<Vec<String>> {
         self.analyze_tokens(text)?.into_terms()
+    }
+
+    /// Normalize complete input with the Korean tokenizer's fixed Unicode profile, independently of analysis stages.
+    #[cfg(feature = "nori")]
+    pub fn normalize(&self, text: &str) -> AnalysisResult<String> {
+        let model = self
+            .normalizer
+            .as_ref()
+            .ok_or(crate::AnalysisError::NormalizationUnavailable)?;
+        crate::nori::pipeline::normalize(text, model)
     }
 }

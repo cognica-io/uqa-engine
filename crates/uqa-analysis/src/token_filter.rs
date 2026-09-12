@@ -26,6 +26,18 @@ pub(crate) use synonyms::parse_synonym_body_bounded;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TokenFilter {
+    #[cfg(feature = "nori")]
+    #[serde(rename = "nori_part_of_speech")]
+    NoriPartOfSpeech(crate::nori::NoriPOSConfig),
+    #[cfg(feature = "nori")]
+    #[serde(rename = "nori_readingform")]
+    NoriReadingForm(crate::nori::EmptyFilterConfig),
+    #[cfg(feature = "nori")]
+    #[serde(rename = "unicode_simple_lowercase")]
+    UnicodeSimpleLowercase(crate::nori::SimpleLowercaseConfig),
+    #[cfg(feature = "nori")]
+    #[serde(rename = "nori_number")]
+    NoriNumber(crate::nori::EmptyFilterConfig),
     Lowercase,
     Stop {
         #[serde(default = "default_stop_language")]
@@ -88,6 +100,8 @@ impl TokenFilter {
     /// deletion, permission changes, and edits.
     pub fn validate(&self) -> AnalysisResult<()> {
         match self {
+            #[cfg(feature = "nori")]
+            TokenFilter::UnicodeSimpleLowercase(_) => self.prepare().map(|_| ()),
             TokenFilter::Synonym {
                 synonyms_path: Some(_),
                 ..

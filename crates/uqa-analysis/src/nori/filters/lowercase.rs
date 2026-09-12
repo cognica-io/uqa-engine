@@ -13,9 +13,10 @@ use crate::AnalysisResult;
 
 pub(super) fn apply(
     input: &mut [u16],
-    model: &NoriDictionary,
+    model: Option<&NoriDictionary>,
     work: &mut Work<'_>,
 ) -> AnalysisResult<()> {
+    let model = model.ok_or_else(|| invalid("Nori lowercase", "missing Unicode profile"))?;
     let mut index = 0;
     while index < input.len() {
         work.tick()?;

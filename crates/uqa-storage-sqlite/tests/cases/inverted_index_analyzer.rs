@@ -34,6 +34,63 @@ fn fields(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         .collect()
 }
 
+#[test]
+fn linear_backends_reject_korean_assignments_and_writes_before_mutation() {
+    let config = serde_json::from_str::<Analyzer>(r#"{"tokenizer":{"type":"nori_tokenizer"}}"#);
+    let analyzer = match config {
+        Ok(config) => config,
+        Err(error) => {
+            assert!(error
+                .to_string()
+                .contains("unknown variant `nori_tokenizer`"));
+            return;
+        }
+    };
+    assert!(analyzer.uses_korean_stages());
+    let indexes = |analyzer: Analyzer| -> Vec<Box<dyn InvertedIndex>> {
+        vec![
+            Box::new(MemoryInvertedIndex::new(analyzer.clone())),
+            Box::new(KeyValueInvertedIndex::new(
+                Arc::new(MemoryKeyValueStore::new()),
+                "korean",
+                analyzer.clone(),
+            )),
+            Box::new(SQLiteInvertedIndex::new(
+                sqlite_with_catalog(),
+                "korean",
+                analyzer,
+            )),
+        ]
+    };
+    for mut index in indexes(whitespace_analyzer()) {
+        index
+            .add_document(1, fields(&[("body", "old value")]))
+            .unwrap();
+        for phase in [
+            AnalyzerPhase::Index,
+            AnalyzerPhase::Search,
+            AnalyzerPhase::Both,
+        ] {
+            let error = index
+                .set_field_analyzer("body", analyzer.clone(), phase)
+                .unwrap_err();
+            assert!(error.contains("lossless token-graph storage"));
+            assert!(!index.get_field_analyzer("body").uses_korean_stages());
+            assert!(!index.get_search_analyzer("body").uses_korean_stages());
+        }
+        assert_eq!(index.get_posting_list("body", "old").unwrap().len(), 1);
+        assert_eq!(index.doc_count().unwrap(), 1);
+    }
+    for mut index in indexes(analyzer) {
+        assert!(index
+            .add_document(1, fields(&[("body", "한국")]))
+            .unwrap_err()
+            .to_string()
+            .contains("lossless token-graph storage"));
+        assert_eq!(index.doc_count().unwrap(), 0);
+    }
+}
+
 fn invalid_pattern_analyzer() -> Analyzer {
     Analyzer::new(
         Tokenizer::Pattern {

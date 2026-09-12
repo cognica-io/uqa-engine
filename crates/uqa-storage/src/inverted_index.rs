@@ -24,6 +24,14 @@ mod contract;
 
 pub use contract::{AnalyzerPhase, InvertedIndex};
 
+/// Linear term/position stores cannot install Korean analysis without immutable graph revisions.
+pub fn validate_linear_analyzer(analyzer: &Analyzer) -> StorageBackendResult<()> {
+    if analyzer.uses_korean_stages() {
+        return Err(StorageBackendError::Other("Korean analyzers require immutable analyzer revisions and lossless token-graph storage".into()));
+    }
+    Ok(())
+}
+
 fn counter_error(context: &str) -> StorageBackendError {
     StorageBackendError::Other(format!("inverted-index {context} overflow or corruption"))
 }
@@ -121,6 +129,7 @@ impl MemoryInvertedIndex {
                 .index_field_analyzers
                 .get(&field)
                 .unwrap_or(&self.analyzer);
+            validate_linear_analyzer(analyzer)?;
             let tokens = analyzer.analyze(&text)?;
             let length = usize_to_u64(tokens.len(), "document token count")?;
             validate_token_position_count(length)?;
@@ -565,6 +574,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         analyzer: Analyzer,
         phase: AnalyzerPhase,
     ) -> Result<(), String> {
+        validate_linear_analyzer(&analyzer).map_err(|error| error.to_string())?;
         match phase {
             AnalyzerPhase::Index => {
                 self.index_field_analyzers

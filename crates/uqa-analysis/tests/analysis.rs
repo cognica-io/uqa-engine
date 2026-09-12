@@ -83,3 +83,7 @@ mod compiled;
 
 #[path = "analysis/descriptor.rs"]
 mod descriptor;
+
+#[cfg(feature = "nori")]
+#[path = "analysis/nori_compiled.rs"]
+mod nori_compiled;

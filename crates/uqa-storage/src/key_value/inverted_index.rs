@@ -156,6 +156,7 @@ impl KeyValueInvertedIndex {
                 .index_field_analyzers
                 .get(&field)
                 .unwrap_or(&self.analyzer);
+            crate::inverted_index::validate_linear_analyzer(analyzer)?;
             let tokens = analyzer.analyze(&text)?;
             let token_count = usize_to_u64(tokens.len(), "document token count")?;
             crate::inverted_index::validate_token_position_count(token_count)?;
@@ -898,6 +899,8 @@ impl InvertedIndex for KeyValueInvertedIndex {
         analyzer: Analyzer,
         phase: AnalyzerPhase,
     ) -> Result<(), String> {
+        crate::inverted_index::validate_linear_analyzer(&analyzer)
+            .map_err(|error| error.to_string())?;
         match phase {
             AnalyzerPhase::Index => {
                 self.index_field_analyzers

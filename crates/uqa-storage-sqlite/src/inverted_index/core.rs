@@ -30,6 +30,7 @@ impl SQLiteInvertedIndex {
             .index_field_analyzers
             .get(field)
             .unwrap_or(&self.analyzer);
+        uqa_storage::inverted_index::validate_linear_analyzer(analyzer)?;
         Ok(analyzer.analyze(text)?)
     }
 

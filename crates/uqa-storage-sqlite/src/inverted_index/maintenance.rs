@@ -122,11 +122,7 @@ impl SQLiteInvertedIndex {
     ) -> SQLiteResult<BTreeMap<FieldName, StagedField>> {
         let mut staged = BTreeMap::new();
         for (field, text) in fields {
-            let analyzer = self
-                .index_field_analyzers
-                .get(&field)
-                .unwrap_or(&self.analyzer);
-            let tokens = analyzer.analyze(&text)?;
+            let tokens = self.tokenize(&text, &field)?;
             let length = usize_to_index_u64("document length", tokens.len())?;
             validate_position_count(length)?;
             let mut term_positions: BTreeMap<String, Vec<u32>> = BTreeMap::new();

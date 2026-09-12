@@ -171,7 +171,9 @@ impl KoreanFilter {
             final_offset_utf16: input.projection.filtered_len(),
             context: input.projection.clone(),
         };
-        let stream = self.compile().apply_stream(stream, model, limits, poll)?;
+        let stream = self
+            .compile()
+            .apply_stream(stream, Some(model), limits, poll)?;
         let batch = crate::token::TokenBatch {
             tokens: stream.tokens,
             terminal: stream.terminal,
@@ -194,13 +196,15 @@ impl CompiledFilter {
         limits: NoriLimits,
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<NoriOutput> {
-        Ok(self.apply_stream(input.into(), model, limits, poll)?.into())
+        Ok(self
+            .apply_stream(input.into(), Some(model), limits, poll)?
+            .into())
     }
 
     pub(crate) fn apply_stream<T: FilterToken>(
         self,
         mut input: FilterStream<T>,
-        model: &NoriDictionary,
+        model: Option<&NoriDictionary>,
         limits: NoriLimits,
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<FilterStream<T>> {
@@ -366,7 +370,7 @@ pub(super) fn normalize(
     )?;
     let mut output = super::io::vector(input.len())?;
     output.extend_from_slice(input);
-    lowercase::apply(&mut output, model, &mut work)?;
+    lowercase::apply(&mut output, Some(model), &mut work)?;
     (work.poll)()?;
     Ok(output)
 }

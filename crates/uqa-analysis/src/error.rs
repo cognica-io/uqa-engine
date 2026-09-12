@@ -13,6 +13,9 @@ use crate::token_filter::SynonymFileError;
 /// An invalid analyzer is an execution error, never an empty token stream.
 #[derive(Debug, thiserror::Error)]
 pub enum AnalysisError {
+    #[cfg(feature = "nori")]
+    #[error("this pipeline has no Korean normalization profile")]
+    NormalizationUnavailable,
     #[error("invalid analyzer descriptor: {0}")]
     Descriptor(&'static str),
     #[error("analyzer {component} revision {actual} is unavailable; expected {expected}")]

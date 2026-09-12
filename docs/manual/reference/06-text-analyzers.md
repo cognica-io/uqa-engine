@@ -272,15 +272,15 @@ This example executes as a Rust doctest. Existing index and query consumers stil
 
 ### Resolved descriptors and compilation resources
 
-`AnalyzerDescriptor::resolve(&config, length_policy, limits)` snapshots the existing generic pipeline into an `Arc<AnalyzerDescriptor>`. `CompiledAnalyzer::descriptor()` exposes that descriptor, `fingerprint()` returns its `AnalyzerFingerprint`, and `canonical_json()` returns its portable JSON. The wire object contains `descriptor` and `fingerprint`; the fingerprint is SHA-256 over the domain `UQA analyzer descriptor` followed by a zero byte and the compact descriptor JSON with recursively sorted object keys. The descriptor declares format `uqa-analyzer`, format version 1, algorithm revision 1, source-mapping revision 1, a length policy, the resolved pipeline, and runtime profiles.
+`AnalyzerDescriptor::resolve(&config, length_policy, limits)` snapshots a pipeline into an `Arc<AnalyzerDescriptor>`. `CompiledAnalyzer::descriptor()` exposes that descriptor, `fingerprint()` returns its `AnalyzerFingerprint`, and `canonical_json()` returns its portable JSON. The wire object contains `descriptor` and `fingerprint`; the fingerprint is SHA-256 over the domain `UQA analyzer descriptor` followed by a zero byte and the compact descriptor JSON with recursively sorted object keys. The descriptor declares format `uqa-analyzer`, format version 1, algorithm revision 1, source-mapping revision 1, a length policy, the resolved pipeline, and runtime profiles.
 
 Resolution writes explicit component defaults, expands built-in stop languages into a sorted unique word set, and reads each synonym file into an inline map with a null file path. Synonym file parsing retains its established ordered deduplication, including self-expansion from duplicate equivalent members; inline synonym lists retain their exact order and duplicates. File paths and comments do not identify a resolved synonym map. `TokenLengthPolicy::EmittedTokens` declares a count of every emitted token, while `DiscountOverlaps` declares a count only of tokens with a positive position increment. The policy contributes to the fingerprint; existing storage consumers still use their documented emitted-token counts.
 
 Runtime profiles identify Rust Unicode tables only for whitespace/gram tokenization or full lowercase, and normalization tables only for ASCII folding. Every regex stage also hashes its parsed expression structure with expanded Unicode character ranges; Unicode word-boundary expressions include the expanded word class. `AnalyzerDescriptor::from_json(json, limits)` rejects a changed fingerprint, unsupported revision, mismatched runtime profile, duplicate or unknown properties, implicit resolved defaults, or any remaining synonym file path. Restoration opens no synonym file. A resolved descriptor still requires executable compilation, which may reject regex program-size limits.
 
-`AnalyzerResources::default()` shares a process-local compilation cache. `AnalyzerResources::new(limits)` creates an independent owner; clones share that owner's fixed limits and retained handles. `compile(&config)` and `Analyzer::compile_with_resources(&resources)` use `EmittedTokens`; `compile_with_length_policy(&config, policy)` selects another declared policy. `restore(descriptor)` or `restore_json(json)` compiles verified immutable inputs. Compilation of a retained fingerprint reuses its handle; a cache miss prepares expressions and fixed filter state once under the owner lock. Mutable file reads occur outside that lock and still run on a new configuration compilation. Failures publish no compiled entry. Eviction removes cache ownership while existing callers retain valid handles.
+`AnalyzerResources::default()` shares a process-local compilation cache. `AnalyzerResources::new(limits)` creates an independent owner; clones share that owner's fixed limits and retained handles. `compile(&config)` and `Analyzer::compile_with_resources(&resources)` use `DiscountOverlaps` when the pipeline contains Korean stages and `EmittedTokens` otherwise; `compile_with_length_policy(&config, policy)` selects an explicit policy. `restore(descriptor)` or `restore_json(json)` compiles verified immutable inputs. Compilation of a retained fingerprint reuses its handle; a cache miss prepares expressions and fixed filter state once under the owner lock. Mutable file reads occur outside that lock and still run on a new configuration compilation. Failures publish no compiled entry. Eviction removes cache ownership while existing callers retain valid handles.
 
-Default `AnalyzerLimits` allow 16 MiB of configuration/descriptor JSON and each synonym source, 256 stages including the tokenizer, and cached ownership of 128 analyzers totaling at most 8 MiB of canonical descriptor JSON. Synonym resolution checks the expanded map's JSON size before inserting another key or expansion, so a small equivalent group cannot allocate an unbounded resolved map. Final descriptor encoding is also bounded. `cache_stats()` reports retained analyzer count and descriptor bytes; these byte totals exclude executable heap allocations and caller-owned handles. A zero cache-entry limit disables retention. A valid descriptor larger than only the cache byte budget returns an uncached handle. These APIs do not persist catalog definitions or field bindings, and generic Nori resource composition remains under development.
+Default `AnalyzerLimits` allow 16 MiB of configuration/descriptor JSON and each synonym source, 256 stages including the tokenizer, and cached ownership of 128 analyzers totaling at most 8 MiB of canonical descriptor JSON. Synonym resolution checks the expanded map's JSON size before inserting another key or expansion, so a small equivalent group cannot allocate an unbounded resolved map. Final descriptor encoding is also bounded. `cache_stats()` reports retained analyzer count and descriptor bytes; these byte totals exclude executable heap allocations and caller-owned handles. A zero cache-entry limit disables retention. A valid descriptor larger than only the cache byte budget returns an uncached handle. These APIs do not persist catalog definitions or field bindings.
 
 ```rust
 use uqa_analysis::{standard_analyzer, AnalyzerLimits, AnalyzerResources};
@@ -401,7 +401,7 @@ assert_eq!(analyzer.normalize("喜悲哀歡 İ UQA")?, "喜悲哀歡 i uqa");
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-The same example executes as a Nori module doctest. The native tokenizer is checked against the [Docker reference corpus](../../../tests/parity/nori/README.md). These are standalone Rust APIs: generic Nori configuration/compilation, JSON/SQL registration, retrieval, and binding integration remain tracked in the [implementation plan](../../plans/0006-nori-analyzer.md). The existing built-in analyzer inventory remains the one listed above.
+The same example executes as a Nori module doctest. The native tokenizer is checked against the [Docker reference corpus](../../../tests/parity/nori/README.md). Generic Korean pipeline configuration and compilation are described below. Durable Nori registration, graph retrieval, and binding integration remain tracked in the [implementation plan](../../plans/0006-nori-analyzer.md). The existing built-in analyzer inventory remains the one listed above.
 
 ### Immutable Korean dictionary resources
 
@@ -415,7 +415,7 @@ The same example executes as a Nori module doctest. The native tokenizer is chec
 
 Cloning `NoriResources` shares its resolver and caches. Concurrent misses publish one validated handle while it remains cached; resolver callbacks execute outside cache locks. Aliases always consult the resolver, so updating one resolves new content without changing an existing handle. Caches evict the least recently used ownership when adding an entry would exceed a configured count or byte budget. An individually valid resource larger than the cache budget is returned without retention. Eviction does not invalidate handles held by callers.
 
-Default `ResourceLimits` retain at most 2 dictionary artifacts totaling 32 MiB of encoded bytes, and at most 64 user-rule snapshots totaling 8 MiB of UTF-8 source. Per-resource `DictionaryLimits` and `UserDictionaryLimits` also apply before publication. `cache_stats()` reports retained counts and those byte totals; they measure encoded/source sizes, not decoded heap usage or caller-owned handles. A zero entry limit disables the respective cache. These resource APIs change no catalog, field binding, or index state; composing them with generic analyzer descriptors remains separate work.
+Default `ResourceLimits` retain at most 2 dictionary artifacts totaling 32 MiB of encoded bytes, and at most 64 user-rule snapshots totaling 8 MiB of UTF-8 source. Per-resource `DictionaryLimits` and `UserDictionaryLimits` also apply before publication. `cache_stats()` reports retained counts and those byte totals; they measure encoded/source sizes, not decoded heap usage or caller-owned handles. A zero entry limit disables the respective cache. These resource APIs change no catalog, field binding, or index state; `AnalyzerResources::with_nori_resources` composes them with generic analyzer descriptors as described below.
 
 ```rust
 use uqa_analysis::nori::{DictionaryRequest, KoreanTokenizer, NoriOptions, NoriResources};
@@ -463,7 +463,57 @@ A returned common stream can be passed directly to `TokenFilter::filter_analyzed
 
 With the `nori` feature enabled, a common stream owns a shared original-text snapshot, character-edit maps, and coordinate indexes so later composition remains valid after the caller's text and `FilteredText` are dropped. Every source tokenizer records `filtered_utf16()` before source correction. A composing filter combines those raw ranges and projects the result once; it cannot combine already-corrected boundaries because deletions and empty spans can make them inconsistent. If a rewritten term exactly matches its original source span, subsequent gram filters recover precise character spans. This retained source state is absent in feature-disabled builds.
 
-`KoreanFilter::filter_analyzed_controlled(stream, &model, limits, poll)` adds the same bounds and cancellation contract as the native filter methods; the input-unit limit measures filtered input. Invalid output graphs return a typed error. Keep the stream object when chaining: serialized diagnostic tokens omit the opaque exhaustion attributes and source projector. These APIs do not register a generic or SQL analyzer; resource compilation and registration remain separate implementation items.
+`KoreanFilter::filter_analyzed_controlled(stream, &model, limits, poll)` adds the same bounds and cancellation contract as the native filter methods; the input-unit limit measures filtered input. Invalid output graphs return a typed error. Keep the stream object when chaining: serialized diagnostic tokens omit the opaque exhaustion attributes and source projector. These stream APIs change no registry or catalog state.
+
+### Korean stages in common pipelines
+
+With `uqa-analysis/nori`, `Analyzer` JSON accepts `nori_tokenizer`, `nori_part_of_speech`, `nori_readingform`, `unicode_simple_lowercase`, and `nori_number`. `nori::nori_analyzer()` constructs the default tokenizer/POS/reading/simple-lowercase configuration. It does not register a built-in name. Character filters and existing generic token filters can appear in the same pipeline; `analyze_tokens` preserves morphology, raw surrogate terms, graph/end state, and original source mappings through those stages. `analyze` remains the checked string projection. Feature-disabled deserialization rejects these component tags.
+
+```json
+{
+  "char_filters": [],
+  "tokenizer": {
+    "type": "nori_tokenizer",
+    "dictionary": "lucene-10.5.1",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 세종 시\n"
+  },
+  "token_filters": [
+    {"type": "nori_part_of_speech"},
+    {"type": "nori_readingform"},
+    {"type": "unicode_simple_lowercase", "unicode_profile": "jdk21"}
+  ]
+}
+```
+
+`Tokenizer::Nori(NoriTokenizerConfig)` uses the same options and defaults as `NoriOptions`, plus `dictionary` (default `lucene-10.5.1`) and `user_dictionary` (default null). A resource string is a resolver name or `sha256:<64 hexadecimal digits>`; names have no implicit file/network meaning. `NoriPOSConfig.stop_tags` defaults to the reference stop set; an empty array retains every tag. `SimpleLowercaseConfig.unicode_profile` defaults to `jdk21`, which identifies the exact shipped bundle's Java profile. Other explicit names or hashes use the supplied resolver. Reading and number filters take no properties. Unknown properties, modes, tags, and unavailable resources fail. `EmptyFilterConfig` is the Rust parameter type for reading and number stages.
+
+`AnalyzerResources::with_nori_resources(limits, resources)` installs an explicit `NoriResources` owner with no default fallback. `nori_resources()` exposes that owner. Compilation resolves each alias once within the pipeline and reuses an already verified artifact for its exact hash, including with resource-cache retention disabled. Resolver callbacks run outside the analyzer-cache lock. The descriptor records exact bundle/profile hashes, explicit tokenizer defaults, the sorted POS stop set, and exact optional user-rule source, distinguishing null, empty, and comment-only input. Identical retained fingerprints share a compiled handle; later alias changes or user-rule revisions cannot mutate an existing handle.
+
+`AnalyzerDescriptor::from_json` validates canonical structure and exact resource identifiers without loading Korean resources. `AnalyzerResources::restore` and `restore_json` load required exact artifacts and validate/compile user rules before publishing a cache miss. Cached compiled revisions need no later resolver call. Restoring through a new owner requires that owner to provide the descriptor's artifacts and satisfy its own dictionary/user limits. POS, reading, and number stages over ordinary tokens need no dictionary; simple lowercase requires its Unicode profile. Native tokenization and Korean filters use their default `NoriLimits` in these composed entry points.
+
+With the feature enabled, `CompiledAnalyzer::normalize(input)` applies simple lowercase to the complete input using the Korean tokenizer's resolved dictionary profile. Character filters, tokenization, user rules, POS stops, readings, and the configured token-filter chain do not run. A pipeline without a Korean tokenizer returns `AnalysisError::NormalizationUnavailable`. Existing generic full lowercase behavior remains unchanged. Pipelines containing Korean stages declare `DiscountOverlaps` by default; the explicit compilation method can select another length policy.
+
+```rust
+use uqa_analysis::{AnalyzerLimits, AnalyzerResources, Tokenizer};
+use uqa_analysis::nori::nori_analyzer;
+
+let mut config = nori_analyzer();
+if let Tokenizer::Nori(tokenizer) = &mut config.tokenizer {
+    tokenizer.user_dictionary = Some("세종시 세종 시".into());
+}
+let compiled = config.compile()?;
+assert_eq!(compiled.analyze("세종시")?, ["세종", "시"]);
+assert_eq!(compiled.normalize("喜悲哀歡 İ UQA")?, "喜悲哀歡 i uqa");
+let restored = AnalyzerResources::new(AnalyzerLimits::default())
+    .restore_json(compiled.descriptor().canonical_json())?;
+assert_eq!(restored.analyze_tokens("세종시")?, compiled.analyze_tokens("세종시")?);
+# Ok::<(), uqa_analysis::AnalysisError>(())
+```
+
+This example executes as a Rust doctest with the Nori feature. Current Memory, Key/Value, and SQLite linear term/position indexes reject Korean-stage field assignments and document analysis before mutating bindings or postings because they cannot retain immutable graph revisions. `Analyzer::uses_korean_stages()` supports capability preflight. Graph occurrence storage, durable descriptor bindings, pipeline-wide cancellation/accounting for generic stages, SQL diagnostics, and actual binding execution remain in the implementation plan; the existing built-in registry inventory is unchanged.
 
 ### Korean filters and normalization
 
@@ -476,7 +526,7 @@ With the `nori` feature enabled, a common stream owns a shared original-text sna
 | `KoreanFilter::SimpleLowercase` | `unicode_simple_lowercase` | Applies the model's pinned Java simple lowercase while retaining unpaired UTF-16 units and all metadata |
 | `KoreanFilter::Number` | `nori_number` | Optionally composes Korean numbers with exact decimals and reference lookahead attributes; excluded from the default analyzer |
 
-For the POS filter, omitted or null `stop_tags` uses `DEFAULT_STOP_TAGS`; `[]` keeps all tags. Exact tag spelling is required. The default set is `EP`, `EF`, `EC`, `ETN`, `ETM`, `IC`, `JKS`, `JKC`, `JKG`, `JKO`, `JKB`, `JKV`, `JKQ`, `JX`, `JC`, `MAG`, `MAJ`, `MM`, `SP`, `SSC`, `SSO`, `SC`, `SE`, `XPN`, `XSA`, `XSN`, `XSV`, `UNA`, `NA`, and `VSV`. Unknown filter properties or tags fail deserialization. This filter vocabulary is exposed by the standalone Rust `KoreanFilter` type; it is not yet accepted by generic analyzer registration or SQL configuration.
+For the POS filter, omitted or null `stop_tags` uses `DEFAULT_STOP_TAGS`; `[]` keeps all tags. Exact tag spelling is required. The default set is `EP`, `EF`, `EC`, `ETN`, `ETM`, `IC`, `JKS`, `JKC`, `JKG`, `JKO`, `JKB`, `JKV`, `JKQ`, `JX`, `JC`, `MAG`, `MAJ`, `MM`, `SP`, `SSC`, `SSO`, `SC`, `SE`, `XPN`, `XSA`, `XSN`, `XSV`, `UNA`, `NA`, and `VSV`. Unknown filter properties or tags fail deserialization. The standalone Rust `KoreanFilter` type and the common pipeline configurations above share these algorithms. Durable Nori registration and retrieval remain in the implementation plan.
 
 `KoreanFilter::apply(output, &model)` applies one stage to a complete output; `apply_controlled(output, &model, limits, poll)` also enforces token/output bounds and cancellation. POS, reading-form, and lowercase filters preserve retained tokens' offsets, position lengths, keyword state, origin, and nullable morphology. POS filtering adds increments with checked arithmetic, including final skipped positions. Reading conversion and lowercase do not modify reading or morpheme metadata.
 

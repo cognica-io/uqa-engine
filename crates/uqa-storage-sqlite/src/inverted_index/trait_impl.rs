@@ -641,6 +641,8 @@ impl InvertedIndex for SQLiteInvertedIndex {
         analyzer: Analyzer,
         phase: AnalyzerPhase,
     ) -> Result<(), String> {
+        uqa_storage::inverted_index::validate_linear_analyzer(&analyzer)
+            .map_err(|error| error.to_string())?;
         match phase {
             AnalyzerPhase::Index => {
                 self.index_field_analyzers

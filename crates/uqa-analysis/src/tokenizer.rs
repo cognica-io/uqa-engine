@@ -26,9 +26,17 @@ pub enum Tokenizer {
     Whitespace,
     Standard,
     Letter,
-    NGram { min_gram: usize, max_gram: usize },
-    Pattern { pattern: String },
+    NGram {
+        min_gram: usize,
+        max_gram: usize,
+    },
+    Pattern {
+        pattern: String,
+    },
     Keyword,
+    #[cfg(feature = "nori")]
+    #[serde(rename = "nori_tokenizer")]
+    Nori(crate::nori::NoriTokenizerConfig),
 }
 
 impl Tokenizer {
@@ -37,6 +45,8 @@ impl Tokenizer {
     /// deserialized legacy values can never bypass them.
     pub fn validate(&self) -> AnalysisResult<()> {
         match self {
+            #[cfg(feature = "nori")]
+            Tokenizer::Nori(_) => self.prepare().map(|_| ()),
             Tokenizer::NGram { .. } | Tokenizer::Pattern { .. } => self.prepare().map(|_| ()),
             _ => Ok(()),
         }

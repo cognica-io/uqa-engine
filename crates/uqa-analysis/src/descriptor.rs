@@ -65,6 +65,12 @@ pub struct AnalyzerDescriptor {
     wire: Box<RawValue>,
 }
 
+pub(crate) struct ResolvedDescriptor {
+    pub descriptor: Arc<AnalyzerDescriptor>,
+    #[cfg(feature = "nori")]
+    pub nori: crate::nori::pipeline::ResolvedNoriPipeline,
+}
+
 impl Serialize for AnalyzerDescriptor {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.wire.serialize(serializer)
@@ -77,10 +83,35 @@ impl AnalyzerDescriptor {
         length_policy: TokenLengthPolicy,
         limits: AnalyzerLimits,
     ) -> AnalysisResult<Arc<Self>> {
+        Ok(Self::resolve_inputs(
+            config,
+            length_policy,
+            limits,
+            #[cfg(feature = "nori")]
+            &crate::nori::NoriResources::default(),
+        )?
+        .descriptor)
+    }
+
+    pub(crate) fn resolve_inputs(
+        config: &Analyzer,
+        length_policy: TokenLengthPolicy,
+        limits: AnalyzerLimits,
+        #[cfg(feature = "nori")] resources: &crate::nori::NoriResources,
+    ) -> AnalysisResult<ResolvedDescriptor> {
         config::check_config(config, limits)?;
         let profiles = RuntimeProfiles::resolve(config)?;
+        #[cfg(feature = "nori")]
+        let (config, nori) = {
+            let mut config = config.clone();
+            let nori =
+                crate::nori::pipeline::ResolvedNoriPipeline::resolve(&mut config, resources)?;
+            (config, nori)
+        };
+        #[cfg(feature = "nori")]
+        let config = &config;
         let pipeline = config::snapshot(config, limits)?;
-        Self::finish(
+        let descriptor = Self::finish(
             DescriptorData {
                 format: FORMAT.into(),
                 format_version: FORMAT_VERSION,
@@ -91,7 +122,12 @@ impl AnalyzerDescriptor {
                 runtime_profiles: profiles,
             },
             limits,
-        )
+        )?;
+        Ok(ResolvedDescriptor {
+            descriptor,
+            #[cfg(feature = "nori")]
+            nori,
+        })
     }
 
     /// Restore resolved inputs without opening any file or substituting current mutable definitions.

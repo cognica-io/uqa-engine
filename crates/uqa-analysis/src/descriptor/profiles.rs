@@ -42,6 +42,8 @@ impl RuntimeProfiles {
             Tokenizer::Letter => (Some("[a-zA-Z]+"), false),
             Tokenizer::Pattern { pattern } => (Some(pattern.as_str()), false),
             Tokenizer::Keyword => (None, false),
+            #[cfg(feature = "nori")]
+            Tokenizer::Nori(_) => (None, false),
         };
         if let Some(pattern) = pattern {
             expressions.push(expression(pattern, "pattern tokenizer")?);

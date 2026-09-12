@@ -18,6 +18,8 @@ use crate::{
 struct Inner {
     limits: AnalyzerLimits,
     cache: Mutex<Cache<AnalyzerFingerprint, CompiledAnalyzer>>,
+    #[cfg(feature = "nori")]
+    nori: crate::nori::NoriResources,
 }
 
 /// Retained descriptor sizes exclude compiled heap allocations and caller-owned handles.
@@ -57,7 +59,24 @@ impl AnalyzerResources {
         Self(Arc::new(Inner {
             limits,
             cache: Mutex::new(Cache::default()),
+            #[cfg(feature = "nori")]
+            nori: crate::nori::NoriResources::default(),
         }))
+    }
+
+    /// Use explicit immutable Korean resources without introducing a fallback resolver.
+    #[cfg(feature = "nori")]
+    pub fn with_nori_resources(limits: AnalyzerLimits, nori: crate::nori::NoriResources) -> Self {
+        Self(Arc::new(Inner {
+            limits,
+            cache: Mutex::new(Cache::default()),
+            nori,
+        }))
+    }
+
+    #[cfg(feature = "nori")]
+    pub fn nori_resources(&self) -> &crate::nori::NoriResources {
+        &self.0.nori
     }
 
     pub fn limits(&self) -> AnalyzerLimits {
@@ -73,7 +92,12 @@ impl AnalyzerResources {
     }
 
     pub fn compile(&self, config: &Analyzer) -> AnalysisResult<Arc<CompiledAnalyzer>> {
-        self.compile_with_length_policy(config, TokenLengthPolicy::EmittedTokens)
+        let policy = if config.uses_korean_stages() {
+            TokenLengthPolicy::DiscountOverlaps
+        } else {
+            TokenLengthPolicy::EmittedTokens
+        };
+        self.compile_with_length_policy(config, policy)
     }
 
     pub fn compile_with_length_policy(
@@ -82,8 +106,18 @@ impl AnalyzerResources {
         policy: TokenLengthPolicy,
     ) -> AnalysisResult<Arc<CompiledAnalyzer>> {
         // Mutable inputs resolve outside the cache lock, even when their previous revision is cached.
-        let descriptor = AnalyzerDescriptor::resolve(config, policy, self.0.limits)?;
-        self.restore(descriptor)
+        let resolved = AnalyzerDescriptor::resolve_inputs(
+            config,
+            policy,
+            self.0.limits,
+            #[cfg(feature = "nori")]
+            &self.0.nori,
+        )?;
+        self.publish(
+            resolved.descriptor,
+            #[cfg(feature = "nori")]
+            resolved.nori,
+        )
     }
 
     /// Compile verified resolved inputs without consulting mutable files or named definitions.
@@ -92,14 +126,40 @@ impl AnalyzerResources {
         descriptor: Arc<AnalyzerDescriptor>,
     ) -> AnalysisResult<Arc<CompiledAnalyzer>> {
         descriptor.validate_limits(self.0.limits)?;
+        if let Some(compiled) = self.0.cache.lock().get(&descriptor.fingerprint()) {
+            return Ok(compiled);
+        }
+        #[cfg(feature = "nori")]
+        let nori = {
+            let mut config = descriptor.configuration()?;
+            crate::nori::pipeline::check_resolved(&config)?;
+            crate::nori::pipeline::ResolvedNoriPipeline::resolve(&mut config, &self.0.nori)?
+        };
+        self.publish(
+            descriptor,
+            #[cfg(feature = "nori")]
+            nori,
+        )
+    }
+
+    fn publish(
+        &self,
+        descriptor: Arc<AnalyzerDescriptor>,
+        #[cfg(feature = "nori")] nori: crate::nori::pipeline::ResolvedNoriPipeline,
+    ) -> AnalysisResult<Arc<CompiledAnalyzer>> {
+        descriptor.validate_limits(self.0.limits)?;
         let fingerprint = descriptor.fingerprint();
         let weight = descriptor.canonical_json().len();
         let mut cache = self.0.cache.lock();
         if let Some(compiled) = cache.get(&fingerprint) {
             return Ok(compiled);
         }
-        // Preparation uses only immutable inline data and cannot call external resource owners.
-        let compiled = Arc::new(CompiledAnalyzer::prepare(descriptor)?);
+        // Executable preparation receives resolved handles and cannot call external owners.
+        let compiled = Arc::new(CompiledAnalyzer::prepare(
+            descriptor,
+            #[cfg(feature = "nori")]
+            nori,
+        )?);
         cache.insert(
             fingerprint,
             compiled.clone(),

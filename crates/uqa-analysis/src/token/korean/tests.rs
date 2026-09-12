@@ -254,7 +254,7 @@ fn generic_filter_kernel_matches_every_recorded_number_and_analysis_stream() {
                 filters.into_iter().try_fold(stream, |stream, filter| {
                     filter.compile().apply_stream(
                         stream,
-                        model(),
+                        Some(model()),
                         NoriLimits::default(),
                         &mut || Ok(()),
                     )

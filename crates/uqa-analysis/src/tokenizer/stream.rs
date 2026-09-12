@@ -18,6 +18,10 @@ pub(super) fn tokenize(
     let text = input.as_str();
     let mut tokens = Vec::new();
     match tokenizer {
+        #[cfg(feature = "nori")]
+        PreparedTokenizer::Nori(tokenizer) => {
+            return tokenizer.tokenize(text)?.into_analyzed(input)
+        }
         PreparedTokenizer::Whitespace => {
             for range in word_ranges(text) {
                 tokens.push(AnalysisToken::from_source(input, range)?);

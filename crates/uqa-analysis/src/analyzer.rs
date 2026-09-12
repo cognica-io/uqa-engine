@@ -45,6 +45,27 @@ impl Default for Analyzer {
 }
 
 impl Analyzer {
+    /// Identify Korean components for storage-format and catalog capability preflight.
+    pub fn uses_korean_stages(&self) -> bool {
+        #[cfg(feature = "nori")]
+        {
+            matches!(self.tokenizer, Tokenizer::Nori(_))
+                || self.token_filters.iter().any(|filter| {
+                    matches!(
+                        filter,
+                        TokenFilter::NoriPartOfSpeech(_)
+                            | TokenFilter::NoriReadingForm(_)
+                            | TokenFilter::UnicodeSimpleLowercase(_)
+                            | TokenFilter::NoriNumber(_)
+                    )
+                })
+        }
+        #[cfg(not(feature = "nori"))]
+        {
+            false
+        }
+    }
+
     pub fn new(
         tokenizer: Tokenizer,
         token_filters: Vec<TokenFilter>,
