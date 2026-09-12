@@ -4,365 +4,213 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Transactional clustered-posting and document mutation.
+//! Atomic source replacement with coalesced graph clusters and revision statistics.
 
+use super::data::FieldStats;
 use super::{
-    clustered_result, corrupt_counter, decode_index_u64, encode_index_counter, encode_index_u64,
-    invalidate_block_max_tables, load_cluster, load_document_lengths, load_document_terms,
-    load_field_total, params, write_cluster, BTreeMap, BTreeSet, ClusterPosting, DocId, FieldName,
-    SQLiteInvertedIndex, SQLiteResult, StagedField,
+    clustered_result, encode_index_counter, encode_index_u64, invalidate_posting_accelerators,
+    load_cluster, params, write_cluster, BTreeMap, DocId, FieldName, OccurrencePosting,
+    SQLiteError, SQLiteInvertedIndex, SQLiteResult, StagedField, TokenTermKey,
 };
-use uqa_storage::clustered_postings::{cluster_id, encode_terms};
+use uqa_storage::clustered_postings::{cluster_id, encode_term_keys};
 
-type PostingChange = Option<(u64, Vec<u32>)>;
-type StagedDocuments = BTreeMap<DocId, (i64, BTreeMap<FieldName, StagedField>)>;
-type ClusterChanges = BTreeMap<(FieldName, String, u64), BTreeMap<DocId, PostingChange>>;
-type FieldChanges = BTreeMap<FieldName, (u64, u64, u64, u64)>;
-type PlannedFieldTotals = Vec<(FieldName, i64, bool)>;
+type Documents = BTreeMap<DocId, BTreeMap<FieldName, StagedField>>;
+type Changes = BTreeMap<(FieldName, TokenTermKey, u64), BTreeMap<DocId, Option<OccurrencePosting>>>;
+
+fn invalid(message: &str) -> SQLiteError {
+    SQLiteError::StorageBackend(message.into())
+}
 
 fn merge_cluster_changes(
-    entries: Vec<ClusterPosting>,
-    changes: BTreeMap<DocId, PostingChange>,
-) -> Vec<ClusterPosting> {
-    fn push_replacement(
-        entries: &mut Vec<ClusterPosting>,
-        doc_id: DocId,
-        replacement: PostingChange,
-    ) {
-        if let Some((doc_length, positions)) = replacement {
-            entries.push(ClusterPosting {
-                doc_id,
-                term_freq: positions.len() as u64,
-                doc_length,
-                positions,
-            });
-        }
-    }
-
+    entries: Vec<OccurrencePosting>,
+    changes: BTreeMap<DocId, Option<OccurrencePosting>>,
+) -> Vec<OccurrencePosting> {
     let mut merged = Vec::with_capacity(entries.len().saturating_add(changes.len()));
     let mut changes = changes.into_iter().peekable();
     for entry in entries {
-        while changes
-            .peek()
-            .is_some_and(|(doc_id, _)| *doc_id < entry.doc_id)
-        {
-            let (doc_id, replacement) = changes.next().expect("peeked posting change exists");
-            push_replacement(&mut merged, doc_id, replacement);
+        while changes.peek().is_some_and(|(id, _)| *id < entry.doc_id) {
+            merged.extend(changes.next().expect("peeked change exists").1);
         }
-        if changes
-            .peek()
-            .is_some_and(|(doc_id, _)| *doc_id == entry.doc_id)
-        {
-            let (doc_id, replacement) = changes.next().expect("peeked posting change exists");
-            push_replacement(&mut merged, doc_id, replacement);
+        if changes.peek().is_some_and(|(id, _)| *id == entry.doc_id) {
+            merged.extend(changes.next().expect("peeked change exists").1);
         } else {
             merged.push(entry);
         }
     }
-    for (doc_id, replacement) in changes {
-        push_replacement(&mut merged, doc_id, replacement);
-    }
+    merged.extend(changes.filter_map(|(_, entry)| entry));
     merged
 }
 
-fn accumulate_field_changes(
-    field_changes: &mut FieldChanges,
-    old_lengths: &BTreeMap<FieldName, u64>,
-    staged: &BTreeMap<FieldName, StagedField>,
+fn add_statistics(
+    totals: &mut BTreeMap<FieldName, FieldStats>,
+    fields: &BTreeMap<FieldName, StagedField>,
 ) -> SQLiteResult<()> {
-    let mut affected_fields = BTreeSet::new();
-    affected_fields.extend(old_lengths.keys().cloned());
-    affected_fields.extend(staged.keys().cloned());
-    for field in affected_fields {
-        let (old_total, new_total, old_docs, new_docs) =
-            field_changes.entry(field.clone()).or_default();
-        if let Some(length) = old_lengths.get(&field) {
-            *old_total = old_total
-                .checked_add(*length)
-                .ok_or_else(|| corrupt_counter("old field length overflow"))?;
-            *old_docs = old_docs
-                .checked_add(1)
-                .ok_or_else(|| corrupt_counter("old field document count overflow"))?;
+    for (field, snapshot) in fields {
+        let revision = snapshot.metadata.revision();
+        let stats = totals.entry(field.clone()).or_insert(FieldStats {
+            revision,
+            doc_count: 0,
+            total_length: 0,
+        });
+        if stats.revision != revision {
+            return Err(invalid(
+                "changing a populated field's index revision requires an atomic source rebuild",
+            ));
         }
-        if let Some(staged_field) = staged.get(&field) {
-            *new_total = new_total
-                .checked_add(staged_field.length)
-                .ok_or_else(|| corrupt_counter("new field length overflow"))?;
-            *new_docs = new_docs
-                .checked_add(1)
-                .ok_or_else(|| corrupt_counter("new field document count overflow"))?;
-        }
-    }
-    Ok(())
-}
-
-fn collect_batch_changes(
-    conn: &rusqlite::Connection,
-    table: &str,
-    staged_documents: &StagedDocuments,
-) -> SQLiteResult<(ClusterChanges, FieldChanges)> {
-    let mut cluster_changes = ClusterChanges::new();
-    let mut field_changes = FieldChanges::new();
-    for (doc_id, (stored_doc_id, staged)) in staged_documents {
-        let old_lengths = load_document_lengths(conn, table, *stored_doc_id)?;
-        let old_terms = load_document_terms(conn, table, *stored_doc_id)?;
-        let posting_cluster = cluster_id(*doc_id);
-        for (field, terms) in old_terms {
-            for term in terms {
-                cluster_changes
-                    .entry((field.clone(), term, posting_cluster))
-                    .or_default()
-                    .insert(*doc_id, None);
-            }
-        }
-        for (field, staged_field) in staged {
-            for (term, positions) in &staged_field.postings {
-                cluster_changes
-                    .entry((field.clone(), term.clone(), posting_cluster))
-                    .or_default()
-                    .insert(*doc_id, Some((staged_field.length, positions.clone())));
-            }
-        }
-        accumulate_field_changes(&mut field_changes, &old_lengths, staged)?;
-    }
-    Ok((cluster_changes, field_changes))
-}
-
-fn plan_batch_field_totals(
-    conn: &rusqlite::Connection,
-    table: &str,
-    field_changes: FieldChanges,
-) -> SQLiteResult<PlannedFieldTotals> {
-    let mut planned = Vec::with_capacity(field_changes.len());
-    for (field, (old_total, new_total, old_docs, new_docs)) in field_changes {
-        let current_total = load_field_total(conn, table, &field)?.unwrap_or(0);
-        let total = current_total
-            .checked_sub(old_total)
-            .ok_or_else(|| corrupt_counter("total field length underflow"))?
-            .checked_add(new_total)
-            .ok_or_else(|| corrupt_counter("total field length overflow"))?;
-        let current_docs: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM _doc_lengths WHERE table_name = ?1 AND field = ?2",
-            params![table, field],
-            |row| row.get(0),
-        )?;
-        let field_docs = decode_index_u64("field document count", current_docs)?
-            .checked_sub(old_docs)
-            .ok_or_else(|| corrupt_counter("field document count underflow"))?
-            .checked_add(new_docs)
-            .ok_or_else(|| corrupt_counter("field document count overflow"))?;
-        planned.push((
-            field,
-            encode_index_counter("total field length", total)?,
-            field_docs > 0,
-        ));
-    }
-    Ok(planned)
-}
-
-fn write_batch_documents(
-    conn: &rusqlite::Connection,
-    table: &str,
-    staged_documents: &StagedDocuments,
-) -> SQLiteResult<()> {
-    for (stored_doc_id, staged) in staged_documents.values() {
-        conn.execute(
-            "DELETE FROM _posting_documents WHERE table_name = ?1 AND doc_id = ?2",
-            params![table, stored_doc_id],
-        )?;
-        conn.execute(
-            "DELETE FROM _doc_lengths WHERE table_name = ?1 AND doc_id = ?2",
-            params![table, stored_doc_id],
-        )?;
-        for (field, staged_field) in staged {
-            let terms = staged_field
-                .postings
-                .iter()
-                .map(|(term, _)| term.clone())
-                .collect::<Vec<_>>();
-            conn.execute(
-                "INSERT INTO _posting_documents (table_name, doc_id, field, terms_blob)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    table,
-                    stored_doc_id,
-                    field,
-                    clustered_result(encode_terms(&terms))?
-                ],
-            )?;
-            conn.execute(
-                "INSERT INTO _doc_lengths (table_name, doc_id, field, length)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    table,
-                    stored_doc_id,
-                    field,
-                    encode_index_counter("document length", staged_field.length)?
-                ],
-            )?;
-        }
-    }
-    Ok(())
-}
-
-fn write_batch_field_totals(
-    conn: &rusqlite::Connection,
-    table: &str,
-    planned_totals: PlannedFieldTotals,
-) -> SQLiteResult<()> {
-    for (field, total, has_field_after) in planned_totals {
-        if has_field_after {
-            conn.execute(
-                "INSERT INTO _field_stats (table_name, field, total_length)
-                 VALUES (?1, ?2, ?3)
-                 ON CONFLICT(table_name, field) DO UPDATE SET total_length = excluded.total_length",
-                params![table, field, total],
-            )?;
-        } else {
-            conn.execute(
-                "DELETE FROM _field_stats WHERE table_name = ?1 AND field = ?2",
-                params![table, field],
-            )?;
-        }
-    }
-    Ok(())
-}
-
-fn clear_table_postings(conn: &rusqlite::Connection, table: &str) -> SQLiteResult<()> {
-    for storage_table in [
-        "_posting_clusters",
-        "_posting_documents",
-        "_doc_lengths",
-        "_field_stats",
-    ] {
-        conn.execute(
-            &format!("DELETE FROM {storage_table} WHERE table_name = ?1"),
-            params![table],
-        )?;
-    }
-    Ok(())
-}
-
-fn apply_document_postings(
-    conn: &rusqlite::Connection,
-    table: &str,
-    doc_id: DocId,
-    stored_doc_id: i64,
-    old_terms: &BTreeMap<FieldName, Vec<String>>,
-    staged: &BTreeMap<FieldName, StagedField>,
-) -> SQLiteResult<()> {
-    let mut changes = BTreeMap::<(FieldName, String), PostingChange>::new();
-    for (field, terms) in old_terms {
-        for term in terms {
-            changes.insert((field.clone(), term.clone()), None);
-        }
-    }
-    for (field, staged_field) in staged {
-        for (term, positions) in &staged_field.postings {
-            changes.insert(
-                (field.clone(), term.clone()),
-                Some((staged_field.length, positions.clone())),
-            );
-        }
-    }
-
-    let posting_cluster = cluster_id(doc_id);
-    for ((field, term), replacement) in changes {
-        let mut entries = load_cluster(conn, table, &field, &term, posting_cluster)?;
-        match entries.binary_search_by_key(&doc_id, |entry| entry.doc_id) {
-            Ok(position) => {
-                entries.remove(position);
-            }
-            Err(position) => {
-                if let Some((doc_length, positions)) = replacement {
-                    entries.insert(
-                        position,
-                        ClusterPosting {
-                            doc_id,
-                            term_freq: positions.len() as u64,
-                            doc_length,
-                            positions,
-                        },
-                    );
-                    write_cluster(conn, table, &field, &term, posting_cluster, &entries)?;
-                    continue;
-                }
-            }
-        }
-        if let Some((doc_length, positions)) = replacement {
-            let position = entries.partition_point(|entry| entry.doc_id < doc_id);
-            entries.insert(
-                position,
-                ClusterPosting {
-                    doc_id,
-                    term_freq: positions.len() as u64,
-                    doc_length,
-                    positions,
-                },
-            );
-        }
-        write_cluster(conn, table, &field, &term, posting_cluster, &entries)?;
-    }
-
-    conn.execute(
-        "DELETE FROM _posting_documents WHERE table_name = ?1 AND doc_id = ?2",
-        params![table, stored_doc_id],
-    )?;
-    for (field, staged_field) in staged {
-        let terms = staged_field
-            .postings
-            .iter()
-            .map(|(term, _)| term.clone())
-            .collect::<Vec<_>>();
-        let terms_blob = clustered_result(encode_terms(&terms))?;
-        conn.execute(
-            "INSERT INTO _posting_documents (table_name, doc_id, field, terms_blob)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![table, stored_doc_id, field, terms_blob],
-        )?;
+        stats.doc_count = stats
+            .doc_count
+            .checked_add(1)
+            .ok_or_else(|| invalid("field document count overflow"))?;
+        stats.total_length = stats
+            .total_length
+            .checked_add(snapshot.metadata.length)
+            .ok_or_else(|| invalid("total field length overflow"))?;
     }
     Ok(())
 }
 
 impl SQLiteInvertedIndex {
+    fn stage_documents(
+        &self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+    ) -> SQLiteResult<Documents> {
+        let mut staged = BTreeMap::new();
+        for (doc_id, fields) in documents {
+            encode_index_u64("document", doc_id)?;
+            staged.insert(doc_id, self.analyze_fields(fields)?);
+        }
+        Ok(staged)
+    }
+
+    fn write_document_on(
+        &self,
+        conn: &rusqlite::Connection,
+        doc_id: DocId,
+        fields: &BTreeMap<FieldName, StagedField>,
+    ) -> SQLiteResult<()> {
+        let doc_id = encode_index_u64("document", doc_id)?;
+        for table in ["_occurrence_documents", "_occurrence_lengths"] {
+            conn.execute(
+                &format!("DELETE FROM {table} WHERE table_name = ?1 AND doc_id = ?2"),
+                params![self.table, doc_id],
+            )?;
+        }
+        for (field, snapshot) in fields {
+            let terms = snapshot.postings.keys().cloned().collect::<Vec<_>>();
+            let terms = clustered_result(encode_term_keys(&terms))?;
+            let metadata = clustered_result(snapshot.metadata.to_bytes())?;
+            conn.execute("INSERT INTO _occurrence_documents(table_name, doc_id, field, terms_blob, metadata_blob) VALUES (?1, ?2, ?3, ?4, ?5)", params![self.table, doc_id, field, terms, metadata.as_slice()])?;
+            conn.execute("INSERT INTO _occurrence_lengths(table_name, doc_id, field, length) VALUES (?1, ?2, ?3, ?4)", params![self.table, doc_id, field, encode_index_counter("document length", snapshot.metadata.length)?])?;
+        }
+        Ok(())
+    }
+
+    fn write_statistics_on(
+        &self,
+        conn: &rusqlite::Connection,
+        totals: &BTreeMap<FieldName, FieldStats>,
+    ) -> SQLiteResult<()> {
+        for (field, stats) in totals {
+            if stats.doc_count == 0 {
+                if stats.total_length != 0 {
+                    return Err(invalid("empty indexed field retains document length"));
+                }
+                conn.execute(
+                    "DELETE FROM _occurrence_fields WHERE table_name = ?1 AND field = ?2",
+                    params![self.table, field],
+                )?;
+            } else {
+                let revision = clustered_result(stats.revision.to_bytes())?;
+                conn.execute("INSERT INTO _occurrence_fields(table_name, field, revision, doc_count, total_length) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(table_name, field) DO UPDATE SET revision = excluded.revision, doc_count = excluded.doc_count, total_length = excluded.total_length", params![self.table, field, revision.as_slice(), encode_index_counter("field document count", stats.doc_count)?, encode_index_counter("total field length", stats.total_length)?])?;
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn add_documents_inner(
         &self,
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
     ) -> SQLiteResult<()> {
-        let mut staged_documents = BTreeMap::new();
-        for (doc_id, fields) in documents {
-            let stored_doc_id = encode_index_u64("document", doc_id)?;
-            let staged = self.analyze_fields(fields)?;
-            staged_documents.insert(doc_id, (stored_doc_id, staged));
+        let staged = self.stage_documents(documents)?;
+        if staged.is_empty() {
+            return self.require_graph_format();
         }
-        if staged_documents.is_empty() {
-            return Ok(());
-        }
-
         self.conn.with_mut(|conn| {
             let tx = conn.savepoint()?;
-            let (cluster_changes, field_changes) =
-                collect_batch_changes(&tx, &self.table, &staged_documents)?;
-            let planned_totals = plan_batch_field_totals(&tx, &self.table, field_changes)?;
-            let staged_fields = staged_documents
-                .values()
-                .flat_map(|(_, fields)| fields.keys().cloned())
-                .collect::<BTreeSet<_>>();
-            for field in staged_fields {
+            self.require_graph_format_on(&tx)?;
+            let mut totals = BTreeMap::<FieldName, FieldStats>::new();
+            let mut changes = Changes::new();
+            for (doc_id, fields) in &staged {
+                let old = self.old_document_on(&tx, encode_index_u64("document", *doc_id)?)?;
+                for field in old.keys().chain(fields.keys()) {
+                    if !totals.contains_key(field) {
+                        if let Some(stats) = self.stored_field_stats_on(&tx, field)? {
+                            totals.insert(field.clone(), stats);
+                        }
+                    }
+                }
+                for (field, snapshot) in old {
+                    let stats = totals
+                        .get_mut(&field)
+                        .ok_or_else(|| invalid("indexed field revision is missing"))?;
+                    stats.doc_count = stats
+                        .doc_count
+                        .checked_sub(1)
+                        .ok_or_else(|| invalid("field document count underflow"))?;
+                    stats.total_length = stats
+                        .total_length
+                        .checked_sub(snapshot.metadata.length)
+                        .ok_or_else(|| invalid("total field length underflow"))?;
+                    for term in snapshot.postings.into_keys() {
+                        changes
+                            .entry((field.clone(), term, cluster_id(*doc_id)))
+                            .or_default()
+                            .insert(*doc_id, None);
+                    }
+                }
+            }
+            if totals.is_empty() && staged.values().all(BTreeMap::is_empty) {
+                tx.commit()?;
+                return Ok(());
+            }
+            for (doc_id, fields) in &staged {
+                add_statistics(&mut totals, fields)?;
+                for (field, snapshot) in fields {
+                    for (term, occurrences) in &snapshot.postings {
+                        changes
+                            .entry((field.clone(), term.clone(), cluster_id(*doc_id)))
+                            .or_default()
+                            .insert(
+                                *doc_id,
+                                Some(OccurrencePosting {
+                                    doc_id: *doc_id,
+                                    doc_length: snapshot.metadata.length,
+                                    occurrences: occurrences.clone(),
+                                }),
+                            );
+                    }
+                }
+            }
+            for ((field, term, cluster), updates) in changes {
+                let merged = merge_cluster_changes(
+                    load_cluster(&tx, &self.table, &field, &term, cluster)?,
+                    updates,
+                );
+                write_cluster(&tx, &self.table, &field, &term, cluster, &merged)?;
+            }
+            for (doc_id, fields) in &staged {
+                self.write_document_on(&tx, *doc_id, fields)?;
+            }
+            self.write_statistics_on(&tx, &totals)?;
+            for field in totals.keys() {
                 Self::ensure_aux_tables_on(
                     &tx,
-                    &self.skip_table_name(&field),
-                    &self.blockmax_table_name(&field),
+                    &self.skip_table_name(field),
+                    &self.blockmax_table_name(field),
                 )?;
             }
-            invalidate_block_max_tables(&tx, &self.table)?;
-            for ((field, term, posting_cluster), changes) in cluster_changes {
-                let entries = load_cluster(&tx, &self.table, &field, &term, posting_cluster)?;
-                let entries = merge_cluster_changes(entries, changes);
-                write_cluster(&tx, &self.table, &field, &term, posting_cluster, &entries)?;
-            }
-            write_batch_documents(&tx, &self.table, &staged_documents)?;
-            write_batch_field_totals(&tx, &self.table, planned_totals)?;
+            invalidate_posting_accelerators(&tx, &self.table)?;
+            self.publish_graph_format(&tx)?;
             tx.commit()?;
             Ok(())
         })
@@ -373,235 +221,54 @@ impl SQLiteInvertedIndex {
         doc_id: DocId,
         fields: BTreeMap<FieldName, String>,
     ) -> SQLiteResult<()> {
-        let stored_doc_id = encode_index_u64("document", doc_id)?;
-        let staged = self.analyze_fields(fields)?;
-        self.conn.with_mut(|conn| {
-            let tx = conn.savepoint()?;
-            let old_lengths = load_document_lengths(&tx, &self.table, stored_doc_id)?;
-            let old_terms = load_document_terms(&tx, &self.table, stored_doc_id)?;
-            let mut affected_fields = BTreeSet::new();
-            affected_fields.extend(old_lengths.keys().cloned());
-            affected_fields.extend(staged.keys().cloned());
-            let mut planned_totals = Vec::with_capacity(affected_fields.len());
-            for field in affected_fields {
-                let current = load_field_total(&tx, &self.table, &field)?.unwrap_or(0);
-                let old = old_lengths.get(&field).copied().unwrap_or(0);
-                let new = staged.get(&field).map_or(0, |value| value.length);
-                let total = current
-                    .checked_sub(old)
-                    .ok_or_else(|| corrupt_counter("total field length underflow"))?
-                    .checked_add(new)
-                    .ok_or_else(|| corrupt_counter("total field length overflow"))?;
-                let total = encode_index_counter("total field length", total)?;
-                let other_docs: i64 = tx.query_row(
-                    "SELECT COUNT(*) FROM _doc_lengths
-                     WHERE table_name = ?1 AND field = ?2 AND doc_id <> ?3",
-                    params![self.table, field, stored_doc_id],
-                    |row| row.get(0),
-                )?;
-                let has_field_after = decode_index_u64("field document count", other_docs)? > 0
-                    || staged.contains_key(&field);
-                planned_totals.push((field, total, has_field_after));
-            }
+        self.add_documents_inner(vec![(doc_id, fields)])
+    }
 
-            for field in staged.keys() {
-                Self::ensure_aux_tables_on(
-                    &tx,
-                    &self.skip_table_name(field),
-                    &self.blockmax_table_name(field),
-                )?;
-            }
-            invalidate_block_max_tables(&tx, &self.table)?;
-            apply_document_postings(&tx, &self.table, doc_id, stored_doc_id, &old_terms, &staged)?;
-            tx.execute(
-                "DELETE FROM _doc_lengths WHERE table_name = ?1 AND doc_id = ?2",
-                params![self.table, stored_doc_id],
-            )?;
-            for (field, total, has_field_after) in planned_totals {
-                if has_field_after {
-                    tx.execute(
-                        "INSERT INTO _field_stats (table_name, field, total_length)
-                         VALUES (?1, ?2, ?3)
-                         ON CONFLICT(table_name, field) DO UPDATE
-                            SET total_length = excluded.total_length",
-                        params![self.table, field, total],
-                    )?;
-                } else {
-                    tx.execute(
-                        "DELETE FROM _field_stats WHERE table_name = ?1 AND field = ?2",
-                        params![self.table, field],
-                    )?;
-                }
-            }
-            for (field, staged_field) in staged {
-                tx.execute(
-                    "INSERT INTO _doc_lengths (table_name, doc_id, field, length)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    params![
-                        self.table,
-                        stored_doc_id,
-                        field,
-                        encode_index_counter("document length", staged_field.length)?
-                    ],
-                )?;
-            }
-            tx.commit()?;
-            Ok(())
-        })
+    pub(super) fn remove_document_inner(&self, doc_id: DocId) -> SQLiteResult<()> {
+        self.add_documents_inner(vec![(doc_id, BTreeMap::new())])
     }
 
     pub(super) fn rebuild_documents_inner(
         &self,
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
     ) -> SQLiteResult<()> {
-        let mut staged_documents = BTreeMap::new();
-        for (doc_id, fields) in documents {
-            if !fields.is_empty() {
-                staged_documents.insert(
-                    encode_index_u64("document", doc_id)?,
-                    self.analyze_fields(fields)?,
-                );
-            }
-        }
-        let fields = staged_documents
-            .values()
-            .flat_map(|fields| fields.keys().cloned())
-            .collect::<BTreeSet<_>>();
-        let mut field_totals = BTreeMap::<FieldName, u64>::new();
-        let mut clusters = BTreeMap::<(FieldName, String, u64), Vec<ClusterPosting>>::new();
-        for (stored_doc_id, staged_fields) in &staged_documents {
-            let doc_id = decode_index_u64("document id", *stored_doc_id)?;
-            for (field, staged_field) in staged_fields {
-                let total = field_totals.entry(field.clone()).or_default();
-                *total = total
-                    .checked_add(staged_field.length)
-                    .ok_or_else(|| corrupt_counter("total field length overflow"))?;
-                for (term, positions) in &staged_field.postings {
+        let staged = self.stage_documents(documents)?;
+        let mut totals = BTreeMap::new();
+        let mut clusters =
+            BTreeMap::<(FieldName, TokenTermKey, u64), Vec<OccurrencePosting>>::new();
+        for (doc_id, fields) in &staged {
+            add_statistics(&mut totals, fields)?;
+            for (field, snapshot) in fields {
+                for (term, occurrences) in &snapshot.postings {
                     clusters
-                        .entry((field.clone(), term.clone(), cluster_id(doc_id)))
+                        .entry((field.clone(), term.clone(), cluster_id(*doc_id)))
                         .or_default()
-                        .push(ClusterPosting {
-                            doc_id,
-                            term_freq: positions.len() as u64,
-                            doc_length: staged_field.length,
-                            positions: positions.clone(),
+                        .push(OccurrencePosting {
+                            doc_id: *doc_id,
+                            doc_length: snapshot.metadata.length,
+                            occurrences: occurrences.clone(),
                         });
                 }
             }
         }
-
         self.conn.with_mut(|conn| {
             let tx = conn.savepoint()?;
-            for field in &fields {
+            self.clear_index_on(&tx)?;
+            for ((field, term, cluster), entries) in clusters {
+                write_cluster(&tx, &self.table, &field, &term, cluster, &entries)?;
+            }
+            for (doc_id, fields) in &staged {
+                self.write_document_on(&tx, *doc_id, fields)?;
+            }
+            self.write_statistics_on(&tx, &totals)?;
+            for field in totals.keys() {
                 Self::ensure_aux_tables_on(
                     &tx,
                     &self.skip_table_name(field),
                     &self.blockmax_table_name(field),
                 )?;
             }
-            invalidate_block_max_tables(&tx, &self.table)?;
-            clear_table_postings(&tx, &self.table)?;
-
-            for ((field, term, posting_cluster), entries) in clusters {
-                write_cluster(&tx, &self.table, &field, &term, posting_cluster, &entries)?;
-            }
-            for (stored_doc_id, staged_fields) in staged_documents {
-                for (field, staged_field) in staged_fields {
-                    tx.execute(
-                        "INSERT INTO _doc_lengths (table_name, doc_id, field, length)
-                         VALUES (?1, ?2, ?3, ?4)",
-                        params![
-                            self.table,
-                            stored_doc_id,
-                            field,
-                            encode_index_counter("document length", staged_field.length)?
-                        ],
-                    )?;
-                    let terms = staged_field
-                        .postings
-                        .into_iter()
-                        .map(|(term, _)| term)
-                        .collect::<Vec<_>>();
-                    tx.execute(
-                        "INSERT INTO _posting_documents
-                            (table_name, doc_id, field, terms_blob)
-                         VALUES (?1, ?2, ?3, ?4)",
-                        params![
-                            self.table,
-                            stored_doc_id,
-                            field,
-                            clustered_result(encode_terms(&terms))?
-                        ],
-                    )?;
-                }
-            }
-            for (field, total_length) in field_totals {
-                tx.execute(
-                    "INSERT INTO _field_stats (table_name, field, total_length)
-                     VALUES (?1, ?2, ?3)",
-                    params![
-                        self.table,
-                        field,
-                        encode_index_counter("total field length", total_length)?
-                    ],
-                )?;
-            }
-            tx.commit()?;
-            Ok(())
-        })
-    }
-
-    pub(super) fn remove_document_inner(&self, doc_id: DocId) -> SQLiteResult<()> {
-        let stored_doc_id = encode_index_u64("document", doc_id)?;
-        self.conn.with_mut(|conn| {
-            let tx = conn.savepoint()?;
-            let old_lengths = load_document_lengths(&tx, &self.table, stored_doc_id)?;
-            let old_terms = load_document_terms(&tx, &self.table, stored_doc_id)?;
-            let mut planned_totals = Vec::with_capacity(old_lengths.len());
-            for (field, length) in &old_lengths {
-                let current = load_field_total(&tx, &self.table, field)?.unwrap_or(0);
-                let total = current
-                    .checked_sub(*length)
-                    .ok_or_else(|| corrupt_counter("total field length underflow"))?;
-                let other_docs: i64 = tx.query_row(
-                    "SELECT COUNT(*) FROM _doc_lengths
-                     WHERE table_name = ?1 AND field = ?2 AND doc_id <> ?3",
-                    params![self.table, field, stored_doc_id],
-                    |row| row.get(0),
-                )?;
-                planned_totals.push((
-                    field.clone(),
-                    encode_index_counter("total field length", total)?,
-                    decode_index_u64("field document count", other_docs)? > 0,
-                ));
-            }
-            invalidate_block_max_tables(&tx, &self.table)?;
-            apply_document_postings(
-                &tx,
-                &self.table,
-                doc_id,
-                stored_doc_id,
-                &old_terms,
-                &BTreeMap::new(),
-            )?;
-            tx.execute(
-                "DELETE FROM _doc_lengths WHERE table_name = ?1 AND doc_id = ?2",
-                params![self.table, stored_doc_id],
-            )?;
-            for (field, total, has_field_after) in planned_totals {
-                if has_field_after {
-                    tx.execute(
-                        "UPDATE _field_stats SET total_length = ?3
-                         WHERE table_name = ?1 AND field = ?2",
-                        params![self.table, field, total],
-                    )?;
-                } else {
-                    tx.execute(
-                        "DELETE FROM _field_stats WHERE table_name = ?1 AND field = ?2",
-                        params![self.table, field],
-                    )?;
-                }
-            }
+            invalidate_posting_accelerators(&tx, &self.table)?;
             tx.commit()?;
             Ok(())
         })

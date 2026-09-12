@@ -7,9 +7,9 @@
 //! Auxiliary schema, field analysis, and skip-pointer rebuilds.
 
 use super::{
-    encode_index_u64, encode_index_usize, params, quote_ident, usize_to_index_u64,
-    validate_position_count, BTreeMap, DocId, FieldName, InvertedIndex, OptionalExtension,
-    SQLiteError, SQLiteInvertedIndex, SQLiteResult, StagedField, StorageBackendResult,
+    encode_index_u64, encode_index_usize, params, quote_ident, BTreeMap, DocId, InvertedIndex,
+    OptionalExtension, SQLiteError, SQLiteInvertedIndex, SQLiteResult, StorageBackendResult,
+    TokenTermKey,
 };
 
 impl SQLiteInvertedIndex {
@@ -17,7 +17,7 @@ impl SQLiteInvertedIndex {
         self.conn.with(|conn| {
             let found: Option<i64> = conn
                 .query_row(
-                    "SELECT 1 FROM _doc_lengths
+                    "SELECT 1 FROM _occurrence_lengths
                      WHERE table_name = ?1 AND field = ?2 LIMIT 1",
                     params![self.table, field],
                     |row| row.get(0),
@@ -28,17 +28,10 @@ impl SQLiteInvertedIndex {
     }
 
     pub(super) fn terms_for_field(&self, field: &str) -> StorageBackendResult<Vec<String>> {
-        Ok(self.conn.with(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT DISTINCT term FROM _posting_clusters
-                     WHERE table_name = ?1 AND field = ?2
-                     ORDER BY term",
-            )?;
-            let rows = stmt
-                .query_map(params![self.table, field], |row| row.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(rows)
-        })?)
+        self.vocabulary_keys(field)?
+            .into_iter()
+            .map(|term| Ok(term.to_term().into_string()?))
+            .collect()
     }
 
     pub(super) fn fields_with_blockmax_tables(&self) -> StorageBackendResult<Vec<String>> {
@@ -76,7 +69,7 @@ impl SQLiteInvertedIndex {
         conn.execute(
             &format!(
                 "CREATE TABLE IF NOT EXISTS {} (
-                    term TEXT NOT NULL,
+                    term BLOB NOT NULL,
                     skip_doc_id INTEGER NOT NULL,
                     skip_offset INTEGER NOT NULL,
                     PRIMARY KEY (term, skip_doc_id)
@@ -88,7 +81,7 @@ impl SQLiteInvertedIndex {
         conn.execute(
             &format!(
                 "CREATE TABLE IF NOT EXISTS {} (
-                    term TEXT NOT NULL,
+                    term BLOB NOT NULL,
                     block_idx INTEGER NOT NULL,
                     max_score REAL NOT NULL,
                     scorer_fingerprint TEXT NOT NULL DEFAULT '',
@@ -116,50 +109,19 @@ impl SQLiteInvertedIndex {
         Ok(())
     }
 
-    pub(super) fn analyze_fields(
-        &self,
-        fields: BTreeMap<FieldName, String>,
-    ) -> SQLiteResult<BTreeMap<FieldName, StagedField>> {
-        let mut staged = BTreeMap::new();
-        for (field, text) in fields {
-            let tokens = self.tokenize(&text, &field)?;
-            let length = usize_to_index_u64("document length", tokens.len())?;
-            validate_position_count(length)?;
-            let mut term_positions: BTreeMap<String, Vec<u32>> = BTreeMap::new();
-            for (position, token) in tokens.into_iter().enumerate() {
-                term_positions
-                    .entry(token)
-                    .or_default()
-                    .push(u32::try_from(position).map_err(|_| {
-                        SQLiteError::StorageBackend(
-                            "token position exceeds the u32 index format".into(),
-                        )
-                    })?);
-            }
-            let mut postings = Vec::with_capacity(term_positions.len());
-            for (term, mut positions) in term_positions {
-                positions.sort_unstable();
-                positions.dedup();
-                postings.push((term, positions));
-            }
-            staged.insert(field, StagedField { length, postings });
-        }
-        Ok(staged)
-    }
-
     pub(super) fn rebuild_skip_pointers_for_field(&self, field: &str) -> SQLiteResult<()> {
         if !self.has_field(field)? {
             return Ok(());
         }
         self.ensure_aux_tables(field)?;
         let table = self.skip_table_name(field);
-        let mut by_term: BTreeMap<String, Vec<DocId>> = BTreeMap::new();
+        let mut by_term: BTreeMap<TokenTermKey, Vec<DocId>> = BTreeMap::new();
         for term in self
-            .terms_for_field(field)
+            .vocabulary_keys(field)
             .map_err(|error| SQLiteError::StorageBackend(error.to_string()))?
         {
             let mut cursor = self
-                .posting_cursor(field, &term)
+                .posting_cursor_key(field, &term)
                 .map_err(|error| SQLiteError::StorageBackend(error.to_string()))?;
             while let Some(entry) = cursor.current() {
                 by_term.entry(term.clone()).or_default().push(entry.doc_id);
@@ -190,7 +152,7 @@ impl SQLiteInvertedIndex {
                                  VALUES (?1, ?2, ?3)",
                                 quote_ident(&table)
                             ),
-                            params![term, doc_id, skip_offset],
+                            params![term.as_bytes(), doc_id, skip_offset],
                         )?;
                     }
                 }

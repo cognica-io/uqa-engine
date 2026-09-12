@@ -21,24 +21,18 @@ impl Catalog {
     }
 
     pub(crate) fn for_initial_restore(conn: ManagedConnection) -> Self {
-        Self {
-            conn,
-            fts_storage_was_reset: std::sync::atomic::AtomicBool::new(false),
-        }
+        Self { conn }
     }
 
     pub(in crate::catalog) fn initialize_storage(&self) -> Result<()> {
-        let reset = self.run_migrations()?;
-        self.fts_storage_was_reset
-            .fetch_or(reset, std::sync::atomic::Ordering::Release);
-        Ok(())
+        self.run_migrations()
     }
 
     pub fn connection(&self) -> ManagedConnection {
         self.conn.clone()
     }
 
-    pub(super) fn run_migrations(&self) -> Result<bool> {
+    pub(super) fn run_migrations(&self) -> Result<()> {
         self.conn.with_mut(|conn| {
             // A savepoint joins Engine's initial restore or owns the entire standalone catalog open. Later migration failures must also restore the original schema and postings.
             let mut conn = conn.savepoint()?;
@@ -110,7 +104,6 @@ impl Catalog {
             let schema_before_repair: i64 =
                 repair.pragma_query_value(None, "schema_version", |row| row.get(0))?;
             Self::ensure_column_stats_shape(&repair)?;
-            let fts_storage_was_reset = Self::ensure_fts_storage_shape(&repair)?;
             let schema_after_repair: i64 =
                 repair.pragma_query_value(None, "schema_version", |row| row.get(0))?;
             if schema_before_repair != schema_after_repair {
@@ -118,7 +111,7 @@ impl Catalog {
             }
             repair.commit()?;
             conn.commit()?;
-            Ok(fts_storage_was_reset)
+            Ok(())
         })
     }
 }

@@ -31,14 +31,13 @@ use super::catalog_lifecycle::{
 };
 
 /// Bump this every time a migration is added.
-pub const CURRENT_SCHEMA_VERSION: u32 = 47;
+pub const CURRENT_SCHEMA_VERSION: u32 = 48;
 
 const LEGACY_VIEWS_METADATA_KEY: &str = "sql_views_json";
 const LEGACY_SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
 
 pub struct Catalog {
     conn: ManagedConnection,
-    fts_storage_was_reset: std::sync::atomic::AtomicBool,
 }
 
 mod analyzers;

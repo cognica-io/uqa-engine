@@ -14,6 +14,8 @@ mod analyzer_revisions;
 mod catalog;
 #[path = "cases/inverted_index_analyzer.rs"]
 mod inverted_index_analyzer;
+#[path = "cases/occurrences.rs"]
+mod occurrences;
 #[path = "cases/persistent_graph.rs"]
 mod persistent_graph;
 #[path = "cases/skip_blockmax_coverage.rs"]

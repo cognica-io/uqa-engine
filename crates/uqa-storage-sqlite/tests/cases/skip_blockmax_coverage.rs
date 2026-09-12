@@ -92,7 +92,7 @@ fn test_skip_entries_for_large_posting_list() {
     conn.with(|c| {
         let mut stmt = c.prepare(
             "SELECT skip_doc_id, skip_offset FROM \"_skip_docs_body\"
-             WHERE term = 'alpha' ORDER BY skip_offset",
+             WHERE term = X'00616c706861' ORDER BY skip_offset",
         )?;
         let rows = stmt
             .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?

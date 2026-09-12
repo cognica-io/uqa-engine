@@ -35,7 +35,7 @@ fn fields(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
 }
 
 #[test]
-fn sqlite_rejects_korean_assignments_and_writes_before_graph_storage() {
+fn sqlite_korean_assignments_store_the_complete_source_graph() {
     let config = serde_json::from_str::<Analyzer>(r#"{"tokenizer":{"type":"nori_tokenizer"}}"#);
     let analyzer = match config {
         Ok(config) => config,
@@ -46,55 +46,38 @@ fn sqlite_rejects_korean_assignments_and_writes_before_graph_storage() {
             return;
         }
     };
-    assert!(analyzer.uses_korean_stages());
-    let compiled = analyzer.compile().unwrap();
-    let indexes = |analyzer: Analyzer| -> Vec<Box<dyn InvertedIndex>> {
-        vec![Box::new(SQLiteInvertedIndex::new(
-            sqlite_with_catalog(),
-            "korean",
-            analyzer,
-        ))]
-    };
-    for mut index in indexes(whitespace_analyzer()) {
-        index
-            .add_document(1, fields(&[("body", "old value")]))
-            .unwrap();
-        for phase in [
-            AnalyzerPhase::Index,
-            AnalyzerPhase::Search,
+    let revision = analyzer.compile().unwrap();
+    let mut index =
+        SQLiteInvertedIndex::new(sqlite_with_catalog(), "korean", whitespace_analyzer());
+    index
+        .add_document(1, fields(&[("body", "old value")]))
+        .unwrap();
+    index
+        .set_field_analyzer_revision("body", revision.clone(), AnalyzerPhase::Search)
+        .unwrap();
+    assert!(index
+        .set_field_analyzer_revision("body", revision.clone(), AnalyzerPhase::Index)
+        .unwrap_err()
+        .contains("source rebuild"));
+    index
+        .rebuild_with_analyzer_revision(
+            "body",
+            revision.clone(),
             AnalyzerPhase::Both,
-        ] {
-            let error = index
-                .set_field_analyzer("body", analyzer.clone(), phase)
-                .unwrap_err();
-            assert!(error.contains("lossless token-graph storage"));
-            let error = index
-                .set_field_analyzer_revision("body", compiled.clone(), phase)
-                .unwrap_err();
-            assert!(error.contains("lossless token-graph storage"));
-            let error = index
-                .rebuild_with_analyzer_revision(
-                    "body",
-                    compiled.clone(),
-                    phase,
-                    vec![(2, fields(&[("body", "한국")]))],
-                )
-                .unwrap_err();
-            assert!(error.to_string().contains("lossless token-graph storage"));
-            assert!(!index.get_field_analyzer("body").uses_korean_stages());
-            assert!(!index.get_search_analyzer("body").uses_korean_stages());
-        }
-        assert_eq!(index.get_posting_list("body", "old").unwrap().len(), 1);
-        assert_eq!(index.doc_count().unwrap(), 1);
+            vec![(2, fields(&[("body", "한국")]))],
+        )
+        .unwrap();
+    let stream = uqa_storage::inverted_index::analyze_index_field(&revision, "한국").unwrap();
+    for (term, occurrences) in stream.terms {
+        assert_eq!(
+            index.get_occurrences(2, "body", &term).unwrap(),
+            occurrences
+        );
     }
-    for mut index in indexes(analyzer) {
-        assert!(index
-            .add_document(1, fields(&[("body", "한국")]))
-            .unwrap_err()
-            .to_string()
-            .contains("lossless token-graph storage"));
-        assert_eq!(index.doc_count().unwrap(), 0);
-    }
+    assert_eq!(index.doc_freq("body", "old").unwrap(), 0);
+    let metadata = index.indexed_field_metadata(2, "body").unwrap().unwrap();
+    assert_eq!(metadata.final_offsets.end_utf8, 6);
+    assert_eq!(metadata.final_offsets.end_utf16, 2);
 }
 
 fn invalid_pattern_analyzer() -> Analyzer {

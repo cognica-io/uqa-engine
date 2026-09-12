@@ -78,7 +78,7 @@ fn bulk_posting_lists_match_point_lookups() {
 }
 
 #[test]
-fn bulk_doc_lengths_match_point_lookups() {
+fn bulk_occurrence_lengths_match_point_lookups() {
     let mut idx = idx();
     idx.add_document(1, fields([("title", "rust language")]))
         .unwrap();
@@ -125,14 +125,12 @@ fn bulk_scoring_inputs_match_point_lookups_in_requested_order() {
 
 #[test]
 fn negative_persisted_cluster_ids_are_rejected_by_every_posting_reader() {
-    let idx = idx();
+    let mut idx = idx();
+    idx.add_document(1, fields([("title", "rust")])).unwrap();
     idx.conn
         .with(|connection| {
             connection.execute(
-                "INSERT INTO _posting_clusters
-                    (table_name, field, term, cluster_id, posting_count,
-                     score_blob, positions_blob)
-                 VALUES ('articles', 'title', 'rust', -1, 1, X'00', X'00')",
+                "UPDATE _occurrence_clusters SET cluster_id = -1 WHERE table_name = 'articles'",
                 [],
             )?;
             Ok(())
@@ -177,8 +175,8 @@ fn score_cursors_reject_a_mismatched_persisted_posting_count() {
     idx.conn
         .with(|connection| {
             connection.execute(
-                "UPDATE _posting_clusters SET posting_count = 2
-                  WHERE table_name = 'articles' AND field = 'title' AND term = 'rust'",
+                "UPDATE _occurrence_clusters SET posting_count = 2
+                  WHERE table_name = 'articles' AND field = 'title' AND term = X'0072757374'",
                 [],
             )?;
             Ok(())
@@ -203,24 +201,23 @@ fn score_cursors_reject_a_mismatched_persisted_posting_count() {
 
 #[test]
 fn negative_persisted_lengths_and_block_indexes_are_rejected() {
-    let idx = idx();
+    let mut idx = idx();
+    idx.add_document(1, fields([("title", "rust")])).unwrap();
     idx.ensure_aux_tables("title").unwrap();
     let block_table = idx.blockmax_table_name("title");
     idx.conn
         .with(|connection| {
             connection.execute(
-                "INSERT INTO _doc_lengths (table_name, doc_id, field, length)
-                 VALUES ('articles', 1, 'title', -2)",
+                "UPDATE _occurrence_lengths SET length = -2 WHERE table_name = 'articles'",
                 [],
             )?;
             connection.execute(
-                "INSERT INTO _field_stats (table_name, field, total_length)
-                 VALUES ('articles', 'title', -2)",
+                "UPDATE _occurrence_fields SET total_length = -2 WHERE table_name = 'articles'",
                 [],
             )?;
             connection.execute(
                 &format!(
-                    "INSERT INTO {} (term, block_idx, max_score) VALUES ('rust', -1, 1.0)",
+                    "INSERT INTO {} (term, block_idx, max_score) VALUES (X'0072757374', -1, 1.0)",
                     quote_ident(&block_table)
                 ),
                 [],
@@ -263,20 +260,13 @@ fn document_ids_beyond_sqlite_integer_range_are_rejected_before_io() {
 }
 
 #[test]
-fn position_count_matches_zero_based_u32_format() {
-    validate_position_count(u64::from(u32::MAX) + 1).unwrap();
-    let error = validate_position_count(u64::from(u32::MAX) + 2).unwrap_err();
-    assert!(error.to_string().contains("u32 index format"));
-}
-
-#[test]
 fn corrupt_total_rejects_remove_without_partial_delete() {
     let mut idx = idx();
     idx.add_document(1, fields([("title", "rust")])).unwrap();
     idx.conn
         .with(|connection| {
             connection.execute(
-                "UPDATE _field_stats SET total_length = 0
+                "UPDATE _occurrence_fields SET total_length = 0
                  WHERE table_name = 'articles' AND field = 'title'",
                 [],
             )?;
@@ -298,7 +288,7 @@ fn sqlite_integer_counter_overflow_preserves_existing_index() {
     idx.conn
         .with(|connection| {
             connection.execute(
-                "UPDATE _field_stats SET total_length = ?1
+                "UPDATE _occurrence_fields SET total_length = ?1
                  WHERE table_name = 'articles' AND field = 'title'",
                 [i64::MAX],
             )?;

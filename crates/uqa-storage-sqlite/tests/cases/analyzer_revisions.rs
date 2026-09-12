@@ -31,11 +31,11 @@ fn providers(default: &Analyzer) -> Vec<Box<dyn InvertedIndex>> {
             default.clone(),
         )),
     ];
-    providers.extend(linear_providers(default));
+    providers.extend(sqlite_providers(default));
     providers
 }
 
-fn linear_providers(default: &Analyzer) -> Vec<Box<dyn InvertedIndex>> {
+fn sqlite_providers(default: &Analyzer) -> Vec<Box<dyn InvertedIndex>> {
     vec![Box::new(SQLiteInvertedIndex::new(
         connection(),
         "docs",
@@ -237,7 +237,7 @@ fn sqlite_rebuild_storage_failure_rolls_back_deleted_postings_and_new_bindings()
     let mut index = SQLiteInvertedIndex::new(connection.clone(), "docs", whitespace_analyzer());
     index.add_document(1, fields("old")).unwrap();
     let before = index.index_analyzer_revision("body").unwrap();
-    connection.with(|db| Ok(db.execute_batch("CREATE TRIGGER reject_posting BEFORE INSERT ON _posting_clusters BEGIN SELECT RAISE(ABORT, 'forced posting failure'); END;")?)).unwrap();
+    connection.with(|db| Ok(db.execute_batch("CREATE TRIGGER reject_posting BEFORE INSERT ON _occurrence_clusters BEGIN SELECT RAISE(ABORT, 'forced posting failure'); END;")?)).unwrap();
     let next = uqa_analysis::keyword_analyzer().compile().unwrap();
     let error = index
         .rebuild_with_analyzer_revision(
@@ -321,39 +321,35 @@ fn memory_batch_analysis_failure_does_not_publish_earlier_documents() {
 }
 
 #[test]
-fn linear_providers_reject_normalization_policies_they_cannot_store() {
+fn sqlite_persists_explicit_normalization_policies_after_atomic_source_rebuild() {
     let revision = uqa_analysis::AnalyzerResources::default()
         .compile_with_length_policy(
             &whitespace_analyzer(),
             uqa_analysis::TokenLengthPolicy::DiscountOverlaps,
         )
         .unwrap();
-    for mut index in linear_providers(&whitespace_analyzer()) {
+    for mut index in sqlite_providers(&whitespace_analyzer()) {
         index.add_document(1, fields("old")).unwrap();
-        let before = index.index_analyzer_revision("body").unwrap();
         assert!(index
             .set_field_analyzer_revision("body", revision.clone(), AnalyzerPhase::Both)
             .unwrap_err()
-            .contains("occurrence storage"));
-        assert!(index
+            .contains("source rebuild"));
+        index
             .rebuild_with_analyzer_revision(
                 "body",
                 revision.clone(),
                 AnalyzerPhase::Both,
-                vec![(2, fields("new"))]
+                vec![(2, fields("new words"))],
             )
-            .unwrap_err()
-            .to_string()
-            .contains("occurrence storage"));
-        assert_eq!(index.doc_freq("body", "old").unwrap(), 1);
-        assert!(Arc::ptr_eq(
-            &before,
-            &index.index_analyzer_revision("body").unwrap()
-        ));
-        assert!(Arc::ptr_eq(
-            &before,
-            &index.search_analyzer_revision("body").unwrap()
-        ));
+            .unwrap();
+        let metadata = index.indexed_field_metadata(2, "body").unwrap().unwrap();
+        assert_eq!(
+            metadata.revision(),
+            uqa_storage::inverted_index::IndexedFieldRevision::new(&revision)
+        );
+        assert_eq!(metadata.length, 2);
+        assert_eq!(index.doc_freq("body", "old").unwrap(), 0);
+        assert_eq!(index.doc_freq("body", "new").unwrap(), 1);
     }
 }
 
@@ -389,11 +385,11 @@ fn concurrent_default_resolution_shares_one_revision_with_cache_retention_disabl
 }
 
 #[test]
-fn linear_providers_reject_missing_graph_information_and_unpaired_key_projection() {
+fn sqlite_keeps_graph_metadata_and_distinguishes_unpaired_keys() {
     let scalar = uqa_storage::TokenTermKey::from_text("�");
     let raw =
         uqa_storage::TokenTermKey::from_term(&uqa_analysis::TokenTerm::from_utf16(vec![0xd83d]));
-    for mut index in linear_providers(&whitespace_analyzer()) {
+    for mut index in sqlite_providers(&whitespace_analyzer()) {
         index.add_document(1, fields("� a")).unwrap();
         assert_eq!(index.doc_freq_key("body", &scalar).unwrap(), 1);
         assert_eq!(index.get_term_freq_key(1, "body", &scalar).unwrap(), 1);
@@ -412,21 +408,23 @@ fn linear_providers_reject_missing_graph_information_and_unpaired_key_projection
         );
         assert!(index.vocabulary_keys("body").unwrap().contains(&scalar));
         assert!(!index.vocabulary_keys("body").unwrap().contains(&raw));
-        assert!(index.doc_freq_key("body", &raw).is_err());
-        assert!(index.get_term_freq_key(1, "body", &raw).is_err());
-        assert!(index.get_posting_list_key("body", &raw).is_err());
-        assert!(index.posting_cursor_key("body", &raw).is_err());
+        assert_eq!(index.doc_freq_key("body", &raw).unwrap(), 0);
+        assert_eq!(index.get_term_freq_key(1, "body", &raw).unwrap(), 0);
+        assert!(index.get_posting_list_key("body", &raw).unwrap().is_empty());
         assert!(index
-            .get_occurrence_postings("body", &scalar)
-            .unwrap_err()
-            .to_string()
-            .contains("not supported"));
-        assert!(index.get_occurrences(1, "body", &scalar).is_err());
-        assert!(index
-            .indexed_field_metadata(1, "body")
-            .unwrap_err()
-            .to_string()
-            .contains("not supported"));
+            .posting_cursor_key("body", &raw)
+            .unwrap()
+            .current()
+            .is_none());
+        assert_eq!(
+            index
+                .get_occurrence_postings("body", &scalar)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(index.get_occurrences(1, "body", &scalar).unwrap().len(), 1);
+        assert!(index.indexed_field_metadata(1, "body").unwrap().is_some());
         assert_eq!(index.doc_count().unwrap(), 1);
         assert_eq!(index.get_term_freq(1, "body", "�").unwrap(), 1);
     }
@@ -454,7 +452,7 @@ fn atomic_revision_pair_skips_an_unused_invalid_default() {
 }
 
 #[test]
-fn unsupported_search_revision_does_not_publish_the_candidate_index_side() {
+fn rejected_populated_index_change_does_not_publish_the_candidate_search_side() {
     let next = uqa_analysis::keyword_analyzer().compile().unwrap();
     let unsupported = uqa_analysis::AnalyzerResources::default()
         .compile_with_length_policy(
@@ -462,7 +460,7 @@ fn unsupported_search_revision_does_not_publish_the_candidate_index_side() {
             uqa_analysis::TokenLengthPolicy::DiscountOverlaps,
         )
         .unwrap();
-    for mut index in linear_providers(&whitespace_analyzer()) {
+    for mut index in sqlite_providers(&whitespace_analyzer()) {
         index.add_document(1, fields("old")).unwrap();
         let before = index.index_analyzer_revision("body").unwrap();
         assert!(index

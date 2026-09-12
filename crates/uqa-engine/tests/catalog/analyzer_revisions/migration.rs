@@ -21,7 +21,23 @@ fn legacy_catalog(database: &Path, directory: &Path) {
         "token_filters": [{"type": "synonym", "synonyms_path": directory.join("missing.txt")}],
     })
     .to_string();
+    let (scores, positions) = uqa_storage::clustered_postings::encode_cluster(&[
+        uqa_storage::clustered_postings::ClusterPosting {
+            doc_id: 1,
+            term_freq: 1,
+            doc_length: 1,
+            positions: vec![0],
+        },
+    ])
+    .unwrap();
+    let terms = uqa_storage::clustered_postings::encode_terms(&["seed".into()]).unwrap();
     ManagedConnection::open(database).unwrap().with(|db| {
+        db.execute("INSERT INTO _posting_clusters(table_name, field, term, cluster_id, posting_count, score_blob, positions_blob) VALUES ('public.docs', 'body', 'seed', 0, 1, ?1, ?2)", rusqlite::params![scores, positions])?;
+        db.execute("INSERT INTO _posting_documents(table_name, doc_id, field, terms_blob) VALUES ('public.docs', 1, 'body', ?1)", [terms])?;
+        db.execute_batch("INSERT INTO _doc_lengths SELECT table_name, doc_id, field, length FROM _occurrence_lengths;
+            INSERT INTO _field_stats SELECT table_name, field, total_length FROM _occurrence_fields;
+            DELETE FROM _occurrence_clusters; DELETE FROM _occurrence_documents; DELETE FROM _occurrence_lengths; DELETE FROM _occurrence_fields; DELETE FROM _occurrence_formats;")?;
+
         db.execute_batch("ALTER TABLE _analyzers DROP COLUMN descriptor_json;
             ALTER TABLE _table_field_analyzers DROP COLUMN binding_json;
             UPDATE _metadata SET value = '46' WHERE key = 'schema_version';
@@ -82,7 +98,7 @@ fn failed_legacy_binding_publication_rolls_back_descriptors_and_rebuilt_postings
     connection
         .with(|db| {
             let count: i64 = db.query_row(
-                "SELECT count(*) FROM _posting_clusters WHERE term = 'stable'",
+                "SELECT count(*) FROM _occurrence_clusters WHERE term = X'00737461626c65'",
                 [],
                 |row| row.get(0),
             )?;

@@ -20,6 +20,8 @@ use uqa_storage_sqlite::ManagedConnection;
 
 #[path = "sql_fts_index_lifecycle/initial_restore.rs"]
 mod initial_restore;
+#[path = "sql_fts_index_lifecycle/occurrences.rs"]
+mod occurrences;
 
 fn ids(result: &uqa_sql::SQLResult) -> Vec<i64> {
     result
@@ -75,6 +77,14 @@ fn create_notes_gin_fixture(db: &Path) {
 fn rewrite_fts_tables_to_legacy_shape(db: &Path) {
     let conn = ManagedConnection::open(db).unwrap();
     conn.with(|c| {
+        c.execute_batch(
+            "DELETE FROM _occurrence_clusters;
+            DELETE FROM _occurrence_documents;
+            DELETE FROM _occurrence_lengths;
+            DELETE FROM _occurrence_fields;
+            DELETE FROM _occurrence_formats;
+            UPDATE _metadata SET value = '47' WHERE key = 'schema_version';",
+        )?;
         c.execute("DROP TABLE _posting_clusters", [])?;
         c.execute("DROP TABLE _posting_documents", [])?;
         c.execute("DROP TABLE _doc_lengths", [])?;
@@ -117,6 +127,15 @@ fn rewrite_fts_tables_to_valid_v21_postings(db: &Path, table: &str) {
     let table = physical_relation_name(table);
     let conn = ManagedConnection::open(db).unwrap();
     conn.with(|c| {
+        c.execute_batch("DELETE FROM _doc_lengths;
+            INSERT INTO _doc_lengths SELECT table_name, doc_id, field, length FROM _occurrence_lengths;
+            DELETE FROM _field_stats;
+            INSERT INTO _field_stats SELECT table_name, field, total_length FROM _occurrence_fields;
+            DELETE FROM _occurrence_clusters;
+            DELETE FROM _occurrence_documents;
+            DELETE FROM _occurrence_lengths;
+            DELETE FROM _occurrence_fields;
+            DELETE FROM _occurrence_formats;")?;
         c.execute_batch(
             "DROP TABLE _posting_clusters;
              DROP TABLE _posting_documents;
@@ -371,8 +390,8 @@ fn sql_fts_mutations_store_one_cluster_row_for_a_common_term() {
         let (rows, postings): (i64, i64) = connection
             .query_row(
                 "SELECT COUNT(*), COALESCE(SUM(posting_count), 0)
-                   FROM _posting_clusters
-                  WHERE table_name = ?1 AND field = 'content' AND term = 'common'",
+                   FROM _occurrence_clusters
+                  WHERE table_name = ?1 AND field = 'content' AND term = X'00636f6d6d6f6e'",
                 [&table],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -582,7 +601,7 @@ fn reopen_reuses_persisted_gin_postings_without_rebuilding() {
 }
 
 #[test]
-fn reopen_migrates_valid_v21_postings_without_rebuilding_from_documents() {
+fn reopen_rebuilds_legacy_positional_postings_from_original_documents() {
     let dir = TempDir::new().unwrap();
     let db = dir.path().join("uqa-v21.db");
     {
@@ -622,8 +641,8 @@ fn reopen_migrates_valid_v21_postings_without_rebuilding_from_documents() {
             &[],
         )
         .unwrap();
-    assert_eq!(int_col(&alpha.rows[0], "n"), 1);
-    assert_eq!(int_col(&beta.rows[0], "n"), 0);
+    assert_eq!(int_col(&alpha.rows[0], "n"), 0);
+    assert_eq!(int_col(&beta.rows[0], "n"), 1);
 
     let connection = rusqlite::Connection::open(&db).unwrap();
     let version: String = connection
@@ -639,7 +658,7 @@ fn reopen_migrates_valid_v21_postings_without_rebuilding_from_documents() {
     );
     let migrated_rows: i64 = connection
         .query_row(
-            "SELECT COUNT(*) FROM _posting_clusters
+            "SELECT COUNT(*) FROM _occurrence_clusters
               WHERE table_name = ?1 AND field = 'content'",
             [physical_relation_name("messages")],
             |row| row.get(0),

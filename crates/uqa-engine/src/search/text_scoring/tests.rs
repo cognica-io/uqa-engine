@@ -9,8 +9,6 @@
 use std::collections::BTreeMap;
 
 use uqa_analysis::{Analyzer, AnalyzerLimits, AnalyzerResources, TokenLengthPolicy};
-use uqa_storage::clustered_postings::{encode_occurrence_cluster, OccurrencePosting};
-use uqa_storage::inverted_index::analyze_index_field;
 use uqa_storage_sqlite::{Catalog, ManagedConnection, SQLiteInvertedIndex};
 
 use super::{Arc, BM25Scorer, Engine, InvertedIndex, ScoringMode};
@@ -23,38 +21,15 @@ fn occurrence_score_fixture() -> SQLiteInvertedIndex {
         .compile_with_length_policy(&config, TokenLengthPolicy::DiscountOverlaps)
         .unwrap();
     let mut index = SQLiteInvertedIndex::new(conn.clone(), "docs", config);
-    let mut terms = BTreeMap::<String, Vec<OccurrencePosting>>::new();
-    let mut lengths = Vec::new();
-    for (doc_id, source) in [(1, "a"), (2, "a a")] {
-        index
-            .add_document(doc_id, BTreeMap::from([("body".into(), source.into())]))
-            .unwrap();
-        let staged = analyze_index_field(&compiled, source).unwrap();
-        lengths.push((doc_id, staged.length));
-        for (key, occurrences) in staged.terms {
-            terms
-                .entry(key.to_term().into_string().unwrap())
-                .or_default()
-                .push(OccurrencePosting {
-                    doc_id,
-                    doc_length: staged.length,
-                    occurrences,
-                });
-        }
-    }
-    conn.with_mut(|conn| {
-        let tx = conn.savepoint()?;
-        for (term, entries) in terms {
-            let (score_blob, positions_blob) = encode_occurrence_cluster(&entries).unwrap();
-            assert_eq!(tx.execute("UPDATE _posting_clusters SET score_blob = ?1, positions_blob = ?2 WHERE table_name = 'docs' AND field = 'body' AND term = ?3 AND cluster_id = 0", rusqlite::params![score_blob, positions_blob, term])?, 1);
-        }
-        for (doc_id, length) in &lengths {
-            assert_eq!(tx.execute("UPDATE _doc_lengths SET length = ?1 WHERE table_name = 'docs' AND field = 'body' AND doc_id = ?2", rusqlite::params![i64::try_from(*length).unwrap(), i64::try_from(*doc_id).unwrap()])?, 1);
-        }
-        assert_eq!(tx.execute("UPDATE _field_stats SET total_length = ?1 WHERE table_name = 'docs' AND field = 'body'", [i64::try_from(lengths.iter().map(|(_, length)| length).sum::<u64>()).unwrap()])?, 1);
-        tx.commit()?;
-        Ok(())
-    }).unwrap();
+    index
+        .set_field_analyzer_revision("body", compiled, uqa_storage::AnalyzerPhase::Both)
+        .unwrap();
+    index
+        .try_add_documents(vec![
+            (1, BTreeMap::from([("body".into(), "a".into())])),
+            (2, BTreeMap::from([("body".into(), "a a".into())])),
+        ])
+        .unwrap();
     index
 }
 

@@ -220,7 +220,7 @@ fn posting_failure_rolls_back_a_persistent_copy_batch() {
             .set_table_field_analyzer("batch_docs", "body", "batch_synonyms", "both")
             .unwrap();
         ManagedConnection::open(&database).unwrap().with(|connection| {
-            connection.execute_batch("CREATE TRIGGER reject_copy_postings BEFORE INSERT ON _posting_clusters BEGIN SELECT RAISE(ABORT, 'forced COPY posting failure'); END;")?;
+            connection.execute_batch("CREATE TRIGGER reject_copy_postings BEFORE INSERT ON _occurrence_clusters BEGIN SELECT RAISE(ABORT, 'forced COPY posting failure'); END;")?;
             Ok(())
         }).unwrap();
         let error = engine

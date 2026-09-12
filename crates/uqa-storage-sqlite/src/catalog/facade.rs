@@ -126,11 +126,6 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::get_metadata(self, key))
     }
 
-    fn fts_storage_was_reset(&self) -> bool {
-        self.fts_storage_was_reset
-            .load(std::sync::atomic::Ordering::Acquire)
-    }
-
     fn migrate_relation_namespace(&self) -> StorageBackendResult<()> {
         into_storage_result(self.conn.with(|connection| {
             let foreign_key_violation = connection

@@ -85,7 +85,7 @@ fn field_stats_total(db: &std::path::Path, table: &str, field: &str) -> Option<i
     let table = physical_relation_name(table);
     let conn = rusqlite::Connection::open(db).unwrap();
     conn.query_row(
-        "SELECT total_length FROM _field_stats WHERE table_name = ?1 AND field = ?2",
+        "SELECT total_length FROM _occurrence_fields WHERE table_name = ?1 AND field = ?2",
         [table.as_str(), field],
         |row| row.get(0),
     )

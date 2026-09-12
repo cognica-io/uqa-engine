@@ -115,3 +115,42 @@ fn failed_source_rebuild_restores_replaced_fts_schema_and_all_catalog_changes() 
     drop(db);
     super::assert_legacy_gin_reopens_with_restored_index(&database);
 }
+
+#[test]
+fn migrated_fts_columns_rename_and_drop_with_retired_legacy_table_shapes() {
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join("legacy-column-lifecycle.db");
+    create_notes_gin_fixture(&database);
+    rewrite_fts_tables_to_legacy_shape(&database);
+    let engine = Engine::open(&database).unwrap();
+    let before = engine
+        .sql(
+            "SELECT id FROM notes WHERE text_match(content, 'Learning') ORDER BY id",
+            &[],
+        )
+        .unwrap()
+        .rows;
+    assert!(!before.is_empty());
+    engine
+        .sql("ALTER TABLE notes RENAME COLUMN content TO caption", &[])
+        .unwrap();
+    let after = engine
+        .sql(
+            "SELECT id FROM notes WHERE text_match(caption, 'Learning') ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(after.rows, before);
+    engine
+        .sql("ALTER TABLE notes DROP COLUMN caption", &[])
+        .unwrap();
+    drop(engine);
+    let reopened = Engine::open(&database).unwrap();
+    assert_eq!(
+        reopened
+            .sql("SELECT count(*) AS n FROM notes", &[])
+            .unwrap()
+            .rows[0]["n"],
+        uqa_core::Value::Int(2)
+    );
+}

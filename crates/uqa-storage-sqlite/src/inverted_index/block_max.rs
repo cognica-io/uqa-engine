@@ -9,7 +9,7 @@
 use super::{
     decode_index_u64, decode_index_usize, encode_index_u64, encode_index_usize, params,
     quote_ident, table_exists, BlockMaxIndex, BlockMaxScorer, DocId, InvertedIndex,
-    OptionalExtension, SQLiteError, SQLiteInvertedIndex, StorageBackendResult,
+    OptionalExtension, SQLiteError, SQLiteInvertedIndex, StorageBackendResult, TokenTermKey,
 };
 
 impl SQLiteInvertedIndex {
@@ -22,6 +22,8 @@ impl SQLiteInvertedIndex {
         term: &str,
         target_doc_id: DocId,
     ) -> StorageBackendResult<(DocId, usize)> {
+        self.require_graph_format()?;
+        let term = TokenTermKey::from_text(term);
         let table = self.skip_table_name(field);
         let target_doc_id = encode_index_u64("target document", target_doc_id)?;
         Ok(self.conn.with(|conn| {
@@ -35,7 +37,7 @@ impl SQLiteInvertedIndex {
                 quote_ident(&table)
             );
             let row: Option<(i64, i64)> = conn
-                .query_row(&sql, params![term, target_doc_id], |row| {
+                .query_row(&sql, params![term.as_bytes(), target_doc_id], |row| {
                     Ok((row.get(0)?, row.get(1)?))
                 })
                 .optional()?;
@@ -68,7 +70,22 @@ impl SQLiteInvertedIndex {
         scorer: &S,
         scorer_fingerprint: &str,
     ) -> StorageBackendResult<()> {
-        let mut cursor = self.posting_cursor(field, term)?;
+        self.build_block_max_scores_key(
+            field,
+            &TokenTermKey::from_text(term),
+            scorer,
+            scorer_fingerprint,
+        )
+    }
+
+    pub(super) fn build_block_max_scores_key<S: BlockMaxScorer + ?Sized>(
+        &self,
+        field: &str,
+        term: &TokenTermKey,
+        scorer: &S,
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<()> {
+        let mut cursor = self.posting_cursor_key(field, term)?;
         if cursor.doc_freq() == 0 && !self.has_field(field)? {
             return Ok(());
         }
@@ -86,7 +103,7 @@ impl SQLiteInvertedIndex {
             let tx = conn.savepoint()?;
             tx.execute(
                 &format!("DELETE FROM {} WHERE term = ?1", quote_ident(&table)),
-                [term],
+                [term.as_bytes()],
             )?;
             for (block_idx, chunk) in scored_entries.chunks(Self::BLOCK_SIZE).enumerate() {
                 let mut max_score = 0.0_f64;
@@ -107,7 +124,7 @@ impl SQLiteInvertedIndex {
                          VALUES (?1, ?2, ?3, ?4)",
                         quote_ident(&table)
                     ),
-                    params![term, block_idx, max_score, scorer_fingerprint],
+                    params![term.as_bytes(), block_idx, max_score, scorer_fingerprint],
                 )?;
             }
             tx.commit()?;
@@ -121,9 +138,9 @@ impl SQLiteInvertedIndex {
         field: &str,
         scorer: &S,
     ) -> StorageBackendResult<()> {
-        let terms = self.terms_for_field(field)?;
+        let terms = self.vocabulary_keys(field)?;
         for term in terms {
-            self.build_block_max_scores(field, &term, scorer)?;
+            self.build_block_max_scores_key(field, &term, scorer, "")?;
         }
         Ok(())
     }
@@ -134,6 +151,8 @@ impl SQLiteInvertedIndex {
         term: &str,
         block_idx: usize,
     ) -> StorageBackendResult<f64> {
+        self.require_graph_format()?;
+        let term = TokenTermKey::from_text(term);
         let table = self.blockmax_table_name(field);
         let block_idx = encode_index_usize("block index", block_idx)?;
         Ok(self.conn.with(|conn| {
@@ -146,7 +165,7 @@ impl SQLiteInvertedIndex {
                 quote_ident(&table)
             );
             let score: Option<f64> = conn
-                .query_row(&sql, params![term, block_idx], |row| row.get(0))
+                .query_row(&sql, params![term.as_bytes(), block_idx], |row| row.get(0))
                 .optional()?;
             Ok(score.unwrap_or(0.0))
         })?)
@@ -157,6 +176,8 @@ impl SQLiteInvertedIndex {
         field: &str,
         term: &str,
     ) -> StorageBackendResult<Vec<f64>> {
+        self.require_graph_format()?;
+        let term = TokenTermKey::from_text(term);
         let table = self.blockmax_table_name(field);
         Ok(self.conn.with(|conn| {
             if !table_exists(conn, &table)? {
@@ -169,7 +190,7 @@ impl SQLiteInvertedIndex {
             );
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt
-                .query_map([term], |row| {
+                .query_map([term.as_bytes()], |row| {
                     Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -210,6 +231,7 @@ impl SQLiteInvertedIndex {
         }
         let table = self.blockmax_table_name(field);
         Ok(self.conn.with(|conn| {
+            self.require_graph_format_on(conn)?;
             if !table_exists(conn, &table)? {
                 return Ok(vec![None; terms.len()]);
             }
@@ -230,7 +252,7 @@ impl SQLiteInvertedIndex {
                 .cloned()
                 .collect::<std::collections::BTreeSet<_>>();
             let unique_terms = unique_terms.into_iter().collect::<Vec<_>>();
-            let mut by_term = std::collections::BTreeMap::<String, Vec<(i64, f64)>>::new();
+            let mut by_term = std::collections::BTreeMap::<Vec<u8>, Vec<(i64, f64)>>::new();
             for chunk in unique_terms.chunks(900) {
                 let placeholders = std::iter::repeat_n("?", chunk.len())
                     .collect::<Vec<_>>()
@@ -243,11 +265,13 @@ impl SQLiteInvertedIndex {
                 );
                 let mut values = Vec::with_capacity(chunk.len() + 1);
                 values.push(rusqlite::types::Value::Text(scorer_fingerprint.to_string()));
-                values.extend(chunk.iter().cloned().map(rusqlite::types::Value::Text));
+                values.extend(chunk.iter().map(|term| {
+                    rusqlite::types::Value::Blob(TokenTermKey::from_text(term).into_bytes())
+                }));
                 let mut statement = conn.prepare(&sql)?;
                 let rows = statement.query_map(rusqlite::params_from_iter(values), |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
+                        row.get::<_, Vec<u8>>(0)?,
                         row.get::<_, i64>(1)?,
                         row.get::<_, f64>(2)?,
                     ))
@@ -260,7 +284,9 @@ impl SQLiteInvertedIndex {
 
             let mut decoded = std::collections::BTreeMap::<String, Option<Vec<f64>>>::new();
             for term in unique_terms {
-                let rows = by_term.remove(&term).unwrap_or_default();
+                let rows = by_term
+                    .remove(TokenTermKey::from_text(&term).as_bytes())
+                    .unwrap_or_default();
                 if rows.is_empty() {
                     decoded.insert(term, None);
                     continue;

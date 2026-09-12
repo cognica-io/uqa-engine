@@ -6,14 +6,15 @@
 
 //! `InvertedIndex` trait implementation and read/statistics surface.
 
+use super::queries::project_postings;
 use super::{
-    clustered_result, decode_index_u64, encode_index_u64, invalidate_block_max_tables, params,
-    params_from_iter, posting_cursor_from_rows, quote_ident, Analyzer, AnalyzerPhase, Arc,
-    BTreeMap, BTreeSet, BlockMaxScorer, DocId, FieldName, IndexStats, InvertedIndex,
-    OptionalExtension, Payload, PostingCursor, PostingEntry, PostingList, SQLiteError,
-    SQLiteInvertedIndex, SqlValue, StorageBackendResult,
+    clustered_result, decode_index_u64, encode_index_u64, invalidate_posting_accelerators, params,
+    params_from_iter, quote_ident, Analyzer, AnalyzerPhase, Arc, BTreeMap, BlockMaxScorer, DocId,
+    FieldName, IndexStats, InvertedIndex, OptionalExtension, PostingCursor, PostingList,
+    SQLiteError, SQLiteInvertedIndex, SqlValue, StorageBackendResult,
 };
-use uqa_storage::clustered_postings::{cluster_id, decode_all_scores, decode_cluster};
+use super::{IndexedFieldMetadata, TokenTermKey};
+use uqa_storage::clustered_postings::{cluster_id, decode_all_scores, OccurrencePosting};
 
 impl InvertedIndex for SQLiteInvertedIndex {
     fn analyzer(&self) -> &Analyzer {
@@ -42,27 +43,16 @@ impl InvertedIndex for SQLiteInvertedIndex {
     fn clear(&mut self) -> StorageBackendResult<()> {
         self.conn.with_mut(|conn| {
             let tx = conn.savepoint()?;
-            invalidate_block_max_tables(&tx, &self.table)?;
-            tx.execute(
-                "DELETE FROM _posting_clusters WHERE table_name = ?1",
-                params![self.table],
-            )?;
-            tx.execute(
-                "DELETE FROM _posting_documents WHERE table_name = ?1",
-                params![self.table],
-            )?;
-            tx.execute(
-                "DELETE FROM _doc_lengths WHERE table_name = ?1",
-                params![self.table],
-            )?;
-            tx.execute(
-                "DELETE FROM _field_stats WHERE table_name = ?1",
-                params![self.table],
-            )?;
+            invalidate_posting_accelerators(&tx, &self.table)?;
+            self.clear_index_on(&tx)?;
             tx.commit()?;
             Ok(())
         })?;
         Ok(())
+    }
+
+    fn source_rebuild_required(&self) -> StorageBackendResult<bool> {
+        Ok(self.conn.with(|conn| self.needs_source_rebuild_on(conn))?)
     }
 
     fn try_rebuild_documents(
@@ -73,48 +63,54 @@ impl InvertedIndex for SQLiteInvertedIndex {
     }
 
     fn get_posting_list(&self, field: &str, term: &str) -> StorageBackendResult<PostingList> {
-        Ok(self.conn.with(|c| {
-            let mut stmt = c.prepare(
-                "SELECT cluster_id, posting_count, score_blob, positions_blob
-                   FROM _posting_clusters
-                     WHERE table_name = ?1 AND field = ?2 AND term = ?3
-                     ORDER BY cluster_id",
-            )?;
-            let rows = stmt.query_map(params![self.table, field, term], |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, Vec<u8>>(2)?,
-                    r.get::<_, Vec<u8>>(3)?,
-                ))
-            })?;
-            let mut entries = Vec::new();
-            for row in rows {
-                let (stored_cluster, stored_count, score_blob, positions_blob) = row?;
-                let posting_cluster = decode_index_u64("posting cluster", stored_cluster)?;
-                let stored_count = decode_index_u64("posting count", stored_count)?;
-                let decoded = clustered_result(decode_cluster(
-                    posting_cluster,
-                    &score_blob,
-                    &positions_blob,
-                ))?;
-                if stored_count != decoded.len() as u64 {
-                    return Err(SQLiteError::StorageBackend(
-                        "corrupt clustered posting: stored posting count mismatch".into(),
-                    ));
-                }
-                entries.extend(decoded.into_iter().map(|entry| {
-                    PostingEntry::new(
-                        entry.doc_id,
-                        Payload {
-                            positions: entry.positions,
-                            score: 0.0,
-                            fields: BTreeMap::new(),
-                        },
-                    )
-                }));
-            }
-            Ok(PostingList::from_sorted_unchecked(entries))
+        self.get_posting_list_key(field, &TokenTermKey::from_text(term))
+    }
+
+    fn get_posting_list_key(
+        &self,
+        field: &str,
+        term: &TokenTermKey,
+    ) -> StorageBackendResult<PostingList> {
+        Ok(project_postings(self.get_occurrence_postings(field, term)?))
+    }
+
+    fn get_occurrence_postings(
+        &self,
+        field: &str,
+        term: &TokenTermKey,
+    ) -> StorageBackendResult<Vec<OccurrencePosting>> {
+        Ok(self
+            .occurrence_postings_bulk(field, std::slice::from_ref(term))?
+            .pop()
+            .unwrap_or_default())
+    }
+
+    fn get_occurrences(
+        &self,
+        doc_id: DocId,
+        field: &str,
+        term: &TokenTermKey,
+    ) -> StorageBackendResult<Vec<uqa_core::TokenOccurrence>> {
+        Ok(self.conn.with(|conn| {
+            self.require_graph_format_on(conn)?;
+            let entries = super::load_cluster(conn, &self.table, field, term, cluster_id(doc_id))?;
+            let Some(posting) = entries.into_iter().find(|entry| entry.doc_id == doc_id) else {
+                return Ok(Vec::new());
+            };
+            self.validate_posting_metadata_on(conn, field, &posting)?;
+            Ok(posting.occurrences)
+        })?)
+    }
+
+    fn indexed_field_metadata(
+        &self,
+        doc_id: DocId,
+        field: &str,
+    ) -> StorageBackendResult<Option<IndexedFieldMetadata>> {
+        let doc_id = encode_index_u64("document", doc_id)?;
+        Ok(self.conn.with(|conn| {
+            self.require_graph_format_on(conn)?;
+            self.read_field_metadata_on(conn, doc_id, field)
         })?)
     }
 
@@ -123,80 +119,14 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         terms: &[String],
     ) -> StorageBackendResult<Vec<PostingList>> {
-        if terms.is_empty() {
-            return Ok(Vec::new());
-        }
-        let unique_terms = terms
+        let keys = terms
             .iter()
-            .cloned()
-            .collect::<BTreeSet<_>>()
-            .into_iter()
+            .map(|term| TokenTermKey::from_text(term))
             .collect::<Vec<_>>();
-        let posting_entries = self.conn.with(|c| {
-            let mut by_term = BTreeMap::<String, Vec<PostingEntry>>::new();
-            for chunk in unique_terms.chunks(900) {
-                let placeholders = std::iter::repeat_n("?", chunk.len())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let sql = format!(
-                    "SELECT term, cluster_id, posting_count, score_blob, positions_blob
-                       FROM _posting_clusters
-                         WHERE table_name = ? AND field = ? AND term IN ({placeholders})
-                         ORDER BY term, cluster_id"
-                );
-                let mut values = Vec::with_capacity(chunk.len() + 2);
-                values.push(SqlValue::Text(self.table.clone()));
-                values.push(SqlValue::Text(field.to_string()));
-                values.extend(chunk.iter().cloned().map(SqlValue::Text));
-                let mut stmt = c.prepare(&sql)?;
-                let rows = stmt.query_map(params_from_iter(values), |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, i64>(1)?,
-                        r.get::<_, i64>(2)?,
-                        r.get::<_, Vec<u8>>(3)?,
-                        r.get::<_, Vec<u8>>(4)?,
-                    ))
-                })?;
-                for row in rows {
-                    let (term, stored_cluster, stored_count, score_blob, positions_blob) = row?;
-                    let posting_cluster = decode_index_u64("posting cluster", stored_cluster)?;
-                    let stored_count = decode_index_u64("posting count", stored_count)?;
-                    let decoded = clustered_result(decode_cluster(
-                        posting_cluster,
-                        &score_blob,
-                        &positions_blob,
-                    ))?;
-                    if stored_count != decoded.len() as u64 {
-                        return Err(SQLiteError::StorageBackend(
-                            "corrupt clustered posting: stored posting count mismatch".into(),
-                        ));
-                    }
-                    by_term
-                        .entry(term)
-                        .or_default()
-                        .extend(decoded.into_iter().map(|entry| {
-                            PostingEntry::new(
-                                entry.doc_id,
-                                Payload {
-                                    positions: entry.positions,
-                                    score: 0.0,
-                                    fields: BTreeMap::new(),
-                                },
-                            )
-                        }));
-                }
-            }
-            Ok(by_term)
-        })?;
-
-        Ok(terms
-            .iter()
-            .map(|term| {
-                PostingList::from_sorted_unchecked(
-                    posting_entries.get(term).cloned().unwrap_or_default(),
-                )
-            })
+        Ok(self
+            .occurrence_postings_bulk(field, &keys)?
+            .into_iter()
+            .map(project_postings)
             .collect())
     }
 
@@ -205,23 +135,15 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         term: &str,
     ) -> StorageBackendResult<Box<dyn PostingCursor>> {
-        Ok(self.conn.with(|connection| {
-            let mut statement = connection.prepare_cached(
-                "SELECT cluster_id, posting_count, score_blob FROM _posting_clusters
-                  WHERE table_name = ?1 AND field = ?2 AND term = ?3
-                  ORDER BY cluster_id",
-            )?;
-            let rows = statement
-                .query_map(params![self.table, field, term], |row| {
-                    Ok((
-                        row.get::<_, i64>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, Vec<u8>>(2)?,
-                    ))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            posting_cursor_from_rows(rows)
-        })?)
+        self.posting_cursor_key(field, &TokenTermKey::from_text(term))
+    }
+
+    fn posting_cursor_key(
+        &self,
+        field: &str,
+        term: &TokenTermKey,
+    ) -> StorageBackendResult<Box<dyn PostingCursor>> {
+        self.cursor_for_term(field, term)
     }
 
     fn posting_cursors_bulk(
@@ -229,53 +151,11 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         terms: &[String],
     ) -> StorageBackendResult<Vec<Box<dyn PostingCursor>>> {
-        if terms.is_empty() {
-            return Ok(Vec::new());
-        }
-        let unique_terms = terms.iter().cloned().collect::<BTreeSet<_>>();
-        let cursors = self.conn.with(|connection| {
-            let mut by_term = BTreeMap::<String, Vec<(i64, i64, Vec<u8>)>>::new();
-            let unique_terms = unique_terms.into_iter().collect::<Vec<_>>();
-            for chunk in unique_terms.chunks(900) {
-                let placeholders = std::iter::repeat_n("?", chunk.len())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let sql = format!(
-                    "SELECT term, cluster_id, posting_count, score_blob FROM _posting_clusters
-                      WHERE table_name = ? AND field = ? AND term IN ({placeholders})
-                      ORDER BY term, cluster_id"
-                );
-                let mut values = Vec::with_capacity(chunk.len() + 2);
-                values.push(SqlValue::Text(self.table.clone()));
-                values.push(SqlValue::Text(field.to_string()));
-                values.extend(chunk.iter().cloned().map(SqlValue::Text));
-                let mut statement = connection.prepare(&sql)?;
-                let rows = statement.query_map(params_from_iter(values), |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, Vec<u8>>(3)?,
-                    ))
-                })?;
-                for row in rows {
-                    let (term, cluster_id, posting_count, score_blob) = row?;
-                    by_term
-                        .entry(term)
-                        .or_default()
-                        .push((cluster_id, posting_count, score_blob));
-                }
-            }
-            let mut cursors = BTreeMap::new();
-            for term in unique_terms {
-                cursors.insert(
-                    term.clone(),
-                    posting_cursor_from_rows(by_term.remove(&term).unwrap_or_default())?,
-                );
-            }
-            Ok(cursors)
-        })?;
-        Ok(terms.iter().map(|term| cursors[term].clone()).collect())
+        let keys = terms
+            .iter()
+            .map(|term| TokenTermKey::from_text(term))
+            .collect::<Vec<_>>();
+        self.cursors_for_terms(field, &keys)
     }
 
     fn rebuild_persisted_block_max(
@@ -290,7 +170,7 @@ impl InvertedIndex for SQLiteInvertedIndex {
             )
             .into());
         }
-        let terms = self.terms_for_field(field)?;
+        let terms = self.vocabulary_keys(field)?;
         self.ensure_aux_tables(field)?;
         let table = self.blockmax_table_name(field);
         self.conn.with_mut(|conn| {
@@ -298,7 +178,7 @@ impl InvertedIndex for SQLiteInvertedIndex {
             Ok(())
         })?;
         for term in terms {
-            self.build_block_max_scores_versioned(field, &term, scorer, scorer_fingerprint)?;
+            self.build_block_max_scores_key(field, &term, scorer, scorer_fingerprint)?;
         }
         Ok(true)
     }
@@ -342,30 +222,19 @@ impl InvertedIndex for SQLiteInvertedIndex {
     }
 
     fn doc_freq(&self, field: &str, term: &str) -> StorageBackendResult<u64> {
-        Ok(self.conn.with(|c| {
-            let n: i64 = c.query_row(
-                "SELECT COALESCE(SUM(posting_count), 0) FROM _posting_clusters
-                     WHERE table_name = ?1 AND field = ?2 AND term = ?3",
-                params![self.table, field, term],
-                |r| r.get(0),
-            )?;
-            decode_index_u64("document frequency", n)
-        })?)
+        self.doc_freq_key(field, &TokenTermKey::from_text(term))
+    }
+
+    fn doc_freq_key(&self, field: &str, term: &TokenTermKey) -> StorageBackendResult<u64> {
+        Ok(self.posting_cursor_key(field, term)?.doc_freq())
     }
 
     fn get_doc_length(&self, doc_id: DocId, field: &str) -> StorageBackendResult<u64> {
-        let doc_id = encode_index_u64("document", doc_id)?;
-        Ok(self.conn.with(|c| {
-            let n: Option<i64> = c
-                .query_row(
-                    "SELECT length FROM _doc_lengths
-                         WHERE table_name = ?1 AND doc_id = ?2 AND field = ?3",
-                    params![self.table, doc_id, field],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            n.map_or(Ok(0), |length| decode_index_u64("document length", length))
-        })?)
+        Ok(self
+            .get_doc_lengths_bulk(&[doc_id], field)?
+            .get(&doc_id)
+            .copied()
+            .unwrap_or(0))
     }
 
     fn get_doc_lengths_bulk(
@@ -373,33 +242,30 @@ impl InvertedIndex for SQLiteInvertedIndex {
         doc_ids: &[DocId],
         field: &str,
     ) -> StorageBackendResult<BTreeMap<DocId, u64>> {
-        if doc_ids.is_empty() {
-            return Ok(BTreeMap::new());
-        }
-        Ok(self.conn.with(|c| {
+        Ok(self.conn.with(|conn| {
+            self.require_graph_format_on(conn)?;
             let mut out = BTreeMap::new();
             for chunk in doc_ids.chunks(900) {
-                let placeholders = std::iter::repeat_n("?", chunk.len())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let sql = format!(
-                    "SELECT doc_id, length FROM _doc_lengths
-                         WHERE table_name = ? AND field = ? AND doc_id IN ({placeholders})"
-                );
-                let mut values = Vec::with_capacity(chunk.len() + 2);
-                values.push(SqlValue::Text(self.table.clone()));
-                values.push(SqlValue::Text(field.to_string()));
+                let ids = (3..chunk.len()+3).map(|parameter| format!("?{parameter}")).collect::<Vec<_>>().join(", ");
+                let sql = format!("WITH lengths AS (SELECT doc_id, length FROM _occurrence_lengths WHERE table_name = ?1 AND field = ?2 AND doc_id IN ({ids})), documents AS (SELECT doc_id, metadata_blob FROM _occurrence_documents WHERE table_name = ?1 AND field = ?2 AND doc_id IN ({ids})) SELECT COALESCE(lengths.doc_id, documents.doc_id), length, metadata_blob FROM lengths FULL OUTER JOIN documents USING(doc_id)");
+                let mut values = vec![SqlValue::Text(self.table.clone()), SqlValue::Text(field.into())];
                 for doc_id in chunk {
                     values.push(SqlValue::Integer(encode_index_u64("document", *doc_id)?));
                 }
-                let mut stmt = c.prepare(&sql)?;
-                let rows = stmt.query_map(params_from_iter(values), |r| {
-                    Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
-                })?;
+                let mut statement = conn.prepare(&sql)?;
+                let rows = statement.query_map(params_from_iter(values), |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<i64>>(1)?, row.get::<_, Option<Vec<u8>>>(2)?)))?;
                 for row in rows {
-                    let (doc_id, length) = row?;
+                    let (doc_id, length, metadata) = row?;
                     let doc_id = decode_index_u64("document id", doc_id)?;
-                    let length = decode_index_u64("document length", length)?;
+                    let length = length.map(|length| decode_index_u64("document length", length)).transpose()?;
+                    let metadata = metadata.map(|bytes| clustered_result(IndexedFieldMetadata::from_bytes(&bytes))).transpose()?;
+                    let (Some(length), Some(metadata)) = (length, metadata) else {
+                        return Err(SQLiteError::StorageBackend("indexed field length and source metadata disagree".into()));
+                    };
+                    let stats = self.stored_field_stats_on(conn, field)?.ok_or_else(|| SQLiteError::StorageBackend("indexed field revision is missing".into()))?;
+                    if metadata.length != length || metadata.revision() != stats.revision {
+                        return Err(SQLiteError::StorageBackend("indexed field length or revision disagrees with source metadata".into()));
+                    }
                     out.insert(doc_id, length);
                 }
             }
@@ -454,24 +320,25 @@ impl InvertedIndex for SQLiteInvertedIndex {
     }
 
     fn get_term_freq(&self, doc_id: DocId, field: &str, term: &str) -> StorageBackendResult<u64> {
-        let posting_cluster = encode_index_u64("posting cluster", cluster_id(doc_id))?;
-        Ok(self.conn.with(|c| {
-            let blob: Option<Vec<u8>> = c
-                .query_row(
-                    "SELECT score_blob FROM _posting_clusters
-                         WHERE table_name = ?1 AND field = ?2
-                            AND term = ?3 AND cluster_id = ?4",
-                    params![self.table, field, term, posting_cluster],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            match blob {
-                Some(blob) => {
-                    let scores = clustered_result(decode_all_scores(cluster_id(doc_id), &blob))?;
-                    Ok(scores
-                        .binary_search_by_key(&doc_id, |entry| entry.doc_id)
-                        .ok()
-                        .map_or(0, |position| scores[position].term_freq))
+        self.get_term_freq_key(doc_id, field, &TokenTermKey::from_text(term))
+    }
+
+    fn get_term_freq_key(
+        &self,
+        doc_id: DocId,
+        field: &str,
+        term: &TokenTermKey,
+    ) -> StorageBackendResult<u64> {
+        let cluster = encode_index_u64("posting cluster", cluster_id(doc_id))?;
+        Ok(self.conn.with(|conn| {
+            self.require_graph_format_on(conn)?;
+            let row: Option<(i64, Vec<u8>)> = conn.query_row("SELECT posting_count, score_blob FROM _occurrence_clusters WHERE table_name = ?1 AND field = ?2 AND term = ?3 AND cluster_id = ?4", params![self.table, field, term.as_bytes(), cluster], |row| Ok((row.get(0)?, row.get(1)?))).optional()?;
+            match row {
+                Some((count, bytes)) => {
+                    // Validate the version and redundant row count before decoding only the requested cluster.
+                    super::posting_cursor_from_rows(vec![(cluster, count, bytes.clone())])?;
+                    let scores = clustered_result(decode_all_scores(cluster_id(doc_id), &bytes))?;
+                    Ok(scores.binary_search_by_key(&doc_id, |entry| entry.doc_id).ok().map_or(0, |position| scores[position].term_freq))
                 }
                 None => Ok(0),
             }
@@ -480,8 +347,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
 
     fn doc_count(&self) -> StorageBackendResult<u64> {
         Ok(self.conn.with(|c| {
+            self.require_graph_format_on(c)?;
             let n: i64 = c.query_row(
-                "SELECT COUNT(DISTINCT doc_id) FROM _doc_lengths
+                "SELECT COUNT(DISTINCT doc_id) FROM _occurrence_lengths
                      WHERE table_name = ?1",
                 params![self.table],
                 |r| r.get(0),
@@ -491,23 +359,34 @@ impl InvertedIndex for SQLiteInvertedIndex {
     }
 
     fn total_field_length(&self, field: &str) -> StorageBackendResult<u64> {
-        Ok(self.conn.with(|c| {
-            let n: Option<i64> = c
-                .query_row(
-                    "SELECT total_length FROM _field_stats
-                         WHERE table_name = ?1 AND field = ?2",
-                    params![self.table, field],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            n.map_or(Ok(0), |length| {
-                decode_index_u64("total field length", length)
-            })
+        Ok(self.conn.with(|conn| {
+            self.require_graph_format_on(conn)?;
+            Ok(self
+                .stored_field_stats_on(conn, field)?
+                .map_or(0, |stats| stats.total_length))
         })?)
     }
 
     fn vocabulary_terms(&self, field: &str) -> StorageBackendResult<Vec<String>> {
         self.terms_for_field(field)
+    }
+
+    fn vocabulary_keys(&self, field: &str) -> StorageBackendResult<Vec<TokenTermKey>> {
+        Ok(self.conn.with(|conn| {
+            self.require_graph_format_on(conn)?;
+            let mut statement = conn.prepare("SELECT DISTINCT term FROM _occurrence_clusters WHERE table_name = ?1 AND field = ?2 ORDER BY term")?;
+            let rows = statement.query_map(params![self.table, field], |row| row.get::<_, Vec<u8>>(0))?;
+            rows.map(|row| clustered_result(TokenTermKey::from_bytes(row?))).collect()
+        })?)
+    }
+
+    fn field_doc_count(&self, field: &str) -> StorageBackendResult<u64> {
+        Ok(self.conn.with(|conn| {
+            self.require_graph_format_on(conn)?;
+            Ok(self
+                .stored_field_stats_on(conn, field)?
+                .map_or(0, |stats| stats.doc_count))
+        })?)
     }
 
     fn stats(&self) -> StorageBackendResult<IndexStats> {
@@ -516,8 +395,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         s.total_docs = doc_count;
         if doc_count > 0 {
             let total: u64 = self.conn.with(|c| {
+                self.require_graph_format_on(c)?;
                 let n: i64 = c.query_row(
-                    "SELECT COALESCE(SUM(total_length), 0) FROM _field_stats
+                    "SELECT COALESCE(SUM(total_length), 0) FROM _occurrence_fields
                          WHERE table_name = ?1",
                     params![self.table],
                     |r| r.get(0),
@@ -526,70 +406,45 @@ impl InvertedIndex for SQLiteInvertedIndex {
             })?;
             s.avg_doc_length = total as f64 / doc_count as f64;
         }
-        // Pull all (field, term) doc-frequencies in one query.
-        let pairs: Vec<(String, String, u64)> = self.conn.with(|c| {
-            let mut stmt = c.prepare(
-                "SELECT field, term, SUM(posting_count) FROM _posting_clusters
-                     WHERE table_name = ?1
-                     GROUP BY field, term",
-            )?;
-            let rows = stmt.query_map(params![self.table], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, i64>(2)?,
-                ))
-            })?;
-            let mut out = Vec::new();
-            for row in rows {
-                let (field, term, doc_frequency) = row?;
-                out.push((
-                    field,
-                    term,
-                    decode_index_u64("document frequency", doc_frequency)?,
-                ));
+        let pairs = self
+            .conn
+            .with(|conn| self.term_frequencies_on(conn, None))?;
+        for ((field, term), df) in pairs {
+            let term = term.to_term();
+            if let Some(text) = term.as_str() {
+                s.set_doc_freq(field, text, df);
+            } else {
+                s.set_doc_freq_utf16(field, term.into_utf16(), df);
             }
-            Ok(out)
-        })?;
-        for (field, term, df) in pairs {
-            s.set_doc_freq(field, term, df);
         }
         Ok(s)
     }
 
     fn posting_count(&self, field: Option<&str>) -> StorageBackendResult<u64> {
-        Ok(self.conn.with(|c| {
-            let n: i64 = if let Some(field) = field {
-                c.query_row(
-                    "SELECT COALESCE(SUM(posting_count), 0) FROM _posting_clusters
-                         WHERE table_name = ?1 AND field = ?2",
-                    params![self.table, field],
-                    |r| r.get(0),
-                )?
-            } else {
-                c.query_row(
-                    "SELECT COALESCE(SUM(posting_count), 0) FROM _posting_clusters
-                     WHERE table_name = ?1",
-                    params![self.table],
-                    |r| r.get(0),
-                )?
-            };
-            decode_index_u64("posting count", n)
+        Ok(self.conn.with(|conn| {
+            self.term_frequencies_on(conn, field)?
+                .into_values()
+                .try_fold(0_u64, |total, count| {
+                    total
+                        .checked_add(count)
+                        .ok_or_else(|| SQLiteError::StorageBackend("posting count overflow".into()))
+                })
         })?)
     }
 
     fn doc_length_count(&self, field: Option<&str>) -> StorageBackendResult<u64> {
         Ok(self.conn.with(|c| {
+            self.require_graph_format_on(c)?;
             let n: i64 = if let Some(field) = field {
                 c.query_row(
-                    "SELECT COUNT(*) FROM _doc_lengths
+                    "SELECT COUNT(*) FROM _occurrence_lengths
                          WHERE table_name = ?1 AND field = ?2",
                     params![self.table, field],
                     |r| r.get(0),
                 )?
             } else {
                 c.query_row(
-                    "SELECT COUNT(*) FROM _doc_lengths WHERE table_name = ?1",
+                    "SELECT COUNT(*) FROM _occurrence_lengths WHERE table_name = ?1",
                     params![self.table],
                     |r| r.get(0),
                 )?
@@ -599,22 +454,13 @@ impl InvertedIndex for SQLiteInvertedIndex {
     }
 
     fn term_count(&self, field: Option<&str>) -> StorageBackendResult<u64> {
-        Ok(self.conn.with(|c| {
-            let n: i64 = if let Some(field) = field {
-                c.query_row(
-                    "SELECT COUNT(DISTINCT term) FROM _posting_clusters
-                         WHERE table_name = ?1 AND field = ?2",
-                    params![self.table, field],
-                    |r| r.get(0),
-                )?
-            } else {
-                c.query_row(
-                    "SELECT COUNT(DISTINCT term) FROM _posting_clusters WHERE table_name = ?1",
-                    params![self.table],
-                    |r| r.get(0),
-                )?
-            };
-            decode_index_u64("term count", n)
+        Ok(self.conn.with(|conn| {
+            let terms = self
+                .term_frequencies_on(conn, field)?
+                .into_keys()
+                .map(|(_, term)| term)
+                .collect::<std::collections::BTreeSet<_>>();
+            Ok(terms.len() as u64)
         })?)
     }
 
@@ -624,8 +470,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
 
     fn field_names(&self) -> StorageBackendResult<Vec<FieldName>> {
         Ok(self.conn.with(|c| {
+            self.require_graph_format_on(c)?;
             let mut stmt =
-                c.prepare("SELECT DISTINCT field FROM _doc_lengths WHERE table_name = ?1")?;
+                c.prepare("SELECT DISTINCT field FROM _occurrence_lengths WHERE table_name = ?1")?;
             let rows = stmt.query_map([&self.table], |row| row.get::<_, String>(0))?;
             let mut fields = Vec::new();
             for row in rows {
@@ -641,33 +488,37 @@ impl InvertedIndex for SQLiteInvertedIndex {
         analyzer: Analyzer,
         phase: AnalyzerPhase,
     ) -> Result<(), String> {
-        uqa_storage::inverted_index::validate_linear_analyzer(&analyzer)
-            .map_err(|error| error.to_string())?;
-        self.bindings
+        let mut candidate = self.bindings.clone();
+        candidate
             .bind(field, &analyzer, phase)
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        self.validate_index_revision_change(field, &candidate)
+            .map_err(|error| error.to_string())?;
+        self.bindings = candidate;
+        Ok(())
     }
 
     fn remove_field_analyzers(&mut self, field: &str) -> Result<(), String> {
-        self.bindings.remove(field);
+        let mut candidate = self.bindings.clone();
+        candidate.remove(field);
+        self.validate_index_revision_change(field, &candidate)
+            .map_err(|error| error.to_string())?;
+        self.bindings = candidate;
         Ok(())
     }
 
     fn get_field_analyzer(&self, field: &str) -> Analyzer {
         self.bindings.index_configuration(field).clone()
     }
-
     fn get_search_analyzer(&self, field: &str) -> Analyzer {
         self.bindings.search_configuration(field).clone()
     }
-
     fn index_analyzer_revision(
         &self,
         field: &str,
     ) -> StorageBackendResult<Arc<uqa_analysis::CompiledAnalyzer>> {
         Ok(self.bindings.index_revision(field)?)
     }
-
     fn search_analyzer_revision(
         &self,
         field: &str,
@@ -681,11 +532,14 @@ impl InvertedIndex for SQLiteInvertedIndex {
         revision: Arc<uqa_analysis::CompiledAnalyzer>,
         phase: AnalyzerPhase,
     ) -> Result<(), String> {
-        uqa_storage::inverted_index::validate_linear_revision(&revision)
-            .map_err(|error| error.to_string())?;
-        self.bindings
+        let mut candidate = self.bindings.clone();
+        candidate
             .bind_revision(field, revision, phase)
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        self.validate_index_revision_change(field, &candidate)
+            .map_err(|error| error.to_string())?;
+        self.bindings = candidate;
+        Ok(())
     }
 
     fn set_field_analyzer_revisions(
@@ -694,13 +548,11 @@ impl InvertedIndex for SQLiteInvertedIndex {
         index: Arc<uqa_analysis::CompiledAnalyzer>,
         search: Arc<uqa_analysis::CompiledAnalyzer>,
     ) -> Result<(), String> {
-        uqa_storage::inverted_index::validate_linear_revision(&index)
-            .map_err(|error| error.to_string())?;
-        uqa_storage::inverted_index::validate_linear_revision(&search)
-            .map_err(|error| error.to_string())?;
         let mut candidate = self.bindings.clone();
         candidate
             .bind_revisions(field, index, search)
+            .map_err(|error| error.to_string())?;
+        self.validate_index_revision_change(field, &candidate)
             .map_err(|error| error.to_string())?;
         self.bindings = candidate;
         Ok(())
@@ -714,10 +566,8 @@ impl InvertedIndex for SQLiteInvertedIndex {
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
     ) -> StorageBackendResult<()> {
         let mut replacement = self.clone();
-        replacement
-            .set_field_analyzer_revision(field, revision, phase)
-            .map_err(uqa_storage::StorageBackendError::Other)?;
-        replacement.try_rebuild_documents(documents)?;
+        replacement.bindings.bind_revision(field, revision, phase)?;
+        replacement.rebuild_documents_inner(documents)?;
         *self = replacement;
         Ok(())
     }

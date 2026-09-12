@@ -24,9 +24,6 @@ impl SQLiteInvertedIndex {
 
     /// Tokenize `text` with the analyzer bound to `field`.
     pub fn tokenize(&self, text: &str, field: &str) -> StorageBackendResult<Vec<String>> {
-        uqa_storage::inverted_index::validate_linear_analyzer(
-            self.bindings.index_configuration(field),
-        )?;
         Ok(self.bindings.index_revision(field)?.analyze(text)?)
     }
 
