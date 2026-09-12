@@ -7,7 +7,7 @@
 //! Memoized traversal of query and document occurrence graphs.
 
 use super::{PhraseBudget, PhraseError, PhraseResult};
-use uqa_core::TokenOccurrence;
+use uqa_core::{memory::BudgetedVec, ordering::sort_by_with_control, TokenOccurrence};
 use uqa_storage::TokenTermKey;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -18,9 +18,9 @@ pub(super) struct Edge {
 }
 
 pub(super) struct QueryGraph<'a> {
-    pub terms: Vec<&'a TokenTermKey>,
-    pub emitted_terms: Vec<usize>,
-    pub edges: Vec<Edge>,
+    pub terms: BudgetedVec<&'a TokenTermKey>,
+    pub emitted_terms: BudgetedVec<usize>,
+    pub edges: BudgetedVec<Edge>,
     pub start: u32,
     pub end: u32,
 }
@@ -28,34 +28,68 @@ pub(super) struct QueryGraph<'a> {
 impl<'a> QueryGraph<'a> {
     pub fn new(
         query: &'a [(TokenTermKey, TokenOccurrence)],
-        budget: &mut PhraseBudget<'_>,
+        budget: &PhraseBudget<'_>,
     ) -> PhraseResult<Self> {
-        budget.reserve_items::<&TokenTermKey>(query.len())?;
-        budget.reserve_items::<usize>(query.len())?;
-        budget.reserve_items::<Edge>(query.len())?;
-        let mut terms = query.iter().map(|(term, _)| term).collect::<Vec<_>>();
-        terms.sort_unstable();
-        terms.dedup();
-        let mut edges = Vec::with_capacity(query.len());
-        let mut emitted_terms = Vec::with_capacity(query.len());
+        let mut terms = BudgetedVec::new(budget.memory());
+        terms.reserve(query.len())?;
+        for (key, _) in query {
+            budget.check_cancelled()?;
+            terms.push(key)?;
+        }
+        sort_by_with_control(
+            &mut terms,
+            &mut || budget.check_cancelled(),
+            |left, right, poll| left.cmp_with_control(right, poll),
+        )?;
+        let mut retained = 0;
+        for index in 0..terms.len() {
+            budget.check_cancelled()?;
+            if retained == 0
+                || !terms[index]
+                    .cmp_with_control(terms[retained - 1], &mut || budget.check_cancelled())?
+                    .is_eq()
+            {
+                terms.swap(retained, index);
+                retained += 1;
+            }
+        }
+        terms.truncate(retained);
+        let mut edges = BudgetedVec::new(budget.memory());
+        edges.reserve(query.len())?;
+        let mut emitted_terms = BudgetedVec::new(budget.memory());
+        emitted_terms.reserve(query.len())?;
         for (key, occurrence) in query {
             budget.check_cancelled()?;
             occurrence
                 .validate()
                 .map_err(|error| PhraseError::InvalidGraph(error.to_string()))?;
-            let term = terms.binary_search(&key).expect("query term was collected");
-            emitted_terms.push(term);
+            let term = term_index(&terms, key, budget)?;
+            emitted_terms.push(term)?;
             edges.push(Edge {
                 start: occurrence.position,
                 end: occurrence.end_position().expect("validated edge"),
                 term,
-            });
+            })?;
         }
-        edges.sort_unstable();
-        edges.dedup();
+        sort_by_with_control(
+            &mut edges,
+            &mut || budget.check_cancelled(),
+            |left, right, _| Ok(left.cmp(right)),
+        )?;
+        let mut retained = 0;
+        let mut end = 0;
+        for index in 0..edges.len() {
+            budget.check_cancelled()?;
+            if retained == 0 || edges[index] != edges[retained - 1] {
+                edges[retained] = edges[index];
+                retained += 1;
+            }
+            end = end.max(edges[index].end);
+        }
+        edges.truncate(retained);
         Ok(Self {
             start: edges.first().map_or(0, |edge| edge.start),
-            end: edges.iter().map(|edge| edge.end).max().unwrap_or(0),
+            end,
             terms,
             emitted_terms,
             edges,
@@ -64,9 +98,9 @@ impl<'a> QueryGraph<'a> {
 
     pub fn matches(
         &self,
-        occurrences: &[Vec<TokenOccurrence>],
-        states: &mut Vec<(u32, u32)>,
-        budget: &mut PhraseBudget<'_>,
+        occurrences: &[impl AsRef<[TokenOccurrence]>],
+        states: &mut BudgetedVec<(u32, u32)>,
+        budget: &PhraseBudget<'_>,
     ) -> PhraseResult<bool> {
         states.clear();
         for edge in self
@@ -74,7 +108,7 @@ impl<'a> QueryGraph<'a> {
             .iter()
             .take_while(|edge| edge.start == self.start)
         {
-            for occurrence in &occurrences[edge.term] {
+            for occurrence in occurrences[edge.term].as_ref() {
                 insert_state(
                     states,
                     (edge.end, occurrence.end_position().expect("validated edge")),
@@ -104,7 +138,7 @@ impl<'a> QueryGraph<'a> {
                         .iter()
                         .take_while(|edge| edge.start == query_position)
                     {
-                        let postings = &occurrences[edge.term];
+                        let postings = occurrences[edge.term].as_ref();
                         let begin =
                             postings.partition_point(|item| item.position < document_position);
                         for occurrence in postings[begin..]
@@ -127,15 +161,36 @@ impl<'a> QueryGraph<'a> {
 }
 
 fn insert_state(
-    states: &mut Vec<(u32, u32)>,
+    states: &mut BudgetedVec<(u32, u32)>,
     state: (u32, u32),
-    budget: &mut PhraseBudget<'_>,
+    budget: &PhraseBudget<'_>,
 ) -> PhraseResult<()> {
     budget.check_cancelled()?;
     if let Err(at) = states.binary_search(&state) {
-        budget.grow(states)?;
-        // Query edges and hole transitions strictly advance, so new states follow the current state.
-        states.insert(at, state);
+        states.push(state)?;
+        // Query edges and holes advance strictly; insertion preserves the pending traversal order.
+        for index in (at + 1..states.len()).rev() {
+            budget.check_cancelled()?;
+            states.swap(index - 1, index);
+        }
     }
     Ok(())
+}
+
+fn term_index(
+    terms: &[&TokenTermKey],
+    key: &TokenTermKey,
+    budget: &PhraseBudget<'_>,
+) -> PhraseResult<usize> {
+    let (mut start, mut end) = (0, terms.len());
+    while start < end {
+        budget.check_cancelled()?;
+        let middle = start + (end - start) / 2;
+        match terms[middle].cmp_with_control(key, &mut || budget.check_cancelled())? {
+            std::cmp::Ordering::Less => start = middle + 1,
+            std::cmp::Ordering::Greater => end = middle,
+            std::cmp::Ordering::Equal => return Ok(middle),
+        }
+    }
+    unreachable!("query term was collected")
 }

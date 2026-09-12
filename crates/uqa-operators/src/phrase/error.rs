@@ -16,6 +16,7 @@ pub enum PhraseError {
     Cancelled(QueryCancelled),
     MemoryLimit { required: usize, limit: usize },
     Allocation(TryReserveError),
+    Memory(uqa_core::memory::MemoryError),
     Storage(StorageBackendError),
     Scoring(TextSearchError),
     InvalidGraph(String),
@@ -32,6 +33,7 @@ impl fmt::Display for PhraseError {
                 "phrase execution requires {required} bytes, exceeding work_mem of {limit} bytes"
             ),
             Self::Allocation(error) => error.fmt(f),
+            Self::Memory(error) => error.fmt(f),
             Self::Storage(error) => error.fmt(f),
             Self::Scoring(error) => error.fmt(f),
             Self::InvalidGraph(message) => f.write_str(message),
@@ -44,6 +46,7 @@ impl Error for PhraseError {
         match self {
             Self::Cancelled(error) => Some(error),
             Self::Allocation(error) => Some(error),
+            Self::Memory(error) => Some(error),
             Self::Storage(error) => Some(error),
             Self::Scoring(error) => Some(error),
             Self::MemoryLimit { .. } | Self::InvalidGraph(_) => None,
@@ -59,6 +62,22 @@ impl From<StorageBackendError> for PhraseError {
 
 impl From<TextSearchError> for PhraseError {
     fn from(error: TextSearchError) -> Self {
-        Self::Scoring(error)
+        match error {
+            TextSearchError::Memory(error) => error.into(),
+            TextSearchError::Cancelled(error) => Self::Cancelled(error),
+            error => Self::Scoring(error),
+        }
+    }
+}
+
+impl From<uqa_core::memory::MemoryError> for PhraseError {
+    fn from(error: uqa_core::memory::MemoryError) -> Self {
+        match error {
+            uqa_core::memory::MemoryError::Limit { required, limit } => {
+                Self::MemoryLimit { required, limit }
+            }
+            uqa_core::memory::MemoryError::Allocation(error) => Self::Allocation(error),
+            error @ uqa_core::memory::MemoryError::SizeOverflow => Self::Memory(error),
+        }
     }
 }

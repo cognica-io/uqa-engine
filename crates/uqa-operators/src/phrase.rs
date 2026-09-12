@@ -7,7 +7,10 @@
 //! Connected phrase support over lossless query terms and native positional postings.
 
 use graph::QueryGraph;
-use uqa_core::{DocId, ScoredEntry, TokenOccurrence};
+use uqa_core::{
+    memory::{Budgeted, BudgetedVec, MemoryError},
+    DocId, ScoredEntry, TokenOccurrence,
+};
 use uqa_scoring::{ScoringMode, TextCandidateScorer};
 use uqa_storage::{clustered_postings::PostingReadCursor, InvertedIndex, TokenTermKey};
 
@@ -28,13 +31,23 @@ pub fn score_phrase(
     mode: &ScoringMode,
     budget: &mut PhraseBudget<'_>,
 ) -> PhraseResult<Vec<ScoredEntry>> {
-    let before = budget.used_bytes();
-    let result = score_phrase_inner(index, field, query, mode, budget);
-    let retained = result
-        .as_ref()
-        .map_or(0, |rows| rows.capacity() * size_of::<ScoredEntry>());
-    budget.finish_scope(before, retained);
-    result
+    Ok(score_phrase_budgeted(index, field, query, mode, budget)?
+        .into_parts()
+        .0)
+}
+
+/// Retain native graph, scoring, occurrence and output reservations through the returned result.
+///
+/// The borrowed query keeps its caller's existing ownership. Use the same allowance for complete query analysis so its key buffers coexist with matching state and results. Provider read workspaces remain with their provider implementation.
+pub fn score_phrase_budgeted(
+    index: &dyn InvertedIndex,
+    field: &str,
+    query: &[(TokenTermKey, TokenOccurrence)],
+    mode: &ScoringMode,
+    budget: &PhraseBudget<'_>,
+) -> PhraseResult<Budgeted<Vec<ScoredEntry>>> {
+    let (rows, memory) = score_phrase_inner(index, field, query, mode, budget)?.into_parts();
+    Ok(Budgeted::new(rows, memory))
 }
 
 fn score_phrase_inner(
@@ -42,43 +55,44 @@ fn score_phrase_inner(
     field: &str,
     query: &[(TokenTermKey, TokenOccurrence)],
     mode: &ScoringMode,
-    budget: &mut PhraseBudget<'_>,
-) -> PhraseResult<Vec<ScoredEntry>> {
+    budget: &PhraseBudget<'_>,
+) -> PhraseResult<BudgetedVec<ScoredEntry>> {
     budget.check_cancelled()?;
     if query.is_empty() {
-        return Ok(Vec::new());
-    }
-    budget.reserve_items::<(TokenTermKey, TokenOccurrence)>(query.len())?;
-    for (term, _) in query {
-        budget.reserve_bytes(term.as_bytes().len())?;
+        return Ok(BudgetedVec::new(budget.memory()));
     }
     let graph = QueryGraph::new(query, budget)?;
-    budget.reserve_items::<Box<dyn PostingReadCursor + '_>>(graph.terms.len())?;
-    let mut cursors = graph
-        .terms
-        .iter()
-        .map(|term| index.posting_read_cursor_key(field, term))
-        .collect::<Result<Vec<_>, _>>()?;
-    budget.reserve_items::<u64>(query.len())?;
-    budget.reserve_items::<f64>(
-        query
-            .len()
-            .checked_mul(2)
-            .ok_or_else(|| PhraseError::InvalidGraph("query term count overflow".into()))?,
+    let mut cursors: BudgetedVec<Box<dyn PostingReadCursor + '_>> =
+        BudgetedVec::new(budget.memory());
+    cursors.reserve(graph.terms.len())?;
+    for term in graph.terms.iter() {
+        budget.check_cancelled()?;
+        cursors.push(index.posting_read_cursor_key(field, term)?)?;
+    }
+    let mut frequencies = BudgetedVec::new(budget.memory());
+    frequencies.reserve(query.len())?;
+    for &term in graph.emitted_terms.iter() {
+        budget.check_cancelled()?;
+        frequencies.push(cursors[term].doc_freq())?;
+    }
+    let scorer = TextCandidateScorer::new_budgeted(
+        mode,
+        index.field_stats_scalar(field)?,
+        &frequencies,
+        budget.memory(),
+        || budget.cancellation().check().map_err(Into::into),
     )?;
-    let mut frequencies = graph
-        .emitted_terms
-        .iter()
-        .map(|&term| cursors[term].doc_freq())
-        .collect::<Vec<_>>();
-    let mut scorer =
-        TextCandidateScorer::new(mode, index.field_stats_scalar(field)?, &frequencies)?;
-    budget.reserve_items::<Vec<TokenOccurrence>>(graph.terms.len())?;
-    let mut occurrences = (0..graph.terms.len())
-        .map(|_| Vec::new())
-        .collect::<Vec<_>>();
-    let mut states = Vec::new();
-    let mut entries = Vec::new();
+    let mut occurrences = BudgetedVec::new(budget.memory());
+    occurrences.reserve(graph.terms.len())?;
+    for _ in graph.terms.iter() {
+        budget.check_cancelled()?;
+        occurrences.push(Budgeted::new(
+            Vec::new(),
+            budget.memory().empty_reservation(),
+        ))?;
+    }
+    let mut states = BudgetedVec::new(budget.memory());
+    let mut entries = BudgetedVec::new(budget.memory());
     while let Some(doc_id) = next_candidate(&graph, &mut cursors, budget)? {
         budget.check_cancelled()?;
         let length = read_candidate(
@@ -91,21 +105,22 @@ fn score_phrase_inner(
             budget,
         )?;
         if graph.matches(&occurrences, &mut states, budget)? {
-            for (frequency, &term) in frequencies.iter_mut().zip(&graph.emitted_terms) {
+            for (frequency, &term) in frequencies.iter_mut().zip(graph.emitted_terms.iter()) {
+                budget.check_cancelled()?;
                 *frequency = cursors[term]
                     .current()
                     .filter(|entry| entry.doc_id == doc_id)
                     .map_or(0, |entry| entry.term_freq);
             }
-            let score = scorer.score_document(length, &frequencies)?;
-            budget.grow(&mut entries)?;
-            entries.push(ScoredEntry { doc_id, score });
+            let score = scorer.score_document_with_control(length, &frequencies, || {
+                budget.cancellation().check().map_err(Into::into)
+            })?;
+            entries.push(ScoredEntry { doc_id, score })?;
         }
-        for values in &mut occurrences {
-            budget.release_bytes(values.capacity() * size_of::<TokenOccurrence>());
-            *values = Vec::new();
+        for values in &mut *occurrences {
+            *values = Budgeted::new(Vec::new(), budget.memory().empty_reservation());
         }
-        for cursor in &mut cursors {
+        for cursor in &mut *cursors {
             budget.check_cancelled()?;
             if cursor.current().is_some_and(|entry| entry.doc_id == doc_id) {
                 cursor.advance()?;
@@ -122,18 +137,18 @@ fn next_candidate(
 ) -> PhraseResult<Option<DocId>> {
     loop {
         budget.check_cancelled()?;
-        let entry = graph
-            .edges
-            .iter()
-            .filter(|edge| edge.start == graph.start)
-            .filter_map(|edge| cursors[edge.term].current().map(|entry| entry.doc_id))
-            .min();
-        let exit = graph
-            .edges
-            .iter()
-            .filter(|edge| edge.end == graph.end)
-            .filter_map(|edge| cursors[edge.term].current().map(|entry| entry.doc_id))
-            .min();
+        let (mut entry, mut exit) = (None, None);
+        for edge in graph.edges.iter() {
+            budget.check_cancelled()?;
+            if let Some(row) = cursors[edge.term].current() {
+                if edge.start == graph.start {
+                    entry = Some(entry.map_or(row.doc_id, |id: DocId| id.min(row.doc_id)));
+                }
+                if edge.end == graph.end {
+                    exit = Some(exit.map_or(row.doc_id, |id: DocId| id.min(row.doc_id)));
+                }
+            }
+        }
         let (Some(entry), Some(exit)) = (entry, exit) else {
             return Ok(None);
         };
@@ -156,8 +171,8 @@ fn read_candidate(
     doc_id: DocId,
     graph: &QueryGraph<'_>,
     cursors: &mut [Box<dyn PostingReadCursor + '_>],
-    occurrences: &mut [Vec<TokenOccurrence>],
-    budget: &mut PhraseBudget<'_>,
+    occurrences: &mut [Budgeted<Vec<TokenOccurrence>>],
+    budget: &PhraseBudget<'_>,
 ) -> PhraseResult<u64> {
     let mut length = None;
     for ((term, cursor), values) in graph.terms.iter().zip(cursors).zip(occurrences) {
@@ -177,16 +192,25 @@ fn read_candidate(
         let count = usize::try_from(entry.term_freq).map_err(|_| {
             PhraseError::InvalidGraph("phrase occurrence count exceeds usize".into())
         })?;
-        budget.reserve_items::<TokenOccurrence>(count)?;
-        *values = index.get_occurrences(doc_id, field, term)?;
-        if values.len() != count {
+        let mut memory = budget.memory().reserve(
+            count
+                .checked_mul(size_of::<TokenOccurrence>())
+                .ok_or(MemoryError::SizeOverflow)?,
+        )?;
+        let records = index.get_occurrences(doc_id, field, term)?;
+        if records.len() != count {
             return Err(PhraseError::InvalidGraph(
                 "phrase occurrences do not match the score cursor frequency".into(),
             ));
         }
-        budget.reserve_items::<TokenOccurrence>(values.capacity() - count)?;
+        memory.grow(
+            (records.capacity() - count)
+                .checked_mul(size_of::<TokenOccurrence>())
+                .ok_or(MemoryError::SizeOverflow)?,
+        )?;
+        *values = Budgeted::new(records, memory);
         let mut previous = None;
-        for occurrence in values {
+        for occurrence in values.iter() {
             budget.check_cancelled()?;
             occurrence
                 .validate()

@@ -10,7 +10,8 @@ use super::{
     operator_execution_error, DriverResult, PhysicalRetrievalDriver, PostingList, SQLError,
     ScoredEntry, TextScoringMode,
 };
-use uqa_operators::phrase::{score_phrase, PhraseBudget, PhraseError};
+use uqa_core::memory::{Budgeted, BudgetedVec};
+use uqa_operators::phrase::{score_phrase_budgeted, PhraseBudget, PhraseError};
 use uqa_scoring::{BM25Params, ScoringMode};
 
 impl PhysicalRetrievalDriver<'_> {
@@ -53,10 +54,10 @@ impl PhysicalRetrievalDriver<'_> {
                 self.table
             )));
         }
-        let mut rows = Vec::new();
         let mut query_units = 0;
         let runtime = self.context.runtime;
-        let mut budget = PhraseBudget::new(runtime.work_mem_bytes()?, runtime.cancellation);
+        let budget = PhraseBudget::new(runtime.work_mem_bytes()?, runtime.cancellation);
+        let mut rows = BudgetedVec::new(budget.memory());
         for field in fields {
             self.context
                 .text
@@ -69,7 +70,7 @@ impl PhysicalRetrievalDriver<'_> {
                 TextScoringMode::CustomBM25(params) => ScoringMode::BM25(params),
                 TextScoringMode::CustomBayesianBM25(params) => ScoringMode::BayesianBM25(params),
             };
-            let (matches, units) = self.phrase_field(query, &field, &mode, &mut budget)?;
+            let (matches, units) = self.phrase_field(query, &field, &mode, &budget)?;
             query_units = query_units.max(units);
             budget
                 .append_results(&mut rows, matches)
@@ -77,7 +78,7 @@ impl PhysicalRetrievalDriver<'_> {
         }
         budget
             .finish_postings(rows)
-            .map(|rows| (rows, query_units))
+            .map(|rows| (rows.into_parts().0, query_units))
             .map_err(phrase_sql_error)
     }
 
@@ -86,8 +87,8 @@ impl PhysicalRetrievalDriver<'_> {
         query: &str,
         field: &str,
         mode: &ScoringMode,
-        budget: &mut PhraseBudget<'_>,
-    ) -> DriverResult<(Vec<ScoredEntry>, usize)> {
+        budget: &PhraseBudget<'_>,
+    ) -> DriverResult<(Budgeted<Vec<ScoredEntry>>, usize)> {
         budget.check_cancelled().map_err(phrase_sql_error)?;
         let state = self
             .context
@@ -100,9 +101,19 @@ impl PhysicalRetrievalDriver<'_> {
         let revision = index
             .search_analyzer_revision(field)
             .map_err(|error| operator_execution_error("resolve phrase analyzer revision", error))?;
-        let graph = uqa_storage::inverted_index::analyze_query_graph(&revision, query)
-            .map_err(|error| operator_execution_error("analyze phrase", error))?;
-        score_phrase(index, field, &graph, mode, budget)
+        let graph = uqa_storage::inverted_index::analyze_query_graph_budgeted(
+            &revision,
+            query,
+            budget.memory(),
+            || {
+                budget
+                    .cancellation()
+                    .check()
+                    .map_err(|_| uqa_analysis::AnalysisError::Cancelled)
+            },
+        )
+        .map_err(|error| phrase_sql_error(PhraseError::Storage(error)))?;
+        score_phrase_budgeted(index, field, &graph, mode, budget)
             .map(|rows| (rows, graph.len()))
             .map_err(phrase_sql_error)
     }
@@ -110,13 +121,19 @@ impl PhysicalRetrievalDriver<'_> {
 
 fn phrase_sql_error(error: PhraseError) -> SQLError {
     match error {
+        PhraseError::Storage(uqa_storage::StorageBackendError::Analysis(
+            uqa_analysis::AnalysisError::Cancelled,
+        )) => SQLError::Cancelled(uqa_core::QueryCancelled),
+        PhraseError::Storage(uqa_storage::StorageBackendError::Analysis(
+            uqa_analysis::AnalysisError::Memory(error),
+        )) => phrase_sql_error(error.into()),
         PhraseError::Cancelled(error) => SQLError::Cancelled(error),
-        error @ (PhraseError::MemoryLimit { .. } | PhraseError::Allocation(_)) => {
-            SQLError::Routine {
-                sqlstate: "53200".into(),
-                message: error.to_string(),
-            }
-        }
+        error @ (PhraseError::MemoryLimit { .. }
+        | PhraseError::Allocation(_)
+        | PhraseError::Memory(_)) => SQLError::Routine {
+            sqlstate: "53200".into(),
+            message: error.to_string(),
+        },
         PhraseError::Scoring(uqa_scoring::TextSearchError::Parameters(error)) => {
             SQLError::Routine {
                 sqlstate: "22023".into(),

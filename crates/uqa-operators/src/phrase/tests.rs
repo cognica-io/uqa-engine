@@ -13,6 +13,8 @@ use uqa_core::CancellationToken;
 use uqa_scoring::{score_text_terms, BM25Params, TextSearchAlgorithm};
 use uqa_storage::{inverted_index::analyze_query_graph, MemoryInvertedIndex};
 
+mod allocation;
+
 fn edge(term: &str, position: u32, length: u32) -> (TokenTermKey, TokenOccurrence) {
     (
         TokenTermKey::from_text(term),
@@ -29,8 +31,8 @@ fn graph_match(
     document: &[(TokenTermKey, TokenOccurrence)],
 ) -> bool {
     let cancellation = CancellationToken::new();
-    let mut budget = PhraseBudget::new(1024 * 1024, &cancellation);
-    let graph = QueryGraph::new(query, &mut budget).unwrap();
+    let budget = PhraseBudget::new(1024 * 1024, &cancellation);
+    let graph = QueryGraph::new(query, &budget).unwrap();
     let postings = graph
         .terms
         .iter()
@@ -45,7 +47,7 @@ fn graph_match(
         })
         .collect::<Vec<_>>();
     graph
-        .matches(&postings, &mut Vec::new(), &mut budget)
+        .matches(&postings, &mut BudgetedVec::new(budget.memory()), &budget)
         .unwrap()
 }
 

@@ -9,6 +9,9 @@
 use super::*;
 use std::{path::Path, sync::Arc};
 
+#[path = "phrases/runtime.rs"]
+mod runtime;
+
 fn ids(engine: &Engine, predicate: &str) -> Vec<Value> {
     engine
         .sql(
