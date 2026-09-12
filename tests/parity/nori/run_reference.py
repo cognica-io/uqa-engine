@@ -3,21 +3,12 @@
 
 import argparse
 import difflib
-import hashlib
 import json
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
-from urllib.request import urlopen
-
-
-ROOT = Path(__file__).resolve().parent
-
-
-def sha256(path):
-    with path.open("rb") as source:
-        return hashlib.file_digest(source, "sha256").hexdigest()
+from reference_runtime import ROOT, docker_command, prepare_jars
 
 
 def main():
@@ -27,36 +18,9 @@ def main():
     parser.add_argument("--write", action="store_true", help="Replace expected output after inspecting an intentional reference change")
     parser.add_argument("--platform", choices=["linux/arm64", "linux/amd64"], default="linux/arm64")
     args = parser.parse_args()
-    manifest = json.loads((ROOT / "manifest.json").read_text())
     cache = args.cache_dir.resolve()
-    cache.mkdir(parents=True, exist_ok=True)
-    for artifact in manifest["jars"]:
-        target = cache / (artifact["artifact"] + "-" + manifest["lucene_version"] + ".jar")
-        if not target.exists():
-            if args.offline:
-                raise RuntimeError(f"Missing cached artifact: {target}")
-            with urlopen(artifact["url"], timeout=60) as source:
-                data = source.read()
-            if hashlib.sha256(data).hexdigest() != artifact["sha256"]:
-                raise RuntimeError(f"Downloaded artifact checksum mismatch: {target.name}")
-            target.write_bytes(data)
-        if sha256(target) != artifact["sha256"]:
-            raise RuntimeError(f"Cached artifact checksum mismatch: {target}")
-
-    # An explicit classpath excludes unrelated jars in a reused cache directory.
-    classpath = ":".join(
-        "/jars/" + artifact["artifact"] + "-" + manifest["lucene_version"] + ".jar"
-        for artifact in manifest["jars"]
-    )
-    command = [
-        "docker", "run", "--rm", "--platform", args.platform,
-        "--pull", "never" if args.offline else "missing",
-        "--network", "none", "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m",
-        "--mount", f"type=bind,source={cache},target=/jars,readonly",
-        "--mount", f"type=bind,source={ROOT},target=/src,readonly",
-        manifest["docker_image"], "java", "-Xmx512m", "--class-path", classpath,
-        "/src/NoriReference.java",
-    ]
+    manifest = prepare_jars(cache, args.offline)
+    command = docker_command(manifest, cache, args.platform, args.offline, "NoriReference.java")
     result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", check=True)
     actual = [json.loads(line) for line in result.stdout.splitlines()]
     if actual[0] != {"runtime": manifest["runtime"]}:

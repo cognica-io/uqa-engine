@@ -5,6 +5,7 @@
   "uqa_source_commit": "bbeb1026cba9001cc5f084d24ac68ec197bd1925",
   "verified_on": "2026-09-12",
   "verified_platform": "linux/arm64",
+  "verified_platforms": ["linux/arm64", "linux/amd64"],
   "docker_image": "eclipse-temurin@sha256:3b0a98dfbdf1067c20a7854cec159551777d2ee1381bc76cd4bd0719f543b148",
   "runtime": {
     "java_version": "21.0.10",

@@ -19,13 +19,13 @@ The checked-in [reference harness](../../tests/parity/nori/README.md) executed 3
 | Reference input | Pinned value |
 | --- | --- |
 | Lucene artifacts | `lucene-core`, `lucene-analysis-common`, and `lucene-analysis-nori`, all `10.5.1`; SHA-256 values in the manifest |
-| JVM | Eclipse Adoptium Temurin `21.0.10+7-LTS`, executed on `linux/arm64` |
+| JVM | Eclipse Adoptium Temurin `21.0.10+7-LTS`, executed on Docker `linux/arm64` and `linux/amd64` |
 | Docker image index | `eclipse-temurin@sha256:3b0a98dfbdf1067c20a7854cec159551777d2ee1381bc76cd4bd0719f543b148` |
 | Dictionary source | `mecab-ko-dic-2.1.1-20180720`, archive SHA-256 `fd62d3d6d8fa85145528065fabad4d7cb20f6b2201e71be4081a4e9701a5b330` |
 | Dictionary normalization during Lucene generation | `normalizeEntries = false` |
 | Reference command | `python3 tests/parity/nori/run_reference.py` |
 
-The Docker image index also provides an amd64 image. The recorded run establishes arm64 results; amd64 must be executed separately before claiming cross-platform reference verification. Changing the Docker digest, JVM, Lucene jars, dictionary, or generated Unicode tables requires an explicit fixture diff and a new compatibility fingerprint.
+The 31 cases and complete neutral model export have been reproduced on both Docker platforms with identical output. This establishes reference reproducibility; it does not establish native Rust or WASM parity or platform performance. Changing the Docker digest, JVM, Lucene jars, dictionary, or generated Unicode tables requires an explicit fixture diff and a new compatibility fingerprint.
 
 ## Current UQA constraints
 
@@ -184,6 +184,8 @@ Use the dictionary resources inside the pinned official Nori jar as the initial 
 Retain the original MeCab-ko-dic source archive and its checksum as regeneration provenance. Lucene's [generation task](https://github.com/apache/lucene/blob/64ce863a2bea79c69c19c4d56268c26710ff0ff9/gradle/generation/nori.gradle) selects `2.1.1-20180720`, UTF-8, and no entry normalization. Its [dictionary builder](https://github.com/apache/lucene/blob/64ce863a2bea79c69c19c4d56268c26710ff0ff9/lucene/analysis/nori/src/java/org/apache/lucene/analysis/ko/dict/TokenInfoDictionaryBuilder.java) sorts input files and stably orders entries by surface. Preserve each surface's entry order; sorting homographs by a new field can change Viterbi ties.
 
 The exporter must cover the system lexicon, all word IDs and costs, both context IDs, POS and reading metadata, morpheme decompositions, unknown-class mappings and entries, character flags, and the full connection matrix with its orientation. Where the public API does not expose dimensions or class inventories, read the pinned resource header through Lucene's Java `DataInput`/codec utilities and cross-check values through the runtime model; do not depend on reflective access to private JVM fields. Enumerate and compare every exported value against the Lucene model, then compare analysis using that bundle against the oracle. Source CSV regeneration is a separate reproducibility check and must not silently replace the canonical jar model when results differ.
+
+The implemented [neutral exporter](../../tests/parity/nori/MODEL.md) now covers the complete jar model and pinned Java Unicode profile. It checks every enumerated surface against runtime FST lookup, every ordered word mapping, all morphology fields, the full matrix, and character definitions, then reopens its output for exhaustive comparison. Independent arm64 and amd64 Docker runs reproduce the five hashes in its [manifest](../../tests/parity/nori/model_manifest.json). The neutral files total 82,581,342 bytes; the Rust bundle, packer, and runtime analysis parity remain pending.
 
 ### Bundle format
 
