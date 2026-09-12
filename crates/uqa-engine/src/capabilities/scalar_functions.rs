@@ -89,6 +89,7 @@ impl Engine {
             graphs: self,
             models: self.model_training_context(),
             analyzers: self,
+            runtime: self.query_runtime_view(),
         }
     }
 }

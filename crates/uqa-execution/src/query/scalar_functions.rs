@@ -44,6 +44,7 @@ pub struct ScalarFunctionContext<'a> {
     pub graphs: &'a dyn GraphLifecycle,
     pub models: ModelTrainingContext<'a>,
     pub analyzers: &'a dyn super::scalar_projection::AnalyzerRevisions,
+    pub runtime: super::runtime::QueryRuntimeView<'a>,
 }
 use crate::query::graph_lifecycle::{
     run_age_alter_graph_with_evaluator, run_age_create_elabel_with_evaluator,
@@ -52,7 +53,7 @@ use crate::query::graph_lifecycle::{
     run_age_graph_exists_with_evaluator, run_graph_create_with_evaluator,
     run_graph_drop_with_evaluator,
 };
-use crate::query::scalar_projection::{run_uqa_highlight, score_projection_value};
+use crate::query::scalar_projection::{run_uqa_highlight_with_runtime, score_projection_value};
 use uqa_sql::expr::RowLookup;
 use uqa_sql::semantics::scalar_projection::validate_score_projection_args;
 
@@ -73,11 +74,12 @@ pub fn intercept_function(
             .transpose();
     }
     match lower.as_str() {
-        "uqa_highlight" => Ok(Some(run_uqa_highlight(
+        "uqa_highlight" => Ok(Some(run_uqa_highlight_with_runtime(
             row,
             args,
             evaluate,
             context.map(|context| context.analyzers),
+            context.map(|context| context.runtime),
         )?)),
         "score_bm25" | "score_bayesian_bm25" => {
             validate_score_projection_args(&lower, args, evaluate)?;

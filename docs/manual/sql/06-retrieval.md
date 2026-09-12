@@ -179,6 +179,8 @@ With an explicit analyzer name, one immutable resolved revision analyzes the com
 
 The result is one TEXT value. Highlighting reads the named revision visible to the session without changing catalog or index state, and it does not infer a table-field analyzer from a bare text value. It needs no GIN index. Later calls observe committed name replacements and transaction/savepoint restoration; each call retains the same revision for its source and query.
 
+After argument evaluation and NULL short circuits, each call reads the current session `work_mem` and cancellation token. The allowance covers analysis-owned runtime buffers, matching, fragment selection, and the complete highlighted output; a prepared statement reads the setting again when executed. Exhausting it returns SQLSTATE `53200`, and cancellation returns `57014`, without a partial highlighted string. Input values, immutable analyzer resources and library search workspaces have separate owners. Highlighting does not spill its working state to disk.
+
 Invalid argument counts outside `2..=7`, non-text query/tag/analyzer arguments, negative fragment counts, and non-positive fragment sizes fail. Empty or unknown analyzer names, unavailable resources, and analysis failures also fail without falling back to another analyzer. NULL source/query short circuits take precedence over validation or evaluation of later arguments.
 
 ```sql execute

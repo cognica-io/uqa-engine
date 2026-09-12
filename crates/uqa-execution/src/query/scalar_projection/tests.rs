@@ -8,6 +8,8 @@ use super::*;
 use std::cell::Cell;
 use uqa_sql::ResultRow;
 
+mod runtime;
+
 struct Revisions {
     compiled: Arc<CompiledAnalyzer>,
     reads: Cell<usize>,

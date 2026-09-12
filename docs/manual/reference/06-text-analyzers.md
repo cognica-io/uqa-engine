@@ -361,7 +361,7 @@ This example executes as a Rust doctest with and without Nori enabled.
 
 `Analyzer::analyze_tokens_budgeted(input, &budget, poll)` and `CompiledAnalyzer::analyze_tokens_budgeted(input, &budget, poll)` return `Budgeted<AnalyzedText>`. Character edits, tokenization, common/Korean filters, source projection, and final position validation share the supplied runtime allowance and callback. `TokenFilter::filter_analyzed_budgeted(input, poll)` consumes a complete reserved analyzed result and returns one retaining the same allowance. Use the returned guard when chaining stages so token buffers, morphology, and hidden terminal attributes keep their reservations.
 
-The compiled method reuses resolved immutable resources. The uncompiled method retains per-call preparation and synonym-file reload behavior; preparation resources are outside the runtime buffer allowance. The callback returns `AnalysisResult<()>`. A byte-limit failure returns `AnalysisError::Memory`, and callback errors propagate without a partial result. Count limits and invalid-graph errors retain their existing contracts. These calls change no catalog, index, or transaction state. Provider/SQL/rendering propagation and library regex workspace/interruption accounting remain open; this API is not a total process-memory bound.
+The compiled method reuses resolved immutable resources. The uncompiled method retains per-call preparation and synonym-file reload behavior; preparation resources are outside the runtime buffer allowance. The callback returns `AnalysisResult<()>`. A byte-limit failure returns `AnalysisError::Memory`, and callback errors propagate without a partial result. Count limits and invalid-graph errors retain their existing contracts. These calls change no catalog, index, or transaction state. Highlighting propagates the allowance through analysis, matching and rendering, including SQL callers. Provider query propagation and library regex workspace/interruption accounting remain open; this API is not a total process-memory bound.
 
 ```rust
 use uqa_analysis::standard_analyzer;
@@ -377,6 +377,28 @@ assert_eq!(budget.used(), 0);
 ```
 
 This example executes as a Rust doctest with and without Nori enabled. Complete-pipeline regressions verify allocation failure and cancellation with an unrelated live owner, shared output lifetime, original spans, trailing gaps, and compiled versus uncompiled synonym-file behavior.
+
+### Highlight allocation ownership
+
+`highlight_budgeted(text, query_inputs, analyzer, options, &budget, poll)` and `highlight_compiled_budgeted(text, query_inputs, &compiled, options, &budget, poll)` return `Budgeted<String>`. They retain one allowance through query/source analysis, exact scalar or raw-term lookup, source-span merging, fragment selection, and output encoding. Query terms move their existing buffers while unused morphology, hidden terminal state, and source projections are released. The result keeps only its own string-capacity reservation after scratch is destroyed.
+
+`uqa_analysis::highlight::highlight_words_budgeted(text, query_inputs, analyzer, options, &budget, poll)` accepts borrowed query strings through an iterator and preserves independent word analysis. Its native Unicode word scanner uses the same immutable character class as the existing regex contract, with cancellation checks inside long words. An uncompiled analyzer retains per-query and per-source-word resource reload behavior. Without an analyzer, borrowed text uses full contextual lowercase.
+
+The renderer scans source coordinates without building a full-source character table, preserves source order when fragment densities tie, and writes selected windows and markers directly into the final buffer. It reserves terms, spans, clusters, windows and output before allocation and polls during ordering, lookup, scanning and encoding. A selected match stays whole. Limits or callback errors return no partial highlighted string and release only the call's allocations. Caller-owned input/options, immutable preparation resources, and configured library search workspaces retain their separate ownership; this is not a total process-memory bound.
+
+```rust
+use uqa_analysis::{highlight_budgeted, HighlightOptions};
+use uqa_core::memory::MemoryBudget;
+let budget = MemoryBudget::new(64 * 1024);
+let result = highlight_budgeted("the quick fox", &["FOX".into()], None, &HighlightOptions::default(), &budget, || Ok(()))?;
+assert_eq!(&**result, "the quick <b>fox</b>");
+assert_eq!(budget.used(), result.reserved_bytes());
+drop(result);
+assert_eq!(budget.used(), 0);
+# Ok::<(), uqa_analysis::AnalysisError>(())
+```
+
+The same example is a Rust doctest on `highlight_budgeted`. SQL execution supplies the live session allowance and cancellation token; see the [SQL highlight contract](../sql/06-retrieval.md#highlighting-and-facets).
 
 ### Word transformation allocation ownership
 

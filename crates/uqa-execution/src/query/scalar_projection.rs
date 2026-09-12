@@ -7,8 +7,11 @@
 //! Score provenance and highlight rendering for scalar projection rows.
 
 use std::sync::Arc;
-use uqa_analysis::CompiledAnalyzer;
-use uqa_core::Value;
+use uqa_analysis::{AnalysisError, AnalysisResult, CompiledAnalyzer};
+use uqa_core::{
+    memory::{BudgetedVec, MemoryBudget},
+    Value,
+};
 use uqa_sql::{
     expr::RowLookup,
     semantics::scalar_projection::{highlight_arguments, HighlightArguments, HighlightInput},
@@ -54,10 +57,34 @@ pub fn run_uqa_highlight(
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
     analyzers: Option<&dyn AnalyzerRevisions>,
 ) -> Result<Value, SQLError> {
+    run_uqa_highlight_with_runtime(row, args, evaluate, analyzers, None)
+}
+
+pub(crate) fn run_uqa_highlight_with_runtime(
+    row: &dyn RowLookup,
+    args: &[ScalarExpr],
+    evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
+    analyzers: Option<&dyn AnalyzerRevisions>,
+    runtime: Option<super::runtime::QueryRuntimeView<'_>>,
+) -> Result<Value, SQLError> {
     let arguments = match highlight_arguments(row, args, evaluate)? {
         HighlightInput::Value(value) => return Ok(value),
         HighlightInput::Arguments(arguments) => arguments,
     };
+    let budget = MemoryBudget::new(match runtime {
+        Some(runtime) => runtime.work_mem_bytes()?,
+        None => usize::MAX,
+    });
+    let mut poll = || {
+        if let Some(runtime) = runtime {
+            runtime
+                .cancellation
+                .check()
+                .map_err(|_| AnalysisError::Cancelled)?;
+        }
+        Ok(())
+    };
+    poll().map_err(highlight_error)?;
     let HighlightArguments {
         text,
         query: query_str,
@@ -82,22 +109,77 @@ pub fn run_uqa_highlight(
         let revision = revisions
             .analyzer_revision(&name)
             .map_err(SQLError::Unsupported)?;
-        let out = uqa_analysis::highlight_compiled(&text, &[query_str], &revision, &opts)
-            .map_err(|error| SQLError::Internal(format!("highlight analysis failed: {error}")))?;
-        return Ok(Value::Str(out));
+        let out = uqa_analysis::highlight_compiled_budgeted(
+            &text,
+            &[query_str],
+            &revision,
+            &opts,
+            &budget,
+            &mut poll,
+        )
+        .map_err(highlight_error)?;
+        return Ok(Value::Str(out.into_parts().0));
     }
-    // Pull every whitespace-separated token from the query string as a
-    // candidate match term. A simple split matches the documented highlighting
-    // surface and its regression fixtures.
-    let terms: Vec<String> = query_str
-        .split_whitespace()
-        .filter(|t| !matches!(t.to_ascii_lowercase().as_str(), "and" | "or" | "not"))
-        .map(std::string::ToString::to_string)
-        .collect();
+    let terms = query_candidates(&query_str, &budget, &mut poll).map_err(highlight_error)?;
     let analyzer = uqa_analysis::standard_analyzer("english");
-    let out = uqa_analysis::highlight::highlight_words(&text, &terms, Some(&analyzer), &opts)
-        .map_err(|error| SQLError::Internal(format!("highlight analysis failed: {error}")))?;
-    Ok(Value::Str(out))
+    let out = uqa_analysis::highlight::highlight_words_budgeted(
+        &text,
+        terms.iter().copied(),
+        Some(&analyzer),
+        &opts,
+        &budget,
+        poll,
+    )
+    .map_err(highlight_error)?;
+    // The completed string transfers to the scalar result owner after rendering.
+    Ok(Value::Str(out.into_parts().0))
+}
+
+fn query_candidates<'a>(
+    query: &'a str,
+    budget: &MemoryBudget,
+    poll: &mut dyn FnMut() -> AnalysisResult<()>,
+) -> AnalysisResult<BudgetedVec<&'a str>> {
+    let mut terms = BudgetedVec::new(budget);
+    let mut start = None;
+    let mut push = |start, end| {
+        let term = &query[start..end];
+        if !["and", "or", "not"]
+            .iter()
+            .any(|word| term.eq_ignore_ascii_case(word))
+        {
+            terms.push(term)?;
+        }
+        Ok::<(), AnalysisError>(())
+    };
+    for (index, (byte, character)) in query.char_indices().enumerate() {
+        if index % 1024 == 0 {
+            poll()?;
+        }
+        if character.is_whitespace() {
+            if let Some(start) = start.take() {
+                push(start, byte)?;
+            }
+        } else {
+            start.get_or_insert(byte);
+        }
+    }
+    if let Some(start) = start {
+        push(start, query.len())?;
+    }
+    poll()?;
+    Ok(terms)
+}
+
+fn highlight_error(error: AnalysisError) -> SQLError {
+    match error {
+        AnalysisError::Cancelled => SQLError::Cancelled(uqa_core::QueryCancelled),
+        AnalysisError::Memory(error) => SQLError::Routine {
+            sqlstate: "53200".into(),
+            message: format!("highlight analysis failed: {error}"),
+        },
+        error => SQLError::Internal(format!("highlight analysis failed: {error}")),
+    }
 }
 
 #[cfg(test)]

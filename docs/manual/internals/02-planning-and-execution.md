@@ -317,6 +317,8 @@ Duplicate projected labels remain separate slots through execution and the colum
 
 Physical relational operators are pull-based and exchange batches of dynamic `Value` instances. Filters can compile projected predicates once and evaluate positions directly. Aggregates use streaming state and adaptive grouping where possible.
 
+Scalar highlighting borrows the current `QueryRuntimeView` after SQL argument validation and NULL short circuits. Execution forwards one `work_mem` allowance and cancellation callback through borrowed query candidate splitting and the analysis-owned matcher/renderer. Named resources retain their immutable revision during source/query analysis. Memory failures return `53200`; cancellation retains the typed `57014` error. The completed string transfers to the ordinary scalar result owner, and the highlighter does not spill.
+
 Sort, distinct, set operations, ordered aggregates, windows, grouping output, joins, and result materialization account against `work_mem`. When a blocking structure exceeds its budget, it uses the execution spill layer instead of retaining unbounded process memory.
 
 [`distinct`](../../../crates/uqa-execution/src/distinct) keeps canonical row encoding, the in-memory seen set, the spill-backed set, and the operator wrapper as separate owners. [`join`](../../../crates/uqa-execution/src/join) likewise separates the row store, direct in-memory index, canonical disk-capable index, and hash-join driver; these modules share the spill layer without hiding spill transitions inside key policy.
