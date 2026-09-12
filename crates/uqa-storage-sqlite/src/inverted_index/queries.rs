@@ -44,23 +44,7 @@ impl SQLiteInvertedIndex {
             .ok_or_else(|| {
                 SQLiteError::StorageBackend("occurrence source metadata is missing".into())
             })?;
-        if metadata.length != posting.doc_length {
-            return Err(SQLiteError::StorageBackend(
-                "occurrence score length disagrees with source metadata".into(),
-            ));
-        }
-        for occurrence in &posting.occurrences {
-            if let Some(offsets) = occurrence.offsets {
-                if offsets.end_utf8 > metadata.final_offsets.end_utf8
-                    || offsets.end_utf16 > metadata.final_offsets.end_utf16
-                {
-                    return Err(SQLiteError::StorageBackend(
-                        "occurrence offsets exceed original source bounds".into(),
-                    ));
-                }
-            }
-        }
-        Ok(())
+        Ok(metadata.validate_posting(posting, || Ok(()))?)
     }
 
     pub(super) fn occurrence_postings_bulk(

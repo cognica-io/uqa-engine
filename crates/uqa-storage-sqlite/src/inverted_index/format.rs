@@ -16,7 +16,7 @@ pub(super) const FIELD_TABLES: [&str; 4] = [
     "_occurrence_lengths",
     "_occurrence_fields",
 ];
-const LEGACY_TABLES: [&str; 5] = [
+pub(super) const LEGACY_TABLES: [&str; 5] = [
     "_postings",
     "_posting_clusters",
     "_posting_documents",

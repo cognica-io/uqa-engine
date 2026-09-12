@@ -42,6 +42,7 @@ struct StagedField {
 mod block_max;
 mod clustered;
 mod codec;
+mod controlled;
 mod core;
 mod data;
 mod format;

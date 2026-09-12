@@ -17,6 +17,36 @@ use super::{IndexedFieldMetadata, TokenTermKey};
 use uqa_storage::clustered_postings::{cluster_id, decode_all_scores, OccurrencePosting};
 
 impl InvertedIndex for SQLiteInvertedIndex {
+    fn visit_score_clusters(
+        &self,
+        field: &str,
+        term: &TokenTermKey,
+        after: Option<u64>,
+        limit: usize,
+        control: &uqa_storage::read_control::StorageReadControl,
+        visit: &mut uqa_storage::clustered_postings::ScoreClusterVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        Ok(self.visit_clusters_budgeted(field, term, after, limit, control, visit)?)
+    }
+
+    fn get_occurrences_budgeted(
+        &self,
+        doc_id: DocId,
+        field: &str,
+        term: &TokenTermKey,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::Budgeted<Vec<uqa_core::TokenOccurrence>>> {
+        Ok(self.occurrences_budgeted(doc_id, field, term, control)?)
+    }
+
+    fn field_stats_scalar_budgeted(
+        &self,
+        field: &str,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<IndexStats> {
+        Ok(self.scalar_stats_budgeted(field, control)?)
+    }
+
     fn analyzer(&self) -> &Analyzer {
         self.bindings.default_configuration()
     }
