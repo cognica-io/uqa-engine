@@ -11,7 +11,12 @@ use std::ops::Range;
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryReservation};
 
 use super::{AnalysisToken, AnalyzedText, TokenBatch};
-use crate::{AnalysisResult, FilteredText};
+use crate::{AnalysisResult, FilteredText, SourceOffsets};
+
+mod cloning;
+
+#[cfg(test)]
+mod tests;
 
 pub(crate) struct TokenBuffer {
     pub(super) tokens: BudgetedVec<AnalysisToken>,
@@ -52,6 +57,25 @@ impl TokenBuffer {
         poll()?;
         #[cfg(feature = "nori")]
         let projection = input.projection_budgeted(self.memory.budget(), poll)?;
+        self.finish_retained(
+            input.final_offsets(),
+            final_position_increment,
+            #[cfg(feature = "nori")]
+            projection,
+            poll,
+        )
+    }
+
+    fn finish_retained(
+        self,
+        final_offsets: SourceOffsets,
+        final_position_increment: u32,
+        #[cfg(feature = "nori")] projection: std::sync::Arc<
+            Budgeted<crate::source::SourceProjection>,
+        >,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<AnalyzedText>> {
+        poll()?;
         let (tokens, mut memory) = self.tokens.into_parts();
         memory.absorb(self.memory);
         let output = Budgeted::new(
@@ -61,7 +85,7 @@ impl TokenBuffer {
                     final_position_increment,
                     terminal: self.terminal,
                 },
-                final_offsets: input.final_offsets(),
+                final_offsets,
                 #[cfg(feature = "nori")]
                 projection,
             },

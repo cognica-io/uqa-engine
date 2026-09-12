@@ -102,6 +102,7 @@ impl AnalysisToken {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn substring(&self, range: Range<usize>) -> Self {
         let mut token = Self {
             term: self.term.substring(range.clone()),

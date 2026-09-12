@@ -11,7 +11,7 @@ use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget};
 use crate::nori::error::check_limit;
 use crate::AnalysisResult;
 
-pub(super) use crate::allocation::copy_text as copy_string;
+pub(super) use crate::allocation::{copy_text as copy_string, copy_units};
 
 pub(super) fn encode(
     input: &str,
@@ -47,22 +47,4 @@ pub(super) fn utf16_len(
         check_limit("Nori input UTF-16 units", length, limit)?;
     }
     Ok(length)
-}
-
-pub(super) fn copy_units(
-    input: &[u16],
-    budget: &MemoryBudget,
-    poll: &mut dyn FnMut() -> AnalysisResult<()>,
-) -> AnalysisResult<Budgeted<Vec<u16>>> {
-    poll()?;
-    let mut output = BudgetedVec::new(budget);
-    output.reserve(input.len())?;
-    for (index, unit) in input.iter().enumerate() {
-        if index % 1024 == 0 {
-            poll()?;
-        }
-        output.push(*unit)?;
-    }
-    let (output, memory) = output.into_parts();
-    Ok(Budgeted::new(output, memory))
 }

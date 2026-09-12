@@ -17,6 +17,7 @@ mod algorithm;
 mod allocation;
 mod word;
 
+#[cfg(test)]
 pub(crate) use allocation::stem_utf16;
 pub use allocation::{stem, stem_budgeted, stem_term_budgeted};
 

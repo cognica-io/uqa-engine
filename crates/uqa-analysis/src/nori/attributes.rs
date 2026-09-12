@@ -10,6 +10,8 @@ use serde::Serialize;
 
 use super::{NoriMorpheme, NoriOrigin, POSTag, POSType};
 
+mod allocation;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct KoreanMorphology {
     pub pos_type: POSType,

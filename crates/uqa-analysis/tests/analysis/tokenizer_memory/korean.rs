@@ -132,3 +132,41 @@ fn cancellation_and_limits_release_native_and_converted_token_buffers() {
         assert_eq!(budget.used(), 0);
     }
 }
+
+#[test]
+fn native_result_copy_retains_lossless_morphology_and_shared_source_after_original_drop() {
+    let budget = MemoryBudget::new(1 << 20);
+    let filtered = CharFilter::HTMLStrip
+        .filter_with_offsets_budgeted("<b>韓國 감싸여 🙂a</b>", &budget, &mut || Ok(()))
+        .unwrap();
+    let original = Tokenizer::Nori(config())
+        .tokenize_mapped_budgeted(&filtered, &budget, || Ok(()))
+        .unwrap();
+    drop(filtered);
+    let original_bytes = original.reserved_bytes();
+    let retained = budget.used();
+    let copied = original.clone_budgeted(&budget, || Ok(())).unwrap();
+    assert_eq!(*copied, *original);
+    assert_eq!(budget.used(), retained + copied.reserved_bytes());
+    drop(original);
+    assert_eq!(
+        budget.used(),
+        retained - original_bytes + copied.reserved_bytes()
+    );
+    assert!(copied
+        .tokens()
+        .iter()
+        .any(|token| token.term().as_str().is_none()));
+    assert!(copied.tokens().iter().any(|token| token
+        .korean_morphology()
+        .unwrap()
+        .reading
+        .is_some()));
+    assert!(copied.tokens().iter().any(|token| token
+        .korean_morphology()
+        .unwrap()
+        .morphemes
+        .is_some()));
+    drop(copied);
+    assert_eq!(budget.used(), 0);
+}

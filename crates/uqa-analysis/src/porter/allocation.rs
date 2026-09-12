@@ -18,6 +18,7 @@ pub fn stem(word: &str) -> String {
         .0
 }
 
+#[cfg(test)]
 pub(crate) fn stem_utf16(word: &[u16]) -> Vec<u16> {
     stem_utf16_budgeted(word, &MemoryBudget::new(usize::MAX), &mut || Ok(()))
         .expect("unbounded lossless Porter stemming")

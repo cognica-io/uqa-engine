@@ -7,6 +7,7 @@
 //! Lossless term identity for Unicode strings and unpaired UTF-16 units.
 
 use std::borrow::Cow;
+#[cfg(test)]
 use std::ops::Range;
 
 use serde::{Deserialize, Serialize, Serializer};
@@ -14,7 +15,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use crate::{AnalysisError, AnalysisResult};
 
 mod allocation;
-pub(crate) use allocation::TermBuffer;
+pub(crate) use allocation::{TermBoundary, TermBuffer};
 
 #[derive(Clone)]
 enum Characters<'a> {
@@ -143,6 +144,7 @@ impl TokenTerm {
         Self::from_utf16(output)
     }
 
+    #[cfg(test)]
     pub(crate) fn boundaries(&self) -> Vec<usize> {
         match &self.0 {
             Representation::Unicode(text) => text
@@ -162,6 +164,7 @@ impl TokenTerm {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn substring(&self, range: Range<usize>) -> Self {
         match &self.0 {
             Representation::Unicode(text) => Self::from(text[range].to_owned()),

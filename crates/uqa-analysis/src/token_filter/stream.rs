@@ -9,11 +9,13 @@
 use super::PreparedTokenFilter;
 use crate::token::TokenBatch;
 use crate::{porter, AnalysisError, AnalysisResult, AnalysisToken, TokenTerm};
+use uqa_core::memory::{Budgeted, MemoryBudget};
 
 pub(super) fn filter(
     filter: &PreparedTokenFilter<'_>,
     mut batch: TokenBatch,
 ) -> AnalysisResult<TokenBatch> {
+    let budget = MemoryBudget::new(usize::MAX);
     match filter {
         #[cfg(feature = "nori")]
         PreparedTokenFilter::Nori(filter) => {
@@ -28,26 +30,23 @@ pub(super) fn filter(
                         super::lowercase::lower_budgeted(
                             &token.term,
                             properties,
-                            &uqa_core::memory::MemoryBudget::new(usize::MAX),
+                            &budget,
                             &mut || Ok(()),
                         )?
                         .into_parts()
                         .0
                     }
                     PreparedTokenFilter::ASCIIFolding => {
-                        super::ascii::fold_budgeted(
-                            &token.term,
-                            &uqa_core::memory::MemoryBudget::new(usize::MAX),
-                            &mut || Ok(()),
-                        )?
-                        .into_parts()
-                        .0
+                        super::ascii::fold_budgeted(&token.term, &budget, &mut || Ok(()))?
+                            .into_parts()
+                            .0
                     }
                     _ if token.keyword => continue,
-                    _ => token.term.as_str().map_or_else(
-                        || TokenTerm::from_utf16(porter::stem_utf16(&token.term.utf16())),
-                        |text| TokenTerm::from(porter::stem(text)),
-                    ),
+                    _ => {
+                        porter::stem_term_budgeted(&token.term, &budget, || Ok(()))?
+                            .into_parts()
+                            .0
+                    }
                 };
                 token.replace_term(term);
             }
@@ -65,8 +64,16 @@ pub(super) fn filter(
                 expanded.push(token);
                 if let Some(alternatives) = alternatives {
                     for term in alternatives {
-                        let mut alternative = expanded[start].clone();
-                        alternative.replace_term(term.clone().into());
+                        let (term, memory) =
+                            crate::allocation::copy_text(term, &budget, &mut || Ok(()))?
+                                .into_parts();
+                        let (mut alternative, _memory) = expanded[start]
+                            .rewrite_budgeted(
+                                Budgeted::new(TokenTerm::from(term), memory),
+                                &budget,
+                                &mut || Ok(()),
+                            )?
+                            .into_parts();
                         alternative.position_increment = 0;
                         expanded.push(alternative);
                     }
@@ -79,10 +86,10 @@ pub(super) fn filter(
             max_gram,
             keep_short,
         } => {
-            batch = grams(batch, *min_gram, *max_gram, *keep_short, false)?;
+            batch = grams(batch, *min_gram, *max_gram, *keep_short, false, &budget)?;
         }
         PreparedTokenFilter::EdgeNgram { min_gram, max_gram } => {
-            batch = grams(batch, *min_gram, *max_gram, false, true)?;
+            batch = grams(batch, *min_gram, *max_gram, false, true, &budget)?;
         }
         PreparedTokenFilter::Length {
             min_length,
@@ -135,12 +142,13 @@ fn grams(
     max_gram: usize,
     keep_short: bool,
     edge: bool,
+    budget: &MemoryBudget,
 ) -> AnalysisResult<TokenBatch> {
     let mut tokens = Vec::new();
     let mut skipped = 0;
     let mut trailing_removed = None;
     for mut token in batch.tokens {
-        let boundaries = token.term.boundaries();
+        let boundaries = token.term.boundaries_budgeted(budget, &mut || Ok(()))?;
         let length = boundaries.len() - 1;
         if length < min_gram {
             if keep_short {
@@ -159,7 +167,15 @@ fn grams(
         for n in min_gram..=max_gram.min(length) {
             let last_start = if edge { 0 } else { length - n };
             for start in 0..=last_start {
-                let mut gram = token.substring(boundaries[start]..boundaries[start + n]);
+                let (mut gram, _memory) = token
+                    .substring_budgeted(
+                        boundaries[start],
+                        boundaries[start + n],
+                        boundaries[length],
+                        budget,
+                        &mut || Ok(()),
+                    )?
+                    .into_parts();
                 gram.position_increment = if first {
                     first = false;
                     let increment = add_increment(token.position_increment, skipped)?;
