@@ -12,6 +12,38 @@ use super::*;
 use crate::transaction::SQLiteTransaction;
 
 #[test]
+fn resource_failures_keep_their_types_across_provider_and_transaction_boundaries() {
+    use uqa_core::{memory::MemoryError, QueryCancelled};
+    use uqa_storage::{StorageBackendError, TransactionError};
+    for error in [
+        StorageBackendError::Memory(MemoryError::Limit {
+            required: 512,
+            limit: 256,
+        }),
+        StorageBackendError::Memory(MemoryError::SizeOverflow),
+        StorageBackendError::Cancelled(QueryCancelled),
+    ] {
+        let expected = error.to_string();
+        let provider = SQLiteError::from(error);
+        let transaction = TransactionError::from(provider);
+        let TransactionError::Storage(storage) = transaction else {
+            panic!("resource error lost its storage boundary")
+        };
+        assert_eq!(storage.to_string(), expected);
+        assert!(matches!(
+            storage,
+            StorageBackendError::Memory(_) | StorageBackendError::Cancelled(_)
+        ));
+        let provider = SQLiteError::from(storage);
+        assert_eq!(provider.to_string(), expected);
+        assert!(matches!(
+            provider,
+            SQLiteError::Memory(_) | SQLiteError::Cancelled(_)
+        ));
+    }
+}
+
+#[test]
 fn provider_error_round_trip_preserves_sqlite_diagnostics() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     connection

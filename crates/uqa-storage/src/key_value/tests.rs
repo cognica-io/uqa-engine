@@ -25,6 +25,8 @@ use super::{
 use crate::{PersistentStorageBackend, StorageBackendError};
 
 mod catalog;
+mod controlled;
+mod controlled_index;
 mod indexes;
 mod occurrences;
 mod tuple_metadata;

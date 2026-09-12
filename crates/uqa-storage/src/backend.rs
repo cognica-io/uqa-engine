@@ -25,6 +25,10 @@ use crate::CatalogFacade;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageBackendError {
+    #[error(transparent)]
+    Memory(#[from] uqa_core::memory::MemoryError),
+    #[error(transparent)]
+    Cancelled(#[from] uqa_core::QueryCancelled),
     #[error("text analysis failed: {0}")]
     Analysis(#[from] uqa_analysis::AnalysisError),
     #[error("payload serialization failed: {0}")]

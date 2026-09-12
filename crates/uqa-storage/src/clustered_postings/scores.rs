@@ -107,89 +107,125 @@ pub(super) fn encode_scores(
     Ok(output)
 }
 
-pub(super) fn parse_score_blob(blob: &[u8]) -> StorageBackendResult<(usize, Vec<ScoreBlock>)> {
-    validate_header(blob, *SCORE_MAGIC)?;
-    let count = read_u32(blob, 8)? as usize;
-    if count == 0 {
-        return Err(corrupt("persisted posting cluster is empty"));
-    }
-    let block_count = read_u32(blob, 12)? as usize;
-    if block_count != count.div_ceil(DEFAULT_BLOCK_SIZE) {
-        return Err(corrupt("score block count does not match posting count"));
-    }
-    let directory_end = HEADER_LEN
-        .checked_add(
-            block_count
-                .checked_mul(SCORE_DIRECTORY_ENTRY_LEN)
-                .ok_or_else(|| corrupt("score directory size overflow"))?,
-        )
-        .ok_or_else(|| corrupt("score directory end overflow"))?;
-    if directory_end > blob.len() {
-        return Err(corrupt("truncated score block directory"));
-    }
-    let minimum_stream_bytes = count
-        .checked_mul(3)
-        .ok_or_else(|| corrupt("minimum score stream size overflow"))?;
-    if directory_end
-        .checked_add(minimum_stream_bytes)
-        .is_none_or(|minimum_len| minimum_len > blob.len())
-    {
-        return Err(corrupt("posting count exceeds score stream length"));
-    }
+/// Validated directory borrowed from its encoded owner; no block table is allocated.
+pub(super) struct ScoreDirectory<'a> {
+    blob: &'a [u8],
+    pub count: usize,
+    pub blocks: usize,
+}
+impl<'a> ScoreDirectory<'a> {
+    pub fn new(
+        blob: &'a [u8],
+        poll: &mut dyn FnMut() -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<Self> {
+        poll()?;
+        validate_header(blob, *SCORE_MAGIC)?;
+        let count = read_u32(blob, 8)? as usize;
+        if count == 0 {
+            return Err(corrupt("persisted posting cluster is empty"));
+        }
+        let block_count = read_u32(blob, 12)? as usize;
+        if block_count != count.div_ceil(DEFAULT_BLOCK_SIZE) {
+            return Err(corrupt("score block count does not match posting count"));
+        }
+        let directory_end = HEADER_LEN
+            .checked_add(
+                block_count
+                    .checked_mul(SCORE_DIRECTORY_ENTRY_LEN)
+                    .ok_or_else(|| corrupt("score directory size overflow"))?,
+            )
+            .ok_or_else(|| corrupt("score directory end overflow"))?;
+        if directory_end > blob.len() {
+            return Err(corrupt("truncated score block directory"));
+        }
+        let minimum_stream_bytes = count
+            .checked_mul(3)
+            .ok_or_else(|| corrupt("minimum score stream size overflow"))?;
+        if directory_end
+            .checked_add(minimum_stream_bytes)
+            .is_none_or(|minimum_len| minimum_len > blob.len())
+        {
+            return Err(corrupt("posting count exceeds score stream length"));
+        }
 
-    let mut blocks = Vec::with_capacity(block_count);
-    let mut total = 0_usize;
-    let mut previous_last = None;
-    let mut previous_end = directory_end;
-    for index in 0..block_count {
-        let start = HEADER_LEN + index * SCORE_DIRECTORY_ENTRY_LEN;
-        let block = ScoreBlock {
-            version: blob[4],
-            count: usize::from(read_u16(blob, start)?),
-            last_offset: read_u16(blob, start + 2)?,
-            docs_start: read_u32(blob, start + 4)? as usize,
-            docs_end: read_u32(blob, start + 8)? as usize,
-            term_freqs_start: read_u32(blob, start + 12)? as usize,
-            term_freqs_end: read_u32(blob, start + 16)? as usize,
-            doc_lengths_start: read_u32(blob, start + 20)? as usize,
-            doc_lengths_end: read_u32(blob, start + 24)? as usize,
-        };
-        let expected_count = (count - total).min(DEFAULT_BLOCK_SIZE);
-        if block.count != expected_count || block.count == 0 {
-            return Err(corrupt("invalid score block posting count"));
+        let mut total = 0_usize;
+        let mut previous_last = None;
+        let mut previous_end = directory_end;
+        for index in 0..block_count {
+            poll()?;
+            let block = read_score_block(blob, index)?;
+            let expected_count = (count - total).min(DEFAULT_BLOCK_SIZE);
+            if block.count != expected_count || block.count == 0 {
+                return Err(corrupt("invalid score block posting count"));
+            }
+            if previous_last.is_some_and(|last| last >= block.last_offset) {
+                return Err(corrupt("score block document ranges overlap"));
+            }
+            if block.docs_start != previous_end
+                || block.docs_start > block.docs_end
+                || block.docs_end != block.term_freqs_start
+                || block.term_freqs_start > block.term_freqs_end
+                || block.term_freqs_end != block.doc_lengths_start
+                || block.doc_lengths_start > block.doc_lengths_end
+                || block.doc_lengths_end > blob.len()
+            {
+                return Err(corrupt("invalid score stream boundaries"));
+            }
+            let mut encoded_docs = &blob[block.docs_start..block.docs_end];
+            let first_offset = u16::try_from(read_varint(&mut encoded_docs)?)
+                .map_err(|_| corrupt("first document offset exceeds clustered format"))?;
+            if first_offset > block.last_offset
+                || previous_last.is_some_and(|last| last >= first_offset)
+            {
+                return Err(corrupt("score block document ranges overlap"));
+            }
+            total = total
+                .checked_add(block.count)
+                .ok_or_else(|| corrupt("score posting count overflow"))?;
+            previous_last = Some(block.last_offset);
+            previous_end = block.doc_lengths_end;
         }
-        if previous_last.is_some_and(|last| last >= block.last_offset) {
-            return Err(corrupt("score block document ranges overlap"));
+        if total != count || previous_end != blob.len() {
+            return Err(corrupt("score blob length or posting count mismatch"));
         }
-        if block.docs_start != previous_end
-            || block.docs_start > block.docs_end
-            || block.docs_end != block.term_freqs_start
-            || block.term_freqs_start > block.term_freqs_end
-            || block.term_freqs_end != block.doc_lengths_start
-            || block.doc_lengths_start > block.doc_lengths_end
-            || block.doc_lengths_end > blob.len()
-        {
-            return Err(corrupt("invalid score stream boundaries"));
-        }
-        let mut encoded_docs = &blob[block.docs_start..block.docs_end];
-        let first_offset = u16::try_from(read_varint(&mut encoded_docs)?)
-            .map_err(|_| corrupt("first document offset exceeds clustered format"))?;
-        if first_offset > block.last_offset
-            || previous_last.is_some_and(|last| last >= first_offset)
-        {
-            return Err(corrupt("score block document ranges overlap"));
-        }
-        total = total
-            .checked_add(block.count)
-            .ok_or_else(|| corrupt("score posting count overflow"))?;
-        previous_last = Some(block.last_offset);
-        previous_end = block.doc_lengths_end;
-        blocks.push(block);
+        poll()?;
+        Ok(Self {
+            blob,
+            count,
+            blocks: block_count,
+        })
     }
-    if total != count || previous_end != blob.len() {
-        return Err(corrupt("score blob length or posting count mismatch"));
+    pub fn block(&self, index: usize) -> StorageBackendResult<ScoreBlock> {
+        if index >= self.blocks {
+            return Err(corrupt("score block index is out of bounds"));
+        }
+        read_score_block(self.blob, index)
     }
-    Ok((count, blocks))
+}
+
+fn read_score_block(blob: &[u8], index: usize) -> StorageBackendResult<ScoreBlock> {
+    let start = HEADER_LEN + index * SCORE_DIRECTORY_ENTRY_LEN;
+    let block = ScoreBlock {
+        version: blob[4],
+        count: usize::from(read_u16(blob, start)?),
+        last_offset: read_u16(blob, start + 2)?,
+        docs_start: read_u32(blob, start + 4)? as usize,
+        docs_end: read_u32(blob, start + 8)? as usize,
+        term_freqs_start: read_u32(blob, start + 12)? as usize,
+        term_freqs_end: read_u32(blob, start + 16)? as usize,
+        doc_lengths_start: read_u32(blob, start + 20)? as usize,
+        doc_lengths_end: read_u32(blob, start + 24)? as usize,
+    };
+    Ok(block)
+}
+
+pub(super) fn parse_score_blob(blob: &[u8]) -> StorageBackendResult<(usize, Vec<ScoreBlock>)> {
+    let directory = ScoreDirectory::new(blob, &mut || Ok(()))?;
+    let mut blocks = Vec::with_capacity(directory.blocks);
+    for index in 0..directory.blocks {
+        blocks.push(directory.block(index)?);
+    }
+    Ok((directory.count, blocks))
 }
 
 pub(super) fn decode_score_block_into(
@@ -198,12 +234,30 @@ pub(super) fn decode_score_block_into(
     block: ScoreBlock,
     output: &mut Vec<PostingScore>,
 ) -> StorageBackendResult<()> {
+    visit_score_block(blob, cluster_id, block, &mut || Ok(()), |entry, _| {
+        output.push(entry);
+        Ok(())
+    })
+}
+
+pub(super) fn visit_score_block(
+    blob: &[u8],
+    cluster_id: u64,
+    block: ScoreBlock,
+    poll: &mut dyn FnMut() -> StorageBackendResult<()>,
+    mut visit: impl FnMut(
+        PostingScore,
+        &mut dyn FnMut() -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()>,
+) -> StorageBackendResult<()> {
+    poll()?;
     let base = cluster_base(cluster_id)?;
     let mut docs = &blob[block.docs_start..block.docs_end];
     let mut term_freqs = &blob[block.term_freqs_start..block.term_freqs_end];
     let mut doc_lengths = &blob[block.doc_lengths_start..block.doc_lengths_end];
     let mut previous = 0_u16;
     for index in 0..block.count {
+        poll()?;
         let encoded = read_varint(&mut docs)?;
         let delta = u16::try_from(encoded)
             .map_err(|_| corrupt("document delta exceeds clustered format"))?;
@@ -227,13 +281,16 @@ pub(super) fn decode_score_block_into(
         {
             return Err(corrupt("invalid term frequency or document length"));
         }
-        output.push(PostingScore {
-            doc_id: base
-                .checked_add(u64::from(offset))
-                .ok_or_else(|| corrupt("posting document id overflow"))?,
-            term_freq,
-            doc_length,
-        });
+        visit(
+            PostingScore {
+                doc_id: base
+                    .checked_add(u64::from(offset))
+                    .ok_or_else(|| corrupt("posting document id overflow"))?,
+                term_freq,
+                doc_length,
+            },
+            poll,
+        )?;
         previous = offset;
     }
     if !docs.is_empty() || !term_freqs.is_empty() || !doc_lengths.is_empty() {
@@ -244,5 +301,6 @@ pub(super) fn decode_score_block_into(
             "score block last document does not match directory",
         ));
     }
+    poll()?;
     Ok(())
 }

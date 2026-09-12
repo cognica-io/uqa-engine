@@ -23,6 +23,10 @@ use crate::compressed_vfs::{self, SQLiteCompressedContainerAnchor, SQLiteCompres
 
 #[derive(Debug, thiserror::Error)]
 pub enum SQLiteError {
+    #[error(transparent)]
+    Memory(#[from] uqa_core::memory::MemoryError),
+    #[error(transparent)]
+    Cancelled(#[from] uqa_core::QueryCancelled),
     #[error("text analysis failed: {0}")]
     Analysis(#[from] uqa_analysis::AnalysisError),
     #[error("sqlite error: {0}")]
@@ -713,7 +717,11 @@ mod tests;
 
 impl From<SQLiteError> for uqa_storage::StorageBackendError {
     fn from(source: SQLiteError) -> Self {
-        Self::backend("SQLite", source)
+        match source {
+            SQLiteError::Memory(error) => Self::Memory(error),
+            SQLiteError::Cancelled(error) => Self::Cancelled(error),
+            source => Self::backend("SQLite", source),
+        }
     }
 }
 
@@ -727,6 +735,8 @@ impl From<uqa_storage::StorageBackendError> for SQLiteError {
     fn from(error: uqa_storage::StorageBackendError) -> Self {
         use uqa_storage::StorageBackendError;
         match error {
+            StorageBackendError::Memory(error) => Self::Memory(error),
+            StorageBackendError::Cancelled(error) => Self::Cancelled(error),
             StorageBackendError::Analysis(error) => Self::Analysis(error),
             StorageBackendError::Serde(error) => Self::Serde(error),
             StorageBackendError::Backend { backend, source } => match source.downcast::<Self>() {

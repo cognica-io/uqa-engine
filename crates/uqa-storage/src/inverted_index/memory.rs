@@ -14,6 +14,49 @@ use super::{
 };
 
 impl InvertedIndex for MemoryInvertedIndex {
+    fn field_stats_scalar_budgeted(
+        &self,
+        field: &str,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<IndexStats> {
+        control.check()?;
+        let stats = self.field_stats_scalar(field)?;
+        control.check()?;
+        Ok(stats)
+    }
+
+    fn posting_read_cursor_key_budgeted<'a>(
+        &'a self,
+        field: &'a str,
+        term: &'a TokenTermKey,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::clustered_postings::BudgetedPostingReadCursor<'a>> {
+        let cursor =
+            super::read_cursor::MemoryPostingReadCursor::with_control(self, field, term, control)?;
+        crate::clustered_postings::BudgetedPostingReadCursor::new(cursor, control)
+    }
+
+    fn get_occurrences_budgeted(
+        &self,
+        doc_id: DocId,
+        field: &str,
+        term: &TokenTermKey,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::Budgeted<Vec<TokenOccurrence>>> {
+        let postings = super::read_cursor::controlled_postings(self, field, term, control)?;
+        let mut output = uqa_core::memory::BudgetedVec::new(control.memory());
+        if let Some(posting) = postings.and_then(|postings| postings.get(&doc_id)) {
+            output.reserve(posting.occurrences.len())?;
+            for occurrence in &posting.occurrences {
+                control.check()?;
+                output.push(*occurrence)?;
+            }
+        }
+        control.check()?;
+        let (values, memory) = output.into_parts();
+        Ok(uqa_core::memory::Budgeted::new(values, memory))
+    }
+
     fn posting_read_cursor_key<'a>(
         &'a self,
         field: &'a str,

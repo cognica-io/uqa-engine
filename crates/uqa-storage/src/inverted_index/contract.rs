@@ -9,10 +9,13 @@ use super::{
     counter_error, Analyzer, Arc, BTreeMap, BlockMaxScorer, DocId, FieldName, IndexStats,
     PostingEntry, PostingList, StorageBackendError, StorageBackendResult,
 };
+use crate::clustered_postings::BudgetedPostingReadCursor;
 use crate::clustered_postings::{
     MaterializedPostingCursor, OccurrencePosting, PostingCursor, PostingScore,
 };
+use crate::read_control::StorageReadControl;
 use crate::TokenTermKey;
+use uqa_core::memory::Budgeted;
 use uqa_core::TokenOccurrence;
 
 /// Which side of the index/search pipeline a field analyzer applies to.
@@ -133,6 +136,46 @@ pub trait InvertedIndex: Send + Sync {
         Ok(Box::new(crate::clustered_postings::OwnedPostingReadCursor(
             self.posting_cursor_key(field, term)?,
         )))
+    }
+
+    /// Open a cursor that owns every query allocation under the supplied allowance. Providers must implement this capability without an unbounded materialization fallback.
+    fn posting_read_cursor_key_budgeted<'a>(
+        &'a self,
+        field: &'a str,
+        term: &'a TokenTermKey,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedPostingReadCursor<'a>> {
+        crate::clustered_postings::open_controlled_cursor(self, field, term, control)
+    }
+
+    /// Visit encoded score clusters in ascending order under the retained provider read. Temporary payloads must be reserved before fetching; callbacks must not reenter the provider.
+    fn visit_score_clusters(
+        &self,
+        _field: &str,
+        _term: &TokenTermKey,
+        _after: Option<u64>,
+        _limit: usize,
+        control: &StorageReadControl,
+        _visit: &mut crate::clustered_postings::ScoreClusterVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled score cluster reads are not supported by this backend".into(),
+        ))
+    }
+
+    /// Decode one document's exact occurrences with provider-owned input and output reservations and cancellation checks.
+    fn get_occurrences_budgeted(
+        &self,
+        _doc_id: DocId,
+        _field: &str,
+        _term: &TokenTermKey,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Budgeted<Vec<TokenOccurrence>>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled occurrence reads are not supported by this backend".into(),
+        ))
     }
 
     /// Complete graph edges in document order, preserving occurrence multiplicity and original source coordinates. Legacy positions cannot implement this contract without a source rebuild.
@@ -451,6 +494,18 @@ pub trait InvertedIndex: Send + Sync {
             0.0
         };
         Ok(stats)
+    }
+
+    /// Read only field scoring scalars with producer-owned temporary reservations.
+    fn field_stats_scalar_budgeted(
+        &self,
+        _field: &str,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<IndexStats> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled field statistics are not supported by this backend".into(),
+        ))
     }
 
     /// Sorted unique indexed terms for `field`.

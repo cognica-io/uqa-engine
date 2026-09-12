@@ -27,6 +27,7 @@ pub mod index_types;
 pub mod inverted_index;
 pub mod ivf_index;
 pub mod key_value;
+pub mod read_control;
 pub mod spatial_index;
 pub mod term_key;
 pub mod transaction;

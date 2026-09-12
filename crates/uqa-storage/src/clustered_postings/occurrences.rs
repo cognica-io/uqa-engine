@@ -9,10 +9,13 @@
 use uqa_core::TokenOffsets;
 
 use super::{
-    cluster_id, corrupt, decode_all_scores, encode_scores, position_entries, put_u32, put_varint,
-    read_varint, validate_header, validate_scores, DocId, PostingScore, StorageBackendResult,
-    TokenOccurrence, OCCURRENCE_FORMAT_VERSION, POSITIONS_MAGIC, SCORE_MAGIC,
+    cluster_id, corrupt, encode_scores, put_u32, put_varint, read_varint, validate_header,
+    validate_scores, DocId, PostingScore, StorageBackendResult, TokenOccurrence,
+    OCCURRENCE_FORMAT_VERSION, POSITIONS_MAGIC, SCORE_MAGIC,
 };
+
+mod allocation;
+pub use allocation::{decode_occurrence_cluster_budgeted, decode_occurrence_document_budgeted};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OccurrencePosting {
@@ -95,39 +98,28 @@ pub fn decode_occurrence_cluster(
     score_blob: &[u8],
     positions_blob: &[u8],
 ) -> StorageBackendResult<Vec<OccurrencePosting>> {
-    validate_header(score_blob, *SCORE_MAGIC)?;
-    validate_header(positions_blob, *POSITIONS_MAGIC)?;
-    if score_blob[4] != OCCURRENCE_FORMAT_VERSION || positions_blob[4] != OCCURRENCE_FORMAT_VERSION
-    {
-        return Err(corrupt(
-            "legacy positional data requires an atomic source rebuild",
-        ));
-    }
-    let scores = decode_all_scores(cluster_id, score_blob)?;
-    let slices = position_entries(positions_blob, scores.len())?;
-    scores
-        .into_iter()
-        .zip(slices)
-        .map(|(score, bytes)| {
-            let occurrences = decode_entry(bytes, score.term_freq)?;
-            Ok(OccurrencePosting {
-                doc_id: score.doc_id,
-                doc_length: score.doc_length,
-                occurrences,
-            })
-        })
-        .collect()
+    Ok(decode_occurrence_cluster_budgeted(
+        cluster_id,
+        score_blob,
+        positions_blob,
+        &uqa_core::memory::MemoryBudget::new(usize::MAX),
+        || Ok(()),
+    )?
+    .into_parts()
+    .0)
 }
 
-fn decode_entry(mut bytes: &[u8], frequency: u64) -> StorageBackendResult<Vec<TokenOccurrence>> {
-    let count =
-        usize::try_from(frequency).map_err(|_| corrupt("occurrence count exceeds memory"))?;
-    if count > bytes.len() / 3 {
-        return Err(corrupt("occurrence count exceeds payload length"));
-    }
-    let mut occurrences = Vec::with_capacity(count);
+fn visit_entry(
+    mut bytes: &[u8],
+    frequency: u64,
+    poll: &mut dyn FnMut() -> StorageBackendResult<()>,
+    mut visit: impl FnMut(TokenOccurrence) -> StorageBackendResult<()>,
+) -> StorageBackendResult<()> {
+    poll()?;
+    let count = occurrence_count(bytes, frequency)?;
     let mut position = 0_u32;
     for _ in 0..count {
+        poll()?;
         let delta = u32::try_from(read_varint(&mut bytes)?)
             .map_err(|_| corrupt("occurrence position delta exceeds u32"))?;
         position = position
@@ -152,12 +144,22 @@ fn decode_entry(mut bytes: &[u8], frequency: u64) -> StorageBackendResult<Vec<To
         occurrence
             .validate()
             .map_err(|error| corrupt(error.to_string()))?;
-        occurrences.push(occurrence);
+        visit(occurrence)?;
     }
     if !bytes.is_empty() {
         return Err(corrupt("occurrence entry contains trailing bytes"));
     }
-    Ok(occurrences)
+    poll()?;
+    Ok(())
+}
+
+fn occurrence_count(bytes: &[u8], frequency: u64) -> StorageBackendResult<usize> {
+    let count =
+        usize::try_from(frequency).map_err(|_| corrupt("occurrence count exceeds memory"))?;
+    if count > bytes.len() / 3 {
+        return Err(corrupt("occurrence count exceeds payload length"));
+    }
+    Ok(count)
 }
 
 fn read_offsets(bytes: &mut &[u8]) -> StorageBackendResult<TokenOffsets> {

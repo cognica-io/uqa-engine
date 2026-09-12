@@ -6,11 +6,12 @@
 
 //! A table-owned namespace for complete occurrence indexes, separate from legacy scalar keys.
 
-use super::codec::{
-    other_error, push_segment, push_str, push_u64, read_segment, read_str, read_u64, single_str_key,
-};
+use super::codec::{other_error, read_segment, read_str, read_u64};
 use super::{DocId, StorageBackendResult, TAG_OCCURRENCE_INDEX};
 use crate::TokenTermKey;
+
+pub(super) mod encoding;
+use encoding::Part::{Number, Segment};
 
 pub(super) const SCORE: u8 = b's';
 pub(super) const POSITIONS: u8 = b'p';
@@ -22,19 +23,20 @@ pub(super) const FORMAT: u8 = b'v';
 pub(super) const FORMAT_NAME: &[u8] = b"occurrences-v2";
 
 pub(super) fn table_prefix(table: &str) -> StorageBackendResult<Vec<u8>> {
-    single_str_key(TAG_OCCURRENCE_INDEX, table)
+    encoding::key(table, TAG_OCCURRENCE_INDEX, None, &[])
 }
 
 pub(super) fn kind_prefix(table: &str, kind: u8) -> StorageBackendResult<Vec<u8>> {
-    let mut key = table_prefix(table)?;
-    key.push(kind);
-    Ok(key)
+    encoding::key(table, TAG_OCCURRENCE_INDEX, Some(kind), &[])
 }
 
 pub(super) fn field_prefix(table: &str, kind: u8, field: &str) -> StorageBackendResult<Vec<u8>> {
-    let mut key = kind_prefix(table, kind)?;
-    push_str(&mut key, field)?;
-    Ok(key)
+    encoding::key(
+        table,
+        TAG_OCCURRENCE_INDEX,
+        Some(kind),
+        &[Segment(field.as_bytes())],
+    )
 }
 
 pub(super) fn term_prefix(
@@ -43,9 +45,12 @@ pub(super) fn term_prefix(
     field: &str,
     term: &TokenTermKey,
 ) -> StorageBackendResult<Vec<u8>> {
-    let mut key = field_prefix(table, kind, field)?;
-    push_segment(&mut key, term.as_bytes())?;
-    Ok(key)
+    encoding::key(
+        table,
+        TAG_OCCURRENCE_INDEX,
+        Some(kind),
+        &[Segment(field.as_bytes()), Segment(term.as_bytes())],
+    )
 }
 
 pub(super) fn cluster_key(
@@ -55,9 +60,16 @@ pub(super) fn cluster_key(
     term: &TokenTermKey,
     cluster: u64,
 ) -> StorageBackendResult<Vec<u8>> {
-    let mut key = term_prefix(table, kind, field, term)?;
-    push_u64(&mut key, cluster);
-    Ok(key)
+    encoding::key(
+        table,
+        TAG_OCCURRENCE_INDEX,
+        Some(kind),
+        &[
+            Segment(field.as_bytes()),
+            Segment(term.as_bytes()),
+            Number(cluster),
+        ],
+    )
 }
 
 pub(super) fn document_prefix(
@@ -65,9 +77,7 @@ pub(super) fn document_prefix(
     kind: u8,
     doc_id: DocId,
 ) -> StorageBackendResult<Vec<u8>> {
-    let mut key = kind_prefix(table, kind)?;
-    push_u64(&mut key, doc_id);
-    Ok(key)
+    encoding::key(table, TAG_OCCURRENCE_INDEX, Some(kind), &[Number(doc_id)])
 }
 
 pub(super) fn document_key(
@@ -76,9 +86,12 @@ pub(super) fn document_key(
     doc_id: DocId,
     field: &str,
 ) -> StorageBackendResult<Vec<u8>> {
-    let mut key = document_prefix(table, kind, doc_id)?;
-    push_str(&mut key, field)?;
-    Ok(key)
+    encoding::key(
+        table,
+        TAG_OCCURRENCE_INDEX,
+        Some(kind),
+        &[Number(doc_id), Segment(field.as_bytes())],
+    )
 }
 
 pub(super) fn metadata_key(
@@ -86,9 +99,12 @@ pub(super) fn metadata_key(
     field: &str,
     doc_id: DocId,
 ) -> StorageBackendResult<Vec<u8>> {
-    let mut key = field_prefix(table, METADATA, field)?;
-    push_u64(&mut key, doc_id);
-    Ok(key)
+    encoding::key(
+        table,
+        TAG_OCCURRENCE_INDEX,
+        Some(METADATA),
+        &[Segment(field.as_bytes()), Number(doc_id)],
+    )
 }
 
 fn header(key: &[u8], kind: u8) -> StorageBackendResult<usize> {

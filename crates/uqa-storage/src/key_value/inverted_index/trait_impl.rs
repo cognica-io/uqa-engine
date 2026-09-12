@@ -16,6 +16,36 @@ use super::{
 };
 
 impl InvertedIndex for KeyValueInvertedIndex {
+    fn visit_score_clusters(
+        &self,
+        field: &str,
+        term: &TokenTermKey,
+        after: Option<u64>,
+        limit: usize,
+        control: &crate::read_control::StorageReadControl,
+        visit: &mut crate::clustered_postings::ScoreClusterVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.visit_clusters_budgeted(field, term, after, limit, control, visit)
+    }
+
+    fn get_occurrences_budgeted(
+        &self,
+        doc_id: DocId,
+        field: &str,
+        term: &TokenTermKey,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::Budgeted<Vec<uqa_core::TokenOccurrence>>> {
+        self.occurrences_budgeted(doc_id, field, term, control)
+    }
+
+    fn field_stats_scalar_budgeted(
+        &self,
+        field: &str,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<IndexStats> {
+        self.scalar_stats_budgeted(field, control)
+    }
+
     fn analyzer(&self) -> &Analyzer {
         self.bindings.default_configuration()
     }

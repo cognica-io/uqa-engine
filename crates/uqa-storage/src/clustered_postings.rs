@@ -52,8 +52,12 @@ pub trait PostingCursor: Send {
     fn boxed_clone(&self) -> Box<dyn PostingCursor>;
 }
 
+mod controlled_cursor;
+mod positions;
 mod read_cursor;
-pub use read_cursor::{OwnedPostingReadCursor, PostingReadCursor};
+pub(crate) use controlled_cursor::open as open_controlled_cursor;
+pub use controlled_cursor::{EncodedScoreClusterRef, ScoreClusterVisitor};
+pub use read_cursor::{BudgetedPostingReadCursor, OwnedPostingReadCursor, PostingReadCursor};
 
 impl Clone for Box<dyn PostingCursor> {
     fn clone(&self) -> Self {
@@ -334,8 +338,15 @@ pub fn decode_cluster(
 }
 
 pub fn score_count(score_blob: &[u8]) -> StorageBackendResult<u64> {
-    let (count, _) = parse_score_blob(score_blob)?;
-    Ok(count as u64)
+    score_count_with_control(score_blob, || Ok(()))
+}
+
+/// Validate the borrowed score directory and count its entries without allocating.
+pub fn score_count_with_control(
+    score_blob: &[u8],
+    mut poll: impl FnMut() -> StorageBackendResult<()>,
+) -> StorageBackendResult<u64> {
+    Ok(scores::ScoreDirectory::new(score_blob, &mut poll)?.count as u64)
 }
 
 pub fn decode_all_scores(
@@ -352,37 +363,10 @@ pub fn decode_all_scores(
 }
 
 fn position_entries(blob: &[u8], expected_count: usize) -> StorageBackendResult<Vec<&[u8]>> {
-    let count = read_u32(blob, 8)? as usize;
-    let offset_count = read_u32(blob, 12)? as usize;
-    if count != expected_count || offset_count != count.saturating_add(1) {
-        return Err(corrupt("positions posting count mismatch"));
-    }
-    let data_start = HEADER_LEN
-        .checked_add(
-            offset_count
-                .checked_mul(std::mem::size_of::<u32>())
-                .ok_or_else(|| corrupt("positions offset table size overflow"))?,
-        )
-        .ok_or_else(|| corrupt("positions data offset overflow"))?;
-    if data_start > blob.len() {
-        return Err(corrupt("truncated positions offset table"));
-    }
-    let data = &blob[data_start..];
-    let mut offsets = Vec::with_capacity(offset_count);
-    for index in 0..offset_count {
-        offsets.push(read_u32(blob, HEADER_LEN + index * 4)? as usize);
-    }
-    if offsets.first().copied() != Some(0)
-        || offsets.last().copied() != Some(data.len())
-        || offsets.windows(2).any(|pair| pair[0] > pair[1])
-    {
-        return Err(corrupt("invalid positions payload offsets"));
-    }
-
-    Ok(offsets
-        .windows(2)
-        .map(|pair| &data[pair[0]..pair[1]])
-        .collect())
+    let directory = positions::PositionDirectory::new(blob, expected_count, &mut || Ok(()))?;
+    (0..expected_count)
+        .map(|index| directory.entry(index))
+        .collect()
 }
 
 fn validate_cluster_entries(entries: &[ClusterPosting]) -> StorageBackendResult<()> {
@@ -506,7 +490,10 @@ mod term_keys;
 
 use legacy::{decode_positions, encode_positions};
 pub use legacy::{decode_terms, encode_terms};
-pub use occurrences::{decode_occurrence_cluster, encode_occurrence_cluster, OccurrencePosting};
+pub use occurrences::{
+    decode_occurrence_cluster, decode_occurrence_cluster_budgeted,
+    decode_occurrence_document_budgeted, encode_occurrence_cluster, OccurrencePosting,
+};
 use scores::{decode_score_block_into, encode_scores, parse_score_blob};
 pub use term_keys::{decode_term_keys, encode_term_keys};
 

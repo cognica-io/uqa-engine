@@ -73,6 +73,32 @@ impl IndexedFieldRevision {
 }
 
 impl IndexedFieldMetadata {
+    /// Validate decoded occurrences against their retained source, polling long occurrence lists.
+    pub fn validate_posting(
+        &self,
+        posting: &crate::clustered_postings::OccurrencePosting,
+        mut poll: impl FnMut() -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()> {
+        poll()?;
+        if posting.doc_length != self.length {
+            return Err(StorageBackendError::Other(
+                "occurrence score length disagrees with source metadata".into(),
+            ));
+        }
+        for occurrence in &posting.occurrences {
+            poll()?;
+            if occurrence.offsets.is_some_and(|offsets| {
+                offsets.end_utf8 > self.final_offsets.end_utf8
+                    || offsets.end_utf16 > self.final_offsets.end_utf16
+            }) {
+                return Err(StorageBackendError::Other(
+                    "occurrence offsets exceed original source bounds".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub fn revision(self) -> IndexedFieldRevision {
         IndexedFieldRevision {
             analyzer_fingerprint: self.analyzer_fingerprint,

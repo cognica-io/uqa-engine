@@ -41,6 +41,47 @@ impl MemoryKeyValueStore {
 }
 
 impl KeyValueStore for MemoryKeyValueStore {
+    fn visit_value(
+        &self,
+        key: &[u8],
+        control: &crate::read_control::StorageReadControl,
+        visit: &mut crate::read_control::ValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        let state = self.inner.lock();
+        control.check()?;
+        visit(state.map.get(key).map(Vec::as_slice))?;
+        control.check()
+    }
+
+    fn visit_prefix_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &crate::read_control::StorageReadControl,
+        visit: &mut crate::read_control::KeyValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        use std::ops::Bound::{Excluded, Included, Unbounded};
+        control.check()?;
+        if limit == 0 {
+            return Ok(());
+        }
+        let state = self.inner.lock();
+        let lower = match after {
+            Some(after) if after >= prefix => Excluded(after),
+            _ => Included(prefix),
+        };
+        for (key, value) in state.map.range::<[u8], _>((lower, Unbounded)).take(limit) {
+            control.check()?;
+            if !key.starts_with(prefix) {
+                break;
+            }
+            visit(key, value)?;
+        }
+        control.check()
+    }
+
     fn get(&self, key: &[u8]) -> StorageBackendResult<Option<Vec<u8>>> {
         Ok(self.inner.lock().map.get(key).cloned())
     }

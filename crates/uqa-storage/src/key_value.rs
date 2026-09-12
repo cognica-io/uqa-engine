@@ -109,6 +109,47 @@ pub trait KeyValueStore: Send + Sync {
     }
 
     fn get(&self, key: &[u8]) -> StorageBackendResult<Option<Vec<u8>>>;
+    /// Visit one borrowed value under the retained read. Providers reserve any temporary encoded payload before fetching it; callbacks must not reenter the store.
+    fn visit_value(
+        &self,
+        _key: &[u8],
+        control: &crate::read_control::StorageReadControl,
+        _visit: &mut crate::read_control::ValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled value reads are not supported by this KeyValue store".into(),
+        ))
+    }
+    /// Visit at most `limit` entries in key order, strictly after `after` when supplied. Encoded values remain borrowed from their provider owner and callbacks must not reenter the store.
+    fn visit_prefix_after(
+        &self,
+        _prefix: &[u8],
+        _after: Option<&[u8]>,
+        _limit: usize,
+        control: &crate::read_control::StorageReadControl,
+        _visit: &mut crate::read_control::KeyValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled prefix reads are not supported by this KeyValue store".into(),
+        ))
+    }
+    /// Test prefix existence under the read allowance. Providers that materialize values should implement a key-only probe.
+    fn contains_prefix_budgeted(
+        &self,
+        prefix: &[u8],
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        let mut found = false;
+        self.visit_prefix_after(prefix, None, 1, control, &mut |_, _| {
+            found = true;
+            Ok(())
+        })?;
+        control.check()?;
+        Ok(found)
+    }
+
     fn contains_key(&self, key: &[u8]) -> StorageBackendResult<bool> {
         self.get(key).map(|value| value.is_some())
     }

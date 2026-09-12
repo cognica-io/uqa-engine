@@ -27,6 +27,7 @@ use crate::inverted_index::{
 };
 use crate::{PostingCursor, TokenTermKey};
 
+mod controlled;
 mod data;
 mod format;
 mod migration;

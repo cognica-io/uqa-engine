@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod allocation;
+
 fn posting(doc_id: DocId, positions: &[u32], doc_length: u64) -> ClusterPosting {
     ClusterPosting {
         doc_id,

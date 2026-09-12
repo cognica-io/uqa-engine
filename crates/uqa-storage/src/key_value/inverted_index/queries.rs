@@ -87,23 +87,7 @@ impl KeyValueInvertedIndex {
         let metadata = self
             .read_field_metadata(posting.doc_id, field)?
             .ok_or_else(|| other_error("occurrence source metadata is missing"))?;
-        if posting.doc_length != metadata.length {
-            return Err(other_error(
-                "occurrence score length disagrees with source metadata",
-            ));
-        }
-        for occurrence in &posting.occurrences {
-            if let Some(offsets) = occurrence.offsets {
-                if offsets.end_utf8 > metadata.final_offsets.end_utf8
-                    || offsets.end_utf16 > metadata.final_offsets.end_utf16
-                {
-                    return Err(other_error(
-                        "occurrence offsets exceed original source bounds",
-                    ));
-                }
-            }
-        }
-        Ok(())
+        metadata.validate_posting(posting, || Ok(()))
     }
 
     pub(super) fn document_length(&self, doc_id: DocId, field: &str) -> StorageBackendResult<u64> {
