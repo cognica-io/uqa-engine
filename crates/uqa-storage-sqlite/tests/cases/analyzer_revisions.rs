@@ -432,3 +432,51 @@ fn linear_providers_reject_missing_graph_information_and_unpaired_key_projection
         assert_eq!(index.get_term_freq(1, "body", "�").unwrap(), 1);
     }
 }
+
+#[test]
+fn atomic_revision_pair_skips_an_unused_invalid_default() {
+    let index_revision = whitespace_analyzer().compile().unwrap();
+    let search_revision = uqa_analysis::keyword_analyzer().compile().unwrap();
+    for mut index in providers(&invalid_default()) {
+        index
+            .set_field_analyzer_revisions("body", index_revision.clone(), search_revision.clone())
+            .unwrap();
+        index.add_document(1, fields("two words")).unwrap();
+        assert_eq!(index.doc_freq("body", "two").unwrap(), 1);
+        assert!(Arc::ptr_eq(
+            &index_revision,
+            &index.index_analyzer_revision("body").unwrap()
+        ));
+        assert!(Arc::ptr_eq(
+            &search_revision,
+            &index.search_analyzer_revision("body").unwrap()
+        ));
+    }
+}
+
+#[test]
+fn unsupported_search_revision_does_not_publish_the_candidate_index_side() {
+    let next = uqa_analysis::keyword_analyzer().compile().unwrap();
+    let unsupported = uqa_analysis::AnalyzerResources::default()
+        .compile_with_length_policy(
+            &whitespace_analyzer(),
+            uqa_analysis::TokenLengthPolicy::DiscountOverlaps,
+        )
+        .unwrap();
+    for mut index in linear_providers(&whitespace_analyzer()) {
+        index.add_document(1, fields("old")).unwrap();
+        let before = index.index_analyzer_revision("body").unwrap();
+        assert!(index
+            .set_field_analyzer_revisions("body", next.clone(), unsupported.clone())
+            .is_err());
+        assert!(Arc::ptr_eq(
+            &before,
+            &index.index_analyzer_revision("body").unwrap()
+        ));
+        assert!(Arc::ptr_eq(
+            &before,
+            &index.search_analyzer_revision("body").unwrap()
+        ));
+        assert_eq!(index.doc_freq("body", "old").unwrap(), 1);
+    }
+}

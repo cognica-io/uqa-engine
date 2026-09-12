@@ -461,6 +461,48 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::load_analyzers(self))
     }
 
+    fn save_analyzer_revision(
+        &self,
+        name: &str,
+        config_json: &str,
+        descriptor_json: &str,
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_analyzer_revision(
+            self,
+            name,
+            config_json,
+            descriptor_json,
+        ))
+    }
+
+    fn load_analyzer_descriptors(&self) -> StorageBackendResult<Vec<(String, String)>> {
+        into_storage_result(Catalog::load_analyzer_descriptors(self))
+    }
+
+    fn replace_table_field_analyzer_binding(
+        &self,
+        table: &str,
+        field: &str,
+        phase: &str,
+        name: &str,
+        binding_json: &str,
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::replace_table_field_analyzer_binding(
+            self,
+            table,
+            field,
+            phase,
+            name,
+            binding_json,
+        ))
+    }
+
+    fn load_table_field_analyzer_bindings(
+        &self,
+    ) -> StorageBackendResult<Vec<(String, String, String)>> {
+        into_storage_result(Catalog::load_table_field_analyzer_bindings(self))
+    }
+
     fn save_table_field_analyzer(
         &self,
         table_name: &str,

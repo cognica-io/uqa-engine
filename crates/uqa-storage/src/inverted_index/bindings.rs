@@ -174,4 +174,19 @@ impl AnalyzerBindings {
     pub fn remove(&mut self, field: &str) {
         self.fields.remove(field);
     }
+
+    /// Resolve both diagnostic configurations before publishing either retained side.
+    pub fn bind_revisions(
+        &mut self,
+        field: &str,
+        index: Arc<CompiledAnalyzer>,
+        search: Arc<CompiledAnalyzer>,
+    ) -> AnalysisResult<()> {
+        let pair = FieldRevisions {
+            index: Revision::new(index)?,
+            search: Revision::new(search)?,
+        };
+        self.fields.insert(field.to_owned(), pair);
+        Ok(())
+    }
 }

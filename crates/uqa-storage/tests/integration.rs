@@ -6,6 +6,8 @@
 
 //! Consolidated storage integration tests.
 
+#[path = "cases/analyzer_bindings.rs"]
+mod analyzer_bindings;
 #[path = "btree_index.rs"]
 mod btree_index;
 

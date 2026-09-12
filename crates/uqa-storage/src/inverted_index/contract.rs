@@ -16,7 +16,8 @@ use crate::TokenTermKey;
 use uqa_core::TokenOccurrence;
 
 /// Which side of the index/search pipeline a field analyzer applies to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AnalyzerPhase {
     /// Run only when *adding* documents.
     Index,
@@ -548,6 +549,16 @@ pub trait InvertedIndex: Send + Sync {
         _phase: AnalyzerPhase,
     ) -> Result<(), String> {
         Err("immutable analyzer revisions are not supported by this backend".into())
+    }
+
+    /// Install a complete retained pair atomically. Failure changes neither side; this does not rebuild existing postings.
+    fn set_field_analyzer_revisions(
+        &mut self,
+        _field: &str,
+        _index: Arc<uqa_analysis::CompiledAnalyzer>,
+        _search: Arc<uqa_analysis::CompiledAnalyzer>,
+    ) -> Result<(), String> {
+        Err("atomic analyzer revision pairs are not supported by this backend".into())
     }
 
     /// Replace the complete indexed document set and selected analyzer sides together. Failure retains the previous postings and bindings; providers must implement their own atomic publication.

@@ -6,6 +6,7 @@
 
 //! Metadata, schema, table, column, and owned-data lifecycle.
 
+use super::analyzers::{field_binding_key, field_binding_prefix};
 use super::physical_indexes::{
     drop_field_indexes, drop_table_indexes, rename_field_indexes, rename_table_indexes,
 };
@@ -221,6 +222,7 @@ impl KeyValueCatalog {
             batch.delete_prefix(&vector_key_prefix(storage_name)?)?;
             batch.delete_prefix(&column_stats_prefix(storage_name)?)?;
             batch.delete_prefix(&table_field_analyzer_prefix(storage_name)?)?;
+            batch.delete_prefix(&field_binding_prefix(storage_name)?)?;
             drop_table_indexes(batch.as_mut(), storage_name)?;
         }
         batch.commit()
@@ -312,6 +314,7 @@ impl KeyValueCatalog {
             ),
             (vector_key_prefix(from)?, vector_key_prefix(to)?),
             (column_stats_prefix(from)?, column_stats_prefix(to)?),
+            (field_binding_prefix(from)?, field_binding_prefix(to)?),
             (
                 table_field_analyzer_prefix(from)?,
                 table_field_analyzer_prefix(to)?,
@@ -367,6 +370,7 @@ impl KeyValueCatalog {
         batch.delete_prefix(&vector_field_prefix(table_name, column_name)?)?;
         drop_field_indexes(batch.as_mut(), table_name, column_name)?;
         batch.delete_prefix(&table_field_analyzer_field_prefix(table_name, column_name)?)?;
+        batch.delete(&field_binding_key(table_name, column_name)?)?;
         batch.delete(&column_stats_key(table_name, column_name)?)?;
         for (key, _) in self
             .store
@@ -464,6 +468,15 @@ impl KeyValueCatalog {
             &table_field_analyzer_field_prefix(table_name, from)?,
             &table_field_analyzer_field_prefix(table_name, to)?,
         )?;
+        if let Some(value) = self.store.get(&field_binding_key(table_name, from)?)? {
+            batch_put_or_keep_existing(
+                self.store.as_ref(),
+                batch.as_mut(),
+                &field_binding_key(table_name, to)?,
+                &value,
+            )?;
+            batch.delete(&field_binding_key(table_name, from)?)?;
+        }
         if let Some(value) = self.store.get(&column_stats_key(table_name, from)?)? {
             batch_put_or_keep_existing(
                 self.store.as_ref(),

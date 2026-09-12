@@ -8,6 +8,9 @@
 //! index, vector indexes (IVF), B-tree, in-memory spatial scan, block-max, and the
 //! provider-neutral catalog and transaction contracts.
 
+pub mod analyzer_binding;
+pub use analyzer_binding::{AnalyzerBindingOwner, BoundAnalyzerRevision, FieldAnalyzerBinding};
+
 pub mod backend;
 pub mod block_max_index;
 pub mod btree_index;

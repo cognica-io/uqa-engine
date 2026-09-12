@@ -688,6 +688,24 @@ impl InvertedIndex for SQLiteInvertedIndex {
             .map_err(|error| error.to_string())
     }
 
+    fn set_field_analyzer_revisions(
+        &mut self,
+        field: &str,
+        index: Arc<uqa_analysis::CompiledAnalyzer>,
+        search: Arc<uqa_analysis::CompiledAnalyzer>,
+    ) -> Result<(), String> {
+        uqa_storage::inverted_index::validate_linear_revision(&index)
+            .map_err(|error| error.to_string())?;
+        uqa_storage::inverted_index::validate_linear_revision(&search)
+            .map_err(|error| error.to_string())?;
+        let mut candidate = self.bindings.clone();
+        candidate
+            .bind_revisions(field, index, search)
+            .map_err(|error| error.to_string())?;
+        self.bindings = candidate;
+        Ok(())
+    }
+
     fn rebuild_with_analyzer_revision(
         &mut self,
         field: &str,

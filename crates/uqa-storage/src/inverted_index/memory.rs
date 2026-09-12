@@ -455,6 +455,21 @@ impl InvertedIndex for MemoryInvertedIndex {
         Ok(())
     }
 
+    fn set_field_analyzer_revisions(
+        &mut self,
+        field: &str,
+        index: Arc<uqa_analysis::CompiledAnalyzer>,
+        search: Arc<uqa_analysis::CompiledAnalyzer>,
+    ) -> Result<(), String> {
+        let mut candidate = self.bindings.clone();
+        candidate
+            .bind_revisions(field, index, search)
+            .map_err(|error| error.to_string())?;
+        self.validate_index_revision_change(field, &candidate)?;
+        self.bindings = candidate;
+        Ok(())
+    }
+
     fn rebuild_with_analyzer_revision(
         &mut self,
         field: &str,
