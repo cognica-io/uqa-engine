@@ -49,6 +49,10 @@ pub struct TextSearchProfile {
 #[derive(Debug, thiserror::Error)]
 pub enum TextSearchError {
     #[error("{0}")]
+    Memory(#[from] uqa_core::memory::MemoryError),
+    #[error("{0}")]
+    Cancelled(#[from] uqa_core::QueryCancelled),
+    #[error("{0}")]
     Parameters(#[from] ScoringError),
     #[error("{action}: {source}")]
     Storage {
