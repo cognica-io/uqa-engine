@@ -27,6 +27,45 @@ pub(super) fn raw_analysis(output: &uqa_analysis::nori::NoriOutput) -> Value {
     json!({"tokens": tokens, "final_offset_utf16": output.final_offset_utf16, "final_position_increment": output.final_position_increment})
 }
 
+pub(super) fn assert_generic_bridge(output: &uqa_analysis::nori::NoriOutput, input: &str) {
+    let analyzed = output
+        .clone()
+        .into_analyzed(&uqa_analysis::FilteredText::new(input))
+        .unwrap();
+    assert_eq!(analyzed.final_offsets().utf8, input.len()..input.len());
+    assert_eq!(
+        analyzed.final_offsets().utf16,
+        output.final_offset_utf16..output.final_offset_utf16
+    );
+    assert_eq!(
+        analyzed.final_position_increment(),
+        output.final_position_increment
+    );
+    assert_eq!(analyzed.tokens().len(), output.tokens.len());
+    for (generic, raw) in analyzed.tokens().iter().zip(&output.tokens) {
+        assert_eq!(generic.term().utf16().as_ref(), raw.term_utf16);
+        assert_eq!(
+            generic.filtered_utf16(),
+            Some(&(raw.start_utf16..raw.end_utf16))
+        );
+        assert_eq!(
+            generic.offsets().unwrap().utf16,
+            raw.start_utf16..raw.end_utf16
+        );
+        assert!(input.get(generic.offsets().unwrap().utf8.clone()).is_some());
+        assert_eq!(generic.position_increment(), raw.position_increment);
+        assert_eq!(generic.position_length(), raw.position_length);
+        assert_eq!(generic.is_keyword(), raw.keyword);
+        let morphology = generic.korean_morphology().unwrap();
+        assert_eq!(morphology.pos_type, raw.pos_type);
+        assert_eq!(morphology.left_pos, raw.left_pos);
+        assert_eq!(morphology.right_pos, raw.right_pos);
+        assert_eq!(morphology.reading, raw.reading);
+        assert_eq!(morphology.morphemes, raw.morphemes);
+        assert_eq!(morphology.origin, raw.origin);
+    }
+}
+
 pub(super) fn canonical(value: &Value, bytes: &mut Vec<u8>) {
     match value {
         Value::Object(object) => {

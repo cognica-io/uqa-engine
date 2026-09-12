@@ -148,6 +148,7 @@ fn filters_analyzer_and_normalization_match_every_docker_attribute() {
         let output = analyzer
             .analyze(input)
             .unwrap_or_else(|error| panic!("{id}: {error}"));
+        super::nori_resources::assert_generic_bridge(&output, input);
         let analysis = raw_analysis(&output);
         if let Some(expected) = expected.get("analysis") {
             assert_eq!(analysis, *expected, "{id}");

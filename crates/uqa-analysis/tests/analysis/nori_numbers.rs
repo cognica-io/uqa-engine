@@ -155,6 +155,9 @@ fn number_parsing_and_composition_match_the_complete_docker_snapshots() {
             continue;
         }
         let result = result.unwrap_or_else(|error| panic!("{id}: {error}"));
+        if case["pipeline"] == "tokenizer" {
+            super::nori_resources::assert_generic_bridge(&result, case["input"].as_str().unwrap());
+        }
         let mut analysis = raw_analysis(&result);
         for (value, token) in analysis["tokens"]
             .as_array_mut()

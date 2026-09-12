@@ -10,21 +10,26 @@ use std::ops::Range;
 
 use serde::Serialize;
 
-use crate::{AnalysisError, AnalysisResult, FilteredText, SourceOffsets};
+use crate::{AnalysisError, AnalysisResult, FilteredText, SourceOffsets, TokenTerm};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AnalysisToken {
-    pub(crate) term: String,
+    pub(crate) term: TokenTerm,
     pub(crate) offsets: Option<SourceOffsets>,
     pub(crate) position_increment: u32,
     pub(crate) position_length: u32,
     pub(crate) keyword: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    filtered_utf16: Option<Range<usize>>,
+    #[cfg(feature = "nori")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    korean_morphology: Option<crate::nori::KoreanMorphology>,
     #[serde(skip)]
     verbatim: bool,
 }
 
 impl AnalysisToken {
-    pub fn term(&self) -> &str {
+    pub fn term(&self) -> &TokenTerm {
         &self.term
     }
 
@@ -44,6 +49,16 @@ impl AnalysisToken {
         self.keyword
     }
 
+    /// Exact tokenizer coordinates before character-filter source correction, when supplied.
+    pub fn filtered_utf16(&self) -> Option<&Range<usize>> {
+        self.filtered_utf16.as_ref()
+    }
+
+    #[cfg(feature = "nori")]
+    pub fn korean_morphology(&self) -> Option<&crate::nori::KoreanMorphology> {
+        self.korean_morphology.as_ref()
+    }
+
     pub(crate) fn from_source(
         input: &FilteredText<'_>,
         range: Range<usize>,
@@ -52,27 +67,33 @@ impl AnalysisToken {
         let term = input.as_str()[range].to_owned();
         let verbatim = input.original().get(offsets.utf8.clone()) == Some(term.as_str());
         Ok(Self {
-            term,
+            term: term.into(),
             offsets: Some(offsets),
             position_increment: 1,
             position_length: 1,
             keyword: false,
+            filtered_utf16: None,
+            #[cfg(feature = "nori")]
+            korean_morphology: None,
             verbatim,
         })
     }
 
     fn term_only(term: String) -> Self {
         Self {
-            term,
+            term: term.into(),
             offsets: None,
             position_increment: 1,
             position_length: 1,
             keyword: false,
+            filtered_utf16: None,
+            #[cfg(feature = "nori")]
+            korean_morphology: None,
             verbatim: false,
         }
     }
 
-    pub(crate) fn replace_term(&mut self, term: String) {
+    pub(crate) fn replace_term(&mut self, term: TokenTerm) {
         if term != self.term {
             self.verbatim = false;
             self.term = term;
@@ -81,22 +102,34 @@ impl AnalysisToken {
 
     pub(crate) fn substring(&self, range: Range<usize>) -> Self {
         let mut token = Self {
-            term: self.term[range.clone()].to_owned(),
+            term: self.term.substring(range.clone()),
             offsets: self.offsets.clone(),
             position_increment: self.position_increment,
             position_length: self.position_length,
             keyword: self.keyword,
+            filtered_utf16: self.filtered_utf16.clone(),
+            #[cfg(feature = "nori")]
+            korean_morphology: self.korean_morphology.clone(),
             verbatim: self.verbatim,
         };
         if self.verbatim {
             if let Some(offsets) = &self.offsets {
-                let start_utf16 = self.term[..range.start].encode_utf16().count();
-                let length_utf16 = token.term.encode_utf16().count();
+                let original = self.term.as_str().expect("verbatim Unicode input");
+                let start_utf16 = original[..range.start].encode_utf16().count();
+                let length_utf16 = token.term.utf16_len();
                 token.offsets = Some(SourceOffsets {
                     utf8: offsets.utf8.start + range.start..offsets.utf8.start + range.end,
                     utf16: offsets.utf16.start + start_utf16
                         ..offsets.utf16.start + start_utf16 + length_utf16,
                 });
+                if let Some(filtered) = &self.filtered_utf16 {
+                    if filtered.len() == self.term.utf16_len() {
+                        token.filtered_utf16 = Some(
+                            filtered.start + start_utf16
+                                ..filtered.start + start_utf16 + length_utf16,
+                        );
+                    }
+                }
             }
         }
         token
@@ -120,7 +153,7 @@ impl AnalyzedText {
         self.batch.tokens
     }
 
-    pub fn into_terms(self) -> Vec<String> {
+    pub fn into_terms(self) -> AnalysisResult<Vec<String>> {
         self.batch.into_terms()
     }
 
@@ -139,6 +172,7 @@ impl AnalyzedText {
         let batch = TokenBatch {
             tokens,
             final_position_increment: 0,
+            terminal: None,
         };
         batch.validate_positions()?;
         Ok(Self {
@@ -152,6 +186,8 @@ impl AnalyzedText {
 pub(crate) struct TokenBatch {
     pub tokens: Vec<AnalysisToken>,
     pub final_position_increment: u32,
+    #[serde(skip)]
+    pub terminal: Option<Box<AnalysisToken>>,
 }
 
 impl TokenBatch {
@@ -159,11 +195,15 @@ impl TokenBatch {
         Self {
             tokens: terms.into_iter().map(AnalysisToken::term_only).collect(),
             final_position_increment: 0,
+            terminal: None,
         }
     }
 
-    pub fn into_terms(self) -> Vec<String> {
-        self.tokens.into_iter().map(|token| token.term).collect()
+    pub fn into_terms(self) -> AnalysisResult<Vec<String>> {
+        self.tokens
+            .into_iter()
+            .map(|token| token.term.into_string())
+            .collect()
     }
 
     pub fn validate_positions(&self) -> AnalysisResult<()> {
@@ -193,3 +233,6 @@ impl TokenBatch {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(feature = "nori")]
+mod korean;

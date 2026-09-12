@@ -62,6 +62,19 @@ impl KoreanAnalyzer {
         self.analyze_controlled(input, NoriLimits::default(), &mut || Ok(()))
     }
 
+    /// Return generic tokens with lossless terms, Korean morphology, and original source offsets.
+    pub fn analyze_tokens(&self, input: &str) -> AnalysisResult<crate::AnalyzedText> {
+        self.analyze_mapped(&crate::FilteredText::new(input))
+    }
+
+    /// Analyze character-filter output and compose its exact source coordinates once.
+    pub fn analyze_mapped(
+        &self,
+        input: &crate::FilteredText<'_>,
+    ) -> AnalysisResult<crate::AnalyzedText> {
+        self.analyze(input.as_str())?.into_analyzed(input)
+    }
+
     pub fn analyze_controlled(
         &self,
         input: &str,

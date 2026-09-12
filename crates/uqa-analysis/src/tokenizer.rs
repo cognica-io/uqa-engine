@@ -52,7 +52,7 @@ impl Tokenizer {
     }
 
     pub fn tokenize(&self, text: &str) -> AnalysisResult<Vec<String>> {
-        Ok(self.tokenize_with_offsets(text)?.into_terms())
+        self.tokenize_with_offsets(text)?.into_terms()
     }
 
     /// Tokenize source text with explicit offsets, positions, and final source coordinates.

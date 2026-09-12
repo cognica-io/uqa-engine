@@ -15,6 +15,13 @@ use crate::token_filter::SynonymFileError;
 pub enum AnalysisError {
     #[error("analysis cancelled")]
     Cancelled,
+    #[error("token contains unpaired UTF-16 surrogate {unit:#06x}; use its lossless term units")]
+    UnpairedTokenSurrogate { unit: u16 },
+    #[error("analysis expected {expected_utf16} UTF-16 input units, but received {actual_utf16}")]
+    MismatchedAnalysisInput {
+        expected_utf16: usize,
+        actual_utf16: usize,
+    },
     #[cfg(feature = "nori")]
     #[error(transparent)]
     Dictionary(#[from] crate::nori::DictionaryError),

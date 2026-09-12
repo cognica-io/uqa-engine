@@ -55,7 +55,7 @@ impl Analyzer {
     }
 
     pub fn analyze(&self, text: &str) -> AnalysisResult<Vec<String>> {
-        Ok(self.analyze_tokens(text)?.into_terms())
+        self.analyze_tokens(text)?.into_terms()
     }
 
     /// Analyze complete input without discarding token graph or original source metadata.

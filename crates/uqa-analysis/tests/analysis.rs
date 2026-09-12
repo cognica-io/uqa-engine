@@ -37,6 +37,8 @@ mod validation;
 #[path = "analysis/source_offsets.rs"]
 mod source_offsets;
 
+#[path = "analysis/lossless_terms.rs"]
+mod lossless_terms;
 #[path = "analysis/rich_tokens.rs"]
 mod rich_tokens;
 
@@ -63,3 +65,7 @@ mod nori_analysis;
 #[cfg(feature = "nori")]
 #[path = "analysis/nori_numbers.rs"]
 mod nori_numbers;
+
+#[cfg(feature = "nori")]
+#[path = "analysis/nori_bridge.rs"]
+mod nori_bridge;

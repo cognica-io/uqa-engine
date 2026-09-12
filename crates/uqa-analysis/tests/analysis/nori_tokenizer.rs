@@ -109,6 +109,7 @@ fn tokenizer_matches_complete_docker_snapshots_across_unicode_and_lattice_bounda
             continue;
         }
         let actual = actual.unwrap_or_else(|error| panic!("{id}: {error}"));
+        super::nori_resources::assert_generic_bridge(&actual, case["input"].as_str().unwrap());
         let analysis = raw_analysis(&actual);
         if let Some(expected) = expected.get("analysis") {
             assert_eq!(analysis, *expected, "{id}");

@@ -251,6 +251,8 @@ The process-global `uqa_analysis::register_analyzer` registry is not catalog per
 
 `Analyzer::analyze_tokens(input)` returns `AnalyzedText`. Its `tokens()` slice contains ordered `AnalysisToken` values with `term()`, `offsets()`, `position_increment()`, `position_length()`, and `is_keyword()`. Tokens emitted by the built-in tokenizers carry `Some(SourceOffsets)` in both original UTF-8 bytes and UTF-16 code units. Start the absolute position at `-1` and add each increment; the token's graph edge ends at that position plus its length. The first increment is positive, later increments may be zero, and lengths are positive. `final_offsets()` identifies the original input end, and `final_position_increment()` counts positions removed after the last emitted token.
 
+`term()` returns `&TokenTerm`. `TokenTerm::from(text)` constructs scalar text; `from_utf16(units)` also accepts isolated surrogate units. `as_str()` returns `Some(&str)` only for scalar text, `utf16()` returns lossless units, and `into_string()` performs a checked string projection. Valid UTF-16 and string construction share the same term identity. JSON retains the existing string form for scalar terms and uses `{"utf16":[...]}` for unpaired units. `AnalyzedText::into_terms()` returns `AnalysisResult<Vec<String>>`; a non-scalar term produces `UnpairedTokenSurrogate` instead of a replacement character. Existing string-only analyzer, tokenizer, and filter entry points retain their signatures and results.
+
 `Tokenizer::tokenize_with_offsets(input)` provides the same representation without character or token filters. `TokenFilter::filter_analyzed(previous_result)` applies one filter while preserving source and stream-end metadata. These operations do not alter catalog or transaction state. Invalid configuration, invalid source boundaries, and position overflow return an `AnalysisError`.
 
 ```rust
@@ -267,6 +269,8 @@ assert_eq!(analyzed.final_offsets().utf8, 12..12);
 ```
 
 Stop-word and length filters carry removed position increments to the next retained token or the stream end. Synonym expansions retain the original token, source range, and position length, and use increment zero; repeated configured alternatives remain repeated. N-gram and edge n-gram token filters also stack each input token's grams at its position. In contrast, the n-gram tokenizer assigns a separate position to each emitted gram. Gram filters use exact substring offsets when a token still equals its original source; after a term rewrite they retain the covering source range. Lowercase, ASCII folding, and stemming retain source ranges, and stemming leaves keyword tokens unchanged.
+
+Generic filters also accept Nori's lossless terms. Lowercase and ASCII folding transform scalar segments while preserving isolated units. Porter stemming processes the complete token with each scalar or isolated unit as one element, and preserves keyword tokens. Length and gram filters count a surrogate pair as one scalar and each isolated unit as one element. String stop/synonym keys cannot match a non-scalar term. Token expansions and rewrites retain Korean morphology; removal filters preserve attributes observed during upstream exhaustion for later stages.
 
 `Analyzer::analyze`, `Tokenizer::tokenize`, and `TokenFilter::filter` remain the ordered `Vec<String>` projection. Current index and query consumers use that term projection; storing and matching graph positions is tracked in the [Nori implementation plan](../../plans/0006-nori-analyzer.md).
 
@@ -348,7 +352,33 @@ assert_eq!(analyzer.normalize("喜悲哀歡 İ UQA")?, "喜悲哀歡 i uqa");
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-The same example executes as a Nori module doctest. The native tokenizer is checked against the [Docker reference corpus](../../../tests/parity/nori/README.md). These are standalone Rust APIs: the common `Analyzer` token bridge, Nori JSON/SQL registration, retrieval, and binding integration remain tracked in the [implementation plan](../../plans/0006-nori-analyzer.md). The existing built-in analyzer inventory remains the one listed above.
+The same example executes as a Nori module doctest. The native tokenizer is checked against the [Docker reference corpus](../../../tests/parity/nori/README.md). These are standalone Rust APIs: generic Nori configuration/compilation, JSON/SQL registration, retrieval, and binding integration remain tracked in the [implementation plan](../../plans/0006-nori-analyzer.md). The existing built-in analyzer inventory remains the one listed above.
+
+### Korean analysis in the common token representation
+
+`KoreanAnalyzer::analyze_tokens(input)` returns the common `AnalyzedText`, including `TokenTerm`, exact UTF-16 and covering UTF-8 source offsets, graph attributes, keyword state, Korean morphology, and complete stream end. `analyze_mapped(&filtered_text)` accepts prior character-filter output and applies source correction once. `NoriOutput::into_analyzed(&filtered_text)` converts an already computed stream; supply the same filtered text used for tokenization. A different input length, invalid token range, or invalid graph returns a typed analysis error.
+
+`AnalysisToken::korean_morphology()` returns the optional `KoreanMorphology` with POS type, left/right POS, reading, raw morpheme units, and origin. `filtered_utf16()` retains the tokenizer's pre-correction source range when supplied. Gram filters refine that range when the unchanged token has matching source width; otherwise they retain its covering range along with the morphology. Unpaired terms remain available through `term().utf16()`. For the accepted `🙂a 가 나` rule after HTML removal, the first token retains the single `0xd83d` unit, original UTF-16 range `4..5`, and safe original UTF-8 range `3..7`.
+
+```rust
+use uqa_analysis::CharFilter;
+use uqa_analysis::nori::{
+    DictionaryLimits, KoreanAnalyzer, NoriDictionary, NoriOptions,
+    UserDictionary, UserDictionaryLimits,
+};
+
+let model = NoriDictionary::from_bytes(uqa_nori_data::BUNDLE, DictionaryLimits::default())?;
+let user = UserDictionary::compile("🙂a 가 나", &model, UserDictionaryLimits::default())?;
+let analyzer = KoreanAnalyzer::with_filters(model, user, NoriOptions::default(), &[])?;
+let filtered = CharFilter::HTMLStrip.filter_with_offsets("<b>🙂a</b>")?;
+let output = analyzer.analyze_mapped(&filtered)?;
+assert_eq!(output.tokens()[0].term().utf16().as_ref(), [0xd83d]);
+assert_eq!(output.tokens()[0].offsets().unwrap().utf16, 4..5);
+assert_eq!(output.tokens()[0].offsets().unwrap().utf8, 3..7);
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+A returned common stream can be passed directly to `TokenFilter::filter_analyzed`. Keep the stream object when chaining: serialized diagnostic tokens omit the opaque exhaustion attributes. These native conversion APIs do not register a generic or SQL analyzer; resource compilation and registration remain separate implementation items.
 
 ### Korean filters and normalization
 

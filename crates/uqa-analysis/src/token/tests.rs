@@ -107,3 +107,84 @@ fn porter_stemming_preserves_keyword_tokens() {
     assert_eq!(stream.tokens()[0].term(), "running");
     assert!(stream.tokens()[0].is_keyword());
 }
+
+#[test]
+fn trailing_removal_retains_exhaustion_attributes_across_later_filters() {
+    let input = FilteredText::new("keep AND");
+    let stream = AnalyzedText::from_source(
+        vec![
+            AnalysisToken::from_source(&input, 0..4).unwrap(),
+            AnalysisToken::from_source(&input, 5..8).unwrap(),
+        ],
+        &input,
+    )
+    .unwrap();
+    for filter in [
+        TokenFilter::Stop {
+            language: "none".into(),
+            custom_words: vec!["AND".into()],
+        },
+        TokenFilter::Ngram {
+            min_gram: 4,
+            max_gram: 4,
+            keep_short: false,
+        },
+        TokenFilter::EdgeNgram {
+            min_gram: 4,
+            max_gram: 4,
+        },
+    ] {
+        let filtered = filter.filter_analyzed(stream.clone()).unwrap();
+        let filtered = TokenFilter::Lowercase.filter_analyzed(filtered).unwrap();
+        assert_eq!(filtered.batch.terminal.as_ref().unwrap().term(), "AND");
+        let removed = TokenFilter::Length {
+            min_length: 99,
+            max_length: 0,
+        }
+        .filter_analyzed(filtered)
+        .unwrap();
+        assert!(removed.tokens().is_empty());
+        assert_eq!(removed.batch.terminal.as_ref().unwrap().term(), "AND");
+        assert_eq!(removed.final_position_increment(), 2);
+    }
+}
+
+#[cfg(feature = "nori")]
+#[test]
+fn native_bridge_keeps_non_emitting_korean_attributes() {
+    use crate::nori::{NoriOrigin, NoriOutput, NoriToken, POSTag, POSType};
+    let first = NoriToken {
+        term_utf16: vec![65],
+        start_utf16: 0,
+        end_utf16: 1,
+        position_increment: 1,
+        position_length: 1,
+        keyword: false,
+        pos_type: POSType::Morpheme,
+        left_pos: POSTag::NNG,
+        right_pos: POSTag::NNG,
+        reading: None,
+        morphemes: None,
+        origin: NoriOrigin::Known,
+    };
+    let mut terminal = first.clone();
+    terminal.term_utf16 = vec![0xd800];
+    terminal.start_utf16 = 2;
+    terminal.end_utf16 = 3;
+    terminal.keyword = true;
+    terminal.reading = Some("UPPER".into());
+    let mut raw = NoriOutput::from_tokens(vec![first], 3, 1);
+    raw.terminal = Some(Box::new(terminal));
+    let stream = raw.into_analyzed(&FilteredText::new("A b")).unwrap();
+    let stream = TokenFilter::Lowercase.filter_analyzed(stream).unwrap();
+    assert_eq!(stream.tokens()[0].term(), "a");
+    let terminal = stream.batch.terminal.as_ref().unwrap();
+    assert_eq!(terminal.term().utf16().as_ref(), [0xd800]);
+    assert!(terminal.is_keyword());
+    assert_eq!(
+        terminal.korean_morphology().unwrap().reading.as_deref(),
+        Some("UPPER")
+    );
+    assert_eq!(terminal.offsets().unwrap().utf16, 2..3);
+    assert_eq!(stream.final_position_increment(), 1);
+}

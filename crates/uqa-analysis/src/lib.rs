@@ -16,6 +16,7 @@ pub mod nori;
 pub mod porter;
 pub mod registry;
 pub mod source;
+pub mod term;
 pub mod token;
 pub mod token_filter;
 pub mod tokenizer;
@@ -30,6 +31,7 @@ pub use registry::{
     drop_analyzer, get_analyzer, list_analyzers, register_analyzer, DEFAULT_ANALYZER_NAME,
 };
 pub use source::{FilteredText, SourceOffsets, TextCoordinates};
+pub use term::TokenTerm;
 pub use token::{AnalysisToken, AnalyzedText};
 pub use token_filter::{SynonymFileError, TokenFilter};
 pub use tokenizer::Tokenizer;

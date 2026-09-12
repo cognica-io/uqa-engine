@@ -10,17 +10,20 @@ use std::collections::BTreeSet;
 
 use super::{ascii_fold, builtin_stop_words, validate_gram_bounds, TokenFilter};
 use crate::token::TokenBatch;
-use crate::{porter, AnalysisError, AnalysisResult, AnalysisToken};
+use crate::{porter, AnalysisError, AnalysisResult, AnalysisToken, TokenTerm};
 
 pub(super) fn filter(filter: &TokenFilter, mut batch: TokenBatch) -> AnalysisResult<TokenBatch> {
     match filter {
         TokenFilter::Lowercase | TokenFilter::ASCIIFolding | TokenFilter::PorterStem => {
             for token in &mut batch.tokens {
                 let term = match filter {
-                    TokenFilter::Lowercase => token.term.to_lowercase(),
-                    TokenFilter::ASCIIFolding => ascii_fold(&token.term),
+                    TokenFilter::Lowercase => token.term.map_unicode(str::to_lowercase),
+                    TokenFilter::ASCIIFolding => token.term.map_unicode(ascii_fold),
                     _ if token.keyword => continue,
-                    _ => porter::stem(&token.term),
+                    _ => token.term.as_str().map_or_else(
+                        || TokenTerm::from_utf16(porter::stem_utf16(&token.term.utf16())),
+                        |text| TokenTerm::from(porter::stem(text)),
+                    ),
                 };
                 token.replace_term(term);
             }
@@ -31,7 +34,9 @@ pub(super) fn filter(filter: &TokenFilter, mut batch: TokenBatch) -> AnalysisRes
         } => {
             let mut words: BTreeSet<&str> = builtin_stop_words(language).iter().copied().collect();
             words.extend(custom_words.iter().map(String::as_str));
-            batch = retain(batch, |token| !words.contains(token.term.as_str()))?;
+            batch = retain(batch, |token| {
+                !token.term.as_str().is_some_and(|term| words.contains(term))
+            })?;
         }
         TokenFilter::Synonym {
             synonyms,
@@ -44,13 +49,13 @@ pub(super) fn filter(filter: &TokenFilter, mut batch: TokenBatch) -> AnalysisRes
             };
             let mut expanded = Vec::new();
             for token in batch.tokens {
-                let alternatives = resolved.get(&token.term);
+                let alternatives = token.term.as_str().and_then(|term| resolved.get(term));
                 let start = expanded.len();
                 expanded.push(token);
                 if let Some(alternatives) = alternatives {
                     for term in alternatives {
                         let mut alternative = expanded[start].clone();
-                        alternative.replace_term(term.clone());
+                        alternative.replace_term(term.clone().into());
                         alternative.position_increment = 0;
                         expanded.push(alternative);
                     }
@@ -75,7 +80,7 @@ pub(super) fn filter(filter: &TokenFilter, mut batch: TokenBatch) -> AnalysisRes
             max_length,
         } => {
             batch = retain(batch, |token| {
-                let length = token.term.chars().count();
+                let length = token.term.character_count();
                 length >= *min_length && (*max_length == 0 || length <= *max_length)
             })?;
         }
@@ -95,16 +100,22 @@ fn retain(
 ) -> AnalysisResult<TokenBatch> {
     let mut tokens = Vec::new();
     let mut skipped = 0;
+    let mut trailing_removed = None;
     for mut token in batch.tokens {
         if keep(&token) {
+            trailing_removed = None;
             token.position_increment = add_increment(token.position_increment, skipped)?;
             skipped = 0;
             tokens.push(token);
         } else {
             skipped = add_increment(skipped, token.position_increment)?;
+            trailing_removed = Some(token);
         }
     }
     batch.tokens = tokens;
+    if batch.terminal.is_none() {
+        batch.terminal = trailing_removed.map(Box::new);
+    }
     batch.final_position_increment = add_increment(batch.final_position_increment, skipped)?;
     Ok(batch)
 }
@@ -118,24 +129,23 @@ fn grams(
 ) -> AnalysisResult<TokenBatch> {
     let mut tokens = Vec::new();
     let mut skipped = 0;
+    let mut trailing_removed = None;
     for mut token in batch.tokens {
-        let boundaries: Vec<_> = token
-            .term
-            .char_indices()
-            .map(|(offset, _)| offset)
-            .chain(std::iter::once(token.term.len()))
-            .collect();
+        let boundaries = token.term.boundaries();
         let length = boundaries.len() - 1;
         if length < min_gram {
             if keep_short {
+                trailing_removed = None;
                 token.position_increment = add_increment(token.position_increment, skipped)?;
                 skipped = 0;
                 tokens.push(token);
             } else {
                 skipped = add_increment(skipped, token.position_increment)?;
+                trailing_removed = Some(token);
             }
             continue;
         }
+        trailing_removed = None;
         let mut first = true;
         for n in min_gram..=max_gram.min(length) {
             let last_start = if edge { 0 } else { length - n };
@@ -154,6 +164,9 @@ fn grams(
         }
     }
     batch.tokens = tokens;
+    if batch.terminal.is_none() {
+        batch.terminal = trailing_removed.map(Box::new);
+    }
     batch.final_position_increment = add_increment(batch.final_position_increment, skipped)?;
     Ok(batch)
 }

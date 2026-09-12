@@ -11,7 +11,7 @@ use super::*;
 fn terms(text: &AnalyzedText) -> Vec<&str> {
     text.tokens()
         .iter()
-        .map(uqa_analysis::AnalysisToken::term)
+        .map(|token| token.term().as_str().unwrap())
         .collect()
 }
 

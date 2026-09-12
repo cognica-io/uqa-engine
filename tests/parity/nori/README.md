@@ -47,7 +47,7 @@ cargo test -p uqa-analysis --features nori --locked nori_tokenizer
 
 Use `--cache-dir PATH` for a nondefault verified jar cache. Each driver accepts `--write` only for an intentional reviewed reference change. Native tests check fixture identity and compare every recorded attribute, including the complete digests for long streams. Additional native lattice tests isolate forced-backtrace tie order, rebasing, and EOS connection-cost selection. Limits and cancellation tests verify failure without partial successful output and reuse of the same immutable tokenizer.
 
-The accepted rule `🙂a 가 나` demonstrates why raw UTF-16 must survive the native tokenizer: component lengths can split a surrogate pair even though the rule and input are valid UTF-8. Back-anchored component offsets can also fall inside a pair. These cases are part of the differential contract; the common-token bridge, persisted term identity, and safe original-source highlighting must preserve them before full Nori integration is complete.
+The accepted rule `🙂a 가 나` demonstrates why raw UTF-16 must survive the native tokenizer: component lengths can split a surrogate pair even though the rule and input are valid UTF-8. Back-anchored component offsets can also fall inside a pair. These cases are part of the differential contract; the common-token bridge now preserves them with exact UTF-16 and safe UTF-8 source ranges. Persisted term identity and actual source highlighting remain full-integration requirements.
 
 ## Filters, complete analysis, and normalization
 
@@ -76,3 +76,7 @@ cargo test -p uqa-analysis --features nori --locked nori_numbers
 ```
 
 Native comparisons cover all 823 complete snapshots and the four original number examples. Both Docker platforms produce identical results. Separate native checks exercise exact arithmetic, bounded work when adding many small coefficients, resource failure versus malformed-input fallback, cancellation at multiple checkpoints, and reuse after failure. The default Korean analyzer excludes number composition; the [manual](../../../docs/manual/reference/06-text-analyzers.md#optional-korean-number-composition) specifies a verified explicit chain and the separate prefix-normalization helper.
+
+## Common-token conversion
+
+The native differential tests additionally convert all 803 successful text cases into generic `AnalyzedText`: 226 tokenizer cases, 396 analyzer/filter cases, and 181 number-chain cases. Every raw term, offset, increment, length, keyword, POS, nullable reading/morpheme, origin, and stream-end field is retained. Separate tests cover composed HTML source correction, generic filters over unpaired units, whole-word stemming, exact gram spans, hidden exhaustion attributes, and typed string-projection failures. Generic term tests round-trip every UTF-16 unit through the explicit JSON representation and verify canonical identity for supplementary pairs.

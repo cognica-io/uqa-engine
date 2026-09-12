@@ -49,6 +49,7 @@
 //! This API has no catalog effects and does not register a generic or SQL analyzer.
 
 mod analyzer;
+mod attributes;
 mod dictionary;
 mod error;
 mod filters;
@@ -65,6 +66,7 @@ mod user_dictionary;
 pub mod pack;
 
 pub use analyzer::KoreanAnalyzer;
+pub use attributes::KoreanMorphology;
 pub use dictionary::{DictionaryLimits, NoriDictionary, SurfaceWords};
 pub use error::{DictionaryError, DictionaryResult};
 pub use filters::{KoreanFilter, DEFAULT_STOP_TAGS};

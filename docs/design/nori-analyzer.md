@@ -85,7 +85,7 @@ The default analyzer's output for `가락지나물은 한국, 중국, 일본` is
 
 ### Unicode and punctuation
 
-The expanded tokenizer oracle proves that valid UTF-8 input can produce non-scalar UTF-16 terms: the accepted user rule `🙂a 가 나` splits a surrogate pair, and unknown grouping limits can split pairs as well. The standalone runtime therefore retains raw UTF-16 term and morpheme units. The common token representation and persisted term keys must carry these units losslessly; diagnostics must expose them explicitly when no Unicode string exists. Exact UTF-16 offsets can land inside a pair, so highlighting needs UTF-8 scalar-covering source spans alongside the exact reference coordinates. Rejecting such accepted rules, replacing their units, or silently rounding away the UTF-16 coordinates does not satisfy the target. The generic source mapper now projects exact UTF-16 ranges through composed edits and exposes explicit scalar-covering UTF-8 conversion. The common token bridge and storage contract remain integration requirements.
+The expanded tokenizer oracle proves that valid UTF-8 input can produce non-scalar UTF-16 terms: the accepted user rule `🙂a 가 나` splits a surrogate pair, and unknown grouping limits can split pairs as well. The standalone runtime therefore retains raw UTF-16 term and morpheme units. The common token representation and persisted term keys must carry these units losslessly; diagnostics must expose them explicitly when no Unicode string exists. Exact UTF-16 offsets can land inside a pair, so highlighting needs UTF-8 scalar-covering source spans alongside the exact reference coordinates. Rejecting such accepted rules, replacing their units, or silently rounding away the UTF-16 coordinates does not satisfy the target. The generic source mapper now projects exact UTF-16 ranges through composed edits and exposes explicit scalar-covering UTF-8 conversion. The common `TokenTerm` representation and native stream bridge now retain every raw term, morphology field, and exhaustion effect. Persisted term keys remain an integration requirement.
 
 Lucene performs morphology over UTF-16 input units and consults Java character properties at specific points. Generate and version the character-class, script, digit, punctuation, and simple-case tables needed by those operations. Preserve the distinction between code-unit and code-point calls; replacing every call with Rust `char` classification can change unknown-word grouping. The pinned [Korean character definition](https://github.com/apache/lucene/blob/64ce863a2bea79c69c19c4d56268c26710ff0ff9/lucene/analysis/nori/src/java/org/apache/lucene/analysis/ko/dict/CharacterDefinition.java) and [Java character utilities](https://github.com/apache/lucene/blob/64ce863a2bea79c69c19c4d56268c26710ff0ff9/lucene/core/src/java/org/apache/lucene/analysis/CharacterUtils.java) are the reference.
 
@@ -122,7 +122,7 @@ CompiledAnalyzer::normalize(text) -> Result<String>
 Analyzer::analyze(text) -> Result<Vec<String>>
 ```
 
-`Analyzer::analyze` remains the ordered term projection for callers that need strings. The rich API is canonical for indexing, positional queries, and highlighting. Maintain existing term-only results while migrating every stage to explicit metadata. Keep compilation state outside the public serializable `Analyzer` struct so configuration serialization and existing construction remain understandable.
+`Analyzer::analyze` remains the ordered term projection for callers that need strings. A raw unpaired term causes a typed projection error; the canonical rich result retains its exact units for indexing and diagnostics. The rich API is canonical for indexing, positional queries, and highlighting. Maintain existing term-only results while migrating every stage to explicit metadata. Keep compilation state outside the public serializable `Analyzer` struct so configuration serialization and existing construction remain understandable.
 
 Compile dictionaries, user entries, regular expressions, and fixed filter state once per resolved revision. An `Arc<CompiledAnalyzer>` is immutable and shareable; lattice buffers and token queues belong to an individual analysis call or an exclusively borrowed reusable worker. Cache dictionary bundles by content hash, not analyzer name. Cloning an analyzer must not clone its dictionary, and a session must not mutate another session's worker state.
 
@@ -130,7 +130,7 @@ Compile dictionaries, user entries, regular expressions, and fixed filter state 
 
 | Value | Contract |
 | --- | --- |
-| `term` | Owned or arena-backed text that may differ from the source |
+| `term` | Canonical `TokenTerm`: scalar text or exact unpaired UTF-16 units, with checked string projection |
 | `position_increment` | Nonnegative increment from the previous emitted token; first emitted position is computed from an initial position of `-1` |
 | `position_length` | Positive edge length; one for ordinary tokens |
 | Source offsets | Half-open UTF-16 coordinates for reference parity and corrected UTF-8 coordinates for Rust source access |

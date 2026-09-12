@@ -192,7 +192,7 @@ fn default_stop_language() -> String {
 
 impl TokenFilter {
     pub fn filter(&self, tokens: Vec<String>) -> AnalysisResult<Vec<String>> {
-        Ok(stream::filter(self, crate::token::TokenBatch::from_terms(tokens))?.into_terms())
+        stream::filter(self, crate::token::TokenBatch::from_terms(tokens))?.into_terms()
     }
 
     /// Transform tokens while retaining their source spans and graph end state.

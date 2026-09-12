@@ -105,10 +105,18 @@ pub struct NoriOutput {
     pub final_offset_utf16: usize,
     pub final_position_increment: u32,
     #[serde(skip)]
-    pub(super) terminal: Option<Box<NoriToken>>,
+    pub(crate) terminal: Option<Box<NoriToken>>,
 }
 
 impl NoriOutput {
+    /// Convert a stream over `input.as_str()` into generic tokens with corrected original offsets.
+    pub fn into_analyzed(
+        self,
+        input: &crate::FilteredText<'_>,
+    ) -> AnalysisResult<crate::AnalyzedText> {
+        crate::AnalyzedText::from_nori(self, input)
+    }
+
     /// Materialize a source that leaves shared token attributes unchanged when exhausted.
     pub fn from_tokens(
         tokens: Vec<NoriToken>,
