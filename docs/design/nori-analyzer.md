@@ -2,6 +2,8 @@
 
 Status: proposed design, prepared on 2026-09-12 against UQA commit `bbeb1026cba9001cc5f084d24ac68ec197bd1925`. Nori is not implemented in that tree. New Rust types, JSON tags, SQL functions, and storage contracts below are proposals; the [manual](../manual/sql/05-analyzers.md) continues to describe available behavior.
 
+Development follows the active [Nori implementation plan](../plans/0006-nori-analyzer.md), which records the current implementation boundary, dependencies, and verification evidence.
+
 Implement Nori as a native Rust analysis subsystem in `uqa-analysis`, with a versioned dictionary bundle and a token representation that preserves positions, offsets, and Korean morphology. Use Lucene 10.5.1 as the executable reference. Run every JVM tool through a digest-pinned Docker image, including dictionary export and fixture generation. Production indexing and querying use Rust on native and WASM targets without a JVM.
 
 ## Compatibility target and evidence
