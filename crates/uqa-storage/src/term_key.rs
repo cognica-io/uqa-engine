@@ -8,6 +8,8 @@
 
 use uqa_analysis::TokenTerm;
 
+mod allocation;
+
 use crate::{StorageBackendError, StorageBackendResult};
 
 /// A tagged term key: zero plus UTF-8, or one plus big-endian UTF-16 containing unpaired units.

@@ -111,46 +111,11 @@ pub fn analyze_index_field(
     Ok(staged)
 }
 
-/// Analyze a complete query without projecting away non-scalar terms or changing repeated-term accounting.
-pub fn analyze_query_terms(
-    analyzer: &CompiledAnalyzer,
-    text: &str,
-) -> StorageBackendResult<Vec<TokenTermKey>> {
-    Ok(analyzer
-        .analyze_tokens(text)?
-        .tokens()
-        .iter()
-        .map(|token| TokenTermKey::from_term(token.term()))
-        .collect())
-}
-
-/// Analyze the complete phrase once, preserving emitted order, duplicate terms, holes, and graph edges.
-pub fn analyze_query_graph(
-    analyzer: &CompiledAnalyzer,
-    text: &str,
-) -> StorageBackendResult<Vec<(TokenTermKey, TokenOccurrence)>> {
-    let output = analyzer.analyze_tokens(text)?;
-    let mut position = -1_i64;
-    output
-        .tokens()
-        .iter()
-        .map(|token| {
-            position = position
-                .checked_add(i64::from(token.position_increment()))
-                .ok_or(AnalysisError::TokenPositionOverflow)?;
-            let occurrence = TokenOccurrence {
-                position: u32::try_from(position)
-                    .map_err(|_| AnalysisError::TokenPositionOverflow)?,
-                position_length: token.position_length(),
-                offsets: token.offsets().map(source_offsets).transpose()?,
-            };
-            occurrence
-                .validate()
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            Ok((TokenTermKey::from_term(token.term()), occurrence))
-        })
-        .collect()
-}
+mod query;
+pub use query::{
+    analyze_query_graph, analyze_query_graph_budgeted, analyze_query_terms,
+    analyze_query_terms_budgeted,
+};
 
 fn source_offsets(offsets: &SourceOffsets) -> StorageBackendResult<TokenOffsets> {
     fn offset(value: usize) -> StorageBackendResult<u64> {

@@ -33,8 +33,8 @@ mod read_cursor;
 mod tests;
 
 pub use analysis::{
-    analyze_index_field, analyze_query_graph, analyze_query_terms, AnalyzedField,
-    IndexedFieldMetadata,
+    analyze_index_field, analyze_query_graph, analyze_query_graph_budgeted, analyze_query_terms,
+    analyze_query_terms_budgeted, AnalyzedField, IndexedFieldMetadata,
 };
 pub use bindings::AnalyzerBindings;
 pub use contract::{AnalyzerPhase, InvertedIndex};
