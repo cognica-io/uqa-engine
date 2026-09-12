@@ -6,9 +6,9 @@
 
 //! Retained query terms release unused token morphology and preserve scalar/raw identity.
 
-use super::ordering::sort_by;
 use crate::{AnalysisError, AnalysisResult, AnalysisToken, AnalyzedText, TokenTerm};
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget};
+use uqa_core::ordering::sort_by_with_control as sort_by;
 
 pub(super) struct Terms {
     values: BudgetedVec<Budgeted<TokenTerm>>,

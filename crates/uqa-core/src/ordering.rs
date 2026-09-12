@@ -6,24 +6,22 @@
 
 //! Fallible in-place ordering with bounded cancellation checks and no scratch allocation.
 
-use crate::AnalysisResult;
 use std::cmp::Ordering;
 
-pub(super) fn sort_by<T>(
+/// Order a mutable slice without scratch allocation, forwarding cancellation and comparison failures.
+///
+/// The sort is unstable. A failure preserves every element but may leave the order partially changed; retained allocation guards stay attached to their elements. Long element comparisons must check the supplied callback themselves.
+pub fn sort_by_with_control<T, E>(
     values: &mut [T],
-    poll: &mut dyn FnMut() -> AnalysisResult<()>,
-    mut compare: impl FnMut(&T, &T, &mut dyn FnMut() -> AnalysisResult<()>) -> AnalysisResult<Ordering>,
-) -> AnalysisResult<()> {
-    fn sift<T>(
+    poll: &mut dyn FnMut() -> Result<(), E>,
+    mut compare: impl FnMut(&T, &T, &mut dyn FnMut() -> Result<(), E>) -> Result<Ordering, E>,
+) -> Result<(), E> {
+    fn sift<T, E>(
         values: &mut [T],
         mut root: usize,
-        poll: &mut dyn FnMut() -> AnalysisResult<()>,
-        compare: &mut impl FnMut(
-            &T,
-            &T,
-            &mut dyn FnMut() -> AnalysisResult<()>,
-        ) -> AnalysisResult<Ordering>,
-    ) -> AnalysisResult<()> {
+        poll: &mut dyn FnMut() -> Result<(), E>,
+        compare: &mut impl FnMut(&T, &T, &mut dyn FnMut() -> Result<(), E>) -> Result<Ordering, E>,
+    ) -> Result<(), E> {
         while root < values.len() / 2 {
             poll()?;
             let mut child = root * 2 + 1;
@@ -51,3 +49,6 @@ pub(super) fn sort_by<T>(
     }
     poll()
 }
+
+#[cfg(test)]
+mod tests;

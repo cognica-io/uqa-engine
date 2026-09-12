@@ -51,7 +51,6 @@ impl Default for HighlightOptions {
     }
 }
 
-mod ordering;
 mod render;
 mod rich;
 mod terms;

@@ -210,6 +210,12 @@ impl<T: PartialEq> PartialEq for Budgeted<T> {
 
 impl<T: Eq> Eq for Budgeted<T> {}
 
+impl<T: AsRef<U>, U: ?Sized> AsRef<U> for Budgeted<T> {
+    fn as_ref(&self) -> &U {
+        self.value.as_ref()
+    }
+}
+
 fn buffer_bytes<T>(capacity: usize) -> Result<usize, MemoryError> {
     capacity
         .checked_mul(std::mem::size_of::<T>())

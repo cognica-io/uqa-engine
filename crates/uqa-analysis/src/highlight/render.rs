@@ -6,9 +6,10 @@
 
 //! Render borrowed source windows directly into one reserved output buffer.
 
-use super::{ordering::sort_by, HighlightOptions};
+use super::HighlightOptions;
 use crate::{AnalysisError, AnalysisResult};
 use uqa_core::memory::{Budgeted, BudgetedString, BudgetedVec, MemoryBudget, MemoryError};
+use uqa_core::ordering::sort_by_with_control as sort_by;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Span {
