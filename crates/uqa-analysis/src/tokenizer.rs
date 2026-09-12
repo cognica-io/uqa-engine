@@ -16,7 +16,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AnalysisError, AnalysisResult};
 
+mod compiled;
 mod stream;
+pub(crate) use compiled::PreparedTokenizer;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -35,18 +37,7 @@ impl Tokenizer {
     /// deserialized legacy values can never bypass them.
     pub fn validate(&self) -> AnalysisResult<()> {
         match self {
-            Tokenizer::NGram { min_gram, max_gram } => {
-                validate_gram_bounds("n-gram tokenizer", *min_gram, *max_gram)
-            }
-            Tokenizer::Pattern { pattern } => {
-                Regex::new(pattern)
-                    .map(|_| ())
-                    .map_err(|source| AnalysisError::InvalidRegex {
-                        component: "pattern tokenizer",
-                        pattern: pattern.clone(),
-                        source,
-                    })
-            }
+            Tokenizer::NGram { .. } | Tokenizer::Pattern { .. } => self.prepare().map(|_| ()),
             _ => Ok(()),
         }
     }
@@ -64,7 +55,7 @@ impl Tokenizer {
         &self,
         text: &crate::FilteredText<'_>,
     ) -> AnalysisResult<crate::AnalyzedText> {
-        stream::tokenize(self, text)
+        self.prepare()?.tokenize_mapped(text)
     }
 }
 

@@ -17,6 +17,9 @@ use crate::error::AnalysisResult;
 use crate::token_filter::TokenFilter;
 use crate::tokenizer::Tokenizer;
 
+mod compiled;
+pub use compiled::CompiledAnalyzer;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Analyzer {
     #[serde(default = "default_tokenizer")]

@@ -16,6 +16,9 @@ use crate::error::{AnalysisError, AnalysisResult};
 use crate::source::TextEdit;
 use crate::FilteredText;
 
+mod compiled;
+pub(crate) use compiled::PreparedCharFilter;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CharFilter {
@@ -37,15 +40,7 @@ impl CharFilter {
     /// Validate configuration without filtering input.
     pub fn validate(&self) -> AnalysisResult<()> {
         match self {
-            CharFilter::PatternReplace { pattern, .. } => {
-                Regex::new(pattern)
-                    .map(|_| ())
-                    .map_err(|source| AnalysisError::InvalidRegex {
-                        component: "pattern-replace character filter",
-                        pattern: pattern.clone(),
-                        source,
-                    })
-            }
+            CharFilter::PatternReplace { .. } => self.prepare().map(|_| ()),
             _ => Ok(()),
         }
     }
@@ -60,37 +55,8 @@ impl CharFilter {
     }
 
     /// Apply this stage to previously filtered text without losing its original source.
-    pub fn filter_mapped<'a>(
-        &self,
-        mut text: FilteredText<'a>,
-    ) -> AnalysisResult<FilteredText<'a>> {
-        match self {
-            CharFilter::HTMLStrip => {
-                replace_pattern(&mut text, html_tag_re()?, " ")?;
-                for (entity, replacement) in HTML_ENTITIES {
-                    replace_literal(&mut text, entity, replacement)?;
-                }
-            }
-            CharFilter::Mapping { mapping } => {
-                let ordered = mapping_longest_first(mapping);
-                for (old, new) in ordered {
-                    replace_literal(&mut text, &old, &new)?;
-                }
-            }
-            CharFilter::PatternReplace {
-                pattern,
-                replacement,
-            } => {
-                let expression =
-                    Regex::new(pattern).map_err(|source| AnalysisError::InvalidRegex {
-                        component: "pattern-replace character filter",
-                        pattern: pattern.clone(),
-                        source,
-                    })?;
-                replace_pattern(&mut text, &expression, replacement)?;
-            }
-        }
-        Ok(text)
+    pub fn filter_mapped<'a>(&self, text: FilteredText<'a>) -> AnalysisResult<FilteredText<'a>> {
+        self.prepare()?.filter_mapped(text)
     }
 }
 

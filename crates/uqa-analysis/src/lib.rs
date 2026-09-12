@@ -23,6 +23,7 @@ pub mod tokenizer;
 
 pub use analyzer::{
     keyword_analyzer, standard_analyzer, standard_cjk_analyzer, whitespace_analyzer, Analyzer,
+    CompiledAnalyzer,
 };
 pub use char_filter::CharFilter;
 pub use error::{AnalysisError, AnalysisResult};

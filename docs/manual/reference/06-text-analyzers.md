@@ -247,6 +247,29 @@ assert_eq!(analyzer.analyze("<p>Running</p>")?, vec!["run"]);
 
 The process-global `uqa_analysis::register_analyzer` registry is not catalog persistence. Use the engine or SQL registration path for a persistent field assignment; otherwise a later process can reopen a field mapping whose process-local analyzer was never registered.
 
+### Immutable pipeline compilation
+
+`Analyzer::compile()` returns an `Arc<CompiledAnalyzer>` containing independently owned, prepared stages. It compiles pattern expressions, orders character mappings, fixes stop-word sets, and resolves each file-backed synonym stage during construction. Configuration errors return an `AnalysisError` in pipeline order: character filters, tokenizer, then token filters. Compilation changes no source configuration, registry, catalog, binding, or index state.
+
+`CompiledAnalyzer::analyze_tokens(input)` returns the complete `AnalyzedText`; `analyze(input)` returns its checked ordered string projection. Each call owns its output and source state. Cloning the `Arc` shares the prepared stages, and concurrent calls may reuse that handle. These methods execute the same token, graph, and source-edit algorithms as the uncompiled APIs, without rebuilding expressions or stop sets, cloning synonym maps, or opening synonym files during execution.
+
+The compiled handle remains stable after source configuration changes, file edits, deletion, or replacement. Compile again to observe a new synonym-file revision. Existing `Analyzer::analyze`, `analyze_tokens`, and individual uncompiled stage methods retain their current execution order and synonym-file reload behavior. A missing file therefore still fails a new compilation or an uncompiled call even when an older compiled handle remains usable. Each compilation currently creates a new handle; canonical resolved descriptors, resource-aware Nori compilation, and analyzer interning remain separate implementation items.
+
+```rust
+use uqa_analysis::standard_analyzer;
+
+let compiled = standard_analyzer("english").compile()?;
+let result = compiled.analyze_tokens("The cats and")?;
+assert_eq!(result.tokens()[0].term(), "cat");
+assert_eq!(result.tokens()[0].offsets().unwrap().utf8, 4..8);
+assert_eq!(result.tokens()[0].position_increment(), 2);
+assert_eq!(result.final_position_increment(), 1);
+assert_eq!(compiled.analyze("Dogs")?, ["dog"]);
+# Ok::<(), uqa_analysis::AnalysisError>(())
+```
+
+This example executes as a Rust doctest. Existing index and query consumers still use the analyzer interfaces described below; compilation alone does not change stored occurrences or field revisions.
+
 ### Structured tokens
 
 `Analyzer::analyze_tokens(input)` returns `AnalyzedText`. Its `tokens()` slice contains ordered `AnalysisToken` values with `term()`, `offsets()`, `position_increment()`, `position_length()`, and `is_keyword()`. Tokens emitted by the built-in tokenizers carry `Some(SourceOffsets)` in both original UTF-8 bytes and UTF-16 code units. Start the absolute position at `-1` and add each increment; the token's graph edge ends at that position plus its length. The first increment is positive, later increments may be zero, and lengths are positive. `final_offsets()` identifies the original input end, and `final_position_increment()` counts positions removed after the last emitted token.

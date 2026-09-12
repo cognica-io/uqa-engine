@@ -77,3 +77,6 @@ mod nori_shared;
 #[cfg(feature = "nori")]
 #[path = "analysis/nori_resolvers.rs"]
 mod nori_resolvers;
+
+#[path = "analysis/compiled.rs"]
+mod compiled;

@@ -8,35 +8,27 @@
 
 use std::ops::Range;
 
-use regex::Regex;
-
-use super::{letter_re, standard_word_re, validate_gram_bounds, Tokenizer};
-use crate::{AnalysisError, AnalysisResult, AnalysisToken, AnalyzedText, FilteredText};
+use super::PreparedTokenizer;
+use crate::{AnalysisResult, AnalysisToken, AnalyzedText, FilteredText};
 
 pub(super) fn tokenize(
-    tokenizer: &Tokenizer,
+    tokenizer: &PreparedTokenizer,
     input: &FilteredText<'_>,
 ) -> AnalysisResult<AnalyzedText> {
     let text = input.as_str();
     let mut tokens = Vec::new();
     match tokenizer {
-        Tokenizer::Whitespace => {
+        PreparedTokenizer::Whitespace => {
             for range in word_ranges(text) {
                 tokens.push(AnalysisToken::from_source(input, range)?);
             }
         }
-        Tokenizer::Standard | Tokenizer::Letter => {
-            let expression = if matches!(tokenizer, Tokenizer::Standard) {
-                standard_word_re()?
-            } else {
-                letter_re()?
-            };
+        PreparedTokenizer::Matches(expression) => {
             for matched in expression.find_iter(text) {
                 tokens.push(AnalysisToken::from_source(input, matched.range())?);
             }
         }
-        Tokenizer::NGram { min_gram, max_gram } => {
-            validate_gram_bounds("n-gram tokenizer", *min_gram, *max_gram)?;
+        PreparedTokenizer::NGram { min_gram, max_gram } => {
             for word in word_ranges(text) {
                 let boundaries: Vec<_> = text[word.clone()]
                     .char_indices()
@@ -54,12 +46,7 @@ pub(super) fn tokenize(
                 }
             }
         }
-        Tokenizer::Pattern { pattern } => {
-            let expression = Regex::new(pattern).map_err(|source| AnalysisError::InvalidRegex {
-                component: "pattern tokenizer",
-                pattern: pattern.clone(),
-                source,
-            })?;
+        PreparedTokenizer::Pattern(expression) => {
             let mut start = 0;
             for separator in expression.find_iter(text) {
                 if start < separator.start() {
@@ -71,7 +58,7 @@ pub(super) fn tokenize(
                 tokens.push(AnalysisToken::from_source(input, start..text.len())?);
             }
         }
-        Tokenizer::Keyword => {
+        PreparedTokenizer::Keyword => {
             if !text.is_empty() {
                 tokens.push(AnalysisToken::from_source(input, 0..text.len())?);
             }

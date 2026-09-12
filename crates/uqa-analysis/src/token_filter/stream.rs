@@ -6,19 +6,22 @@
 
 //! Metadata-preserving implementations shared by rich and term-only filtering.
 
-use std::collections::BTreeSet;
-
-use super::{ascii_fold, builtin_stop_words, validate_gram_bounds, TokenFilter};
+use super::{ascii_fold, PreparedTokenFilter};
 use crate::token::TokenBatch;
 use crate::{porter, AnalysisError, AnalysisResult, AnalysisToken, TokenTerm};
 
-pub(super) fn filter(filter: &TokenFilter, mut batch: TokenBatch) -> AnalysisResult<TokenBatch> {
+pub(super) fn filter(
+    filter: &PreparedTokenFilter<'_>,
+    mut batch: TokenBatch,
+) -> AnalysisResult<TokenBatch> {
     match filter {
-        TokenFilter::Lowercase | TokenFilter::ASCIIFolding | TokenFilter::PorterStem => {
+        PreparedTokenFilter::Lowercase
+        | PreparedTokenFilter::ASCIIFolding
+        | PreparedTokenFilter::PorterStem => {
             for token in &mut batch.tokens {
                 let term = match filter {
-                    TokenFilter::Lowercase => token.term.map_unicode(str::to_lowercase),
-                    TokenFilter::ASCIIFolding => token.term.map_unicode(ascii_fold),
+                    PreparedTokenFilter::Lowercase => token.term.map_unicode(str::to_lowercase),
+                    PreparedTokenFilter::ASCIIFolding => token.term.map_unicode(ascii_fold),
                     _ if token.keyword => continue,
                     _ => token.term.as_str().map_or_else(
                         || TokenTerm::from_utf16(porter::stem_utf16(&token.term.utf16())),
@@ -28,25 +31,12 @@ pub(super) fn filter(filter: &TokenFilter, mut batch: TokenBatch) -> AnalysisRes
                 token.replace_term(term);
             }
         }
-        TokenFilter::Stop {
-            language,
-            custom_words,
-        } => {
-            let mut words: BTreeSet<&str> = builtin_stop_words(language).iter().copied().collect();
-            words.extend(custom_words.iter().map(String::as_str));
+        PreparedTokenFilter::Stop(words) => {
             batch = retain(batch, |token| {
                 !token.term.as_str().is_some_and(|term| words.contains(term))
             })?;
         }
-        TokenFilter::Synonym {
-            synonyms,
-            synonyms_path,
-        } => {
-            let resolved = if let Some(path) = synonyms_path {
-                TokenFilter::parse_synonym_file(path)?
-            } else {
-                synonyms.clone()
-            };
+        PreparedTokenFilter::Synonym(resolved) => {
             let mut expanded = Vec::new();
             for token in batch.tokens {
                 let alternatives = token.term.as_str().and_then(|term| resolved.get(term));
@@ -63,19 +53,17 @@ pub(super) fn filter(filter: &TokenFilter, mut batch: TokenBatch) -> AnalysisRes
             }
             batch.tokens = expanded;
         }
-        TokenFilter::Ngram {
+        PreparedTokenFilter::Ngram {
             min_gram,
             max_gram,
             keep_short,
         } => {
-            validate_gram_bounds("n-gram token filter", *min_gram, *max_gram)?;
             batch = grams(batch, *min_gram, *max_gram, *keep_short, false)?;
         }
-        TokenFilter::EdgeNgram { min_gram, max_gram } => {
-            validate_gram_bounds("edge n-gram token filter", *min_gram, *max_gram)?;
+        PreparedTokenFilter::EdgeNgram { min_gram, max_gram } => {
             batch = grams(batch, *min_gram, *max_gram, false, true)?;
         }
-        TokenFilter::Length {
+        PreparedTokenFilter::Length {
             min_length,
             max_length,
         } => {

@@ -16,7 +16,9 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::{AnalysisError, AnalysisResult};
 
+mod compiled;
 mod stream;
+pub(crate) use compiled::PreparedTokenFilter;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -84,18 +86,11 @@ impl TokenFilter {
     pub fn validate(&self) -> AnalysisResult<()> {
         match self {
             TokenFilter::Synonym {
-                synonyms_path: Some(path),
+                synonyms_path: Some(_),
                 ..
-            } => {
-                Self::parse_synonym_file(path)?;
-                Ok(())
             }
-            TokenFilter::Ngram {
-                min_gram, max_gram, ..
-            } => validate_gram_bounds("n-gram token filter", *min_gram, *max_gram),
-            TokenFilter::EdgeNgram { min_gram, max_gram } => {
-                validate_gram_bounds("edge n-gram token filter", *min_gram, *max_gram)
-            }
+            | TokenFilter::Ngram { .. }
+            | TokenFilter::EdgeNgram { .. } => self.prepare().map(|_| ()),
             _ => Ok(()),
         }
     }
@@ -192,16 +187,19 @@ fn default_stop_language() -> String {
 
 impl TokenFilter {
     pub fn filter(&self, tokens: Vec<String>) -> AnalysisResult<Vec<String>> {
-        stream::filter(self, crate::token::TokenBatch::from_terms(tokens))?.into_terms()
+        stream::filter(
+            &self.prepare()?,
+            crate::token::TokenBatch::from_terms(tokens),
+        )?
+        .into_terms()
     }
 
     /// Transform tokens while retaining their source spans and graph end state.
     pub fn filter_analyzed(
         &self,
-        mut input: crate::AnalyzedText,
+        input: crate::AnalyzedText,
     ) -> AnalysisResult<crate::AnalyzedText> {
-        input.batch = stream::filter(self, input.batch)?;
-        Ok(input)
+        self.prepare()?.filter_analyzed(input)
     }
 }
 
