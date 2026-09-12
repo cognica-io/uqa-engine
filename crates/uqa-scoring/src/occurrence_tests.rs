@@ -168,20 +168,51 @@ fn projected_positions_do_not_replace_occurrence_frequency_or_normalization_leng
 
 #[test]
 fn all_wand_paths_match_exact_graph_frequency_and_discounted_length_scores() {
-    let index = OccurrenceIndex::new();
+    let reference = OccurrenceIndex::new();
+    verify_wand_scores(&reference, || {
+        let (bytes, _) = encode_occurrence_cluster(&reference.entries).unwrap();
+        Box::new(
+            ClusteredPostingCursor::new(vec![EncodedScoreCluster {
+                cluster_id: 0,
+                bytes,
+            }])
+            .unwrap(),
+        )
+    });
+}
+
+#[test]
+fn memory_graph_postings_produce_exact_scores_in_every_wand_path() {
+    let reference = OccurrenceIndex::new();
+    let revision = AnalyzerResources::default()
+        .compile_with_length_policy(&reference.analyzer, TokenLengthPolicy::DiscountOverlaps)
+        .unwrap();
+    let mut index = uqa_storage::MemoryInvertedIndex::new(reference.analyzer);
+    index
+        .set_field_analyzer_revision("body", revision, uqa_storage::AnalyzerPhase::Both)
+        .unwrap();
+    index
+        .try_add_documents(
+            [(1, "a"), (2, "a a")]
+                .into_iter()
+                .map(|(doc, text)| (doc, BTreeMap::from([("body".into(), text.into())])))
+                .collect(),
+        )
+        .unwrap();
+    verify_wand_scores(&index, || index.posting_cursor("body", "a").unwrap());
+}
+
+fn verify_wand_scores(
+    index: &dyn InvertedIndex,
+    cursor: impl Fn() -> Box<dyn uqa_storage::PostingCursor>,
+) {
     let scorer = Arc::new(BM25Scorer::new(
         BM25Params::default(),
         Arc::new(index.stats().unwrap()),
     ));
-    let expected: BTreeMap<_, _> = index
-        .entries
-        .iter()
-        .map(|entry| {
-            (
-                entry.doc_id,
-                scorer.score(entry.score().term_freq, entry.doc_length, 2),
-            )
-        })
+    let expected: BTreeMap<_, _> = [(1, 3, 1), (2, 6, 2)]
+        .into_iter()
+        .map(|(doc, frequency, length)| (doc, scorer.score(frequency, length, 2)))
         .collect();
     let mut blocks = BlockMaxIndex::new(1).unwrap();
     blocks
@@ -196,15 +227,8 @@ fn all_wand_paths_match_exact_graph_frequency_and_discounted_length_scores() {
             k,
         )
         .unwrap();
-        let (bytes, _) = encode_occurrence_cluster(&index.entries).unwrap();
         let query_cursors = CursorWANDQuery::new(
-            vec![Box::new(
-                ClusteredPostingCursor::new(vec![EncodedScoreCluster {
-                    cluster_id: 0,
-                    bytes,
-                }])
-                .unwrap(),
-            )],
+            vec![cursor()],
             vec![scorer.clone()],
             vec!["body".into()],
             vec!["a".into()],
@@ -212,8 +236,8 @@ fn all_wand_paths_match_exact_graph_frequency_and_discounted_length_scores() {
         )
         .unwrap();
         let results = [
-            WANDScorer::new(&query, Some(&index)).score_top_k().unwrap(),
-            BlockMaxWANDScorer::new(&query, Some(&index), &blocks, "docs")
+            WANDScorer::new(&query, Some(index)).score_top_k().unwrap(),
+            BlockMaxWANDScorer::new(&query, Some(index), &blocks, "docs")
                 .score_top_k()
                 .unwrap(),
             CursorWANDScorer::new(&query_cursors).score_top_k().unwrap(),

@@ -44,29 +44,39 @@ impl Engine {
             .try_table(table)
             .map_err(|err| format!("resolve table `{table}`: {err}"))?
             .ok_or_else(|| format!("unknown table `{table}`"))?;
-        if let Some(analyzer_name) = analyzer {
-            let analyzer = self.resolve_analyzer(analyzer_name)?;
+        let revision = analyzer
+            .map(|name| {
+                self.resolve_analyzer(name)?
+                    .compile()
+                    .map_err(|error| error.to_string())
+            })
+            .transpose()?;
+        {
+            let mut fts = t.fts_fields.write();
+            if !fts.contains(&field) {
+                fts.push(field.clone());
+            }
+        }
+        if let Some(revision) = revision {
+            let documents = Self::project_fts_sources(&t)?;
             t.inverted_index
                 .write()
-                .set_field_analyzer(&field, analyzer, AnalyzerPhase::Both)
+                .rebuild_with_analyzer_revision(&field, revision, AnalyzerPhase::Both, documents)
                 .map_err(|e| format!("add_fts_field: {e}"))?;
-            self.durable.table_field_analyzers.write().insert(
-                (table_name.clone(), field.clone()),
-                (analyzer_name.to_string(), "both".to_string()),
-            );
+        } else {
+            Self::rebuild_fts_index(&t)?;
+        }
+        if let Some(analyzer_name) = analyzer {
             if let Some(catalog) = self.storage.catalog.as_ref() {
                 catalog
                     .replace_table_field_analyzer(&table_name, &field, "both", analyzer_name)
                     .map_err(|err| format!("persist FTS analyzer: {err}"))?;
             }
+            self.durable.table_field_analyzers.write().insert(
+                (table_name.clone(), field),
+                (analyzer_name.to_string(), "both".to_string()),
+            );
         }
-        {
-            let mut fts = t.fts_fields.write();
-            if !fts.contains(&field) {
-                fts.push(field);
-            }
-        }
-        Self::rebuild_fts_index(&t)?;
         if self.is_persistent() {
             self.try_save_table_schema(&table_name, &t)
                 .map_err(|err| format!("persist FTS schema `{table_name}`: {err}"))?;
@@ -103,13 +113,13 @@ impl Engine {
             ));
         }
 
+        t.fts_fields.write().retain(|candidate| candidate != field);
+        Self::rebuild_fts_index(&t)
+            .map_err(|err| format!("rebuild FTS index for `{table_name}`: {err}"))?;
         t.inverted_index
             .write()
             .remove_field_analyzers(field)
             .map_err(|err| format!("remove FTS analyzer `{table_name}`.`{field}`: {err}"))?;
-        t.fts_fields.write().retain(|candidate| candidate != field);
-        Self::rebuild_fts_index(&t)
-            .map_err(|err| format!("rebuild FTS index for `{table_name}`: {err}"))?;
 
         if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog

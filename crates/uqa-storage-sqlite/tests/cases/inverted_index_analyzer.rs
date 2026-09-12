@@ -50,7 +50,6 @@ fn linear_backends_reject_korean_assignments_and_writes_before_mutation() {
     let compiled = analyzer.compile().unwrap();
     let indexes = |analyzer: Analyzer| -> Vec<Box<dyn InvertedIndex>> {
         vec![
-            Box::new(MemoryInvertedIndex::new(analyzer.clone())),
             Box::new(KeyValueInvertedIndex::new(
                 Arc::new(MemoryKeyValueStore::new()),
                 "korean",

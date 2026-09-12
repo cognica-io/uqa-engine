@@ -4,11 +4,16 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use super::IndexedFieldMetadata;
 use super::{
     counter_error, Analyzer, Arc, BTreeMap, BlockMaxScorer, DocId, FieldName, IndexStats,
     PostingEntry, PostingList, StorageBackendError, StorageBackendResult,
 };
-use crate::clustered_postings::{MaterializedPostingCursor, PostingCursor, PostingScore};
+use crate::clustered_postings::{
+    MaterializedPostingCursor, OccurrencePosting, PostingCursor, PostingScore,
+};
+use crate::TokenTermKey;
+use uqa_core::TokenOccurrence;
 
 /// Which side of the index/search pipeline a field analyzer applies to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,6 +99,82 @@ pub trait InvertedIndex: Send + Sync {
     }
 
     fn get_posting_list(&self, field: &str, term: &str) -> StorageBackendResult<PostingList>;
+
+    /// Unique-position compatibility projection for an exact term key. Legacy providers accept scalar keys and reject unpaired UTF-16 explicitly.
+    fn get_posting_list_key(
+        &self,
+        field: &str,
+        term: &TokenTermKey,
+    ) -> StorageBackendResult<PostingList> {
+        self.get_posting_list(field, &term.to_term().into_string()?)
+    }
+
+    /// Score cursor with exact term identity and occurrence frequency independent of unique positions.
+    fn posting_cursor_key(
+        &self,
+        field: &str,
+        term: &TokenTermKey,
+    ) -> StorageBackendResult<Box<dyn PostingCursor>> {
+        self.posting_cursor(field, &term.to_term().into_string()?)
+    }
+
+    /// Complete graph edges in document order, preserving occurrence multiplicity and original source coordinates. Legacy positions cannot implement this contract without a source rebuild.
+    fn get_occurrence_postings(
+        &self,
+        _field: &str,
+        _term: &TokenTermKey,
+    ) -> StorageBackendResult<Vec<OccurrencePosting>> {
+        Err(StorageBackendError::Other(
+            "lossless occurrence storage is not supported by this backend".into(),
+        ))
+    }
+
+    /// Exact occurrences for one document and term; an absent document or term has no occurrences.
+    fn get_occurrences(
+        &self,
+        doc_id: DocId,
+        field: &str,
+        term: &TokenTermKey,
+    ) -> StorageBackendResult<Vec<TokenOccurrence>> {
+        Ok(self
+            .get_occurrence_postings(field, term)?
+            .into_iter()
+            .find(|posting| posting.doc_id == doc_id)
+            .map_or_else(Vec::new, |posting| posting.occurrences))
+    }
+
+    /// Original stream-end state and revision metadata published with a document field, including fields that emitted no tokens.
+    fn indexed_field_metadata(
+        &self,
+        _doc_id: DocId,
+        _field: &str,
+    ) -> StorageBackendResult<Option<IndexedFieldMetadata>> {
+        Err(StorageBackendError::Other(
+            "indexed field analysis metadata is not supported by this backend".into(),
+        ))
+    }
+
+    fn doc_freq_key(&self, field: &str, term: &TokenTermKey) -> StorageBackendResult<u64> {
+        self.doc_freq(field, &term.to_term().into_string()?)
+    }
+
+    fn get_term_freq_key(
+        &self,
+        doc_id: DocId,
+        field: &str,
+        term: &TokenTermKey,
+    ) -> StorageBackendResult<u64> {
+        self.get_term_freq(doc_id, field, &term.to_term().into_string()?)
+    }
+
+    /// Sorted canonical term keys, including unpaired units. String-only vocabulary APIs must return an error if projection would lose identity.
+    fn vocabulary_keys(&self, field: &str) -> StorageBackendResult<Vec<TokenTermKey>> {
+        Ok(self
+            .vocabulary_terms(field)?
+            .iter()
+            .map(|term| TokenTermKey::from_text(term))
+            .collect())
+    }
 
     fn get_posting_lists_bulk(
         &self,
@@ -459,7 +540,7 @@ pub trait InvertedIndex: Send + Sync {
         Ok(self.get_search_analyzer(field).compile()?)
     }
 
-    /// Install a validated revision without reopening its resources. This does not rebuild existing documents.
+    /// Install a validated revision without reopening its resources. This does not rebuild existing documents; graph providers reject a different index revision on a populated field and require `rebuild_with_analyzer_revision` instead.
     fn set_field_analyzer_revision(
         &mut self,
         _field: &str,

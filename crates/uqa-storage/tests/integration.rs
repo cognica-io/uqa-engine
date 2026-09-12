@@ -11,3 +11,6 @@ mod btree_index;
 
 #[path = "cases/occurrences.rs"]
 mod occurrences;
+
+#[path = "cases/memory_occurrences.rs"]
+mod memory_occurrences;

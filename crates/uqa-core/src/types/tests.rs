@@ -811,3 +811,25 @@ fn jsonb_equality_and_ordering_follow_postgresql_structure() {
     );
     assert_eq!(jsonb("{\"a\":1,\"a\":2}"), jsonb("{\"a\":2}"));
 }
+
+#[test]
+fn index_statistics_preserve_every_utf16_unit_without_scalar_aliases() {
+    let mut stats = IndexStats::default();
+    for unit in 0..=u16::MAX {
+        stats.set_doc_freq_utf16("body", vec![unit], u64::from(unit) + 1);
+    }
+    for unit in 0..=u16::MAX {
+        assert_eq!(stats.doc_freq_utf16("body", &[unit]), u64::from(unit) + 1);
+        if let Some(scalar) = char::from_u32(u32::from(unit)) {
+            assert_eq!(
+                stats.doc_freq("body", &scalar.to_string()),
+                u64::from(unit) + 1
+            );
+        }
+    }
+    stats.set_doc_freq_utf16("body", vec![0xd83d, 0xde42], 17);
+    assert_eq!(stats.doc_freq("body", "🙂"), 17);
+    stats.set_doc_freq("body", "🙂", 29);
+    assert_eq!(stats.doc_freq_utf16("body", &[0xd83d, 0xde42]), 29);
+    assert_eq!(stats.doc_freq_utf16("missing", &[0xd83d]), 0);
+}

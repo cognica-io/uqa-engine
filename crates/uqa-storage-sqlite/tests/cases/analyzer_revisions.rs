@@ -23,8 +23,14 @@ fn connection() -> ManagedConnection {
 }
 
 fn providers(default: &Analyzer) -> Vec<Box<dyn InvertedIndex>> {
+    let mut providers: Vec<Box<dyn InvertedIndex>> =
+        vec![Box::new(MemoryInvertedIndex::new(default.clone()))];
+    providers.extend(linear_providers(default));
+    providers
+}
+
+fn linear_providers(default: &Analyzer) -> Vec<Box<dyn InvertedIndex>> {
     vec![
-        Box::new(MemoryInvertedIndex::new(default.clone())),
         Box::new(KeyValueInvertedIndex::new(
             Arc::new(MemoryKeyValueStore::new()),
             "docs",
@@ -323,7 +329,7 @@ fn linear_providers_reject_normalization_policies_they_cannot_store() {
             uqa_analysis::TokenLengthPolicy::DiscountOverlaps,
         )
         .unwrap();
-    for mut index in providers(&whitespace_analyzer()) {
+    for mut index in linear_providers(&whitespace_analyzer()) {
         index.add_document(1, fields("old")).unwrap();
         let before = index.index_analyzer_revision("body").unwrap();
         assert!(index
@@ -380,5 +386,49 @@ fn concurrent_default_resolution_shares_one_revision_with_cache_retention_disabl
         .collect();
     for revision in &revisions[1..] {
         assert!(Arc::ptr_eq(&revisions[0], revision));
+    }
+}
+
+#[test]
+fn linear_providers_reject_missing_graph_information_and_unpaired_key_projection() {
+    let scalar = uqa_storage::TokenTermKey::from_text("�");
+    let raw =
+        uqa_storage::TokenTermKey::from_term(&uqa_analysis::TokenTerm::from_utf16(vec![0xd83d]));
+    for mut index in linear_providers(&whitespace_analyzer()) {
+        index.add_document(1, fields("� a")).unwrap();
+        assert_eq!(index.doc_freq_key("body", &scalar).unwrap(), 1);
+        assert_eq!(index.get_term_freq_key(1, "body", &scalar).unwrap(), 1);
+        assert_eq!(
+            index.get_posting_list_key("body", &scalar).unwrap().len(),
+            1
+        );
+        assert_eq!(
+            index
+                .posting_cursor_key("body", &scalar)
+                .unwrap()
+                .current()
+                .unwrap()
+                .doc_id,
+            1
+        );
+        assert!(index.vocabulary_keys("body").unwrap().contains(&scalar));
+        assert!(!index.vocabulary_keys("body").unwrap().contains(&raw));
+        assert!(index.doc_freq_key("body", &raw).is_err());
+        assert!(index.get_term_freq_key(1, "body", &raw).is_err());
+        assert!(index.get_posting_list_key("body", &raw).is_err());
+        assert!(index.posting_cursor_key("body", &raw).is_err());
+        assert!(index
+            .get_occurrence_postings("body", &scalar)
+            .unwrap_err()
+            .to_string()
+            .contains("not supported"));
+        assert!(index.get_occurrences(1, "body", &scalar).is_err());
+        assert!(index
+            .indexed_field_metadata(1, "body")
+            .unwrap_err()
+            .to_string()
+            .contains("not supported"));
+        assert_eq!(index.doc_count().unwrap(), 1);
+        assert_eq!(index.get_term_freq(1, "body", "�").unwrap(), 1);
     }
 }

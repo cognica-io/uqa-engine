@@ -8,10 +8,36 @@
 
 use std::collections::BTreeMap;
 
-use uqa_analysis::{AnalysisError, CompiledAnalyzer, SourceOffsets, TokenLengthPolicy};
+use uqa_analysis::{
+    AnalysisError, AnalyzerFingerprint, CompiledAnalyzer, SourceOffsets, TokenLengthPolicy,
+};
 use uqa_core::{TokenOccurrence, TokenOffsets};
 
 use crate::{StorageBackendError, StorageBackendResult, TokenTermKey};
+
+/// Metadata published with a complete document field's occurrences. The field's retained index revision owns the matching descriptor and resources.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IndexedFieldMetadata {
+    pub analyzer_fingerprint: AnalyzerFingerprint,
+    pub occurrence_format_version: u8,
+    pub length_policy: TokenLengthPolicy,
+    pub length: u64,
+    pub final_offsets: TokenOffsets,
+    pub final_position_increment: u32,
+}
+
+impl IndexedFieldMetadata {
+    pub fn new(analyzer: &CompiledAnalyzer, field: &AnalyzedField) -> Self {
+        Self {
+            analyzer_fingerprint: analyzer.descriptor().fingerprint(),
+            occurrence_format_version: crate::clustered_postings::OCCURRENCE_FORMAT_VERSION,
+            length_policy: analyzer.descriptor().length_policy(),
+            length: field.length,
+            final_offsets: field.final_offsets,
+            final_position_increment: field.final_position_increment,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnalyzedField {

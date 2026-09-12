@@ -515,7 +515,7 @@ assert_eq!(restored.analyze_tokens("세종시")?, compiled.analyze_tokens("세�
 # Ok::<(), uqa_analysis::AnalysisError>(())
 ```
 
-This example executes as a Rust doctest with the Nori feature. Current Memory, Key/Value, and SQLite linear term/position indexes reject Korean-stage field assignments and document analysis before mutating bindings or postings because they cannot retain immutable graph revisions. `Analyzer::uses_korean_stages()` supports capability preflight. Graph occurrence storage, durable descriptor bindings, pipeline-wide cancellation/accounting for generic stages, SQL diagnostics, and actual binding execution remain in the implementation plan; the existing built-in registry inventory is unchanged.
+This example executes as a Rust doctest with the Nori feature. Memory indexes accept these compiled pipelines and retain canonical term keys, complete occurrence graphs, declared normalization lengths, and original source-end metadata. Exact graph access uses `get_occurrence_postings` or `get_occurrences` with `TokenTermKey`; string posting lists remain a unique-position projection. Changing a populated memory field's index revision requires `rebuild_with_analyzer_revision` with original sources. Key/Value and SQLite still reject Korean-stage assignments and writes before mutation until their graph storage and source migrations are implemented. `Analyzer::uses_korean_stages()` supports capability preflight. Persistent graph storage, graph-aware query execution, durable descriptor bindings, pipeline-wide cancellation/accounting for generic stages, SQL diagnostics, and actual binding execution remain in the implementation plan; the existing built-in registry inventory is unchanged.
 
 ### Korean filters and normalization
 

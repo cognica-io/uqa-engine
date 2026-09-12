@@ -1,6 +1,6 @@
 # Lossless token occurrence format
 
-The common storage library implements the binary term keys, occurrence values, field staging, and version 2 codecs described here. Memory, Key/Value, and SQLite indexes still write their existing linear representation until provider integration and atomic source rebuilds install the new contract. This document specifies the available codec, not completed index migration or Nori retrieval. The [Nori plan](../plans/0006-nori-analyzer.md) tracks those consumers and durable analyzer revisions.
+The common storage library implements the binary term keys, occurrence values, field staging, and version 2 codecs described here. The Memory provider now stores exact term keys and complete occurrence graphs with revision and original source-end metadata. Key/Value and SQLite still write their existing linear representation until atomic source rebuilds install the new contract. This document specifies the implemented memory representation and available codecs; persistent migration and complete Nori retrieval remain pending. The [Nori plan](../plans/0006-nori-analyzer.md) tracks those consumers and durable analyzer revisions.
 
 ## Values and ownership
 
@@ -10,7 +10,17 @@ Each `(field, term, document)` occurrence list preserves emission order, equal s
 
 `uqa-storage::inverted_index::analyze_index_field(&CompiledAnalyzer, text)` stages a complete source field before mutation. It accumulates the analyzer's increments, preserves source spans, groups occurrences under canonical term keys, and retains final source offsets and the final skipped-position increment. Its length follows the compiled descriptor: `EmittedTokens` counts all tokens; `DiscountOverlaps` counts tokens whose increment is positive, without counting removed-position holes. The returned `AnalyzedField` does not itself persist a field binding or mutate an index.
 
-A provider must associate the positional format with the exact analyzer descriptor and length policy in field metadata, and preserve the staged field/document end state in its document metadata. Rebuilds must publish that metadata, occurrences, reverse terms, document lengths, and dependent statistics together. These provider changes remain implementation work; the binary payload alone cannot identify an analyzer revision.
+A provider must associate the positional format with the exact analyzer descriptor and length policy in field metadata, and preserve the staged field/document end state in its document metadata. Rebuilds must publish that metadata, occurrences, reverse terms, document lengths, and dependent statistics together. Memory implements this association using `IndexedFieldMetadata` and its retained index-side compiled handle; the persistent providers still require this integration. The binary occurrence payload alone cannot identify an analyzer revision.
+
+## Memory provider access and publication
+
+`MemoryInvertedIndex` runs `analyze_index_field` for every source field and publishes canonical keys, complete occurrence lists, reverse terms, and `IndexedFieldMetadata` with checked field/corpus counters. Metadata contains the exact analyzer fingerprint, occurrence format version, declared length policy and length, original final offsets, and final skipped-position increment. Empty and all-stopped fields retain that metadata and count as indexed fields even when they have no term postings.
+
+`InvertedIndex::get_occurrence_postings` returns complete document-ordered occurrence lists; `get_occurrences` looks up one document. `get_posting_list_key`, `posting_cursor_key`, `doc_freq_key`, `get_term_freq_key`, and `vocabulary_keys` use canonical term identity. Existing string lookup methods select the matching scalar key. Unique positions remain a cached compatibility projection; score cursors and all frequency accessors count the complete occurrence list. String vocabulary projection returns an error if any term contains unpaired units. `IndexStats::doc_freq_utf16` and `set_doc_freq_utf16` preserve those identities while sharing scalar terms with the existing string API.
+
+A populated memory field, including an all-stopped field, rejects changing or removing its index revision without an atomic source rebuild. A search-only assignment preserves its stored graph metadata. `rebuild_with_analyzer_revision` builds an empty candidate from supplied original sources and publishes its selected bindings with all replacement documents after success. Read-only and writable snapshots retain their original data and compiled handles. Point replacement, removal, clearing, and batch replacement update graph/end metadata together; a failed analysis or checked-counter update leaves the previous state. Bulk insertion currently stages through a full provisional copy, whose heap and throughput costs remain part of the planned benchmarks.
+
+Legacy providers' new scalar-key lookup defaults delegate to their existing methods, and unpaired keys fail checked projection. Their occurrence and field-metadata methods return explicit unsupported errors instead of fabricating missing graph information. Graph phrase matching, lossless query terms throughout ranking, and original-source highlighting remain separate consumer work.
 
 ## Canonical term keys
 

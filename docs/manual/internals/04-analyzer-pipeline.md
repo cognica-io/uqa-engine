@@ -11,11 +11,11 @@ Analyzer behavior crosses analysis, storage, engine catalog, SQL execution, and 
 | Built-in and process-global registry | `uqa-analysis::registry` | Immutable built-ins plus a process-global custom map |
 | Persistent named definitions | `uqa-engine` and `CatalogFacade` | Analyzer name to JSON configuration |
 | Persistent field assignment | `uqa-engine` and `CatalogFacade` | Table, field, normalized phase, analyzer name |
-| Index and search analyzer instances | `InvertedIndex` implementations | Per-field index and search analyzer maps |
+| Index and search analyzer instances | `InvertedIndex` implementations | Independent immutable handles in `AnalyzerBindings` |
 | SQL lifecycle | `uqa-execution::query::table_functions::analyzers` | Mutating table functions and `fts_index_stats` |
-| Query-time resolution | `uqa-operators` and engine search paths | `get_search_analyzer(field)` |
+| Query-time resolution | `uqa-operators` and engine search paths | `search_analyzer_revision(field)` |
 
-The engine catalog stores JSON and names, while inverted-index instances hold cloned, validated `Analyzer` values. A definition update therefore does not mutate every installed clone automatically; an owning GIN definition must be recreated or a field assignment must be reapplied.
+The engine catalog stores JSON and names, while inverted-index instances retain immutable `CompiledAnalyzer` handles with resolved resources. A definition update does not mutate installed revisions; an owning GIN definition must be recreated or a field assignment must be reapplied.
 
 ## Analysis execution
 
@@ -34,7 +34,7 @@ flowchart LR
 
 Generic terms use `TokenTerm`, with canonical scalar strings and explicit raw UTF-16 storage for unpaired units. Checked string projection fails for a non-scalar term. Nori streams convert directly into this representation, retaining optional Korean morphology and pre-correction coordinates while projecting exact original UTF-16 and safe UTF-8 source ranges. An opaque terminal token preserves attribute changes when an upstream filter is exhausted; subsequent filters must retain that state independently of the emitted token list. The native bridge is exercised against all 803 successful text cases across the tokenizer, analyzer, and number corpora.
 
-Removal filters accumulate skipped increments, including trailing removals. Synonym and gram-filter expansions share the input position and length; tokenizer grams occupy consecutive positions. Unchanged substrings preserve precise source offsets, while rewritten terms retain covering spans. Existing storage and query consumers still call the term-only API; graph occurrence storage and phrase matching remain tracked in the [Nori implementation plan](../../plans/0006-nori-analyzer.md). The [Rust reference](../reference/06-text-analyzers.md#structured-tokens) defines the public metadata contract.
+Removal filters accumulate skipped increments, including trailing removals. Synonym and gram-filter expansions share the input position and length; tokenizer grams occupy consecutive positions. Unchanged substrings preserve precise source offsets, while rewritten terms retain covering spans. Memory storage consumes the rich result and preserves occurrence graphs and original source metadata. Key/Value and SQLite storage and existing query consumers still use term projections; their graph integration and phrase matching remain tracked in the [Nori implementation plan](../../plans/0006-nori-analyzer.md). The [Rust reference](../reference/06-text-analyzers.md#structured-tokens) defines the public metadata contract.
 
 Configuration uses Serde tagged enums. Most serialized tags derive from Rust variant spelling, including `n_gram` for `Tokenizer::NGram` and `ngram` for `TokenFilter::Ngram`. Acronym-bearing variants have explicit stable names: `html_strip` for `CharFilter::HTMLStrip` and `ascii_folding` for `TokenFilter::ASCIIFolding`. Deserialization also accepts the derived spellings `h_t_m_l_strip` and `a_s_c_i_i_folding` that releases up to 0.1.2 persisted, so catalogs written before the stable names still open; serialization always emits the stable names. Engine parsing normalizes string shorthand only for the tokenizer and token-filter arrays; canonical object tags remain the compatibility contract.
 
@@ -97,9 +97,11 @@ sequenceDiagram
 
 Document writes project only registered FTS fields whose values are strings. The inverted-index write is a replacement operation so an update that removes indexed text cannot leave stale postings. Analyzer failure aborts before the document store publishes the new row. Transaction snapshots cover analyzer instances and catalog state so a later failure can restore the prior visible state.
 
-`CREATE INDEX ... USING gin` calls `add_fts_field_with_analyzer` for every indexed column. It validates an optional analyzer name, installs it for both phases, registers the FTS field, and rebuilds the full index from existing documents. The catalog index row stores the analyzer option for reopen.
+`CREATE INDEX ... USING gin` calls `add_fts_field_with_analyzer` for every indexed column. It compiles an optional analyzer name before publication, stages the full index from existing documents, and publishes its replacement postings with both analyzer sides. Field registration and catalog updates are covered by the owning transaction. The catalog index row stores the analyzer option for reopen.
 
-`set_table_field_analyzer` first requires a real `TEXT` column already registered in the physical FTS index. An `index` or `both` assignment installs the analyzer and calls `rebuild_fts_index`; a search-only assignment changes query analysis without touching postings. Persistence failure or rebuild failure restores the old index and search analyzers and rebuilds the prior posting state when required.
+`set_table_field_analyzer` first requires a real `TEXT` column already registered in the physical FTS index. An `index` or `both` assignment uses the provider's atomic revision/source rebuild; a search-only assignment changes query analysis without touching postings. Failure retains or restores the old compiled index and search handles and prior postings without reopening their resources.
+
+Memory indexes publish canonical `TokenTermKey` values and complete `TokenOccurrence` lists with each document field's `IndexedFieldMetadata`. The metadata retains the exact analyzer fingerprint, length policy, final original offsets, and trailing position gaps, including fields that emit no tokens. Changing a populated field's index revision requires a source rebuild. String posting lists expose unique starts for compatibility, while score cursors count every occurrence. The [occurrence format](../../design/occurrence-posting-format.md#memory-provider-access-and-publication) defines exact-key and graph lookup methods, snapshots, and failure atomicity. Persistent graph storage and graph-aware query execution remain in the Nori plan.
 
 ## Query path
 
