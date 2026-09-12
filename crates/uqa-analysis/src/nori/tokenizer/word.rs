@@ -6,11 +6,13 @@
 
 //! A common view of system, unknown, and user morphology without narrowing user costs.
 
+use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget};
+
+use super::allocation;
 use super::lattice::WordId;
 use super::{NoriMorpheme, NoriOrigin};
-use crate::nori::{
-    DictionaryResult, DictionaryWord, NoriDictionary, POSTag, POSType, UserDictionary, UserEntry,
-};
+use crate::nori::{DictionaryWord, NoriDictionary, POSTag, POSType, UserDictionary, UserEntry};
+use crate::AnalysisResult;
 
 pub(super) enum Word<'a> {
     Dictionary(DictionaryWord<'a>, NoriOrigin),
@@ -87,36 +89,53 @@ impl<'a> Word<'a> {
             Self::User(_) => None,
         }
     }
-    pub fn morphemes(&self, surface: &[u16]) -> DictionaryResult<Option<Vec<NoriMorpheme>>> {
-        let mut result = Vec::new();
+    pub fn morphemes(
+        &self,
+        surface: &[u16],
+        budget: &MemoryBudget,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<Option<Vec<NoriMorpheme>>>> {
+        let mut attributes = budget.empty_reservation();
+        let mut result = BudgetedVec::new(budget);
         match self {
             Self::Dictionary(word, _) => {
                 let Some(parts) = word.morphemes() else {
-                    return Ok(None);
+                    return Ok(Budgeted::new(None, attributes));
                 };
-                result.try_reserve(parts.len())?;
+                poll()?;
+                result.reserve(parts.len())?;
                 for part in parts {
+                    let (surface_utf16, memory) =
+                        allocation::encode(part.surface, usize::MAX, budget, poll)?.into_parts();
+                    attributes.absorb(memory);
                     result.push(NoriMorpheme {
-                        surface_utf16: part.surface.encode_utf16().collect(),
+                        surface_utf16,
                         pos: part.pos,
-                    });
+                    })?;
                 }
             }
             Self::User(word) => {
                 let Some(lengths) = word.segment_lengths() else {
-                    return Ok(None);
+                    return Ok(Budgeted::new(None, attributes));
                 };
-                result.try_reserve(lengths.len())?;
+                poll()?;
+                result.reserve(lengths.len())?;
                 let mut offset = 0;
                 for length in lengths {
+                    let (surface_utf16, memory) =
+                        allocation::copy_units(&surface[offset..offset + length], budget, poll)?
+                            .into_parts();
+                    attributes.absorb(memory);
                     result.push(NoriMorpheme {
-                        surface_utf16: surface[offset..offset + length].to_vec(),
+                        surface_utf16,
                         pos: word.pos(),
-                    });
+                    })?;
                     offset += length;
                 }
             }
         }
-        Ok(Some(result))
+        let (result, memory) = result.into_parts();
+        attributes.absorb(memory);
+        Ok(Budgeted::new(Some(result), attributes))
     }
 }

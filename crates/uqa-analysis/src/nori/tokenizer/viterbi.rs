@@ -6,11 +6,13 @@
 
 //! Ordered rolling Viterbi with frontier commits and the reference's forced backtrace rule.
 
+use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryReservation};
+
 use super::lattice::{Lattice, Node, WordId};
 use super::word::Word;
 use super::{NoriLimits, NoriOptions, NoriOutput, NoriToken};
 use crate::nori::error::{check_limit, invalid};
-use crate::nori::{DictionaryError, NoriDictionary, POSTag, UserDictionary};
+use crate::nori::{NoriDictionary, POSTag, UserDictionary};
 use crate::AnalysisResult;
 
 pub(super) struct State<'a> {
@@ -21,13 +23,15 @@ pub(super) struct State<'a> {
     pub lattice: Lattice,
     pub position: usize,
     pub last_backtrace: usize,
-    pub pending: Vec<NoriToken>,
+    pub pending: BudgetedVec<NoriToken>,
     pub ngram: Option<u32>,
+    pub budget: &'a MemoryBudget,
     limits: NoriLimits,
     total_tokens: usize,
     output_units: usize,
     work: usize,
-    poll: &'a mut dyn FnMut() -> AnalysisResult<()>,
+    output_memory: MemoryReservation,
+    pub poll: &'a mut dyn FnMut() -> AnalysisResult<()>,
 }
 
 pub(super) fn analyze(
@@ -36,52 +40,67 @@ pub(super) fn analyze(
     user: Option<&UserDictionary>,
     options: NoriOptions,
     limits: NoriLimits,
+    budget: &MemoryBudget,
     poll: &mut impl FnMut() -> AnalysisResult<()>,
-) -> AnalysisResult<NoriOutput> {
-    let ngram = if options.output_unknown_unigrams {
-        Some(
-            (model.known_word_count()..model.word_count())
-                .find(|id| {
-                    model
-                        .word(*id as u32)
-                        .is_some_and(|word| word.original_id() == 0)
-                })
-                .ok_or_else(|| {
-                    invalid("Nori tokenizer", "unknown dictionary has no word ID zero")
-                })? as u32,
-        )
-    } else {
-        None
-    };
+) -> AnalysisResult<Budgeted<NoriOutput>> {
+    let ngram =
+        if options.output_unknown_unigrams {
+            let mut ngram = None;
+            for (work, id) in (model.known_word_count()..model.word_count()).enumerate() {
+                if work % 1024 == 0 {
+                    poll()?;
+                }
+                if model
+                    .word(id as u32)
+                    .is_some_and(|word| word.original_id() == 0)
+                {
+                    ngram = Some(id as u32);
+                    break;
+                }
+            }
+            Some(ngram.ok_or_else(|| {
+                invalid("Nori tokenizer", "unknown dictionary has no word ID zero")
+            })?)
+        } else {
+            None
+        };
     let mut state = State {
         input,
         model,
         user,
         options,
-        lattice: Lattice::new(limits)?,
+        lattice: Lattice::new(limits, budget, poll)?,
         position: 0,
         last_backtrace: 0,
-        pending: Vec::new(),
+        pending: BudgetedVec::new(budget),
         ngram,
+        budget,
         limits,
         total_tokens: 0,
         output_units: 0,
         work: 0,
+        output_memory: budget.empty_reservation(),
         poll,
     };
-    let mut tokens = Vec::new();
+    let mut tokens = BudgetedVec::new(budget);
     loop {
         let ended = state.forward()?;
-        tokens
-            .try_reserve(state.pending.len())
-            .map_err(DictionaryError::from)?;
-        tokens.extend(state.pending.drain(..).rev());
+        tokens.reserve(state.pending.len())?;
+        while let Some(token) = state.pending.pop() {
+            state.tick()?;
+            tokens.push(token)?;
+        }
         if ended {
             break;
         }
     }
     (state.poll)()?;
-    Ok(NoriOutput::from_tokens(tokens, state.position, 0))
+    let (tokens, mut memory) = tokens.into_parts();
+    memory.absorb(state.output_memory);
+    Ok(Budgeted::new(
+        NoriOutput::from_tokens(tokens, state.position, 0),
+        memory,
+    ))
 }
 
 impl State<'_> {
@@ -106,25 +125,34 @@ impl State<'_> {
         Ok(())
     }
 
-    pub fn push(&mut self, token: NoriToken) -> AnalysisResult<()> {
+    pub fn push(&mut self, token: Budgeted<NoriToken>) -> AnalysisResult<()> {
         check_limit(
             "Nori output tokens",
-            self.total_tokens + 1,
+            self.total_tokens
+                .checked_add(1)
+                .ok_or_else(|| invalid("Nori emission", "token count overflow"))?,
             self.limits.max_tokens,
         )?;
-        let mut units = token.term_utf16.len()
-            + token
-                .reading
-                .as_ref()
-                .map_or(0, |text| text.encode_utf16().count());
+        let mut units = token.term_utf16.len();
+        if let Some(reading) = &token.reading {
+            units = units
+                .checked_add(super::allocation::utf16_len(
+                    reading,
+                    usize::MAX,
+                    self.poll,
+                )?)
+                .ok_or_else(|| invalid("Nori emission", "reading size overflow"))?;
+        }
         for part in token.morphemes.iter().flatten() {
+            self.tick()?;
             units = units
                 .checked_add(part.surface_utf16.len())
                 .ok_or_else(|| invalid("Nori emission", "morpheme size overflow"))?;
         }
         self.check_units(units)?;
-        self.pending.try_reserve(1).map_err(DictionaryError::from)?;
-        self.pending.push(token);
+        let (token, memory) = token.into_parts();
+        self.pending.push(token)?;
+        self.output_memory.absorb(memory);
         self.total_tokens += 1;
         self.output_units += units;
         Ok(())
@@ -135,7 +163,7 @@ impl State<'_> {
         let mut user_maximum = None;
         while self.position < self.input.len() {
             self.tick()?;
-            self.lattice.ensure(self.position)?;
+            self.lattice.ensure(self.position, self.poll)?;
             if self.lattice.get(self.position).is_empty() {
                 self.position += 1;
                 continue;
@@ -221,7 +249,7 @@ impl State<'_> {
 
     fn finish(&mut self) -> AnalysisResult<()> {
         if self.position > 0 {
-            self.lattice.ensure(self.position)?;
+            self.lattice.ensure(self.position, self.poll)?;
             let mut best = None;
             let mut least_cost = i32::MAX;
             for index in 0..self.lattice.get(self.position).len() {
@@ -259,7 +287,8 @@ impl State<'_> {
         }
         let (position, index) =
             best.ok_or_else(|| invalid("Nori lattice", "no live path at forced backtrace"))?;
-        self.lattice.prune(self.position, position, index);
+        self.lattice
+            .prune(self.position, position, index, self.poll)?;
         super::emission::backtrace(self, position, 0)?;
         self.lattice.rebase(position);
         self.position = position;
@@ -304,6 +333,7 @@ impl State<'_> {
                 back_index,
                 word: id,
             },
+            self.poll,
         )?;
         Ok(())
     }

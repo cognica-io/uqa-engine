@@ -12,6 +12,7 @@ use crate::nori::tokenizer::lattice::{Lattice, Node, WordId};
 use crate::nori::{
     DecompoundMode, DictionaryLimits, NoriDictionary, NoriLimits, NoriOptions, POSType,
 };
+use uqa_core::memory::{BudgetedVec, MemoryBudget};
 
 #[test]
 fn forced_backtrace_selects_the_first_cheapest_future_candidate_and_rebases_it() {
@@ -23,6 +24,7 @@ fn forced_backtrace_selects_the_first_cheapest_future_candidate_and_rebases_it()
     let input = vec!['가' as u16; 1030];
     let limits = NoriLimits::default();
     let mut poll = || Ok(());
+    let budget = MemoryBudget::new(usize::MAX);
     let mut state = State {
         input: &input,
         model: &model,
@@ -31,15 +33,17 @@ fn forced_backtrace_selects_the_first_cheapest_future_candidate_and_rebases_it()
             decompound_mode: DecompoundMode::None,
             ..NoriOptions::default()
         },
-        lattice: Lattice::new(limits).unwrap(),
+        lattice: Lattice::new(limits, &budget, &mut poll).unwrap(),
         position: 1024,
         last_backtrace: 0,
-        pending: Vec::new(),
+        pending: BudgetedVec::new(&budget),
         ngram: None,
+        budget: &budget,
         limits,
         total_tokens: 0,
         output_units: 0,
         work: 0,
+        output_memory: budget.empty_reservation(),
         poll: &mut poll,
     };
     for (end, cost, word_pos) in [(1024, 50, 0), (1025, 3, 0), (1025, 3, 1), (1026, 3, 0)] {
@@ -55,6 +59,7 @@ fn forced_backtrace_selects_the_first_cheapest_future_candidate_and_rebases_it()
                     back_index: 0,
                     word: WordId::Known(0),
                 },
+                state.poll,
             )
             .unwrap();
     }
@@ -91,6 +96,7 @@ fn eos_connection_cost_can_select_the_more_expensive_partial_path() {
         None,
         options,
         NoriLimits::default(),
+        &MemoryBudget::new(usize::MAX),
         &mut || Ok(()),
     )
     .unwrap();
@@ -103,6 +109,7 @@ fn eos_connection_cost_can_select_the_more_expensive_partial_path() {
         None,
         NoriOptions::default(),
         NoriLimits::default(),
+        &MemoryBudget::new(usize::MAX),
         &mut || Ok(()),
     )
     .unwrap();

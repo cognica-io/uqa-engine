@@ -11,6 +11,9 @@ use uqa_analysis::nori::{KoreanTokenizer, NoriOptions, UserDictionary, UserDicti
 
 use super::nori_resources::{canonical, model, raw_analysis};
 
+#[path = "nori_tokenizer/memory.rs"]
+mod memory;
+
 #[test]
 fn tokenizer_matches_all_original_tokenizer_fixtures() {
     let mut checked = 0;

@@ -6,11 +6,11 @@
 
 //! Bounded rolling positions, retaining candidate insertion order for exact cost ties.
 
-use std::collections::VecDeque;
+use uqa_core::memory::{BudgetedDeque, BudgetedVec, MemoryBudget};
 
 use super::NoriLimits;
 use crate::nori::error::{check_limit, invalid};
-use crate::nori::DictionaryResult;
+use crate::AnalysisResult;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum WordId {
@@ -31,18 +31,24 @@ pub(super) struct Node {
 
 pub(super) struct Lattice {
     base: usize,
-    positions: VecDeque<Vec<Node>>,
+    positions: BudgetedDeque<BudgetedVec<Node>>,
     candidates: usize,
     limits: NoriLimits,
+    budget: MemoryBudget,
 }
 
 impl Lattice {
-    pub fn new(limits: NoriLimits) -> DictionaryResult<Self> {
+    pub fn new(
+        limits: NoriLimits,
+        budget: &MemoryBudget,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Self> {
         let mut lattice = Self {
             base: 0,
-            positions: VecDeque::new(),
+            positions: BudgetedDeque::new(budget),
             candidates: 0,
             limits,
+            budget: budget.clone(),
         };
         lattice.push(
             0,
@@ -54,6 +60,7 @@ impl Lattice {
                 back_index: 0,
                 word: WordId::Known(0),
             },
+            poll,
         )?;
         Ok(lattice)
     }
@@ -62,7 +69,11 @@ impl Lattice {
         self.base + self.positions.len()
     }
 
-    pub fn ensure(&mut self, position: usize) -> DictionaryResult<()> {
+    pub fn ensure(
+        &mut self,
+        position: usize,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<()> {
         let index = position
             .checked_sub(self.base)
             .ok_or_else(|| invalid("Nori lattice", "position was already released"))?;
@@ -75,9 +86,14 @@ impl Lattice {
             self.limits.max_lattice_positions,
         )?;
         if required > self.positions.len() {
-            self.positions
-                .try_reserve(required - self.positions.len())?;
-            self.positions.resize_with(required, Vec::new);
+            poll()?;
+            self.positions.reserve(required - self.positions.len())?;
+            while self.positions.len() < required {
+                if self.positions.len().is_multiple_of(1024) {
+                    poll()?;
+                }
+                self.positions.push_back(BudgetedVec::new(&self.budget))?;
+            }
         }
         Ok(())
     }
@@ -86,16 +102,22 @@ impl Lattice {
         &self.positions[position - self.base]
     }
 
-    pub fn push(&mut self, position: usize, node: Node) -> DictionaryResult<()> {
-        self.ensure(position)?;
+    pub fn push(
+        &mut self,
+        position: usize,
+        node: Node,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<()> {
+        self.ensure(position, poll)?;
         check_limit(
             "Nori lattice candidates",
-            self.candidates + 1,
+            self.candidates
+                .checked_add(1)
+                .ok_or_else(|| invalid("Nori lattice", "candidate count overflow"))?,
             self.limits.max_lattice_candidates,
         )?;
         let nodes = &mut self.positions[position - self.base];
-        nodes.try_reserve(1)?;
-        nodes.push(node);
+        nodes.push(node)?;
         self.candidates += 1;
         Ok(())
     }
@@ -104,23 +126,45 @@ impl Lattice {
         self.positions[position - self.base][0].cost = 0;
     }
 
-    pub fn prune(&mut self, from: usize, keep: usize, index: usize) {
+    pub fn prune(
+        &mut self,
+        from: usize,
+        keep: usize,
+        index: usize,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<()> {
         let node = self.get(keep)[index];
-        for position in from..self.next_pos() {
+        for (work, position) in (from..self.next_pos()).enumerate() {
+            if work % 1024 == 0 {
+                poll()?;
+            }
             let nodes = &mut self.positions[position - self.base];
             self.candidates -= nodes.len();
-            nodes.clear();
             if position == keep {
-                nodes.push(node);
+                nodes[0] = node;
+                nodes.truncate(1);
                 self.candidates += 1;
+            } else {
+                nodes.clear();
             }
         }
+        Ok(())
     }
 
-    pub fn release_before(&mut self, position: usize) {
+    pub fn release_before(
+        &mut self,
+        position: usize,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<()> {
+        let mut work = 0;
         while self.base < position {
+            if work % 1024 == 0 {
+                poll()?;
+            }
             self.candidates -= self.positions.pop_front().expect("live prefix").len();
             self.base += 1;
+            work += 1;
         }
+        Ok(())
     }
 }

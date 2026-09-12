@@ -181,6 +181,8 @@ The Korean [Viterbi specialization](https://github.com/apache/lucene/blob/64ce86
 
 Use compact arrays for lattice node costs, context IDs, backpointers, word IDs, and origins. A candidate references shared dictionary metadata; allocate rewritten term strings only when needed during emission. A bounded backtrace gap does not make total analysis memory constant: input/offset maps, dictionary lookahead, active candidates, output tokens, and staged posting updates all consume memory. Apply the engine's cancellation and resource policy at bounded work intervals, and fail the entire statement if limits are exceeded.
 
+The native tokenizer now reserves input, lattice capacities, pending/output buffers, readings, and morphemes through the shared `uqa-core::memory` allowance before allocation. Buffer replacement charges both allocations, pruning preserves reservations for retained capacity, and the budgeted result carries its output reservation across the return boundary. Cancellation callbacks also cover attribute encoding, candidate expansion, backtrace, pruning, and output transfer. The common compiled pipeline, generic/Nori filters, source maps, provider cursors, and highlighting still need this allowance propagated from their caller before the complete runtime resource gate is satisfied.
+
 ## Dictionary construction and distribution
 
 ### Canonical input and exporter

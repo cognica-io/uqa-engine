@@ -8,11 +8,13 @@
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use uqa_core::memory::{Budgeted, MemoryBudget};
 
 use super::error::{check_limit, invalid};
 use super::{DictionaryError, NoriDictionary, POSTag, POSType, UserDictionary};
 use crate::AnalysisResult;
 
+mod allocation;
 mod emission;
 mod lattice;
 mod viterbi;
@@ -173,8 +175,24 @@ impl KoreanTokenizer {
         limits: NoriLimits,
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<NoriOutput> {
-        let units = encode_input(input, limits, poll)?;
-        self.tokenize_utf16(&units, limits, poll)
+        let budget = MemoryBudget::new(usize::MAX);
+        let (output, _memory) = self
+            .tokenize_budgeted(input, limits, &budget, poll)?
+            .into_parts();
+        Ok(output)
+    }
+
+    /// Reserve input, rolling lattice, pending tokens, and output attributes against one allowance. The returned result retains its output reservation until it is dropped or transferred.
+    pub fn tokenize_budgeted(
+        &self,
+        input: &str,
+        limits: NoriLimits,
+        budget: &MemoryBudget,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<NoriOutput>> {
+        poll()?;
+        let units = allocation::encode(input, limits.max_input_utf16, budget, poll)?;
+        self.tokenize_utf16_budgeted(&units, limits, budget, poll)
     }
 
     /// Analyze code units directly, preserving even non-scalar reference terms and morphemes.
@@ -184,6 +202,21 @@ impl KoreanTokenizer {
         limits: NoriLimits,
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<NoriOutput> {
+        let budget = MemoryBudget::new(usize::MAX);
+        let (output, _memory) = self
+            .tokenize_utf16_budgeted(input, limits, &budget, poll)?
+            .into_parts();
+        Ok(output)
+    }
+
+    /// The caller owns the borrowed input; all tokenizer-owned allocations share `budget`.
+    pub fn tokenize_utf16_budgeted(
+        &self,
+        input: &[u16],
+        limits: NoriLimits,
+        budget: &MemoryBudget,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<NoriOutput>> {
         poll()?;
         check_limit(
             "Nori input UTF-16 units",
@@ -196,6 +229,7 @@ impl KoreanTokenizer {
             self.user.as_deref(),
             self.options,
             limits,
+            budget,
             poll,
         )
     }

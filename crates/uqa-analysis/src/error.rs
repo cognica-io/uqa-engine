@@ -13,6 +13,8 @@ use crate::token_filter::SynonymFileError;
 /// An invalid analyzer is an execution error, never an empty token stream.
 #[derive(Debug, thiserror::Error)]
 pub enum AnalysisError {
+    #[error(transparent)]
+    Memory(#[from] uqa_core::memory::MemoryError),
     #[cfg(feature = "nori")]
     #[error("this pipeline has no Korean normalization profile")]
     NormalizationUnavailable,
