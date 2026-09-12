@@ -6,10 +6,12 @@
 
 //! Token-owned strings and code units are reserved before materialization.
 
-use uqa_core::memory::{Budgeted, BudgetedString, BudgetedVec, MemoryBudget};
+use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget};
 
 use crate::nori::error::check_limit;
 use crate::AnalysisResult;
+
+pub(super) use crate::allocation::copy_text as copy_string;
 
 pub(super) fn encode(
     input: &str,
@@ -60,24 +62,6 @@ pub(super) fn copy_units(
             poll()?;
         }
         output.push(*unit)?;
-    }
-    let (output, memory) = output.into_parts();
-    Ok(Budgeted::new(output, memory))
-}
-
-pub(super) fn copy_string(
-    input: &str,
-    budget: &MemoryBudget,
-    poll: &mut dyn FnMut() -> AnalysisResult<()>,
-) -> AnalysisResult<Budgeted<String>> {
-    poll()?;
-    let mut output = BudgetedString::new(budget);
-    output.reserve(input.len())?;
-    for (index, character) in input.chars().enumerate() {
-        if index % 1024 == 0 {
-            poll()?;
-        }
-        output.push(character)?;
     }
     let (output, memory) = output.into_parts();
     Ok(Budgeted::new(output, memory))

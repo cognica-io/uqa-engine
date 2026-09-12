@@ -25,6 +25,44 @@ fn model() -> &'static Arc<NoriDictionary> {
     })
 }
 
+#[test]
+fn budgeted_conversion_retains_hidden_terminal_attributes_and_releases_native_boxes() {
+    use uqa_core::memory::MemoryBudget;
+    let budget = MemoryBudget::new(1 << 20);
+    let input = FilteredText::new("韓國");
+    input.prepare_coordinates(&budget, &mut || Ok(())).unwrap();
+    let tokenizer = KoreanTokenizer::new(model().clone(), None, NoriOptions::default()).unwrap();
+    let raw = tokenizer
+        .tokenize_budgeted(input.as_str(), NoriLimits::default(), &budget, &mut || {
+            Ok(())
+        })
+        .unwrap();
+    let (mut raw, mut memory) = raw.into_parts();
+    memory.grow(std::mem::size_of::<NoriToken>()).unwrap();
+    raw.terminal = Some(Box::new(raw.tokens.pop().unwrap()));
+    raw.final_position_increment = 1;
+    let expected = raw.clone().into_analyzed(&input).unwrap();
+    let actual =
+        AnalyzedText::from_nori_budgeted(Budgeted::new(raw, memory), &input, &mut || Ok(()))
+            .unwrap();
+    assert_eq!(*actual, expected);
+    assert!(actual.tokens().is_empty());
+    let terminal = actual.batch.terminal.as_ref().unwrap();
+    assert_eq!(terminal.term(), "韓國");
+    assert_eq!(
+        terminal.korean_morphology().unwrap().reading.as_deref(),
+        Some("한국")
+    );
+    assert_eq!(
+        actual.reserved_bytes(),
+        std::mem::size_of::<AnalysisToken>() + "韓國".len() + "한국".len()
+    );
+    drop(expected);
+    drop(input);
+    drop(actual);
+    assert_eq!(budget.used(), 0);
+}
+
 fn units(value: &Value) -> Vec<u16> {
     serde_json::from_value(value.clone()).unwrap()
 }

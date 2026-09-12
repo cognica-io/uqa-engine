@@ -14,15 +14,28 @@ use crate::{AnalysisError, AnalysisResult, FilteredText, TokenTerm};
 use std::borrow::Cow;
 use std::ops::Range;
 use std::sync::Arc;
+use uqa_core::memory::Budgeted;
+
+mod allocation;
 
 impl AnalysisToken {
-    fn from_nori(token: NoriToken, input: &FilteredText<'_>) -> AnalysisResult<Self> {
+    fn from_nori(mut token: NoriToken, input: &FilteredText<'_>) -> AnalysisResult<Self> {
+        let length = token.term_utf16.len();
+        let term = TokenTerm::from_utf16(std::mem::take(&mut token.term_utf16));
+        Self::from_nori_term(token, term, length, input)
+    }
+
+    fn from_nori_term(
+        token: NoriToken,
+        term: TokenTerm,
+        term_utf16_len: usize,
+        input: &FilteredText<'_>,
+    ) -> AnalysisResult<Self> {
         let filtered_utf16 = token.start_utf16..token.end_utf16;
         let offsets = input.source_covering_offsets_utf16(filtered_utf16.clone())?;
-        let term = TokenTerm::from_utf16(token.term_utf16);
         let verbatim = term.as_str().is_some_and(|text| {
             input.original().get(offsets.utf8.clone()) == Some(text)
-                && term.utf16_len() == offsets.utf16.len()
+                && term_utf16_len == offsets.utf16.len()
         });
         Ok(Self {
             term,
@@ -77,7 +90,7 @@ impl AnalyzedText {
 
 impl FilterToken for AnalysisToken {
     type Span = Option<Range<usize>>;
-    type Context = Arc<SourceProjection>;
+    type Context = Arc<Budgeted<SourceProjection>>;
 
     fn term(&self) -> Cow<'_, [u16]> {
         self.term.utf16()

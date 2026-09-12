@@ -323,7 +323,37 @@ Stop-word and length filters carry removed position increments to the next retai
 
 Generic filters also accept Nori's lossless terms. Lowercase and ASCII folding transform scalar segments while preserving isolated units. Porter stemming processes the complete token with each scalar or isolated unit as one element, and preserves keyword tokens. Length and gram filters count a surrogate pair as one scalar and each isolated unit as one element. String stop/synonym keys cannot match a non-scalar term. Token expansions and rewrites retain Korean morphology; removal filters preserve attributes observed during upstream exhaustion for later stages.
 
-`Analyzer::analyze`, `Tokenizer::tokenize`, and `TokenFilter::filter` remain the ordered `Vec<String>` projection. Memory and Key/Value indexes retain complete occurrences and original-source metadata; string posting APIs expose unique positions for compatibility. SQLite storage and current query consumers still require the remaining graph integration tracked in the [Nori implementation plan](../../plans/0006-nori-analyzer.md).
+`Analyzer::analyze`, `Tokenizer::tokenize`, and `TokenFilter::filter` remain the ordered `Vec<String>` projection. Memory, Key/Value, and SQLite indexes retain complete occurrences and original-source metadata; string posting APIs expose unique positions for compatibility. Quoted full-text phrases use the retained search revision and match connected occurrence paths. The [Nori implementation plan](../../plans/0006-nori-analyzer.md) tracks the remaining runtime controls and public delivery requirements.
+
+### Tokenizer allocation ownership
+
+`Tokenizer::tokenize_with_offsets_budgeted(input, &budget, poll)` and `tokenize_mapped_budgeted(&filtered, &budget, poll)` return `Budgeted<AnalyzedText>`. Token buffers, term strings, temporary gram boundaries, native Nori buffers and morphology, newly built coordinate indexes, and retained source copies reserve their requested layouts before allocation. Replacement buffers coexist with their predecessors in the allowance. Word boundaries are emitted incrementally instead of collected into a separate list. The callback returns `AnalysisResult<()>`; byte-limit failures return `AnalysisError::Memory(MemoryError::Limit { required, limit })`, and callback errors return no partial token result. A failed call leaves the borrowed input's coordinate caches unchanged.
+
+`reserved_bytes()` on this result covers its uniquely owned token, term, morphology, and terminal-attribute buffers. Shared source maps, coordinates, and projection payloads retain their own leases; `MemoryBudget::used()` also includes those leases when they belong to the same allowance. Previously prepared source data keeps its existing allocation owner. Dropping a result frees its owned buffers before returning their reservation. `into_parts()` transfers both the value and its unique lease; `into_shared()` additionally reserves the shared payload, and clones of that `Arc` retain the same allocations. Cloning the underlying `AnalyzedText` directly creates separately owned token buffers outside this allowance.
+
+`TokenTerm::from_utf16_budgeted(units, poll)` consumes a `Budgeted<Vec<u16>>` carrying its buffer reservation. It validates the complete scalar encoding before allocating UTF-8, preserves invalid UTF-16 exactly, and releases a valid input's UTF-16 buffer only after the UTF-8 replacement exists. Validation and decoding poll for cancellation. Borrowed input, immutable preparation resources, library regex workspaces, and allocator/reference-count bookkeeping remain outside these runtime buffer reservations. Regex searches run between callback checks; their internal allocation and interruption, caller propagation through `CompiledAnalyzer`, token filters, provider cursors, SQL, and highlighting remain open.
+
+```rust
+use uqa_analysis::{CharFilter, Tokenizer};
+use uqa_core::memory::MemoryBudget;
+
+let budget = MemoryBudget::new(16 * 1024);
+let filtered = CharFilter::HTMLStrip.filter_with_offsets_budgeted(
+    "<b>韓🙂</b>", &budget, &mut || Ok(()),
+)?;
+let tokens = Tokenizer::Whitespace.tokenize_mapped_budgeted(
+    &filtered, &budget, || Ok(()),
+)?;
+assert_eq!(tokens.tokens()[0].term(), "韓🙂");
+assert_eq!(tokens.tokens()[0].offsets().unwrap().utf8, 3..10);
+drop(filtered);
+assert!(budget.used() > 0);
+drop(tokens);
+assert_eq!(budget.used(), 0);
+# Ok::<(), uqa_analysis::AnalysisError>(())
+```
+
+This example executes as a Rust doctest with and without Nori enabled.
 
 ### Character-filter source coordinates
 
@@ -392,7 +422,7 @@ Terms and morphemes use raw `Vec<u16>` because valid UTF-8 input and accepted us
 
 All calls are read-only and publish no catalog, index, or transaction state. Dictionary and user-rule handles are shared through `Arc`; each tokenization call owns its lattice and output. Invalid rules, dictionary mismatch, checked size/position overflow, and resource limits return an analysis or dictionary error without a partial successful result. `tokenize_controlled(input, limits, poll)` accepts a cancellation callback returning `AnalysisResult<()>`; a callback error propagates and leaves the tokenizer reusable. `tokenize_utf16(units, limits, poll)` accepts raw UTF-16 units directly.
 
-`tokenize_budgeted(input, limits, &budget, poll)` and `tokenize_utf16_budgeted(units, limits, &budget, poll)` additionally accept a shared `uqa_core::memory::MemoryBudget`. They return `Budgeted<NoriOutput>`, which exposes the immutable output and `reserved_bytes()`; `into_parts()` transfers the output and its unique reservation to another owner. A byte-limit failure returns `AnalysisError::Memory(MemoryError::Limit { required, limit })` without a partial result. Reservations cover requested input, lattice, pending/output, reading, and morpheme buffer layouts, including both buffers during growth. Borrowed caller input, immutable dictionary/user resources, and allocator bookkeeping are outside that allowance. `MemoryBudget::used()` reports live reservations and `peak()` reports their high-water mark. Dropping the result frees its allocations before returning its reservation; other owners sharing the budget retain theirs. The existing entry points retain count limits without imposing a byte limit. Generic compiled pipelines, filters, source mapping, SQL callers, and rendering still require budget propagation.
+`tokenize_budgeted(input, limits, &budget, poll)` and `tokenize_utf16_budgeted(units, limits, &budget, poll)` additionally accept a shared `uqa_core::memory::MemoryBudget`. They return `Budgeted<NoriOutput>`, which exposes the immutable output and `reserved_bytes()`; `into_parts()` transfers the output and its unique reservation to another owner. A byte-limit failure returns `AnalysisError::Memory(MemoryError::Limit { required, limit })` without a partial result. Reservations cover requested input, lattice, pending/output, reading, and morpheme buffer layouts, including both buffers during growth. Borrowed caller input, immutable dictionary/user resources, and allocator bookkeeping are outside that allowance. `MemoryBudget::used()` reports live reservations and `peak()` reports their high-water mark. Dropping the result frees its allocations before returning its reservation; other owners sharing the budget retain theirs. The existing entry points retain count limits without imposing a byte limit. The common tokenizer bridge now preserves these reservations through canonical term conversion and retained source creation. Generic compiled pipelines, filters, provider cursors, SQL callers, and rendering still require caller budget propagation.
 
 | Limit | Default | Scope |
 | --- | --- | --- |

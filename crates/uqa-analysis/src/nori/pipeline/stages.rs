@@ -7,6 +7,7 @@
 //! Frozen Korean filters execute over the common stream and its retained source projection.
 
 use std::sync::Arc;
+use uqa_core::memory::Budgeted;
 
 use super::super::{
     filters::{stream::FilterStream, CompiledFilter},
@@ -50,7 +51,7 @@ impl PreparedNoriFilter {
     pub fn filter_batch(
         &self,
         input: TokenBatch,
-        projection: Arc<SourceProjection>,
+        projection: Arc<Budgeted<SourceProjection>>,
     ) -> AnalysisResult<TokenBatch> {
         let stream = FilterStream {
             tokens: input.tokens,

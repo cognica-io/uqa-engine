@@ -11,8 +11,14 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use serde::Serialize;
+#[cfg(feature = "nori")]
+use uqa_core::memory::Budgeted;
 
-use crate::{AnalysisError, AnalysisResult, FilteredText, SourceOffsets, TokenTerm};
+#[cfg(test)]
+use crate::FilteredText;
+use crate::{AnalysisError, AnalysisResult, SourceOffsets, TokenTerm};
+
+pub(crate) mod allocation;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AnalysisToken {
@@ -61,25 +67,18 @@ impl AnalysisToken {
         self.korean_morphology.as_ref()
     }
 
+    #[cfg(test)]
     pub(crate) fn from_source(
         input: &FilteredText<'_>,
         range: Range<usize>,
     ) -> AnalysisResult<Self> {
-        let offsets = input.source_offsets(range.clone())?;
-        let filtered_utf16 = Some(input.filtered_utf16(range.clone())?);
-        let term = input.as_str()[range].to_owned();
-        let verbatim = input.original().get(offsets.utf8.clone()) == Some(term.as_str());
-        Ok(Self {
-            term: term.into(),
-            offsets: Some(offsets),
-            position_increment: 1,
-            position_length: 1,
-            keyword: false,
-            filtered_utf16,
-            #[cfg(feature = "nori")]
-            korean_morphology: None,
-            verbatim,
-        })
+        let budget = uqa_core::memory::MemoryBudget::new(usize::MAX);
+        input.prepare_coordinates(&budget, &mut || Ok(()))?;
+        Ok(
+            Self::from_source_budgeted(input, range, &budget, &mut || Ok(()))?
+                .into_parts()
+                .0,
+        )
     }
 
     fn term_only(term: String) -> Self {
@@ -147,7 +146,7 @@ pub struct AnalyzedText {
     pub(crate) final_offsets: SourceOffsets,
     #[cfg(feature = "nori")]
     #[serde(skip)]
-    pub(crate) projection: Arc<crate::source::SourceProjection>,
+    pub(crate) projection: Arc<Budgeted<crate::source::SourceProjection>>,
 }
 
 impl AnalyzedText {
@@ -171,6 +170,7 @@ impl AnalyzedText {
         self.batch.final_position_increment
     }
 
+    #[cfg(test)]
     pub(crate) fn from_source(
         tokens: Vec<AnalysisToken>,
         input: &FilteredText<'_>,
@@ -215,8 +215,18 @@ impl TokenBatch {
     }
 
     pub fn validate_positions(&self) -> AnalysisResult<()> {
+        self.validate_positions_with_control(&mut || Ok(()))
+    }
+
+    pub(crate) fn validate_positions_with_control(
+        &self,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<()> {
         let mut position = -1_i64;
-        for token in &self.tokens {
+        for (index, token) in self.tokens.iter().enumerate() {
+            if index % 1024 == 0 {
+                poll()?;
+            }
             if token.position_length == 0 || (position < 0 && token.position_increment == 0) {
                 return Err(AnalysisError::InvalidTokenPosition);
             }

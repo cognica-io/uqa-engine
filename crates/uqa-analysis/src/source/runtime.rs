@@ -8,11 +8,6 @@
 
 use std::sync::Arc;
 use uqa_core::memory::Budgeted;
-#[cfg(feature = "nori")]
-use uqa_core::memory::{BudgetedString, MemoryBudget};
-
-#[cfg(feature = "nori")]
-use crate::AnalysisResult;
 
 #[derive(Debug, Clone)]
 pub(super) enum SourceText<'a> {
@@ -37,23 +32,4 @@ impl SourceText<'_> {
             },
         }
     }
-}
-
-#[cfg(feature = "nori")]
-pub(super) fn copy_text(
-    input: &str,
-    budget: &MemoryBudget,
-    poll: &mut dyn FnMut() -> AnalysisResult<()>,
-) -> AnalysisResult<Arc<Budgeted<String>>> {
-    poll()?;
-    let mut output = BudgetedString::new(budget);
-    output.reserve(input.len())?;
-    for (index, character) in input.chars().enumerate() {
-        if index % 1024 == 0 {
-            poll()?;
-        }
-        output.push(character)?;
-    }
-    let (output, memory) = output.into_parts();
-    Ok(Budgeted::new(output, memory).into_shared()?)
 }

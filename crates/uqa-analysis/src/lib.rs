@@ -7,6 +7,7 @@
 //! Text analysis pipeline: char filters, tokenizers, token filters,
 //! composable [`Analyzer`], and a global named-analyzer registry.
 
+mod allocation;
 pub mod analyzer;
 mod cache;
 pub mod char_filter;

@@ -19,6 +19,12 @@ use uqa_analysis::{
 #[path = "analysis/tokenizers.rs"]
 mod tokenizers;
 
+#[path = "analysis/tokenizer_memory.rs"]
+mod tokenizer_memory;
+
+#[path = "analysis/term_memory.rs"]
+mod term_memory;
+
 #[path = "analysis/token_filters.rs"]
 mod token_filters;
 

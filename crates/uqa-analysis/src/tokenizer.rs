@@ -13,6 +13,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use uqa_core::memory::{Budgeted, MemoryBudget};
 
 use crate::error::{AnalysisError, AnalysisResult};
 
@@ -59,6 +60,51 @@ impl Tokenizer {
     /// Tokenize source text with explicit offsets, positions, and final source coordinates.
     pub fn tokenize_with_offsets(&self, text: &str) -> AnalysisResult<crate::AnalyzedText> {
         self.tokenize_mapped(&crate::FilteredText::new(text))
+    }
+
+    /// Tokenize with reservations for owned buffers and retained source provenance.
+    ///
+    /// Configuration resources and library regex workspaces remain separately managed. Regex searches run between cancellation polls; loops owned by analysis poll while scanning and emitting. Cloning the underlying analyzed value creates separate, unreserved token buffers.
+    pub fn tokenize_with_offsets_budgeted(
+        &self,
+        text: &str,
+        budget: &MemoryBudget,
+        poll: impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<crate::AnalyzedText>> {
+        self.tokenize_mapped_budgeted(&crate::FilteredText::new(text), budget, poll)
+    }
+
+    /// Tokenize a retained character-filter result under a caller allowance.
+    ///
+    /// Previously prepared source allocations keep their existing owner. Newly built coordinate indexes, token buffers, terms, and retained source copies use `budget`; failed calls leave the input's coordinate caches unchanged.
+    ///
+    /// ```
+    /// use uqa_analysis::{CharFilter, Tokenizer};
+    /// use uqa_core::memory::MemoryBudget;
+    /// let budget = MemoryBudget::new(16 * 1024);
+    /// let filtered = CharFilter::HTMLStrip.filter_with_offsets_budgeted(
+    ///     "<b>韓🙂</b>", &budget, &mut || Ok(()),
+    /// )?;
+    /// let tokens = Tokenizer::Whitespace.tokenize_mapped_budgeted(
+    ///     &filtered, &budget, || Ok(()),
+    /// )?;
+    /// assert_eq!(tokens.tokens()[0].term(), "韓🙂");
+    /// assert_eq!(tokens.tokens()[0].offsets().unwrap().utf8, 3..10);
+    /// drop(filtered);
+    /// assert!(budget.used() > 0);
+    /// drop(tokens);
+    /// assert_eq!(budget.used(), 0);
+    /// # Ok::<(), uqa_analysis::AnalysisError>(())
+    /// ```
+    pub fn tokenize_mapped_budgeted(
+        &self,
+        text: &crate::FilteredText<'_>,
+        budget: &MemoryBudget,
+        mut poll: impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<crate::AnalyzedText>> {
+        poll()?;
+        self.prepare()?
+            .tokenize_mapped_budgeted(text, budget, &mut poll)
     }
 
     pub(crate) fn tokenize_mapped(

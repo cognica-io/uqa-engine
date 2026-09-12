@@ -344,15 +344,27 @@ impl<'a> FilteredText<'a> {
     }
 
     #[cfg(feature = "nori")]
-    pub(crate) fn projection(&self) -> Arc<SourceProjection> {
+    pub(crate) fn projection(&self) -> Arc<Budgeted<SourceProjection>> {
         let budget = MemoryBudget::new(usize::MAX);
-        Arc::new(SourceProjection {
-            source: runtime::copy_text(self.original, &budget, &mut || Ok(()))
-                .expect("unbounded source retention"),
+        self.projection_budgeted(&budget, &mut || Ok(()))
+            .expect("unbounded source retention")
+    }
+
+    #[cfg(feature = "nori")]
+    pub(crate) fn projection_budgeted(
+        &self,
+        budget: &MemoryBudget,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Arc<Budgeted<SourceProjection>>> {
+        self.prepare_coordinates(budget, poll)?;
+        let source = crate::allocation::copy_text(self.original, budget, poll)?.into_shared()?;
+        let projection = SourceProjection {
+            source,
             maps: self.maps.clone(),
             original: self.original_coordinates().clone(),
             filtered: self.filtered_coordinates().clone(),
-        })
+        };
+        Ok(Budgeted::new(projection, budget.empty_reservation()).into_shared()?)
     }
 
     fn original_coordinates(&self) -> &Arc<Budgeted<TextCoordinates>> {

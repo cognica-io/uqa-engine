@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize, Serializer};
 
 use crate::{AnalysisError, AnalysisResult};
 
+mod allocation;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Representation {
     Unicode(String),

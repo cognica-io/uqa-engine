@@ -7,6 +7,7 @@
 //! Immutable tokenizer configuration with prevalidated bounds and prepared expressions.
 
 use regex::Regex;
+use uqa_core::memory::{Budgeted, MemoryBudget};
 
 use super::{letter_re, standard_word_re, stream, validate_gram_bounds, Tokenizer};
 use crate::{AnalysisError, AnalysisResult, AnalyzedText, FilteredText};
@@ -66,5 +67,14 @@ impl Tokenizer {
 impl PreparedTokenizer {
     pub(crate) fn tokenize_mapped(&self, text: &FilteredText<'_>) -> AnalysisResult<AnalyzedText> {
         stream::tokenize(self, text)
+    }
+
+    pub(crate) fn tokenize_mapped_budgeted(
+        &self,
+        text: &FilteredText<'_>,
+        budget: &MemoryBudget,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<AnalyzedText>> {
+        stream::tokenize_budgeted(self, text, budget, poll)
     }
 }
