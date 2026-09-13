@@ -337,5 +337,192 @@
         }
       ]
     }
+  },
+  "allocator_controls_run": {
+    "run": "https://github.com/cognica-io/uqa-engine/actions/runs/34770527808",
+    "revision": "6391001aecd5957b4c644e3c89d5078af6edc04a",
+    "native_and_wasm_forward_gates_passed": true,
+    "ordinary_pair_still_has_large_bidirectional_variation": true,
+    "all_control_outputs_polls_and_allocation_counters_match_original": true,
+    "inherited_allocator_environment": {},
+    "diagnostic_receipt_sha256": "1be183966df447cef86bfccce913ccdf2b100098b7e842e62b6c8413146aac2b",
+    "diagnostic_artifact_id": 10321972859,
+    "reports": [
+      {
+        "artifact_id": 10321972859,
+        "filename": "nori-analysis-native.json",
+        "sha256": "0e58bfd016305cbd6a801cfd6dff7dc3a6f4b2a7f4835813c529807efd4a0d21",
+        "source_lock_flags_verified": true
+      },
+      {
+        "artifact_id": 10321972859,
+        "filename": "nori-cancellation-native-baseline.json",
+        "sha256": "4c908e767e5fadf8b29e82576d7632c3c3043835f562c2f2c0aafb5ac8117d10",
+        "source_lock_flags_verified": true
+      },
+      {
+        "artifact_id": 10321972859,
+        "filename": "nori-cancellation-native-repeat.json",
+        "sha256": "ffe12dcff715f2ed7cce747ed355d45cc4a3c63f82a3706680d7b6a77d61e040",
+        "source_lock_flags_verified": true
+      },
+      {
+        "artifact_id": 10322057433,
+        "filename": "nori-analysis-wasm.json",
+        "sha256": "0d3ff6ac2cb5311b96c5146cf1629d4e7d3ae2c21cbda702c3d765c4f5641dd2",
+        "source_lock_flags_verified": true
+      },
+      {
+        "artifact_id": 10322057433,
+        "filename": "nori-cancellation-wasm-baseline.json",
+        "sha256": "d72ae06babd617ee536a17e6af049621733eadb854d2dec5616e2cc1edaec7e2",
+        "source_lock_flags_verified": true
+      },
+      {
+        "artifact_id": 10322057433,
+        "filename": "nori-cancellation-wasm-repeat.json",
+        "sha256": "d2a33c143a774b68e63a5c3b9ae014ce12f9a3ae8d4c3fc141cae4a6f93d8ebe",
+        "source_lock_flags_verified": true
+      }
+    ],
+    "controls": [
+      {
+        "control": "system_call_trace",
+        "report": "run-0.json",
+        "report_sha256": "6e11d6fe6c10d6ef3c0a3494982b535b0d42c4f615429f6cacd61e05a924e31b",
+        "system_calls": "run-0.syscalls.log",
+        "system_calls_sha256": "53dd38b0c16b36f118cbc66dbf7b898732d002516ebbc0db6bce63adcff5c22b"
+      },
+      {
+        "control": "system_call_trace",
+        "report": "run-1.json",
+        "report_sha256": "42d1365eecdb10b63f1e57204115795d03cf22cff2d2913bd89a93dd0c0b8915",
+        "system_calls": "run-1.syscalls.log",
+        "system_calls_sha256": "17b4aa2a698b2438e4d0e3bf47bdf58fe12ff43882aaf483d674b991cf8c886f"
+      },
+      {
+        "control": "thread_cache_disabled",
+        "environment_overrides": {
+          "GLIBC_TUNABLES": "glibc.malloc.tcache_count=0"
+        },
+        "returncode": 0,
+        "report": "thread_cache_disabled-0.json",
+        "report_sha256": "340a574035e3cd2c909da0acf2f39ab6d4b4945785e5dcd20366b26f2b04558e"
+      },
+      {
+        "control": "thread_cache_disabled",
+        "environment_overrides": {
+          "GLIBC_TUNABLES": "glibc.malloc.tcache_count=0"
+        },
+        "returncode": 0,
+        "report": "thread_cache_disabled-1.json",
+        "report_sha256": "41f594cb8af2b385a96990227c2cb0ea93a364483be3fe00813154233e3a0809"
+      },
+      {
+        "control": "fixed_address_layout",
+        "environment_overrides": {},
+        "returncode": 0,
+        "report": "fixed_address_layout-0.json",
+        "report_sha256": "8bb24e9fb3cb17735d3c598bae396865a1ff049cdadb6ee95451b9c3f26c37ad"
+      },
+      {
+        "control": "fixed_address_layout",
+        "environment_overrides": {},
+        "returncode": 0,
+        "report": "fixed_address_layout-1.json",
+        "report_sha256": "04a5ad15ff219da4ce950068caf6719bf2d3518c7cf3c7002e4f2eda2b9f1273"
+      }
+    ],
+    "comparison": {
+      "ordinary": {
+        "maximum_bidirectional_timing_ratio": 3.656131691449475,
+        "median_bidirectional_timing_ratio": 1.0077330907903712,
+        "largest_ratios": [
+          {
+            "workload": "analyzer/None/korean_prose/last/response_timing",
+            "ratio": 3.656131691449475
+          },
+          {
+            "workload": "analyzer/Mixed/korean_prose/last/response_timing",
+            "ratio": 3.2528379678688446
+          },
+          {
+            "workload": "analyzer/None/korean_prose/middle/response_timing",
+            "ratio": 1.1313273716318035
+          },
+          {
+            "workload": "tokenizer/None/short_query/middle/response_timing",
+            "ratio": 1.0640253588198505
+          }
+        ]
+      },
+      "system_call_trace": {
+        "maximum_bidirectional_timing_ratio": 3.6993218120705555,
+        "median_bidirectional_timing_ratio": 1.0081708032251706,
+        "largest_ratios": [
+          {
+            "workload": "analyzer/None/korean_prose/last/response_timing",
+            "ratio": 3.6993218120705555
+          },
+          {
+            "workload": "analyzer/Discard/korean_prose/last/response_timing",
+            "ratio": 1.6143018728126872
+          },
+          {
+            "workload": "analyzer/Discard/korean_prose/middle/response_timing",
+            "ratio": 1.163736936966623
+          },
+          {
+            "workload": "analyzer/None/korean_prose/middle/response_timing",
+            "ratio": 1.1434212756963358
+          }
+        ]
+      },
+      "thread_cache_disabled": {
+        "maximum_bidirectional_timing_ratio": 1.0615300730221873,
+        "median_bidirectional_timing_ratio": 1.0081443741204377,
+        "largest_ratios": [
+          {
+            "workload": "tokenizer/Discard/ambiguous_long/middle/response_timing",
+            "ratio": 1.0615300730221873
+          },
+          {
+            "workload": "tokenizer/Mixed/short_query/middle/response_timing",
+            "ratio": 1.0533011542411157
+          },
+          {
+            "workload": "analyzer/None/hanja/last/response_timing",
+            "ratio": 1.0462921190860128
+          },
+          {
+            "workload": "analyzer/Mixed/hanja/last/response_timing",
+            "ratio": 1.0438533248782111
+          }
+        ]
+      },
+      "fixed_address_layout": {
+        "maximum_bidirectional_timing_ratio": 1.656640364188164,
+        "median_bidirectional_timing_ratio": 1.007664779739434,
+        "largest_ratios": [
+          {
+            "workload": "analyzer/Mixed/korean_prose/last/response_timing",
+            "ratio": 1.656640364188164
+          },
+          {
+            "workload": "tokenizer/Discard/korean_prose/middle/response_timing",
+            "ratio": 1.1392965992997317
+          },
+          {
+            "workload": "analyzer/Mixed/korean_prose/middle/response_timing",
+            "ratio": 1.1059255478128653
+          },
+          {
+            "workload": "tokenizer/None/korean_prose/middle/response_timing",
+            "ratio": 1.1052749738432799
+          }
+        ]
+      }
+    },
+    "inference": "The observed thread-cache-disabled pair is stable, while fixing address layout alone retains large variation. A fixed-iteration comparison with the default allocator remains required."
   }
 }

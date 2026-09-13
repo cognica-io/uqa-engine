@@ -11,6 +11,7 @@ use allocation_counter::{measure, opt_out, AllocationInfo};
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 use uqa_analysis::nori::{
@@ -26,6 +27,56 @@ const BATCH: usize = 16;
 const SAMPLE_TIME: Duration = Duration::from_millis(75);
 const ALLOWANCE: usize = 256 * 1024 * 1024;
 const RETAINED: usize = 4096;
+
+#[derive(Default)]
+struct Sampling {
+    iterations: Option<BTreeMap<String, usize>>,
+    fixed: bool,
+    identity: Option<String>,
+}
+
+impl Sampling {
+    fn load() -> Self {
+        let Some(path) = std::env::var_os("UQA_NORI_CANCELLATION_SAMPLING") else {
+            return Self::default();
+        };
+        let fixed = match std::env::var("UQA_NORI_CANCELLATION_SAMPLING_MODE").as_deref() {
+            Ok("fixed") => true,
+            Ok("timed") => false,
+            _ => panic!("sampling control requires a fixed or timed mode"),
+        };
+        let bytes = std::fs::read(path).expect("sampling control input");
+        let iterations: BTreeMap<String, usize> =
+            serde_json::from_slice(&bytes).expect("sampling control iterations");
+        assert_eq!(iterations.len(), 108, "complete sampling control coverage");
+        assert!(iterations
+            .values()
+            .all(|count| *count > 0 && count.is_multiple_of(BATCH)));
+        Self {
+            iterations: Some(iterations),
+            fixed,
+            identity: Some(format!("{:x}", Sha256::digest(&bytes))),
+        }
+    }
+
+    fn limit(&self, stage: &str, mode: DecompoundMode, case: &Case, point: &str) -> Option<usize> {
+        let iterations = self.iterations.as_ref()?;
+        let name = format!("{stage}/{mode:?}/{}/{point}", case.name);
+        let count = *iterations.get(&name).expect("sampling control workload");
+        self.fixed.then_some(count)
+    }
+
+    fn protocol(&self) -> Value {
+        let mut protocol = json!({"samples": SAMPLES, "warmup": WARMUP, "batch_operations": BATCH, "minimum_sample_time_ns": SAMPLE_TIME.as_nanos() as u64, "allocation_samples": 1, "clock": "per_operation"});
+        if let Some(identity) = &self.identity {
+            protocol["sampling_control"] = json!({
+                "mode": if self.fixed { "fixed" } else { "timed" },
+                "iterations_sha256": identity,
+            });
+        }
+        protocol
+    }
+}
 
 #[derive(Serialize)]
 struct Allocation {
@@ -155,7 +206,70 @@ fn recover(runner: &Runner<'_>, text: &str, budget: &MemoryBudget, expected: &No
     assert_eq!(budget.used(), RETAINED);
 }
 
-fn cases(case: &Case, stage: &str, mode: DecompoundMode, runner: &Runner<'_>) -> Vec<Measurement> {
+struct Samples {
+    operation: Timing,
+    response: Timing,
+    wall_ns: [u64; SAMPLES],
+}
+
+fn sample(
+    runner: &Runner<'_>,
+    text: &str,
+    budget: &MemoryBudget,
+    at: usize,
+    expected: &NoriOutput,
+    limit: Option<usize>,
+) -> Samples {
+    let mut operation = [0; SAMPLES];
+    let mut response = [0; SAMPLES];
+    let mut iterations = [0; SAMPLES];
+    let mut sample_wall_ns = [0; SAMPLES];
+    opt_out(|| {
+        for _ in 0..WARMUP {
+            black_box(cancel(runner, text, budget, at));
+            recover(runner, text, budget, expected);
+        }
+        for sample in 0..SAMPLES {
+            let mut total = 0;
+            let mut propagation = 0;
+            let mut count = 0;
+            let started = Instant::now();
+            loop {
+                for _ in 0..BATCH {
+                    let (elapsed, returned) = cancel(runner, text, budget, at);
+                    total += elapsed;
+                    propagation += returned;
+                }
+                count += BATCH;
+                if limit.map_or_else(|| started.elapsed() >= SAMPLE_TIME, |limit| count >= limit) {
+                    break;
+                }
+            }
+            sample_wall_ns[sample] = started.elapsed().as_nanos() as u64;
+            assert!(
+                u128::from(sample_wall_ns[sample]) >= SAMPLE_TIME.as_nanos(),
+                "sampling control is too short"
+            );
+            iterations[sample] = count;
+            operation[sample] = total;
+            response[sample] = propagation;
+            recover(runner, text, budget, expected);
+        }
+    });
+    Samples {
+        operation: Timing::new(operation, iterations),
+        response: Timing::new(response, iterations),
+        wall_ns: sample_wall_ns,
+    }
+}
+
+fn cases(
+    case: &Case,
+    stage: &str,
+    mode: DecompoundMode,
+    runner: &Runner<'_>,
+    sampling: &Sampling,
+) -> Vec<Measurement> {
     let expected = runner.full(&case.text);
     let output_sha256 = format!(
         "{:x}",
@@ -183,38 +297,8 @@ fn cases(case: &Case, stage: &str, mode: DecompoundMode, runner: &Runner<'_>) ->
         ("middle", complete_polls.div_ceil(2)),
         ("last", complete_polls),
     ] {
-        let mut operation = [0; SAMPLES];
-        let mut response = [0; SAMPLES];
-        let mut iterations = [0; SAMPLES];
-        let mut sample_wall_ns = [0; SAMPLES];
-        opt_out(|| {
-            for _ in 0..WARMUP {
-                black_box(cancel(runner, &case.text, &budget, at));
-                recover(runner, &case.text, &budget, &expected);
-            }
-            for sample in 0..SAMPLES {
-                let mut total = 0;
-                let mut propagation = 0;
-                let mut count = 0;
-                let started = Instant::now();
-                loop {
-                    for _ in 0..BATCH {
-                        let (elapsed, returned) = cancel(runner, &case.text, &budget, at);
-                        total += elapsed;
-                        propagation += returned;
-                    }
-                    count += BATCH;
-                    if started.elapsed() >= SAMPLE_TIME {
-                        break;
-                    }
-                }
-                sample_wall_ns[sample] = started.elapsed().as_nanos() as u64;
-                iterations[sample] = count;
-                operation[sample] = total;
-                response[sample] = propagation;
-                recover(runner, &case.text, &budget, &expected);
-            }
-        });
+        let limit = sampling.limit(stage, mode, case, point);
+        let samples = sample(runner, &case.text, &budget, at, &expected, limit);
         let info = measure(|| {
             black_box(cancel(runner, &case.text, &budget, at));
         });
@@ -230,13 +314,13 @@ fn cases(case: &Case, stage: &str, mode: DecompoundMode, runner: &Runner<'_>) ->
             tokens: expected.tokens.len(),
             complete_polls,
             cancel_at_poll: at,
-            verified_cancellations: WARMUP + iterations.iter().sum::<usize>() + 1,
+            verified_cancellations: WARMUP + samples.operation.iterations.iter().sum::<usize>() + 1,
             verified_recoveries: WARMUP + SAMPLES + 1,
             remaining_budget_bytes: budget.used(),
             allocation: info.into(),
-            sample_wall_ns,
-            operation_timing: Timing::new(operation, iterations),
-            response_timing: Timing::new(response, iterations),
+            sample_wall_ns: samples.wall_ns,
+            operation_timing: samples.operation,
+            response_timing: samples.response,
         });
         eprintln!(
             "measured cancellation {stage}/{mode:?}/{}/{point}",
@@ -249,6 +333,7 @@ fn cases(case: &Case, stage: &str, mode: DecompoundMode, runner: &Runner<'_>) ->
 }
 
 pub(super) fn run() -> Value {
+    let sampling = Sampling::load();
     let resources = NoriResources::default();
     let resolved = resources.load_default().expect("bundled dictionary");
     let corpus: Corpus = serde_json::from_str(CORPUS).expect("fixed corpus");
@@ -272,8 +357,15 @@ pub(super) fn run() -> Value {
                 "tokenizer",
                 mode,
                 &Runner::Tokenizer(&tokenizer),
+                &sampling,
             ));
-            results.extend(cases(&case, "analyzer", mode, &Runner::Analyzer(&analyzer)));
+            results.extend(cases(
+                &case,
+                "analyzer",
+                mode,
+                &Runner::Analyzer(&analyzer),
+                &sampling,
+            ));
         }
     }
     json!({
@@ -284,7 +376,7 @@ pub(super) fn run() -> Value {
         "target_os": std::env::consts::OS,
         "pointer_bits": usize::BITS,
         "threads": 1,
-        "protocol": {"samples": SAMPLES, "warmup": WARMUP, "batch_operations": BATCH, "minimum_sample_time_ns": SAMPLE_TIME.as_nanos() as u64, "allocation_samples": 1, "clock": "per_operation"},
+        "protocol": sampling.protocol(),
         "memory_limit_bytes": ALLOWANCE,
         "unrelated_reservation_bytes": RETAINED,
         "bundle_bytes": uqa_nori_data::BUNDLE.len(),

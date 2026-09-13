@@ -35,6 +35,7 @@ def validate_output(path, expected):
         for key in ("input_bytes", "input_utf16", "input_sha256", "output_sha256", "tokens", "complete_polls", "cancel_at_poll", "allocation"):
             if row[key] != expected[name][key]:
                 raise RuntimeError(f"diagnostic cancellation result changed: {name}/{key}")
+    return report
 
 
 def main():
@@ -100,6 +101,27 @@ def main():
         receipt["address_layout_control"] = "setarch is unavailable"
     else:
         controls.append(("fixed_address_layout", [setarch, platform.machine(), "-R"], {}))
+    ordinary = [report]
+    baseline = REPORTS / "nori-cancellation-native-baseline.json"
+    if baseline != source and baseline.exists():
+        ordinary.append(json.loads(baseline.read_text()))
+    counts = {
+        name: 2 * max(value for candidate in ordinary for row in candidate["measurements"]
+                      if row["name"] == name for value in row["operation_timing"]["iterations"])
+        for name in expected
+    }
+    sampling = output / "sampling-iterations.json"
+    sampling.write_text(json.dumps(counts, sort_keys=True, indent=2) + "\n")
+    receipt["sampling_iterations"] = {
+        "path": sampling.name,
+        "sha256": digest(sampling),
+        "rule": "Twice the largest observed operation count for each workload in the ordinary pair.",
+    }
+    for mode in ("timed", "fixed"):
+        controls.append((f"sampling_control_{mode}", [], {
+            "UQA_NORI_CANCELLATION_SAMPLING": sampling.relative_to(ROOT).as_posix(),
+            "UQA_NORI_CANCELLATION_SAMPLING_MODE": mode,
+        }))
     for label, prefix, overrides in controls:
         for index in range(2):
             raw = output / f"{label}-{index}.json"
@@ -114,7 +136,17 @@ def main():
                 if label != "fixed_address_layout" or "failed to set personality" not in result.stderr:
                     raise RuntimeError(f"diagnostic cancellation execution failed: {label}")
                 break
-            validate_output(raw, expected)
+            diagnostic = validate_output(raw, expected)
+            if label.startswith("sampling_control_"):
+                mode = overrides["UQA_NORI_CANCELLATION_SAMPLING_MODE"]
+                if diagnostic["protocol"].get("sampling_control") != {"mode": mode, "iterations_sha256": digest(sampling)}:
+                    raise RuntimeError("sampling control identity differs from its input")
+                if mode == "fixed":
+                    for row in diagnostic["measurements"]:
+                        wanted = [counts[row["name"]]] * diagnostic["protocol"]["samples"]
+                        for scope in ("operation_timing", "response_timing"):
+                            if row[scope]["iterations"] != wanted:
+                                raise RuntimeError("sampling control did not execute its fixed workload")
             entry.update({"report": raw.name, "report_sha256": digest(raw)})
             receipt["runs"].append(entry)
     if digest(binary) != artifact["sha256"]:
