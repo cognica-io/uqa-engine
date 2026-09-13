@@ -4,298 +4,153 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Cooperative match-range searches over prepared regular expressions.
+//! Prepared regex automata with analysis-owned search and capture allocation lifetimes.
 
 use std::ops::Range;
 
-use regex_automata::{
-    dfa::{dense, sparse, Automaton, StartKind},
-    nfa::thompson,
-    Anchored, Input, MatchKind,
-};
+use regex_automata::nfa::thompson::NFA;
+use uqa_core::memory::{BudgetedVec, MemoryBudget};
 
-use crate::{AnalysisError, AnalysisResult};
+use crate::AnalysisResult;
 
-const POLL_INTERVAL: usize = 1024;
-// Keep preparation bounded; patterns exceeding this per-automaton budget use the validated regex fallback.
-const DFA_SIZE_LIMIT_BYTES: usize = 1 << 20;
+mod control;
+mod dfa;
+mod nfa;
+mod states;
+
+// Match the validated regex implementation's default Thompson program limit.
+const NFA_SIZE_LIMIT: usize = 10 << 20;
+// Rust slices cannot reach this offset, so an owned usize slot can represent absence without private dependency layouts.
+const ABSENT: usize = usize::MAX;
 
 #[derive(Debug)]
 pub(crate) struct CooperativeRegex {
-    forward: sparse::DFA<Vec<u8>>,
-    reverse: sparse::DFA<Vec<u8>>,
-}
-
-#[derive(Debug)]
-pub(crate) enum SearchError {
-    Automaton,
-    Poll(AnalysisError),
+    nfa: NFA,
+    dfa: Option<dfa::RangeDFA>,
 }
 
 impl CooperativeRegex {
-    /// Compile a match-range search automaton from the same syntax accepted by `regex`.
-    ///
-    /// Capturing groups are ignored while finding the overall range and can be resolved by the
-    /// validated expression after this search returns. Unicode word-boundary expressions are
-    /// intentionally left to the `regex` fallback: the pinned DFA builder cannot represent their
-    /// full Unicode look-around semantics. A failed or size-limited DFA construction likewise
-    /// keeps the validated library expression as the fallback.
-    pub(crate) fn compile(pattern: &str) -> Option<Self> {
-        if pattern.contains(r"\b") || pattern.contains(r"\B") {
-            return None;
-        }
-        let forward = dense::Builder::new()
-            .configure(cooperative_dfa_config())
-            .build(pattern)
-            .ok()?
-            .to_sparse()
-            .ok()?;
-        let reverse = dense::Builder::new()
-            .thompson(thompson::Config::new().reverse(true))
+    pub(crate) fn compile(pattern: &str) -> Result<Self, regex::Error> {
+        let nfa = NFA::compiler()
             .configure(
-                cooperative_dfa_config()
-                    .start_kind(StartKind::Anchored)
-                    .match_kind(MatchKind::All),
+                NFA::config()
+                    .nfa_size_limit(Some(NFA_SIZE_LIMIT))
+                    .shrink(false),
             )
             .build(pattern)
-            .ok()?
-            .to_sparse()
-            .ok()?;
-        Some(Self { forward, reverse })
+            .map_err(|error| match error.size_limit() {
+                Some(limit) => regex::Error::CompiledTooBig(limit),
+                None => regex::Error::Syntax(error.to_string()),
+            })?;
+        Ok(Self {
+            nfa,
+            dfa: dfa::RangeDFA::compile(pattern),
+        })
     }
 
-    pub(crate) fn find_at(
-        &self,
-        text: &str,
-        start: usize,
+    pub(crate) fn searcher<'a>(
+        &'a self,
+        budget: &MemoryBudget,
+        captures: bool,
         poll: &mut dyn FnMut() -> AnalysisResult<()>,
-    ) -> Result<Option<Range<usize>>, SearchError> {
-        if start > text.len() {
-            return Ok(None);
-        }
-        let start = Self::next_boundary(text, start, poll)?;
-        let bytes = text.as_bytes();
-        let input = Input::new(bytes).span(start..bytes.len());
-        let mut state = self
-            .forward
-            .start_state_forward(&input)
-            .map_err(|_| SearchError::Automaton)?;
-        let mut end = None;
-        for (index, &byte) in bytes.iter().enumerate().skip(start) {
-            if (index - start) % POLL_INTERVAL == 0 {
-                poll().map_err(SearchError::Poll)?;
-            }
-            state = self.forward.next_state(state, byte);
-            if self.forward.is_quit_state(state) {
-                return Err(SearchError::Automaton);
-            }
-            if self.forward.is_match_state(state) {
-                // DFA match states are delayed by one byte so that end-of-input assertions work.
-                end = Some(index);
-            }
-            if self.forward.is_dead_state(state) {
-                break;
-            }
-        }
-        state = self.forward.next_eoi_state(state);
-        if self.forward.is_quit_state(state) {
-            return Err(SearchError::Automaton);
-        }
-        if self.forward.is_match_state(state) {
-            end = Some(bytes.len());
-        }
-        let Some(end) = end else {
-            return Ok(None);
-        };
-
-        let input = Input::new(bytes).span(start..end).anchored(Anchored::Yes);
-        let mut state = self
-            .reverse
-            .start_state_reverse(&input)
-            .map_err(|_| SearchError::Automaton)?;
-        let mut begin = None;
-        for index in (start..end).rev() {
-            if (end - 1 - index) % POLL_INTERVAL == 0 {
-                poll().map_err(SearchError::Poll)?;
-            }
-            state = self.reverse.next_state(state, bytes[index]);
-            if self.reverse.is_quit_state(state) {
-                return Err(SearchError::Automaton);
-            }
-            if self.reverse.is_match_state(state) {
-                begin = index.checked_add(1);
-            }
-            if self.reverse.is_dead_state(state) {
-                break;
-            }
-        }
-        if start > 0 {
-            state = self.reverse.next_state(state, bytes[start - 1]);
-            if self.reverse.is_quit_state(state) {
-                return Err(SearchError::Automaton);
-            }
-            if self.reverse.is_match_state(state) {
-                begin = Some(start);
-            }
+    ) -> AnalysisResult<Searcher<'a>> {
+        poll()?;
+        let slots = if captures {
+            control::Control::new(poll).buffer(budget, self.nfa.group_info().slot_len(), ABSENT)?
         } else {
-            state = self.reverse.next_eoi_state(state);
-            if self.reverse.is_quit_state(state) {
-                return Err(SearchError::Automaton);
-            }
-            if self.reverse.is_match_state(state) {
-                begin = Some(start);
-            }
-        }
-        let Some(begin) = begin else {
-            return Err(SearchError::Automaton);
+            BudgetedVec::new(budget)
         };
-        Ok(Some(begin..end))
+        Ok(Searcher {
+            expression: self,
+            captures,
+            matched: false,
+            slots: CaptureSlots { values: slots },
+            cache: None,
+        })
     }
+}
 
-    fn next_boundary(
+pub(crate) struct CaptureSlots {
+    values: BudgetedVec<usize>,
+}
+
+impl CaptureSlots {
+    pub(crate) fn get(&self, group: usize) -> Option<(usize, usize)> {
+        let index = group.checked_mul(2)?;
+        let start = *self.values.get(index)?;
+        let end = *self.values.get(index.checked_add(1)?)?;
+        (start != ABSENT && end != ABSENT).then_some((start, end))
+    }
+}
+
+pub(crate) struct Searcher<'a> {
+    expression: &'a CooperativeRegex,
+    captures: bool,
+    matched: bool,
+    slots: CaptureSlots,
+    cache: Option<nfa::Cache>,
+}
+
+impl Searcher<'_> {
+    pub(crate) fn find_at(
+        &mut self,
         text: &str,
         mut start: usize,
         poll: &mut dyn FnMut() -> AnalysisResult<()>,
-    ) -> Result<usize, SearchError> {
-        while start < text.len() && !text.is_char_boundary(start) {
-            poll().map_err(SearchError::Poll)?;
+    ) -> AnalysisResult<Option<Range<usize>>> {
+        self.matched = false;
+        poll()?;
+        if start > text.len() {
+            return Ok(None);
+        }
+        while !text.is_char_boundary(start) {
             start += 1;
         }
-        Ok(start)
+        let mut span = start..text.len();
+        let mut anchored = false;
+        if let Some(dfa) = &self.expression.dfa {
+            match dfa.find_at(text, start, poll) {
+                Ok(None) => return Ok(None),
+                Ok(Some(range)) if !self.captures => return Ok(Some(range)),
+                Ok(Some(range)) => {
+                    span = range;
+                    anchored = true;
+                }
+                Err(dfa::SearchError::Poll(error)) => return Err(error),
+                Err(dfa::SearchError::Automaton) => {}
+            }
+        }
+        let mut control = control::Control::new(poll);
+        if self.slots.values.is_empty() {
+            self.slots.values = control.buffer(self.slots.values.budget(), 2, ABSENT)?;
+        }
+        if self.cache.is_none() {
+            self.cache = Some(nfa::Cache::new(
+                &self.expression.nfa,
+                self.slots.values.len(),
+                self.slots.values.budget(),
+                &mut control,
+            )?);
+        }
+        let cache = self.cache.as_mut().expect("initialized regex cache");
+        self.matched = cache.search(
+            &self.expression.nfa,
+            text,
+            span,
+            anchored,
+            &mut self.slots.values,
+            &mut control,
+        )?;
+        Ok(self.matched.then(|| {
+            let (start, end) = self.slots.get(0).expect("NFA records the overall match");
+            start..end
+        }))
     }
-}
 
-fn cooperative_dfa_config() -> dense::Config {
-    dense::Config::new()
-        .dfa_size_limit(Some(DFA_SIZE_LIMIT_BYTES))
-        .determinize_size_limit(Some(DFA_SIZE_LIMIT_BYTES))
+    pub(crate) fn captures(&self) -> Option<&CaptureSlots> {
+        (self.captures && self.matched).then_some(&self.slots)
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use regex::Regex;
-
-    use super::{CooperativeRegex, SearchError};
-    use crate::AnalysisError;
-
-    #[test]
-    fn cooperative_ranges_match_the_validated_regex() {
-        for pattern in [
-            r"foo|foobar",
-            r"a+",
-            r"a*",
-            r"(?:ab)+",
-            r"(?m)^foo$",
-            r"(?m)(b|^ab)",
-            r"\w+",
-            r"\p{Greek}+",
-            r"[^>]+",
-            r"\d{2,4}",
-            r"(?s).+?",
-            r"a?b",
-            r"(?i)rust",
-            r"\Afoo\z",
-            r"$",
-            r"^",
-            "",
-        ] {
-            let expression = Regex::new(pattern).unwrap();
-            let cooperative = CooperativeRegex::compile(pattern).unwrap();
-            for text in [
-                "", "aa", "foobar", "xfoo\n", "\n\rab", "é", "🙂", "aé", "αβfoo", "a1 b22",
-            ] {
-                for start in 0..=text.len() {
-                    if !text.is_char_boundary(start) {
-                        continue;
-                    }
-                    let expected = expression
-                        .find_at(text, start)
-                        .map(|matched| matched.range());
-                    let actual = cooperative.find_at(text, start, &mut || Ok(())).unwrap();
-                    assert_eq!(
-                        actual, expected,
-                        "pattern={pattern:?}, text={text:?}, start={start}"
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn cooperative_scan_polls_through_a_long_unmatched_input() {
-        let cooperative = CooperativeRegex::compile(r"needle").unwrap();
-        let text = "x".repeat(128 * 1024);
-        let mut polls = 0;
-        cooperative
-            .find_at(&text, 0, &mut || {
-                polls += 1;
-                Ok(())
-            })
-            .unwrap();
-        assert!(polls > text.len() / 2048);
-    }
-
-    #[test]
-    fn cooperative_scan_cancellation_is_propagated() {
-        let cooperative = CooperativeRegex::compile(r"needle").unwrap();
-        let text = "x".repeat(128 * 1024);
-        let mut polls = 0;
-        let result = cooperative.find_at(&text, 0, &mut || {
-            polls += 1;
-            if polls == 8 {
-                Err(AnalysisError::Cancelled)
-            } else {
-                Ok(())
-            }
-        });
-        assert!(matches!(
-            result,
-            Err(SearchError::Poll(AnalysisError::Cancelled))
-        ));
-        assert_eq!(polls, 8);
-    }
-
-    #[test]
-    fn word_boundaries_use_the_library_fallback() {
-        assert!(CooperativeRegex::compile(r"\bword\b").is_none());
-        assert!(CooperativeRegex::compile(r"(?-u)\bword\b").is_none());
-    }
-
-    #[test]
-    fn capturing_groups_keep_the_overall_range_cooperative() {
-        let pattern = r"(foo|bar)+(?<tail>baz)?";
-        let expression = Regex::new(pattern).unwrap();
-        let cooperative = CooperativeRegex::compile(pattern).unwrap();
-        for text in ["foo", "foobar", "foobar-baz", "xbarbaz"] {
-            for start in 0..=text.len() {
-                if !text.is_char_boundary(start) {
-                    continue;
-                }
-                let expected = expression
-                    .find_at(text, start)
-                    .map(|matched| matched.range());
-                let actual = cooperative.find_at(text, start, &mut || Ok(())).unwrap();
-                assert_eq!(actual, expected, "text={text:?}, start={start}");
-            }
-        }
-    }
-
-    #[test]
-    fn anchored_alternatives_keep_their_original_context_after_restart() {
-        let pattern = r"(^ab|b|x)";
-        let expression = Regex::new(pattern).unwrap();
-        let cooperative = CooperativeRegex::compile(pattern).unwrap();
-        let text = "xab";
-        let start = 1;
-        let expected = expression
-            .find_at(text, start)
-            .map(|matched| matched.range());
-        let actual = cooperative.find_at(text, start, &mut || Ok(())).unwrap();
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn pathological_dfa_construction_uses_the_library_fallback() {
-        assert!(CooperativeRegex::compile(r"([ab]*a[ab]{16})").is_none());
-    }
-}
+mod tests;

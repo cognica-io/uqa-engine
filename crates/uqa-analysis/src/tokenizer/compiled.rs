@@ -23,8 +23,7 @@ pub(crate) enum PreparedTokenizer {
         max_gram: usize,
     },
     Pattern {
-        expression: Regex,
-        cooperative: Option<Box<CooperativeRegex>>,
+        expression: Box<CooperativeRegex>,
     },
     Keyword,
     #[cfg(feature = "nori")]
@@ -56,15 +55,20 @@ impl Tokenizer {
                 }
             }
             Self::Pattern { pattern } => {
-                let expression =
-                    Regex::new(pattern).map_err(|source| AnalysisError::InvalidRegex {
+                Regex::new(pattern).map_err(|source| AnalysisError::InvalidRegex {
+                    component: "pattern tokenizer",
+                    pattern: pattern.clone(),
+                    source,
+                })?;
+                let expression = CooperativeRegex::compile(pattern).map_err(|source| {
+                    AnalysisError::InvalidRegex {
                         component: "pattern tokenizer",
                         pattern: pattern.clone(),
                         source,
-                    })?;
+                    }
+                })?;
                 PreparedTokenizer::Pattern {
-                    expression,
-                    cooperative: CooperativeRegex::compile(pattern).map(Box::new),
+                    expression: Box::new(expression),
                 }
             }
             Self::Keyword => PreparedTokenizer::Keyword,

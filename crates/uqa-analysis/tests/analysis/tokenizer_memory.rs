@@ -19,6 +19,9 @@ fn tokenizers() -> Vec<Tokenizer> {
         Tokenizer::Pattern {
             pattern: "[ ,]+".into(),
         },
+        Tokenizer::Pattern {
+            pattern: r"\b".into(),
+        },
         Tokenizer::Keyword,
     ]
 }
@@ -47,6 +50,13 @@ fn budgeted_tokenizers_preserve_scalar_spans_and_emission_order() {
             },
             "a🙂b",
             vec!["a", "🙂", "b"],
+        ),
+        (
+            Tokenizer::Pattern {
+                pattern: r"\b".into(),
+            },
+            "ab 韓🙂 cd",
+            vec!["ab", " ", "韓", "🙂 ", "cd"],
         ),
         (Tokenizer::Keyword, "한 🙂", vec!["한 🙂"]),
     ];

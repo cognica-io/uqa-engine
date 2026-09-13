@@ -9,7 +9,9 @@
 use std::borrow::Cow;
 use std::ops::Range;
 
-use regex::{CaptureLocations, Regex};
+use regex::Regex;
+
+use crate::cooperative_regex::CaptureSlots;
 
 #[derive(Debug)]
 enum Piece {
@@ -108,7 +110,7 @@ impl<'a> Replacement<'a> {
 
     pub fn fragments<'b>(
         &'b self,
-        locations: Option<&'b CaptureLocations>,
+        locations: Option<&'b CaptureSlots>,
         input: &'b str,
     ) -> impl Iterator<Item = &'b str> + Clone {
         std::iter::once(self.pieces.is_none().then_some(self.text.as_ref()))

@@ -62,17 +62,24 @@ fn cloning_filtered_text_shares_allocations_and_later_edits_keep_older_views_int
 }
 
 #[test]
-fn identity_capture_expansion_allocates_only_the_retained_coordinate_index() {
+fn identity_capture_expansion_releases_search_workspace_and_retains_only_coordinates() {
     let expected = size_of::<Budgeted<TextCoordinates>>() + 3 * size_of::<(usize, usize)>();
-    let budget = MemoryBudget::new(expected);
+    let budget = MemoryBudget::new(1 << 20);
     let filter = CharFilter::PatternReplace {
         pattern: "(?P<x>.*)".into(),
         replacement: "$x".into(),
     };
+    let insufficient = MemoryBudget::new(expected);
+    assert!(matches!(
+        filter.filter_with_offsets_budgeted("韓🙂", &insufficient, &mut || Ok(())),
+        Err(AnalysisError::Memory(MemoryError::Limit { .. }))
+    ));
+    assert_eq!(insufficient.used(), 0);
     let output = filter
         .filter_with_offsets_budgeted("韓🙂", &budget, &mut || Ok(()))
         .unwrap();
     assert_eq!(output.as_str(), "韓🙂");
+    assert!(budget.peak() > expected);
     assert_eq!(budget.used(), expected);
     assert_eq!(output.source_offsets(3..7).unwrap().utf16, 1..3);
     drop(output);

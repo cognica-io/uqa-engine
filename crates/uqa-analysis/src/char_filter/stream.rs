@@ -6,13 +6,12 @@
 
 //! Ordered character edits write directly into reserved text and source-map buffers.
 
-use regex::Regex;
-use uqa_core::memory::{MemoryBudget, MemoryError};
+use uqa_core::memory::MemoryBudget;
 
 use super::replacement::Replacement;
-use crate::cooperative_regex::{CooperativeRegex, SearchError};
+use crate::cooperative_regex::CooperativeRegex;
 use crate::source::EditBuilder;
-use crate::{AnalysisError, AnalysisResult, FilteredText};
+use crate::{AnalysisResult, FilteredText};
 
 pub(super) fn replace_html(
     text: &mut FilteredText<'_>,
@@ -130,25 +129,13 @@ fn bytes_equal(
 
 pub(super) fn replace_pattern(
     text: &mut FilteredText<'_>,
-    pattern: &Regex,
+    pattern: &CooperativeRegex,
     replacement: &Replacement<'_>,
-    cooperative: Option<&CooperativeRegex>,
     budget: &MemoryBudget,
     poll: &mut dyn FnMut() -> AnalysisResult<()>,
 ) -> AnalysisResult<()> {
     poll()?;
-    // CaptureLocations owns two pointer-sized slots per group in the pinned regex implementation.
-    let mut capture_memory = budget.empty_reservation();
-    let mut locations = if replacement.uses_captures() {
-        let bytes = pattern
-            .captures_len()
-            .checked_mul(2 * size_of::<usize>())
-            .ok_or(MemoryError::SizeOverflow)?;
-        capture_memory.grow(bytes)?;
-        Some(pattern.capture_locations())
-    } else {
-        None
-    };
+    let mut search = pattern.searcher(budget, replacement.uses_captures(), poll)?;
     let edited = {
         let input = text.as_str();
         let mut builder = EditBuilder::new(input, budget, poll);
@@ -156,47 +143,9 @@ pub(super) fn replace_pattern(
         let mut last_end = None;
         loop {
             builder.check()?;
-            let mut captures_resolved = false;
-            let matched = if let Some(cooperative) = cooperative {
-                match cooperative.find_at(input, start, &mut || builder.check()) {
-                    Ok(matched) => matched,
-                    Err(SearchError::Poll(error)) => return Err(error),
-                    Err(SearchError::Automaton) => {
-                        if let Some(locations) = &mut locations {
-                            captures_resolved = true;
-                            pattern
-                                .captures_read_at(locations, input, start)
-                                .map(|matched| matched.range())
-                        } else {
-                            pattern.find_at(input, start).map(|matched| matched.range())
-                        }
-                    }
-                }
-            } else if let Some(locations) = &mut locations {
-                captures_resolved = true;
-                pattern
-                    .captures_read_at(locations, input, start)
-                    .map(|matched| matched.range())
-            } else {
-                pattern.find_at(input, start).map(|matched| matched.range())
-            };
-            let Some(mut matched) = matched else {
+            let Some(matched) = search.find_at(input, start, &mut || builder.check())? else {
                 break;
             };
-            if !captures_resolved {
-                if let Some(locations) = &mut locations {
-                    builder.check()?;
-                    let Some(captured) = pattern
-                        .captures_read_at(locations, input, matched.start)
-                        .map(|capture| capture.range())
-                    else {
-                        return Err(AnalysisError::Descriptor(
-                            "capture resolution returned no overall match",
-                        ));
-                    };
-                    matched = captured;
-                }
-            }
             if matched.is_empty() && Some(matched.end) == last_end {
                 if start == input.len() {
                     break;
@@ -206,15 +155,14 @@ pub(super) fn replace_pattern(
             }
             builder.edit(
                 matched.clone(),
-                replacement.fragments(locations.as_ref(), input),
+                replacement.fragments(search.captures(), input),
             )?;
             start = matched.end;
             last_end = Some(start);
         }
         builder.finish()?
     };
-    drop(locations);
-    drop(capture_memory);
+    drop(search);
     text.apply_edited(edited, budget, poll)
 }
 
@@ -267,22 +215,14 @@ mod tests {
     fn configured_pattern_scan_polls_through_a_long_unmatched_input() {
         let input = "x".repeat(128 * 1024);
         let mut text = FilteredText::new(&input);
-        let pattern = Regex::new("needle").unwrap();
         let replacement = Replacement::literal("#");
-        let cooperative = CooperativeRegex::compile("needle");
+        let cooperative = CooperativeRegex::compile("needle").unwrap();
         let budget = MemoryBudget::new(0);
         let mut polls = 0;
-        replace_pattern(
-            &mut text,
-            &pattern,
-            &replacement,
-            cooperative.as_ref(),
-            &budget,
-            &mut || {
-                polls += 1;
-                Ok(())
-            },
-        )
+        replace_pattern(&mut text, &cooperative, &replacement, &budget, &mut || {
+            polls += 1;
+            Ok(())
+        })
         .unwrap();
         assert!(polls > input.len() / 2048);
         assert_eq!(text.as_str(), input);
@@ -293,26 +233,18 @@ mod tests {
     fn configured_pattern_scan_cancellation_releases_unpublished_edit() {
         let input = "x".repeat(128 * 1024);
         let mut text = FilteredText::new(&input);
-        let pattern = Regex::new("needle").unwrap();
         let replacement = Replacement::literal("#");
-        let cooperative = CooperativeRegex::compile("needle");
+        let cooperative = CooperativeRegex::compile("needle").unwrap();
         let budget = MemoryBudget::new(1 << 20);
         let mut polls = 0;
-        let result = replace_pattern(
-            &mut text,
-            &pattern,
-            &replacement,
-            cooperative.as_ref(),
-            &budget,
-            &mut || {
-                polls += 1;
-                if polls == 8 {
-                    Err(AnalysisError::Cancelled)
-                } else {
-                    Ok(())
-                }
-            },
-        );
+        let result = replace_pattern(&mut text, &cooperative, &replacement, &budget, &mut || {
+            polls += 1;
+            if polls == 8 {
+                Err(AnalysisError::Cancelled)
+            } else {
+                Ok(())
+            }
+        });
         assert!(matches!(result, Err(AnalysisError::Cancelled)));
         assert_eq!(text.as_str(), input);
         assert_eq!(budget.used(), 0);
@@ -325,20 +257,13 @@ mod tests {
         let mut text = FilteredText::new(&input);
         let pattern = Regex::new("(needle)").unwrap();
         let replacement = Replacement::prepare("<$1>", &pattern);
-        let cooperative = CooperativeRegex::compile("(needle)");
+        let cooperative = CooperativeRegex::compile("(needle)").unwrap();
         let budget = MemoryBudget::new(1 << 20);
         let mut polls = 0;
-        replace_pattern(
-            &mut text,
-            &pattern,
-            &replacement,
-            cooperative.as_ref(),
-            &budget,
-            &mut || {
-                polls += 1;
-                Ok(())
-            },
-        )
+        replace_pattern(&mut text, &cooperative, &replacement, &budget, &mut || {
+            polls += 1;
+            Ok(())
+        })
         .unwrap();
         assert!(polls > input.len() / 2048);
         assert_eq!(text.as_str(), format!("{prefix}<needle>"));
@@ -350,24 +275,17 @@ mod tests {
         let mut text = FilteredText::new(&input);
         let pattern = Regex::new("(needle)").unwrap();
         let replacement = Replacement::prepare("<$1>", &pattern);
-        let cooperative = CooperativeRegex::compile("(needle)");
+        let cooperative = CooperativeRegex::compile("(needle)").unwrap();
         let budget = MemoryBudget::new(1 << 20);
         let mut polls = 0;
-        let result = replace_pattern(
-            &mut text,
-            &pattern,
-            &replacement,
-            cooperative.as_ref(),
-            &budget,
-            &mut || {
-                polls += 1;
-                if polls == 8 {
-                    Err(AnalysisError::Cancelled)
-                } else {
-                    Ok(())
-                }
-            },
-        );
+        let result = replace_pattern(&mut text, &cooperative, &replacement, &budget, &mut || {
+            polls += 1;
+            if polls == 8 {
+                Err(AnalysisError::Cancelled)
+            } else {
+                Ok(())
+            }
+        });
         assert!(matches!(result, Err(AnalysisError::Cancelled)));
         assert_eq!(text.as_str(), input);
         assert_eq!(budget.used(), 0);
@@ -379,12 +297,11 @@ mod tests {
         let mut text = FilteredText::new(input);
         let pattern = Regex::new("(foo)(bar)").unwrap();
         let replacement = Replacement::prepare("<$2-$1>", &pattern);
-        let cooperative = CooperativeRegex::compile("(foo)(bar)");
+        let cooperative = CooperativeRegex::compile("(foo)(bar)").unwrap();
         replace_pattern(
             &mut text,
-            &pattern,
+            &cooperative,
             &replacement,
-            cooperative.as_ref(),
             &MemoryBudget::new(1 << 20),
             &mut || Ok(()),
         )
@@ -398,12 +315,11 @@ mod tests {
         let mut text = FilteredText::new(input);
         let pattern = Regex::new(r"(^ab|b|x)").unwrap();
         let replacement = Replacement::prepare("<$1>", &pattern);
-        let cooperative = CooperativeRegex::compile(r"(^ab|b|x)");
+        let cooperative = CooperativeRegex::compile(r"(^ab|b|x)").unwrap();
         replace_pattern(
             &mut text,
-            &pattern,
+            &cooperative,
             &replacement,
-            cooperative.as_ref(),
             &MemoryBudget::new(1 << 20),
             &mut || Ok(()),
         )
@@ -417,16 +333,11 @@ mod tests {
         let mut text = FilteredText::new(&input);
         let pattern = Regex::new("(needle)").unwrap();
         let replacement = Replacement::prepare("<$1>", &pattern);
-        let cooperative = CooperativeRegex::compile("(needle)");
+        let cooperative = CooperativeRegex::compile("(needle)").unwrap();
         let budget = MemoryBudget::new(0);
-        let result = replace_pattern(
-            &mut text,
-            &pattern,
-            &replacement,
-            cooperative.as_ref(),
-            &budget,
-            &mut || Ok(()),
-        );
+        let result = replace_pattern(&mut text, &cooperative, &replacement, &budget, &mut || {
+            Ok(())
+        });
         assert!(matches!(
             result,
             Err(crate::AnalysisError::Memory(

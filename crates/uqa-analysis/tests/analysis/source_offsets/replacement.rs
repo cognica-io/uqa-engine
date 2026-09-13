@@ -17,8 +17,22 @@ fn streamed_replacements_match_regex_capture_and_empty_match_rules() {
         "(?P<x>a)?",
         "(?m)^|$",
         "(?P<한>韓|a)",
+        r"\b(韓|a+)\b",
+        r"\B(a*)",
+        "((a?)*)",
+        "(^ab|b|x)",
     ];
-    let inputs = ["", "a", "aa", "aba", "韓🙂a", "🙂\n韓", "$x{}", "b🙂c"];
+    let inputs = [
+        "",
+        "a",
+        "aa",
+        "aba",
+        "xab",
+        "韓🙂a",
+        "🙂\n韓",
+        "$x{}",
+        "b🙂c",
+    ];
     let replacements = [
         "$",
         "$$",

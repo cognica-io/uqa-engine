@@ -20,9 +20,8 @@ pub(crate) enum PreparedCharFilter<'a> {
     HTMLStrip,
     Mapping(Vec<(String, String)>),
     PatternReplace {
-        expression: Regex,
+        expression: Box<CooperativeRegex>,
         replacement: Replacement<'a>,
-        cooperative: Option<Box<CooperativeRegex>>,
     },
 }
 
@@ -44,11 +43,16 @@ impl CharFilter {
                         source,
                     })?;
                 let replacement = Replacement::prepare(replacement, &expression);
-                let cooperative = CooperativeRegex::compile(pattern).map(Box::new);
+                let expression = CooperativeRegex::compile(pattern).map_err(|source| {
+                    AnalysisError::InvalidRegex {
+                        component: "pattern-replace character filter",
+                        pattern: pattern.clone(),
+                        source,
+                    }
+                })?;
                 PreparedCharFilter::PatternReplace {
-                    expression,
+                    expression: Box::new(expression),
                     replacement,
-                    cooperative,
                 }
             }
         })
@@ -63,11 +67,9 @@ impl PreparedCharFilter<'_> {
             Self::PatternReplace {
                 expression,
                 replacement,
-                cooperative,
             } => PreparedCharFilter::PatternReplace {
                 expression,
                 replacement: replacement.into_owned(),
-                cooperative,
             },
         }
     }
@@ -102,15 +104,7 @@ impl PreparedCharFilter<'_> {
             Self::PatternReplace {
                 expression,
                 replacement,
-                cooperative,
-            } => replace_pattern(
-                &mut text,
-                expression,
-                replacement,
-                cooperative.as_deref(),
-                budget,
-                poll,
-            )?,
+            } => replace_pattern(&mut text, expression, replacement, budget, poll)?,
         }
         text.prepare_coordinates(budget, poll)?;
         poll()?;

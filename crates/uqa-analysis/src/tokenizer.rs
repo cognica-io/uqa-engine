@@ -63,7 +63,7 @@ impl Tokenizer {
 
     /// Tokenize with reservations for owned buffers and retained source provenance.
     ///
-    /// Configuration resources and library regex workspaces remain separately managed. Built-in word tokenizers and prepared pattern DFAs poll while scanning; patterns that cannot use the cooperative DFA poll between library searches, and loops owned by analysis poll while emitting. Cloning the underlying analyzed value creates separate, unreserved token buffers.
+    /// Immutable configuration resources remain separately managed. Built-in word tokenizers and every prepared pattern search poll while scanning; regex fallback workspace reserves its buffers from the caller's allowance. Emission and projection also poll. Cloning the underlying analyzed value creates separate, unreserved token buffers.
     pub fn tokenize_with_offsets_budgeted(
         &self,
         text: &str,
