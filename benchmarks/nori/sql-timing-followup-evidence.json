@@ -503,5 +503,124 @@
     "full_sql_report_completed": false,
     "updated_at_utc": "2026-09-13T18:02:42.718734+00:00",
     "disposition": "Stopped the owned diagnostic with SIGINT after the two profiles; the runner terminated with exit code 1."
+  },
+  "foreground_scheduling_control": {
+    "calibration_eligible": false,
+    "workload": "sqlite/sql_query/none/korean_prose",
+    "verified_executions": 45,
+    "report_sha256": "bba97f3790f6602e261ad7cde248d69fb2a949bb4467553f135f0a519fbd11f8",
+    "report_bytes": 69759,
+    "diagnostic_source_sha256": "4110886109e9ff270cd257d1f53777b623a5af59db8cf927eb3ee0160d8a9c62",
+    "diagnostic_executable_sha256": "76195aaa9c1ff3fad8124aa9ca5f743a91c1531476561cb8451a7e86704d1116",
+    "mach_timebase": {
+      "denom": 3,
+      "numer": 125
+    },
+    "blocks": [
+      {
+        "label": "qos_0",
+        "requested_thread_qos": 33,
+        "median_ns": 1692969833,
+        "user_cpu_ns_median": 1085455458.3333333,
+        "kernel_cpu_ns_median": 604863500.0,
+        "cache_misses": [
+          521,
+          20,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "instructions_median": 17629575511
+      },
+      {
+        "label": "qos_1",
+        "requested_thread_qos": 25,
+        "median_ns": 1618582167,
+        "user_cpu_ns_median": 1041195250.0,
+        "kernel_cpu_ns_median": 576238125.0,
+        "cache_misses": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "instructions_median": 17626379949
+      },
+      {
+        "label": "qos_2",
+        "requested_thread_qos": 9,
+        "median_ns": 8780711166,
+        "user_cpu_ns_median": 4612144791.666667,
+        "kernel_cpu_ns_median": 2986650250.0,
+        "cache_misses": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "instructions_median": 17717547024
+      },
+      {
+        "label": "qos_3",
+        "requested_thread_qos": 25,
+        "median_ns": 1498114042,
+        "user_cpu_ns_median": 982993291.6666666,
+        "kernel_cpu_ns_median": 514932625.0,
+        "cache_misses": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "instructions_median": 17624677146
+      },
+      {
+        "label": "qos_4",
+        "requested_thread_qos": 33,
+        "median_ns": 1493931250,
+        "user_cpu_ns_median": 982914583.3333334,
+        "kernel_cpu_ns_median": 510735750.0,
+        "cache_misses": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "instructions_median": 17624862090
+      }
+    ],
+    "interpretation": "The same live database and complete query results remain under observation. Warm samples have no SQLite page-cache misses while QoS changes affect wall, user and kernel CPU time. Restoring foreground priority returns the final median to 1.494 seconds. This demonstrates a relevant scheduling condition; it does not attribute the earlier complete-report difference to a single cause or replace complete calibration.",
+    "launcher_verification": {
+      "interface": "Foundation.Process.qualityOfService",
+      "requested": "userInteractive",
+      "child_pthread_qos_class": 33,
+      "child_pid_matches_receipt": true,
+      "argument_forwarding_verified": true,
+      "exit_statuses_verified": [
+        0,
+        7
+      ],
+      "existing_metadata_rejected_before_launch": true,
+      "missing_arguments_rejected": true,
+      "note": "Setting pthread QoS before exec is insufficient: a separate probe observed class 33 after requesting class 9. The production runner therefore uses the public Foundation process-spawn interface, without Rust unsafe code or private platform APIs."
+    },
+    "report": "benchmarks/nori/sql-fixture-evidence/macos-foreground-control.json",
+    "complete_outputs_match_reviewed_sql_report": true,
+    "reviewed_sql_report": "benchmarks/nori/sql-evidence/macos-baseline.json",
+    "reviewed_sql_report_sha256": "d7a19fd11d0566bf69b7101d3c9fdd87d042de13dae8d7d1810d681da035b5e2"
   }
 }

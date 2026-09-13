@@ -18,6 +18,7 @@ import pathlib
 import statistics
 import subprocess
 import sys
+import tempfile
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -29,10 +30,11 @@ LIMITS = ROOT / "benchmarks/nori/sql-limits.json"
 BENCHMARK = ROOT / "crates/uqa/benches/nori_sql.rs"
 SUPPORT = ROOT / "crates/uqa/benches/nori_sql/fixture.rs"
 SEED_SUPPORT = ROOT / "crates/uqa/benches/nori_sql/seeds.rs"
+SCHEDULING_SUPPORT = ROOT / "crates/uqa/benches/nori_sql/foreground.swift"
 CATALOGS = SEED_SUPPORT.parent / "catalogs"
 CATALOG_MANIFEST = CATALOGS / "manifest.json"
 CATALOG_FILES = tuple(CATALOGS / f"{provider}-empty.db" for provider in ("sqlite", "redb"))
-SUPPORTING = (SUPPORT, SEED_SUPPORT, CATALOG_MANIFEST, *CATALOG_FILES)
+SUPPORTING = (SUPPORT, SEED_SUPPORT, SCHEDULING_SUPPORT, CATALOG_MANIFEST, *CATALOG_FILES)
 OWNERS = ("uqa", "uqa-engine", "uqa-core", "uqa-analysis", "uqa-nori-data", "uqa-storage",
           "uqa-storage-sqlite", "uqa-sql", "uqa-pg-query", "uqa-planner", "uqa-execution",
           "uqa-operators", "uqa-scoring", "uqa-fusion", "uqa-graph", "uqa-joins", "uqa-ml", "uqa-fdw")
@@ -198,9 +200,34 @@ def transaction_probe(report: dict) -> dict:
     return indexed
 
 
+def scheduling_scope(report: dict) -> dict | None:
+    if report.get("schema_version") == 2:
+        if "scheduling" in report:
+            raise RuntimeError("legacy SQL reports do not establish a scheduling policy")
+        return None
+    scheduling = report.get("scheduling")
+    if report.get("target_os") == "macos":
+        if not isinstance(scheduling, dict) or set(scheduling) != {"policy", "requested_qos_class"} or \
+                scheduling["policy"] != "macos_foundation_user_interactive" or type(scheduling["requested_qos_class"]) is not int or scheduling["requested_qos_class"] != 0x21:
+            raise RuntimeError("SQL measurements require verified macOS foreground scheduling")
+        provenance = report.get("provenance", {})
+        launcher = provenance.get("scheduling_launcher")
+        if not isinstance(launcher, dict) or set(launcher) != {"compiler", "source_sha256", "executable_sha256", "child_pid"} or \
+                not isinstance(launcher["compiler"], str) or not launcher["compiler"] or \
+                not identity(launcher["source_sha256"]) or not identity(launcher["executable_sha256"]) or \
+                type(launcher["child_pid"]) is not int or launcher["child_pid"] <= 0 or \
+                provenance.get("benchmark_sources", {}).get(SCHEDULING_SUPPORT.relative_to(ROOT).as_posix()) != launcher["source_sha256"]:
+            raise RuntimeError("SQL measurements require their scheduling launcher identity")
+        return scheduling
+    if scheduling != {"policy": "platform_default"}:
+        raise RuntimeError("SQL measurements require their target scheduling policy")
+    return scheduling
+
+
 def measurements(report: dict) -> dict:
-    if report.get("schema_version") != 2 or report.get("owner") != "uqa":
+    if report.get("schema_version") not in (2, 3) or report.get("owner") != "uqa":
         raise RuntimeError("unsupported SQL benchmark schema or owner")
+    scheduling_scope(report)
     if report.get("protocol") != PROTOCOL or report.get("foreground_threads") != 1:
         raise RuntimeError("invalid SQL sampling protocol")
     wasm = report.get("target_os") == "emscripten"
@@ -276,6 +303,12 @@ def check(report: dict, limits: dict, baseline: dict | None = None) -> dict:
     ratios = {}
     if baseline is not None:
         before = measurements(baseline)
+        if scheduling_scope(report) != scheduling_scope(baseline):
+            raise RuntimeError("incomparable SQL timing scope: scheduling")
+        if report.get("target_os") == "macos" and report.get("schema_version") == 3:
+            for key in ("compiler", "source_sha256"):
+                if report["provenance"]["scheduling_launcher"][key] != baseline["provenance"]["scheduling_launcher"][key]:
+                    raise RuntimeError(f"incomparable SQL scheduling launcher: {key}")
         for key in ("protocol", "pointer_bits", "target_arch", "target_os", "corpus_sha256", "catalog_inputs", "providers", "provider_settings",
                     "query_documents", "work_mem_bytes", "foreground_threads", "background_statistics", "timing_scope", "allocation_scope"):
             if report.get(key) != baseline.get(key):
@@ -292,6 +325,41 @@ def check(report: dict, limits: dict, baseline: dict | None = None) -> dict:
             if ratios[name] > maximum:
                 raise RuntimeError(f"SQL timing regression: {name}: {ratios[name]:.3f} > {maximum}")
     return {"allocation_and_rows_passed": True, "timing_compared": baseline is not None, "timing_ratios": ratios}
+
+
+def run(target: str, owners: tuple[str, ...]) -> dict:
+    scheduling = {"policy": "platform_default"}
+    with tempfile.TemporaryDirectory(prefix="uqa-nori-sql-scheduling-") as temporary:
+        directory = pathlib.Path(temporary)
+        prefix = ()
+        launcher = None
+        if target == "native" and sys.platform == "darwin":
+            executable = directory / "foreground"
+            source = directory / "foreground.swift"
+            source.write_bytes(SCHEDULING_SUPPORT.read_bytes())
+            source_sha256 = common.digest(source)
+            compiler = common.command("xcrun", "swiftc", "--version")
+            common.command("xcrun", "swiftc", "-module-cache-path", str(directory / "modules"),
+                           str(source), "-o", str(executable))
+            if source_sha256 != common.digest(SCHEDULING_SUPPORT):
+                raise RuntimeError("SQL scheduling source changed while compiling its launcher")
+            prefix = (str(executable), str(directory / "scheduling.json"))
+            launcher = {"compiler": compiler, "source_sha256": source_sha256,
+                        "executable_sha256": common.digest(executable)}
+        report = common.execute_benchmark(
+            target, "uqa", "nori_sql", "nori", owners, SUPPORTING, wasm_c_headers=True,
+            command_prefix=prefix)
+        if launcher is not None:
+            record = json.loads((directory / "scheduling.json").read_text())
+            if set(record) != {"policy", "requested_qos_class", "child_pid"} or \
+                    type(record["child_pid"]) is not int or record["child_pid"] <= 0:
+                raise RuntimeError("invalid SQL scheduling launcher receipt")
+            launcher["child_pid"] = record.pop("child_pid")
+            scheduling = record
+            report["provenance"]["scheduling_launcher"] = launcher
+        report.update(schema_version=3, scheduling=scheduling)
+        measurements(report)
+        return report
 
 
 def main() -> int:
@@ -346,8 +414,7 @@ def main() -> int:
         print(f"SQL transaction fixture experiment: {args.output}")
         return 0
     pinned_catalogs(["sqlite", "redb"])
-    report = json.loads(args.report.read_text()) if args.report else common.execute_benchmark(
-        args.target, "uqa", "nori_sql", "nori", owners, SUPPORTING, wasm_c_headers=True)
+    report = json.loads(args.report.read_text()) if args.report else run(args.target, owners)
     measurements(report)
     report["gate"] = {"allocation_and_rows_passed": False, "timing_compared": False}
     args.output.parent.mkdir(parents=True, exist_ok=True)

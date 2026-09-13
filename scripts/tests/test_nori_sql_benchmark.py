@@ -48,7 +48,9 @@ def fixture(wasm=False):
             row.update(analyzer_fingerprint=fingerprints[mode], query_sha256=hashlib.sha256(case["text"].encode()).hexdigest(),
                        rows=[[doc, 0.9] for doc in [*range(i, benchmark.DOCUMENTS, len(corpus)), benchmark.DOCUMENTS + i]])
         rows.append(row)
-    report = {"schema_version": 2, "owner": "uqa", "protocol": dict(benchmark.PROTOCOL),
+    report = {"schema_version": 3, "owner": "uqa", "protocol": dict(benchmark.PROTOCOL),
+              "scheduling": {"policy": "platform_default"} if wasm else
+                  {"policy": "macos_foundation_user_interactive", "requested_qos_class": 33},
               "pointer_bits": 32 if wasm else 64, "foreground_threads": 1,
               "target_arch": "wasm32" if wasm else "aarch64", "target_os": "emscripten" if wasm else "macos",
               "providers": providers, "provider_settings": {"sqlite": {"journal_mode": "delete"}},
@@ -59,6 +61,10 @@ def fixture(wasm=False):
               "provenance": {"cpu": "CPU", "platform": "platform", "rustc": "rustc", "flags": {},
                              "flags_sha256": benchmark.common.flags_signature({}), "node": None, "emcc": None,
                              "benchmark_sha256": "c" * 64, "cargo_lock_sha256": "d" * 64}}
+    if not wasm:
+        report["provenance"]["scheduling_launcher"] = {
+            "compiler": "Swift", "source_sha256": "e" * 64, "executable_sha256": "f" * 64, "child_pid": 1}
+        report["provenance"]["benchmark_sources"] = {benchmark.SCHEDULING_SUPPORT.relative_to(ROOT).as_posix(): "e" * 64}
     limits = {"schema_version": 2, "corpus_sha256": report["corpus_sha256"], "timing_max_ratio": 1.2,
               "catalog_inputs": benchmark.pinned_catalogs(["sqlite", "redb"]),
               "allocation_ceilings": {benchmark.target_key(report): {row["name"]: dict(row["allocation"]) for row in rows}},
@@ -67,6 +73,39 @@ def fixture(wasm=False):
 
 
 class NoriSQLBenchmarkTest(unittest.TestCase):
+    def test_scheduling_is_verified_and_comparisons_require_the_same_policy(self):
+        for wasm in (False, True):
+            report, limits = fixture(wasm)
+            for change in ("missing", "policy", "extra"):
+                changed = copy.deepcopy(report)
+                if change == "missing": del changed["scheduling"]
+                elif change == "policy": changed["scheduling"]["policy"] = "background"
+                else: changed["scheduling"]["unknown"] = True
+                with self.subTest(wasm=wasm, change=change), self.assertRaisesRegex(RuntimeError, "scheduling"):
+                    benchmark.measurements(changed)
+            legacy = copy.deepcopy(report)
+            legacy["schema_version"] = 2
+            del legacy["scheduling"]
+            self.assertTrue(benchmark.check(legacy, limits)["allocation_and_rows_passed"])
+            with self.assertRaisesRegex(RuntimeError, "scheduling"):
+                benchmark.check(report, limits, legacy)
+        report, limits = fixture()
+        self.assertTrue(benchmark.check(report, limits, copy.deepcopy(report))["timing_compared"])
+        for key, value in (("requested_qos_class", -1), ("requested_qos_class", True),
+                           ("requested_qos_class", 25), ("requested_qos_class", 33.0)):
+            changed = copy.deepcopy(report)
+            changed["scheduling"][key] = value
+            with self.subTest(key=key, value=value), self.assertRaisesRegex(RuntimeError, "scheduling"):
+                benchmark.measurements(changed)
+        changed = copy.deepcopy(report)
+        del changed["provenance"]["scheduling_launcher"]
+        with self.assertRaisesRegex(RuntimeError, "scheduling launcher identity"):
+            benchmark.measurements(changed)
+        changed = copy.deepcopy(report)
+        changed["provenance"]["scheduling_launcher"]["compiler"] = "another Swift compiler"
+        with self.assertRaisesRegex(RuntimeError, "scheduling launcher"):
+            benchmark.check(changed, limits, report)
+
     def test_reviewed_reports_reproduce_complete_outputs_and_exact_allocation_ceilings(self):
         limits = json.loads(benchmark.LIMITS.read_text())
         calibration = limits["calibration"]
