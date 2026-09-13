@@ -219,7 +219,7 @@
         "commit_batch_16/256": {
           "bytes_net": 2801452,
           "bytes_peak": 5660165,
-          "bytes_total": 51574089,
+          "bytes_total": 51574092,
           "count_net": 333,
           "count_peak": 3868,
           "count_total": 144916
@@ -268,7 +268,7 @@
     "calibration": {
       "maximum_bidirectional_repeat_ratio": 1.0985584434948636,
       "timing_policy_margin": 1.1,
-      "allocation_policy": "maximum observed value for each metric, target OS, target architecture and pointer width; no padding; unknown targets require calibration",
+      "allocation_policy": "maximum observed value for each metric, target OS, target architecture and pointer width; no padding; unknown targets require calibration; every commit workload must observe both table-update orders, differing by exactly three cumulative bytes with all other counters unchanged",
       "reports": [
         {
           "path": "benchmarks/nori/persistent-evidence/redb-native-baseline.json",
@@ -295,11 +295,22 @@
           "gate_passed_at_collection": false,
           "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/attempts/2",
           "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/artifacts/10314024274"
+        },
+        {
+          "path": "benchmarks/nori/persistent-evidence/redb-linux-commit-order.json",
+          "sha256": "a20600183644479ef05f848d8c1f2c12a3ee9a603b12e9880b1f60a93be89c33",
+          "gate_passed_at_collection": false,
+          "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34749722780/attempts/1",
+          "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34749722780/artifacts/10314984155"
         }
       ],
       "allocation_reference": {
         "path": "benchmarks/nori/persistent-evidence/redb-allocation-reference.json",
         "sha256": "6792e89d46fdb8dfd4240c131d06a79df31dc0299d13806152bbfb98f358ca76"
+      },
+      "commit_allocation_probe": {
+        "path": "benchmarks/nori/persistent-evidence/redb-commit-allocation-probe.json",
+        "sha256": "8bd5e9979b725a8cad99490dcd270e1d3bc5fa3173b7dfeac7a78f85b090de27"
       }
     }
   }

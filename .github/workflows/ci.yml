@@ -250,6 +250,8 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Measure native analysis and indexing with reviewed allocation ceilings
         run: |
+          mkdir -p target/benchmark-runs
+          cargo bench --locked -p uqa-storage-redb --bench commit_allocation_order > target/benchmark-runs/redb-commit-allocation-order.json
           python3 scripts/run-nori-benchmark.py --output target/benchmark-runs/nori-native.json
           python3 scripts/run-nori-index-benchmark.py --output target/benchmark-runs/nori-index-native.json
           python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --output target/benchmark-runs/nori-sqlite-native.json
@@ -260,6 +262,7 @@ jobs:
         with:
           name: nori-native-${{ github.sha }}
           path: |
+            target/benchmark-runs/redb-commit-allocation-order.json
             target/benchmark-runs/nori-native.json
             target/benchmark-runs/nori-index-native.json
             target/benchmark-runs/nori-sqlite-native.json

@@ -109,6 +109,19 @@ class NoriPersistentBenchmarkTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "target-specific calibration"):
             benchmark.check(report, limits, "sqlite")
 
+    def test_redb_observed_maxima_reject_even_one_additional_byte_or_allocation(self):
+        rule = json.loads(benchmark.LIMITS.read_text())["redb"]
+        for record in rule["calibration"]["reports"]:
+            report = json.loads((ROOT / record["path"]).read_text())
+            target = benchmark.target_key(report)
+            for offset, row in enumerate(report["measurements"]):
+                for key in benchmark.index.ALLOCATION_KEYS:
+                    changed = copy.deepcopy(report)
+                    changed["measurements"][offset]["allocation"][key] = (
+                        rule["allocation_ceilings"][target][row["name"]][key] + 1)
+                    with self.subTest(target=target, name=row["name"], key=key), self.assertRaisesRegex(RuntimeError, "allocation regression"):
+                        benchmark.check(changed, rule, "redb")
+
     def test_disk_observations_and_comparison_scope_cannot_be_omitted(self):
         for key in ("closed_seed_file_bytes", "closed_result_file_bytes"):
             report, limits = fixture()
@@ -165,6 +178,42 @@ class NoriPersistentBenchmarkTest(unittest.TestCase):
         self.assertNotIn("run-nori-persistent-benchmark.py --provider redb", wasm)
         self.assertNotIn("--measure-only", native + wasm)
 
+    def test_redb_commit_order_probe_isolates_definition_copy_bytes(self):
+        record = json.loads(benchmark.LIMITS.read_text())["redb"]["calibration"]["commit_allocation_probe"]
+        path = ROOT / record["path"]
+        self.assertEqual(benchmark.common.digest(path), record["sha256"])
+        report = json.loads(path.read_text())
+        source = ROOT / "crates/uqa-storage-redb/benches/commit_allocation_order.rs"
+        self.assertEqual(report["provenance"]["benchmark_sha256"], benchmark.common.digest(source))
+        self.assertEqual(report["owner"], "uqa-storage-redb")
+        self.assertEqual(report["samples_per_condition"], 64)
+        self.assertEqual(report["type_names"], {"data": ["&[u8]", "&[u8]"], "metadata": ["&str", "u64"]})
+        delta = sum(map(len, report["type_names"]["data"])) - sum(map(len, report["type_names"]["metadata"]))
+        self.assertEqual(report["type_name_bytes_delta"], delta)
+        self.assertEqual(delta, 3)
+        rows = report["measurements"]
+        self.assertEqual(len(rows), 4)
+        self.assertEqual({(row["existing_tables"], row["mixed_types"]) for row in rows},
+                         {(existing, mixed) for existing in (False, True) for mixed in (False, True)})
+        for row in rows:
+            self.assertEqual(row["verified_reopened_samples"], 64)
+            self.assertEqual(sum(outcome["samples"] for outcome in row["outcomes"]), 64)
+            for outcome in row["outcomes"]:
+                self.assertGreater(outcome["samples"], 0)
+                self.assertEqual(set(outcome["allocation"]), set(benchmark.index.ALLOCATION_KEYS))
+            varied = row["existing_tables"] and row["mixed_types"]
+            self.assertEqual(len(row["outcomes"]), 2 if varied else 1)
+            for key in benchmark.index.ALLOCATION_KEYS:
+                values = sorted({outcome["allocation"][key] for outcome in row["outcomes"]})
+                if varied and key == "bytes_total":
+                    self.assertEqual(len(values), 2)
+                    self.assertEqual(values[1] - values[0], delta)
+                else:
+                    self.assertEqual(len(values), 1)
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("cargo bench --locked -p uqa-storage-redb --bench commit_allocation_order", workflow)
+        self.assertIn("target/benchmark-runs/redb-commit-allocation-order.json", workflow)
+
     def test_reviewed_reports_cover_supported_targets_and_memory_graphs(self):
         limits = json.loads(benchmark.LIMITS.read_text())
         memory = json.loads(benchmark.index.LIMITS.read_text())["outputs"]
@@ -176,7 +225,7 @@ class NoriPersistentBenchmarkTest(unittest.TestCase):
                 targets.add("emscripten/wasm32/32")
             self.assertEqual(set(rule["allocation_ceilings"]), targets)
             records = rule["calibration"]["reports"]
-            self.assertEqual(len(records), 6 if provider == "sqlite" else 5)
+            self.assertEqual(len(records), 6)
             reports = []
             for record in records:
                 path = ROOT / record["path"]
@@ -209,6 +258,14 @@ class NoriPersistentBenchmarkTest(unittest.TestCase):
                     rows = [next(row for row in r["measurements"] if row["name"] == name) for r in matching]
                     for key, value in ceiling.items():
                         self.assertEqual(value, max(row["allocation"][key] for row in rows))
+                        if provider == "redb":
+                            observed = sorted({row["allocation"][key] for row in rows})
+                            with self.subTest(target=target, name=name, key=key):
+                                if name.startswith("commit_") and key == "bytes_total":
+                                    self.assertEqual(len(observed), 2, "calibration must cover both redb table-update orders")
+                                    self.assertEqual(observed[1] - observed[0], 3)
+                                else:
+                                    self.assertEqual(len(observed), 1, "table-update order cannot change another counter")
             for name, expected in rule["outputs"].items():
                 self.assertEqual(expected, memory[mapping[name]])
 
