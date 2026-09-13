@@ -51,7 +51,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             "(github.event_name == 'workflow_dispatch' && inputs.run_rust) }}"
         )
 
-        self.assertEqual(self.workflow.count(condition), 8)
+        self.assertEqual(self.workflow.count(condition), 9)
         self.assertNotIn("if: ${{ inputs.run_rust }}", self.workflow)
 
     def test_upstream_reference_is_required_by_the_merge_gate(self) -> None:
@@ -59,6 +59,18 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         needs = gate.split("    needs: [", 1)[1].split("]", 1)[0]
         self.assertIn("upstream-regression-oracle", [name.strip() for name in needs.split(",")])
         self.assertIn("harness.py run --output target/pg18-upstream/reference", self.workflow)
+
+    def test_nori_regeneration_and_all_reference_drivers_are_required_by_the_merge_gate(self) -> None:
+        gate = self.workflow.split("  gate:\n", 1)[1]
+        needs = gate.split("    needs: [", 1)[1].split("]", 1)[0]
+        self.assertIn("nori-reference", [name.strip() for name in needs.split(",")])
+        job = self.workflow.split("  nori-reference:\n", 1)[1].split("  gate:\n", 1)[0]
+        self.assertIn("regenerate_dictionary.py --platform linux/amd64", job)
+        self.assertIn("export_model.py --platform linux/amd64 --offline", job)
+        for driver in ["run_reference.py", "run_user_reference.py", "run_tokenizer_reference.py",
+                       "run_analysis_reference.py", "run_number_reference.py", "run_generic_reference.py"]:
+            self.assertIn(driver, job)
+        self.assertNotIn("--write", job)
 
     def test_temporary_tag_caches_are_restore_only(self) -> None:
         cache_step = (

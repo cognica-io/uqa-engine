@@ -55,7 +55,7 @@ def verify_dictionary_resources(manifest, cache):
                 raise RuntimeError(f"Dictionary resource checksum mismatch: {name}")
 
 
-def docker_command(manifest, cache, platform, offline, entrypoint, arguments=(), output=None, output_readonly=False):
+def docker_command(manifest, cache, platform, offline, entrypoint, arguments=(), output=None, output_readonly=False, input_directory=None):
     # An explicit classpath excludes unrelated jars in a reused cache directory.
     classpath = ":".join(
         "/jars/" + item["artifact"] + "-" + manifest["lucene_version"] + ".jar"
@@ -70,4 +70,6 @@ def docker_command(manifest, cache, platform, offline, entrypoint, arguments=(),
     ]
     if output is not None:
         command += ["--mount", f"type=bind,source={output},target=/output" + (",readonly" if output_readonly else "")]
+    if input_directory is not None:
+        command += ["--mount", f"type=bind,source={input_directory},target=/input,readonly"]
     return command + [manifest["docker_image"], "java", "-Xmx1g", "--class-path", classpath, "/src/" + entrypoint, *arguments]

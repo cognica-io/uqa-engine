@@ -1,6 +1,6 @@
 # Neutral Nori model export
 
-`export_model.py` exports the complete model from the pinned official Lucene jars through `NoriModel.java`, using the Docker runtime and checked resources in `manifest.json`. This is the offline input for the planned Rust dictionary packer. It is not the production UQA bundle, and no Cargo build or query invokes this tool.
+`export_model.py` exports the complete model from the pinned official Lucene jars through `NoriModel.java`, using the Docker runtime and checked resources in `manifest.json`. This is the offline input for the Rust dictionary packer. It is not the production UQA bundle, and no Cargo build or query invokes this tool.
 
 The recorded export contains 774,582 distinct surfaces, 816,283 ordered system word entries, 14 unknown classes and entries, a 3,822-forward by 2,693-backward connection matrix with 10,292,646 costs, 65,536 character-definition entries, and 1,114,112 Java Unicode entries. The five neutral files total 82,581,342 bytes. This size measures the uncompressed neutral export; it does not establish a runtime bundle size or memory requirement.
 
@@ -26,7 +26,23 @@ The exporter enumerates the FST in UTF-16 label order and independently resolves
 
 Lucene's codec reader supplies matrix dimensions and every delta-encoded cell; all decoded cells are checked against `ConnectionCosts.get(forward, backward)`. Character-definition categories and invoke/group flags are compared with the live model for every UTF-16 unit. Flags for classes without a representative character are retained directly from the checked resource. The Unicode profile records every code point accepted by Java's classification APIs, including surrogate code points needed when the tokenizer inspects individual UTF-16 units. No private-field reflection is used.
 
-The export is compared field by field after writing, and fresh runs must reproduce every recorded SHA-256. This proves model extraction and serialization against the pinned JVM. Rust loading and analysis parity, CSV regeneration, resource packaging, and performance gates remain in the [implementation plan](../../../docs/plans/0006-nori-analyzer.md).
+The export is compared field by field after writing, and fresh runs must reproduce every recorded SHA-256. This proves model extraction and serialization against the pinned JVM. The [implementation plan](../../../docs/plans/0006-nori-analyzer.md) records native loading/analysis parity, resource packaging, and remaining performance and delivery gates.
+
+## CSV source regeneration
+
+`regenerate_dictionary.py` rebuilds the dictionary through the pinned jar's public `DictionaryBuilder`, using the exact MeCab-ko-dic 2.1.1-20180720 archive, UTF-8, and entry normalization disabled. Python validates the source archive and jar hashes before selecting the 40 top-level CSV files plus `char.def`, `unk.def`, and `matrix.def`. It copies only those builder inputs; it does not execute or unpack the archive's build scripts. All Java execution uses the pinned Docker image and a 1 GiB heap, with input mounted read-only and networking disabled inside the container.
+
+```sh
+python3 tests/parity/nori/regenerate_dictionary.py --output target/nori-csv-regeneration
+python3 tests/parity/nori/regenerate_dictionary.py --output target/nori-csv-repeat --offline
+python3 -m unittest discover -s scripts/tests -p 'test_nori*.py'
+```
+
+`--cache-dir` selects the shared jar/source cache. `--offline` requires the cached source archive, jars, and Docker image. `--platform` selects `linux/arm64` or `linux/amd64`. Each run requires a new output directory; after validation it contains `resources/` with the nine generated files and `regeneration_manifest.json` with their provenance. The checked-in [`csv_manifest.json`](csv_manifest.json) records the builder source, reference manifest, archive identity, builder flags, JVM version, and every input/output size and SHA-256. Platform selection does not change this manifest.
+
+The 49,775,061-byte archive supplies 202,683,519 bytes across 43 builder inputs. Fresh arm64 runs and an independent amd64 Docker run produced all nine dictionary resources byte for byte equal to the pinned release jar, totaling 25,039,384 bytes. Equality covers the compiled FST, stable word ordering, dictionary buffers/maps, character classes, and connection matrix; it is stronger than comparing token examples alone. These are reproducibility and artifact-size measurements, not analysis throughput or runtime-memory measurements.
+
+Any input, runtime, file-inventory, size, or checksum difference fails the run before publishing an output directory. Existing output is preserved. `--write-manifest` records an intentional reviewed provenance change only after every regenerated resource matches the reference jar; it cannot accept different resource bytes. The packaged UQA bundle is never replaced by this command. Pre-merge CI's Nori regeneration job runs this comparison, exhaustive neutral model export, and all six reference drivers, then retains the model and regeneration manifests as artifacts.
 
 ## Binary format version 1
 

@@ -1,0 +1,290 @@
+{
+  "format": "uqa-nori-csv-regeneration",
+  "format_version": 1,
+  "reference_manifest_sha256": "f2856885efadaf6783d3be8063d594a74faaad9a50a1960ead738f22ea4fe0fe",
+  "builder_source_sha256": "e3b0b7a5981c755d5faaea226e8f7b3c3fa55b0c13619720ee08f76031e6f136",
+  "source_archive": {
+    "name": "mecab-ko-dic-2.1.1-20180720",
+    "url": "https://s3.amazonaws.com/lucene-testdata/mecab/mecab-ko-dic-2.1.1-20180720.tar.gz",
+    "sha256": "fd62d3d6d8fa85145528065fabad4d7cb20f6b2201e71be4081a4e9701a5b330",
+    "license_file": "COPYING",
+    "license": "Apache-2.0",
+    "lucene_normalize_entries": false,
+    "bytes": 49775061
+  },
+  "builder": {
+    "class": "org.apache.lucene.analysis.ko.dict.DictionaryBuilder",
+    "encoding": "utf-8",
+    "normalize_entries": false,
+    "java_heap": "1g"
+  },
+  "runtime": {
+    "java_version": "21.0.10",
+    "java_runtime_version": "21.0.10+7-LTS",
+    "java_vendor": "Eclipse Adoptium"
+  },
+  "inputs": [
+    {
+      "path": "CoinedWord.csv",
+      "bytes": 7115,
+      "sha256": "721e94cb6c77022fe5f09fe24df982b0815469bdef151fd9e2436d45ebae5bc8"
+    },
+    {
+      "path": "EC.csv",
+      "bytes": 105592,
+      "sha256": "6d8ffbc4a73743d3e33cde2aeb2db8901198c4d0e07ee108782a6660b4b7ed6c"
+    },
+    {
+      "path": "EF.csv",
+      "bytes": 77385,
+      "sha256": "29af32001cad203e9f65870f5cfe9c252b21ee263939b3b22471521b288461d9"
+    },
+    {
+      "path": "EP.csv",
+      "bytes": 1750,
+      "sha256": "29901ef575c1419afd65845a7cb1ccf36145029c3fac241daf214d92c33b8c0c"
+    },
+    {
+      "path": "ETM.csv",
+      "bytes": 5781,
+      "sha256": "e10aa1e8b40b6ee10c4edbc70e5c113059d4cd4a875e72c2603393d5ccbc4627"
+    },
+    {
+      "path": "ETN.csv",
+      "bytes": 540,
+      "sha256": "0de1456b9a0db4239e7afbf84b966e2a77065497af3e0c59446c0b706277fcaf"
+    },
+    {
+      "path": "Foreign.csv",
+      "bytes": 648134,
+      "sha256": "1d18687e258cd7fef5971d7fef207ec15aee98c2e58e2ba7088c419396c5b6fc"
+    },
+    {
+      "path": "Group.csv",
+      "bytes": 261576,
+      "sha256": "a6420aa3482054ce6781e5c9f72cdaa7bf3e9093fa31e254e8a5db8dad452016"
+    },
+    {
+      "path": "Hanja.csv",
+      "bytes": 5926151,
+      "sha256": "eb2d0e9c9b32727aa82c483c89deef92b389e1459e59d1cb8d15dbfb2544233d"
+    },
+    {
+      "path": "IC.csv",
+      "bytes": 58942,
+      "sha256": "f0f989383be44663a7efa39b7b928d758c58257f67373393fc5e7b277c4f22e6"
+    },
+    {
+      "path": "Inflect.csv",
+      "bytes": 4042583,
+      "sha256": "ff9a82d6f97aa75b86f03c33e2d615486200d7433f1c86c2e33a8c18d647064c"
+    },
+    {
+      "path": "J.csv",
+      "bytes": 17878,
+      "sha256": "0100f2cc4b4e76a44b3888bdb464be0f2249605f7c300b52d657cc8981b3c117"
+    },
+    {
+      "path": "MAG.csv",
+      "bytes": 842240,
+      "sha256": "d9842fd7f1efc6398fb06c0d3b4c881571b49b91fb340017a8a688f7bd4a4785"
+    },
+    {
+      "path": "MAJ.csv",
+      "bytes": 11994,
+      "sha256": "987a9af86e253fe28bea22037a96ff484c64c7bc96beca7682fdc169bd56b0a0"
+    },
+    {
+      "path": "MM.csv",
+      "bytes": 23761,
+      "sha256": "46f455b56f100d1d015f54ec82e2f7833b8a680ac79f08ae2744706fee71a34d"
+    },
+    {
+      "path": "NNB.csv",
+      "bytes": 5635,
+      "sha256": "5537b9e6398dafa71c9432e61150bb2d52f0e8a200459defce67ec61ff8fad7c"
+    },
+    {
+      "path": "NNBC.csv",
+      "bytes": 33212,
+      "sha256": "e230971ad18d2162dfe9b46286b9b969f8eeab5d37006cd989959a335ec6b0b2"
+    },
+    {
+      "path": "NNG.csv",
+      "bytes": 14868349,
+      "sha256": "93be2e17bf9349f400bd24baa47fc3edee997c61727f5df95677714ed3f35745"
+    },
+    {
+      "path": "NNP.csv",
+      "bytes": 198413,
+      "sha256": "72f5d577c9ddaf4da77cd57ef40c4ad6c98cfb31aa99744395aba33d2014344c"
+    },
+    {
+      "path": "NP.csv",
+      "bytes": 15005,
+      "sha256": "8a6e963b73696b944bfbf4d3362a54a0d82d1854cad906f3ae27a78ea227d24b"
+    },
+    {
+      "path": "NR.csv",
+      "bytes": 23238,
+      "sha256": "30fe26849cec9251152af1dcf83af88111db3076810f2b4f7b468a9d84a0dad1"
+    },
+    {
+      "path": "NorthKorea.csv",
+      "bytes": 135,
+      "sha256": "4f6e61ccd266667d155b5ad8f80ba4b22d6c270efb246fa60933743f0d5684dc"
+    },
+    {
+      "path": "Person-actor.csv",
+      "bytes": 9950318,
+      "sha256": "f087febd7fa4efc2629e828c382ad8e7fb3cade7a0cf22c2d38c6e1307b61816"
+    },
+    {
+      "path": "Person.csv",
+      "bytes": 14224094,
+      "sha256": "33aef8a2630e366ecfd4a0a8979c5de6fd44b4846fb1a1bf7b21cc8683e21537"
+    },
+    {
+      "path": "Place-address.csv",
+      "bytes": 1390411,
+      "sha256": "8f8dda89ccd588280c592ad03d5d3843f2630779eda37ff7730a7ba54ae43bd4"
+    },
+    {
+      "path": "Place-station.csv",
+      "bytes": 109639,
+      "sha256": "2105392fb681c14cfd643dd367d7fc9374d6f47708ce587a940ca830d4a72bab"
+    },
+    {
+      "path": "Place.csv",
+      "bytes": 2527890,
+      "sha256": "78939dc1daa157ed49e34c96f1a2af25dda7c0f37856ea8212089dab4df7035b"
+    },
+    {
+      "path": "Preanalysis.csv",
+      "bytes": 585,
+      "sha256": "e7551cfdb35e13aeb274c64ad43718d84925c5e9f747f691f56887de7ad7a41e"
+    },
+    {
+      "path": "Symbol.csv",
+      "bytes": 570,
+      "sha256": "cd11ca7b7709b0e8f90221225833ea50db65daab5844592356aa3859becf2e6d"
+    },
+    {
+      "path": "VA.csv",
+      "bytes": 117146,
+      "sha256": "5508849ef6054533ffe1e81a8c2351838e538e98ba62a9f97a09836f2f19dbab"
+    },
+    {
+      "path": "VCN.csv",
+      "bytes": 321,
+      "sha256": "d7237953df47b40ed383887383c5a4d24699d1c55ebed6eb1545e90f4d621b1b"
+    },
+    {
+      "path": "VCP.csv",
+      "bytes": 369,
+      "sha256": "80a2068b76a16fd32335f767209f073757d2a0e50c104fba17a68ef932dab3bd"
+    },
+    {
+      "path": "VV.csv",
+      "bytes": 362987,
+      "sha256": "2929d7cfd45c30d64bfe2b8e6e31f6362772c95a7e2646968a10df04116f60d2"
+    },
+    {
+      "path": "VX.csv",
+      "bytes": 5204,
+      "sha256": "b8168dcdf7bcb0d7aadbd91b5372f24bfd5d4908f631a561f31e4945daf0a543"
+    },
+    {
+      "path": "Wikipedia.csv",
+      "bytes": 2219240,
+      "sha256": "d492957fdfa3585a6e4754b5c9b3bcd4aed2c4f4d9e741567d8f26b69c3300a5"
+    },
+    {
+      "path": "XPN.csv",
+      "bytes": 3237,
+      "sha256": "a4c37b72a0dd0b9bb611c7ce7cccc7eaa8050818b511568a6c5fa6ac5ce590ef"
+    },
+    {
+      "path": "XR.csv",
+      "bytes": 165259,
+      "sha256": "ab645b6332e56fe767edaf27409dfc03211d64e56dd4b562d19a671d6ec9e2d7"
+    },
+    {
+      "path": "XSA.csv",
+      "bytes": 813,
+      "sha256": "5a3c2c9d805d17deff7e2db91cb96cf4e9df7d0b401abd17cedcb85febd9e6a2"
+    },
+    {
+      "path": "XSN.csv",
+      "bytes": 4960,
+      "sha256": "4df40d210adc725e80c233c71bb69fc630f0b7103acc908d08ef242eb7672e5f"
+    },
+    {
+      "path": "XSV.csv",
+      "bytes": 945,
+      "sha256": "f377d8f1da96823103af0dc571d892332743dc1a69ff68fc96fb79e6bb4dd533"
+    },
+    {
+      "path": "char.def",
+      "bytes": 4353,
+      "sha256": "ee2482af6643407b04e8c27600ead4c4bed37b7f4460d53ad8371cab4ca175a5"
+    },
+    {
+      "path": "matrix.def",
+      "bytes": 144419254,
+      "sha256": "e91912feaf2fd4d4bd7666169aac4926bddc39fa83ff1dbd9aace7ec24f7a847"
+    },
+    {
+      "path": "unk.def",
+      "bytes": 515,
+      "sha256": "4adcb0233ef05ef7bf1fdd0390aafb69fc85ec735280068f7923004f68275664"
+    }
+  ],
+  "resources": [
+    {
+      "path": "org/apache/lucene/analysis/ko/dict/CharacterDefinition.dat",
+      "bytes": 65564,
+      "sha256": "5ed2303b58a61819dd256f295b6cd52f869b6a15479255242133f7556c090b20"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ko/dict/ConnectionCosts.dat",
+      "bytes": 11231986,
+      "sha256": "90902b01157c383a196c7e9798dc4bec5e6aae88d17ef83c73217312d633945e"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ko/dict/TokenInfoDictionary$buffer.dat",
+      "bytes": 7288372,
+      "sha256": "73af46066a8d8138590b20c3941ee0c6cfe8b15d81ad8167d2565804128cca8b"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ko/dict/TokenInfoDictionary$fst.dat",
+      "bytes": 5632475,
+      "sha256": "c07fec77418992d104b9c217661067743ada15282c167cac3d1dfdac90e12b8b"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ko/dict/TokenInfoDictionary$posDict.dat",
+      "bytes": 2715,
+      "sha256": "12b227d6de87c7e980783ca7eed07074a69d57ef4cc0a0431221b04e3681385a"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ko/dict/TokenInfoDictionary$targetMap.dat",
+      "bytes": 816309,
+      "sha256": "47aac565e59cb80a341199f9484d6abf128084e8b6b23e6c3d7b7a8d4263a590"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ko/dict/UnknownDictionary$buffer.dat",
+      "bytes": 101,
+      "sha256": "2571f47d1e316d095d7727270538428e223da4e5c92990d0e4f8744cac739ade"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ko/dict/UnknownDictionary$posDict.dat",
+      "bytes": 1826,
+      "sha256": "76cb39a78f503b5b202d5a418b0241e4f747096ccc39d13914a7c12fcd1ae678"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ko/dict/UnknownDictionary$targetMap.dat",
+      "bytes": 36,
+      "sha256": "d5d9a3a0b35426c63b873f4b907fb9c3b51d8e6376c5ee9fbee00f960b569345"
+    }
+  ]
+}
