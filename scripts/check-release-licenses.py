@@ -376,7 +376,7 @@ def check_archive(path: pathlib.Path, payloads: dict[str, bytes], require_nori: 
         members, AGPL_NOTICE
     ):
         raise RuntimeError(f"{path} omits {AGPL_NOTICE}")
-    if path.name.endswith((".whl", ".tgz")):
+    if path.name.endswith((".whl", ".tgz", ".tar.gz")):
         for relative, expected in binding_nori_payloads().items():
             matches = matching_members(members, relative)
             if not matches or any(payload != expected for _, payload in matches):
@@ -429,8 +429,37 @@ def check_embedded_nori(path: pathlib.Path, members: dict[str, bytes]) -> None:
         check_nori_payloads(manifest, read_resource)
         if read_resource("data/nori.uqan") != bundle:
             raise RuntimeError(f"{path} contains a different Nori source bundle")
+        check_benchmark_sources(path, members)
         return
     raise RuntimeError(f"{path} has no Nori runtime or source bundle")
+
+
+def benchmark_inputs() -> set[str]:
+    """Follow literal Rust source/data references from every included benchmark."""
+    pending = list(ROOT.glob("crates/*/benches/**/*.rs"))
+    visited = set()
+    references = re.compile(r'(?:include(?:_str|_bytes)?!\s*\(\s*|#\[path\s*=\s*)"([^"\n]+)"')
+    while pending:
+        path = pending.pop().resolve()
+        try:
+            relative = path.relative_to(ROOT.resolve()).as_posix()
+        except ValueError as error:
+            raise RuntimeError("benchmark source inputs must stay inside the repository") from error
+        if relative in visited:
+            continue
+        if not path.is_file():
+            raise RuntimeError(f"missing benchmark source input: {relative}")
+        visited.add(relative)
+        if path.suffix == ".rs":
+            pending.extend(path.parent / item for item in references.findall(path.read_text()))
+    return visited
+
+
+def check_benchmark_sources(path: pathlib.Path, members: dict[str, bytes]) -> None:
+    for relative in benchmark_inputs():
+        matches = matching_members(members, relative)
+        if len(matches) != 1 or matches[0][1] != (ROOT / relative).read_bytes():
+            raise RuntimeError(f"{path} omits or changes a benchmark source input: {relative}")
 
 
 def parse_args() -> argparse.Namespace:

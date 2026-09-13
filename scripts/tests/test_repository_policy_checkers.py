@@ -38,6 +38,23 @@ LICENSES = load_script("uqa_check_release_licenses", "check-release-licenses.py"
 
 
 class RepositoryPolicyCheckerTest(unittest.TestCase):
+    def test_sdist_benchmarks_require_their_data_and_external_source_modules(self) -> None:
+        required = {"crates/uqa-analysis/benches/nori/corpus.json", "benchmarks/nori/persistent.rs",
+                    "crates/uqa-engine/tests/support/tpch_fixture.rs"}
+        inputs = LICENSES.benchmark_inputs()
+        self.assertTrue(required <= inputs)
+        members = {f"uqa-0.0.0/{relative}": (ROOT / relative).read_bytes() for relative in inputs}
+        path = pathlib.Path("uqa-0.0.0.tar.gz")
+        LICENSES.check_benchmark_sources(path, members)
+        for relative in required:
+            for mode in ("missing", "changed", "duplicate"):
+                changed = dict(members)
+                if mode == "missing": del changed[f"uqa-0.0.0/{relative}"]
+                elif mode == "changed": changed[f"uqa-0.0.0/{relative}"] = b"changed"
+                else: changed[f"extra/{relative}"] = changed[f"uqa-0.0.0/{relative}"]
+                with self.subTest(relative=relative, mode=mode), self.assertRaisesRegex(RuntimeError, "benchmark source input"):
+                    LICENSES.check_benchmark_sources(path, changed)
+
     def test_binding_archives_require_every_nori_notice_and_provenance_file(self) -> None:
         canonical = LICENSES.binding_nori_payloads()
         files = {**canonical, "LICENSE": b"license", "LICENSE-NOTICE.md": b"notice"}

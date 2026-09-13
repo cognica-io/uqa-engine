@@ -38,4 +38,8 @@ manifest-path = "crates/uqa-python/Cargo.toml"
 module-name = "uqa._uqa"
 python-source = "python"
 strip = true
-include = [{ path = "crates/*/benches/**/*.rs", format = "sdist" }]
+include = [
+    { path = "crates/*/benches/**/*", format = "sdist" },
+    { path = "benchmarks/nori/persistent.rs", format = "sdist" },
+    { path = "crates/uqa-engine/tests/support/tpch_fixture.rs", format = "sdist" },
+]
