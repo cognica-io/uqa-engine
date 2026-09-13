@@ -9,7 +9,8 @@
 use std::ops::Range;
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget};
 
-use super::PreparedTokenizer;
+use super::{standard_word_class, PreparedTokenizer};
+use crate::character_class::contains;
 use crate::token::allocation::TokenBuffer;
 use crate::{AnalysisResult, AnalysisToken, AnalyzedText, FilteredText};
 
@@ -53,20 +54,30 @@ pub(super) fn tokenize_budgeted(
                 )?)
             })?;
         }
-        PreparedTokenizer::Matches(expression) => {
-            let mut occurrences = expression.find_iter(text);
-            loop {
-                poll()?;
-                let Some(matched) = occurrences.next() else {
-                    break;
-                };
-                tokens.push(AnalysisToken::from_source_budgeted(
-                    input,
-                    matched.range(),
-                    budget,
-                    poll,
-                )?)?;
-            }
+        PreparedTokenizer::Standard => {
+            let class = standard_word_class()?;
+            for_each_matching_word(
+                text,
+                poll,
+                |character| contains(class, character),
+                |range, poll| {
+                    tokens.push(AnalysisToken::from_source_budgeted(
+                        input, range, budget, poll,
+                    )?)
+                },
+            )?;
+        }
+        PreparedTokenizer::Letter => {
+            for_each_matching_word(
+                text,
+                poll,
+                |character| character.is_ascii_alphabetic(),
+                |range, poll| {
+                    tokens.push(AnalysisToken::from_source_budgeted(
+                        input, range, budget, poll,
+                    )?)
+                },
+            )?;
         }
         PreparedTokenizer::NGram { min_gram, max_gram } => {
             for_each_word(text, poll, |word, poll| {
@@ -173,4 +184,69 @@ fn for_each_word(
         emit(start..text.len(), poll)?;
     }
     Ok(())
+}
+
+fn for_each_matching_word(
+    text: &str,
+    poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    is_word: impl Fn(char) -> bool,
+    mut emit: impl FnMut(Range<usize>, &mut dyn FnMut() -> AnalysisResult<()>) -> AnalysisResult<()>,
+) -> AnalysisResult<()> {
+    let mut start = None;
+    for (index, (offset, character)) in text.char_indices().enumerate() {
+        if index % 1024 == 0 {
+            poll()?;
+        }
+        if is_word(character) {
+            start.get_or_insert(offset);
+        } else if let Some(start) = start.take() {
+            emit(start..offset, poll)?;
+        }
+    }
+    if let Some(start) = start {
+        emit(start..text.len(), poll)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::AnalysisError;
+    use uqa_core::memory::MemoryBudget;
+
+    #[test]
+    fn built_in_word_scan_polls_through_unmatched_input() {
+        let source = "!".repeat(128 * 1024);
+        let tokenizer = PreparedTokenizer::Standard;
+        let input = FilteredText::new(&source);
+        let budget = MemoryBudget::new(1 << 20);
+        let mut polls = 0;
+        tokenize_budgeted(&tokenizer, &input, &budget, &mut || {
+            polls += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert!(polls > source.len() / 2048);
+        assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn built_in_word_scan_cancellation_releases_unpublished_tokens() {
+        let source = "!".repeat(128 * 1024);
+        let tokenizer = PreparedTokenizer::Letter;
+        let input = FilteredText::new(&source);
+        let budget = MemoryBudget::new(1 << 20);
+        let mut polls = 0;
+        let result = tokenize_budgeted(&tokenizer, &input, &budget, &mut || {
+            polls += 1;
+            if polls == 8 {
+                Err(AnalysisError::Cancelled)
+            } else {
+                Ok(())
+            }
+        });
+        assert!(matches!(result, Err(AnalysisError::Cancelled)));
+        assert_eq!(budget.used(), 0);
+    }
 }

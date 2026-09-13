@@ -9,13 +9,14 @@
 use regex::Regex;
 use uqa_core::memory::{Budgeted, MemoryBudget};
 
-use super::{letter_re, standard_word_re, stream, validate_gram_bounds, Tokenizer};
+use super::{stream, validate_gram_bounds, Tokenizer};
 use crate::{AnalysisError, AnalysisResult, AnalyzedText, FilteredText};
 
 #[derive(Debug)]
 pub(crate) enum PreparedTokenizer {
     Whitespace,
-    Matches(&'static Regex),
+    Standard,
+    Letter,
     NGram {
         min_gram: usize,
         max_gram: usize,
@@ -41,8 +42,8 @@ impl Tokenizer {
                 )?)
             }
             Self::Whitespace => PreparedTokenizer::Whitespace,
-            Self::Standard => PreparedTokenizer::Matches(standard_word_re()?),
-            Self::Letter => PreparedTokenizer::Matches(letter_re()?),
+            Self::Standard => PreparedTokenizer::Standard,
+            Self::Letter => PreparedTokenizer::Letter,
             Self::NGram { min_gram, max_gram } => {
                 validate_gram_bounds("n-gram tokenizer", *min_gram, *max_gram)?;
                 PreparedTokenizer::NGram {

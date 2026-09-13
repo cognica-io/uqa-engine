@@ -10,13 +10,13 @@ use regex::Regex;
 use uqa_core::memory::MemoryBudget;
 
 use super::replacement::Replacement;
-use super::stream::{replace_literal, replace_pattern};
-use super::{html_tag_re, mapping_longest_first, CharFilter, HTML_ENTITIES};
+use super::stream::{replace_html, replace_literal, replace_pattern};
+use super::{mapping_longest_first, CharFilter, HTML_ENTITIES};
 use crate::{AnalysisError, AnalysisResult, FilteredText};
 
 #[derive(Debug)]
 pub(crate) enum PreparedCharFilter<'a> {
-    HTMLStrip(&'static Regex),
+    HTMLStrip,
     Mapping(Vec<(String, String)>),
     PatternReplace {
         expression: Regex,
@@ -27,7 +27,7 @@ pub(crate) enum PreparedCharFilter<'a> {
 impl CharFilter {
     pub(crate) fn prepare(&self) -> AnalysisResult<PreparedCharFilter<'_>> {
         Ok(match self {
-            Self::HTMLStrip => PreparedCharFilter::HTMLStrip(html_tag_re()?),
+            Self::HTMLStrip => PreparedCharFilter::HTMLStrip,
             Self::Mapping { mapping } => {
                 PreparedCharFilter::Mapping(mapping_longest_first(mapping))
             }
@@ -54,7 +54,7 @@ impl CharFilter {
 impl PreparedCharFilter<'_> {
     pub(crate) fn into_owned(self) -> PreparedCharFilter<'static> {
         match self {
-            Self::HTMLStrip(expression) => PreparedCharFilter::HTMLStrip(expression),
+            Self::HTMLStrip => PreparedCharFilter::HTMLStrip,
             Self::Mapping(mapping) => PreparedCharFilter::Mapping(mapping),
             Self::PatternReplace {
                 expression,
@@ -82,14 +82,8 @@ impl PreparedCharFilter<'_> {
     ) -> AnalysisResult<FilteredText<'a>> {
         poll()?;
         match self {
-            Self::HTMLStrip(expression) => {
-                replace_pattern(
-                    &mut text,
-                    expression,
-                    &Replacement::literal(" "),
-                    budget,
-                    poll,
-                )?;
+            Self::HTMLStrip => {
+                replace_html(&mut text, budget, poll)?;
                 for (entity, replacement) in HTML_ENTITIES {
                     replace_literal(&mut text, entity, replacement, budget, poll)?;
                 }

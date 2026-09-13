@@ -9,12 +9,11 @@
 //!
 //! [`Analyzer`]: crate::analyzer::Analyzer
 
-use std::sync::OnceLock;
-
-use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 use uqa_core::memory::{Budgeted, MemoryBudget};
 
+use crate::character_class::class;
 use crate::error::{AnalysisError, AnalysisResult};
 
 mod compiled;
@@ -64,7 +63,7 @@ impl Tokenizer {
 
     /// Tokenize with reservations for owned buffers and retained source provenance.
     ///
-    /// Configuration resources and library regex workspaces remain separately managed. Regex searches run between cancellation polls; loops owned by analysis poll while scanning and emitting. Cloning the underlying analyzed value creates separate, unreserved token buffers.
+    /// Configuration resources and library regex workspaces remain separately managed. Built-in word tokenizers poll while scanning; configured pattern tokenizers poll between library searches, and loops owned by analysis poll while emitting. Cloning the underlying analyzed value creates separate, unreserved token buffers.
     pub fn tokenize_with_offsets_budgeted(
         &self,
         text: &str,
@@ -130,22 +129,13 @@ fn validate_gram_bounds(
     Ok(())
 }
 
-fn standard_word_re() -> AnalysisResult<&'static Regex> {
-    static RE: OnceLock<Result<Regex, String>> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\w+").map_err(|error| error.to_string()))
+pub(super) fn standard_word_class() -> AnalysisResult<&'static regex_syntax::hir::ClassUnicode> {
+    static CLASS: OnceLock<Result<regex_syntax::hir::ClassUnicode, String>> = OnceLock::new();
+    CLASS
+        .get_or_init(|| class(r"\w"))
         .as_ref()
         .map_err(|message| AnalysisError::BuiltInRegex {
             component: "standard tokenizer",
-            message: message.clone(),
-        })
-}
-
-fn letter_re() -> AnalysisResult<&'static Regex> {
-    static RE: OnceLock<Result<Regex, String>> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"[a-zA-Z]+").map_err(|error| error.to_string()))
-        .as_ref()
-        .map_err(|message| AnalysisError::BuiltInRegex {
-            component: "letter tokenizer",
             message: message.clone(),
         })
 }

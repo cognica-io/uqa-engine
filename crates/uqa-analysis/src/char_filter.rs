@@ -7,12 +7,10 @@
 //! Character-level filters that run before tokenization.
 
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
 
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{AnalysisError, AnalysisResult};
+use crate::error::AnalysisResult;
 use crate::FilteredText;
 use uqa_core::memory::MemoryBudget;
 
@@ -98,16 +96,6 @@ impl CharFilter {
         poll()?;
         self.prepare()?.filter_mapped_budgeted(text, budget, poll)
     }
-}
-
-fn html_tag_re() -> AnalysisResult<&'static Regex> {
-    static RE: OnceLock<Result<Regex, String>> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"<[^>]+>").map_err(|error| error.to_string()))
-        .as_ref()
-        .map_err(|message| AnalysisError::BuiltInRegex {
-            component: "HTML tag filter",
-            message: message.clone(),
-        })
 }
 
 const HTML_ENTITIES: &[(&str, &str)] = &[
