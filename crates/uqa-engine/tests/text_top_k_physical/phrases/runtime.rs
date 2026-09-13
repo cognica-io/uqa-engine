@@ -108,5 +108,15 @@ fn phrase_provider_occurrence_reads_obey_session_work_mem() {
             rows.iter().any(|row| row["id"] == Value::Int(1)),
             "{provider}"
         );
+
+        engine.cancel();
+        let error = engine.sql(query, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("57014"), "{provider}: {error}");
+        engine.reset_cancellation();
+        let rows = engine.sql(query, &[]).unwrap().rows;
+        assert!(
+            rows.iter().any(|row| row["id"] == Value::Int(1)),
+            "{provider}"
+        );
     }
 }
