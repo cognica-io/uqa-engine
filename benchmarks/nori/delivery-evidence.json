@@ -1,0 +1,583 @@
+{
+  "schema_version": 1,
+  "status": "Recorded package and report acceptance; final source/package preflight, SQL calibration, and final remote-head CI remain pending.",
+  "python": {
+    "revision": "39df0bd8d5d267bf98385aa65b4af265e17fa05d",
+    "run": "https://github.com/cognica-io/uqa-engine/actions/runs/34758420618",
+    "full_matrix_passed": true,
+    "six_wheels_and_source_archive_verified": true,
+    "archives": [
+      {
+        "filename": "uqa-0.2.3-cp38-abi3-macosx_11_0_arm64.whl",
+        "artifact_id": 10318287677,
+        "bytes": 44047849,
+        "sha256": "fd60c6f2dcd3f94475b26fad2782ea968f2f913fe4c47622b08be4f13d79b497"
+      },
+      {
+        "filename": "uqa-0.2.3-cp38-abi3-manylinux_2_28_aarch64.whl",
+        "artifact_id": 10318572154,
+        "bytes": 47027460,
+        "sha256": "d8fcbb70b8a0668374019aa8144f4e487c977086c52e4838ee1926641e9ac42f"
+      },
+      {
+        "filename": "uqa-0.2.3.tar.gz",
+        "artifact_id": 10318196379,
+        "bytes": 15653033,
+        "sha256": "3db7735da4473781d1472b048b77e61ffdaf27a4256f14367e8292c84bf16d39"
+      },
+      {
+        "filename": "uqa-0.2.3-cp38-abi3-win_amd64.whl",
+        "artifact_id": 10319105164,
+        "bytes": 45997221,
+        "sha256": "0a3452f6ea7c2dda3987fc584c096c9380d1f6c3893839236f3895a6ee9de9dc"
+      },
+      {
+        "filename": "uqa-0.2.3-cp38-abi3-win_arm64.whl",
+        "artifact_id": 10318522824,
+        "bytes": 44152386,
+        "sha256": "57d4f8616dd6b3e91bfac5ce569a125a1cbfe1606e2ba35bceafee954fe255e0"
+      },
+      {
+        "filename": "uqa-0.2.3-cp38-abi3-manylinux_2_28_x86_64.whl",
+        "artifact_id": 10318607522,
+        "bytes": 50431317,
+        "sha256": "d0dbe21691e80c28820427d979a3e90ea24d879bf4be33f4cbfc2a8e014816b2"
+      },
+      {
+        "filename": "uqa-0.2.3-cp38-abi3-macosx_10_12_x86_64.whl",
+        "artifact_id": 10318383584,
+        "bytes": 47063365,
+        "sha256": "01da34bb15207bc316e4ea392fb2c14036588acf89861a7aa479a6d259bdfcc7"
+      }
+    ],
+    "diagnostics": [
+      {
+        "id": 10318970475,
+        "name": "nori-python-x86_64-pc-windows-msvc-39df0bd8d5d267bf98385aa65b4af265e17fa05d",
+        "sha256": "e2e7bb9ee9baa7e8b837c8a5b89b7d7e6af712516cc83a9343fa7c7140704a1a",
+        "full_contract_equal": true
+      },
+      {
+        "id": 10318841676,
+        "name": "nori-python-aarch64-pc-windows-msvc-39df0bd8d5d267bf98385aa65b4af265e17fa05d",
+        "sha256": "e2e7bb9ee9baa7e8b837c8a5b89b7d7e6af712516cc83a9343fa7c7140704a1a",
+        "full_contract_equal": true
+      },
+      {
+        "id": 10318681894,
+        "name": "nori-python-aarch64-unknown-linux-gnu-39df0bd8d5d267bf98385aa65b4af265e17fa05d",
+        "sha256": "3f0a4158d383450598461b46c0edebd0d34d311f03eed216c963faef2d9d246a",
+        "full_contract_equal": true
+      },
+      {
+        "id": 10318612643,
+        "name": "nori-python-x86_64-unknown-linux-gnu-39df0bd8d5d267bf98385aa65b4af265e17fa05d",
+        "sha256": "3f0a4158d383450598461b46c0edebd0d34d311f03eed216c963faef2d9d246a",
+        "full_contract_equal": true
+      },
+      {
+        "id": 10318611226,
+        "name": "nori-python-smoke-39df0bd8d5d267bf98385aa65b4af265e17fa05d",
+        "sha256": "3f0a4158d383450598461b46c0edebd0d34d311f03eed216c963faef2d9d246a",
+        "full_contract_equal": true
+      },
+      {
+        "id": 10318437228,
+        "name": "nori-python-aarch64-apple-darwin-39df0bd8d5d267bf98385aa65b4af265e17fa05d",
+        "sha256": "3f0a4158d383450598461b46c0edebd0d34d311f03eed216c963faef2d9d246a",
+        "full_contract_equal": true
+      },
+      {
+        "id": 10318278914,
+        "name": "nori-python-x86_64-apple-darwin-39df0bd8d5d267bf98385aa65b4af265e17fa05d",
+        "sha256": "3f0a4158d383450598461b46c0edebd0d34d311f03eed216c963faef2d9d246a",
+        "full_contract_equal": true
+      }
+    ]
+  },
+  "javascript": {
+    "revision": "826f23e0681ac5c4751a50b13a156cd98d74bd48",
+    "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34755946673",
+    "node_artifact_id": 10317997404,
+    "wasm_artifact_id": 10317013547,
+    "complete_npm_inventory_passed": true,
+    "exact_notices_and_embedded_bundle_passed": true,
+    "archives": [
+      {
+        "filename": "cognica-io-uqa-0.2.3.tgz",
+        "bytes": 56262,
+        "sha256": "c5580b273ec24fa8e5c57011c3414b63c82ca46ce1ea8e88f5c5c9e4713e7391"
+      },
+      {
+        "filename": "cognica-io-uqa-darwin-arm64-0.2.3.tgz",
+        "bytes": 43141308,
+        "sha256": "5d7b3863845c03e36b3204beb09d37380c9f4d2599fdd5561513bff3a584ef9f"
+      },
+      {
+        "filename": "cognica-io-uqa-darwin-x64-0.2.3.tgz",
+        "bytes": 45535037,
+        "sha256": "e783a2989e48404a0b3ade2dcf05f55a1083ab7075b4ac02e7c99cef973fdf3e"
+      },
+      {
+        "filename": "cognica-io-uqa-linux-arm64-gnu-0.2.3.tgz",
+        "bytes": 46566965,
+        "sha256": "7226ba3bc3a4ecb7a1dcf174b1d7aa3c966bbadde6d989bdaabe1a8f108baacb"
+      },
+      {
+        "filename": "cognica-io-uqa-linux-x64-gnu-0.2.3.tgz",
+        "bytes": 49156185,
+        "sha256": "26c268156a3b6657e205fa51f417832391abe060ad282bbd4bb794ae7efc3c58"
+      },
+      {
+        "filename": "cognica-io-uqa-win32-arm64-msvc-0.2.3.tgz",
+        "bytes": 43891363,
+        "sha256": "75c29119dc791c8b5e601014801564a6a27d629f6cacd9065512b6640ab7e503"
+      },
+      {
+        "filename": "cognica-io-uqa-win32-x64-msvc-0.2.3.tgz",
+        "bytes": 44837725,
+        "sha256": "13a0d2c710b681e6aa582ae191146d1d34df36c38447c18d75e5e83a4fd4c6b2"
+      },
+      {
+        "filename": "cognica-io-uqa-wasm-0.2.3.tgz",
+        "bytes": 22272672,
+        "sha256": "0c2595dfd4e0da5269d91006bd1f3f1ec3ef2e84cf2ff54a04649a69c7467e5b"
+      }
+    ]
+  },
+  "new_sql_benchmark_source_distribution": {
+    "revision": "e09cf627021db67d236ea666461c00d14c475f46",
+    "bytes": 15678161,
+    "sha256": "927951b9e068f466e23f6e3993622ed80a743d96cd7bb159898b43315f808b4f",
+    "all_benchmark_inputs_verified": true,
+    "both_embedded_catalogs_identical": true,
+    "canonical_licenses_and_exact_nori_resources": true,
+    "extracted_workspace_metadata_verified": true,
+    "filename": "uqa-0.2.3.tar.gz"
+  },
+  "installed_package_tests": {
+    "python_macos_arm64": {
+      "revision": "39df0bd8d5d267bf98385aa65b4af265e17fa05d",
+      "passed": 14,
+      "full_native_contract_equal": true
+    },
+    "node_macos_arm64": {
+      "revision": "826f23e0681ac5c4751a50b13a156cd98d74bd48",
+      "passed": 17
+    },
+    "wasm": {
+      "revision": "826f23e0681ac5c4751a50b13a156cd98d74bd48",
+      "passed": 11
+    }
+  },
+  "rust": {
+    "revision": "e09cf627021db67d236ea666461c00d14c475f46",
+    "all_23_archives_and_licenses_verified": true,
+    "all_normalized_manifests_dependencies_and_features_verified": true,
+    "compilation_claim": "cargo package --no-verify plus metadata validation; does not establish compilation of every archive",
+    "archives": [
+      {
+        "name": "uqa",
+        "filename": "uqa-0.2.3.crate",
+        "bytes": 47913,
+        "sha256": "d25fa20f7624b836289c84d18f10b8077a3e3302d856aa4f919d493a6e96d219",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "b19eae7370a4cfb1621842c7f95730bf5d196453fc2f02e06264ee610b8f65af",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-analysis",
+        "filename": "uqa-analysis-0.2.3.crate",
+        "bytes": 193734,
+        "sha256": "7c36ad293d802ef108b7136401133b0db467dcc3c7eed9bf74516e8440f202a2",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "01d5fc85fd5b9fa847bf96738f0b9239a65dc3aaf04bb1a21473f35638714c77",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-api",
+        "filename": "uqa-api-0.2.3.crate",
+        "bytes": 59320,
+        "sha256": "3a533840eae08d90aff8afdcf527e1264d3c4ed2f5ebc991ecdd2860772ca09c",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "6df23add9e8d8474188677f4800325dd8562e2717d18d6836ad48bd09cc5346d",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-cli",
+        "filename": "uqa-cli-0.2.3.crate",
+        "bytes": 74623,
+        "sha256": "b3f5543cbfdf495a6b4e837db2a80219b95c3037e8df7cd529d51bfb0ec6e2ea",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "e07bfdbd1c45e87deeac9acd331a429b4a211b69123adeb35f149a57b0e6a0d8",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-client",
+        "filename": "uqa-client-0.2.3.crate",
+        "bytes": 55529,
+        "sha256": "b7a10dbc5130d75f5afdb7b543cb6926b09e36c80cb13eeed23f62934eb6dccf",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "01225a8e17c5f4e47477ca3b3b6741f6d4888d8914bf25eb2a00ab4793800239",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-core",
+        "filename": "uqa-core-0.2.3.crate",
+        "bytes": 94331,
+        "sha256": "97e5aedea4da949732295fe5469dd3fe33b8780e1e8620615c0423819b5fa4d3",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "0057e4376e64d751a61c71072f54ca0bbaff58953af2fcceb89afad94aad2ead",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-engine",
+        "filename": "uqa-engine-0.2.3.crate",
+        "bytes": 403329,
+        "sha256": "e10e1f049e8ea8083f594def8734f98f7b00d869a98e6645c887f688d9e836ce",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "1e77055e0a22623cc6449032020ced2725da687a31d48c4bbe78a50d31512b10",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-execution",
+        "filename": "uqa-execution-0.2.3.crate",
+        "bytes": 849088,
+        "sha256": "cc35871054eaef5882f2ec6b8332a9b3daebfe55cc91aa15533654935d8f609e",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "831d7a07815422573b92e5a22d00bc7c4ae2b4a751fa28f69900028a768740bd",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-fdw",
+        "filename": "uqa-fdw-0.2.3.crate",
+        "bytes": 47501,
+        "sha256": "96b1b00e80c65b6ceec6444e911b18ffcb44a1990d679d9de50d8df8a8e731ef",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "4462ba9fa8e5bf310a7fff0866970e07184a66aae46d4218249f89306823abab",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-fusion",
+        "filename": "uqa-fusion-0.2.3.crate",
+        "bytes": 41055,
+        "sha256": "f6a27a3ca006b8ed36a9ad1bda3f7f42fae290689812aba7be310afda4da56f2",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "26c37f9d35b658f39f72ee41b3d4711b58e28797825fed402d6f8ab522b75f0c",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-graph",
+        "filename": "uqa-graph-0.2.3.crate",
+        "bytes": 144324,
+        "sha256": "5bf9872d83ee950fae179b4561988432286d64b6aa0bc78901f8023e9f74ae7f",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "f9376b467450cfbcd3141adbc2e5fc445381e6642065d7590a8a0b81873be2f7",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-joins",
+        "filename": "uqa-joins-0.2.3.crate",
+        "bytes": 38191,
+        "sha256": "b025dd5c880167d79823bc60402fd2939ea8c756ab01b28d52c13bceed50a7f6",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "18b0d97d310e3253ace7c2c60a40aea680e808563041d3bc4f704d733dca2f39",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-ml",
+        "filename": "uqa-ml-0.2.3.crate",
+        "bytes": 52088,
+        "sha256": "fc6af41794b5a0b08d7a876f7f01825b98e29161292481cf5283be9e11904ed7",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "2205f429d9d6e9a39d67e40104f6b2d269527d740f9154248ad371905b442ee8",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-nori-data",
+        "filename": "uqa-nori-data-0.2.3.crate",
+        "bytes": 9682093,
+        "sha256": "f60d6df9f47adec461608bac8aab25e860b87a2d62b471d5a1a4151ee5a861e2",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "cd8a3c3f20ffeede7d4d8224fb3df6799f5d18f443ee9106ce371be6a0a4f2dd",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-operators",
+        "filename": "uqa-operators-0.2.3.crate",
+        "bytes": 74054,
+        "sha256": "03811a5cf638e467f8e529799ef1e5ff06ea7df4625d40a002f3d7f723b916bb",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "a3ee044ef6348105460b6578480298a8cc2c0b708484f6c98ca89eea9bb58e16",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-pg-query",
+        "filename": "uqa-pg-query-0.2.3.crate",
+        "bytes": 2314691,
+        "sha256": "fa46e35ba44e929bea8ca5b7b34001d8aac1085ec4f23aa2f0981a1a3a52035f",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "05287596df2595cde87bbb72724c5738689ccfad2547385752d05b8786e541d8",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-pg-wire",
+        "filename": "uqa-pg-wire-0.2.3.crate",
+        "bytes": 31361,
+        "sha256": "71f12cae13a1e5d955944c10642128414a0956a5a11fa8fd3118f5eb9d730444",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "bab2403c2c9166e7f9bfa507be540632dcfd27208896d890bb2de9e9fcca9373",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-planner",
+        "filename": "uqa-planner-0.2.3.crate",
+        "bytes": 146473,
+        "sha256": "4bb3fb2d7bf33b6a76b18c45e9b28aa4b5c9827645e2483f6be538f7f513c78b",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "24bf0ce7d794a8d77eadbf451e4f0c86d65b905ae9b838e639857adfe251e072",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-scoring",
+        "filename": "uqa-scoring-0.2.3.crate",
+        "bytes": 83686,
+        "sha256": "5a1835e8702ad14ac53866db0b4956ad414f45d2d62d57753feadc081f33259b",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "645a9fd6bd53817e2ea6b995a74e493bb006854008d39e7ada614aba80fc58d2",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-sql",
+        "filename": "uqa-sql-0.2.3.crate",
+        "bytes": 893671,
+        "sha256": "b705b4efab6229e8a4b888feecf33b29a3c299e4aba624637de1b28b5c0a4b7f",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "dc73901d726f82d0c34cec1155e6d05413923d3eeb830ced336b43359378a6ff",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-storage",
+        "filename": "uqa-storage-0.2.3.crate",
+        "bytes": 197160,
+        "sha256": "2df0746385d738c0b84070062d739ce2686c2f5362342e700504d42d6709007e",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "526cd2a8bd46e0fab4c826650a375e7db49afb152c51b586ca22f0095c304a4c",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-storage-redb",
+        "filename": "uqa-storage-redb-0.2.3.crate",
+        "bytes": 29924,
+        "sha256": "480e81755f6c689a99ec47c2ddd5e4708d262d8867f145804aae53e40dfc3493",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "b69549dc815e4dc4b0aa3ea10389f1fbc412815035276f2158bca6eb1de34756",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      },
+      {
+        "name": "uqa-storage-sqlite",
+        "filename": "uqa-storage-sqlite-0.2.3.crate",
+        "bytes": 208368,
+        "sha256": "8e21b03f4303dc46b3a1a67ac3379d54f748a946b2adde63fd641be61dded872",
+        "vcs_revision": "e09cf627021db67d236ea666461c00d14c475f46",
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "unchanged_source_and_resource_payload_sha256": "6fe09a67babca68b13d593ba8f2846ef5d4eeb3842b89add2f013e94bbf50f31",
+        "compared_to_revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+        "lock_changes_are_verified_internal_archive_checksums": true
+      }
+    ],
+    "all_packaged_sources_resources_and_manifests_unchanged_since_f5": true,
+    "all_lock_changes_match_exact_current_internal_archives": true,
+    "bootstrap_dry_run_inputs_unchanged_except_vcs_metadata": [
+      "uqa-core",
+      "uqa-nori-data",
+      "uqa-pg-query",
+      "uqa-pg-wire"
+    ],
+    "bootstrap_preflight": {
+      "revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+      "command": "bash scripts/publish-crates.sh",
+      "verified_crates": [
+        "uqa-pg-query",
+        "uqa-nori-data",
+        "uqa-core",
+        "uqa-pg-wire"
+      ],
+      "uploads_suppressed": 4,
+      "live_publication": false
+    }
+  },
+  "current_ci_report_verification": {
+    "revision": "e09cf627021db67d236ea666461c00d14c475f46",
+    "reports": [
+      {
+        "sha256": "34f29dffe45ce87f12b017e51f602d503bfb614f39bec49821e2e6f9755315fc",
+        "gate": {
+          "allocation_and_output_passed": true,
+          "timing_compared": false,
+          "timing_ratios": {}
+        },
+        "source_and_lock_identities_verified": true,
+        "artifact_path": "nori-wasm.json",
+        "artifact_id": 10319995939
+      },
+      {
+        "sha256": "3512b05719ed518882ce650f41da14e0ca61cf66d9095e2de13b132666e69647",
+        "gate": {
+          "allocation_and_graph_passed": true,
+          "timing_compared": false,
+          "timing_ratios": {}
+        },
+        "source_and_lock_identities_verified": true,
+        "artifact_path": "nori-index-wasm.json",
+        "artifact_id": 10319995939
+      },
+      {
+        "sha256": "5ee505a1082398fa8c137811609af98c0bc7a02ad851ad7fe7d20498dceb1db6",
+        "gate": {
+          "allocation_and_graph_passed": true,
+          "timing_compared": false,
+          "timing_ratios": {}
+        },
+        "source_and_lock_identities_verified": true,
+        "artifact_path": "nori-sqlite-wasm.json",
+        "artifact_id": 10319995939
+      },
+      {
+        "sha256": "f7106a969057c21ff8d987a9f61ebbd7564d62c6e07e8d22056566bdccac6b2c",
+        "gate": {
+          "allocation_and_rows_passed": true,
+          "timing_compared": false,
+          "timing_ratios": {}
+        },
+        "source_and_lock_identities_verified": true,
+        "artifact_path": "nori-phrase-wasm.json",
+        "artifact_id": 10319995939
+      },
+      {
+        "sha256": "b72ac4a7deb4a545f6bef05580a04045fd0fea53290f60f006b85f0e4b895634",
+        "source_and_lock_identities_verified": true,
+        "verified_runs": 3,
+        "page_loads": 9,
+        "persistent_reopens": 6,
+        "diagnostic_comparisons": 54,
+        "memory_observations": 144,
+        "max_observed_bytes": 143590964,
+        "artifact_path": "nori-enabled/report.json",
+        "artifact_id": 10319403259
+      },
+      {
+        "sha256": "28599d2492037abf8f1a3a40d97365d2ae17599d4f1491b0958c41045d32fe23",
+        "source_and_lock_identities_verified": true,
+        "verified_runs": 3,
+        "page_loads": 6,
+        "persistent_reopens": 3,
+        "diagnostic_comparisons": 0,
+        "memory_observations": 21,
+        "max_observed_bytes": 29517761,
+        "artifact_path": "nori-disabled/report.json",
+        "artifact_id": 10319403259
+      },
+      {
+        "sha256": "3f0a4158d383450598461b46c0edebd0d34d311f03eed216c963faef2d9d246a",
+        "complete_contract_equal": true,
+        "checks": 18,
+        "artifact_path": "nori-browser-native-diagnostics.json",
+        "artifact_id": 10319432794
+      }
+    ],
+    "scope": "Independent validation of downloaded CI reports against current source, reviewed limits, and complete browser/Python contracts; generated binary hashes are recorded by CI and not independently rehashed in this report-only review.",
+    "javascript_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34762157946",
+    "python_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34762160110"
+  }
+}
