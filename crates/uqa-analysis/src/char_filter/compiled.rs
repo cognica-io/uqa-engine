@@ -44,10 +44,7 @@ impl CharFilter {
                         source,
                     })?;
                 let replacement = Replacement::prepare(replacement, &expression);
-                let cooperative = (!replacement.uses_captures())
-                    .then(|| CooperativeRegex::compile(pattern))
-                    .flatten()
-                    .map(Box::new);
+                let cooperative = CooperativeRegex::compile(pattern).map(Box::new);
                 PreparedCharFilter::PatternReplace {
                     expression,
                     replacement,

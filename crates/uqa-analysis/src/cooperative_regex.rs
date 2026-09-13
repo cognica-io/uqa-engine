@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Cooperative, capture-free searches over prepared regular expressions.
+//! Cooperative match-range searches over prepared regular expressions.
 
 use std::ops::Range;
 
@@ -31,11 +31,13 @@ pub(crate) enum SearchError {
 }
 
 impl CooperativeRegex {
-    /// Compile a capture-free search automaton from the same syntax accepted by `regex`.
+    /// Compile a match-range search automaton from the same syntax accepted by `regex`.
     ///
-    /// Unicode word-boundary expressions are intentionally left to the `regex` fallback: the
-    /// pinned DFA builder cannot represent their full Unicode look-around semantics. A failed
-    /// DFA construction likewise keeps the validated library expression as the fallback.
+    /// Capturing groups are ignored while finding the overall range and can be resolved by the
+    /// validated expression after this search returns. Unicode word-boundary expressions are
+    /// intentionally left to the `regex` fallback: the pinned DFA builder cannot represent their
+    /// full Unicode look-around semantics. A failed DFA construction likewise keeps the validated
+    /// library expression as the fallback.
     pub(crate) fn compile(pattern: &str) -> Option<Self> {
         if pattern.contains(r"\b") || pattern.contains(r"\B") {
             return None;
@@ -237,5 +239,24 @@ mod tests {
     fn word_boundaries_use_the_library_fallback() {
         assert!(CooperativeRegex::compile(r"\bword\b").is_none());
         assert!(CooperativeRegex::compile(r"(?-u)\bword\b").is_none());
+    }
+
+    #[test]
+    fn capturing_groups_keep_the_overall_range_cooperative() {
+        let pattern = r"(foo|bar)+(?<tail>baz)?";
+        let expression = Regex::new(pattern).unwrap();
+        let cooperative = CooperativeRegex::compile(pattern).unwrap();
+        for text in ["foo", "foobar", "foobar-baz", "xbarbaz"] {
+            for start in 0..=text.len() {
+                if !text.is_char_boundary(start) {
+                    continue;
+                }
+                let expected = expression
+                    .find_at(text, start)
+                    .map(|matched| matched.range());
+                let actual = cooperative.find_at(text, start, &mut || Ok(())).unwrap();
+                assert_eq!(actual, expected, "text={text:?}, start={start}");
+            }
+        }
     }
 }

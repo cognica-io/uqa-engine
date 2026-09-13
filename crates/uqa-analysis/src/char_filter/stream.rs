@@ -12,7 +12,7 @@ use uqa_core::memory::{MemoryBudget, MemoryError};
 use super::replacement::Replacement;
 use crate::cooperative_regex::{CooperativeRegex, SearchError};
 use crate::source::EditBuilder;
-use crate::{AnalysisResult, FilteredText};
+use crate::{AnalysisError, AnalysisResult, FilteredText};
 
 pub(super) fn replace_html(
     text: &mut FilteredText<'_>,
@@ -156,12 +156,14 @@ pub(super) fn replace_pattern(
         let mut last_end = None;
         loop {
             builder.check()?;
+            let mut captures_resolved = false;
             let matched = if let Some(cooperative) = cooperative {
                 match cooperative.find_at(input, start, &mut || builder.check()) {
                     Ok(matched) => matched,
                     Err(SearchError::Poll(error)) => return Err(error),
                     Err(SearchError::Automaton) => {
                         if let Some(locations) = &mut locations {
+                            captures_resolved = true;
                             pattern
                                 .captures_read_at(locations, input, start)
                                 .map(|matched| matched.range())
@@ -171,15 +173,31 @@ pub(super) fn replace_pattern(
                     }
                 }
             } else if let Some(locations) = &mut locations {
+                captures_resolved = true;
                 pattern
                     .captures_read_at(locations, input, start)
                     .map(|matched| matched.range())
             } else {
                 pattern.find_at(input, start).map(|matched| matched.range())
             };
-            let Some(matched) = matched else {
+            let Some(mut matched) = matched else {
                 break;
             };
+            if !captures_resolved {
+                if let Some(locations) = &mut locations {
+                    builder.check()?;
+                    let Some(captured) = pattern
+                        .captures_read_at(locations, input, matched.start)
+                        .map(|capture| capture.range())
+                    else {
+                        return Err(AnalysisError::Descriptor(
+                            "capture resolution returned no overall match",
+                        ));
+                    };
+                    debug_assert_eq!(captured, matched);
+                    matched = captured;
+                }
+            }
             if matched.is_empty() && Some(matched.end) == last_end {
                 if start == input.len() {
                     break;
@@ -297,6 +315,106 @@ mod tests {
             },
         );
         assert!(matches!(result, Err(AnalysisError::Cancelled)));
+        assert_eq!(text.as_str(), input);
+        assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn capture_pattern_scan_polls_before_resolving_replacement_captures() {
+        let input = "x".repeat(128 * 1024);
+        let mut text = FilteredText::new(&input);
+        let pattern = Regex::new("(needle)").unwrap();
+        let replacement = Replacement::prepare("<$1>", &pattern);
+        let cooperative = CooperativeRegex::compile("(needle)");
+        let budget = MemoryBudget::new(1 << 20);
+        let mut polls = 0;
+        replace_pattern(
+            &mut text,
+            &pattern,
+            &replacement,
+            cooperative.as_ref(),
+            &budget,
+            &mut || {
+                polls += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(polls > input.len() / 2048);
+        assert_eq!(text.as_str(), input);
+        assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn capture_pattern_scan_cancellation_releases_unpublished_edit() {
+        let input = "x".repeat(128 * 1024);
+        let mut text = FilteredText::new(&input);
+        let pattern = Regex::new("(needle)").unwrap();
+        let replacement = Replacement::prepare("<$1>", &pattern);
+        let cooperative = CooperativeRegex::compile("(needle)");
+        let budget = MemoryBudget::new(1 << 20);
+        let mut polls = 0;
+        let result = replace_pattern(
+            &mut text,
+            &pattern,
+            &replacement,
+            cooperative.as_ref(),
+            &budget,
+            &mut || {
+                polls += 1;
+                if polls == 8 {
+                    Err(AnalysisError::Cancelled)
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert!(matches!(result, Err(AnalysisError::Cancelled)));
+        assert_eq!(text.as_str(), input);
+        assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn capture_pattern_replacement_resolves_captures_after_range_search() {
+        let input = "prefix foobar suffix";
+        let mut text = FilteredText::new(input);
+        let pattern = Regex::new("(foo)(bar)").unwrap();
+        let replacement = Replacement::prepare("<$2-$1>", &pattern);
+        let cooperative = CooperativeRegex::compile("(foo)(bar)");
+        replace_pattern(
+            &mut text,
+            &pattern,
+            &replacement,
+            cooperative.as_ref(),
+            &MemoryBudget::new(1 << 20),
+            &mut || Ok(()),
+        )
+        .unwrap();
+        assert_eq!(text.as_str(), "prefix <bar-foo> suffix");
+    }
+
+    #[test]
+    fn capture_pattern_reserves_all_capture_slots_before_search() {
+        let input = "x".repeat(128 * 1024);
+        let mut text = FilteredText::new(&input);
+        let pattern = Regex::new("(needle)").unwrap();
+        let replacement = Replacement::prepare("<$1>", &pattern);
+        let cooperative = CooperativeRegex::compile("(needle)");
+        let budget = MemoryBudget::new(0);
+        let result = replace_pattern(
+            &mut text,
+            &pattern,
+            &replacement,
+            cooperative.as_ref(),
+            &budget,
+            &mut || Ok(()),
+        );
+        assert!(matches!(
+            result,
+            Err(crate::AnalysisError::Memory(
+                uqa_core::memory::MemoryError::Limit { .. }
+            ))
+        ));
         assert_eq!(text.as_str(), input);
         assert_eq!(budget.used(), 0);
     }
