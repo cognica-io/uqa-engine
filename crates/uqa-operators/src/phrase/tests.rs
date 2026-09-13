@@ -128,6 +128,123 @@ fn raw_utf16_edges_are_distinct_from_replacement_characters() {
     assert!(!graph_match(&query, &[edge("�", 0, 1), edge("b", 1, 1)]));
 }
 
+#[test]
+fn generated_small_graphs_match_an_independent_path_reference() {
+    let mut random = 0x6a09_e667_f3bc_c909_u64;
+    for _ in 0..2_000 {
+        let query_len = 1 + next_random(&mut random) as usize % 6;
+        let document_len = next_random(&mut random) as usize % 10;
+        let mut query = Vec::with_capacity(query_len);
+        let mut document = Vec::with_capacity(document_len);
+        for _ in 0..query_len {
+            query.push(edge(
+                ["a", "b", "c"][next_random(&mut random) as usize % 3],
+                next_random(&mut random) % 6,
+                1 + next_random(&mut random) % 3,
+            ));
+        }
+        for _ in 0..document_len {
+            document.push(edge(
+                ["a", "b", "c"][next_random(&mut random) as usize % 3],
+                next_random(&mut random) % 8,
+                1 + next_random(&mut random) % 3,
+            ));
+        }
+        let expected = reference_graph_match(&query, &document);
+        assert_eq!(
+            graph_match(&query, &document),
+            expected,
+            "query={query:?}, document={document:?}"
+        );
+    }
+}
+
+fn next_random(state: &mut u64) -> u32 {
+    *state = state
+        .wrapping_mul(6_364_136_223_846_793_005)
+        .wrapping_add(1);
+    (*state >> 32) as u32
+}
+
+fn reference_graph_match(
+    query: &[(TokenTermKey, TokenOccurrence)],
+    document: &[(TokenTermKey, TokenOccurrence)],
+) -> bool {
+    let start = query
+        .iter()
+        .map(|(_, occurrence)| occurrence.position)
+        .min()
+        .unwrap();
+    let end = query
+        .iter()
+        .map(|(_, occurrence)| occurrence.end_position().unwrap())
+        .max()
+        .unwrap();
+    query.iter().any(|(term, edge)| {
+        edge.position == start
+            && document.iter().any(|(candidate, occurrence)| {
+                candidate == term && visit_reference_path(query, document, edge, occurrence, end)
+            })
+    })
+}
+
+fn visit_reference_path(
+    query: &[(TokenTermKey, TokenOccurrence)],
+    document: &[(TokenTermKey, TokenOccurrence)],
+    edge: &TokenOccurrence,
+    occurrence: &TokenOccurrence,
+    end: u32,
+) -> bool {
+    let query_position = edge.end_position().unwrap();
+    if query_position == end {
+        return true;
+    }
+    let mut next = query
+        .iter()
+        .filter(|(_, candidate)| candidate.position >= query_position)
+        .collect::<Vec<_>>();
+    next.sort_by_key(|(_, candidate)| candidate.position);
+    let Some(next_position) = next.first().map(|(_, candidate)| candidate.position) else {
+        return false;
+    };
+    if next_position > query_position {
+        let Some(document_position) = occurrence
+            .end_position()
+            .unwrap()
+            .checked_add(next_position - query_position)
+        else {
+            return false;
+        };
+        return visit_reference_position(query, document, next_position, document_position, end);
+    }
+    visit_reference_position(
+        query,
+        document,
+        query_position,
+        occurrence.end_position().unwrap(),
+        end,
+    )
+}
+
+fn visit_reference_position(
+    query: &[(TokenTermKey, TokenOccurrence)],
+    document: &[(TokenTermKey, TokenOccurrence)],
+    query_position: u32,
+    document_position: u32,
+    end: u32,
+) -> bool {
+    query.iter().any(|(term, edge)| {
+        if edge.position != query_position {
+            return false;
+        }
+        document.iter().any(|(candidate, occurrence)| {
+            candidate == term
+                && occurrence.position == document_position
+                && visit_reference_path(query, document, edge, occurrence, end)
+        })
+    })
+}
+
 fn fixture(analyzer: Analyzer, documents: &[(DocId, &str)]) -> MemoryInvertedIndex {
     let mut index = MemoryInvertedIndex::new(analyzer);
     for &(doc_id, text) in documents {
