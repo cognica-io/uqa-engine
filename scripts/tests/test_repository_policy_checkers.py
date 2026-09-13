@@ -11,7 +11,9 @@ import importlib.util
 import hashlib
 import io
 import json
+import os
 import pathlib
+import subprocess
 import sys
 import tempfile
 import tarfile
@@ -38,6 +40,22 @@ LICENSES = load_script("uqa_check_release_licenses", "check-release-licenses.py"
 
 
 class RepositoryPolicyCheckerTest(unittest.TestCase):
+    def test_binding_attribution_survives_windows_checkout_conversion(self) -> None:
+        paths = {"crates/uqa-analysis/THIRD-PARTY/LUCENE-SOURCE.md"}
+        for directory in LICENSES.BINDING_PACKAGES:
+            paths.update((directory / relative).relative_to(ROOT).as_posix()
+                         for relative in LICENSES.binding_nori_payloads())
+        # Apply Git's actual checkout filter to current bytes without writing repository objects.
+        with tempfile.TemporaryDirectory() as objects:
+            environment = {**os.environ, "GIT_OBJECT_DIRECTORY": objects}
+            for relative in sorted(paths):
+                expected = (ROOT / relative).read_bytes()
+                blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], input=expected,
+                                      cwd=ROOT, env=environment, capture_output=True, check=True).stdout.decode().strip()
+                result = subprocess.run(["git", "-c", "core.autocrlf=true", "cat-file", "--filters", f"--path={relative}", blob],
+                                        cwd=ROOT, env=environment, capture_output=True, check=True)
+                with self.subTest(path=relative): self.assertEqual(result.stdout, expected)
+
     def test_sdist_benchmarks_require_their_data_and_external_source_modules(self) -> None:
         required = {"crates/uqa-analysis/benches/nori/corpus.json", "benchmarks/nori/persistent.rs",
                     "crates/uqa-engine/tests/support/tpch_fixture.rs"}
