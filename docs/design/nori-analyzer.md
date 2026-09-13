@@ -404,7 +404,7 @@ Memory indexing now has [separate native/WASM measurements](../../benchmarks/nor
 
 The work packages may be implemented in separate logical commits and PRs, but the public feature is complete only when its analysis, persistence, retrieval, and binding contracts are all verified. Do not advertise Nori after tokenizer compilation alone.
 
-[Package acceptance evidence](../../benchmarks/nori/DELIVERY.md) now records the corrected full Python and JavaScript matrices, every binding archive, refreshed Rust/source archives, feature/dependency metadata checks, and actual installed-package execution. The inventory pins archive and CI report identities while distinguishing compiled tests from packaging-only checks. Final preflight, complete SQL calibration, and final remote-head CI remain acceptance requirements.
+[Package acceptance evidence](../../benchmarks/nori/DELIVERY.md) now records the corrected full Python and JavaScript matrices, every binding archive, refreshed Rust/source archives, feature/dependency metadata checks, and actual installed-package execution. The inventory pins archive and CI report identities while distinguishing compiled tests from packaging-only checks. The refreshed four-crate preflight and complete current source archive also pass. Complete SQL and cancellation calibration and final remote-head CI remain acceptance requirements.
 
 ## Alternatives and remaining engineering decisions
 

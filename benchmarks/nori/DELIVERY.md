@@ -1,6 +1,6 @@
 # Nori package and CI acceptance
 
-The [artifact inventory](delivery-evidence.json) records the exact archives, source revisions, CI runs, checksums, and verification scopes reviewed for this change. It distinguishes packaging and manifest inspection from compiled or executed tests. The full Python matrix was collected at `39df0bd8`, the full JavaScript matrix at `826f23e0`, and the refreshed Rust archives, Python source distribution, and CI report review at `e09cf627`. These are the recorded checkpoints; final source/package preflight, [SQL calibration](SQL.md), and final remote-head CI remain open in the [implementation plan](../../docs/plans/0006-nori-analyzer.md).
+The [artifact inventory](delivery-evidence.json) records the exact archives, source revisions, CI runs, checksums, and verification scopes reviewed for this change. It distinguishes packaging and manifest inspection from compiled or executed tests. The full Python matrix was collected at `39df0bd8`, the full JavaScript matrix at `826f23e0`, the refreshed Rust archives and CI report review at `e09cf627`, the compiled bootstrap preflight at `fe36f0af`, and the complete source distribution at `437d61c0`. These are the recorded checkpoints; [SQL calibration](SQL.md), [cancellation calibration](CANCELLATION.md), and final remote-head CI remain open in the [implementation plan](../../docs/plans/0006-nori-analyzer.md).
 
 ## Binding archives
 
@@ -8,7 +8,7 @@ The [full Python workflow](https://github.com/cognica-io/uqa-engine/actions/runs
 
 The [full JavaScript workflow](https://github.com/cognica-io/uqa-engine/actions/runs/34755946673) passes all six native addons, root/platform npm packages, WASM packaging, feature-disabled bindings, browser execution, and owner benchmark gates. Independent inspection verifies all eight npm archives, including loader paths, versions, platform metadata, seven canonical attribution/source files, and exact embedded dictionary bytes. The actual root and macOS arm64 packages pass all 17 Node package tests; the actual WASM archive passes all 11 package tests.
 
-The refreshed `e09cf627` Python source distribution is 15,678,161 bytes, with SHA-256 `927951b9e068f466e23f6e3993622ed80a743d96cd7bb159898b43315f808b4f`. It includes every referenced benchmark source and corpus plus byte-identical SQLite/redb catalog inputs. Canonical license/resource checks and locked Cargo metadata from the extracted workspace pass. This source-archive inspection does not claim a new six-wheel matrix at that revision.
+The refreshed `437d61c0` Python source distribution is 15,679,949 bytes, with SHA-256 `a53c6361be820e68c3b61eacbb438861a66dca1fa978944ba5b736e2231a8d3e`. It includes every referenced benchmark source and corpus, the complete cancellation sampler, and byte-identical SQLite/redb catalog inputs. Canonical license/resource checks and locked Cargo metadata from the extracted workspace pass. This source-archive inspection does not claim a new six-wheel matrix at that revision.
 
 ## Rust archives and dependency closure
 
@@ -16,7 +16,7 @@ The refreshed `e09cf627` Python source distribution is 15,678,161 bytes, with SH
 
 Every packaged source, resource, and manifest remains byte-identical to the earlier `f5ce8843` archive. The changed VCS revision changes archive hashes, so dependent package lockfiles also change: every changed internal checksum was independently matched to the actual corresponding old/new archive. All other lockfile fields agree. The four bootstrap archives retain identical lockfiles as well as their source/configuration payloads, apart from VCS metadata.
 
-The registry-independent `bash scripts/publish-crates.sh` preflight at `f5ce8843` compiles and verifies `uqa-pg-query`, `uqa-nori-data`, `uqa-core`, and `uqa-pg-wire`, explicitly suppressing all four uploads. The script's default scope is those four bootstrap crates. Packaging uses `--no-verify`, so it does not establish compilation of all 23 archives. A fresh preflight after the complete native timing pair remains pending. No live registry or release publication is part of this evidence.
+The registry-independent `bash scripts/publish-crates.sh` preflight at `fe36f0af` compiles and verifies `uqa-pg-query`, `uqa-nori-data`, `uqa-core`, and `uqa-pg-wire`, explicitly suppressing all four uploads. The script's default scope is those four bootstrap crates. Packaging uses `--no-verify`, so it does not establish compilation of all 23 archives. The refreshed preflight ran after the complete native timing pair. Its four archives have the recorded clean VCS identity and pass independent license/resource checks; the inventory includes each archive hash. Those four crates and the workspace manifest/lockfile remain byte-identical at the `437d61c0` source-archive revision. No live registry or release publication is part of this evidence.
 
 ## Current CI report review
 

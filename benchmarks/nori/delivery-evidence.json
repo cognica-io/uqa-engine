@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Recorded package and report acceptance; final source/package preflight, SQL calibration, and final remote-head CI remain pending.",
+  "status": "Recorded package and report acceptance; SQL and cancellation calibration and final remote-head CI remain pending.",
   "python": {
     "revision": "39df0bd8d5d267bf98385aa65b4af265e17fa05d",
     "run": "https://github.com/cognica-io/uqa-engine/actions/runs/34758420618",
@@ -485,7 +485,7 @@
       "uqa-pg-wire"
     ],
     "bootstrap_preflight": {
-      "revision": "f5ce8843e3597605829bee54a6113ab9336da305",
+      "revision": "fe36f0af40649ffb849274980ff9a6801cb76dc0",
       "command": "bash scripts/publish-crates.sh",
       "verified_crates": [
         "uqa-pg-query",
@@ -494,7 +494,34 @@
         "uqa-pg-wire"
       ],
       "uploads_suppressed": 4,
-      "live_publication": false
+      "live_publication": false,
+      "archives": [
+        {
+          "crate": "uqa-pg-query",
+          "filename": "uqa-pg-query-0.2.3.crate",
+          "bytes": 2314689,
+          "sha256": "a24fe95634f55f2db2ccf4f2496cf4c4b57e25d1735ccd0cea743253efc972df"
+        },
+        {
+          "crate": "uqa-nori-data",
+          "filename": "uqa-nori-data-0.2.3.crate",
+          "bytes": 9682094,
+          "sha256": "ef28033a7417f4483323cd047c9a0912aa8fbeebe615a7a4e87bb817442b1940"
+        },
+        {
+          "crate": "uqa-core",
+          "filename": "uqa-core-0.2.3.crate",
+          "bytes": 94332,
+          "sha256": "54663d6dc05e935a54e93b00e1e77d3624ba6ecc101c5f324339cc5404a9ff79"
+        },
+        {
+          "crate": "uqa-pg-wire",
+          "filename": "uqa-pg-wire-0.2.3.crate",
+          "bytes": 31360,
+          "sha256": "71f34ae78003ad852d008167f69e95b8cc403929d0ad74f9ccca15478304ad9c"
+        }
+      ],
+      "source_inputs_unchanged_through_revision": "437d61c0226b194ed2833833a0f50b7c957dce7c"
     }
   },
   "current_ci_report_verification": {
@@ -579,5 +606,16 @@
     "scope": "Independent validation of downloaded CI reports against current source, reviewed limits, and complete browser/Python contracts; generated binary hashes are recorded by CI and not independently rehashed in this report-only review.",
     "javascript_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34762157946",
     "python_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34762160110"
+  },
+  "current_source_distribution": {
+    "revision": "437d61c0226b194ed2833833a0f50b7c957dce7c",
+    "filename": "uqa-0.2.3.tar.gz",
+    "bytes": 15679949,
+    "sha256": "a53c6361be820e68c3b61eacbb438861a66dca1fa978944ba5b736e2231a8d3e",
+    "all_benchmark_inputs_verified": true,
+    "both_embedded_catalogs_identical": true,
+    "canonical_licenses_and_exact_nori_resources": true,
+    "extracted_workspace_metadata_verified": true,
+    "cancellation_benchmark_source_identical_to_recorded_revision": true
   }
 }
