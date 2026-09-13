@@ -135,7 +135,8 @@ while IFS= read -r path; do
     docs/manual/* | \
     .github/scripts/* | \
     .github/workflows/ci.yml | \
-    .github/workflows/nori-sql-benchmarks.yml)
+    .github/workflows/nori-sql-benchmarks.yml | \
+    .github/workflows/nori-cancellation-benchmarks.yml)
       run_rust=true
       ;;
   esac

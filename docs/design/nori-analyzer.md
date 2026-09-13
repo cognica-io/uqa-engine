@@ -388,6 +388,8 @@ Memory indexing now has [separate native/WASM measurements](../../benchmarks/nor
 
 [Real-browser measurements](../../benchmarks/nori/BROWSER.md) now record three Nori-enabled and three disabled Chrome sessions, all required IndexedDB reloads, and complete native/browser SQL diagnostic identity for six fixed corpora in three modes. The 165 post-GC page memory observations and actual JS/WASM artifacts have pinned hashes and browser/toolchain provenance. The largest observed values are 143,655,635 bytes enabled and 29,526,920 bytes disabled; these estimates do not establish RSS or continuous allocation peaks. Actual Python, Node.js, and WASM custom builds also pass their full package suites with Nori disabled.
 
+[Cooperative cancellation measurements](../../benchmarks/nori/CANCELLATION.md) separately cover cancellation decisions during tokenization and analysis, reservation cleanup, and complete recovery. The benchmark records both total interrupted-operation time and return latency after the callback decision; it does not measure external-signal detection or scheduler latency. Actual native/WASM calibration and regression limits remain required.
+
 ## Implementation work packages
 
 | Work package | Deliverable and completion evidence |

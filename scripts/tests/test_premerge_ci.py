@@ -51,7 +51,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             "(github.event_name == 'workflow_dispatch' && inputs.run_rust) }}"
         )
 
-        self.assertEqual(self.workflow.count(condition), 11)
+        self.assertEqual(self.workflow.count(condition), 12)
         self.assertNotIn("if: ${{ inputs.run_rust }}", self.workflow)
 
     def test_upstream_reference_is_required_by_the_merge_gate(self) -> None:
@@ -283,6 +283,7 @@ class PremergeCITest(unittest.TestCase):
             ),
             (".github/workflows/ci.yml", ("ci.yml",), "true"),
             (".github/workflows/nori-sql-benchmarks.yml", ("ci.yml",), "true"),
+            (".github/workflows/nori-cancellation-benchmarks.yml", ("ci.yml",), "true"),
         )
 
         for changed_file, expected_workflows, run_rust in cases:
@@ -383,7 +384,7 @@ class PremergeCITest(unittest.TestCase):
 
     def test_nori_measurement_inputs_select_native_and_wasm_gates(self) -> None:
         for path in ("scripts/run-nori-benchmark.py", "scripts/run-nori-index-benchmark.py",
-                     "scripts/run-nori-sql-benchmark.py",
+                     "scripts/run-nori-sql-benchmark.py", "scripts/run-nori-cancellation-benchmark.py",
                      "scripts/run-nori-persistent-benchmark.py", "benchmarks/nori/persistent.rs",
                      "benchmarks/nori/persistent-limits.json", "crates/uqa-analysis/benches/nori/corpus.json"):
             result, invocations, _ = self.run_script(changed_files=(path,))

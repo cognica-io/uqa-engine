@@ -19,6 +19,9 @@ use uqa_analysis::nori::{
     NoriDictionary, NoriOptions, NoriOutput, NoriResources, DEFAULT_NORI_DICTIONARY,
 };
 
+#[path = "nori/cancellation.rs"]
+mod cancellation;
+
 const CORPUS: &str = include_str!("nori/corpus.json");
 const SAMPLES: usize = 7;
 const WARMUP: usize = 2;
@@ -155,6 +158,10 @@ fn analyze_case(
 }
 
 fn main() {
+    if std::env::args_os().any(|argument| argument == "--cancellation") {
+        println!("{}", cancellation::run());
+        return;
+    }
     let mut results = vec![cold_dictionary()];
     eprintln!("measured cold dictionary loading");
     let resources = NoriResources::default();

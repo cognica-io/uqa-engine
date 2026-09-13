@@ -1,0 +1,69 @@
+name: Nori Cancellation Benchmarks
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    tags:
+      - "uqa-nori-cancellation/**"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  measurements:
+    name: Cancellation measurements (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [native, wasm]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Free Linux runner disk
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: actions/setup-node@v4
+        if: matrix.target == 'wasm'
+        with:
+          node-version: "20"
+      - uses: mymindstorm/setup-emsdk@v14
+        if: matrix.target == 'wasm'
+        with:
+          version: latest
+      - name: Install the Emscripten Rust target
+        if: matrix.target == 'wasm'
+        run: rustup target add wasm32-unknown-emscripten
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: true
+          key: nori-cancellation-${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Check the feature-enabled analysis benchmark
+        if: matrix.target == 'native'
+        run: cargo clippy --locked -p uqa-analysis --features nori --bench nori -- -D warnings
+      - name: Verify ordinary analysis and collect repeated cancellation candidates
+        env:
+          RUSTFLAGS: ""
+          CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS: "-D warnings"
+          BENCHMARK_TARGET: ${{ matrix.target }}
+        run: |
+          python3 scripts/run-nori-benchmark.py --target "$BENCHMARK_TARGET" --output "target/benchmark-runs/nori-analysis-$BENCHMARK_TARGET.json"
+          python3 scripts/run-nori-cancellation-benchmark.py --target "$BENCHMARK_TARGET" --measure-only --output "target/benchmark-runs/nori-cancellation-$BENCHMARK_TARGET-baseline.json"
+          python3 scripts/run-nori-cancellation-benchmark.py --target "$BENCHMARK_TARGET" --measure-only --output "target/benchmark-runs/nori-cancellation-$BENCHMARK_TARGET-repeat.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nori-cancellation-${{ matrix.target }}-${{ github.sha }}
+          path: |
+            target/benchmark-runs/nori-analysis-*.json
+            target/benchmark-runs/nori-cancellation-*.json
+          if-no-files-found: error

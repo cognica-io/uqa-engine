@@ -282,10 +282,15 @@ jobs:
     if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     uses: ./.github/workflows/nori-sql-benchmarks.yml
 
+  nori-cancellation-benchmarks:
+    name: Nori cooperative cancellation measurements
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    uses: ./.github/workflows/nori-cancellation-benchmarks.yml
+
   gate:
     name: pre-merge CI
     if: ${{ always() }}
-    needs: [test-linux, test-fdw-linux, test-macos, clippy, msrv, doc, deny, upstream-regression-oracle, nori-reference, nori-benchmark, nori-sql-benchmarks]
+    needs: [test-linux, test-fdw-linux, test-macos, clippy, msrv, doc, deny, upstream-regression-oracle, nori-reference, nori-benchmark, nori-sql-benchmarks, nori-cancellation-benchmarks]
     runs-on: ubuntu-24.04
     env:
       RESULTS: ${{ join(needs.*.result, ' ') }}

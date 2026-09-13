@@ -25,6 +25,8 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CORPUS = ROOT / "crates/uqa-analysis/benches/nori/corpus.json"
 LIMITS = ROOT / "benchmarks/nori/limits.json"
+ANALYSIS_BENCHMARK = ROOT / "crates/uqa-analysis/benches/nori.rs"
+ANALYSIS_SUPPORT = ROOT / "crates/uqa-analysis/benches/nori/cancellation.rs"
 WASM_TARGET = "wasm32-unknown-emscripten"
 WASM_FLAGS = "-C link-arg=-sALLOW_MEMORY_GROWTH=1 -C link-arg=-sMAXIMUM_MEMORY=2147483648 -C link-arg=-sDEFAULT_TO_CXX -C link-arg=-sSTACK_SIZE=5242880"
 PROTOCOL = {"samples": 7, "cold_samples": 3, "warmup": 2, "pilot": 1, "clock": "per_batch", "sample_ms": 75}
@@ -277,7 +279,8 @@ def execute_benchmark(target: str, package: str, benchmark: str, features: str, 
 
 
 def run(target: str) -> dict:
-    report = execute_benchmark(target, "uqa-analysis", "nori", "nori", ("uqa-analysis", "uqa-core", "uqa-nori-data"))
+    report = execute_benchmark(target, "uqa-analysis", "nori", "nori", ("uqa-analysis", "uqa-core", "uqa-nori-data"),
+                               (ANALYSIS_SUPPORT,))
     measurements(report)
     return report
 
@@ -293,9 +296,9 @@ def main() -> int:
     args = parser.parse_args()
     if args.measure_only and args.baseline:
         parser.error("--baseline requires the reviewed gate")
-    protected = [CORPUS, args.limits] + ([args.baseline] if args.baseline else [])
+    protected = [CORPUS, args.limits, ANALYSIS_BENCHMARK, ANALYSIS_SUPPORT] + ([args.baseline] if args.baseline else [])
     if args.output.resolve() in [path.resolve() for path in protected]:
-        parser.error("output must not overwrite the corpus, reviewed limits, or timing baseline")
+        parser.error("output must not overwrite benchmark sources, the corpus, reviewed limits, or timing baseline")
     report = json.loads(args.report.read_text()) if args.report else run(args.target)
     measurements(report)
     report["gate"] = {"allocation_and_output_passed": False, "timing_compared": False}
