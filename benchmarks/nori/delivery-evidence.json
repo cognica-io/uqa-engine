@@ -608,6 +608,45 @@
     "python_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34762160110"
   },
   "current_source_distribution": {
+    "revision": "99c87be00eea06a982d6e8df2abcca8dcec56f79",
+    "filename": "uqa-0.2.3.tar.gz",
+    "bytes": 15682957,
+    "sha256": "8255739a4bfea656c0d7c10e03dac792ca36e68772f349e72846050d684af5d0",
+    "all_benchmark_inputs_verified": true,
+    "benchmark_input_files": 54,
+    "runtime_sources_and_manifests_verified": 2813,
+    "manifest_normalization": "Maturin resolves the Python crate workspace README to its byte-identical packaged README; other packaged crate manifests match exactly.",
+    "both_embedded_catalogs_identical": true,
+    "canonical_licenses_and_exact_nori_resources": true,
+    "extracted_workspace_metadata_verified": true,
+    "cancellation_benchmark_source_identical_to_recorded_revision": true,
+    "foreground_launcher_source_identical_to_recorded_revision": true,
+    "scope": "Source archive inspection including current runtime sources and manifests, plus locked offline metadata; release binary matrices are recorded separately.",
+    "packaged_crates": [
+      "crates/uqa-analysis",
+      "crates/uqa-cli",
+      "crates/uqa-client",
+      "crates/uqa-core",
+      "crates/uqa-engine",
+      "crates/uqa-execution",
+      "crates/uqa-fdw",
+      "crates/uqa-fusion",
+      "crates/uqa-graph",
+      "crates/uqa-joins",
+      "crates/uqa-ml",
+      "crates/uqa-nori-data",
+      "crates/uqa-operators",
+      "crates/uqa-pg-query",
+      "crates/uqa-planner",
+      "crates/uqa-python",
+      "crates/uqa-scoring",
+      "crates/uqa-sql",
+      "crates/uqa-storage",
+      "crates/uqa-storage-redb",
+      "crates/uqa-storage-sqlite"
+    ]
+  },
+  "previous_source_distribution": {
     "revision": "9f6356131fa354f5edb51d1fe0dcd75db2daa9af",
     "filename": "uqa-0.2.3.tar.gz",
     "bytes": 15681167,
@@ -621,16 +660,18 @@
     "foreground_launcher_source_identical_to_recorded_revision": true,
     "scope": "Source archive inspection and locked offline metadata; does not claim a new wheel matrix or compilation of all packaged crates."
   },
-  "previous_source_distribution": {
-    "revision": "ec114821f525d1694937b87da2b149007311bf8a",
-    "filename": "uqa-0.2.3.tar.gz",
-    "bytes": 15680963,
-    "sha256": "be4c8756333dd368b0b70b13832953e0f930fd196c730caecff0dfb63e465600",
-    "all_benchmark_inputs_verified": true,
-    "both_embedded_catalogs_identical": true,
-    "canonical_licenses_and_exact_nori_resources": true,
-    "extracted_workspace_metadata_verified": true,
-    "cancellation_benchmark_source_identical_to_recorded_revision": true,
-    "scope": "Source archive inspection and locked offline metadata; does not claim a new wheel matrix or compilation of all packaged crates."
-  }
+  "older_source_distributions": [
+    {
+      "revision": "ec114821f525d1694937b87da2b149007311bf8a",
+      "filename": "uqa-0.2.3.tar.gz",
+      "bytes": 15680963,
+      "sha256": "be4c8756333dd368b0b70b13832953e0f930fd196c730caecff0dfb63e465600",
+      "all_benchmark_inputs_verified": true,
+      "both_embedded_catalogs_identical": true,
+      "canonical_licenses_and_exact_nori_resources": true,
+      "extracted_workspace_metadata_verified": true,
+      "cancellation_benchmark_source_identical_to_recorded_revision": true,
+      "scope": "Source archive inspection and locked offline metadata; does not claim a new wheel matrix or compilation of all packaged crates."
+    }
+  ]
 }
