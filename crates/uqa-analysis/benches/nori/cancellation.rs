@@ -11,7 +11,7 @@ use allocation_counter::{measure, opt_out};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::hint::black_box;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use uqa_analysis::nori::{
     DecompoundMode, KoreanAnalyzer, KoreanTokenizer, NoriLimits, NoriOptions, NoriOutput,
     NoriResources,
@@ -21,7 +21,8 @@ use uqa_core::memory::{Budgeted, MemoryBudget};
 
 const SAMPLES: usize = 7;
 const WARMUP: usize = 2;
-const ITERATIONS: usize = 16;
+const BATCH: usize = 16;
+const SAMPLE_TIME: Duration = Duration::from_millis(75);
 const ALLOWANCE: usize = 256 * 1024 * 1024;
 const RETAINED: usize = 4096;
 
@@ -91,13 +92,17 @@ fn recover(runner: &Runner<'_>, text: &str, budget: &MemoryBudget, expected: &No
     assert_eq!(budget.used(), RETAINED);
 }
 
-fn timing(elapsed_ns: &[u64]) -> Value {
-    let mut sorted = elapsed_ns.to_vec();
-    sorted.sort_unstable();
+fn timing(elapsed_ns: &[u64], iterations: &[usize]) -> Value {
+    let mut sorted: Vec<f64> = elapsed_ns
+        .iter()
+        .zip(iterations)
+        .map(|(&elapsed, &count)| elapsed as f64 / count as f64)
+        .collect();
+    sorted.sort_by(f64::total_cmp);
     json!({
         "elapsed_ns": elapsed_ns,
-        "iterations": ITERATIONS,
-        "median_ns": sorted[SAMPLES / 2] as f64 / ITERATIONS as f64,
+        "iterations": iterations,
+        "median_ns": sorted[SAMPLES / 2],
     })
 }
 
@@ -131,6 +136,8 @@ fn cases(case: &Case, stage: &str, mode: DecompoundMode, runner: &Runner<'_>) ->
     ] {
         let mut operation = Vec::with_capacity(SAMPLES);
         let mut response = Vec::with_capacity(SAMPLES);
+        let mut iterations = Vec::with_capacity(SAMPLES);
+        let mut sample_wall_ns = Vec::with_capacity(SAMPLES);
         opt_out(|| {
             for _ in 0..WARMUP {
                 black_box(cancel(runner, &case.text, &budget, at));
@@ -139,11 +146,21 @@ fn cases(case: &Case, stage: &str, mode: DecompoundMode, runner: &Runner<'_>) ->
             for _ in 0..SAMPLES {
                 let mut total = 0;
                 let mut propagation = 0;
-                for _ in 0..ITERATIONS {
-                    let (elapsed, returned) = cancel(runner, &case.text, &budget, at);
-                    total += elapsed;
-                    propagation += returned;
+                let mut count = 0;
+                let started = Instant::now();
+                loop {
+                    for _ in 0..BATCH {
+                        let (elapsed, returned) = cancel(runner, &case.text, &budget, at);
+                        total += elapsed;
+                        propagation += returned;
+                    }
+                    count += BATCH;
+                    if started.elapsed() >= SAMPLE_TIME {
+                        break;
+                    }
                 }
+                sample_wall_ns.push(started.elapsed().as_nanos() as u64);
+                iterations.push(count);
                 operation.push(total);
                 response.push(propagation);
                 recover(runner, &case.text, &budget, &expected);
@@ -164,12 +181,13 @@ fn cases(case: &Case, stage: &str, mode: DecompoundMode, runner: &Runner<'_>) ->
             "tokens": expected.tokens.len(),
             "complete_polls": complete_polls,
             "cancel_at_poll": at,
-            "verified_cancellations": WARMUP + SAMPLES * ITERATIONS + 1,
+            "verified_cancellations": WARMUP + iterations.iter().sum::<usize>() + 1,
             "verified_recoveries": WARMUP + SAMPLES + 1,
             "remaining_budget_bytes": budget.used(),
             "allocation": allocation(info),
-            "operation_timing": timing(&operation),
-            "response_timing": timing(&response),
+            "sample_wall_ns": sample_wall_ns,
+            "operation_timing": timing(&operation, &iterations),
+            "response_timing": timing(&response, &iterations),
         }));
         eprintln!(
             "measured cancellation {stage}/{mode:?}/{}/{point}",
@@ -209,14 +227,14 @@ pub(super) fn run() -> Value {
         }
     }
     json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "owner": "uqa-analysis",
         "purpose": "cooperative_cancellation",
         "target_arch": std::env::consts::ARCH,
         "target_os": std::env::consts::OS,
         "pointer_bits": usize::BITS,
         "threads": 1,
-        "protocol": {"samples": SAMPLES, "warmup": WARMUP, "timed_operations_per_sample": ITERATIONS, "allocation_samples": 1, "clock": "per_operation"},
+        "protocol": {"samples": SAMPLES, "warmup": WARMUP, "batch_operations": BATCH, "minimum_sample_time_ns": SAMPLE_TIME.as_nanos() as u64, "allocation_samples": 1, "clock": "per_operation"},
         "memory_limit_bytes": ALLOWANCE,
         "unrelated_reservation_bytes": RETAINED,
         "bundle_bytes": uqa_nori_data::BUNDLE.len(),

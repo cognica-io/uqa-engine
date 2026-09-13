@@ -21,7 +21,7 @@ SPEC.loader.exec_module(benchmark)
 def fixture():
     analysis = json.loads(benchmark.common.LIMITS.read_text())
     report = {
-        "schema_version": 1, "owner": "uqa-analysis", "purpose": "cooperative_cancellation",
+        "schema_version": 2, "owner": "uqa-analysis", "purpose": "cooperative_cancellation",
         "target_os": "linux", "target_arch": "x86_64", "pointer_bits": 64, "threads": 1,
         "protocol": dict(benchmark.PROTOCOL), "memory_limit_bytes": 256 * 1024 * 1024,
         "unrelated_reservation_bytes": 4096, "timing_scope": "clocked cooperative cancellation return",
@@ -36,10 +36,11 @@ def fixture():
             report["measurements"].append({
                 "name": f"{name}/{point}", **output, "complete_polls": 12, "cancel_at_poll": at,
                 "verified_cancellations": 115, "verified_recoveries": 10, "remaining_budget_bytes": 4096,
+                "sample_wall_ns": [75_000_000] * 7,
                 "allocation": {"count_total": 8, "count_peak": 8, "count_retained": 0,
                                "bytes_total": 64, "bytes_peak": 64, "bytes_retained": 0},
-                "operation_timing": {"elapsed_ns": [1024] * 7, "iterations": 16, "median_ns": 64.0},
-                "response_timing": {"elapsed_ns": [512] * 7, "iterations": 16, "median_ns": 32.0},
+                "operation_timing": {"elapsed_ns": [1024] * 7, "iterations": [16] * 7, "median_ns": 64.0},
+                "response_timing": {"elapsed_ns": [512] * 7, "iterations": [16] * 7, "median_ns": 32.0},
             })
     limits = {"schema_version": 1, "timing_max_ratio": 1.2,
               "outputs": {row["name"]: {key: row[key] for key in benchmark.OUTPUT_KEYS} for row in report["measurements"]},
@@ -108,6 +109,26 @@ class NoriCancellationBenchmarkTests(unittest.TestCase):
         self.assertTrue(benchmark.check(report, limits)["allocation_and_recovery_passed"])
         with self.assertRaisesRegex(RuntimeError, "clock resolution"):
             benchmark.check(report, limits, copy.deepcopy(report))
+
+    def test_short_samples_and_incomplete_adaptive_counts_fail(self):
+        for duration in (74_999_999, True, -1):
+            report, _ = fixture(); report["measurements"][0]["sample_wall_ns"][0] = duration
+            with self.subTest(duration=duration), self.assertRaisesRegex(RuntimeError, "sample duration"):
+                benchmark.measurements(report)
+        for count in (0, 15, 17, True):
+            report, _ = fixture(); report["measurements"][0]["operation_timing"]["iterations"][0] = count
+            with self.subTest(count=count), self.assertRaisesRegex(RuntimeError, "operation counts"):
+                benchmark.measurements(report)
+        report, _ = fixture(); row = report["measurements"][0]
+        for key in benchmark.TIMINGS:
+            row[key]["iterations"] = [16, 32, 48, 64, 80, 96, 112]
+            row[key]["elapsed_ns"] = [count * row[key]["median_ns"] for count in row[key]["iterations"]]
+            row[key]["elapsed_ns"] = list(map(int, row[key]["elapsed_ns"]))
+        row["verified_cancellations"] = 3 + sum(row["operation_timing"]["iterations"])
+        self.assertEqual(len(benchmark.measurements(report)), 108)
+        row["response_timing"]["iterations"][0] = 32
+        with self.assertRaisesRegex(RuntimeError, "timing samples"):
+            benchmark.measurements(report)
 
     def test_unmeasured_targets_and_incomparable_timing_environments_fail(self):
         report, limits = fixture(); report["target_os"] = "macos"

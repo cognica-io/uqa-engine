@@ -27,7 +27,7 @@ BENCHMARK = ROOT / "crates/uqa-analysis/benches/nori.rs"
 SUPPORT = ROOT / "crates/uqa-analysis/benches/nori/cancellation.rs"
 LIMITS = ROOT / "benchmarks/nori/cancellation-limits.json"
 OWNERS = ("uqa-analysis", "uqa-core", "uqa-nori-data")
-PROTOCOL = {"samples": 7, "warmup": 2, "timed_operations_per_sample": 16, "allocation_samples": 1, "clock": "per_operation"}
+PROTOCOL = {"samples": 7, "warmup": 2, "batch_operations": 16, "minimum_sample_time_ns": 75_000_000, "allocation_samples": 1, "clock": "per_operation"}
 TIMINGS = ("operation_timing", "response_timing")
 OUTPUT_KEYS = ("input_bytes", "input_utf16", "input_sha256", "output_sha256", "tokens", "complete_polls", "cancel_at_poll")
 POINTS = ("first", "middle", "last")
@@ -54,7 +54,7 @@ def expected_outputs() -> dict:
 
 
 def measurements(report: dict) -> dict:
-    if report.get("schema_version") != 1 or report.get("owner") != "uqa-analysis" or report.get("purpose") != "cooperative_cancellation":
+    if report.get("schema_version") != 2 or report.get("owner") != "uqa-analysis" or report.get("purpose") != "cooperative_cancellation":
         raise RuntimeError("unsupported cancellation measurement schema or owner")
     if report.get("protocol") != PROTOCOL or report.get("threads") != 1:
         raise RuntimeError("invalid cancellation sampling protocol")
@@ -90,7 +90,13 @@ def measurements(report: dict) -> dict:
         expected = {"first": 1, "middle": (count + 1) // 2, "last": count}[point]
         if type(row.get("cancel_at_poll")) is not int or row["cancel_at_poll"] != expected:
             raise RuntimeError(f"changed cancellation point: {name}")
-        if row.get("verified_cancellations") != 115 or row.get("verified_recoveries") != 10 or row.get("remaining_budget_bytes") != 4096:
+        iterations = row["operation_timing"]["iterations"]
+        wall = row.get("sample_wall_ns", [])
+        if not isinstance(iterations, list) or len(iterations) != 7 or any(type(value) is not int or value < 16 or value % 16 for value in iterations):
+            raise RuntimeError(f"invalid cancellation sample operation counts: {name}")
+        if len(wall) != 7 or any(type(value) is not int or value < PROTOCOL["minimum_sample_time_ns"] for value in wall):
+            raise RuntimeError(f"insufficient cancellation sample duration: {name}")
+        if row.get("verified_cancellations") != 3 + sum(iterations) or row.get("verified_recoveries") != 10 or row.get("remaining_budget_bytes") != 4096:
             raise RuntimeError(f"incomplete cancellation, cleanup, or recovery verification: {name}")
         allocation = row["allocation"]
         if set(allocation) != set(common.ALLOCATION_KEYS) or any(type(value) is not int or value < 0 for value in allocation.values()):
@@ -101,12 +107,12 @@ def measurements(report: dict) -> dict:
         for key in TIMINGS:
             timing = row[key]
             samples = timing["elapsed_ns"]
-            if len(samples) != 7 or any(type(value) is not int or value < 0 for value in samples) or timing.get("iterations") != 16:
+            if len(samples) != 7 or any(type(value) is not int or value < 0 for value in samples) or timing.get("iterations") != iterations:
                 raise RuntimeError(f"invalid cancellation timing samples: {name}/{key}")
             value = timing.get("median_ns")
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value != statistics.median(samples) / 16:
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value != statistics.median(elapsed / count for elapsed, count in zip(samples, iterations)):
                 raise RuntimeError(f"invalid cancellation timing estimator: {name}/{key}")
-        if any(total <= 0 or response > total for total, response in zip(row["operation_timing"]["elapsed_ns"], row["response_timing"]["elapsed_ns"])):
+        if any(total <= 0 or response > total or total > duration for total, response, duration in zip(row["operation_timing"]["elapsed_ns"], row["response_timing"]["elapsed_ns"], wall)):
             raise RuntimeError(f"inconsistent cancellation return and operation durations: {name}")
     return indexed
 
