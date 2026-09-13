@@ -141,7 +141,10 @@ def main():
         command = docker_command(manifest, cache, args.platform, args.offline, ENTRYPOINT,
                                  ("/input", "/output"), output=resources, input_directory=inputs)
         completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", check=True)
-        runtime = dict(zip(RUNTIME_FIELDS, completed.stdout.splitlines(), strict=True))
+        fields = completed.stdout.splitlines()
+        if len(fields) != len(RUNTIME_FIELDS):
+            raise RuntimeError("Unexpected regeneration JVM runtime field count")
+        runtime = dict(zip(RUNTIME_FIELDS, fields))
         if runtime != manifest["runtime"]:
             raise RuntimeError(f"Unexpected regeneration JVM runtime: {runtime}")
         check_resources(resources, manifest["dictionary_resources"])

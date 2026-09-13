@@ -135,6 +135,8 @@ class NoriCsvRegenerationTest(unittest.TestCase):
             failures = [
                 (subprocess.CalledProcessError(1, "docker"), subprocess.CalledProcessError),
                 (subprocess.CompletedProcess([], 0, "wrong\nruntime\nidentity\n"), RuntimeError),
+                (subprocess.CompletedProcess([], 0, "missing fields\n"), RuntimeError),
+                (subprocess.CompletedProcess([], 0, runtime + "extra field\n"), RuntimeError),
                 (subprocess.CompletedProcess([], 0, runtime), RuntimeError),
             ]
             for result, error in failures:
