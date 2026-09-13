@@ -254,6 +254,7 @@ jobs:
           python3 scripts/run-nori-index-benchmark.py --output target/benchmark-runs/nori-index-native.json
           python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --output target/benchmark-runs/nori-sqlite-native.json
           python3 scripts/run-nori-persistent-benchmark.py --provider redb --output target/benchmark-runs/nori-redb-native.json
+          python3 scripts/run-nori-phrase-benchmark.py --output target/benchmark-runs/nori-phrase-native.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -263,6 +264,7 @@ jobs:
             target/benchmark-runs/nori-index-native.json
             target/benchmark-runs/nori-sqlite-native.json
             target/benchmark-runs/nori-redb-native.json
+            target/benchmark-runs/nori-phrase-native.json
 
   gate:
     name: pre-merge CI

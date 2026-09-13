@@ -3,6 +3,10 @@
   "description": "Machine-checked inventory of Rust benchmark entrypoints and required semantic probes.",
   "surfaces": [
     {
+      "path": "crates/uqa-operators/benches/nori_phrase.rs",
+      "tokens": ["score_phrase_budgeted", "analyze_query_graph_budgeted", "PhraseBudget", "MEMORY_LIMIT", "DecompoundMode", "verified_samples"]
+    },
+    {
       "path": "crates/uqa-storage-sqlite/benches/nori_persistent.rs",
       "tokens": ["persistent.rs", "SQLiteInvertedIndex", "begin_transaction", "commit_transaction", "rollback_transaction"]
     },
