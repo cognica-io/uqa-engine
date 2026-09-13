@@ -10,6 +10,7 @@ use regex::Regex;
 use uqa_core::memory::{Budgeted, MemoryBudget};
 
 use super::{stream, validate_gram_bounds, Tokenizer};
+use crate::cooperative_regex::CooperativeRegex;
 use crate::{AnalysisError, AnalysisResult, AnalyzedText, FilteredText};
 
 #[derive(Debug)]
@@ -21,7 +22,10 @@ pub(crate) enum PreparedTokenizer {
         min_gram: usize,
         max_gram: usize,
     },
-    Pattern(Regex),
+    Pattern {
+        expression: Regex,
+        cooperative: Option<Box<CooperativeRegex>>,
+    },
     Keyword,
     #[cfg(feature = "nori")]
     Nori(crate::nori::KoreanTokenizer),
@@ -52,13 +56,16 @@ impl Tokenizer {
                 }
             }
             Self::Pattern { pattern } => {
-                PreparedTokenizer::Pattern(Regex::new(pattern).map_err(|source| {
-                    AnalysisError::InvalidRegex {
+                let expression =
+                    Regex::new(pattern).map_err(|source| AnalysisError::InvalidRegex {
                         component: "pattern tokenizer",
                         pattern: pattern.clone(),
                         source,
-                    }
-                })?)
+                    })?;
+                PreparedTokenizer::Pattern {
+                    expression,
+                    cooperative: CooperativeRegex::compile(pattern).map(Box::new),
+                }
             }
             Self::Keyword => PreparedTokenizer::Keyword,
         })

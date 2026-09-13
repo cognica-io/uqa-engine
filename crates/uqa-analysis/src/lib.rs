@@ -12,6 +12,7 @@ pub mod analyzer;
 mod cache;
 pub mod char_filter;
 mod character_class;
+mod cooperative_regex;
 pub mod descriptor;
 pub mod error;
 pub mod highlight;

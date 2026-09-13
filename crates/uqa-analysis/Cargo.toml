@@ -20,6 +20,7 @@ nori-tools = ["nori"]
 [dependencies]
 uqa-core = { workspace = true }
 regex = { workspace = true }
+regex-automata = { workspace = true }
 regex-syntax = { workspace = true }
 unicode-normalization = { workspace = true }
 serde = { workspace = true }

@@ -11,6 +11,7 @@ use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget};
 
 use super::{standard_word_class, PreparedTokenizer};
 use crate::character_class::contains;
+use crate::cooperative_regex::SearchError;
 use crate::token::allocation::TokenBuffer;
 use crate::{AnalysisResult, AnalysisToken, AnalyzedText, FilteredText};
 
@@ -91,32 +92,19 @@ pub(super) fn tokenize_budgeted(
                 )
             })?;
         }
-        PreparedTokenizer::Pattern(expression) => {
-            let mut start = 0;
-            let mut separators = expression.find_iter(text);
-            loop {
-                poll()?;
-                let Some(separator) = separators.next() else {
-                    break;
-                };
-                if start < separator.start() {
-                    tokens.push(AnalysisToken::from_source_budgeted(
-                        input,
-                        start..separator.start(),
-                        budget,
-                        poll,
-                    )?)?;
-                }
-                start = separator.end();
-            }
-            if start < text.len() {
-                tokens.push(AnalysisToken::from_source_budgeted(
-                    input,
-                    start..text.len(),
-                    budget,
-                    poll,
-                )?)?;
-            }
+        PreparedTokenizer::Pattern {
+            expression,
+            cooperative,
+        } => {
+            tokenize_pattern(
+                input,
+                text,
+                expression,
+                cooperative.as_deref(),
+                &mut tokens,
+                budget,
+                poll,
+            )?;
         }
         PreparedTokenizer::Keyword => {
             if !text.is_empty() {
@@ -130,6 +118,65 @@ pub(super) fn tokenize_budgeted(
         }
     }
     tokens.finish(input, 0, poll)
+}
+
+fn tokenize_pattern(
+    input: &FilteredText<'_>,
+    text: &str,
+    expression: &regex::Regex,
+    cooperative: Option<&crate::cooperative_regex::CooperativeRegex>,
+    tokens: &mut TokenBuffer,
+    budget: &MemoryBudget,
+    poll: &mut dyn FnMut() -> AnalysisResult<()>,
+) -> AnalysisResult<()> {
+    let mut start = 0;
+    let mut search_start = 0;
+    let mut last_empty_end = None;
+    loop {
+        poll()?;
+        let separator = match cooperative {
+            Some(cooperative) => match cooperative.find_at(text, search_start, poll) {
+                Ok(separator) => separator,
+                Err(SearchError::Poll(error)) => return Err(error),
+                Err(SearchError::Automaton) => expression
+                    .find_at(text, search_start)
+                    .map(|matched| matched.range()),
+            },
+            None => expression
+                .find_at(text, search_start)
+                .map(|matched| matched.range()),
+        };
+        let Some(separator) = separator else {
+            break;
+        };
+        if separator.is_empty() && Some(separator.end) == last_empty_end {
+            if search_start == text.len() {
+                break;
+            }
+            search_start += 1;
+            continue;
+        }
+        if start < separator.start {
+            tokens.push(AnalysisToken::from_source_budgeted(
+                input,
+                start..separator.start,
+                budget,
+                poll,
+            )?)?;
+        }
+        start = separator.end;
+        search_start = start;
+        last_empty_end = separator.is_empty().then_some(separator.end);
+    }
+    if start < text.len() {
+        tokens.push(AnalysisToken::from_source_budgeted(
+            input,
+            start..text.len(),
+            budget,
+            poll,
+        )?)?;
+    }
+    Ok(())
 }
 
 fn emit_grams(
@@ -235,6 +282,50 @@ mod tests {
     fn built_in_word_scan_cancellation_releases_unpublished_tokens() {
         let source = "!".repeat(128 * 1024);
         let tokenizer = PreparedTokenizer::Letter;
+        let input = FilteredText::new(&source);
+        let budget = MemoryBudget::new(1 << 20);
+        let mut polls = 0;
+        let result = tokenize_budgeted(&tokenizer, &input, &budget, &mut || {
+            polls += 1;
+            if polls == 8 {
+                Err(AnalysisError::Cancelled)
+            } else {
+                Ok(())
+            }
+        });
+        assert!(matches!(result, Err(AnalysisError::Cancelled)));
+        assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn configured_pattern_scan_polls_through_a_long_unmatched_input() {
+        let source = "x".repeat(128 * 1024);
+        let tokenizer = PreparedTokenizer::Pattern {
+            expression: regex::Regex::new("needle").unwrap(),
+            cooperative: crate::cooperative_regex::CooperativeRegex::compile("needle")
+                .map(Box::new),
+        };
+        let input = FilteredText::new(&source);
+        let budget = MemoryBudget::new(1 << 20);
+        let mut polls = 0;
+        let analyzed = tokenize_budgeted(&tokenizer, &input, &budget, &mut || {
+            polls += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert!(polls > source.len() / 2048);
+        drop(analyzed);
+        assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn configured_pattern_scan_cancellation_releases_unpublished_tokens() {
+        let source = "x".repeat(128 * 1024);
+        let tokenizer = PreparedTokenizer::Pattern {
+            expression: regex::Regex::new("needle").unwrap(),
+            cooperative: crate::cooperative_regex::CooperativeRegex::compile("needle")
+                .map(Box::new),
+        };
         let input = FilteredText::new(&source);
         let budget = MemoryBudget::new(1 << 20);
         let mut polls = 0;

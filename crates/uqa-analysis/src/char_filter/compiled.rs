@@ -12,6 +12,7 @@ use uqa_core::memory::MemoryBudget;
 use super::replacement::Replacement;
 use super::stream::{replace_html, replace_literal, replace_pattern};
 use super::{mapping_longest_first, CharFilter, HTML_ENTITIES};
+use crate::cooperative_regex::CooperativeRegex;
 use crate::{AnalysisError, AnalysisResult, FilteredText};
 
 #[derive(Debug)]
@@ -21,6 +22,7 @@ pub(crate) enum PreparedCharFilter<'a> {
     PatternReplace {
         expression: Regex,
         replacement: Replacement<'a>,
+        cooperative: Option<Box<CooperativeRegex>>,
     },
 }
 
@@ -42,9 +44,14 @@ impl CharFilter {
                         source,
                     })?;
                 let replacement = Replacement::prepare(replacement, &expression);
+                let cooperative = (!replacement.uses_captures())
+                    .then(|| CooperativeRegex::compile(pattern))
+                    .flatten()
+                    .map(Box::new);
                 PreparedCharFilter::PatternReplace {
                     expression,
                     replacement,
+                    cooperative,
                 }
             }
         })
@@ -59,9 +66,11 @@ impl PreparedCharFilter<'_> {
             Self::PatternReplace {
                 expression,
                 replacement,
+                cooperative,
             } => PreparedCharFilter::PatternReplace {
                 expression,
                 replacement: replacement.into_owned(),
+                cooperative,
             },
         }
     }
@@ -96,7 +105,15 @@ impl PreparedCharFilter<'_> {
             Self::PatternReplace {
                 expression,
                 replacement,
-            } => replace_pattern(&mut text, expression, replacement, budget, poll)?,
+                cooperative,
+            } => replace_pattern(
+                &mut text,
+                expression,
+                replacement,
+                cooperative.as_deref(),
+                budget,
+                poll,
+            )?,
         }
         text.prepare_coordinates(budget, poll)?;
         poll()?;
