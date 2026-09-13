@@ -245,6 +245,19 @@ def test_sql_text_vector_tensor_and_cypher_surfaces() -> None:
     assert cypher.rows == [{"name": "Ada"}]
 
 
+def test_native_nori_diagnostics_reach_python_binding() -> None:
+    engine = uqa.Engine()
+    listed = engine.sql("SELECT analyzer_name FROM list_analyzers() ORDER BY analyzer_name")
+    assert "nori" in [row["analyzer_name"] for row in listed.rows]
+
+    result = engine.sql("SELECT analysis FROM analyze_text('nori', '나물은')")
+    assert result.columns == ["analysis"]
+    analysis = result.rows[0]["analysis"]
+    assert len(analysis["analyzer_fingerprint"]) == 64
+    assert analysis["final_offsets"]["utf16"]["end"] == 3
+    assert any("korean_morphology" in token for token in analysis["tokens"])
+
+
 def test_persistent_open_and_batch(tmp_path) -> None:
     path = tmp_path / "uqa.db"
     engine = uqa.open(path)

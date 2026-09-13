@@ -18,6 +18,8 @@ npm install --omit=optional @cognica-io/uqa@0.2.3
 
 `HttpEngine`, `HttpSQLStream`, `SQLParam`, `vector`, and `tensor` run in JavaScript on Node.js 16 or newer using Node's built-in HTTP modules. They require no Rust toolchain, native addon, or embedded database. The package loads the native addon only when embedded `Engine` functionality is used. Both CommonJS and ESM support the main package and the explicit `@cognica-io/uqa/http` entry point.
 
+Embedded native addons include the Lucene-compatible Nori dictionary and analyzer by default. Use `list_analyzers()` and `analyze_text('nori', input)` through `Engine.sql` to inspect Korean token graphs, morphology, offsets, and positions.
+
 Save this example in an `.mjs` file so it can use ESM and top-level `await`:
 
 ```javascript

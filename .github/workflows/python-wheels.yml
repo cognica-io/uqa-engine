@@ -47,8 +47,8 @@ jobs:
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/python -m pip install maturin==1.11.5 pytest
-      - name: Build and install the development extension
-        run: maturin develop --locked
+      - name: Build and install the development extension with native Nori
+        run: maturin develop --locked --features nori
       - name: Check the stable ABI contract
         run: |
           python - <<'PY'
@@ -134,7 +134,7 @@ jobs:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux }}
           before-script-linux: source .github/scripts/install-manylinux-build-deps.sh
-          args: --release --locked --compatibility pypi --out dist
+          args: --release --locked --features nori --compatibility pypi --out dist
 
       - name: Check wheel license contents
         shell: bash

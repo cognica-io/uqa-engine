@@ -11,6 +11,7 @@ UQA Engine exposes the same durable embedded engine through Rust, Python, Node.j
 | SQLCipher | Yes | Yes | Yes | No |
 | Text, vector, and hybrid APIs | Yes | Yes | Yes | Yes |
 | Custom analyzer catalog through SQL | Yes | Yes | Yes | Yes |
+| Native Nori analyzer and `analyze_text` diagnostics | Feature-enabled | Bundled | Bundled | Bundled |
 | Cypher | Yes | Yes | Yes | Yes |
 | Runtime scalar/table/aggregate callbacks | Yes | Yes | Yes | Yes |
 | Native DuckDB and Arrow FDWs | Yes | Build dependent | Build dependent | No |
@@ -145,7 +146,7 @@ Persist after important application checkpoints. Browser callbacks use synchrono
 
 ## Analyzer pipelines across bindings
 
-All four bindings can execute `create_analyzer`, `list_analyzers`, `set_table_analyzer`, `fts_index_stats`, and `drop_analyzer` through SQL. Python also exposes `list_named_analyzers()`, while Node.js and browser WASM expose `listNamedAnalyzers()` for custom engine-catalog names. Rust alone exposes direct `Analyzer`, `CharFilter`, `Tokenizer`, and `TokenFilter` construction. See [Text analyzer pipelines](06-text-analyzers.md) for the JSON schema and lifecycle.
+All four bindings can execute `create_analyzer`, `list_analyzers`, `analyze_text`, `set_table_analyzer`, `fts_index_stats`, and `drop_analyzer` through SQL. The released Python, Node.js, and browser WASM artifacts include the native Nori bundle, so `list_analyzers` reports `nori` and `analyze_text('nori', input)` returns the complete token and source-coordinate diagnostic. Python also exposes `list_named_analyzers()`, while Node.js and browser WASM expose `listNamedAnalyzers()` for custom engine-catalog names. Rust alone exposes direct `Analyzer`, `CharFilter`, `Tokenizer`, and `TokenFilter` construction. See [Text analyzer pipelines](06-text-analyzers.md) for the JSON schema and lifecycle.
 
 ## Runtime SQL callbacks
 

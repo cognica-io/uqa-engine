@@ -66,8 +66,8 @@
     ]
   },
   "scripts": {
-    "build": "napi build --platform --no-js --release",
-    "build:debug": "napi build --platform --no-js"
+    "build": "napi build --platform --no-js --release --features nori",
+    "build:debug": "napi build --platform --no-js --features nori"
   },
   "devDependencies": {
     "@napi-rs/cli": "3.8.6"

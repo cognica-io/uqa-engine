@@ -2,6 +2,8 @@
 
 `@cognica-io/uqa-wasm` provides the embedded UQA Engine and direct local or Cloud HTTP SQL for browser applications through WebAssembly.
 
+The published WASM bundle includes the Lucene-compatible Nori dictionary and analyzer. `Engine.sql` can call `list_analyzers()` and `analyze_text('nori', input)` to return Korean token graphs, morphology, offsets, and positions.
+
 ## Install
 
 ```sh

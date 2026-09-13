@@ -298,6 +298,21 @@ test("sql, params, vector, tensor, and cypher surfaces", async () => {
   await assert.rejects(engine.sql("SELECT FROM FROM"), /error|syntax/i);
 });
 
+test("native Nori diagnostics reach the browser WASM binding", async () => {
+  const engine = await Engine.inMemory();
+  const listed = await engine.sql(
+    "SELECT analyzer_name FROM list_analyzers() ORDER BY analyzer_name",
+  );
+  assert.ok(listed.rows.some((row) => row.analyzer_name === "nori"));
+
+  const result = await engine.sql("SELECT analysis FROM analyze_text('nori', '나물은')");
+  assert.deepEqual(result.columns, ["analysis"]);
+  const analysis = result.rows[0].analysis;
+  assert.equal(analysis.analyzer_fingerprint.length, 64);
+  assert.equal(analysis.final_offsets.utf16.end, 3);
+  assert.ok(analysis.tokens.some((token) => "korean_morphology" in token));
+});
+
 test("value round-trip through documents", async () => {
   const engine = await Engine.inMemory();
   await engine.createDefaultTable("docs", ["body"]);

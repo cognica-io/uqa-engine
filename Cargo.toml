@@ -71,7 +71,7 @@ uqa-pg-query = { version = "0.2.3", path = "crates/uqa-pg-query" }
 uqa-sql = { version = "0.2.3", path = "crates/uqa-sql" }
 uqa-pg-wire = { version = "0.2.3", path = "crates/uqa-pg-wire" }
 uqa-fdw = { version = "0.2.3", path = "crates/uqa-fdw" }
-uqa-engine = { version = "0.2.3", path = "crates/uqa-engine" }
+uqa-engine = { version = "0.2.3", path = "crates/uqa-engine", default-features = false }
 uqa = { version = "0.2.3", path = "crates/uqa" }
 uqa-client = { version = "0.2.3", path = "crates/uqa-client" }
 uqa-api = { version = "0.2.3", path = "crates/uqa-api" }
