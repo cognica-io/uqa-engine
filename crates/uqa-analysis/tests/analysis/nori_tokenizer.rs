@@ -11,6 +11,8 @@ use uqa_analysis::nori::{KoreanTokenizer, NoriOptions, UserDictionary, UserDicti
 
 use super::nori_resources::{canonical, model, raw_analysis};
 
+#[path = "nori_tokenizer/generated.rs"]
+mod generated;
 #[path = "nori_tokenizer/memory.rs"]
 mod memory;
 
