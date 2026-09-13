@@ -28,6 +28,20 @@ EXPECTED = {"commit_batch_256/0": 256, "commit_batch_16/256": 272,
             "commit_batch_16/2048": 2064, "rollback_batch_16/2048": 2048}
 
 
+def target_key(report: dict) -> str:
+    return "/".join(str(report.get(key, "")) for key in ("target_os", "target_arch", "pointer_bits"))
+
+
+def target_limits(report: dict, limits: dict) -> dict:
+    if limits.get("schema_version") != 2:
+        raise RuntimeError("persistent allocation limits require target-specific calibration")
+    target = target_key(report)
+    ceilings = limits.get("allocation_ceilings", {}).get(target)
+    if ceilings is None:
+        raise RuntimeError(f"no reviewed persistent allocation limits for target: {target}")
+    return {**limits, "schema_version": 1, "allocation_ceilings": {str(report["pointer_bits"]): ceilings}}
+
+
 def measurements(report: dict, provider: str) -> dict:
     rows = index.measurements(report, EXPECTED, f"uqa-storage-{provider}")
     signature = report.get("provenance", {}).get("flags_sha256", "")
@@ -53,7 +67,7 @@ def check(report: dict, limits: dict, provider: str, baseline: dict | None = Non
         for key in ("durability", "filesystem"):
             if report[key] != baseline[key]:
                 raise RuntimeError(f"incomparable persistent timing scope: {key}")
-    return index.check(report, limits, baseline, expected=EXPECTED, owner=f"uqa-storage-{provider}")
+    return index.check(report, target_limits(report, limits), baseline, expected=EXPECTED, owner=f"uqa-storage-{provider}")
 
 
 def main() -> int:

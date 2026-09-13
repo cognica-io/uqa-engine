@@ -1,0 +1,169 @@
+{
+  "allocation_scope": "current-thread Rust allocator requests during mutation and transaction; excludes base index, dictionary, C allocator, OS cache, stack and host heap",
+  "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+  "corpus_sha256": "18a50905d26e3615d9db2a8b9565cbcdefcbcfdd1036a88292624154fc228e6b",
+  "durability": "redb default immediate commit durability",
+  "filesystem": "temporary directory on host filesystem",
+  "measurements": [
+    {
+      "allocation": {
+        "bytes_net": 1848212,
+        "bytes_peak": 13159758,
+        "bytes_total": 473580960,
+        "count_net": 319,
+        "count_peak": 12474,
+        "count_total": 1948655
+      },
+      "closed_result_file_bytes": 2109440,
+      "closed_seed_file_bytes": 1056768,
+      "documents_after": 256,
+      "elapsed_ns": [
+        353399382,
+        353804039,
+        356161942,
+        356128379,
+        354810653,
+        357280632,
+        355624365
+      ],
+      "field_length": 125079,
+      "graph_sha256": "01bbc354e7415e5182f73b54982af1423e855cb4e727b945bd2a5f4029a8e0ea",
+      "median_ns": 355624365,
+      "name": "commit_batch_256/0",
+      "posting_count": 3507,
+      "verified_live_and_reopened_samples": 9
+    },
+    {
+      "allocation": {
+        "bytes_net": 2801452,
+        "bytes_peak": 5660165,
+        "bytes_total": 51574089,
+        "count_net": 333,
+        "count_peak": 3868,
+        "count_total": 144916
+      },
+      "closed_result_file_bytes": 4214784,
+      "closed_seed_file_bytes": 2109440,
+      "documents_after": 272,
+      "elapsed_ns": [
+        33839033,
+        33780785,
+        33630313,
+        33862989,
+        33948539,
+        33741841,
+        36320257
+      ],
+      "field_length": 133622,
+      "graph_sha256": "f2acfb805f20eda2e1f35ec4f4bfd094fd9c185d55f2df7e32df7b5a640d0d7e",
+      "median_ns": 33839033,
+      "name": "commit_batch_16/256",
+      "posting_count": 3719,
+      "verified_live_and_reopened_samples": 9
+    },
+    {
+      "allocation": {
+        "bytes_net": 20704368,
+        "bytes_peak": 39746897,
+        "bytes_total": 179453281,
+        "count_net": 445,
+        "count_peak": 3939,
+        "count_total": 172888
+      },
+      "closed_result_file_bytes": 50401280,
+      "closed_seed_file_bytes": 25202688,
+      "documents_after": 2064,
+      "elapsed_ns": [
+        88174773,
+        87882147,
+        87911992,
+        88021627,
+        87852531,
+        87087269,
+        87710155
+      ],
+      "field_length": 1019960,
+      "graph_sha256": "ec6a006122f9822322876f9802a8c7c8a1d6bec2f3dac3cb1f92636c2be2dfa7",
+      "median_ns": 87882147,
+      "name": "commit_batch_16/2048",
+      "posting_count": 28208,
+      "verified_live_and_reopened_samples": 9
+    },
+    {
+      "allocation": {
+        "bytes_net": 8220520,
+        "bytes_peak": 39746897,
+        "bytes_total": 179350144,
+        "count_net": 247,
+        "count_peak": 3939,
+        "count_total": 172698
+      },
+      "closed_result_file_bytes": 25202688,
+      "closed_seed_file_bytes": 25202688,
+      "documents_after": 2048,
+      "elapsed_ns": [
+        79409723,
+        78549592,
+        78547426,
+        78505598,
+        78937967,
+        79048624,
+        78518252
+      ],
+      "field_length": 1011262,
+      "graph_sha256": "0f4cecb080517dfac5fba98cca752781954cf1c7cbafb7c9d47c71bcde4fc17e",
+      "median_ns": 78549592,
+      "name": "rollback_batch_16/2048",
+      "posting_count": 27991,
+      "verified_live_and_reopened_samples": 9
+    }
+  ],
+  "owner": "uqa-storage-redb",
+  "pointer_bits": 64,
+  "protocol": {
+    "samples": 7,
+    "timed_operations_per_sample": 1,
+    "warmup": 1
+  },
+  "schema_version": 1,
+  "target_arch": "x86_64",
+  "target_os": "linux",
+  "threads": 1,
+  "timing_scope": "input construction, index mutation and explicit transaction begin/commit/rollback; excludes seed copying, open, close, graph verification and reopen",
+  "provenance": {
+    "measured_at_utc": "2026-09-13T08:19:07.526287+00:00",
+    "revision": "9d4d7830f885276a5c0d7f7b0262e389dae70485",
+    "worktree_dirty": false,
+    "cpu": "AMD EPYC 7763 64-Core Processor",
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "rustc": "rustc 1.90.0 (1159e78c4 2025-09-14)\nbinary: rustc\ncommit-hash: 1159e78c4747b02ef996e55082b704c09b970588\ncommit-date: 2025-09-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.90.0\nLLVM version: 20.1.8",
+    "flags": {
+      "CARGO_PROFILE_TEST_DEBUG": "0",
+      "RUSTFLAGS": "-D warnings"
+    },
+    "flags_sha256": "cd39a87599ab727439452dfa679b2424283a1cf3e145f158833495d35be1eeb4",
+    "node": null,
+    "emcc": null,
+    "benchmark_sha256": "23457478df9f449a9a4ef89aa863e4a8ddafb7d67e65a58f46437c0a634399cd",
+    "cargo_lock_sha256": "8e55e43be2f8ac54e9775e56192cc260d046bf2d324a184aa0b424945f160814",
+    "runtime_sources_sha256": "da020a0d7bef81c53307af678881d077b1041239541d2812917e965c490daf99",
+    "profile": "bench (workspace release, thin LTO, one codegen unit, debug information)",
+    "container": null,
+    "jvm": null,
+    "artifacts": [
+      {
+        "name": "nori_persistent-618c2e40f36e1fc0",
+        "bytes": 60261880,
+        "sha256": "18139af2ae77a3316d28081172b2b2534e47f0b367d86376574ee77a519c3cca"
+      }
+    ],
+    "benchmark_sources": {
+      "crates/uqa-storage-redb/benches/nori_persistent.rs": "c89b0d492a8c73cb581fd9b4daca46dc198dcca0f84e25be01e1af0bab520e2c",
+      "benchmarks/nori/persistent.rs": "c3da36bd5c3bf37308ffcc2446a6bd4725d300cfde02d6b0fb1cad6c1a572adc"
+    }
+  },
+  "gate": {
+    "allocation_and_graph_passed": false,
+    "timing_compared": false
+  }
+}

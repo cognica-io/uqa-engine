@@ -1,0 +1,170 @@
+{
+  "allocation_scope": "current-thread Rust allocator requests during mutation and transaction; excludes base index, dictionary, C allocator, OS cache, stack and host heap",
+  "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+  "corpus_sha256": "18a50905d26e3615d9db2a8b9565cbcdefcbcfdd1036a88292624154fc228e6b",
+  "durability": "SQLite 3.50.4, journal_mode=wal, synchronous=1, page_size=4096",
+  "filesystem": "temporary directory on host filesystem",
+  "measurements": [
+    {
+      "allocation": {
+        "bytes_net": 0,
+        "bytes_peak": 13142035,
+        "bytes_total": 468106703,
+        "count_net": 0,
+        "count_peak": 12420,
+        "count_total": 1892692
+      },
+      "closed_result_file_bytes": 1806336,
+      "closed_seed_file_bytes": 446464,
+      "documents_after": 256,
+      "elapsed_ns": [
+        380456688,
+        368942805,
+        367812440,
+        367188563,
+        368245541,
+        367869745,
+        361568014
+      ],
+      "field_length": 125079,
+      "graph_sha256": "01bbc354e7415e5182f73b54982af1423e855cb4e727b945bd2a5f4029a8e0ea",
+      "median_ns": 367869745,
+      "name": "commit_batch_256/0",
+      "posting_count": 3507,
+      "verified_live_and_reopened_samples": 9
+    },
+    {
+      "allocation": {
+        "bytes_net": 0,
+        "bytes_peak": 1963072,
+        "bytes_total": 44328251,
+        "count_net": 0,
+        "count_peak": 3859,
+        "count_total": 137368
+      },
+      "closed_result_file_bytes": 1982464,
+      "closed_seed_file_bytes": 1806336,
+      "documents_after": 272,
+      "elapsed_ns": [
+        41372546,
+        41051054,
+        41321821,
+        41338282,
+        41583690,
+        41648391,
+        41120364
+      ],
+      "field_length": 133622,
+      "graph_sha256": "f2acfb805f20eda2e1f35ec4f4bfd094fd9c185d55f2df7e32df7b5a640d0d7e",
+      "median_ns": 41338282,
+      "name": "commit_batch_16/256",
+      "posting_count": 3719,
+      "verified_live_and_reopened_samples": 9
+    },
+    {
+      "allocation": {
+        "bytes_net": 0,
+        "bytes_peak": 6958940,
+        "bytes_total": 127356392,
+        "count_net": 0,
+        "count_peak": 3930,
+        "count_total": 165081
+      },
+      "closed_result_file_bytes": 11354112,
+      "closed_seed_file_bytes": 10481664,
+      "documents_after": 2064,
+      "elapsed_ns": [
+        154960519,
+        148758466,
+        149535880,
+        150183693,
+        149016431,
+        149267460,
+        152777787
+      ],
+      "field_length": 1019960,
+      "graph_sha256": "ec6a006122f9822322876f9802a8c7c8a1d6bec2f3dac3cb1f92636c2be2dfa7",
+      "median_ns": 149535880,
+      "name": "commit_batch_16/2048",
+      "posting_count": 28208,
+      "verified_live_and_reopened_samples": 9
+    },
+    {
+      "allocation": {
+        "bytes_net": 0,
+        "bytes_peak": 6958940,
+        "bytes_total": 127356392,
+        "count_net": 0,
+        "count_peak": 3930,
+        "count_total": 165081
+      },
+      "closed_result_file_bytes": 10481664,
+      "closed_seed_file_bytes": 10481664,
+      "documents_after": 2048,
+      "elapsed_ns": [
+        126951604,
+        130887746,
+        126919824,
+        128694875,
+        125874984,
+        128144909,
+        128047377
+      ],
+      "field_length": 1011262,
+      "graph_sha256": "0f4cecb080517dfac5fba98cca752781954cf1c7cbafb7c9d47c71bcde4fc17e",
+      "median_ns": 128047377,
+      "name": "rollback_batch_16/2048",
+      "posting_count": 27991,
+      "verified_live_and_reopened_samples": 9
+    }
+  ],
+  "owner": "uqa-storage-sqlite",
+  "pointer_bits": 64,
+  "protocol": {
+    "samples": 7,
+    "timed_operations_per_sample": 1,
+    "warmup": 1
+  },
+  "schema_version": 1,
+  "target_arch": "x86_64",
+  "target_os": "linux",
+  "threads": 1,
+  "timing_scope": "input construction, index mutation and explicit transaction begin/commit/rollback; excludes seed copying, open, close, graph verification and reopen",
+  "provenance": {
+    "measured_at_utc": "2026-09-13T08:17:44.865761+00:00",
+    "revision": "9d4d7830f885276a5c0d7f7b0262e389dae70485",
+    "worktree_dirty": false,
+    "cpu": "AMD EPYC 7763 64-Core Processor",
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "rustc": "rustc 1.90.0 (1159e78c4 2025-09-14)\nbinary: rustc\ncommit-hash: 1159e78c4747b02ef996e55082b704c09b970588\ncommit-date: 2025-09-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.90.0\nLLVM version: 20.1.8",
+    "flags": {
+      "CARGO_PROFILE_TEST_DEBUG": "0",
+      "RUSTFLAGS": "-D warnings"
+    },
+    "flags_sha256": "cd39a87599ab727439452dfa679b2424283a1cf3e145f158833495d35be1eeb4",
+    "node": null,
+    "emcc": null,
+    "benchmark_sha256": "af0c75fc4ec89dfc54f5e440ea07059fce9bf0ebc660303a44508a192fd30b11",
+    "cargo_lock_sha256": "8e55e43be2f8ac54e9775e56192cc260d046bf2d324a184aa0b424945f160814",
+    "runtime_sources_sha256": "01bd377024ba7b96a5c5a5f0998d21470a854679401159e85b2fe21c8740204b",
+    "profile": "bench (workspace release, thin LTO, one codegen unit, debug information)",
+    "container": null,
+    "jvm": null,
+    "artifacts": [
+      {
+        "name": "nori_persistent-0174df972d89f4ce",
+        "bytes": 94362056,
+        "sha256": "32c9d94ba90e87ae33cdf8e8b5b3a174db478215aa252aee00359efeacebaa76"
+      }
+    ],
+    "benchmark_sources": {
+      "crates/uqa-storage-sqlite/benches/nori_persistent.rs": "efd5fbc52ef2eb75eab0288f7c1fd52bf044147a12b4eeba9011fbd7fa351765",
+      "benchmarks/nori/persistent.rs": "c3da36bd5c3bf37308ffcc2446a6bd4725d300cfde02d6b0fb1cad6c1a572adc"
+    }
+  },
+  "gate": {
+    "allocation_and_graph_passed": true,
+    "timing_compared": false,
+    "timing_ratios": {}
+  }
+}

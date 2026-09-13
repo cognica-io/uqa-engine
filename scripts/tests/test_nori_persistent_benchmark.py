@@ -32,8 +32,8 @@ def fixture(provider="sqlite"):
               "analyzer_fingerprint": "b" * 64, "measurements": rows,
               "provenance": {"cpu": "CPU", "platform": "platform", "rustc": "rustc", "flags": {}, "flags_sha256": benchmark.common.flags_signature({}), "node": None, "emcc": None, "benchmark_sha256": "c" * 64}}
     limits = {key: report[key] for key in ("schema_version", "corpus_sha256", "analyzer_fingerprint")}
-    limits.update(timing_max_ratio=1.25,
-                  allocation_ceilings={"64": {row["name"]: dict(row["allocation"]) for row in rows}},
+    limits.update(schema_version=2, timing_max_ratio=1.25,
+                  allocation_ceilings={benchmark.target_key(report): {row["name"]: dict(row["allocation"]) for row in rows}},
                   outputs={row["name"]: {key: row[key] for key in ("graph_sha256", "field_length", "posting_count")} for row in rows})
     return report, limits
 
@@ -77,13 +77,37 @@ class NoriPersistentBenchmarkTest(unittest.TestCase):
         report, limits = fixture()
         for key in benchmark.index.ALLOCATION_KEYS:
             changed = copy.deepcopy(limits)
-            changed["allocation_ceilings"]["64"][report["measurements"][0]["name"]][key] -= 1
+            changed["allocation_ceilings"][benchmark.target_key(report)][report["measurements"][0]["name"]][key] -= 1
             with self.subTest(key=key), self.assertRaisesRegex(RuntimeError, "allocation regression"):
                 benchmark.check(report, changed, "sqlite")
         baseline = copy.deepcopy(report)
         report["measurements"][0].update(elapsed_ns=[2000] * 7, median_ns=2000)
         with self.assertRaisesRegex(RuntimeError, "timing regression"):
             benchmark.check(report, limits, "sqlite", baseline)
+
+    def test_platform_limits_do_not_raise_another_platforms_ceiling(self):
+        report, limits = fixture("redb")
+        linux = copy.deepcopy(report)
+        linux.update(target_os="linux", target_arch="x86_64")
+        for row in linux["measurements"]:
+            row["allocation"]["bytes_net"] += 1
+        limits["allocation_ceilings"][benchmark.target_key(linux)] = {
+            row["name"]: dict(row["allocation"]) for row in linux["measurements"]}
+        self.assertTrue(benchmark.check(linux, limits, "redb")["allocation_and_graph_passed"])
+        self.assertTrue(benchmark.check(report, limits, "redb")["allocation_and_graph_passed"])
+        report["measurements"][0]["allocation"]["bytes_net"] += 1
+        with self.assertRaisesRegex(RuntimeError, "allocation regression"):
+            benchmark.check(report, limits, "redb")
+
+    def test_unknown_targets_and_width_only_limits_require_calibration(self):
+        report, limits = fixture()
+        for key, value in (("target_os", "linux"), ("target_arch", "x86_64"), ("pointer_bits", 32)):
+            changed = {**report, key: value}
+            with self.subTest(key=key), self.assertRaisesRegex(RuntimeError, "no reviewed.*target"):
+                benchmark.check(changed, limits, "sqlite")
+        limits["schema_version"] = 1
+        with self.assertRaisesRegex(RuntimeError, "target-specific calibration"):
+            benchmark.check(report, limits, "sqlite")
 
     def test_disk_observations_and_comparison_scope_cannot_be_omitted(self):
         for key in ("closed_seed_file_bytes", "closed_result_file_bytes"):
@@ -147,9 +171,12 @@ class NoriPersistentBenchmarkTest(unittest.TestCase):
         mapping = dict(zip(benchmark.EXPECTED, ("build_points/256", "append_batch_16/256", "append_batch_16/2048", "build_points/2048")))
         self.assertEqual(set(limits), {"sqlite", "redb"})
         for provider, rule in limits.items():
-            self.assertEqual(set(rule["allocation_ceilings"]), {"32", "64"} if provider == "sqlite" else {"64"})
+            targets = {"macos/aarch64/64", "linux/x86_64/64"}
+            if provider == "sqlite":
+                targets.add("emscripten/wasm32/32")
+            self.assertEqual(set(rule["allocation_ceilings"]), targets)
             records = rule["calibration"]["reports"]
-            self.assertEqual(len(records), 4 if provider == "sqlite" else 3)
+            self.assertEqual(len(records), 6 if provider == "sqlite" else 5)
             reports = []
             for record in records:
                 path = ROOT / record["path"]
@@ -157,23 +184,27 @@ class NoriPersistentBenchmarkTest(unittest.TestCase):
                 report = json.loads(path.read_text())
                 reports.append(report)
                 self.assertTrue(benchmark.check(report, rule, provider)["allocation_and_graph_passed"])
-                self.assertTrue(report["gate"]["allocation_and_graph_passed"])
+                self.assertEqual(report["gate"]["allocation_and_graph_passed"], record.get("gate_passed_at_collection", True))
             if provider == "redb":
                 record = rule["calibration"]["allocation_reference"]
                 path = ROOT / record["path"]
                 self.assertEqual(benchmark.common.digest(path), record["sha256"])
                 reference = json.loads(path.read_text())
                 self.assertTrue(benchmark.index.check(
-                    reference, rule, expected=benchmark.EXPECTED, owner=f"uqa-storage-{provider}"
+                    reference, benchmark.target_limits(reference, rule), expected=benchmark.EXPECTED, owner=f"uqa-storage-{provider}"
                 )["allocation_and_graph_passed"])
                 with self.assertRaisesRegex(RuntimeError, "compiler-flag identity"):
                     benchmark.check(reference, rule, provider)
                 for report in reports:
+                    if benchmark.target_key(report) != benchmark.target_key(reference):
+                        continue
                     for key in ("artifacts", "runtime_sources_sha256", "benchmark_sources", "cpu", "rustc"):
                         self.assertEqual(reference["provenance"][key], report["provenance"][key])
                 reports.append(reference)
-            for width, ceilings in rule["allocation_ceilings"].items():
-                matching = [r for r in reports if str(r["pointer_bits"]) == width]
+            for target, ceilings in rule["allocation_ceilings"].items():
+                matching = [r for r in reports if benchmark.target_key(r) == target]
+                self.assertGreaterEqual(len(matching), 2)
+                self.assertGreaterEqual(len({r["provenance"]["measured_at_utc"] for r in matching}), 2)
                 for name, ceiling in ceilings.items():
                     rows = [next(row for row in r["measurements"] if row["name"] == name) for r in matching]
                     for key, value in ceiling.items():
