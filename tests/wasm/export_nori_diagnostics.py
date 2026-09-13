@@ -5,16 +5,22 @@
 # Copyright (c) 2023-2026 Cognica, Inc.
 #
 
-"""Print the browser corpus contract through an installed native Python binding."""
+"""Print and optionally verify the corpus contract through an installed native Python binding."""
 
+import argparse
+import difflib
 import hashlib
 import json
 from pathlib import Path
+import sys
 
 import uqa
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", type=Path, help="compare with this reviewed contract and print any difference")
+    args = parser.parse_args()
     corpus_path = Path(__file__).resolve().parents[2] / "crates/uqa-analysis/benches/nori/corpus.json"
     corpus = json.loads(corpus_path.read_text(encoding="utf-8"))
     engine = uqa.Engine()
@@ -34,8 +40,15 @@ def main():
                                "diagnostic_sha256": hashlib.sha256(encoded).hexdigest()})
     finally:
         engine.close()
-    print(json.dumps({"schema_version": 1, "corpus_sha256": hashlib.sha256(corpus_path.read_bytes()).hexdigest(), "checks": checks},
-                     ensure_ascii=False, indent=2))
+    actual = {"schema_version": 1, "corpus_sha256": hashlib.sha256(corpus_path.read_bytes()).hexdigest(), "checks": checks}
+    print(json.dumps(actual, ensure_ascii=False, indent=2))
+    if args.check:
+        expected = json.loads(args.check.read_text(encoding="utf-8"))
+        if actual != expected:
+            before = json.dumps(expected, sort_keys=True, indent=2).splitlines(keepends=True)
+            after = json.dumps(actual, sort_keys=True, indent=2).splitlines(keepends=True)
+            sys.stderr.writelines(difflib.unified_diff(before, after, fromfile="expected", tofile="native"))
+            raise SystemExit("Native Nori diagnostic identity differs from the reviewed corpus")
 
 
 if __name__ == "__main__":

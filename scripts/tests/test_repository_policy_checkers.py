@@ -40,8 +40,12 @@ LICENSES = load_script("uqa_check_release_licenses", "check-release-licenses.py"
 
 
 class RepositoryPolicyCheckerTest(unittest.TestCase):
-    def test_binding_attribution_survives_windows_checkout_conversion(self) -> None:
-        paths = {"crates/uqa-analysis/THIRD-PARTY/LUCENE-SOURCE.md"}
+    def test_nori_byte_identities_survive_windows_checkout_conversion(self) -> None:
+        paths = {"crates/uqa-analysis/THIRD-PARTY/LUCENE-SOURCE.md",
+                 "crates/uqa-analysis/benches/nori/corpus.json"}
+        for directory in (ROOT / "tests/parity/nori", ROOT / "benchmarks/nori"):
+            paths.update(path.relative_to(ROOT).as_posix() for path in directory.rglob("*")
+                         if path.suffix in (".json", ".jsonl"))
         for directory in LICENSES.BINDING_PACKAGES:
             paths.update((directory / relative).relative_to(ROOT).as_posix()
                          for relative in LICENSES.binding_nori_payloads())

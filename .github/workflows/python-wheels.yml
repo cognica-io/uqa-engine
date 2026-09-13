@@ -79,8 +79,15 @@ jobs:
           for example in examples/python/*.py; do
             python "$example"
           done
-          python tests/wasm/export_nori_diagnostics.py > nori-browser-native-diagnostics.json
-          python -c 'import json; assert json.load(open("nori-browser-native-diagnostics.json")) == json.load(open("benchmarks/nori/browser-contract.json"))'
+          python tests/wasm/export_nori_diagnostics.py --check benchmarks/nori/browser-contract.json > nori-browser-native-diagnostics.json
+
+      - name: Retain native Nori diagnostic evidence
+        if: ${{ always() && hashFiles('nori-browser-native-diagnostics.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nori-python-smoke-${{ github.sha }}
+          path: nori-browser-native-diagnostics.json
+          if-no-files-found: error
 
       - name: Build and test the Python wheel without Nori
         run: |
@@ -201,8 +208,15 @@ jobs:
           for example in examples/python/*.py; do
             python "$example"
           done
-          python tests/wasm/export_nori_diagnostics.py > nori-browser-native-diagnostics.json
-          python -c 'import json; assert json.load(open("nori-browser-native-diagnostics.json")) == json.load(open("benchmarks/nori/browser-contract.json"))'
+          python tests/wasm/export_nori_diagnostics.py --check benchmarks/nori/browser-contract.json > nori-browser-native-diagnostics.json
+
+      - name: Retain native Nori diagnostic evidence
+        if: ${{ always() && hashFiles('nori-browser-native-diagnostics.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nori-python-${{ matrix.target }}-${{ github.sha }}
+          path: nori-browser-native-diagnostics.json
+          if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
         with:

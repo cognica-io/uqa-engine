@@ -111,6 +111,7 @@ while IFS= read -r path; do
   [[ -n "$path" ]] || continue
 
   case "$path" in
+    .gitattributes | \
     Cargo.toml | \
     Cargo.lock | \
     crates/*/Cargo.toml | \

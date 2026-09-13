@@ -36,3 +36,10 @@ crates/uqa-analysis/THIRD-PARTY/LUCENE-SOURCE.md text eol=lf
 crates/uqa-node/THIRD-PARTY/** -text -whitespace linguist-vendored
 crates/uqa-wasm/js/THIRD-PARTY/** -text -whitespace linguist-vendored
 python/uqa/THIRD-PARTY/** -text -whitespace linguist-vendored
+
+# Nori fixture and evidence identities hash the exact checked-out bytes.
+crates/uqa-analysis/benches/nori/corpus.json text eol=lf
+tests/parity/nori/**/*.json text eol=lf
+tests/parity/nori/**/*.jsonl text eol=lf
+benchmarks/nori/**/*.json text eol=lf
+benchmarks/nori/**/*.jsonl text eol=lf
