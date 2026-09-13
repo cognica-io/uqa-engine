@@ -391,8 +391,9 @@ class PremergeCITest(unittest.TestCase):
                 self.assertTrue(any("ci.yml" in item and "run_rust=true" in item for item in invocations))
                 self.assertTrue(any("javascript-bindings.yml" in item for item in invocations))
 
-    def test_nori_bundle_inputs_select_all_runtime_bindings(self) -> None:
-        for path in ("crates/uqa-nori-data/data/nori.uqan", "crates/uqa-nori-data/data/resource_manifest.json"):
+    def test_nori_resource_and_binding_inputs_select_all_runtime_bindings(self) -> None:
+        for path in ("crates/uqa-nori-data/data/nori.uqan", "crates/uqa-nori-data/data/resource_manifest.json",
+                     "tests/parity/nori/bindings.json", "tests/parity/nori/bindings.mjs"):
             result, invocations, _ = self.run_script(changed_files=(path,))
             with self.subTest(path=path):
                 self.assertEqual(result.returncode, 0, result.stderr)

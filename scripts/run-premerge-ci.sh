@@ -143,6 +143,7 @@ while IFS= read -r path; do
     crates/uqa-wasm/* | \
     tests/node/* | \
     tests/wasm/* | \
+    tests/parity/nori/bindings.* | \
     examples/node/* | \
     examples/browser/* | \
     benchmarks/nori/* | \
@@ -160,6 +161,7 @@ while IFS= read -r path; do
     python/* | \
     crates/uqa-python/* | \
     tests/python/* | \
+    tests/parity/nori/bindings.* | \
     examples/python/* | \
     .github/workflows/python-wheels.yml)
       run_python=true

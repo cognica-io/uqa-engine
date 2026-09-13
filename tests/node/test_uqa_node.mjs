@@ -11,6 +11,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { runNoriBindings } from "../parity/nori/bindings.mjs";
 
 const require = createRequire(import.meta.url);
 const uqa = require("../../crates/uqa-node");
@@ -319,6 +320,15 @@ test("native Nori diagnostics reach the Node binding", async () => {
   assert.equal(analysis.analyzer_fingerprint.length, 64);
   assert.equal(analysis.final_offsets.utf16.end, 3);
   assert.ok(analysis.tokens.some((token) => "korean_morphology" in token));
+});
+
+test("Nori user dictionaries and retained graph revisions survive Node reopen", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "uqa-node-nori-"));
+  try {
+    await runNoriBindings((path) => uqa.open(path), join(dir, "nori.db"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("async errors reject the promise", async () => {

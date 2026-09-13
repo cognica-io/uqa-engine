@@ -1,6 +1,6 @@
 # Lucene Nori reference examples
 
-These fixtures support the [Nori analyzer design](../../../docs/design/nori-analyzer.md). The original 31 cases record actual Lucene 10.5.1 tokenizer, filter, analyzer, and normalization results. Separate expanded corpora compare native Rust user-dictionary compilation, standalone tokenization, complete Korean analysis, number composition, and normalization against Lucene. Generic analyzer integration, storage, binding, and performance acceptance remains in the [implementation plan](../../../docs/plans/0006-nori-analyzer.md).
+These fixtures support the [Nori analyzer design](../../../docs/design/nori-analyzer.md). The original 31 cases record actual Lucene 10.5.1 tokenizer, filter, analyzer, and normalization results. Separate expanded corpora compare native Rust user-dictionary compilation, standalone tokenization, complete Korean analysis, number composition, and normalization against Lucene. The [persistent binding contract](BINDINGS.md) runs the same user-dictionary, diagnostic, graph-search, failure, and reopen scenario through Rust, Python, Node.js, and WASM. Remaining acceptance is tracked in the [implementation plan](../../../docs/plans/0006-nori-analyzer.md).
 
 `manifest.json` pins the Lucene source commit, three Maven Central jar hashes, the Docker image digest, the JVM runtime, and the dictionary resources. `NoriReference.java` uses Lucene's real `KoreanAnalyzer`, tokenizer, filters, and token attributes. `expected.jsonl` records the runtime followed by the case results; offsets are UTF-16 code units. The dictionary archive's `COPYING` was inspected and identifies Apache-2.0. The fixture runner only downloads the three jars; it does not download or rebuild the dictionary archive.
 
@@ -24,7 +24,7 @@ The 31 cases were reproduced on both `linux/arm64` and `linux/amd64` Docker plat
 
 The cases cover compound modes, inflections, POS stop gaps and trailing positions, Hanja readings, unknown unigrams, punctuation and spaces, user dictionary precedence and segmentation rules, Unicode lowercase and supplementary characters, decomposed Hangul, Korean numbers, empty input, and `KoreanAnalyzer.normalize`. For example, shortened user segmentations retain Lucene's surprising offsets, and number composition after punctuation removal can produce an unintended value. These observations constrain the port and the documented configuration examples.
 
-The [complete model exporter](MODEL.md) adds exhaustive dictionary, connection-cost, character-definition, and Java Unicode extraction with a reproducible manifest. It uses the same pinned inputs and Docker-only JVM. The native bundle reconstructs every exported model value. Storage migration, full analyzer and binding execution, and performance measurements remain implementation work.
+The [complete model exporter](MODEL.md) adds exhaustive dictionary, connection-cost, character-definition, and Java Unicode extraction with a reproducible manifest. It uses the same pinned inputs and Docker-only JVM. The native bundle reconstructs every exported model value. Storage migration and analyzer integration are exercised in their owning suites; the implementation plan records remaining performance, browser-host, and release requirements.
 
 ## Native user dictionaries and tokenization
 
@@ -61,7 +61,7 @@ python3 tests/parity/nori/run_analysis_reference.py --offline --platform linux/a
 cargo test -p uqa-analysis --features nori --locked nori_analysis
 ```
 
-Both Docker platforms produced the same 423 results and the native implementation matches them. The eight original full-analyzer examples also pass directly against their original reference file. Native regressions additionally cover present-empty readings, left-versus-right POS selection, stacked edges, trailing holes, checked position overflow, cancellation, bounds, and strict configuration properties. Generic pipeline/binding integration remains an open acceptance item.
+Both Docker platforms produced the same 423 results and the native implementation matches them. The eight original full-analyzer examples also pass directly against their original reference file. Native regressions additionally cover present-empty readings, left-versus-right POS selection, stacked edges, trailing holes, checked position overflow, cancellation, bounds, and strict configuration properties. Generic pipeline tests live in `uqa-analysis`, and the [persistent binding contract](BINDINGS.md) covers SQL resource delivery and retained revisions across language APIs.
 
 ## Exact Korean numbers and shared filter state
 

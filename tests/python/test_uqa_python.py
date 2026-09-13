@@ -258,6 +258,33 @@ def test_native_nori_diagnostics_reach_python_binding() -> None:
     assert any("korean_morphology" in token for token in analysis["tokens"])
 
 
+def test_nori_user_dictionary_and_retained_graph_revisions_survive_reopen(tmp_path):
+    fixture = json.loads(
+        (Path(__file__).parents[1] / "parity/nori/bindings.json").read_text(encoding="utf-8")
+    )
+    assert fixture["schema_version"] == 1
+    path = tmp_path / "nori.db"
+    engine = uqa.open(path)
+    try:
+        for step in fixture["enabled"]:
+            if step.get("reopen"):
+                engine.close()
+                engine = None
+                engine = uqa.open(path)
+            elif "error_contains" in step:
+                with pytest.raises(RuntimeError) as error:
+                    engine.sql(step["sql"], step.get("params", []))
+                assert step["error_contains"] in str(error.value), step["name"]
+            else:
+                result = engine.sql(step["sql"], step.get("params", []))
+                if "rows_ref" in step or "rows" in step:
+                    expected = fixture[step["rows_ref"]] if "rows_ref" in step else step["rows"]
+                    assert result.rows == expected, step["name"]
+    finally:
+        if engine is not None:
+            engine.close()
+
+
 def test_persistent_open_and_batch(tmp_path) -> None:
     path = tmp_path / "uqa.db"
     engine = uqa.open(path)

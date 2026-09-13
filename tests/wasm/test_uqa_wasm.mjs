@@ -11,6 +11,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { runNoriBindings } from "../parity/nori/bindings.mjs";
 
 import {
   Engine,
@@ -311,6 +312,10 @@ test("native Nori diagnostics reach the browser WASM binding", async () => {
   assert.equal(analysis.analyzer_fingerprint.length, 64);
   assert.equal(analysis.final_offsets.utf16.end, 3);
   assert.ok(analysis.tokens.some((token) => "korean_morphology" in token));
+});
+
+test("Nori user dictionaries and retained graph revisions survive WASM reopen", async () => {
+  await runNoriBindings((path) => Engine.open(path), `${UQA.persistDir}/nori-bindings.db`);
 });
 
 test("value round-trip through documents", async () => {

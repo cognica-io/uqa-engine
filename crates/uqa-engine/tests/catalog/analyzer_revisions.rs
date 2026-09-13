@@ -16,6 +16,8 @@ use uqa_storage_redb::RedbStorage;
 
 const KEYWORD: &str = r#"{"tokenizer":{"type":"keyword"}}"#;
 
+#[path = "analyzer_revisions/binding_parity.rs"]
+mod binding_parity;
 #[path = "analyzer_revisions/migration.rs"]
 mod migration;
 
