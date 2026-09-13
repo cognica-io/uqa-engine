@@ -6,21 +6,17 @@
 
 //! Text, vector, and hybrid retrieval orchestration.
 
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::time::Instant;
 
 use super::{
-    Arc, BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, CalibrationMetrics,
-    CalibrationReport, DocId, Engine, ExecutionContext, HybridSearchParams, InvertedIndex,
-    ParameterLearner, PostingList, RawBm25Score, RobustHybridSearchParams, SQLError, ScoredEntry,
-    Scorer, ScoringMode, StorageBackendError, StorageBackendResult, TextSearchAlgorithm,
-    TextSearchProfile, UnsupervisedBm25ScoreEstimator,
+    Arc, BM25Params, BayesianBM25Params, BayesianBM25Scorer, CalibrationMetrics, CalibrationReport,
+    DocId, Engine, ExecutionContext, HybridSearchParams, ParameterLearner, RawBm25Score,
+    RobustHybridSearchParams, SQLError, ScoredEntry, ScoringMode, StorageBackendError,
+    TextSearchAlgorithm, TextSearchProfile, UnsupervisedBm25ScoreEstimator,
 };
-use uqa_core::IndexStats;
 use uqa_operators::{OperatorTree, TextScoringMode, TextTopKPlan, TextTopKStrategy};
-use uqa_scoring::{CursorBlockMaxWANDScorer, CursorWANDQuery, CursorWANDScorer, WANDStats};
-use uqa_storage::{BlockMaxIndex, DEFAULT_BLOCK_SIZE};
+use uqa_storage::{inverted_index::analyze_query_terms, TokenTermKey};
 
 mod calibration;
 mod context;
@@ -28,10 +24,7 @@ mod helpers;
 mod hybrid;
 mod learning;
 mod search_api;
-mod text_scoring;
 mod top_k;
 mod vector;
 
 pub(crate) use helpers::storage_sql_error;
-
-use helpers::{block_max_scorer_fingerprint, raw_bm25_params, search_stats_for_terms};

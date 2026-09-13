@@ -23,7 +23,7 @@ fn decode_legacy_positions(blob: &[u8]) -> Result<Vec<u32>> {
 }
 
 fn insert_migrated_cluster(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     cluster: (String, String, String, u64, Vec<ClusterPosting>),
 ) -> Result<()> {
     let (table, field, term, cluster_id, postings) = cluster;
@@ -48,7 +48,7 @@ fn insert_migrated_cluster(
 }
 
 fn insert_migrated_document_terms(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     document: (String, i64, String, Vec<String>),
 ) -> Result<()> {
     let (table, doc_id, field, terms) = document;
@@ -62,7 +62,7 @@ fn insert_migrated_document_terms(
     Ok(())
 }
 
-fn migrate_legacy_clusters_v22(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+fn migrate_legacy_clusters_v22(tx: &rusqlite::Connection) -> Result<()> {
     let mut statement = tx.prepare(
         "SELECT posting.table_name, posting.field, posting.term,
                 posting.doc_id, posting.positions, lengths.length
@@ -121,7 +121,7 @@ fn migrate_legacy_clusters_v22(tx: &rusqlite::Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
-fn migrate_legacy_document_terms_v22(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+fn migrate_legacy_document_terms_v22(tx: &rusqlite::Connection) -> Result<()> {
     let mut statement = tx.prepare(
         "SELECT table_name, doc_id, field, term
            FROM _postings
@@ -196,7 +196,7 @@ pub(in crate::catalog::migration) fn clustered_posting_tables_have_current_shape
     Ok(posting_clusters_ok && posting_documents_ok)
 }
 
-pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+pub(super) fn migrate(tx: &rusqlite::Connection) -> Result<()> {
     let legacy_postings_exist = table_exists(tx, "_postings")?;
     if !legacy_postings_exist && clustered_posting_tables_have_current_shape(tx)? {
         return Ok(());

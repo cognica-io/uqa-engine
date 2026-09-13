@@ -61,6 +61,10 @@ pub trait RetrievalSnapshots: Sync {
 }
 
 pub trait RetrievalIndexes: Sync {
+    fn query_table_indexes(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Option<Box<dyn RetrievalIndexState>>>;
     fn table_indexes(
         &self,
         table: &str,
@@ -115,6 +119,7 @@ pub trait RetrievalModels: Sync {
 
 #[derive(Clone, Copy)]
 pub struct PhysicalDriverContext<'a> {
+    pub runtime: crate::query::runtime::QueryRuntimeView<'a>,
     pub relations: &'a dyn RetrievalRelations,
     pub snapshots: &'a dyn RetrievalSnapshots,
     pub indexes: &'a dyn RetrievalIndexes,

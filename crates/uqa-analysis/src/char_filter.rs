@@ -7,12 +7,17 @@
 //! Character-level filters that run before tokenization.
 
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
 
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{AnalysisError, AnalysisResult};
+use crate::error::AnalysisResult;
+use crate::FilteredText;
+use uqa_core::memory::MemoryBudget;
+
+mod compiled;
+mod replacement;
+mod stream;
+pub(crate) use compiled::PreparedCharFilter;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -35,57 +40,62 @@ impl CharFilter {
     /// Validate configuration without filtering input.
     pub fn validate(&self) -> AnalysisResult<()> {
         match self {
-            CharFilter::PatternReplace { pattern, .. } => {
-                Regex::new(pattern)
-                    .map(|_| ())
-                    .map_err(|source| AnalysisError::InvalidRegex {
-                        component: "pattern-replace character filter",
-                        pattern: pattern.clone(),
-                        source,
-                    })
-            }
+            CharFilter::PatternReplace { .. } => self.prepare().map(|_| ()),
             _ => Ok(()),
         }
     }
 
     pub fn filter(&self, text: &str) -> AnalysisResult<String> {
-        let filtered = match self {
-            CharFilter::HTMLStrip => {
-                let stripped = html_tag_re()?.replace_all(text, " ").into_owned();
-                replace_entities(&stripped)
-            }
-            CharFilter::Mapping { mapping } => {
-                let ordered = mapping_longest_first(mapping);
-                let mut out = text.to_owned();
-                for (old, new) in ordered {
-                    out = out.replace(&old, &new);
-                }
-                out
-            }
-            CharFilter::PatternReplace {
-                pattern,
-                replacement,
-            } => Regex::new(pattern)
-                .map_err(|source| AnalysisError::InvalidRegex {
-                    component: "pattern-replace character filter",
-                    pattern: pattern.clone(),
-                    source,
-                })?
-                .replace_all(text, replacement.as_str())
-                .into_owned(),
-        };
-        Ok(filtered)
+        Ok(self.filter_with_offsets(text)?.into_string())
     }
-}
 
-fn html_tag_re() -> AnalysisResult<&'static Regex> {
-    static RE: OnceLock<Result<Regex, String>> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"<[^>]+>").map_err(|error| error.to_string()))
-        .as_ref()
-        .map_err(|message| AnalysisError::BuiltInRegex {
-            component: "HTML tag filter",
-            message: message.clone(),
-        })
+    /// Transform text while retaining source coordinates for the result.
+    pub fn filter_with_offsets<'a>(&self, text: &'a str) -> AnalysisResult<FilteredText<'a>> {
+        self.filter_mapped(FilteredText::new(text))
+    }
+
+    /// Apply this stage to previously filtered text without losing its original source.
+    pub fn filter_mapped<'a>(&self, text: FilteredText<'a>) -> AnalysisResult<FilteredText<'a>> {
+        self.prepare()?.filter_mapped(text)
+    }
+
+    /// Transform a borrowed input while retaining source buffers and regex search workspace under the caller's byte allowance. Immutable configuration preparation is separate. Literal, built-in HTML, regex range and capture searches, source copying, and coordinate construction poll during execution. Search scratch is released before returning the retained source result.
+    ///
+    /// ```
+    /// use uqa_analysis::CharFilter;
+    /// use uqa_core::memory::MemoryBudget;
+    /// let budget = MemoryBudget::new(16 * 1024);
+    /// let filtered = CharFilter::HTMLStrip.filter_with_offsets_budgeted(
+    ///     "<b>한&amp;🙂</b>", &budget, &mut || Ok(()),
+    /// )?;
+    /// let retained = filtered.clone();
+    /// drop(filtered);
+    /// assert_eq!(retained.as_str(), " 한&🙂 ");
+    /// assert_eq!(retained.source_offsets(1..4)?.utf8, 3..6);
+    /// assert!(budget.used() > 0);
+    /// drop(retained);
+    /// assert_eq!(budget.used(), 0);
+    /// # Ok::<(), uqa_analysis::AnalysisError>(())
+    /// ```
+    pub fn filter_with_offsets_budgeted<'a>(
+        &self,
+        text: &'a str,
+        budget: &MemoryBudget,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<FilteredText<'a>> {
+        self.filter_mapped_budgeted(FilteredText::new(text), budget, poll)
+    }
+
+    /// New source, edit, and coordinate buffers use `budget`; retained input allocations keep their original shared leases.
+    pub fn filter_mapped_budgeted<'a>(
+        &self,
+        text: FilteredText<'a>,
+        budget: &MemoryBudget,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<FilteredText<'a>> {
+        poll()?;
+        self.prepare()?.filter_mapped_budgeted(text, budget, poll)
+    }
 }
 
 const HTML_ENTITIES: &[(&str, &str)] = &[
@@ -97,14 +107,6 @@ const HTML_ENTITIES: &[(&str, &str)] = &[
     ("&apos;", "'"),
     ("&nbsp;", " "),
 ];
-
-fn replace_entities(text: &str) -> String {
-    let mut out = text.to_owned();
-    for (entity, replacement) in HTML_ENTITIES {
-        out = out.replace(entity, replacement);
-    }
-    out
-}
 
 /// Order mapping entries longest-key-first so that, e.g., the rule
 /// `aa -> X` fires before `a -> Y`.

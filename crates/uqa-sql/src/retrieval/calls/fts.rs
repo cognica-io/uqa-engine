@@ -16,66 +16,37 @@ pub(super) fn compile_query_string(
     default_field: Option<&str>,
 ) -> Result<RetrievalExpr, SQLError> {
     let ast = crate::parse_fts_query_string(query)?;
-    Ok(compile(&ast, default_field, &tokenize_phrase))
+    Ok(compile(&ast, default_field))
 }
 
-fn tokenize_phrase(_field: Option<&str>, phrase: &str) -> Vec<String> {
-    phrase
-        .split_whitespace()
-        .map(str::to_ascii_lowercase)
-        .collect()
-}
-
-fn compile(
-    node: &FTSNode,
-    default_field: Option<&str>,
-    phrase_tokenizer: &dyn Fn(Option<&str>, &str) -> Vec<String>,
-) -> RetrievalExpr {
+fn compile(node: &FTSNode, default_field: Option<&str>) -> RetrievalExpr {
     match node {
         FTSNode::Term { field, term } => {
             term_operator(term.clone(), resolve_field(field.as_deref(), default_field))
         }
-        FTSNode::Phrase { field, phrase } => {
-            let resolved = resolve_field(field.as_deref(), default_field);
-            let terms = phrase_tokenizer(resolved.as_deref(), phrase);
-            compile_phrase(terms, resolved)
-        }
+        FTSNode::Phrase { field, phrase } => RetrievalExpr::Phrase {
+            query: phrase.clone(),
+            field: resolve_field(field.as_deref(), default_field),
+            scoring: None,
+        },
         FTSNode::Vector { field, values } => RetrievalExpr::KNN {
             query_vector: values.clone(),
             k: VECTOR_K,
             field: resolve_field(field.as_deref(), default_field)
                 .unwrap_or_else(|| "embedding".into()),
         },
-        FTSNode::And(left, right) => compile_and(left, right, default_field, phrase_tokenizer),
+        FTSNode::And(left, right) => compile_and(left, right, default_field),
         FTSNode::Or(left, right) => RetrievalExpr::Union(vec![
-            compile(left, default_field, phrase_tokenizer),
-            compile(right, default_field, phrase_tokenizer),
+            compile(left, default_field),
+            compile(right, default_field),
         ]),
         FTSNode::Not(operand) => {
-            RetrievalExpr::Complement(Box::new(compile(operand, default_field, phrase_tokenizer)))
+            RetrievalExpr::Complement(Box::new(compile(operand, default_field)))
         }
     }
 }
 
-fn compile_phrase(terms: Vec<String>, field: Option<String>) -> RetrievalExpr {
-    match terms.as_slice() {
-        [] => RetrievalExpr::Empty,
-        [query] => term_operator(query.clone(), field),
-        _ => RetrievalExpr::Intersect(
-            terms
-                .into_iter()
-                .map(|query| term_operator(query, field.clone()))
-                .collect(),
-        ),
-    }
-}
-
-fn compile_and(
-    left: &FTSNode,
-    right: &FTSNode,
-    default_field: Option<&str>,
-    phrase_tokenizer: &dyn Fn(Option<&str>, &str) -> Vec<String>,
-) -> RetrievalExpr {
+fn compile_and(left: &FTSNode, right: &FTSNode, default_field: Option<&str>) -> RetrievalExpr {
     let mut conjuncts = Vec::new();
     collect_conjuncts(left, &mut conjuncts);
     collect_conjuncts(right, &mut conjuncts);
@@ -93,14 +64,14 @@ fn compile_and(
         let text_trees = conjuncts
             .iter()
             .filter(|conjunct| is_text_query_node(conjunct))
-            .map(|conjunct| compile(conjunct, default_field, phrase_tokenizer))
+            .map(|conjunct| compile(conjunct, default_field))
             .collect();
         let mut signals = vec![intersect_or_single(text_trees)];
         signals.extend(
             conjuncts
                 .iter()
                 .filter(|conjunct| matches!(conjunct, FTSNode::Vector { .. }))
-                .map(|conjunct| compile(conjunct, default_field, phrase_tokenizer)),
+                .map(|conjunct| compile(conjunct, default_field)),
         );
         return RetrievalExpr::BayesianEvidenceFusion {
             signals,
@@ -109,8 +80,8 @@ fn compile_and(
     }
 
     RetrievalExpr::Intersect(vec![
-        compile(left, default_field, phrase_tokenizer),
-        compile(right, default_field, phrase_tokenizer),
+        compile(left, default_field),
+        compile(right, default_field),
     ])
 }
 
@@ -162,20 +133,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn phrase_is_lowered_after_whitespace_tokenization() {
+    fn phrase_lowering_preserves_complete_input() {
         let tree = compile_query_string("body:\"Rust Ferris Crab\"", None).unwrap();
-        let RetrievalExpr::Intersect(terms) = tree else {
-            panic!("expected phrase terms to intersect");
-        };
-        assert_eq!(terms.len(), 3);
-        assert!(terms.iter().all(|term| matches!(
-            term,
-            RetrievalExpr::Term {
-                field: Some(field),
-                scoring: None,
-                ..
-            } if field == "body"
-        )));
+        assert!(matches!(tree, RetrievalExpr::Phrase {
+            query, field: Some(field), scoring: None,
+        } if query == "Rust Ferris Crab" && field == "body"));
     }
 
     #[test]

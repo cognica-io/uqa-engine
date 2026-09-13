@@ -13,9 +13,10 @@ use uqa_core::{DocId, FieldName, Payload, PostingEntry, PostingList};
 use uqa_storage::{BlockMaxIndex, PostingCursor, StorageBackendResult};
 
 use crate::scorer::Scorer;
+use uqa_storage::TokenTermKey;
 
 use super::common::{
-    invalid_wand_input, require_nonnegative_finite, update_top_k, WANDResult, WANDStats, INF_DOC,
+    invalid_wand_input, require_nonnegative_finite, update_top_k, WANDResult, WANDStats,
 };
 
 /// WAND query backed directly by score-only posting cursors.
@@ -26,7 +27,7 @@ pub struct CursorWANDQuery {
     pub cursors: Vec<Box<dyn PostingCursor>>,
     pub scorers: Vec<Arc<dyn Scorer>>,
     pub fields: Vec<FieldName>,
-    pub terms: Vec<String>,
+    pub terms: Vec<TokenTermKey>,
     pub k: usize,
 }
 
@@ -36,6 +37,24 @@ impl CursorWANDQuery {
         scorers: Vec<Arc<dyn Scorer>>,
         fields: Vec<FieldName>,
         terms: Vec<String>,
+        k: usize,
+    ) -> StorageBackendResult<Self> {
+        Self::new_keys(
+            cursors,
+            scorers,
+            fields,
+            terms.into_iter().map(TokenTermKey::from).collect(),
+            k,
+        )
+    }
+}
+
+impl CursorWANDQuery {
+    pub fn new_keys(
+        cursors: Vec<Box<dyn PostingCursor>>,
+        scorers: Vec<Arc<dyn Scorer>>,
+        fields: Vec<FieldName>,
+        terms: Vec<TokenTermKey>,
         k: usize,
     ) -> StorageBackendResult<Self> {
         let expected = cursors.len();
@@ -63,8 +82,8 @@ struct ScoreTermCursor {
 }
 
 impl ScoreTermCursor {
-    fn current_doc(&self) -> DocId {
-        self.cursor.current().map_or(INF_DOC, |entry| entry.doc_id)
+    fn current_doc(&self) -> Option<DocId> {
+        self.cursor.current().map(|entry| entry.doc_id)
     }
 
     fn block_ordinal(&self) -> StorageBackendResult<usize> {
@@ -120,7 +139,7 @@ impl<'a> CursorBlockMaxWANDScorer<'a> {
             .iter()
             .zip(&query.terms)
             .map(|(field, term)| {
-                let Some(blocks) = block_max.block_maxes(&self.table, field, term) else {
+                let Some(blocks) = block_max.block_maxes_key(&self.table, field, term) else {
                     return Vec::new();
                 };
                 let mut suffix = vec![0.0_f64; blocks.len()];
@@ -133,11 +152,7 @@ impl<'a> CursorBlockMaxWANDScorer<'a> {
             })
             .collect::<Vec<_>>();
         run_cursor_pivot_loop(query, &mut cursors, |sorted_terms, cursors, bounds| {
-            for &(doc_id, term_index) in sorted_terms {
-                if doc_id == INF_DOC {
-                    bounds.push(0.0);
-                    continue;
-                }
+            for &(_, term_index) in sorted_terms {
                 let block_index =
                     block_max.block_index_for(cursors[term_index].block_ordinal()?)?;
                 let block_bound = suffix_bounds[term_index]
@@ -225,25 +240,20 @@ where
     let mut sorted_terms = cursors
         .iter()
         .enumerate()
-        .map(|(index, cursor)| (cursor.current_doc(), index))
+        .filter_map(|(index, cursor)| cursor.current_doc().map(|doc_id| (doc_id, index)))
         .collect::<Vec<_>>();
     sorted_terms.sort_unstable();
     let mut bounds = Vec::with_capacity(cursors.len());
     let mut term_scores = Vec::with_capacity(cursors.len());
 
-    while sorted_terms
-        .first()
-        .is_some_and(|(doc_id, _)| *doc_id != INF_DOC)
-    {
+    while !sorted_terms.is_empty() {
         bounds.clear();
         if !bound_provider(&sorted_terms, cursors, &mut bounds)? {
-            bounds.extend(sorted_terms.iter().map(|&(doc_id, term_index)| {
-                if doc_id == INF_DOC {
-                    0.0
-                } else {
-                    cursors[term_index].upper_bound
-                }
-            }));
+            bounds.extend(
+                sorted_terms
+                    .iter()
+                    .map(|&(_, term_index)| cursors[term_index].upper_bound),
+            );
         }
         let Some(pivot_index) = select_cursor_pivot(query, &sorted_terms, &bounds, threshold)?
         else {
@@ -259,12 +269,10 @@ where
             update_top_k(&mut top_k, query.k, score, pivot_doc, &mut threshold);
             for sorted in &mut sorted_terms {
                 let term_index = sorted.1;
-                if cursors[term_index].current_doc() == pivot_doc {
+                if cursors[term_index].current_doc() == Some(pivot_doc) {
                     cursors[term_index].cursor.advance()?;
-                    sorted.0 = cursors[term_index].current_doc();
                 }
             }
-            sorted_terms.sort_unstable();
         } else {
             let term_index = sorted_terms[0].1;
             cursors[term_index].cursor.advance_to(pivot_doc)?;
@@ -272,9 +280,16 @@ where
                 .cursor_advances
                 .checked_add(1)
                 .ok_or_else(|| invalid_wand_input("cursor-advance counter overflowed"))?;
-            sorted_terms[0].0 = cursors[term_index].current_doc();
-            sorted_terms.sort_unstable();
         }
+        sorted_terms.retain_mut(|(doc_id, term_index)| {
+            if let Some(current) = cursors[*term_index].current_doc() {
+                *doc_id = current;
+                true
+            } else {
+                false
+            }
+        });
+        sorted_terms.sort_unstable();
     }
 
     let mut entries = top_k
@@ -306,10 +321,7 @@ fn select_cursor_pivot(
     for bound in bounds {
         require_nonnegative_finite(*bound, "cursor WAND pruning bound")?;
     }
-    for (index, &(doc_id, _)) in sorted_terms.iter().enumerate() {
-        if doc_id == INF_DOC {
-            break;
-        }
+    for index in 0..sorted_terms.len() {
         let cumulative = query.scorers[0].finalize_upper_bound(&bounds[..=index]);
         require_nonnegative_finite(cumulative, "cursor WAND cumulative upper bound")?;
         if cumulative >= threshold {
@@ -335,7 +347,7 @@ fn score_cursor_document(
         }
         let term_score = query.scorers[index].term_score(
             entry.term_freq,
-            entry.doc_length.max(entry.term_freq),
+            entry.doc_length,
             cursor.cursor.doc_freq(),
         );
         require_nonnegative_finite(term_score, "cursor WAND term score")?;

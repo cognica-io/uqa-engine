@@ -39,10 +39,27 @@ fn create_and_list_analyzers() {
         })
         .collect();
     assert!(listed.contains(&"rs_my_test_analyzer".to_string()));
-    for builtin in ["keyword", "standard", "standard_cjk", "whitespace"] {
-        assert!(listed.iter().any(|name| name == builtin));
+    for builtin in uqa_analysis::builtin_analyzer_names() {
+        assert!(listed.iter().any(|name| name == &builtin));
     }
     let _ = run_one(&eng, "SELECT * FROM drop_analyzer('rs_my_test_analyzer')");
+}
+
+#[test]
+fn catalog_names_cannot_shadow_builtins() {
+    let engine = Engine::new();
+    for name in uqa_analysis::builtin_analyzer_names() {
+        let error = engine
+            .register_named_analyzer(
+                &name,
+                r#"{"tokenizer":{"type":"keyword"},"token_filters":[]}"#,
+            )
+            .unwrap_err();
+        assert!(
+            error.contains("cannot overwrite built-in analyzer"),
+            "{name}: {error}"
+        );
+    }
 }
 
 #[test]
@@ -135,7 +152,7 @@ fn missing_synonym_file_is_rejected_before_registration() {
 }
 
 #[test]
-fn runtime_analyzer_failure_does_not_publish_a_partial_update() {
+fn installed_analyzer_revision_survives_file_removal_during_update_and_search() {
     let engine = Engine::new();
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("synonyms.txt");
@@ -159,28 +176,26 @@ fn runtime_analyzer_failure_does_not_publish_a_partial_update() {
         .sql("CREATE INDEX docs_body_gin ON docs USING gin (body)", &[])
         .unwrap();
     engine
-        .set_table_field_analyzer("docs", "body", "file_synonyms", "index")
+        .set_table_field_analyzer("docs", "body", "file_synonyms", "both")
         .unwrap();
     engine
         .sql("INSERT INTO docs VALUES (1, 'old')", &[])
         .unwrap();
 
     std::fs::remove_file(&path).unwrap();
-    let error = engine
-        .sql("UPDATE docs SET body = 'new' WHERE id = 1", &[])
-        .expect_err("missing analyzer input must abort the update");
-    assert!(error.to_string().contains("synonym file"), "{error}");
+    engine
+        .sql("UPDATE docs SET body = 'legacy' WHERE id = 1", &[])
+        .unwrap();
+    assert!(engine
+        .register_named_analyzer("file_synonyms", &config)
+        .unwrap_err()
+        .contains("synonym file"));
 
     let stored = engine.get_document("docs", 1).unwrap().unwrap();
     assert_eq!(
         stored.get("body"),
-        Some(&uqa_core::Value::Str("old".into()))
+        Some(&uqa_core::Value::Str("legacy".into()))
     );
-    // Search analysis intentionally uses the index analyzer when no separate
-    // search-phase analyzer is configured. Restore its external resource so
-    // the assertions below inspect the committed postings rather than merely
-    // re-observing the expected missing-resource error.
-    std::fs::write(&path, "old, legacy\n").unwrap();
     assert_eq!(
         engine
             .sql("SELECT id FROM docs WHERE text_match(body, 'old')", &[],)
@@ -197,24 +212,14 @@ fn runtime_analyzer_failure_does_not_publish_a_partial_update() {
 }
 
 #[test]
-fn runtime_analyzer_failure_rolls_back_a_persistent_copy_batch() {
+fn posting_failure_rolls_back_a_persistent_copy_batch() {
     let directory = TempDir::new().unwrap();
-    let database = directory.path().join("batch-analyzer-failure.db");
-    let synonyms = directory.path().join("batch-synonyms.txt");
-    std::fs::write(&synonyms, "old, legacy\n").unwrap();
-    let config = serde_json::json!({
-        "tokenizer": {"type": "whitespace"},
-        "token_filters": [{
-            "type": "synonym",
-            "synonyms_path": synonyms,
-        }],
-    })
-    .to_string();
-
+    let database = directory.path().join("batch-posting-failure.db");
+    let config = r#"{"tokenizer":{"type":"whitespace"},"token_filters":[{"type":"synonym","synonyms":{"old":["legacy"]}}]}"#;
     {
         let engine = Engine::open(&database).unwrap();
         engine
-            .register_named_analyzer("batch_file_synonyms", &config)
+            .register_named_analyzer("batch_synonyms", config)
             .unwrap();
         engine
             .sql(
@@ -229,18 +234,22 @@ fn runtime_analyzer_failure_rolls_back_a_persistent_copy_batch() {
             )
             .unwrap();
         engine
-            .set_table_field_analyzer("batch_docs", "body", "batch_file_synonyms", "index")
+            .set_table_field_analyzer("batch_docs", "body", "batch_synonyms", "both")
             .unwrap();
-        std::fs::remove_file(&synonyms).unwrap();
-
+        ManagedConnection::open(&database).unwrap().with(|connection| {
+            connection.execute_batch("CREATE TRIGGER reject_copy_postings BEFORE INSERT ON _occurrence_clusters BEGIN SELECT RAISE(ABORT, 'forced COPY posting failure'); END;")?;
+            Ok(())
+        }).unwrap();
         let error = engine
             .copy_from(
                 "COPY batch_docs (id, body) FROM STDIN",
                 b"1\tfirst\n2\tsecond\n".as_slice(),
             )
-            .expect_err("missing analyzer input must abort the COPY batch");
-        assert!(error.to_string().contains("synonym file"), "{error}");
-        std::fs::write(&synonyms, "old, legacy\n").unwrap();
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("forced COPY posting failure"),
+            "{error}"
+        );
         assert_eq!(
             engine
                 .sql("SELECT count(*) AS n FROM batch_docs", &[])
@@ -248,8 +257,15 @@ fn runtime_analyzer_failure_rolls_back_a_persistent_copy_batch() {
                 .rows[0]["n"],
             uqa_core::Value::Int(0)
         );
+        assert!(engine
+            .sql(
+                "SELECT id FROM batch_docs WHERE text_match(body, 'first')",
+                &[]
+            )
+            .unwrap()
+            .rows
+            .is_empty());
     }
-
     let reopened = Engine::open(&database).unwrap();
     assert_eq!(
         reopened
@@ -258,6 +274,14 @@ fn runtime_analyzer_failure_rolls_back_a_persistent_copy_batch() {
             .rows[0]["n"],
         uqa_core::Value::Int(0)
     );
+    assert!(reopened
+        .sql(
+            "SELECT id FROM batch_docs WHERE text_match(body, 'first')",
+            &[]
+        )
+        .unwrap()
+        .rows
+        .is_empty());
 }
 
 #[test]
@@ -283,6 +307,31 @@ fn invalid_legacy_catalog_analyzer_makes_reopen_fail_explicitly() {
             .to_string()
             .contains("invalid n-gram tokenizer gram bounds"),
         "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn persisted_builtin_collision_is_rejected_before_catalog_restore() {
+    if !uqa_analysis::is_builtin_analyzer("nori") {
+        return;
+    }
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("nori-collision.db");
+    {
+        let connection = ManagedConnection::open(&path).unwrap();
+        let catalog = Catalog::open(connection).unwrap();
+        catalog
+            .save_analyzer("nori", r#"{"tokenizer":"keyword"}"#)
+            .unwrap();
+    }
+    let Err(error) = Engine::open(&path) else {
+        panic!("persisted built-in collision was accepted")
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("catalog analyzer `nori` conflicts with a built-in analyzer"),
+        "{error}"
     );
 }
 

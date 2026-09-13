@@ -14,9 +14,13 @@ exclude.workspace = true
 keywords = ["database", "sql", "full-text-search", "vector-search", "graph"]
 categories = ["database-implementations"]
 
+[features]
+default = []
+nori = ["uqa-engine/nori"]
+
 [dependencies]
 uqa-core = { workspace = true }
-uqa-engine = { workspace = true }
+uqa-engine = { workspace = true, default-features = false }
 
 [lints]
 workspace = true

@@ -69,6 +69,23 @@ mod tests {
     use super::*;
     use uqa_operators::TextScoringMode;
 
+    #[test]
+    fn phrase_support_is_not_cut_off_by_bag_of_terms_top_k() {
+        let planned = plan_text_top_k(
+            OperatorTree::Phrase {
+                query: "red fox".into(),
+                field: Some("body".into()),
+                scoring: Some(TextScoringMode::BM25),
+            },
+            1,
+            TextTopKCapabilities {
+                analyzed_term_count: 2,
+                indexed_document_count: 100,
+            },
+        );
+        assert!(matches!(planned, OperatorTree::Phrase { query, .. } if query == "red fox"));
+    }
+
     fn term() -> OperatorTree {
         OperatorTree::Term {
             query: "rust search".into(),

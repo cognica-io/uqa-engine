@@ -281,6 +281,15 @@ pub(super) fn map_operator_children(
             scoring,
             top_k,
         },
+        OperatorTree::Phrase {
+            query,
+            field,
+            scoring,
+        } => OperatorTree::Phrase {
+            query,
+            field,
+            scoring,
+        },
         OperatorTree::BayesianMatchWithPrior {
             field,
             query,

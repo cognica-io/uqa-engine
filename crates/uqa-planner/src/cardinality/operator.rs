@@ -23,7 +23,7 @@ impl CardinalityEstimator {
 
         match op {
             OperatorTree::Empty => 0.0,
-            OperatorTree::Term { query, field, .. } => {
+            OperatorTree::Term { query, field, .. } | OperatorTree::Phrase { query, field, .. } => {
                 let field_name = field.as_deref().unwrap_or("_default");
                 stats.doc_freq(field_name, query) as f64
             }

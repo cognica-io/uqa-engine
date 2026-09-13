@@ -17,6 +17,7 @@ use crate::vector_index::{
 };
 
 use super::codec::*;
+use super::occurrence_keys as occurrence;
 use super::{
     KeyValueCatalog, KeyValueDocumentStore, KeyValueInvertedIndex, KeyValueStore,
     KeyValueVectorIndex, MemoryKeyValueStore, DOCUMENT_VALUE_V2_PREFIX, TAG_METADATA,
@@ -24,7 +25,10 @@ use super::{
 use crate::{PersistentStorageBackend, StorageBackendError};
 
 mod catalog;
+mod controlled;
+mod controlled_index;
 mod indexes;
+mod occurrences;
 mod tuple_metadata;
 
 #[test]
@@ -564,16 +568,41 @@ fn key_value_legacy_postings_migrate_atomically_across_scan_pages() {
 
     let index =
         KeyValueInvertedIndex::new(Arc::clone(&store), "articles", standard_analyzer("english"));
-    assert_eq!(index.doc_freq("title", "rust").unwrap(), 1_031);
-    assert_eq!(index.get_term_freq(1, "title", "search").unwrap(), 2);
-    assert_eq!(
-        index
-            .get_posting_list("title", "rust")
+    assert!(index.source_rebuild_required().unwrap());
+    assert!(index
+        .doc_freq("title", "rust")
+        .unwrap_err()
+        .to_string()
+        .contains("atomic source rebuild"));
+    let mut migrated_ids = Vec::new();
+    for cluster in [0, 1] {
+        let score_blob = store
+            .get(&posting_cluster_score_key("articles", "title", "rust", cluster).unwrap())
             .unwrap()
-            .doc_ids()
-            .collect::<Vec<_>>(),
-        document_ids
-    );
+            .unwrap();
+        let positions = store
+            .get(&posting_cluster_positions_key("articles", "title", "rust", cluster).unwrap())
+            .unwrap()
+            .unwrap();
+        let postings =
+            crate::clustered_postings::decode_cluster(cluster, &score_blob, &positions).unwrap();
+        assert!(postings
+            .iter()
+            .all(|entry| entry.doc_length == 4 && entry.positions == [0]));
+        migrated_ids.extend(postings.into_iter().map(|entry| entry.doc_id));
+    }
+    assert_eq!(migrated_ids, document_ids);
+    let score_blob = store
+        .get(&posting_cluster_score_key("articles", "title", "search", 0).unwrap())
+        .unwrap()
+        .unwrap();
+    let positions = store
+        .get(&posting_cluster_positions_key("articles", "title", "search", 0).unwrap())
+        .unwrap()
+        .unwrap();
+    let search = crate::clustered_postings::decode_cluster(0, &score_blob, &positions).unwrap();
+    assert_eq!(search[0].term_freq, 2);
+    assert_eq!(search[0].positions, [1, 3]);
 
     let version_before = store.change_version().unwrap();
     KeyValueInvertedIndex::migrate_legacy_storage(store.as_ref()).unwrap();
@@ -732,12 +761,12 @@ fn clustered_postings_follow_key_value_table_rename_and_drop() {
     );
     assert_eq!(renamed.doc_freq("title", "rust").unwrap(), 1);
     assert!(store
-        .scan_prefix(&posting_cluster_score_key_prefix("public.articles").unwrap())
+        .scan_prefix(&occurrence::table_prefix("public.articles").unwrap())
         .unwrap()
         .is_empty());
     assert_eq!(
         store
-            .scan_prefix(&posting_document_key_prefix("public.docs").unwrap())
+            .scan_prefix(&occurrence::kind_prefix("public.docs", occurrence::DOCUMENT).unwrap())
             .unwrap()
             .len(),
         1
@@ -745,7 +774,7 @@ fn clustered_postings_follow_key_value_table_rename_and_drop() {
 
     catalog.drop_table_and_data("public.docs").unwrap();
     assert!(store
-        .scan_prefix(&posting_cluster_score_key_prefix("public.docs").unwrap())
+        .scan_prefix(&occurrence::table_prefix("public.docs").unwrap())
         .unwrap()
         .is_empty());
     assert!(store
@@ -753,7 +782,7 @@ fn clustered_postings_follow_key_value_table_rename_and_drop() {
         .unwrap()
         .is_empty());
     assert!(store
-        .scan_prefix(&posting_document_key_prefix("public.docs").unwrap())
+        .scan_prefix(&occurrence::kind_prefix("public.docs", occurrence::DOCUMENT).unwrap())
         .unwrap()
         .is_empty());
 }
@@ -766,12 +795,10 @@ fn key_value_add_counter_overflow_is_atomic() {
     index
         .add_document(1, BTreeMap::from([("title".into(), "rust".into())]))
         .unwrap();
-    store
-        .put(
-            &field_stats_key("articles", "title").unwrap(),
-            &u64_value(u64::MAX),
-        )
-        .unwrap();
+    let key = occurrence::field_prefix("articles", occurrence::FIELD, "title").unwrap();
+    let mut value = store.get(&key).unwrap().unwrap();
+    value[48..56].copy_from_slice(&u64::MAX.to_le_bytes());
+    store.put(&key, &value).unwrap();
 
     let error = index
         .add_document(2, BTreeMap::from([("title".into(), "sqlite".into())]))
@@ -785,10 +812,6 @@ fn key_value_add_counter_overflow_is_atomic() {
 #[test]
 fn key_value_rebuild_analysis_failure_preserves_old_index() {
     let store = store();
-    let mut index = KeyValueInvertedIndex::new(store, "articles", standard_analyzer("english"));
-    index
-        .add_document(1, BTreeMap::from([("title".into(), "rust".into())]))
-        .unwrap();
     let invalid = Analyzer::new(
         Tokenizer::NGram {
             min_gram: 0,
@@ -797,8 +820,12 @@ fn key_value_rebuild_analysis_failure_preserves_old_index() {
         Vec::new(),
         Vec::new(),
     );
+    let mut index = KeyValueInvertedIndex::new(store, "articles", invalid);
     index
-        .set_field_analyzer("body", invalid, AnalyzerPhase::Index)
+        .set_field_analyzer("title", standard_analyzer("english"), AnalyzerPhase::Both)
+        .unwrap();
+    index
+        .add_document(1, BTreeMap::from([("title".into(), "rust".into())]))
         .unwrap();
 
     let error = index
@@ -816,10 +843,6 @@ fn key_value_rebuild_analysis_failure_preserves_old_index() {
 #[test]
 fn key_value_batch_analysis_failure_preserves_old_index() {
     let store = store();
-    let mut index = KeyValueInvertedIndex::new(store, "articles", standard_analyzer("english"));
-    index
-        .add_document(1, BTreeMap::from([("title".into(), "rust".into())]))
-        .unwrap();
     let invalid = Analyzer::new(
         Tokenizer::NGram {
             min_gram: 0,
@@ -828,8 +851,12 @@ fn key_value_batch_analysis_failure_preserves_old_index() {
         Vec::new(),
         Vec::new(),
     );
+    let mut index = KeyValueInvertedIndex::new(store, "articles", invalid);
     index
-        .set_field_analyzer("body", invalid, AnalyzerPhase::Index)
+        .set_field_analyzer("title", standard_analyzer("english"), AnalyzerPhase::Both)
+        .unwrap();
+    index
+        .add_document(1, BTreeMap::from([("title".into(), "rust".into())]))
         .unwrap();
 
     let error = index

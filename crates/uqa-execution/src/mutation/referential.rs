@@ -36,11 +36,14 @@ use uqa_sql::{
 };
 use uqa_storage::document_store::Document;
 mod context;
-pub use context::{ReferentialContext, ReferentialDeferrals};
+pub use context::{
+    ReferentialContext, ReferentialDeferrals, ReferentialReadSnapshot, ReferentialSnapshots,
+};
 mod actions;
 mod delete;
 mod references;
 mod rewrite;
+mod snapshots;
 pub use actions::{prepare_referenced_key_delete_actions, prepare_referenced_key_update_actions};
 pub use delete::prepare_document_delete;
 pub use references::{

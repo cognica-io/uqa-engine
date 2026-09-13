@@ -112,6 +112,10 @@ pub fn tree_may_persist_calibration(tree: &OperatorTree) -> bool {
                     scoring: Some(TextScoringMode::BayesianBM25),
                     ..
                 }
+                | OperatorTree::Phrase {
+                    scoring: Some(TextScoringMode::BayesianBM25),
+                    ..
+                }
                 | OperatorTree::BayesianMatchWithPrior { .. }
                 | OperatorTree::MultiFieldSearch { .. }
         );

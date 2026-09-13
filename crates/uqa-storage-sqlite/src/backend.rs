@@ -55,6 +55,15 @@ impl SQLiteStorageProvider {
 }
 
 impl PersistentStorageProvider for SQLiteStorageProvider {
+    fn open_initial_session(&self) -> StorageBackendResult<PersistentStorageSession> {
+        let connection = self.connection.new_session();
+        let catalog: Arc<dyn CatalogFacade> =
+            Arc::new(Catalog::for_initial_restore(connection.clone()));
+        let backend: Arc<dyn PersistentStorageBackend> =
+            Arc::new(SQLiteStorageBackend::new(connection));
+        Ok(PersistentStorageSession::new(catalog, backend))
+    }
+
     fn open_session(&self) -> StorageBackendResult<PersistentStorageSession> {
         let connection = self.connection.new_session();
         let catalog: Arc<dyn CatalogFacade> = Arc::new(Catalog::open(connection.clone())?);

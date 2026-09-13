@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Persisted exact named analyzer descriptors and independent index/search bindings, including resolved synonym files, owner validation, transactional source migration, and restoration across sessions and reopen.
+
 - Added a versioned pre-commit hook that validates staged crate dependencies and transitive ownership boundaries, with the same policy enforced in CI.
 
 - Added cost-based custom/generic prepared-plan selection and `plan_cache_mode`, with typed parameter specialization, five initial custom plans, planning-cost-aware reuse, and per-session usage counters.
@@ -18,6 +20,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added domain declarations with defaults, named CHECK and NOT NULL constraints, nested domains, domain arrays, catalog identities, transactional rollback, and SQLite persistence. PostgreSQL differential cases verify conversion errors, assignment versus explicit-cast behavior, preservation of already typed values, and constraint-function effects.
 
 ### Fixed
+
+- Preserved both analyzer revisions before rewriting documents during a column rename, preventing existing rows from being reindexed with the table default. Dropping the last explicit GIN analyzer owner now rebuilds with the default when another GIN retains the field.
 
 - Moved Cypher default-label requirement analysis and diagnostics from Engine into graph, preserving catalog reads, vertex-before-edge errors, and the existing graph transaction boundaries.
 - Move pure scored-input and persisted-relation-reference tests to their implementation crates, consolidate Engine state tests under one unit-test tree, and move public model-training scenarios to the existing integration harness; remove obsolete test-only source directories and the event type reexport module.

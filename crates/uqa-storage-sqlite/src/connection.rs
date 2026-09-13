@@ -23,6 +23,10 @@ use crate::compressed_vfs::{self, SQLiteCompressedContainerAnchor, SQLiteCompres
 
 #[derive(Debug, thiserror::Error)]
 pub enum SQLiteError {
+    #[error(transparent)]
+    Memory(#[from] uqa_core::memory::MemoryError),
+    #[error(transparent)]
+    Cancelled(#[from] uqa_core::QueryCancelled),
     #[error("text analysis failed: {0}")]
     Analysis(#[from] uqa_analysis::AnalysisError),
     #[error("sqlite error: {0}")]
@@ -460,26 +464,13 @@ impl ManagedConnection {
     /// Whether this session's independent [`Self::data_version`] monitor can
     /// read without contending with the currently pinned transaction.
     ///
-    /// The compressed VFS deliberately maps rollback-journal `RESERVED` and
-    /// stronger locks to one whole-file exclusive lock. Once an immediate
-    /// transaction has entered `SQLite`'s write state, a second connection from
-    /// the same pool therefore cannot even read `PRAGMA data_version`. Callers
-    /// must use the pinned connection and conservatively refresh their caches
-    /// instead of waiting on a lock held by themselves. WAL connections and
-    /// compressed read transactions permit the independent monitor.
+    /// A rollback-journal writer's pending lock blocks new readers while waiting for existing readers to finish. A compressed read transaction must therefore also avoid the independent monitor: its own shared lock may be preventing that waiting writer from proceeding. Callers refresh through the pinned connection instead. WAL sessions and compressed sessions without a pinned transaction permit the independent monitor.
     pub fn data_version_monitor_is_nonblocking(&self) -> Result<bool> {
         if !matches!(&self.pool.spec, ConnectionSpec::Compressed { .. }) {
             return Ok(true);
         }
         let _gate = self.session.gate.read();
-        let transaction = self.session.transaction.lock();
-        let Some(transaction) = transaction.as_ref() else {
-            return Ok(true);
-        };
-        Ok(!matches!(
-            transaction.connection()?.transaction_state(Some("main"))?,
-            rusqlite::TransactionState::Write
-        ))
+        Ok(self.session.transaction.lock().is_none())
     }
 
     /// Whether one pooled connection may retain a read snapshot while another writes. Plain and encrypted `SQLite` databases use WAL; compressed containers use rollback journaling and therefore require a detached engine snapshot before writer promotion.
@@ -726,7 +717,11 @@ mod tests;
 
 impl From<SQLiteError> for uqa_storage::StorageBackendError {
     fn from(source: SQLiteError) -> Self {
-        Self::backend("SQLite", source)
+        match source {
+            SQLiteError::Memory(error) => Self::Memory(error),
+            SQLiteError::Cancelled(error) => Self::Cancelled(error),
+            source => Self::backend("SQLite", source),
+        }
     }
 }
 
@@ -740,6 +735,8 @@ impl From<uqa_storage::StorageBackendError> for SQLiteError {
     fn from(error: uqa_storage::StorageBackendError) -> Self {
         use uqa_storage::StorageBackendError;
         match error {
+            StorageBackendError::Memory(error) => Self::Memory(error),
+            StorageBackendError::Cancelled(error) => Self::Cancelled(error),
             StorageBackendError::Analysis(error) => Self::Analysis(error),
             StorageBackendError::Serde(error) => Self::Serde(error),
             StorageBackendError::Backend { backend, source } => match source.downcast::<Self>() {

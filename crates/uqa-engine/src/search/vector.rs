@@ -33,7 +33,7 @@ impl Engine {
         let pl = index
             .search_knn(query_vector.as_ref(), top_k)
             .map_err(|error| storage_sql_error("execute KNN search", error))?;
-        Ok(Self::rank_top_k(&pl, top_k))
+        Ok(uqa_scoring::rank_top_k(&pl, top_k))
     }
 
     /// Run KNN and query-pool calibration directly against the registered vector index so metadata validation does not materialize an unrelated full execution context.
@@ -72,7 +72,7 @@ impl Engine {
             0.5,
         )
         .map_err(|error| storage_sql_error("calibrate vector query pool", error))?;
-        Ok(Self::rank_top_k(&calibrated, top_k))
+        Ok(uqa_scoring::rank_top_k(&calibrated, top_k))
     }
 
     /// Top-`k` nearest neighbors through the shared operator optimizer and
@@ -90,7 +90,7 @@ impl Engine {
             field: field.to_string(),
         };
         let entries = crate::operator_tree_bridge::execute_scored_tree(self, table, &[], &tree)?;
-        Ok(Self::rank_scored_entries_top_k(entries, top_k))
+        Ok(uqa_scoring::rank_scored_entries_top_k(entries, top_k))
     }
 
     /// Apply a persisted/offline vector calibration model to a KNN pool.
@@ -169,7 +169,7 @@ impl Engine {
                 score: probability,
             });
         }
-        Ok(Self::rank_scored_entries_top_k(
+        Ok(uqa_scoring::rank_scored_entries_top_k(
             calibrated,
             target.candidate_k,
         ))

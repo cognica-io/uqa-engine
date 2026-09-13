@@ -121,7 +121,7 @@ impl Engine {
             let params = if queries.is_empty() {
                 estimator.estimate(index.as_ref(), field, BM25Params::default())
             } else {
-                estimator.estimate_with_queries(
+                estimator.estimate_with_query_keys(
                     index.as_ref(),
                     field,
                     BM25Params::default(),

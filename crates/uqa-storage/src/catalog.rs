@@ -364,6 +364,11 @@ pub fn sequence_value_reservation(
 
 /// Engine-facing catalog facade for persistent metadata.
 pub trait CatalogFacade: Send + Sync {
+    /// Prepare durable catalog storage inside the backend's owning initial-restore transaction. Already initialized catalogs may keep the default.
+    fn initialize_storage(&self) -> StorageBackendResult<()> {
+        Ok(())
+    }
+
     /// Read transactional cache generations without loading schemas or column
     /// statistics. Providers without change tracking use conservative reloads.
     fn cache_revisions(&self) -> StorageBackendResult<Option<CatalogCacheRevisions>> {
@@ -564,6 +569,44 @@ pub trait CatalogFacade: Send + Sync {
     fn save_analyzer(&self, name: &str, config_json: &str) -> StorageBackendResult<()>;
     fn drop_analyzer(&self, name: &str) -> StorageBackendResult<()>;
     fn load_analyzers(&self) -> StorageBackendResult<Vec<(String, String)>>;
+
+    /// Save a named definition's resolved descriptor with its diagnostic configuration in the same transaction.
+    fn save_analyzer_revision(
+        &self,
+        _name: &str,
+        _config_json: &str,
+        _descriptor_json: &str,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "durable analyzer descriptors are not supported by this catalog".into(),
+        ))
+    }
+
+    /// Resolved named descriptors; legacy definitions appear only in `load_analyzers` until migrated.
+    fn load_analyzer_descriptors(&self) -> StorageBackendResult<Vec<(String, String)>> {
+        Ok(Vec::new())
+    }
+
+    /// Atomically replace a field's complete independent binding and its compatibility label. An empty label denotes the physical field's unnamed default.
+    fn replace_table_field_analyzer_binding(
+        &self,
+        _table: &str,
+        _field: &str,
+        _phase: &str,
+        _name: &str,
+        _binding_json: &str,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "durable analyzer bindings are not supported by this catalog".into(),
+        ))
+    }
+
+    /// `(table, field, binding JSON)` rows. Each field has one complete binding envelope.
+    fn load_table_field_analyzer_bindings(
+        &self,
+    ) -> StorageBackendResult<Vec<(String, String, String)>> {
+        Ok(Vec::new())
+    }
 
     fn save_table_field_analyzer(
         &self,

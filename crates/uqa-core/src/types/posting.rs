@@ -14,6 +14,8 @@ use super::{BTreeMap, DocId, FieldName, Value};
 /// `positions` is sorted ascending with no duplicates. `fields` uses
 /// `BTreeMap` (not `HashMap`) so equality and iteration are deterministic
 /// across storage, merge, and regression tests.
+///
+/// Graph occurrence frequency is independent of this unique-start projection; positional graph consumers retain the separate term occurrence list.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Payload {
     pub positions: Vec<u32>,

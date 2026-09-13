@@ -139,6 +139,38 @@ fn drop_gin_index_side_effects(
                 }
             }),
         )?;
+        if still_referenced {
+            let mut named_owner_remains = false;
+            for candidate in &indexes {
+                if candidate.relation == row.relation
+                    || candidate.table_name != row.table_name
+                    || !candidate.index_type.eq_ignore_ascii_case("gin")
+                {
+                    continue;
+                }
+                let columns = uqa_sql::schema::indexes::removal::catalog_index_columns(
+                    &candidate.relation,
+                    &candidate.columns_json,
+                    "DROP INDEX",
+                )?;
+                if !columns.contains(&field) {
+                    continue;
+                }
+                let parameters: std::collections::BTreeMap<String, String> =
+                    serde_json::from_str(&candidate.parameters_json).map_err(|error| {
+                        SQLError::Internal(format!("invalid GIN parameters: {error}"))
+                    })?;
+                named_owner_remains |= parameters
+                    .keys()
+                    .any(|name| name.eq_ignore_ascii_case("analyzer"));
+            }
+            if !named_owner_remains {
+                context
+                    .publication
+                    .release_fts_analyzer_owner(&row.table_name, &field)
+                    .map_err(SQLError::Internal)?;
+            }
+        }
         if !still_referenced {
             context
                 .publication

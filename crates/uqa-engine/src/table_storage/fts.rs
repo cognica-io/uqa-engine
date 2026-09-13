@@ -44,29 +44,82 @@ impl Engine {
             .try_table(table)
             .map_err(|err| format!("resolve table `{table}`: {err}"))?
             .ok_or_else(|| format!("unknown table `{table}`"))?;
-        if let Some(analyzer_name) = analyzer {
-            let analyzer = self.resolve_analyzer(analyzer_name)?;
-            t.inverted_index
-                .write()
-                .set_field_analyzer(&field, analyzer, AnalyzerPhase::Both)
-                .map_err(|e| format!("add_fts_field: {e}"))?;
-            self.durable.table_field_analyzers.write().insert(
-                (table_name.clone(), field.clone()),
-                (analyzer_name.to_string(), "both".to_string()),
-            );
-            if let Some(catalog) = self.storage.catalog.as_ref() {
-                catalog
-                    .replace_table_field_analyzer(&table_name, &field, "both", analyzer_name)
-                    .map_err(|err| format!("persist FTS analyzer: {err}"))?;
+        let existing = self
+            .durable
+            .table_field_analyzers
+            .read()
+            .get(&(table_name.clone(), field.clone()))
+            .cloned();
+        let uses_default = analyzer.is_none() && existing.is_none();
+        let candidate = if let Some(name) = analyzer {
+            let name = name.trim();
+            let revision = self.resolve_analyzer_revision(name)?;
+            let previous = existing.unwrap_or_else(|| {
+                uqa_storage::FieldAnalyzerBinding::unassigned(revision.clone(), revision.clone())
+            });
+            match previous.owner {
+                uqa_storage::AnalyzerBindingOwner::Field
+                    if previous.index.name.is_some() || previous.search.name.is_some() =>
+                {
+                    return Err(
+                        "GIN analyzer option competes with an existing field assignment".into(),
+                    )
+                }
+                uqa_storage::AnalyzerBindingOwner::Gin
+                    if previous.index.name.as_deref() != Some(name)
+                        || previous.index.compiled.descriptor().fingerprint()
+                            != revision.descriptor().fingerprint() =>
+                {
+                    return Err("GIN analyzer option competes with an existing GIN revision".into())
+                }
+                _ => {}
             }
-        }
+            previous.assigned(
+                name,
+                revision,
+                AnalyzerPhase::Both,
+                uqa_storage::AnalyzerBindingOwner::Gin,
+            )
+        } else {
+            self.current_field_analyzer_binding(&table_name, &t, &field)?
+        };
         {
             let mut fts = t.fts_fields.write();
             if !fts.contains(&field) {
-                fts.push(field);
+                fts.push(field.clone());
             }
         }
-        Self::rebuild_fts_index(&t)?;
+        let documents = Self::project_fts_sources(&t)?;
+        let phase = if analyzer.is_some() {
+            AnalyzerPhase::Both
+        } else {
+            AnalyzerPhase::Index
+        };
+        t.inverted_index
+            .write()
+            .rebuild_with_analyzer_revision(
+                &field,
+                candidate.index.compiled.clone(),
+                phase,
+                documents,
+            )
+            .map_err(|error| format!("add_fts_field: {error}"))?;
+        candidate
+            .install(&field, t.inverted_index.write().as_mut())
+            .map_err(|error| error.to_string())?;
+        if uses_default {
+            *t.analyzer.write() = candidate
+                .index
+                .compiled
+                .descriptor()
+                .configuration()
+                .map_err(|error| error.to_string())?;
+        }
+        self.persist_field_analyzer_binding(&table_name, &field, &candidate)?;
+        self.durable
+            .table_field_analyzers
+            .write()
+            .insert((table_name.clone(), field), candidate);
         if self.is_persistent() {
             self.try_save_table_schema(&table_name, &t)
                 .map_err(|err| format!("persist FTS schema `{table_name}`: {err}"))?;
@@ -103,13 +156,13 @@ impl Engine {
             ));
         }
 
+        t.fts_fields.write().retain(|candidate| candidate != field);
+        Self::rebuild_fts_index(&t)
+            .map_err(|err| format!("rebuild FTS index for `{table_name}`: {err}"))?;
         t.inverted_index
             .write()
             .remove_field_analyzers(field)
             .map_err(|err| format!("remove FTS analyzer `{table_name}`.`{field}`: {err}"))?;
-        t.fts_fields.write().retain(|candidate| candidate != field);
-        Self::rebuild_fts_index(&t)
-            .map_err(|err| format!("rebuild FTS index for `{table_name}`: {err}"))?;
 
         if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
@@ -125,6 +178,65 @@ impl Engine {
         if self.is_persistent() {
             self.try_save_table_schema(&table_name, &t)
                 .map_err(|err| format!("persist FTS schema `{table_name}`: {err}"))?;
+            self.note_catalog_registry_changed();
+        }
+        Ok(())
+    }
+}
+
+impl Engine {
+    /// Release the last explicit GIN analyzer owner while another GIN still keeps the field indexed.
+    pub(crate) fn release_fts_analyzer_owner(
+        &self,
+        table: &str,
+        field: &str,
+    ) -> Result<(), String> {
+        let table_name = self
+            .try_resolve_table_name(table)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("unknown table `{table}`"))?;
+        let t = self
+            .try_table(&table_name)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("unknown table `{table}`"))?;
+        let Some(previous) = self
+            .durable
+            .table_field_analyzers
+            .read()
+            .get(&(table_name.clone(), field.to_owned()))
+            .cloned()
+        else {
+            return Ok(());
+        };
+        if previous.owner != uqa_storage::AnalyzerBindingOwner::Gin {
+            return Ok(());
+        }
+        let revision = t
+            .analyzer
+            .read()
+            .clone()
+            .compile()
+            .map_err(|error| error.to_string())?;
+        let binding =
+            uqa_storage::FieldAnalyzerBinding::unassigned(revision.clone(), revision.clone());
+        let documents = Self::project_fts_sources(&t)?;
+        t.inverted_index
+            .write()
+            .rebuild_with_analyzer_revision(field, revision.clone(), AnalyzerPhase::Both, documents)
+            .map_err(|error| error.to_string())?;
+        *t.analyzer.write() = revision
+            .descriptor()
+            .configuration()
+            .map_err(|error| error.to_string())?;
+        self.persist_field_analyzer_binding(&table_name, field, &binding)?;
+        self.durable
+            .table_field_analyzers
+            .write()
+            .insert((table_name.clone(), field.to_owned()), binding);
+        if self.is_persistent() && t.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+            self.try_save_table_schema(&table_name, &t)
+                .map_err(|error| error.to_string())?;
+            self.note_table_catalog_changed();
             self.note_catalog_registry_changed();
         }
         Ok(())

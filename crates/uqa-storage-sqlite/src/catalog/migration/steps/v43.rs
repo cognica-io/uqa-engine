@@ -8,7 +8,7 @@
 
 use super::super::super::{Catalog, Result};
 
-pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+pub(super) fn migrate(tx: &rusqlite::Connection) -> Result<()> {
     let columns = Catalog::table_columns(tx, "_catalog_indexes")?.unwrap_or_default();
     if !columns.contains_key("definition") {
         tx.execute_batch("ALTER TABLE _catalog_indexes ADD COLUMN definition TEXT")?;

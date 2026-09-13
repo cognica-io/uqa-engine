@@ -4,14 +4,23 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use super::IndexedFieldMetadata;
 use super::{
-    counter_error, usize_to_u64, Analyzer, Arc, BTreeMap, BlockMaxScorer, DocId, FieldName,
-    IndexStats, PostingEntry, PostingList, StorageBackendError, StorageBackendResult,
+    counter_error, Analyzer, Arc, BTreeMap, BlockMaxScorer, DocId, FieldName, IndexStats,
+    PostingEntry, PostingList, StorageBackendError, StorageBackendResult,
 };
-use crate::clustered_postings::{MaterializedPostingCursor, PostingCursor, PostingScore};
+use crate::clustered_postings::BudgetedPostingReadCursor;
+use crate::clustered_postings::{
+    MaterializedPostingCursor, OccurrencePosting, PostingCursor, PostingScore,
+};
+use crate::read_control::StorageReadControl;
+use crate::TokenTermKey;
+use uqa_core::memory::Budgeted;
+use uqa_core::TokenOccurrence;
 
 /// Which side of the index/search pipeline a field analyzer applies to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AnalyzerPhase {
     /// Run only when *adding* documents.
     Index,
@@ -41,6 +50,11 @@ impl std::str::FromStr for AnalyzerPhase {
 }
 
 pub trait InvertedIndex: Send + Sync {
+    /// Whether persisted positional data must be rebuilt from original sources before this index can be read or mutated. The owning engine performs this after restoring exact analyzer revisions, in the same initial-open transaction.
+    fn source_rebuild_required(&self) -> StorageBackendResult<bool> {
+        Ok(false)
+    }
+
     fn analyzer(&self) -> &Analyzer;
 
     fn add_document(
@@ -95,6 +109,133 @@ pub trait InvertedIndex: Send + Sync {
 
     fn get_posting_list(&self, field: &str, term: &str) -> StorageBackendResult<PostingList>;
 
+    /// Unique-position compatibility projection for an exact term key. Legacy providers accept scalar keys and reject unpaired UTF-16 explicitly.
+    fn get_posting_list_key(
+        &self,
+        field: &str,
+        term: &TokenTermKey,
+    ) -> StorageBackendResult<PostingList> {
+        self.get_posting_list(field, &term.to_term().into_string()?)
+    }
+
+    /// Score cursor with exact term identity and occurrence frequency independent of unique positions.
+    fn posting_cursor_key(
+        &self,
+        field: &str,
+        term: &TokenTermKey,
+    ) -> StorageBackendResult<Box<dyn PostingCursor>> {
+        self.posting_cursor(field, &term.to_term().into_string()?)
+    }
+
+    /// Traverse candidates while retaining this index read. Providers with borrowed posting maps can avoid copying the entire term support; owned persistent cursors keep their incremental reads.
+    fn posting_read_cursor_key<'a>(
+        &'a self,
+        field: &'a str,
+        term: &TokenTermKey,
+    ) -> StorageBackendResult<Box<dyn crate::clustered_postings::PostingReadCursor + 'a>> {
+        Ok(Box::new(crate::clustered_postings::OwnedPostingReadCursor(
+            self.posting_cursor_key(field, term)?,
+        )))
+    }
+
+    /// Open a cursor that owns every query allocation under the supplied allowance. Providers must implement this capability without an unbounded materialization fallback.
+    fn posting_read_cursor_key_budgeted<'a>(
+        &'a self,
+        field: &'a str,
+        term: &'a TokenTermKey,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedPostingReadCursor<'a>> {
+        crate::clustered_postings::open_controlled_cursor(self, field, term, control)
+    }
+
+    /// Visit encoded score clusters in ascending order under the retained provider read. Temporary payloads must be reserved before fetching; callbacks must not reenter the provider.
+    fn visit_score_clusters(
+        &self,
+        _field: &str,
+        _term: &TokenTermKey,
+        _after: Option<u64>,
+        _limit: usize,
+        control: &StorageReadControl,
+        _visit: &mut crate::clustered_postings::ScoreClusterVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled score cluster reads are not supported by this backend".into(),
+        ))
+    }
+
+    /// Decode one document's exact occurrences with provider-owned input and output reservations and cancellation checks.
+    fn get_occurrences_budgeted(
+        &self,
+        _doc_id: DocId,
+        _field: &str,
+        _term: &TokenTermKey,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Budgeted<Vec<TokenOccurrence>>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled occurrence reads are not supported by this backend".into(),
+        ))
+    }
+
+    /// Complete graph edges in document order, preserving occurrence multiplicity and original source coordinates. Legacy positions cannot implement this contract without a source rebuild.
+    fn get_occurrence_postings(
+        &self,
+        _field: &str,
+        _term: &TokenTermKey,
+    ) -> StorageBackendResult<Vec<OccurrencePosting>> {
+        Err(StorageBackendError::Other(
+            "lossless occurrence storage is not supported by this backend".into(),
+        ))
+    }
+
+    /// Exact occurrences for one document and term; an absent document or term has no occurrences.
+    fn get_occurrences(
+        &self,
+        doc_id: DocId,
+        field: &str,
+        term: &TokenTermKey,
+    ) -> StorageBackendResult<Vec<TokenOccurrence>> {
+        Ok(self
+            .get_occurrence_postings(field, term)?
+            .into_iter()
+            .find(|posting| posting.doc_id == doc_id)
+            .map_or_else(Vec::new, |posting| posting.occurrences))
+    }
+
+    /// Original stream-end state and revision metadata published with a document field, including fields that emitted no tokens.
+    fn indexed_field_metadata(
+        &self,
+        _doc_id: DocId,
+        _field: &str,
+    ) -> StorageBackendResult<Option<IndexedFieldMetadata>> {
+        Err(StorageBackendError::Other(
+            "indexed field analysis metadata is not supported by this backend".into(),
+        ))
+    }
+
+    fn doc_freq_key(&self, field: &str, term: &TokenTermKey) -> StorageBackendResult<u64> {
+        self.doc_freq(field, &term.to_term().into_string()?)
+    }
+
+    fn get_term_freq_key(
+        &self,
+        doc_id: DocId,
+        field: &str,
+        term: &TokenTermKey,
+    ) -> StorageBackendResult<u64> {
+        self.get_term_freq(doc_id, field, &term.to_term().into_string()?)
+    }
+
+    /// Sorted canonical term keys, including unpaired units. String-only vocabulary APIs must return an error if projection would lose identity.
+    fn vocabulary_keys(&self, field: &str) -> StorageBackendResult<Vec<TokenTermKey>> {
+        Ok(self
+            .vocabulary_terms(field)?
+            .iter()
+            .map(|term| TokenTermKey::from_text(term))
+            .collect())
+    }
+
     fn get_posting_lists_bulk(
         &self,
         field: &str,
@@ -120,11 +261,11 @@ pub trait InvertedIndex: Send + Sync {
         let posting_list = self.get_posting_list(field, term)?;
         let mut entries = Vec::with_capacity(posting_list.len());
         for posting in posting_list {
-            let term_freq = usize_to_u64(posting.payload.positions.len().max(1), "term frequency")?;
+            let term_freq = self.get_term_freq(posting.doc_id, field, term)?;
             entries.push(PostingScore {
                 doc_id: posting.doc_id,
                 term_freq,
-                doc_length: self.get_doc_length(posting.doc_id, field)?.max(term_freq),
+                doc_length: self.get_doc_length(posting.doc_id, field)?,
             });
         }
         Ok(Box::new(MaterializedPostingCursor::new(entries)?))
@@ -138,6 +279,95 @@ pub trait InvertedIndex: Send + Sync {
         terms
             .iter()
             .map(|term| self.posting_cursor(field, term))
+            .collect()
+    }
+
+    /// Open exact-key cursors in input order, retaining repeated query terms. Scalar custom backends retain their optimized bulk implementation.
+    fn posting_cursors_keys_bulk(
+        &self,
+        field: &str,
+        terms: &[TokenTermKey],
+    ) -> StorageBackendResult<Vec<Box<dyn PostingCursor>>> {
+        if let Some(scalar) = terms
+            .iter()
+            .map(|key| key.as_str().map(str::to_owned))
+            .collect::<Option<Vec<_>>>()
+        {
+            return self.posting_cursors_bulk(field, &scalar);
+        }
+        terms
+            .iter()
+            .map(|term| self.posting_cursor_key(field, term))
+            .collect()
+    }
+
+    /// Read exact-key support without projecting UTF-16 term identity.
+    fn get_posting_lists_keys_bulk(
+        &self,
+        field: &str,
+        terms: &[TokenTermKey],
+    ) -> StorageBackendResult<Vec<PostingList>> {
+        if let Some(scalar) = terms
+            .iter()
+            .map(|key| key.as_str().map(str::to_owned))
+            .collect::<Option<Vec<_>>>()
+        {
+            return self.get_posting_lists_bulk(field, &scalar);
+        }
+        terms
+            .iter()
+            .map(|term| self.get_posting_list_key(field, term))
+            .collect()
+    }
+
+    /// Load exact-key scorer-versioned bounds. Custom scalar providers expose no raw-key materialization by default.
+    fn persisted_block_max_scores_keys_bulk(
+        &self,
+        field: &str,
+        terms: &[TokenTermKey],
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<Vec<Option<Vec<f64>>>> {
+        if let Some(scalar) = terms
+            .iter()
+            .map(|key| key.as_str().map(str::to_owned))
+            .collect::<Option<Vec<_>>>()
+        {
+            return self.persisted_block_max_scores_bulk(field, &scalar, scorer_fingerprint);
+        }
+        terms
+            .iter()
+            .map(|key| match key.as_str() {
+                Some(term) => self.persisted_block_max_scores(field, term, scorer_fingerprint),
+                None => Ok(None),
+            })
+            .collect()
+    }
+
+    /// Exact-key scoring inputs aligned with both the document and query-term arrays, including repetitions.
+    fn get_scoring_inputs_keys_bulk(
+        &self,
+        doc_ids: &[DocId],
+        field: &str,
+        terms: &[TokenTermKey],
+    ) -> StorageBackendResult<Vec<(u64, Vec<u64>)>> {
+        if let Some(scalar) = terms
+            .iter()
+            .map(|key| key.as_str().map(str::to_owned))
+            .collect::<Option<Vec<_>>>()
+        {
+            return self.get_scoring_inputs_bulk(doc_ids, field, &scalar);
+        }
+        doc_ids
+            .iter()
+            .map(|id| {
+                Ok((
+                    self.get_doc_length(*id, field)?,
+                    terms
+                        .iter()
+                        .map(|key| self.get_term_freq_key(*id, field, key))
+                        .collect::<StorageBackendResult<_>>()?,
+                ))
+            })
             .collect()
     }
 
@@ -201,7 +431,7 @@ pub trait InvertedIndex: Send + Sync {
 
     /// Visit `(doc_id, term_frequency)` pairs without requiring callers to
     /// materialize or decode payload details they do not use. The default
-    /// keeps every backend compatible through the posting-list contract;
+    /// uses posting support and the authoritative frequency accessor;
     /// persistent backends can stream compact frequency projections.
     fn for_each_term_freq(
         &self,
@@ -210,10 +440,7 @@ pub trait InvertedIndex: Send + Sync {
         visit: &mut dyn FnMut(DocId, u64),
     ) -> StorageBackendResult<()> {
         for entry in &self.get_posting_list(field, term)? {
-            visit(
-                entry.doc_id,
-                usize_to_u64(entry.payload.positions.len(), "term frequency")?,
-            );
+            visit(entry.doc_id, self.get_term_freq(entry.doc_id, field, term)?);
         }
         Ok(())
     }
@@ -267,6 +494,18 @@ pub trait InvertedIndex: Send + Sync {
             0.0
         };
         Ok(stats)
+    }
+
+    /// Read only field scoring scalars with producer-owned temporary reservations.
+    fn field_stats_scalar_budgeted(
+        &self,
+        _field: &str,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<IndexStats> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled field statistics are not supported by this backend".into(),
+        ))
     }
 
     /// Sorted unique indexed terms for `field`.
@@ -441,9 +680,57 @@ pub trait InvertedIndex: Send + Sync {
         self.analyzer().clone()
     }
 
-    /// Search-time analyzer for `field`; falls back to the index-time analyzer,
-    /// then to the default.
+    /// Compatibility configuration for search. Built-in providers return their independent retained search revision's inputs; this default preserves the index fallback for custom legacy providers. Use `search_analyzer_revision` for execution with exact resource ownership.
     fn get_search_analyzer(&self, field: &str) -> Analyzer {
         self.get_field_analyzer(field)
+    }
+
+    /// Retain the exact executable index revision. Built-in providers resolve their default once and keep field revisions immutable.
+    fn index_analyzer_revision(
+        &self,
+        field: &str,
+    ) -> StorageBackendResult<Arc<uqa_analysis::CompiledAnalyzer>> {
+        Ok(self.get_field_analyzer(field).compile()?)
+    }
+
+    /// Retain the exact executable search revision independently of subsequent index assignments.
+    fn search_analyzer_revision(
+        &self,
+        field: &str,
+    ) -> StorageBackendResult<Arc<uqa_analysis::CompiledAnalyzer>> {
+        Ok(self.get_search_analyzer(field).compile()?)
+    }
+
+    /// Install a validated revision without reopening its resources. This does not rebuild existing documents; graph providers reject a different index revision on a populated field and require `rebuild_with_analyzer_revision` instead.
+    fn set_field_analyzer_revision(
+        &mut self,
+        _field: &str,
+        _revision: Arc<uqa_analysis::CompiledAnalyzer>,
+        _phase: AnalyzerPhase,
+    ) -> Result<(), String> {
+        Err("immutable analyzer revisions are not supported by this backend".into())
+    }
+
+    /// Install a complete retained pair atomically. Failure changes neither side; this does not rebuild existing postings.
+    fn set_field_analyzer_revisions(
+        &mut self,
+        _field: &str,
+        _index: Arc<uqa_analysis::CompiledAnalyzer>,
+        _search: Arc<uqa_analysis::CompiledAnalyzer>,
+    ) -> Result<(), String> {
+        Err("atomic analyzer revision pairs are not supported by this backend".into())
+    }
+
+    /// Replace the complete indexed document set and selected analyzer sides together. Failure retains the previous postings and bindings; providers must implement their own atomic publication.
+    fn rebuild_with_analyzer_revision(
+        &mut self,
+        _field: &str,
+        _revision: Arc<uqa_analysis::CompiledAnalyzer>,
+        _phase: AnalyzerPhase,
+        _documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "atomic analyzer revision rebuild is not supported by this backend".into(),
+        ))
     }
 }

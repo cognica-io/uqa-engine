@@ -3669,14 +3669,19 @@ dependencies = [
 name = "uqa-analysis"
 version = "0.2.3"
 dependencies = [
+ "miniz_oxide",
  "parking_lot",
  "regex",
+ "regex-automata",
+ "regex-syntax",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "unicode-normalization",
  "uqa-core",
+ "uqa-nori-data",
 ]
 
 [[package]]
@@ -3896,11 +3901,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "uqa-nori-data"
+version = "0.2.3"
+dependencies = [
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "uqa-operators"
 version = "0.2.3"
 dependencies = [
  "criterion",
  "proptest",
+ "serde_json",
  "uqa-analysis",
  "uqa-core",
  "uqa-fusion",
@@ -4061,6 +4075,7 @@ dependencies = [
  "uqa-analysis",
  "uqa-core",
  "uqa-graph",
+ "uqa-scoring",
  "uqa-storage",
  "zstd",
 ]

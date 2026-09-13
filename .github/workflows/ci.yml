@@ -54,6 +54,8 @@ jobs:
         run: cargo test -p uqa-engine --test integration --locked queries::manual_sql_examples::manual_sql_examples_compile_or_execute -- --exact
       - name: Test workspace
         run: cargo test --workspace --exclude uqa-fdw --locked -- --skip manual_sql_examples::manual_sql_examples_compile_or_execute
+      - name: Test Nori bundle tools and embedded model
+        run: cargo test -p uqa-analysis -p uqa-nori-data --features uqa-analysis/nori-tools --locked
 
   test-fdw-linux:
     name: test FDW Linux
@@ -88,6 +90,8 @@ jobs:
           cache-targets: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo test --workspace --locked
+      - name: Test Nori bundle tools and embedded model
+        run: cargo test -p uqa-analysis -p uqa-nori-data --features uqa-analysis/nori-tools --locked
 
   clippy:
     name: clippy ${{ matrix.label }}
@@ -117,6 +121,8 @@ jobs:
           cache-targets: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Lint Nori bundle tools and data
+        run: cargo clippy -p uqa-analysis -p uqa-nori-data --features uqa-analysis/nori-tools --all-targets --locked -- -D warnings
 
   msrv:
     name: check Rust 1.90
@@ -196,10 +202,42 @@ jobs:
           name: pg18-upstream-reference-${{ github.sha }}
           path: target/pg18-upstream/reference/
 
+  nori-reference:
+    name: Nori dictionary and reference regeneration
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: target/nori-reference-cache
+          key: nori-reference-${{ hashFiles('tests/parity/nori/manifest.json', 'tests/parity/nori/csv_manifest.json') }}
+      - name: Rebuild exact dictionary resources from the pinned CSV source
+        run: python3 tests/parity/nori/regenerate_dictionary.py --platform linux/amd64 --cache-dir target/nori-reference-cache --output target/nori-csv-regeneration
+      - name: Reproduce every neutral model value and reference fixture with Docker
+        run: |
+          set -euo pipefail
+          python3 tests/parity/nori/export_model.py --platform linux/amd64 --offline --cache-dir target/nori-reference-cache --output target/nori-reference-model
+          for driver in run_reference.py run_user_reference.py run_tokenizer_reference.py run_analysis_reference.py run_number_reference.py run_generic_reference.py; do
+            python3 "tests/parity/nori/$driver" --platform linux/amd64 --offline --cache-dir target/nori-reference-cache
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nori-reference-${{ github.sha }}
+          path: |
+            target/nori-csv-regeneration/regeneration_manifest.json
+            target/nori-reference-model/model_manifest.json
+
   gate:
     name: pre-merge CI
     if: ${{ always() }}
-    needs: [test-linux, test-fdw-linux, test-macos, clippy, msrv, doc, deny, upstream-regression-oracle]
+    needs: [test-linux, test-fdw-linux, test-macos, clippy, msrv, doc, deny, upstream-regression-oracle, nori-reference]
     runs-on: ubuntu-24.04
     env:
       RESULTS: ${{ join(needs.*.result, ' ') }}

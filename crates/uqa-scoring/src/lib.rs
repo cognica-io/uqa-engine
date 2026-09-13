@@ -20,8 +20,10 @@ pub mod metrics;
 pub mod multi_field;
 pub mod parameter_learner;
 pub mod prob;
+pub mod ranking;
 pub mod score_domain;
 pub mod scorer;
+pub mod text;
 pub mod vector_calibration;
 pub mod vector_score;
 pub mod wand;
@@ -47,8 +49,13 @@ pub use prob::{
     confidence_scaled_log_odds_pool, cosine_to_probability, logit, prob_and, prob_not, prob_or,
     sigmoid, PROB_EPSILON,
 };
+pub use ranking::{rank_scored_entries_top_k, rank_top_k};
 pub use score_domain::{EvidenceLogit, PosteriorProbability, PriorLogit, RawBm25Score};
 pub use scorer::Scorer;
+pub use text::{
+    rebuild_text_block_max, score_text_query, score_text_terms, TextCandidateScorer,
+    TextSearchAlgorithm, TextSearchError, TextSearchProfile,
+};
 pub use vector_calibration::{
     VectorCalibrationModel, VectorCalibrationProvenance, VectorCalibrationStabilityReport,
     VectorCalibrationTarget, VECTOR_CALIBRATION_MODEL_SCHEMA_VERSION,
@@ -61,3 +68,6 @@ pub use wand::{
 
 pub mod mode;
 pub use mode::ScoringMode;
+
+#[cfg(test)]
+mod occurrence_tests;

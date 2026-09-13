@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/uqa-core",
     "crates/uqa-analysis",
+    "crates/uqa-nori-data",
     "crates/uqa-storage",
     "crates/uqa-storage-redb",
     "crates/uqa-storage-sqlite",
@@ -54,6 +55,7 @@ exclude = ["/tests", "/benches", "/examples"]
 # Internal crates
 uqa-core = { version = "0.2.3", path = "crates/uqa-core" }
 uqa-analysis = { version = "0.2.3", path = "crates/uqa-analysis" }
+uqa-nori-data = { version = "0.2.3", path = "crates/uqa-nori-data" }
 uqa-storage = { version = "0.2.3", path = "crates/uqa-storage" }
 uqa-storage-redb = { version = "0.2.3", path = "crates/uqa-storage-redb" }
 uqa-storage-sqlite = { version = "0.2.3", path = "crates/uqa-storage-sqlite" }
@@ -69,7 +71,7 @@ uqa-pg-query = { version = "0.2.3", path = "crates/uqa-pg-query" }
 uqa-sql = { version = "0.2.3", path = "crates/uqa-sql" }
 uqa-pg-wire = { version = "0.2.3", path = "crates/uqa-pg-wire" }
 uqa-fdw = { version = "0.2.3", path = "crates/uqa-fdw" }
-uqa-engine = { version = "0.2.3", path = "crates/uqa-engine" }
+uqa-engine = { version = "0.2.3", path = "crates/uqa-engine", default-features = false }
 uqa = { version = "0.2.3", path = "crates/uqa" }
 uqa-client = { version = "0.2.3", path = "crates/uqa-client" }
 uqa-api = { version = "0.2.3", path = "crates/uqa-api" }
@@ -89,6 +91,8 @@ smallvec = "1.15"
 ahash = "0.8"
 rayon = "1.10"
 regex = "1.11"
+regex-automata = { version = "=0.4.14", default-features = false, features = ["std", "syntax", "unicode", "dfa"] }
+regex-syntax = "0.8"
 unicode-normalization = "0.1"
 num-bigint = "0.4"
 num-traits = "0.2"
@@ -101,6 +105,7 @@ sha2 = { version = "0.10", default-features = false }
 crc32fast = "1.4"
 fs2 = "0.4"
 lz4_flex = "0.13"
+miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
 getrandom = "0.3"
 icu_casemap = "=2.0.0"
 icu_properties = "=2.0.2"

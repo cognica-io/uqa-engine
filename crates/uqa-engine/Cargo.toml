@@ -16,6 +16,10 @@ exclude.workspace = true
 keywords = ["database", "sql", "postgresql", "full-text-search", "vector-search"]
 categories = ["database-implementations"]
 
+[features]
+default = []
+nori = ["uqa-analysis/nori"]
+
 [dependencies]
 uqa-storage-sqlite = { workspace = true }
 uqa-core = { workspace = true }

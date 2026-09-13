@@ -14,6 +14,8 @@ pub mod agtype;
 pub mod cancel;
 pub mod doc_set;
 mod float_text;
+pub mod memory;
+pub mod ordering;
 pub mod posting_list;
 pub mod predicate;
 pub mod ranked_view;
@@ -32,7 +34,8 @@ pub use relation_identity::RelationIdentity;
 pub use types::{
     jsonb_equality_key, ArrayValue, DecimalValue, DocId, Edge, EdgeId, FieldName,
     GeneralizedPayload, GeneralizedPostingEntry, IndexStats, PathExpr, PathSegment, Payload,
-    PostingEntry, TemporalValue, Value, Vertex, VertexId,
+    PostingEntry, TemporalValue, TokenOccurrence, TokenOccurrenceError, TokenOffsets, Value,
+    Vertex, VertexId,
 };
 
 mod scored_entry;

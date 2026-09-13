@@ -17,6 +17,9 @@ use crate::error::AnalysisResult;
 use crate::token_filter::TokenFilter;
 use crate::tokenizer::Tokenizer;
 
+mod compiled;
+pub use compiled::CompiledAnalyzer;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Analyzer {
     #[serde(default = "default_tokenizer")]
@@ -42,6 +45,27 @@ impl Default for Analyzer {
 }
 
 impl Analyzer {
+    /// Identify Korean components for storage-format and catalog capability preflight.
+    pub fn uses_korean_stages(&self) -> bool {
+        #[cfg(feature = "nori")]
+        {
+            matches!(self.tokenizer, Tokenizer::Nori(_))
+                || self.token_filters.iter().any(|filter| {
+                    matches!(
+                        filter,
+                        TokenFilter::NoriPartOfSpeech(_)
+                            | TokenFilter::NoriReadingForm(_)
+                            | TokenFilter::UnicodeSimpleLowercase(_)
+                            | TokenFilter::NoriNumber(_)
+                    )
+                })
+        }
+        #[cfg(not(feature = "nori"))]
+        {
+            false
+        }
+    }
+
     pub fn new(
         tokenizer: Tokenizer,
         token_filters: Vec<TokenFilter>,
@@ -55,14 +79,59 @@ impl Analyzer {
     }
 
     pub fn analyze(&self, text: &str) -> AnalysisResult<Vec<String>> {
-        let mut filtered: String = text.to_owned();
-        for cf in &self.char_filters {
-            filtered = cf.filter(&filtered)?;
+        self.analyze_tokens(text)?.into_terms()
+    }
+
+    /// Analyze complete input without discarding token graph or original source metadata.
+    ///
+    /// ```
+    /// use uqa_analysis::standard_analyzer;
+    ///
+    /// let analyzed = standard_analyzer("english").analyze_tokens("The cats and")?;
+    /// let token = &analyzed.tokens()[0];
+    /// assert_eq!(token.term(), "cat");
+    /// assert_eq!(token.offsets().unwrap().utf8, 4..8);
+    /// assert_eq!(token.position_increment(), 2);
+    /// assert_eq!(analyzed.final_position_increment(), 1);
+    /// assert_eq!(analyzed.final_offsets().utf8, 12..12);
+    /// # Ok::<(), uqa_analysis::AnalysisError>(())
+    /// ```
+    pub fn analyze_tokens(&self, text: &str) -> AnalysisResult<crate::AnalyzedText> {
+        Ok(self
+            .analyze_tokens_budgeted(
+                text,
+                &uqa_core::memory::MemoryBudget::new(usize::MAX),
+                || Ok(()),
+            )?
+            .into_parts()
+            .0)
+    }
+
+    /// Analyze with one runtime allowance while retaining the uncompiled API's resource reload behavior.
+    ///
+    /// Filter preparation and caller configuration have separate ownership. Use a compiled analyzer to resolve immutable resources before execution and reuse them across calls.
+    pub fn analyze_tokens_budgeted(
+        &self,
+        text: &str,
+        budget: &uqa_core::memory::MemoryBudget,
+        mut poll: impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<uqa_core::memory::Budgeted<crate::AnalyzedText>> {
+        poll()?;
+        let mut filtered = crate::FilteredText::new(text);
+        for filter in &self.char_filters {
+            filtered = filter
+                .prepare()?
+                .filter_mapped_budgeted(filtered, budget, &mut poll)?;
         }
-        let mut tokens = self.tokenizer.tokenize(&filtered)?;
-        for tf in &self.token_filters {
-            tokens = tf.filter(tokens)?;
+        let mut tokens = self
+            .tokenizer
+            .prepare()?
+            .tokenize_mapped_budgeted(&filtered, budget, &mut poll)?;
+        drop(filtered);
+        for filter in &self.token_filters {
+            tokens = filter.filter_analyzed_budgeted(tokens, &mut poll)?;
         }
+        poll()?;
         Ok(tokens)
     }
 

@@ -114,6 +114,18 @@ pub fn instantiate(expression: RetrievalExpr) -> Result<OperatorTree, SQLError> 
             }),
             top_k: None,
         },
+        RetrievalExpr::Phrase {
+            query,
+            field,
+            scoring,
+        } => OperatorTree::Phrase {
+            query,
+            field,
+            scoring: scoring.map(|mode| match mode {
+                LogicalTextScoring::BM25 => TextScoringMode::BM25,
+                LogicalTextScoring::BayesianBM25 => TextScoringMode::BayesianBM25,
+            }),
+        },
         RetrievalExpr::Filter {
             field,
             predicate,

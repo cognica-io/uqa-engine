@@ -6,20 +6,39 @@
 
 //! Token-level filters that run after tokenization.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use unicode_normalization::UnicodeNormalization;
 
-use crate::porter;
 use crate::{AnalysisError, AnalysisResult};
+
+mod ascii;
+mod compiled;
+pub(crate) mod lowercase;
+mod stream;
+mod synonyms;
+pub(crate) use compiled::PreparedTokenFilter;
+use synonyms::parse_synonym_body;
+pub(crate) use synonyms::parse_synonym_body_bounded;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TokenFilter {
+    #[cfg(feature = "nori")]
+    #[serde(rename = "nori_part_of_speech")]
+    NoriPartOfSpeech(crate::nori::NoriPOSConfig),
+    #[cfg(feature = "nori")]
+    #[serde(rename = "nori_readingform")]
+    NoriReadingForm(crate::nori::EmptyFilterConfig),
+    #[cfg(feature = "nori")]
+    #[serde(rename = "unicode_simple_lowercase")]
+    UnicodeSimpleLowercase(crate::nori::SimpleLowercaseConfig),
+    #[cfg(feature = "nori")]
+    #[serde(rename = "nori_number")]
+    NoriNumber(crate::nori::EmptyFilterConfig),
     Lowercase,
     Stop {
         #[serde(default = "default_stop_language")]
@@ -82,19 +101,14 @@ impl TokenFilter {
     /// deletion, permission changes, and edits.
     pub fn validate(&self) -> AnalysisResult<()> {
         match self {
+            #[cfg(feature = "nori")]
+            TokenFilter::UnicodeSimpleLowercase(_) => self.prepare().map(|_| ()),
             TokenFilter::Synonym {
-                synonyms_path: Some(path),
+                synonyms_path: Some(_),
                 ..
-            } => {
-                Self::parse_synonym_file(path)?;
-                Ok(())
             }
-            TokenFilter::Ngram {
-                min_gram, max_gram, ..
-            } => validate_gram_bounds("n-gram token filter", *min_gram, *max_gram),
-            TokenFilter::EdgeNgram { min_gram, max_gram } => {
-                validate_gram_bounds("edge n-gram token filter", *min_gram, *max_gram)
-            }
+            | TokenFilter::Ngram { .. }
+            | TokenFilter::EdgeNgram { .. } => self.prepare().map(|_| ()),
             _ => Ok(()),
         }
     }
@@ -129,161 +143,51 @@ impl TokenFilter {
     }
 }
 
-fn parse_synonym_body(body: &str) -> BTreeMap<String, Vec<String>> {
-    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for raw_line in body.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if let Some((lhs, rhs)) = line.split_once("=>") {
-            // One-way mapping: lhs members all expand to the rhs list.
-            let lhs_terms: Vec<String> = lhs
-                .split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .collect();
-            let rhs_terms: Vec<String> = rhs
-                .split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .collect();
-            for term in lhs_terms {
-                let entry = out.entry(term).or_default();
-                for r in &rhs_terms {
-                    if !entry.iter().any(|e| e == r) {
-                        entry.push(r.clone());
-                    }
-                }
-            }
-        } else {
-            // Equivalent group: each member expands to the others.
-            let members: Vec<String> = line
-                .split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .collect();
-            if members.len() < 2 {
-                continue;
-            }
-            for (i, term) in members.iter().enumerate() {
-                let entry = out.entry(term.clone()).or_default();
-                for (j, other) in members.iter().enumerate() {
-                    if i == j {
-                        continue;
-                    }
-                    if !entry.iter().any(|e| e == other) {
-                        entry.push(other.clone());
-                    }
-                }
-            }
-        }
-    }
-    out
-}
-
 fn default_stop_language() -> String {
     "english".to_string()
 }
 
 impl TokenFilter {
     pub fn filter(&self, tokens: Vec<String>) -> AnalysisResult<Vec<String>> {
-        let tokens = match self {
-            TokenFilter::Lowercase => tokens.into_iter().map(|t| t.to_lowercase()).collect(),
-            TokenFilter::Stop {
-                language,
-                custom_words,
-            } => {
-                let mut words: BTreeSet<&str> =
-                    builtin_stop_words(language).iter().copied().collect();
-                let custom: Vec<&str> = custom_words.iter().map(String::as_str).collect();
-                words.extend(custom);
-                tokens
-                    .into_iter()
-                    .filter(|t| !words.contains(t.as_str()))
-                    .collect()
-            }
-            TokenFilter::PorterStem => tokens.into_iter().map(|t| porter::stem(&t)).collect(),
-            TokenFilter::ASCIIFolding => tokens.into_iter().map(|t| ascii_fold(&t)).collect(),
-            TokenFilter::Synonym {
-                synonyms,
-                synonyms_path,
-            } => {
-                let resolved: BTreeMap<String, Vec<String>> = if let Some(path) = synonyms_path {
-                    TokenFilter::parse_synonym_file(path)?
-                } else {
-                    synonyms.clone()
-                };
-                let mut out = Vec::with_capacity(tokens.len());
-                for t in tokens {
-                    if let Some(extra) = resolved.get(&t) {
-                        out.push(t);
-                        out.extend(extra.iter().cloned());
-                    } else {
-                        out.push(t);
-                    }
-                }
-                out
-            }
-            TokenFilter::Ngram {
-                min_gram,
-                max_gram,
-                keep_short,
-            } => {
-                validate_gram_bounds("n-gram token filter", *min_gram, *max_gram)?;
-                let mut out = Vec::new();
-                for t in tokens {
-                    let chars: Vec<char> = t.chars().collect();
-                    if chars.len() < *min_gram {
-                        if *keep_short {
-                            out.push(t);
-                        }
-                        continue;
-                    }
-                    for n in *min_gram..=*max_gram {
-                        if chars.len() < n {
-                            continue;
-                        }
-                        for i in 0..=(chars.len() - n) {
-                            out.push(chars[i..i + n].iter().collect());
-                        }
-                    }
-                }
-                out
-            }
-            TokenFilter::EdgeNgram { min_gram, max_gram } => {
-                validate_gram_bounds("edge n-gram token filter", *min_gram, *max_gram)?;
-                let mut out = Vec::new();
-                for t in tokens {
-                    let chars: Vec<char> = t.chars().collect();
-                    let upper = (*max_gram).min(chars.len());
-                    for n in *min_gram..=upper {
-                        out.push(chars[..n].iter().collect());
-                    }
-                }
-                out
-            }
-            TokenFilter::Length {
-                min_length,
-                max_length,
-            } => tokens
-                .into_iter()
-                .filter(|t| {
-                    let len = t.chars().count();
-                    if len < *min_length {
-                        return false;
-                    }
-                    if *max_length > 0 && len > *max_length {
-                        return false;
-                    }
-                    true
-                })
-                .collect(),
-        };
-        Ok(tokens)
+        stream::filter(
+            &self.prepare()?,
+            crate::token::TokenBatch::from_terms(tokens),
+        )?
+        .into_terms()
+    }
+
+    /// Transform tokens while retaining their source spans and graph end state.
+    pub fn filter_analyzed(
+        &self,
+        input: crate::AnalyzedText,
+    ) -> AnalysisResult<crate::AnalyzedText> {
+        self.prepare()?.filter_analyzed(input)
+    }
+
+    /// Consume a reserved stream and retain its allowance through every common or Korean token filter.
+    ///
+    /// The returned tokens retain their own terms, morphology, terminal state and vector reservations, and share existing source leases. Removed buffers release their reservations after destruction; replacements and copies reserve before allocation. Byte-limit and callback errors return no partial result. Immutable filter preparation and caller-owned configuration have separate ownership.
+    ///
+    /// ```
+    /// use uqa_analysis::{TokenFilter, Tokenizer};
+    /// use uqa_core::memory::MemoryBudget;
+    /// let budget = MemoryBudget::new(64 * 1024);
+    /// let tokens = Tokenizer::Whitespace.tokenize_with_offsets_budgeted(
+    ///     "UQA AND", &budget, || Ok(()),
+    /// )?;
+    /// let output = TokenFilter::Lowercase.filter_analyzed_budgeted(tokens, || Ok(()))?;
+    /// assert_eq!(output.tokens()[0].term(), "uqa");
+    /// drop(output);
+    /// assert_eq!(budget.used(), 0);
+    /// # Ok::<(), uqa_analysis::AnalysisError>(())
+    /// ```
+    pub fn filter_analyzed_budgeted(
+        &self,
+        input: uqa_core::memory::Budgeted<crate::AnalyzedText>,
+        mut poll: impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<uqa_core::memory::Budgeted<crate::AnalyzedText>> {
+        poll()?;
+        self.prepare()?.filter_analyzed_budgeted(input, &mut poll)
     }
 }
 
@@ -315,27 +219,6 @@ fn validate_gram_bounds(
     Ok(())
 }
 
-fn ascii_fold(token: &str) -> String {
-    if token.is_ascii() {
-        return token.to_owned();
-    }
-    let mut out = String::with_capacity(token.len());
-    for ch in token.chars() {
-        if ch.is_ascii() {
-            out.push(ch);
-            continue;
-        }
-        let folded: String = ch.nfkd().filter(char::is_ascii).collect();
-        if folded.is_empty() {
-            // No ASCII equivalent (CJK, Korean, Arabic, etc.) — keep original.
-            out.push(ch);
-        } else {
-            out.push_str(&folded);
-        }
-    }
-    out
-}
-
 const ENGLISH_STOP_WORDS: &[&str] = &[
     "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in", "into", "is", "it",
     "no", "not", "of", "on", "or", "such", "that", "the", "their", "then", "there", "these",
@@ -345,7 +228,7 @@ const ENGLISH_STOP_WORDS: &[&str] = &[
     "when", "which", "who", "whom", "why", "you", "your",
 ];
 
-fn builtin_stop_words(language: &str) -> &'static [&'static str] {
+pub(crate) fn builtin_stop_words(language: &str) -> &'static [&'static str] {
     match language {
         "english" => ENGLISH_STOP_WORDS,
         _ => &[],

@@ -46,6 +46,12 @@ pub enum RetrievalExpr {
         field: Option<String>,
         scoring: Option<TextScoringMode>,
     },
+    /// Preserve the complete quoted input for one field-specific token-graph analysis.
+    Phrase {
+        query: String,
+        field: Option<String>,
+        scoring: Option<TextScoringMode>,
+    },
     Filter {
         field: String,
         predicate: Predicate,

@@ -18,6 +18,7 @@ pub mod fusion_wrappers;
 pub mod hierarchical;
 pub mod hybrid;
 pub mod multi_stage;
+pub mod phrase;
 pub mod primitive;
 pub mod progressive_fusion;
 pub mod sparse;

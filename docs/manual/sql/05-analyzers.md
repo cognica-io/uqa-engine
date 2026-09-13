@@ -8,6 +8,7 @@ UQA Engine exposes analyzer catalog operations as row-producing SQL functions an
 | --- | --- | --- | --- |
 | `create_analyzer(name, config_json)` | Two strings | One status row | Yes |
 | `list_analyzers()` | None | One `analyzer_name` row per built-in or custom catalog analyzer | No |
+| `analyze_text(name, input)` | Two strings | One `analysis JSONB` row | No |
 | `set_table_analyzer(table, field, name [, phase])` | Three or four strings | One status row | Yes |
 | `drop_analyzer(name)` | One string | One status row | Yes |
 | `fts_index_stats([table])` | Zero or one table-name string | One diagnostics row per indexed field | No |
@@ -22,8 +23,9 @@ These functions are used in `FROM` like other table functions. `SELECT * FROM fu
 | `whitespace` | Whitespace tokenizer, lowercase | Pre-segmented text whose punctuation must remain within tokens |
 | `standard_cjk` | `standard` pipeline followed by 2-to-3-character n-grams with short-token retention | CJK-style text and substring-oriented matching |
 | `keyword` | Keyword tokenizer with no filters | Treat the complete non-empty field as one exact token |
+| `nori` (when the `nori` feature is enabled) | Native Lucene-compatible Korean tokenizer, POS and reading-form filters, and simple lowercase | Korean morphological analysis with graph positions and source offsets |
 
-`standard` is used when a GIN field has no explicit analyzer. `standard_cjk` is a built-in character n-gram pipeline, not a Chinese, Japanese, or Korean morphological segmenter. It can be assigned without calling `create_analyzer`:
+`standard` is used when a GIN field has no explicit analyzer. `standard_cjk` is a built-in character n-gram pipeline, not a Chinese, Japanese, or Korean morphological segmenter. The `nori` built-in is available only when the Engine is built with the native Nori dictionary feature. A built-in can be assigned without calling `create_analyzer`:
 
 ```sql
 SELECT * FROM set_table_analyzer(
@@ -116,7 +118,7 @@ $analyzer$
 
 The second argument is a SQL string containing JSON. Tagged dollar quoting keeps the JSON readable without escaping double quotes. An invalid JSON document, unknown component tag, invalid regular expression, invalid gram range, or unavailable synonym file rejects the statement.
 
-Registering the same custom name replaces its stored JSON definition, but already materialized postings are not rebuilt merely because the named definition changed. Reapply an index-owned definition by recreating its GIN index, or reapply a field-owned definition with `set_table_analyzer` and an `index` or `both` phase.
+Registering a custom name compiles an immutable revision and persists its resolved descriptor, including inline snapshots of synonym files. Registering the same name replaces the revision available to future assignments. Existing index and search bindings retain their own revisions across rollback, other sessions, and reopen. Reapply an index-owned definition by recreating its GIN index, or reapply a field-owned definition with `set_table_analyzer` for the desired phase.
 
 ## LIST ANALYZERS function
 
@@ -125,7 +127,7 @@ Registering the same custom name replaces its stored JSON definition, but alread
 | Syntax | `list_analyzers()` in `FROM` |
 | Arguments | None |
 | Result | Zero or more rows with one `analyzer_name TEXT` column, sorted by name in the direct result |
-| Effects | Read-only; includes custom catalog analyzers and the four built-ins |
+| Effects | Read-only; includes custom catalog analyzers and every built-in available in the current feature set |
 | Errors | Any argument is an arity error |
 
 ```sql
@@ -134,7 +136,28 @@ FROM list_analyzers()
 ORDER BY analyzer_name;
 ```
 
-The result includes `keyword`, `standard`, `standard_cjk`, `whitespace`, and custom analyzer names stored in the engine catalog. The function accepts no arguments.
+The result includes `keyword`, `standard`, `standard_cjk`, `whitespace`, feature-enabled `nori`, and custom analyzer names stored in the engine catalog. The function accepts no arguments.
+
+## ANALYZE TEXT function
+
+Inspect one complete analysis result without changing the catalog:
+
+| Contract part | Definition |
+| --- | --- |
+| Syntax | `analyze_text(name TEXT, input TEXT)` in `FROM` |
+| Arguments | `name` resolves a built-in or custom analyzer and `input` is the complete source string |
+| Result | One `analysis JSONB` row containing `tokens`, `final_offsets`, `final_position_increment`, and `analyzer_fingerprint` |
+| Effects | Read-only; no analyzer, table, index, or session state is changed |
+| Errors | Wrong arity or types, an unknown analyzer, unavailable resources, invalid analysis input, and analysis failures are returned as SQL errors |
+
+Each token preserves its term, UTF-8 and UTF-16 source ranges, position increment and length, keyword state, and any analyzer-specific metadata. Nori tokens additionally include Korean morphology, readings, and morpheme origins when those attributes are present. The final offsets and final position increment are retained even when filters remove every token, and `analyzer_fingerprint` identifies the resolved immutable revision used for the call.
+
+```sql
+SELECT analysis
+FROM analyze_text('nori', '나물은') AS a(analysis);
+```
+
+The JSONB diagnostic is the SQL form of the same rich token stream returned by the Rust `uqa_analysis::CompiledAnalyzer::analyze_tokens` API. A feature-disabled build reports an unknown analyzer for `nori` rather than silently falling back to another pipeline.
 
 ## Bind through CREATE INDEX
 
@@ -144,7 +167,7 @@ ON articles USING gin (body)
 WITH (analyzer = 'html_vehicle');
 ```
 
-The analyzer must already resolve when the index is created. It is applied to both index and search phases, existing rows are backfilled, and the name is persisted in the index definition. To change an analyzer owned by this DDL, drop and recreate the GIN index.
+The analyzer must already resolve when the index is created. Its exact revision is applied to both index and search phases, existing rows are backfilled, and the binding and ownership are persisted with the index definition. A field assignment cannot override this owner. Another GIN analyzer option on the same field must select the same name and revision. To change an analyzer owned by this DDL, drop its owning indexes and recreate them. If a GIN without an analyzer option still references the field after the last explicit owner is dropped, the field returns to its table default and existing rows are rebuilt in the same transaction.
 
 ## SET TABLE ANALYZER function
 
@@ -155,8 +178,8 @@ Create a GIN index without an analyzer option when assignments will be managed s
 | Syntax | `set_table_analyzer(table TEXT, field TEXT, name TEXT [, phase TEXT])` in `FROM` |
 | Arguments | All operands are string values naming a table, text column, analyzer, and optional `index`, `search`/`query`, or `both` phase; `phase` defaults to `both` |
 | Result | One `set_table_analyzer TEXT` status column; a table-function column alias can rename it |
-| Effects | Replaces the field's durable assignment in the transaction; `index` and `both` rebuild current postings before publication |
-| Errors | Wrong arity or types, an unknown table, column, or analyzer, a non-`TEXT` column, a field outside a physical GIN index, and an unknown phase are rejected |
+| Effects | Replaces the selected sides of the field's durable binding in the transaction; `index` and `both` rebuild current postings before publication |
+| Errors | Wrong arity or types, an unknown table, column, or analyzer, a non-`TEXT` column, a field outside a physical GIN index, an unknown phase, and a competing GIN analyzer owner are rejected |
 
 ```sql
 CREATE INDEX articles_body_gin
@@ -178,7 +201,7 @@ The target table and column must exist, the column must be `TEXT`, and the field
 | `search` or `query` | Install for query analysis without rebuilding postings |
 | `both` | Install for both sides and rebuild all current postings |
 
-The default phase is `both`. One assignment row is retained per table field, so another call replaces its recorded analyzer and phase. A phase-specific call updates only that in-memory side and leaves the other side unchanged, but only the last assignment is restored after reopen. Do not layer separate index and search assignments; prefer one `both` assignment or verify the complete asymmetric lifecycle. Do not combine a GIN `analyzer` option with a separate field assignment for the same column; select one catalog owner.
+The default phase is `both`. A phase-specific call replaces only the selected revision and retains the other side, including the table default on first assignment. Both independent descriptors are persisted and restored across rollback, catalog refresh, column or table rename, and reopen. The compatibility label reported by `table_field_analyzer` and `fts_index_stats` identifies the last explicit assignment; it does not describe both sides of an asymmetric binding. Select either GIN analyzer ownership or field-assignment ownership for each column; competing owners are rejected.
 
 ## Search behavior
 
@@ -191,7 +214,7 @@ WHERE text_match(body, 'car')
 ORDER BY _score DESC, id ASC;
 ```
 
-If no search-phase analyzer is installed, execution falls back to the field's index analyzer and then to the table's default analyzer. Multiple tokens emitted for one query leaf, including synonym expansions, are unioned across posting lists. BM25 scoring uses the analyzed term sequence.
+An index-only assignment retains the prior search revision, including the table default on the first assignment. Multiple tokens emitted for one query leaf, including synonym expansions, are unioned across posting lists. BM25 scoring uses the analyzed term sequence.
 
 ## FTS INDEX STATS function
 
@@ -259,15 +282,14 @@ For a GIN-index-owned analyzer, recreate the GIN index without that name before 
 
 Analyzer creation, assignment, and deletion are mutating SQL operations. Each standalone statement has an implicit transaction, and the operations can participate in explicit transactions. A failing outer projection or later statement rollback does not leave a partially published analyzer, assignment, or rebuilt posting set.
 
-Persistent engines store custom analyzer JSON and table-field assignments in the catalog and restore them on reopen. A file-backed synonym configuration stores only its path. Reopen and later analysis require that path to remain readable.
+Persistent engines store exact named descriptors and independent index/search bindings. Registered synonym files are resolved into the descriptor, so later assignment, document writes, search, and reopen need no original synonym file. Re-register the name to read changed file contents and then reapply the desired binding. A fresh compilation of an unresolved configuration still requires its files. Initial open migrates legacy name/phase rows, resolves any legacy files, and rebuilds affected indexes from original documents in the owning catalog transaction. Invalid descriptors, unavailable legacy resources, inconsistent ownership, or migration writes that fail abort restoration.
 
 ## Limits and deliberate differences
 
 - UQA Engine does not implement PostgreSQL text-search parser, dictionary, configuration, or template DDL.
-- SQL has no analyzer token-preview function; construct `uqa_analysis::Analyzer` and call `analyze` in Rust to inspect a pipeline directly.
-- SQL does not return the raw JSON definition for every named analyzer. Rust `Engine::get_table_analyzer` returns the normalized serialized configuration for an assigned phase.
+- `analyze_text` returns a read-only JSONB token diagnostic; Rust callers can use `uqa_analysis::CompiledAnalyzer::analyze_tokens` when they need typed token objects.
+- SQL does not return the raw JSON definition for every named analyzer. Rust `Engine::get_table_analyzer` returns the exact bound configuration for the selected phase. Its `both` result requires the same named revision on both sides; an unnamed default or asymmetric binding returns `None`.
 - SQL `uqa_highlight` uses the built-in English `standard` analyzer rather than inheriting the field assignment.
-- One durable assignment is recorded per field, not one independently managed assignment for each phase.
 
 ## Related documentation
 

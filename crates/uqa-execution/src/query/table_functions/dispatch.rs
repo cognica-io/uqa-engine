@@ -125,8 +125,8 @@ pub(super) fn build_table_function_rows_with_row(
             ],
             column_aliases,
         ),
-        "create_analyzer" | "drop_analyzer" | "list_analyzers" | "fts_index_stats"
-        | "set_table_analyzer" => {
+        "create_analyzer" | "drop_analyzer" | "list_analyzers" | "analyze_text"
+        | "fts_index_stats" | "set_table_analyzer" => {
             super::analyzers::build_rows(context.analyzers, &lower, &evaluated, column_aliases)
         }
         "pagerank" | "graph_pagerank" | "hits" | "graph_hits" | "betweenness"

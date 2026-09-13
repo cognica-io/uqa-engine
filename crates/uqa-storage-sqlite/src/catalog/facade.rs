@@ -110,6 +110,10 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::graph_has_membership(self, kind, id, graph))
     }
 
+    fn initialize_storage(&self) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::initialize_storage(self))
+    }
+
     fn cache_revisions(&self) -> StorageBackendResult<Option<uqa_storage::CatalogCacheRevisions>> {
         into_storage_result(Catalog::cache_revisions(self)).map(Some)
     }
@@ -120,10 +124,6 @@ impl CatalogFacade for Catalog {
 
     fn get_metadata(&self, key: &str) -> StorageBackendResult<Option<String>> {
         into_storage_result(Catalog::get_metadata(self, key))
-    }
-
-    fn fts_storage_was_reset(&self) -> bool {
-        self.fts_storage_was_reset
     }
 
     fn migrate_relation_namespace(&self) -> StorageBackendResult<()> {
@@ -459,6 +459,48 @@ impl CatalogFacade for Catalog {
 
     fn load_analyzers(&self) -> StorageBackendResult<Vec<(String, String)>> {
         into_storage_result(Catalog::load_analyzers(self))
+    }
+
+    fn save_analyzer_revision(
+        &self,
+        name: &str,
+        config_json: &str,
+        descriptor_json: &str,
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_analyzer_revision(
+            self,
+            name,
+            config_json,
+            descriptor_json,
+        ))
+    }
+
+    fn load_analyzer_descriptors(&self) -> StorageBackendResult<Vec<(String, String)>> {
+        into_storage_result(Catalog::load_analyzer_descriptors(self))
+    }
+
+    fn replace_table_field_analyzer_binding(
+        &self,
+        table: &str,
+        field: &str,
+        phase: &str,
+        name: &str,
+        binding_json: &str,
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::replace_table_field_analyzer_binding(
+            self,
+            table,
+            field,
+            phase,
+            name,
+            binding_json,
+        ))
+    }
+
+    fn load_table_field_analyzer_bindings(
+        &self,
+    ) -> StorageBackendResult<Vec<(String, String, String)>> {
+        into_storage_result(Catalog::load_table_field_analyzer_bindings(self))
     }
 
     fn save_table_field_analyzer(

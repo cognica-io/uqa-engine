@@ -76,7 +76,7 @@ export BINDGEN_EXTRA_CLANG_ARGS_wasm32_unknown_emscripten="--sysroot=${EM_SYSROO
 # CFLAGS that point at a native sysroot.
 export CFLAGS_wasm32_unknown_emscripten=""
 
-cargo build --target wasm32-unknown-emscripten -p uqa-wasm ${PROFILE_FLAG}
+cargo build --target wasm32-unknown-emscripten -p uqa-wasm --features nori ${PROFILE_FLAG}
 
 OUT_DIR="crates/uqa-wasm/js"
 cp "target/wasm32-unknown-emscripten/${PROFILE}/uqa.js" "${OUT_DIR}/uqa.js"

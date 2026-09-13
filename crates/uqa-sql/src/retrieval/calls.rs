@@ -668,7 +668,7 @@ pub(super) fn prepare_fts_probability_tree(tree: RetrievalExpr) -> RetrievalExpr
 
 pub(super) fn is_text_query_tree(tree: &RetrievalExpr) -> bool {
     match tree {
-        RetrievalExpr::Empty | RetrievalExpr::Term { .. } => true,
+        RetrievalExpr::Empty | RetrievalExpr::Term { .. } | RetrievalExpr::Phrase { .. } => true,
         RetrievalExpr::Intersect(children)
         | RetrievalExpr::Union(children)
         | RetrievalExpr::Composed(children) => children.iter().all(is_text_query_tree),
@@ -680,6 +680,11 @@ pub(super) fn is_text_query_tree(tree: &RetrievalExpr) -> bool {
 pub(super) fn bind_fts_bm25_tree(tree: RetrievalExpr) -> RetrievalExpr {
     match tree {
         RetrievalExpr::Term { query, field, .. } => RetrievalExpr::Term {
+            query,
+            field,
+            scoring: Some(TextScoringMode::BM25),
+        },
+        RetrievalExpr::Phrase { query, field, .. } => RetrievalExpr::Phrase {
             query,
             field,
             scoring: Some(TextScoringMode::BM25),
@@ -703,7 +708,7 @@ pub(super) fn bind_fts_bm25_tree(tree: RetrievalExpr) -> RetrievalExpr {
 pub(super) fn common_text_field(tree: &RetrievalExpr) -> Option<String> {
     fn collect_fields(tree: &RetrievalExpr, fields: &mut BTreeSet<Option<String>>) {
         match tree {
-            RetrievalExpr::Term { field, .. } => {
+            RetrievalExpr::Term { field, .. } | RetrievalExpr::Phrase { field, .. } => {
                 fields.insert(field.clone());
             }
             RetrievalExpr::Intersect(children)

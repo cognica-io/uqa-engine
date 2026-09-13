@@ -40,6 +40,7 @@ pub struct HighlightArguments {
     pub end_tag: String,
     pub max_fragments: usize,
     pub fragment_size: usize,
+    pub analyzer: Option<String>,
 }
 
 pub enum HighlightInput {
@@ -57,10 +58,10 @@ pub fn highlight_arguments(
     args: &[ScalarExpr],
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<HighlightInput, SQLError> {
-    if args.len() < 2 || args.len() > 6 {
+    if args.len() < 2 || args.len() > 7 {
         return Err(SQLError::BadArity {
             name: "uqa_highlight".into(),
-            expected: "2..=6".into(),
+            expected: "2..=7".into(),
             actual: args.len(),
         });
     }
@@ -150,6 +151,18 @@ pub fn highlight_arguments(
         },
         None => 150,
     };
+    let analyzer = match args.get(6) {
+        Some(expression) => match evaluate(expression)? {
+            Value::Str(name) => Some(name),
+            Value::Null => None,
+            other => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "uqa_highlight analyzer must be string, got {other:?}"
+                )))
+            }
+        },
+        None => None,
+    };
     Ok(HighlightInput::Arguments(HighlightArguments {
         text,
         query: query_str,
@@ -157,5 +170,6 @@ pub fn highlight_arguments(
         end_tag,
         max_fragments,
         fragment_size,
+        analyzer,
     }))
 }

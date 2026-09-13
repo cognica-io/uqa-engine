@@ -1,0 +1,192 @@
+[
+  {
+    "id": "empty",
+    "rules": "",
+    "query": "한국"
+  },
+  {
+    "id": "comments",
+    "rules": "# 설명\n  # 공백\r\n\t# 다음\n",
+    "query": "한국"
+  },
+  {
+    "id": "ascii_blank",
+    "rules": " \t\r\n\u000b\f",
+    "query": "한국"
+  },
+  {
+    "id": "nouns",
+    "rules": "세종\n세종시 세종 시\nc++\n",
+    "query": "세종시 c++ 세종"
+  },
+  {
+    "id": "duplicate_first",
+    "rules": "세종시 세종 시\n세종시 세 종시\n",
+    "query": "세종시"
+  },
+  {
+    "id": "ignored_invalid_duplicate",
+    "rules": "세종시\n세종시 세종시 시\n",
+    "query": "세종시"
+  },
+  {
+    "id": "first_invalid_duplicate",
+    "rules": "세종시 세종시 시\n세종시\n",
+    "query": "세종시"
+  },
+  {
+    "id": "different_labels",
+    "rules": "세종시 가나 다\n",
+    "query": "세종시"
+  },
+  {
+    "id": "short_segmentation",
+    "rules": "세종시 가나\n",
+    "query": "세종시"
+  },
+  {
+    "id": "long_segmentation",
+    "rules": "세종시 가나 다라\n",
+    "query": "세종시"
+  },
+  {
+    "id": "noun_coda",
+    "rules": "한국\n",
+    "query": "한국"
+  },
+  {
+    "id": "noun_no_coda",
+    "rules": "하나\n",
+    "query": "하나"
+  },
+  {
+    "id": "label_coda",
+    "rules": "세종시 가나 말\n",
+    "query": "세종시"
+  },
+  {
+    "id": "trailing_space",
+    "rules": "한국 \n",
+    "query": "한국"
+  },
+  {
+    "id": "trailing_tab",
+    "rules": "한국\t\n",
+    "query": "한국"
+  },
+  {
+    "id": "comment_adjacent",
+    "rules": "한국#comment\n",
+    "query": "한국"
+  },
+  {
+    "id": "comment_after_space",
+    "rules": "한국 #comment\n",
+    "query": "한국"
+  },
+  {
+    "id": "leading_space",
+    "rules": " 한국\n",
+    "query": "한국"
+  },
+  {
+    "id": "leading_tab",
+    "rules": "\t한국\n",
+    "query": "한국"
+  },
+  {
+    "id": "tabs_formfeeds",
+    "rules": "세종시\t세종\f시\n",
+    "query": "세종시"
+  },
+  {
+    "id": "carriage_return",
+    "rules": "한국\r하나\r\n세종시 세종 시\n",
+    "query": "한국 하나 세종시"
+  },
+  {
+    "id": "utf16_sort",
+    "rules": "\n😀\n𐀀\n가\n",
+    "query": "가😀𐀀"
+  },
+  {
+    "id": "supplementary_lengths",
+    "rules": "😀한 😀 한\n",
+    "query": "😀한"
+  },
+  {
+    "id": "split_surrogate",
+    "rules": "🙂a 가 나\n",
+    "query": "🙂a"
+  },
+  {
+    "id": "null_in_surface",
+    "rules": "끝\u0000\n",
+    "query": "끝\u0000"
+  },
+  {
+    "id": "control_at_start",
+    "rules": "\u0001한국\n",
+    "query": "\u0001한국"
+  },
+  {
+    "id": "unicode_blank",
+    "rules": "　\n",
+    "query": "　"
+  },
+  {
+    "id": "nonbreaking_space",
+    "rules": "a b\n",
+    "query": "a b"
+  },
+  {
+    "id": "unicode_line_separator",
+    "rules": "a b\n",
+    "query": "a b"
+  },
+  {
+    "id": "comment_before_separator",
+    "rules": "ab#x cd\n",
+    "query": "ab#x cd"
+  },
+  {
+    "id": "comment_ending_separator",
+    "rules": "ab#x \n",
+    "query": "ab "
+  },
+  {
+    "id": "comment_after_separator",
+    "rules": "ab #x\n",
+    "query": "ab "
+  },
+  {
+    "id": "comment_middle_separator",
+    "rules": "ab#x #y\n",
+    "query": "ab#x "
+  },
+  {
+    "id": "comment_only_separator",
+    "rules": "#x \n",
+    "query": " "
+  },
+  {
+    "id": "nel_terminator",
+    "rules": "ab#x\n",
+    "query": "ab"
+  },
+  {
+    "id": "paragraph_terminator",
+    "rules": "ab#x \n",
+    "query": "ab "
+  },
+  {
+    "id": "overlapping",
+    "rules": "골드\n브라운\n골드브라운\n라운\n",
+    "query": "골드브라운골드"
+  },
+  {
+    "id": "archaic_hangul",
+    "rules": "ᄒ\nᅡ\nㆍ\n",
+    "query": "하ㆍ"
+  }
+]

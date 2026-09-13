@@ -24,8 +24,9 @@
 //! to the actual query length (`scaled_for_query_terms`), keeping long
 //! real queries out of the sigmoid's saturated tail.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
+use uqa_storage::TokenTermKey;
 
 use uqa_core::DocId;
 use uqa_storage::{InvertedIndex, StorageBackendError, StorageBackendResult};
@@ -34,6 +35,8 @@ use crate::bayesian_bm25::BayesianBM25Params;
 use crate::bm25::{BM25Params, BM25Scorer};
 use crate::error::invalid_input;
 use crate::ScoringResult;
+
+mod document_queries;
 
 const DEFAULT_N_SAMPLES: usize = 50;
 const DEFAULT_TOKENS_PER_QUERY: usize = 5;
@@ -115,11 +118,11 @@ impl UnsupervisedBm25ScoreEstimator {
                     "n_samples * tokens_per_query does not fit in usize".to_string(),
                 )
             })?;
-        let vocabulary = index.vocabulary_terms(field)?;
+        let vocabulary = index.vocabulary_keys(field)?;
         let sampled_terms = reservoir_sample(&vocabulary, sample_size, self.seed);
 
         let lengths = calibration_lengths(self.tokens_per_query);
-        let mut queries: Vec<Vec<String>> = Vec::new();
+        let mut queries: Vec<Vec<TokenTermKey>> = Vec::new();
         let mut cursor = 0;
         let mut query_index = 0;
         while cursor < sampled_terms.len() {
@@ -133,7 +136,7 @@ impl UnsupervisedBm25ScoreEstimator {
             cursor = end;
         }
 
-        self.estimate_with_queries(index, field, bm25_params, &queries)
+        self.estimate_with_query_keys(index, field, bm25_params, &queries)
     }
 
     /// Estimate from caller-provided pseudo-queries, grouped by their
@@ -147,6 +150,26 @@ impl UnsupervisedBm25ScoreEstimator {
         field: &str,
         bm25_params: BM25Params,
         queries: &[Vec<String>],
+    ) -> StorageBackendResult<BayesianBM25Params> {
+        let keys = queries
+            .iter()
+            .map(|query| {
+                query
+                    .iter()
+                    .map(|term| TokenTermKey::from_text(term))
+                    .collect()
+            })
+            .collect::<Vec<_>>();
+        self.estimate_with_query_keys(index, field, bm25_params, &keys)
+    }
+
+    /// Estimate from lossless term keys, preserving the supplied query lengths and repetitions.
+    pub fn estimate_with_query_keys(
+        &self,
+        index: &dyn InvertedIndex,
+        field: &str,
+        bm25_params: BM25Params,
+        queries: &[Vec<TokenTermKey>],
     ) -> StorageBackendResult<BayesianBM25Params> {
         let doc_count = index.doc_count()? as usize;
         if doc_count == 0 || queries.is_empty() {
@@ -296,7 +319,7 @@ fn fallback_params(bm25: BM25Params) -> BayesianBM25Params {
     }
 }
 
-fn reservoir_sample(terms: &[String], sample_size: usize, seed: i64) -> Vec<String> {
+fn reservoir_sample<T: Clone>(terms: &[T], sample_size: usize, seed: i64) -> Vec<T> {
     let mut random = JavaRandom::new(seed);
     let mut reservoir = Vec::with_capacity(sample_size.min(terms.len()));
     for (index, term) in terms.iter().enumerate() {
@@ -316,40 +339,36 @@ fn reservoir_sample(terms: &[String], sample_size: usize, seed: i64) -> Vec<Stri
 fn collect_scores(
     index: &dyn InvertedIndex,
     field: &str,
-    query_terms: &[String],
+    query_terms: &[TokenTermKey],
     scorer: &BM25Scorer,
 ) -> StorageBackendResult<Vec<f64>> {
-    let posting_lists = index.get_posting_lists_bulk(field, query_terms)?;
-    let idfs: Vec<f64> = posting_lists
+    let mut cursors = index.posting_cursors_keys_bulk(field, query_terms)?;
+    let idfs: Vec<_> = cursors
         .iter()
-        .map(|posting_list| scorer.idf(posting_list.len() as u64))
+        .map(|cursor| scorer.idf(cursor.doc_freq()))
         .collect();
-    let mut matching_terms = BTreeMap::<DocId, Vec<(usize, u64)>>::new();
-    let mut candidate_ids = BTreeSet::<DocId>::new();
-
-    for (term_index, posting_list) in posting_lists.iter().enumerate() {
-        for entry in posting_list {
-            candidate_ids.insert(entry.doc_id);
-            matching_terms
+    let mut matching = BTreeMap::<DocId, (u64, Vec<(usize, u64)>)>::new();
+    for (term_index, cursor) in cursors.iter_mut().enumerate() {
+        while let Some(entry) = cursor.current() {
+            let (length, terms) = matching
                 .entry(entry.doc_id)
-                .or_default()
-                .push((term_index, entry.payload.positions.len() as u64));
+                .or_insert_with(|| (entry.doc_length, Vec::new()));
+            if *length != entry.doc_length {
+                return Err(StorageBackendError::Other(format!(
+                    "inconsistent indexed document length for document {}",
+                    entry.doc_id
+                )));
+            }
+            terms.push((term_index, entry.term_freq));
+            cursor.advance()?;
         }
     }
-
-    let candidate_ids: Vec<DocId> = candidate_ids.into_iter().collect();
-    let doc_lengths = index.get_doc_lengths_bulk(&candidate_ids, field)?;
-    Ok(candidate_ids
-        .into_iter()
-        .map(|doc_id| {
-            let doc_length = doc_lengths.get(&doc_id).copied().unwrap_or(0);
-            matching_terms
-                .get(&doc_id)
+    Ok(matching
+        .into_values()
+        .map(|(length, terms)| {
+            terms
                 .into_iter()
-                .flatten()
-                .map(|(term_index, term_frequency)| {
-                    scorer.score_with_idf(*term_frequency, doc_length, idfs[*term_index])
-                })
+                .map(|(index, frequency)| scorer.score_with_idf(frequency, length, idfs[index]))
                 .sum()
         })
         .collect())
@@ -407,6 +426,19 @@ mod tests {
     use uqa_storage::{InvertedIndex, MemoryInvertedIndex};
 
     use super::*;
+
+    #[test]
+    fn calibration_uses_occurrence_scores_instead_of_unique_position_counts() {
+        let index = crate::occurrence_tests::OccurrenceIndex::new();
+        let scorer = BM25Scorer::new(BM25Params::default(), Arc::new(index.stats().unwrap()));
+        let actual = collect_scores(&index, "body", &["a".into(), "a".into()], &scorer).unwrap();
+        let expected: Vec<_> = index
+            .entries
+            .iter()
+            .map(|entry| 2.0 * scorer.score(entry.score().term_freq, entry.doc_length, 2))
+            .collect();
+        assert_eq!(actual, expected);
+    }
 
     fn populated_index() -> MemoryInvertedIndex {
         let mut index = MemoryInvertedIndex::new(standard_analyzer("english"));

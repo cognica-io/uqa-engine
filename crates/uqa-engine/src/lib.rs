@@ -130,12 +130,12 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use uqa_analysis::{analyzer::standard_analyzer, registry as analyzer_registry, Analyzer};
-use uqa_core::{DocId, FieldName, PostingList, Value};
+use uqa_core::{DocId, FieldName, Value};
 use uqa_ml::{DeepLearnOutput, DeepModel, LearnOptions, TrainingSet};
 use uqa_operators::ExecutionContext;
 use uqa_scoring::{
-    BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, CalibrationMetrics,
-    CalibrationReport, ParameterLearner, RawBm25Score, Scorer, UnsupervisedBm25ScoreEstimator,
+    BM25Params, BayesianBM25Params, BayesianBM25Scorer, CalibrationMetrics, CalibrationReport,
+    ParameterLearner, RawBm25Score, UnsupervisedBm25ScoreEstimator,
 };
 use uqa_sql::SQLError;
 use uqa_storage::{
@@ -193,34 +193,13 @@ pub type EngineResult<T> = std::result::Result<T, EngineError>;
 
 pub use uqa_core::ScoredEntry;
 
-/// Algorithm that actually produced a text-search result.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TextSearchAlgorithm {
-    Exhaustive,
-    Wand,
-    BlockMaxWand,
-}
-
-/// Observable work counters for one text top-k execution.
-#[derive(Debug, Clone)]
-pub struct TextSearchProfile {
-    pub entries: Vec<ScoredEntry>,
-    pub algorithm: TextSearchAlgorithm,
-    pub scored_candidates: u64,
-    /// Exact distinct candidates for exhaustive/materialized execution; for
-    /// score-cursor WAND/BMW this is the sum of term document frequencies, a
-    /// no-prescan upper bound on the distinct candidate count.
-    pub total_candidates: u64,
-    pub cursor_advances: u64,
-    pub skip_rate: f64,
-    pub elapsed_ms: f64,
-}
+pub use uqa_scoring::{TextSearchAlgorithm, TextSearchProfile};
 
 pub use uqa_storage::FtsIndexStat;
 
 pub use uqa_scoring::ScoringMode;
 
-type TableFieldAnalyzerRegistry = BTreeMap<(String, String), (String, String)>;
+type TableFieldAnalyzerRegistry = BTreeMap<(String, String), uqa_storage::FieldAnalyzerBinding>;
 type SessionPortalTableSnapshots = Arc<BTreeMap<RelationIdentity, Arc<TableState>>>;
 type SessionPortalViewSnapshots = Arc<BTreeMap<RelationIdentity, StoredView>>;
 type SessionPortalSQLFunctionSnapshots =

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import pathlib
 import re
@@ -18,6 +19,7 @@ import subprocess
 import sys
 import tarfile
 import zipfile
+from typing import Callable
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -199,6 +201,42 @@ def is_publishable(package: dict[str, object]) -> bool:
     return True
 
 
+NORI_FILES = (
+    "data/nori.uqan",
+    "data/model_manifest.json",
+    "THIRD-PARTY/JDK-UNICODE.md",
+    "THIRD-PARTY/LUCENE-LICENSE.txt",
+    "THIRD-PARTY/LUCENE-NOTICE.txt",
+    "THIRD-PARTY/MECAB-COPYING.txt",
+)
+
+
+LUCENE_FILES = ("THIRD-PARTY/LUCENE-LICENSE.txt", "THIRD-PARTY/LUCENE-NOTICE.txt")
+
+
+def check_lucene_payloads(read: Callable[[str], bytes]) -> None:
+    for relative in LUCENE_FILES:
+        expected = (ROOT / "crates/uqa-nori-data" / relative).read_bytes()
+        if read(relative) != expected:
+            raise RuntimeError(f"ported Nori code requires the complete pinned {relative}")
+
+
+def check_nori_payloads(manifest_bytes: bytes, read: Callable[[str], bytes]) -> None:
+    try:
+        manifest = json.loads(manifest_bytes)
+        if manifest["format"] != "uqa-nori-bundled-resource" or manifest["format_version"] != 1:
+            raise ValueError("unsupported resource manifest")
+        entries = manifest["files"]
+        if sorted(entry["path"] for entry in entries) != sorted(NORI_FILES):
+            raise ValueError("incomplete or duplicate resource inventory")
+        for entry in entries:
+            actual = read(entry["path"])
+            if len(actual) != entry["bytes"] or hashlib.sha256(actual).hexdigest() != entry["sha256"]:
+                raise ValueError(f"size or hash differs: {entry['path']}")
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise RuntimeError(f"invalid Nori resources: {error}") from error
+
+
 def check_cargo_sources(payloads: dict[str, bytes]) -> None:
     notice = (ROOT / "crates" / "uqa-node" / AGPL_NOTICE).read_bytes()
     for package in workspace_packages():
@@ -233,6 +271,13 @@ def check_cargo_sources(payloads: dict[str, bytes]) -> None:
             raise RuntimeError(f"cannot read {notice_path}: {error}") from error
         if actual_notice != notice:
             raise RuntimeError(f"crate legal copy differs from canonical file: {notice_path}")
+        if name == "uqa-analysis":
+            check_lucene_payloads(lambda relative: (crate_root / relative).read_bytes())
+        if name == "uqa-nori-data":
+            check_nori_payloads(
+                (crate_root / "data/resource_manifest.json").read_bytes(),
+                lambda relative: (crate_root / relative).read_bytes(),
+            )
 
 
 def check_maturin_sources() -> None:
@@ -312,6 +357,26 @@ def check_archive(path: pathlib.Path, payloads: dict[str, bytes]) -> None:
         members, AGPL_NOTICE
     ):
         raise RuntimeError(f"{path} omits {AGPL_NOTICE}")
+    if path.name.startswith(("uqa-analysis-", "uqa-nori-data-")) and path.name.endswith(".crate"):
+        def read_nori(relative: str) -> bytes:
+            matches = matching_members(members, relative)
+            if len(matches) != 1:
+                raise RuntimeError(f"{path} requires exactly one {relative}")
+            return matches[0][1]
+
+        if path.name.startswith("uqa-analysis-"):
+            check_lucene_payloads(read_nori)
+            source = "THIRD-PARTY/LUCENE-SOURCE.md"
+            if read_nori(source) != (ROOT / "crates/uqa-analysis" / source).read_bytes():
+                raise RuntimeError(f"{path} contains different Lucene source attribution")
+            return
+        manifest = read_nori("data/resource_manifest.json")
+        expected = (ROOT / "crates/uqa-nori-data/data/resource_manifest.json").read_bytes()
+        if manifest != expected:
+            raise RuntimeError(f"{path} contains a different Nori resource manifest")
+        check_nori_payloads(manifest, read_nori)
+        if path.stat().st_size > 10_000_000:
+            raise RuntimeError(f"{path} exceeds the Nori crate's 10 MB archive budget")
 
 
 def parse_args() -> argparse.Namespace:

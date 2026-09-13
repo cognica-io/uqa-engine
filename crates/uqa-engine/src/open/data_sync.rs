@@ -287,9 +287,7 @@ impl Engine {
                         stable.then_some(after).flatten(),
                     )
                 } else {
-                    // A backend may own a whole-file exclusive lock. Pin and
-                    // refresh through the session itself because an independent
-                    // monitor could wait on a lock held by this same session.
+                    // A writer or an existing reader may prevent an independent monitor from acquiring its read lock. Refresh through the pinned session instead of waiting on a lock cycle that includes this session.
                     backend.pin_transaction_snapshot()?;
                     (false, None)
                 }

@@ -307,6 +307,7 @@ pub fn is_builtin_table_function(name: &str) -> bool {
             | "create_analyzer"
             | "drop_analyzer"
             | "list_analyzers"
+            | "analyze_text"
             | "fts_index_stats"
             | "set_table_analyzer"
             | "pagerank"
@@ -357,6 +358,7 @@ pub fn table_function_empty_schema(
             | "graph_betweenness" => vec!["_doc_id".into(), "_score".into()],
             "rpq" => vec!["vertex_id".into()],
             "list_analyzers" => vec!["analyzer_name".into()],
+            "analyze_text" => vec!["analysis".into()],
             "fts_index_stats" => vec![
                 "table_name".into(),
                 "field".into(),
@@ -508,6 +510,7 @@ pub fn table_function_column_types(
         align(match normalized.as_str() {
             "pg_listening_channels" => vec![Some(ColumnType::Text)],
             "generate_series" => vec![argument_type(0)],
+            "analyze_text" => vec![Some(ColumnType::JsonB)],
             "unnest" => args
                 .iter()
                 .map(|argument| {

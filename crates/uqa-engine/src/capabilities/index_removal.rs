@@ -82,6 +82,9 @@ impl IndexRemovalPublication for Engine {
     fn drop_fts_field(&self, table: &str, field: &str) -> Result<(), String> {
         Engine::drop_fts_field(self, table, field)
     }
+    fn release_fts_analyzer_owner(&self, table: &str, field: &str) -> Result<(), String> {
+        Engine::release_fts_analyzer_owner(self, table, field)
+    }
     fn drop_vector_field_index(
         &self,
         table: &str,

@@ -7,11 +7,8 @@
 //! WAND/BMW planning, block-max lifecycle, and profiled text leaves.
 
 use super::{
-    block_max_scorer_fingerprint, raw_bm25_params, search_stats_for_terms, storage_sql_error, Arc,
-    BM25Scorer, BTreeSet, BlockMaxIndex, CursorBlockMaxWANDScorer, CursorWANDQuery,
-    CursorWANDScorer, Engine, Instant, InvertedIndex, OperatorTree, SQLError, ScoredEntry,
-    ScoringMode, TextScoringMode, TextSearchAlgorithm, TextSearchProfile, TextTopKPlan,
-    TextTopKStrategy, WANDStats, DEFAULT_BLOCK_SIZE,
+    storage_sql_error, Engine, OperatorTree, SQLError, ScoredEntry, ScoringMode, TextScoringMode,
+    TextSearchAlgorithm, TextSearchProfile, TextTopKPlan, TextTopKStrategy,
 };
 
 impl Engine {
@@ -46,143 +43,9 @@ impl Engine {
                 return Err(SQLError::UnknownTable(table.to_string()));
             };
             let mut index = table_state.inverted_index.write();
-            let stats = Arc::new(
-                index
-                    .field_stats_scalar(field)
-                    .map_err(|error| storage_sql_error("read field statistics", error))?,
-            );
-            let params = raw_bm25_params(mode);
-            params
-                .validate()
-                .map_err(|error| SQLError::TypeMismatch(error.to_string()))?;
-            let fingerprint = block_max_scorer_fingerprint(params, stats.as_ref());
-            let scorer = BM25Scorer::new(params, stats);
-            index
-                .rebuild_persisted_block_max(field, &scorer, &fingerprint)
-                .map_err(|error| storage_sql_error("rebuild persisted block-max scores", error))
+            uqa_scoring::rebuild_text_block_max(index.as_mut(), field, mode)
+                .map_err(super::helpers::scoring_sql_error)
         })
-    }
-
-    pub(super) fn load_block_max_index(
-        index: &dyn InvertedIndex,
-        table: &str,
-        field: &str,
-        analyzed_terms: &[String],
-        doc_freqs: &[u64],
-        fingerprint: &str,
-    ) -> Result<Option<BlockMaxIndex>, SQLError> {
-        let mut block_max = BlockMaxIndex::new(DEFAULT_BLOCK_SIZE)
-            .map_err(|error| storage_sql_error("create block-max index", error))?;
-        let mut checked = BTreeSet::new();
-        let mut requested = Vec::<(String, usize)>::new();
-        for (term, doc_freq) in analyzed_terms.iter().zip(doc_freqs) {
-            if *doc_freq == 0 || !checked.insert(term) {
-                continue;
-            }
-            let expected_blocks = usize::try_from(*doc_freq)
-                .map_err(|_| SQLError::Internal("text document frequency exceeds usize".into()))?
-                .div_ceil(DEFAULT_BLOCK_SIZE);
-            requested.push((term.clone(), expected_blocks));
-        }
-        let terms = requested
-            .iter()
-            .map(|(term, _)| term.clone())
-            .collect::<Vec<_>>();
-        let persisted = index
-            .persisted_block_max_scores_bulk(field, &terms, fingerprint)
-            .map_err(|error| storage_sql_error("read persisted block-max scores", error))?;
-        if persisted.len() != requested.len() {
-            return Err(SQLError::Internal(format!(
-                "block-max bulk read returned {} terms for {} requests",
-                persisted.len(),
-                requested.len()
-            )));
-        }
-        for ((term, expected_blocks), scores) in requested.into_iter().zip(persisted) {
-            let Some(scores) = scores else {
-                return Ok(None);
-            };
-            if scores.len() != expected_blocks {
-                return Ok(None);
-            }
-            block_max
-                .set_block_maxes(table, field, &term, scores)
-                .map_err(|error| storage_sql_error("load block-max scores", error))?;
-        }
-        Ok(Some(block_max))
-    }
-
-    pub(super) fn score_text_top_k(
-        index: &dyn InvertedIndex,
-        table: &str,
-        field: &str,
-        analyzed_terms: &[String],
-        mode: &ScoringMode,
-        plan: TextTopKPlan,
-    ) -> Result<(Vec<ScoredEntry>, WANDStats, TextSearchAlgorithm), SQLError> {
-        let posting_cursors = index
-            .posting_cursors_bulk(field, analyzed_terms)
-            .map_err(|error| storage_sql_error("open text posting cursors", error))?;
-        let doc_freqs = posting_cursors
-            .iter()
-            .map(|cursor| cursor.doc_freq())
-            .collect::<Vec<_>>();
-        let stats = Arc::new(
-            search_stats_for_terms(index, field, analyzed_terms, &doc_freqs)
-                .map_err(|error| storage_sql_error("read field statistics", error))?,
-        );
-        let scorer = Self::build_text_scorer(mode, stats.clone(), analyzed_terms.len())?;
-        let wand_query = CursorWANDQuery::new(
-            posting_cursors,
-            vec![scorer; analyzed_terms.len()],
-            vec![field.to_string(); analyzed_terms.len()],
-            analyzed_terms.to_vec(),
-            plan.k,
-        )
-        .map_err(|error| storage_sql_error("build WAND query", error))?;
-
-        let (result, algorithm) = match plan.strategy {
-            TextTopKStrategy::Wand => (
-                CursorWANDScorer::new(&wand_query)
-                    .score_top_k()
-                    .map_err(|error| storage_sql_error("execute WAND", error))?,
-                TextSearchAlgorithm::Wand,
-            ),
-            TextTopKStrategy::BlockMaxWand => {
-                let fingerprint =
-                    block_max_scorer_fingerprint(raw_bm25_params(mode), stats.as_ref());
-                if let Some(block_max) = Self::load_block_max_index(
-                    index,
-                    table,
-                    field,
-                    analyzed_terms,
-                    &doc_freqs,
-                    &fingerprint,
-                )? {
-                    (
-                        CursorBlockMaxWANDScorer::new(&wand_query, &block_max, table)
-                            .score_top_k()
-                            .map_err(|error| storage_sql_error("execute Block-Max WAND", error))?,
-                        TextSearchAlgorithm::BlockMaxWand,
-                    )
-                } else {
-                    // A concurrent or transactional posting mutation can
-                    // invalidate blocks after planning. Exact WAND is the safe
-                    // physical fallback; stale bounds are never consumed.
-                    (
-                        CursorWANDScorer::new(&wand_query)
-                            .score_top_k()
-                            .map_err(|error| storage_sql_error("execute WAND fallback", error))?,
-                        TextSearchAlgorithm::Wand,
-                    )
-                }
-            }
-        };
-        let entries = Self::rank_scored_entries_top_k(
-            result.top_k.iter().map(ScoredEntry::from_entry).collect(),
-            plan.k,
-        );
-        Ok((entries, result.stats, algorithm))
     }
 
     pub(super) fn search_leaf_profiled(
@@ -194,63 +57,23 @@ impl Engine {
         top_k: usize,
         physical_top_k: Option<TextTopKPlan>,
     ) -> Result<TextSearchProfile, SQLError> {
-        let started = Instant::now();
-        let Some(t) = self
+        let table_state = self
             .try_query_table(table)
             .map_err(|error| storage_sql_error("resolve text-search table", error))?
-        else {
-            return Err(SQLError::UnknownTable(table.to_string()));
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        let index = table_state.inverted_index.read();
+        let (limit, strategy) = match physical_top_k {
+            Some(plan) => (
+                plan.k,
+                match plan.strategy {
+                    TextTopKStrategy::Wand => TextSearchAlgorithm::Wand,
+                    TextTopKStrategy::BlockMaxWand => TextSearchAlgorithm::BlockMaxWand,
+                },
+            ),
+            None => (top_k, TextSearchAlgorithm::Exhaustive),
         };
-        let index = t.inverted_index.read();
-        let analyzer = index.get_search_analyzer(field);
-        let analyzed_terms = analyzer
-            .analyze(query)
-            .map_err(|error| storage_sql_error("analyze text query", error))?;
-        if analyzed_terms.is_empty() {
-            return Ok(TextSearchProfile {
-                entries: Vec::new(),
-                algorithm: TextSearchAlgorithm::Exhaustive,
-                scored_candidates: 0,
-                total_candidates: 0,
-                cursor_advances: 0,
-                skip_rate: 0.0,
-                elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
-            });
-        }
-
-        if let Some(plan) = physical_top_k {
-            let (entries, stats, algorithm) =
-                Self::score_text_top_k(index.as_ref(), table, field, &analyzed_terms, mode, plan)?;
-            return Ok(TextSearchProfile {
-                entries,
-                algorithm,
-                scored_candidates: stats.scored,
-                total_candidates: stats.total_candidates,
-                cursor_advances: stats.cursor_advances,
-                skip_rate: stats.skip_rate(),
-                elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
-            });
-        }
-
-        // Walk the postings once per term occurrence, keeping only
-        // `(doc_id, term_freq)` and the document frequencies required by the
-        // scorer. Single-term queries avoid the per-document term map.
-        let entries = if analyzed_terms.len() == 1 {
-            Self::score_single_text_term(index.as_ref(), field, &analyzed_terms, mode)?
-        } else {
-            Self::score_multiple_text_terms(index.as_ref(), field, &analyzed_terms, mode)?
-        };
-        let total_candidates = u64::try_from(entries.len())
-            .map_err(|_| SQLError::Internal("text candidate count exceeds u64".into()))?;
-        Ok(TextSearchProfile {
-            entries: Self::rank_scored_entries_top_k(entries, top_k),
-            algorithm: TextSearchAlgorithm::Exhaustive,
-            scored_candidates: total_candidates,
-            total_candidates,
-            cursor_advances: 0,
-            skip_rate: 0.0,
-            elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
-        })
+        uqa_scoring::score_text_query(index.as_ref(), table, field, query, mode, limit, strategy)
+            .map_err(super::helpers::scoring_sql_error)
     }
 
     /// Physical text-search leaf. Only [`crate::operator_tree_bridge::EngineDriver`]

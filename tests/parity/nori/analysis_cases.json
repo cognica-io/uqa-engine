@@ -1,0 +1,5786 @@
+[
+  {
+    "id": "filters_0_none_0",
+    "input": "",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_0_none_1",
+    "input": "",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_0_none_2",
+    "input": "",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_0_none_3",
+    "input": "",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_0_none_4",
+    "input": "",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_0_none_5",
+    "input": "",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_0_none",
+    "input": "",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_0_discard_0",
+    "input": "",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_0_discard_1",
+    "input": "",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_0_discard_2",
+    "input": "",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_0_discard_3",
+    "input": "",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_0_discard_4",
+    "input": "",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_0_discard_5",
+    "input": "",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_0_discard",
+    "input": "",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_0_mixed_0",
+    "input": "",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_0_mixed_1",
+    "input": "",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_0_mixed_2",
+    "input": "",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_0_mixed_3",
+    "input": "",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_0_mixed_4",
+    "input": "",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_0_mixed_5",
+    "input": "",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_0_mixed",
+    "input": "",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "normalize_0",
+    "input": "",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "normalize",
+    "filters": []
+  },
+  {
+    "id": "filters_1_none_0",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_1_none_1",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_1_none_2",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_1_none_3",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_1_none_4",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_1_none_5",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_1_none",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_1_discard_0",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_1_discard_1",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_1_discard_2",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_1_discard_3",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_1_discard_4",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_1_discard_5",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_1_discard",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_1_mixed_0",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_1_mixed_1",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_1_mixed_2",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_1_mixed_3",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_1_mixed_4",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_1_mixed_5",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_1_mixed",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "normalize_1",
+    "input": "가락지나물은 한국, 중국, 일본",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "normalize",
+    "filters": []
+  },
+  {
+    "id": "filters_2_none_0",
+    "input": "나물은",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_2_none_1",
+    "input": "나물은",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_2_none_2",
+    "input": "나물은",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_2_none_3",
+    "input": "나물은",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_2_none_4",
+    "input": "나물은",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_2_none_5",
+    "input": "나물은",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_2_none",
+    "input": "나물은",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_2_discard_0",
+    "input": "나물은",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_2_discard_1",
+    "input": "나물은",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_2_discard_2",
+    "input": "나물은",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_2_discard_3",
+    "input": "나물은",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_2_discard_4",
+    "input": "나물은",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_2_discard_5",
+    "input": "나물은",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_2_discard",
+    "input": "나물은",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_2_mixed_0",
+    "input": "나물은",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_2_mixed_1",
+    "input": "나물은",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_2_mixed_2",
+    "input": "나물은",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_2_mixed_3",
+    "input": "나물은",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_2_mixed_4",
+    "input": "나물은",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_2_mixed_5",
+    "input": "나물은",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_2_mixed",
+    "input": "나물은",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "normalize_2",
+    "input": "나물은",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "normalize",
+    "filters": []
+  },
+  {
+    "id": "filters_3_none_0",
+    "input": "은 는 이 가",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_3_none_1",
+    "input": "은 는 이 가",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_3_none_2",
+    "input": "은 는 이 가",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_3_none_3",
+    "input": "은 는 이 가",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_3_none_4",
+    "input": "은 는 이 가",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_3_none_5",
+    "input": "은 는 이 가",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_3_none",
+    "input": "은 는 이 가",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_3_discard_0",
+    "input": "은 는 이 가",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_3_discard_1",
+    "input": "은 는 이 가",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_3_discard_2",
+    "input": "은 는 이 가",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_3_discard_3",
+    "input": "은 는 이 가",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_3_discard_4",
+    "input": "은 는 이 가",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_3_discard_5",
+    "input": "은 는 이 가",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_3_discard",
+    "input": "은 는 이 가",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_3_mixed_0",
+    "input": "은 는 이 가",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_3_mixed_1",
+    "input": "은 는 이 가",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_3_mixed_2",
+    "input": "은 는 이 가",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_3_mixed_3",
+    "input": "은 는 이 가",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_3_mixed_4",
+    "input": "은 는 이 가",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_3_mixed_5",
+    "input": "은 는 이 가",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_3_mixed",
+    "input": "은 는 이 가",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "normalize_3",
+    "input": "은 는 이 가",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "normalize",
+    "filters": []
+  },
+  {
+    "id": "filters_4_none_0",
+    "input": "감싸여",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_4_none_1",
+    "input": "감싸여",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_4_none_2",
+    "input": "감싸여",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_4_none_3",
+    "input": "감싸여",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_4_none_4",
+    "input": "감싸여",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_4_none_5",
+    "input": "감싸여",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_4_none",
+    "input": "감싸여",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_4_discard_0",
+    "input": "감싸여",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_4_discard_1",
+    "input": "감싸여",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_4_discard_2",
+    "input": "감싸여",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_4_discard_3",
+    "input": "감싸여",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_4_discard_4",
+    "input": "감싸여",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_4_discard_5",
+    "input": "감싸여",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_4_discard",
+    "input": "감싸여",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_4_mixed_0",
+    "input": "감싸여",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_4_mixed_1",
+    "input": "감싸여",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_4_mixed_2",
+    "input": "감싸여",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_4_mixed_3",
+    "input": "감싸여",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_4_mixed_4",
+    "input": "감싸여",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_4_mixed_5",
+    "input": "감싸여",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_4_mixed",
+    "input": "감싸여",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "normalize_4",
+    "input": "감싸여",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "normalize",
+    "filters": []
+  },
+  {
+    "id": "filters_5_none_0",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_5_none_1",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_5_none_2",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_5_none_3",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_5_none_4",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_5_none_5",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_5_none",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_5_discard_0",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_5_discard_1",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_5_discard_2",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_5_discard_3",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_5_discard_4",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_5_discard_5",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_5_discard",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_5_mixed_0",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_5_mixed_1",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_5_mixed_2",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_5_mixed_3",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_5_mixed_4",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_5_mixed_5",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_5_mixed",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "normalize_5",
+    "input": "喜悲哀歡 人生 大韓民國",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "normalize",
+    "filters": []
+  },
+  {
+    "id": "filters_6_none_0",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_6_none_1",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_6_none_2",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_6_none_3",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_6_none_4",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_6_none_5",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_6_none",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_6_discard_0",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_6_discard_1",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_6_discard_2",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_6_discard_3",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_6_discard_4",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_6_discard_5",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_6_discard",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_6_mixed_0",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_6_mixed_1",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_6_mixed_2",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_6_mixed_3",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_6_mixed_4",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_6_mixed_5",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_6_mixed",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "normalize_6",
+    "input": "İ ΟΣ UQA 𐐀 𐐨 K ẞ",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "normalize",
+    "filters": []
+  },
+  {
+    "id": "filters_7_none_0",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_7_none_1",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_7_none_2",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_7_none_3",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_7_none_4",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_7_none_5",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_7_none",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_7_discard_0",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_7_discard_1",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_7_discard_2",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_7_discard_3",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_7_discard_4",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_7_discard_5",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_7_discard",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_7_mixed_0",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_7_mixed_1",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_7_mixed_2",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_7_mixed_3",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_7_mixed_4",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_7_mixed_5",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_7_mixed",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "normalize_7",
+    "input": "𠀀🙂서울",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "normalize",
+    "filters": []
+  },
+  {
+    "id": "filters_8_none_0",
+    "input": "한글 한글",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_8_none_1",
+    "input": "한글 한글",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_8_none_2",
+    "input": "한글 한글",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_8_none_3",
+    "input": "한글 한글",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_8_none_4",
+    "input": "한글 한글",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_8_none_5",
+    "input": "한글 한글",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_8_none",
+    "input": "한글 한글",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_8_discard_0",
+    "input": "한글 한글",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_8_discard_1",
+    "input": "한글 한글",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_8_discard_2",
+    "input": "한글 한글",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_8_discard_3",
+    "input": "한글 한글",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_8_discard_4",
+    "input": "한글 한글",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_8_discard_5",
+    "input": "한글 한글",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_8_discard",
+    "input": "한글 한글",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_8_mixed_0",
+    "input": "한글 한글",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_8_mixed_1",
+    "input": "한글 한글",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_8_mixed_2",
+    "input": "한글 한글",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_8_mixed_3",
+    "input": "한글 한글",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_8_mixed_4",
+    "input": "한글 한글",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_8_mixed_5",
+    "input": "한글 한글",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_8_mixed",
+    "input": "한글 한글",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "normalize_8",
+    "input": "한글 한글",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "normalize",
+    "filters": []
+  },
+  {
+    "id": "filters_9_none_0",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_9_none_1",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_9_none_2",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_9_none_3",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_9_none_4",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_9_none_5",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_9_none",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_9_discard_0",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_9_discard_1",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_9_discard_2",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_9_discard_3",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_9_discard_4",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_9_discard_5",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_9_discard",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_9_mixed_0",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_9_mixed_1",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_9_mixed_2",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_9_mixed_3",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_9_mixed_4",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_9_mixed_5",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_9_mixed",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "normalize_9",
+    "input": "화학 이외의 것!\t \n",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "normalize",
+    "filters": []
+  },
+  {
+    "id": "filters_10_none_0",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_10_none_1",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_10_none_2",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_10_none_3",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_10_none_4",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_10_none_5",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_10_none",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_10_discard_0",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_10_discard_1",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_10_discard_2",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_10_discard_3",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_10_discard_4",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_10_discard_5",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_10_discard",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_10_mixed_0",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_10_mixed_1",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_10_mixed_2",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_10_mixed_3",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_10_mixed_4",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_10_mixed_5",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_10_mixed",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "normalize_10",
+    "input": "먹 었다 먹  었다",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "normalize",
+    "filters": []
+  },
+  {
+    "id": "filters_11_none_0",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_11_none_1",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_11_none_2",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_11_none_3",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_11_none_4",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_11_none_5",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_11_none",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_11_discard_0",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_11_discard_1",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_11_discard_2",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_11_discard_3",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_11_discard_4",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_11_discard_5",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_11_discard",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_11_mixed_0",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_11_mixed_1",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_11_mixed_2",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_11_mixed_3",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_11_mixed_4",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_11_mixed_5",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_11_mixed",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "normalize_11",
+    "input": "ＡＢＣ ３．２천 15,7",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "normalize",
+    "filters": []
+  },
+  {
+    "id": "filters_12_none_0",
+    "input": "\u0000AB C D",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_12_none_1",
+    "input": "\u0000AB C D",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_12_none_2",
+    "input": "\u0000AB C D",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_12_none_3",
+    "input": "\u0000AB C D",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_12_none_4",
+    "input": "\u0000AB C D",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_12_none_5",
+    "input": "\u0000AB C D",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_12_none",
+    "input": "\u0000AB C D",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_12_discard_0",
+    "input": "\u0000AB C D",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_12_discard_1",
+    "input": "\u0000AB C D",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_12_discard_2",
+    "input": "\u0000AB C D",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_12_discard_3",
+    "input": "\u0000AB C D",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_12_discard_4",
+    "input": "\u0000AB C D",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_12_discard_5",
+    "input": "\u0000AB C D",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_12_discard",
+    "input": "\u0000AB C D",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_12_mixed_0",
+    "input": "\u0000AB C D",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_12_mixed_1",
+    "input": "\u0000AB C D",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_12_mixed_2",
+    "input": "\u0000AB C D",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_12_mixed_3",
+    "input": "\u0000AB C D",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_12_mixed_4",
+    "input": "\u0000AB C D",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_12_mixed_5",
+    "input": "\u0000AB C D",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": false,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_12_mixed",
+    "input": "\u0000AB C D",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": true,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "normalize_12",
+    "input": "\u0000AB C D",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "normalize",
+    "filters": []
+  },
+  {
+    "id": "filters_13_none_0",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_13_none_1",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_13_none_2",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_13_none_3",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_13_none_4",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_13_none_5",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_13_none",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_13_discard_0",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_13_discard_1",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_13_discard_2",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_13_discard_3",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_13_discard_4",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_13_discard_5",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_13_discard",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "filters_13_mixed_0",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      }
+    ]
+  },
+  {
+    "id": "filters_13_mixed_1",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "filters_13_mixed_2",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech",
+        "stop_tags": [
+          "NNG",
+          "NNP",
+          "NNG",
+          "VV"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "filters_13_mixed_3",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_readingform"
+      }
+    ]
+  },
+  {
+    "id": "filters_13_mixed_4",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "filters_13_mixed_5",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "filters",
+    "filters": [
+      {
+        "type": "nori_part_of_speech"
+      },
+      {
+        "type": "nori_readingform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "analyzer_13_mixed",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "normalize_13",
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "normalize",
+    "filters": []
+  },
+  {
+    "id": "user_empty_none",
+    "input": "한국",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_empty_discard",
+    "input": "한국",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_empty_mixed",
+    "input": "한국",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comments_none",
+    "input": "한국",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "# 설명\n  # 공백\r\n\t# 다음\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comments_discard",
+    "input": "한국",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "# 설명\n  # 공백\r\n\t# 다음\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comments_mixed",
+    "input": "한국",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "# 설명\n  # 공백\r\n\t# 다음\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_ascii_blank_none",
+    "input": "한국",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": " \t\r\n\u000b\f",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_ascii_blank_discard",
+    "input": "한국",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": " \t\r\n\u000b\f",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_ascii_blank_mixed",
+    "input": "한국",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": " \t\r\n\u000b\f",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_nouns_none",
+    "input": "세종시 c++ 세종",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종\n세종시 세종 시\nc++\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_nouns_discard",
+    "input": "세종시 c++ 세종",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종\n세종시 세종 시\nc++\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_nouns_mixed",
+    "input": "세종시 c++ 세종",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종\n세종시 세종 시\nc++\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_duplicate_first_none",
+    "input": "세종시",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 세종 시\n세종시 세 종시\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_duplicate_first_discard",
+    "input": "세종시",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 세종 시\n세종시 세 종시\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_duplicate_first_mixed",
+    "input": "세종시",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 세종 시\n세종시 세 종시\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_ignored_invalid_duplicate_none",
+    "input": "세종시",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시\n세종시 세종시 시\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_ignored_invalid_duplicate_discard",
+    "input": "세종시",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시\n세종시 세종시 시\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_ignored_invalid_duplicate_mixed",
+    "input": "세종시",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시\n세종시 세종시 시\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_first_invalid_duplicate_none",
+    "input": "세종시",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 세종시 시\n세종시\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_first_invalid_duplicate_discard",
+    "input": "세종시",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 세종시 시\n세종시\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_first_invalid_duplicate_mixed",
+    "input": "세종시",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 세종시 시\n세종시\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_different_labels_none",
+    "input": "세종시",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 가나 다\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_different_labels_discard",
+    "input": "세종시",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 가나 다\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_different_labels_mixed",
+    "input": "세종시",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 가나 다\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_short_segmentation_none",
+    "input": "세종시",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 가나\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_short_segmentation_discard",
+    "input": "세종시",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 가나\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_short_segmentation_mixed",
+    "input": "세종시",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 가나\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_long_segmentation_none",
+    "input": "세종시",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 가나 다라\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_long_segmentation_discard",
+    "input": "세종시",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 가나 다라\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_long_segmentation_mixed",
+    "input": "세종시",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 가나 다라\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_noun_coda_none",
+    "input": "한국",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "한국\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_noun_coda_discard",
+    "input": "한국",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "한국\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_noun_coda_mixed",
+    "input": "한국",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "한국\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_noun_no_coda_none",
+    "input": "하나",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "하나\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_noun_no_coda_discard",
+    "input": "하나",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "하나\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_noun_no_coda_mixed",
+    "input": "하나",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "하나\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_label_coda_none",
+    "input": "세종시",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 가나 말\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_label_coda_discard",
+    "input": "세종시",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 가나 말\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_label_coda_mixed",
+    "input": "세종시",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시 가나 말\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_trailing_space_none",
+    "input": "한국",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "한국 \n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_trailing_space_discard",
+    "input": "한국",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "한국 \n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_trailing_space_mixed",
+    "input": "한국",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "한국 \n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_trailing_tab_none",
+    "input": "한국",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "한국\t\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_trailing_tab_discard",
+    "input": "한국",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "한국\t\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_trailing_tab_mixed",
+    "input": "한국",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "한국\t\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_adjacent_none",
+    "input": "한국",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "한국#comment\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_adjacent_discard",
+    "input": "한국",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "한국#comment\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_adjacent_mixed",
+    "input": "한국",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "한국#comment\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_after_space_none",
+    "input": "한국",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "한국 #comment\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_after_space_discard",
+    "input": "한국",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "한국 #comment\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_after_space_mixed",
+    "input": "한국",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "한국 #comment\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_leading_space_none",
+    "input": "한국",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": " 한국\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_leading_space_discard",
+    "input": "한국",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": " 한국\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_leading_space_mixed",
+    "input": "한국",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": " 한국\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_leading_tab_none",
+    "input": "한국",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "\t한국\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_leading_tab_discard",
+    "input": "한국",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "\t한국\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_leading_tab_mixed",
+    "input": "한국",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "\t한국\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_tabs_formfeeds_none",
+    "input": "세종시",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시\t세종\f시\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_tabs_formfeeds_discard",
+    "input": "세종시",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시\t세종\f시\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_tabs_formfeeds_mixed",
+    "input": "세종시",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "세종시\t세종\f시\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_carriage_return_none",
+    "input": "한국 하나 세종시",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "한국\r하나\r\n세종시 세종 시\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_carriage_return_discard",
+    "input": "한국 하나 세종시",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "한국\r하나\r\n세종시 세종 시\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_carriage_return_mixed",
+    "input": "한국 하나 세종시",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "한국\r하나\r\n세종시 세종 시\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_utf16_sort_none",
+    "input": "가😀𐀀",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "\n😀\n𐀀\n가\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_utf16_sort_discard",
+    "input": "가😀𐀀",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "\n😀\n𐀀\n가\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_utf16_sort_mixed",
+    "input": "가😀𐀀",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "\n😀\n𐀀\n가\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_supplementary_lengths_none",
+    "input": "😀한",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "😀한 😀 한\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_supplementary_lengths_discard",
+    "input": "😀한",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "😀한 😀 한\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_supplementary_lengths_mixed",
+    "input": "😀한",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "😀한 😀 한\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_split_surrogate_none",
+    "input": "🙂a",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "🙂a 가 나\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_split_surrogate_discard",
+    "input": "🙂a",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "🙂a 가 나\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_split_surrogate_mixed",
+    "input": "🙂a",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "🙂a 가 나\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_null_in_surface_none",
+    "input": "끝\u0000",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "끝\u0000\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_null_in_surface_discard",
+    "input": "끝\u0000",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "끝\u0000\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_null_in_surface_mixed",
+    "input": "끝\u0000",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "끝\u0000\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_control_at_start_none",
+    "input": "\u0001한국",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "\u0001한국\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_control_at_start_discard",
+    "input": "\u0001한국",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "\u0001한국\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_control_at_start_mixed",
+    "input": "\u0001한국",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "\u0001한국\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_unicode_blank_none",
+    "input": "　",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "　\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_unicode_blank_discard",
+    "input": "　",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "　\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_unicode_blank_mixed",
+    "input": "　",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "　\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_nonbreaking_space_none",
+    "input": "a b",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "a b\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_nonbreaking_space_discard",
+    "input": "a b",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "a b\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_nonbreaking_space_mixed",
+    "input": "a b",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "a b\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_unicode_line_separator_none",
+    "input": "a b",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "a b\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_unicode_line_separator_discard",
+    "input": "a b",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "a b\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_unicode_line_separator_mixed",
+    "input": "a b",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "a b\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_before_separator_none",
+    "input": "ab#x cd",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ab#x cd\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_before_separator_discard",
+    "input": "ab#x cd",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ab#x cd\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_before_separator_mixed",
+    "input": "ab#x cd",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ab#x cd\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_ending_separator_none",
+    "input": "ab ",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ab#x \n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_ending_separator_discard",
+    "input": "ab ",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ab#x \n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_ending_separator_mixed",
+    "input": "ab ",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ab#x \n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_after_separator_none",
+    "input": "ab ",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ab #x\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_after_separator_discard",
+    "input": "ab ",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ab #x\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_after_separator_mixed",
+    "input": "ab ",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ab #x\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_middle_separator_none",
+    "input": "ab#x ",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ab#x #y\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_middle_separator_discard",
+    "input": "ab#x ",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ab#x #y\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_middle_separator_mixed",
+    "input": "ab#x ",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ab#x #y\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_only_separator_none",
+    "input": " ",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "#x \n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_only_separator_discard",
+    "input": " ",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "#x \n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_comment_only_separator_mixed",
+    "input": " ",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "#x \n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_nel_terminator_none",
+    "input": "ab",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ab#x\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_nel_terminator_discard",
+    "input": "ab",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ab#x\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_nel_terminator_mixed",
+    "input": "ab",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ab#x\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_paragraph_terminator_none",
+    "input": "ab ",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ab#x \n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_paragraph_terminator_discard",
+    "input": "ab ",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ab#x \n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_paragraph_terminator_mixed",
+    "input": "ab ",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ab#x \n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_overlapping_none",
+    "input": "골드브라운골드",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "골드\n브라운\n골드브라운\n라운\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_overlapping_discard",
+    "input": "골드브라운골드",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "골드\n브라운\n골드브라운\n라운\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_overlapping_mixed",
+    "input": "골드브라운골드",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "골드\n브라운\n골드브라운\n라운\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_archaic_hangul_none",
+    "input": "하ㆍ",
+    "decompound_mode": "none",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ᄒ\nᅡ\nㆍ\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_archaic_hangul_discard",
+    "input": "하ㆍ",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ᄒ\nᅡ\nㆍ\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "user_archaic_hangul_mixed",
+    "input": "하ㆍ",
+    "decompound_mode": "mixed",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": "ᄒ\nᅡ\nㆍ\n",
+    "pipeline": "analyzer",
+    "filters": []
+  },
+  {
+    "id": "all_unicode_lowercase",
+    "input": "",
+    "decompound_mode": "discard",
+    "output_unknown_unigrams": false,
+    "discard_punctuation": true,
+    "user_dictionary": null,
+    "pipeline": "unicode_lowercase",
+    "filters": []
+  }
+]

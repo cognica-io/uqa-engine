@@ -77,8 +77,6 @@ impl Engine {
             self.clear_persistent_table_bindings_for_catalog_reload();
             self.reload_table_catalog(catalog_epoch)?;
             self.synchronize_partition_identity_watermarks()?;
-        } else if let Some(previous) = previous.as_ref() {
-            self.refresh_changed_table_caches(previous, &current)?;
         }
         if registries_changed {
             self.reload_catalog_registries(registry_epoch)?;
@@ -96,6 +94,12 @@ impl Engine {
                 self.clear_regtype_output_cache();
             }
             self.refresh_changed_graph_path_indexes(catalog.as_ref(), &changed)?;
+        }
+        // Physical indexes and analyzer bindings belong to the same committed revision. Restore changed registries before reopening data stores, so an old cached binding never meets newly committed occurrence metadata.
+        if !catalog_changed {
+            if let Some(previous) = previous.as_ref() {
+                self.refresh_changed_table_caches(previous, &current)?;
+            }
         }
         // Generations become observed only after every dependent cache was
         // restored successfully. An error leaves the snapshot eligible to retry.

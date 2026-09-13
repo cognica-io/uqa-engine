@@ -6,6 +6,10 @@ For UQA Engine SQL, documentation, and feature verification, follow `.agents/ski
 
 The manual is authoritative for public behavior. Verify ambiguous claims against implementation and tests.
 
+Before implementing or moving functionality, inspect the relevant crates' `Cargo.toml` files, including declared and enabled Cargo features, `scripts/workspace-dependency-policy.json`, the manual's ownership boundaries, and existing implementations and tests. Confirm which crate owns the behavior, what it already supports under the relevant feature configuration, and the permitted dependency direction before choosing an implementation location.
+
+Implement behavior in its owning crate and keep its tests there. Keep Engine responsible for state, session, transaction, and retained-resource adapters; do not place analysis, planning, scoring, storage, or execution algorithms in Engine for convenience. Reuse or extend the owning crate's interfaces instead of duplicating behavior, adding reverse dependencies, or weakening dependency and capability policies. Run the relevant ownership and dependency checks before committing.
+
 Keep each prose paragraph on one physical line. Do not insert line breaks inside paragraphs.
 
 Preserve the established `CPU`, `MLX`, and `UQA` initialisms in Rust identifiers and design pseudocode; do not apply mixed-case acronym normalization to them.

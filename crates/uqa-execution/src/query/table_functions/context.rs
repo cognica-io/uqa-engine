@@ -36,6 +36,7 @@ pub trait AnalyzerTableFunctions {
         phase: &str,
     ) -> Result<(), String>;
     fn fts_index_stats(&self, table: Option<&str>) -> Result<Vec<FtsIndexStat>, SQLError>;
+    fn analyze_text(&self, name: &str, input: &str) -> Result<Value, String>;
 }
 
 /// Bind both relation operands before execution schedules their independent physical plans.

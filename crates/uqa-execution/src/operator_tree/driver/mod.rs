@@ -31,9 +31,11 @@ mod graph;
 mod graph_runtime;
 pub mod introspection;
 mod joins;
+mod phrase;
 pub mod posting;
 mod relation_context;
 mod relational;
+mod text_query;
 
 use context::PhysicalDriverContext;
 use deep_layers::{
