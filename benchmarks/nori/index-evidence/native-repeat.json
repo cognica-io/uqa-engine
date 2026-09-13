@@ -1,0 +1,179 @@
+{
+  "allocation_scope": "current-thread Rust allocator requests during mutation; net includes released seed allocations; excludes static bundle, base index, stack and host heap",
+  "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+  "corpus_sha256": "18a50905d26e3615d9db2a8b9565cbcdefcbcfdd1036a88292624154fc228e6b",
+  "measurements": [
+    {
+      "allocation": {
+        "bytes_net": 7895825,
+        "bytes_peak": 9362090,
+        "bytes_total": 459694645,
+        "count_net": 15968,
+        "count_peak": 19097,
+        "count_total": 1889636
+      },
+      "documents_after": 256,
+      "elapsed_ns": [
+        241267958,
+        241074875,
+        240905625,
+        243120375,
+        244721000,
+        240613834,
+        246806042
+      ],
+      "field_length": 125079,
+      "graph_sha256": "01bbc354e7415e5182f73b54982af1423e855cb4e727b945bd2a5f4029a8e0ea",
+      "median_ns": 241267958,
+      "name": "build_points/256",
+      "posting_count": 3507
+    },
+    {
+      "allocation": {
+        "bytes_net": 63744080,
+        "bytes_peak": 65221268,
+        "bytes_total": 3717906814,
+        "count_net": 126366,
+        "count_peak": 129628,
+        "count_total": 15275513
+      },
+      "documents_after": 2048,
+      "elapsed_ns": [
+        1947565959,
+        1959971750,
+        1956112500,
+        1948629333,
+        1952276959,
+        1948462084,
+        1955612166
+      ],
+      "field_length": 1011262,
+      "graph_sha256": "0f4cecb080517dfac5fba98cca752781954cf1c7cbafb7c9d47c71bcde4fc17e",
+      "median_ns": 1952276959,
+      "name": "build_points/2048",
+      "posting_count": 27991
+    },
+    {
+      "allocation": {
+        "bytes_net": 481065,
+        "bytes_peak": 1953019,
+        "bytes_total": 23886837,
+        "count_net": 1237,
+        "count_peak": 4381,
+        "count_total": 98511
+      },
+      "documents_after": 16,
+      "elapsed_ns": [
+        13044292,
+        12492792,
+        12714875,
+        12451375,
+        12526333,
+        12917583,
+        12332542
+      ],
+      "field_length": 6479,
+      "graph_sha256": "73571dd1ebcd45209b0ce27507966b69e4efc3fa7fdb937f7cd2c0c28edacd7f",
+      "median_ns": 12526333,
+      "name": "append_batch_16/0",
+      "posting_count": 227
+    },
+    {
+      "allocation": {
+        "bytes_net": 496543,
+        "bytes_peak": 2082253,
+        "bytes_total": 32115033,
+        "count_net": 927,
+        "count_peak": 4463,
+        "count_total": 130286
+      },
+      "documents_after": 272,
+      "elapsed_ns": [
+        16731416,
+        16321000,
+        16250833,
+        16749417,
+        16644958,
+        16570542,
+        16554250
+      ],
+      "field_length": 133622,
+      "graph_sha256": "f2acfb805f20eda2e1f35ec4f4bfd094fd9c185d55f2df7e32df7b5a640d0d7e",
+      "median_ns": 16570542,
+      "name": "append_batch_16/256",
+      "posting_count": 3719
+    },
+    {
+      "allocation": {
+        "bytes_net": 502513,
+        "bytes_peak": 2102359,
+        "bytes_total": 31473682,
+        "count_net": 947,
+        "count_peak": 4601,
+        "count_total": 129839
+      },
+      "documents_after": 2064,
+      "elapsed_ns": [
+        16792584,
+        16830833,
+        16589333,
+        16929959,
+        16589792,
+        17073792,
+        16482750
+      ],
+      "field_length": 1019960,
+      "graph_sha256": "ec6a006122f9822322876f9802a8c7c8a1d6bec2f3dac3cb1f92636c2be2dfa7",
+      "median_ns": 16792584,
+      "name": "append_batch_16/2048",
+      "posting_count": 28208
+    }
+  ],
+  "owner": "uqa-storage",
+  "pointer_bits": 64,
+  "protocol": {
+    "samples": 7,
+    "timed_operations_per_sample": 1,
+    "warmup": 1
+  },
+  "schema_version": 1,
+  "target_arch": "aarch64",
+  "target_os": "macos",
+  "threads": 1,
+  "timing_scope": "input construction and index mutation; seed cloning, destruction and graph validation excluded",
+  "provenance": {
+    "measured_at_utc": "2026-09-13T06:21:50.154750+00:00",
+    "revision": "fad60fa3849c725e3a3c7e6d1407982c6e521f7c",
+    "worktree_dirty": true,
+    "cpu": "Apple M1 Ultra",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "rustc": "rustc 1.90.0 (1159e78c4 2025-09-14)\nbinary: rustc\ncommit-hash: 1159e78c4747b02ef996e55082b704c09b970588\ncommit-date: 2025-09-14\nhost: aarch64-apple-darwin\nrelease: 1.90.0\nLLVM version: 20.1.8",
+    "flags": {},
+    "node": null,
+    "emcc": null,
+    "benchmark_sha256": "2433e47b4e1bab9234df2118dd71b59c1888efc4821183c6ceb42d4377143472",
+    "cargo_lock_sha256": "358d389f45c61098c2c6fedad3bf642888960482c36a0759bdb59959579d09f6",
+    "runtime_sources_sha256": "323ee34bb561e6b38bf6fd774eca73cee93369c468595eec6c412fd65c5002f4",
+    "profile": "bench (workspace release, thin LTO, one codegen unit, debug information)",
+    "container": null,
+    "jvm": null,
+    "artifacts": [
+      {
+        "name": "nori_storage-db1e39f5f3251f38",
+        "bytes": 13615552,
+        "sha256": "13c171dcccaf7e8459de8e0a7d55a893833f34c061ea9fa39b361112890ad952"
+      }
+    ]
+  },
+  "gate": {
+    "allocation_and_graph_passed": true,
+    "timing_compared": true,
+    "timing_ratios": {
+      "build_points/256": 1.0151893591803929,
+      "build_points/2048": 0.9969004898583148,
+      "append_batch_16/0": 1.016961023565249,
+      "append_batch_16/256": 0.9985361709553708,
+      "append_batch_16/2048": 1.0120333279575453
+    }
+  }
+}

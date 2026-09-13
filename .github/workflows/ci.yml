@@ -235,7 +235,7 @@ jobs:
             target/nori-reference-model/model_manifest.json
 
   nori-benchmark:
-    name: Nori native allocation and output gate
+    name: Nori native analysis and indexing gate
     if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
     steps:
@@ -248,13 +248,17 @@ jobs:
           cache-bin: false
           cache-targets: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Measure native analysis and enforce reviewed allocation ceilings
-        run: python3 scripts/run-nori-benchmark.py --output target/benchmark-runs/nori-native.json
+      - name: Measure native analysis and indexing with reviewed allocation ceilings
+        run: |
+          python3 scripts/run-nori-benchmark.py --output target/benchmark-runs/nori-native.json
+          python3 scripts/run-nori-index-benchmark.py --output target/benchmark-runs/nori-index-native.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: nori-native-${{ github.sha }}
-          path: target/benchmark-runs/nori-native.json
+          path: |
+            target/benchmark-runs/nori-native.json
+            target/benchmark-runs/nori-index-native.json
 
   gate:
     name: pre-merge CI

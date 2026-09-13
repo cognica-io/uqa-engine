@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "corpus_sha256": "18a50905d26e3615d9db2a8b9565cbcdefcbcfdd1036a88292624154fc228e6b",
+  "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+  "allocation_ceilings": {
+    "64": {
+      "build_points/256": {
+        "bytes_net": 7895825,
+        "bytes_peak": 9362090,
+        "bytes_total": 459694645,
+        "count_net": 15968,
+        "count_peak": 19097,
+        "count_total": 1889636
+      },
+      "build_points/2048": {
+        "bytes_net": 63744080,
+        "bytes_peak": 65221268,
+        "bytes_total": 3717906814,
+        "count_net": 126366,
+        "count_peak": 129628,
+        "count_total": 15275513
+      },
+      "append_batch_16/0": {
+        "bytes_net": 481065,
+        "bytes_peak": 1953019,
+        "bytes_total": 23886837,
+        "count_net": 1237,
+        "count_peak": 4381,
+        "count_total": 98511
+      },
+      "append_batch_16/256": {
+        "bytes_net": 496543,
+        "bytes_peak": 2082253,
+        "bytes_total": 32115033,
+        "count_net": 927,
+        "count_peak": 4463,
+        "count_total": 130286
+      },
+      "append_batch_16/2048": {
+        "bytes_net": 502513,
+        "bytes_peak": 2102359,
+        "bytes_total": 31473682,
+        "count_net": 947,
+        "count_peak": 4601,
+        "count_total": 129839
+      }
+    },
+    "32": {
+      "build_points/256": {
+        "bytes_net": 7465277,
+        "bytes_peak": 8196798,
+        "bytes_total": 302929453,
+        "count_net": 15968,
+        "count_peak": 19097,
+        "count_total": 1889636
+      },
+      "build_points/2048": {
+        "bytes_net": 60300436,
+        "bytes_peak": 61045520,
+        "bytes_total": 2450180542,
+        "count_net": 126366,
+        "count_peak": 129628,
+        "count_total": 15275513
+      },
+      "append_batch_16/0": {
+        "bytes_net": 433649,
+        "bytes_peak": 1170159,
+        "bytes_total": 15720389,
+        "count_net": 1237,
+        "count_peak": 4381,
+        "count_total": 98511
+      },
+      "append_batch_16/256": {
+        "bytes_net": 481567,
+        "bytes_peak": 1297889,
+        "bytes_total": 21172293,
+        "count_net": 927,
+        "count_peak": 4463,
+        "count_total": 130286
+      },
+      "append_batch_16/2048": {
+        "bytes_net": 487985,
+        "bytes_peak": 1317263,
+        "bytes_total": 20750886,
+        "count_net": 947,
+        "count_peak": 4601,
+        "count_total": 129839
+      }
+    }
+  },
+  "outputs": {
+    "build_points/256": {
+      "graph_sha256": "01bbc354e7415e5182f73b54982af1423e855cb4e727b945bd2a5f4029a8e0ea",
+      "field_length": 125079,
+      "posting_count": 3507
+    },
+    "build_points/2048": {
+      "graph_sha256": "0f4cecb080517dfac5fba98cca752781954cf1c7cbafb7c9d47c71bcde4fc17e",
+      "field_length": 1011262,
+      "posting_count": 27991
+    },
+    "append_batch_16/0": {
+      "graph_sha256": "73571dd1ebcd45209b0ce27507966b69e4efc3fa7fdb937f7cd2c0c28edacd7f",
+      "field_length": 6479,
+      "posting_count": 227
+    },
+    "append_batch_16/256": {
+      "graph_sha256": "f2acfb805f20eda2e1f35ec4f4bfd094fd9c185d55f2df7e32df7b5a640d0d7e",
+      "field_length": 133622,
+      "posting_count": 3719
+    },
+    "append_batch_16/2048": {
+      "graph_sha256": "ec6a006122f9822322876f9802a8c7c8a1d6bec2f3dac3cb1f92636c2be2dfa7",
+      "field_length": 1019960,
+      "posting_count": 28208
+    }
+  },
+  "timing_max_ratio": 1.13,
+  "calibration": {
+    "maximum_bidirectional_repeat_ratio": {
+      "native": 1.016961023565249,
+      "wasm": 1.0231041197935375
+    },
+    "timing_margin_rule": "Round the largest measured repeat ratio times 1.10 upward to two decimals; the 10% factor is policy headroom.",
+    "allocation_margin": 0
+  },
+  "evidence": [
+    {
+      "path": "benchmarks/nori/index-evidence/native-final.json",
+      "sha256": "5694c9978db60207a2274f61c771a2b9aa99f13f19b54c2f96bbcdbd696955ee"
+    },
+    {
+      "path": "benchmarks/nori/index-evidence/native-repeat.json",
+      "sha256": "0601e5f1362fb13883bb1fd8d4efba40a05e25303fd5e958a87389f5bd2eb6fd"
+    },
+    {
+      "path": "benchmarks/nori/index-evidence/wasm-final.json",
+      "sha256": "20e8c41678eefae92432093da0cf9079eb67dab6104a2aac203beaf92a355634"
+    },
+    {
+      "path": "benchmarks/nori/index-evidence/wasm-repeat.json",
+      "sha256": "a6aa27ed002e8b201db35759b4e770e1579680461e2d1f115463a7d674379478"
+    }
+  ],
+  "before_comparison": {
+    "path": "benchmarks/nori/index-evidence/native-before.json",
+    "sha256": "f554841464c7d934c73647446089bc29231582cf323a836ef45d349383bc03dc"
+  }
+}

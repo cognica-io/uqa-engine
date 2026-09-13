@@ -28,7 +28,7 @@ Name resolution verifies resolver output because aliases can change; content-ide
 
 Timing comparisons require an explicit baseline with the same CPU, OS, target, toolchain, flags, benchmark source, corpus, and sampling protocol. The maximum ratio is calibrated from repeated measurements and recorded with its evidence in `limits.json`. CI checks allocations and outputs on its own host; it does not compare Linux elapsed times with a macOS baseline. `--measure-only` writes candidate evidence with a false gate status and cannot be combined with a timing baseline. It does not rewrite the reviewed ceilings or token hashes.
 
-These measurements cover the standalone analysis owner. Storage indexing and phrase-query costs, full browser process memory, persistent binding scenarios, and release package acceptance remain separate verification work.
+These measurements cover the standalone analysis owner. [Memory indexing measurements](INDEXING.md) separately exercise the storage owner. Persistent indexing and phrase-query costs, full browser process memory, persistent binding scenarios, and release package acceptance remain separate verification work.
 
 ## Recorded baseline
 

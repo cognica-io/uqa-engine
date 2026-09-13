@@ -378,6 +378,8 @@ Establish baselines before selecting compression and lookup optimizations. Initi
 
 The standalone analysis measurements and regression gates are now recorded in [the Nori benchmark](../../benchmarks/nori/README.md). The analysis owner exercises six fixed corpora in all three decompound modes, separates tokenization from default filters, and measures dictionary loading and name/content-identity sharing. Repeated native and WASM executions reproduce all allocation counters and token graphs; reviewed 32-bit/64-bit allocation ceilings and same-environment timing comparisons are machine checked. The evidence records allocator-request scope and does not claim RSS, indexing throughput, phrase-query cost, browser host memory, or complete release acceptance.
 
+Memory indexing now has [separate native/WASM measurements](../../benchmarks/nori/INDEXING.md). The measured whole-index copy in atomic batches was replaced by affected-document staging inside `uqa-storage`, reusing ordered point-replacement validation. Before/after complete graph and metadata hashes agree; repeated allocation counters define native and WASM ceilings enforced alongside the analysis gates. Persistent-provider indexing, phrase-query cost, and browser host memory remain separate measurements.
+
 ## Implementation work packages
 
 | Work package | Deliverable and completion evidence |

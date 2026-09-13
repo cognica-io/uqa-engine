@@ -23,6 +23,7 @@ use crate::block_max_index::BlockMaxScorer;
 use crate::clustered_postings::{MaterializedPostingCursor, PostingCursor, PostingScore};
 
 mod analysis;
+mod batch;
 mod bindings;
 mod contract;
 mod memory;

@@ -53,10 +53,10 @@ def digest(path: pathlib.Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def runtime_sources_hash() -> str:
+def runtime_sources_hash(crates=("uqa-analysis", "uqa-core", "uqa-nori-data")) -> str:
     checksum = hashlib.sha256()
     paths = [ROOT / "Cargo.toml", ROOT / "Cargo.lock"]
-    for crate in ("uqa-analysis", "uqa-core", "uqa-nori-data"):
+    for crate in crates:
         directory = ROOT / "crates" / crate
         paths.append(directory / "Cargo.toml")
         paths.extend((directory / "src").rglob("*.rs"))
@@ -179,11 +179,12 @@ def check(report: dict, limits: dict, baseline: dict | None = None) -> dict:
     return {"allocation_and_output_passed": True, "timing_compared": baseline is not None, "timing_ratios": ratios}
 
 
-def run(target: str) -> dict:
+def execute_benchmark(target: str, package: str, benchmark: str, features: str, owners: tuple[str, ...]) -> dict:
     env = os.environ.copy()
     cpu = cpu_model()
-    runtime_hash = runtime_sources_hash()
-    benchmark_hash = digest(ROOT / "crates/uqa-analysis/benches/nori.rs")
+    runtime_hash = runtime_sources_hash(owners)
+    benchmark_path = ROOT / "crates" / package / "benches" / f"{benchmark}.rs"
+    benchmark_hash = digest(benchmark_path)
     target_args = []
     if target == "wasm":
         if "EMSDK_PYTHON" not in env:
@@ -195,9 +196,9 @@ def run(target: str) -> dict:
             raise RuntimeError("use target-scoped Rust flags for WASM; global flags override required linker options")
         env[flag_key] = f"{env.get(flag_key, '')} {WASM_FLAGS}".strip()
         target_args = ["--target", WASM_TARGET]
-    build = command("cargo", "bench", "--locked", "-p", "uqa-analysis", "--features", "nori", "--bench", "nori", "--no-run", "--message-format=json", *target_args, env=env)
+    build = command("cargo", "bench", "--locked", "-p", package, "--features", features, "--bench", benchmark, "--no-run", "--message-format=json", *target_args, env=env)
     artifacts = [json.loads(line) for line in build.splitlines() if line.startswith("{")]
-    binaries = [pathlib.Path(item["executable"]) for item in artifacts if item.get("reason") == "compiler-artifact" and item["target"]["name"] == "nori" and item.get("executable")]
+    binaries = [pathlib.Path(item["executable"]) for item in artifacts if item.get("reason") == "compiler-artifact" and item["target"]["name"] == benchmark and item.get("executable")]
     if len(binaries) != 1:
         raise RuntimeError("Cargo did not produce exactly one Nori benchmark executable")
     executable = binaries[0]
@@ -207,7 +208,7 @@ def run(target: str) -> dict:
         paths.append(executable.with_suffix(".wasm"))
         invocation.insert(0, "node")
     report = json.loads(command(*invocation, env=env))
-    if runtime_sources_hash() != runtime_hash or digest(ROOT / "crates/uqa-analysis/benches/nori.rs") != benchmark_hash:
+    if runtime_sources_hash(owners) != runtime_hash or digest(benchmark_path) != benchmark_hash:
         raise RuntimeError("Nori sources changed during measurement; rerun with a stable checkout")
     report["provenance"] = {
         "measured_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -227,6 +228,11 @@ def run(target: str) -> dict:
         "jvm": None,
         "artifacts": [{"name": path.name, "bytes": path.stat().st_size, "sha256": digest(path)} for path in paths],
     }
+    return report
+
+
+def run(target: str) -> dict:
+    report = execute_benchmark(target, "uqa-analysis", "nori", "nori", ("uqa-analysis", "uqa-core", "uqa-nori-data"))
     measurements(report)
     return report
 

@@ -174,12 +174,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         &mut self,
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
     ) -> StorageBackendResult<()> {
-        let mut replacement = self.clone();
-        for (doc_id, fields) in documents {
-            replacement.add_document(doc_id, fields)?;
-        }
-        *self = replacement;
-        Ok(())
+        self.add_document_batch(documents)
     }
 
     fn clear(&mut self) -> StorageBackendResult<()> {

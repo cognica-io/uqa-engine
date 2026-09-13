@@ -86,16 +86,20 @@ jobs:
         run: bash scripts/build-wasm.sh
       - name: Test browser WASM bundle
         run: node --test tests/wasm/test_uqa_wasm.mjs
-      - name: Measure WASM analysis and enforce reviewed allocation ceilings
+      - name: Measure WASM analysis and indexing with reviewed allocation ceilings
         env:
           RUSTFLAGS: ""
           CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS: "-D warnings"
-        run: python3 scripts/run-nori-benchmark.py --target wasm --output target/benchmark-runs/nori-wasm.json
+        run: |
+          python3 scripts/run-nori-benchmark.py --target wasm --output target/benchmark-runs/nori-wasm.json
+          python3 scripts/run-nori-index-benchmark.py --target wasm --output target/benchmark-runs/nori-index-wasm.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: nori-wasm-${{ github.sha }}
-          path: target/benchmark-runs/nori-wasm.json
+          path: |
+            target/benchmark-runs/nori-wasm.json
+            target/benchmark-runs/nori-index-wasm.json
       - name: Run Browser WASM examples
         run: |
           set -euo pipefail
