@@ -39,10 +39,27 @@ fn create_and_list_analyzers() {
         })
         .collect();
     assert!(listed.contains(&"rs_my_test_analyzer".to_string()));
-    for builtin in ["keyword", "standard", "standard_cjk", "whitespace"] {
-        assert!(listed.iter().any(|name| name == builtin));
+    for builtin in uqa_analysis::builtin_analyzer_names() {
+        assert!(listed.iter().any(|name| name == &builtin));
     }
     let _ = run_one(&eng, "SELECT * FROM drop_analyzer('rs_my_test_analyzer')");
+}
+
+#[test]
+fn catalog_names_cannot_shadow_builtins() {
+    let engine = Engine::new();
+    for name in uqa_analysis::builtin_analyzer_names() {
+        let error = engine
+            .register_named_analyzer(
+                &name,
+                r#"{"tokenizer":{"type":"keyword"},"token_filters":[]}"#,
+            )
+            .unwrap_err();
+        assert!(
+            error.contains("cannot overwrite built-in analyzer"),
+            "{name}: {error}"
+        );
+    }
 }
 
 #[test]
@@ -290,6 +307,31 @@ fn invalid_legacy_catalog_analyzer_makes_reopen_fail_explicitly() {
             .to_string()
             .contains("invalid n-gram tokenizer gram bounds"),
         "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn persisted_builtin_collision_is_rejected_before_catalog_restore() {
+    if !uqa_analysis::is_builtin_analyzer("nori") {
+        return;
+    }
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("nori-collision.db");
+    {
+        let connection = ManagedConnection::open(&path).unwrap();
+        let catalog = Catalog::open(connection).unwrap();
+        catalog
+            .save_analyzer("nori", r#"{"tokenizer":"keyword"}"#)
+            .unwrap();
+    }
+    let Err(error) = Engine::open(&path) else {
+        panic!("persisted built-in collision was accepted")
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("catalog analyzer `nori` conflicts with a built-in analyzer"),
+        "{error}"
     );
 }
 

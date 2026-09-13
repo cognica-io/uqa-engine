@@ -5,9 +5,9 @@
 //
 
 //! Named [`Analyzer`] registry. Built-in entries (`whitespace`, `standard`,
-//! `standard_cjk`, `keyword`) are immutable. Users register custom
-//! analyzers under any other name; built-in names cannot be overwritten or
-//! dropped.
+//! `standard_cjk`, `keyword`, and feature-enabled `nori`) are immutable. Users
+//! register custom analyzers under any other name; built-in names cannot be
+//! overwritten or dropped.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -18,6 +18,8 @@ use crate::analyzer::{
     keyword_analyzer, standard_analyzer, standard_cjk_analyzer, whitespace_analyzer, Analyzer,
 };
 use crate::error::AnalysisError;
+#[cfg(feature = "nori")]
+use crate::nori::nori_analyzer;
 
 /// Built-in default analyzer name.
 pub const DEFAULT_ANALYZER_NAME: &str = "standard";
@@ -46,6 +48,8 @@ fn builtins() -> &'static BTreeMap<&'static str, Analyzer> {
         m.insert("standard", standard_analyzer("english"));
         m.insert("standard_cjk", standard_cjk_analyzer("english"));
         m.insert("keyword", keyword_analyzer());
+        #[cfg(feature = "nori")]
+        m.insert("nori", nori_analyzer());
         m
     })
 }
@@ -68,6 +72,16 @@ pub fn register_analyzer(name: impl Into<String>, analyzer: Analyzer) -> Result<
         })?;
     custom().write().insert(name, analyzer);
     Ok(())
+}
+
+/// Return whether a name is reserved by an immutable built-in analyzer.
+pub fn is_builtin_analyzer(name: &str) -> bool {
+    builtins().contains_key(name)
+}
+
+/// Return the names of every built-in analyzer exposed by this feature set.
+pub fn builtin_analyzer_names() -> Vec<String> {
+    builtins().keys().map(|name| (*name).to_owned()).collect()
 }
 
 pub fn get_analyzer(name: &str) -> Result<Analyzer, RegistryError> {
@@ -107,6 +121,14 @@ mod tests {
         for name in ["whitespace", "standard", "standard_cjk", "keyword"] {
             assert!(get_analyzer(name).is_ok(), "missing builtin: {name}");
         }
+    }
+
+    #[cfg(feature = "nori")]
+    #[test]
+    fn nori_builtin_is_resolvable_and_reserved() {
+        assert!(get_analyzer("nori").is_ok());
+        assert!(is_builtin_analyzer("nori"));
+        assert!(builtin_analyzer_names().iter().any(|name| name == "nori"));
     }
 
     #[test]

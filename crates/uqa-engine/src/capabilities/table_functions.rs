@@ -60,6 +60,9 @@ impl AnalyzerTableFunctions for Engine {
     fn fts_index_stats(&self, table: Option<&str>) -> Result<Vec<FtsIndexStat>, SQLError> {
         self.fts_index_stats(table)
     }
+    fn analyze_text(&self, name: &str, input: &str) -> Result<Value, String> {
+        Engine::analyze_text(self, name, input)
+    }
 }
 impl OperatorJoinBinding for Engine {
     fn lower(

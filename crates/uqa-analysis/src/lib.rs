@@ -38,7 +38,8 @@ pub use highlight::{
     HighlightOptions,
 };
 pub use registry::{
-    drop_analyzer, get_analyzer, list_analyzers, register_analyzer, DEFAULT_ANALYZER_NAME,
+    builtin_analyzer_names, drop_analyzer, get_analyzer, is_builtin_analyzer, list_analyzers,
+    register_analyzer, DEFAULT_ANALYZER_NAME,
 };
 pub use resources::{AnalyzerCacheStats, AnalyzerResources};
 pub use source::{FilteredText, SourceOffsets, TextCoordinates};

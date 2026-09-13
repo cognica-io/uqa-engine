@@ -361,6 +361,11 @@ fn load_named_revisions(
 ) -> StorageBackendResult<NamedAnalyzerRevisions> {
     let mut descriptors = BTreeMap::new();
     for (name, descriptor) in catalog.load_analyzer_descriptors()? {
+        if crate::analyzer_registry::is_builtin_analyzer(&name) {
+            return Err(corrupt(format!(
+                "catalog analyzer `{name}` conflicts with a built-in analyzer"
+            )));
+        }
         if descriptors.insert(name, descriptor).is_some() {
             return Err(corrupt("duplicate named analyzer descriptor"));
         }
@@ -370,6 +375,11 @@ fn load_named_revisions(
     for (name, configuration) in catalog.load_analyzers()? {
         if name.is_empty() || name.trim() != name {
             return Err(corrupt("catalog analyzer has an invalid name"));
+        }
+        if crate::analyzer_registry::is_builtin_analyzer(&name) {
+            return Err(corrupt(format!(
+                "catalog analyzer `{name}` conflicts with a built-in analyzer"
+            )));
         }
         let compiled = if let Some(descriptor) = descriptors.remove(&name) {
             let compiled = resources.restore_json(&descriptor)?;

@@ -8,6 +8,7 @@ UQA Engine exposes analyzer catalog operations as row-producing SQL functions an
 | --- | --- | --- | --- |
 | `create_analyzer(name, config_json)` | Two strings | One status row | Yes |
 | `list_analyzers()` | None | One `analyzer_name` row per built-in or custom catalog analyzer | No |
+| `analyze_text(name, input)` | Two strings | One `analysis JSONB` row | No |
 | `set_table_analyzer(table, field, name [, phase])` | Three or four strings | One status row | Yes |
 | `drop_analyzer(name)` | One string | One status row | Yes |
 | `fts_index_stats([table])` | Zero or one table-name string | One diagnostics row per indexed field | No |
@@ -22,8 +23,9 @@ These functions are used in `FROM` like other table functions. `SELECT * FROM fu
 | `whitespace` | Whitespace tokenizer, lowercase | Pre-segmented text whose punctuation must remain within tokens |
 | `standard_cjk` | `standard` pipeline followed by 2-to-3-character n-grams with short-token retention | CJK-style text and substring-oriented matching |
 | `keyword` | Keyword tokenizer with no filters | Treat the complete non-empty field as one exact token |
+| `nori` (when the `nori` feature is enabled) | Native Lucene-compatible Korean tokenizer, POS and reading-form filters, and simple lowercase | Korean morphological analysis with graph positions and source offsets |
 
-`standard` is used when a GIN field has no explicit analyzer. `standard_cjk` is a built-in character n-gram pipeline, not a Chinese, Japanese, or Korean morphological segmenter. It can be assigned without calling `create_analyzer`:
+`standard` is used when a GIN field has no explicit analyzer. `standard_cjk` is a built-in character n-gram pipeline, not a Chinese, Japanese, or Korean morphological segmenter. The `nori` built-in is available only when the Engine is built with the native Nori dictionary feature. A built-in can be assigned without calling `create_analyzer`:
 
 ```sql
 SELECT * FROM set_table_analyzer(
@@ -125,7 +127,7 @@ Registering a custom name compiles an immutable revision and persists its resolv
 | Syntax | `list_analyzers()` in `FROM` |
 | Arguments | None |
 | Result | Zero or more rows with one `analyzer_name TEXT` column, sorted by name in the direct result |
-| Effects | Read-only; includes custom catalog analyzers and the four built-ins |
+| Effects | Read-only; includes custom catalog analyzers and every built-in available in the current feature set |
 | Errors | Any argument is an arity error |
 
 ```sql
@@ -134,7 +136,28 @@ FROM list_analyzers()
 ORDER BY analyzer_name;
 ```
 
-The result includes `keyword`, `standard`, `standard_cjk`, `whitespace`, and custom analyzer names stored in the engine catalog. The function accepts no arguments.
+The result includes `keyword`, `standard`, `standard_cjk`, `whitespace`, feature-enabled `nori`, and custom analyzer names stored in the engine catalog. The function accepts no arguments.
+
+## ANALYZE TEXT function
+
+Inspect one complete analysis result without changing the catalog:
+
+| Contract part | Definition |
+| --- | --- |
+| Syntax | `analyze_text(name TEXT, input TEXT)` in `FROM` |
+| Arguments | `name` resolves a built-in or custom analyzer and `input` is the complete source string |
+| Result | One `analysis JSONB` row containing `tokens`, `final_offsets`, `final_position_increment`, and `analyzer_fingerprint` |
+| Effects | Read-only; no analyzer, table, index, or session state is changed |
+| Errors | Wrong arity or types, an unknown analyzer, unavailable resources, invalid analysis input, and analysis failures are returned as SQL errors |
+
+Each token preserves its term, UTF-8 and UTF-16 source ranges, position increment and length, keyword state, and any analyzer-specific metadata. Nori tokens additionally include Korean morphology, readings, and morpheme origins when those attributes are present. The final offsets and final position increment are retained even when filters remove every token, and `analyzer_fingerprint` identifies the resolved immutable revision used for the call.
+
+```sql
+SELECT analysis
+FROM analyze_text('nori', '나물은') AS a(analysis);
+```
+
+The JSONB diagnostic is the SQL form of the same rich token stream returned by the Rust `uqa_analysis::CompiledAnalyzer::analyze_tokens` API. A feature-disabled build reports an unknown analyzer for `nori` rather than silently falling back to another pipeline.
 
 ## Bind through CREATE INDEX
 
@@ -264,7 +287,7 @@ Persistent engines store exact named descriptors and independent index/search bi
 ## Limits and deliberate differences
 
 - UQA Engine does not implement PostgreSQL text-search parser, dictionary, configuration, or template DDL.
-- SQL has no analyzer token-preview function; construct `uqa_analysis::Analyzer` and call `analyze` in Rust to inspect a pipeline directly.
+- `analyze_text` returns a read-only JSONB token diagnostic; Rust callers can use `uqa_analysis::CompiledAnalyzer::analyze_tokens` when they need typed token objects.
 - SQL does not return the raw JSON definition for every named analyzer. Rust `Engine::get_table_analyzer` returns the exact bound configuration for the selected phase. Its `both` result requires the same named revision on both sides; an unnamed default or asymmetric binding returns `None`.
 - SQL `uqa_highlight` uses the built-in English `standard` analyzer rather than inheriting the field assignment.
 

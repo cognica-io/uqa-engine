@@ -66,16 +66,13 @@ pub(super) fn build_rows(
         }
         "list_analyzers" => {
             require_no_arguments("list_analyzers", evaluated)?;
-            // Include the four built-in analyzers (`whitespace`, `standard`,
-            // `standard_cjk`, `keyword`) in addition to
-            // top of every user-registered named analyzer.
             let mut names: std::collections::BTreeSet<String> = runtime
                 .list_named_analyzers()
                 .map_err(SQLError::Unsupported)?
                 .into_iter()
                 .collect();
-            for builtin in ["whitespace", "standard", "standard_cjk", "keyword"] {
-                names.insert(builtin.to_string());
+            for builtin in uqa_analysis::builtin_analyzer_names() {
+                names.insert(builtin);
             }
             let key = column_aliases
                 .first()
@@ -85,6 +82,21 @@ pub(super) fn build_rows(
                 out.push(vec![Value::Str(n)]);
             }
             Ok(TableFunctionRows::materialized(vec![key], out))
+        }
+        "analyze_text" => {
+            let (name, input) =
+                uqa_sql::semantics::table_function_arguments::analyze_text_arguments(evaluated)?;
+            let diagnostic = runtime
+                .analyze_text(&name, &input)
+                .map_err(SQLError::Unsupported)?;
+            let column = column_aliases
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "analysis".into());
+            Ok(TableFunctionRows::materialized(
+                vec![column],
+                vec![vec![diagnostic]],
+            ))
         }
         "fts_index_stats" => index_stat_rows(runtime, evaluated),
         "set_table_analyzer" => {

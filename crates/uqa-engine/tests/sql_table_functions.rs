@@ -13,6 +13,9 @@ use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_sql::ast::ColumnType;
 
+#[path = "sql_table_functions/analyzer_diagnostics.rs"]
+mod analyzer_diagnostics;
+
 fn values(result: &uqa_engine::SQLResult, column: &str) -> Vec<Value> {
     result.rows.iter().map(|row| row[column].clone()).collect()
 }
