@@ -3,6 +3,10 @@
   "description": "Machine-checked inventory of Rust benchmark entrypoints and required semantic probes.",
   "surfaces": [
     {
+      "path": "crates/uqa-analysis/benches/nori.rs",
+      "tokens": ["cold_dictionary", "shared_dictionary", "analyze_case", "output_sha256", "bytes_peak"]
+    },
+    {
       "path": "crates/uqa-core/benches/carrier_layers.rs",
       "tokens": ["doc_set_by_size", "boolean_relation_100k", "log_relation_100k"]
     },

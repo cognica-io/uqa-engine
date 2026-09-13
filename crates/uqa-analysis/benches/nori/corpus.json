@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "Original synthetic Korean workloads, Cognica, Inc., Apache-2.0",
+  "cases": [
+    {"name": "korean_prose", "text": "서울의 연구진은 새로운 검색 기술을 개발했다. 사용자는 자연어로 질문하고 문서에서 필요한 정보를 찾는다. 정확한 형태소 분석은 복합 명사와 조사를 구분한다. ", "repeat": 8},
+    {"name": "short_query", "text": "세종시 도서관 운영 시간", "repeat": 1},
+    {"name": "hanja", "text": "大韓民國 首都 서울 經濟 文化 敎育 喜悲哀歡 株式會社 ", "repeat": 16},
+    {"name": "mixed_script", "text": "UQA Engine 18은 Rust와 WASM에서 검색한다. CPU MLX SQL İSTANBUL café 😀 ２０２６년 9월 13일 https://example.com/search?q=서울 ", "repeat": 8},
+    {"name": "unknown", "text": "뷁쀍쀎 뙓뙔뙕 쮃쮄쮅 zqxvplmn 𠀀𠀁𠀂 🧪🛰️ ", "repeat": 16},
+    {"name": "ambiguous_long", "text": "가곡역남산성대입구나무늘보동물병원", "repeat": 256}
+  ]
+}
