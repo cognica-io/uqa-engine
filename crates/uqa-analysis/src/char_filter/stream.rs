@@ -24,12 +24,56 @@ pub(super) fn replace_literal(
     let edited = {
         let input = text.as_str();
         let mut builder = EditBuilder::new(input, budget, poll);
-        for (start, matched) in input.match_indices(old) {
-            builder.edit(start..start + matched.len(), std::iter::once(new))?;
+        if old.is_empty() {
+            for (index, _) in input.char_indices() {
+                builder.check()?;
+                builder.edit(index..index, std::iter::once(new))?;
+            }
+            builder.edit(input.len()..input.len(), std::iter::once(new))?;
+        } else {
+            let input_bytes = input.as_bytes();
+            let old_bytes = old.as_bytes();
+            if let Some(last_start) = input_bytes.len().checked_sub(old_bytes.len()) {
+                let mut start = 0;
+                let mut scanned = 0;
+                while start <= last_start {
+                    if scanned % 1024 == 0 {
+                        builder.check()?;
+                    }
+                    if input.is_char_boundary(start)
+                        && bytes_equal(input_bytes, old_bytes, start, &mut builder)?
+                    {
+                        let end = start + old_bytes.len();
+                        builder.edit(start..end, std::iter::once(new))?;
+                        start = end;
+                    } else {
+                        start += 1;
+                    }
+                    scanned += 1;
+                }
+            }
         }
         builder.finish()?
     };
     text.apply_edited(edited, budget, poll)
+}
+
+fn bytes_equal(
+    input: &[u8],
+    pattern: &[u8],
+    start: usize,
+    builder: &mut EditBuilder<'_, '_>,
+) -> AnalysisResult<bool> {
+    for (left, right) in input[start..start + pattern.len()]
+        .chunks(1024)
+        .zip(pattern.chunks(1024))
+    {
+        builder.check()?;
+        if left != right {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 pub(super) fn replace_pattern(
@@ -86,4 +130,46 @@ pub(super) fn replace_pattern(
     drop(locations);
     drop(capture_memory);
     text.apply_edited(edited, budget, poll)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::replace_literal;
+    use crate::{AnalysisError, FilteredText};
+    use uqa_core::memory::MemoryBudget;
+
+    #[test]
+    fn literal_search_polls_inside_a_long_unmatched_input() {
+        let input = "x".repeat(128 * 1024);
+        let mut text = FilteredText::new(&input);
+        let budget = MemoryBudget::new(0);
+        let mut polls = 0;
+        replace_literal(&mut text, "needle", "replacement", &budget, &mut || {
+            polls += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert!(polls > input.len() / 2048);
+        assert_eq!(text.as_str(), input);
+        assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn literal_search_cancellation_releases_an_unpublished_edit() {
+        let input = "x".repeat(128 * 1024);
+        let mut text = FilteredText::new(&input);
+        let budget = MemoryBudget::new(1 << 20);
+        let mut polls = 0;
+        let result = replace_literal(&mut text, "needle", "replacement", &budget, &mut || {
+            polls += 1;
+            if polls == 8 {
+                Err(AnalysisError::Cancelled)
+            } else {
+                Ok(())
+            }
+        });
+        assert!(matches!(result, Err(AnalysisError::Cancelled)));
+        assert_eq!(text.as_str(), input);
+        assert_eq!(budget.used(), 0);
+    }
 }

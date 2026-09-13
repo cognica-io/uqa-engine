@@ -61,7 +61,7 @@ impl CharFilter {
         self.prepare()?.filter_mapped(text)
     }
 
-    /// Transform a borrowed input while retaining source buffers under the caller's byte allowance. Immutable configuration preparation is separate. Polls occur between searches and during source copying and coordinate construction.
+    /// Transform a borrowed input while retaining source buffers under the caller's byte allowance. Immutable configuration preparation is separate. Literal scans poll while examining input, regex searches poll between library calls, and source copying and coordinate construction remain cancellable.
     ///
     /// ```
     /// use uqa_analysis::CharFilter;
