@@ -236,5 +236,106 @@
         "timing_compared": true
       }
     }
-  ]
+  ],
+  "subsequent_run": {
+    "run": "https://github.com/cognica-io/uqa-engine/actions/runs/34769754158",
+    "revision": "9a3fb5bae784b41a4bd676062ac8f4172a6e37d1",
+    "native_timing_failure": "cancellation timing regression: analyzer/None/korean_prose/last/response_timing: 2.0718249844107253 > 1.26",
+    "all_repeated_allocations_and_recoveries_verified": true,
+    "wasm_maximum_forward_timing_ratio": 1.1311993154384492,
+    "reports": [
+      {
+        "target": "native",
+        "artifact_id": 10321702167,
+        "filename": "nori-analysis-native.json",
+        "sha256": "d042ebeb7055f3c41081c53f782b515d90fad9cd3076310308e4834010ede879",
+        "source_lock_flags_verified": true
+      },
+      {
+        "target": "native",
+        "artifact_id": 10321702167,
+        "filename": "nori-cancellation-native-baseline.json",
+        "sha256": "c8950903547a59c109e923149ec2edb73c37da0d6a322e2062cf23919978e87a",
+        "source_lock_flags_verified": true
+      },
+      {
+        "target": "native",
+        "artifact_id": 10321702167,
+        "filename": "nori-cancellation-native-repeat.json",
+        "sha256": "707111850beabd964cec4ceee7d69b2463d04c0c97b65038cbfa92265709fc43",
+        "source_lock_flags_verified": true
+      },
+      {
+        "target": "wasm",
+        "artifact_id": 10322035698,
+        "filename": "nori-analysis-wasm.json",
+        "sha256": "970aef2036a4fe66b79ad088a2f8d03802c80ca17a20f21a7875b038458998dc",
+        "source_lock_flags_verified": true
+      },
+      {
+        "target": "wasm",
+        "artifact_id": 10322035698,
+        "filename": "nori-cancellation-wasm-baseline.json",
+        "sha256": "be8c3bcb9983ac5f57ae49b95dc6344b404cb32110123c23926c6e7d69f056b2",
+        "source_lock_flags_verified": true
+      },
+      {
+        "target": "wasm",
+        "artifact_id": 10322035698,
+        "filename": "nori-cancellation-wasm-repeat.json",
+        "sha256": "bd9eff75230db930c9e5c54d5cc20bfc27577c90d00e32ad9e9c5557b3fd88ad",
+        "source_lock_flags_verified": true
+      }
+    ],
+    "diagnostics": {
+      "artifact_id": 10321702167,
+      "receipt_sha256": "18d5f4efebe9be8d578412eb498eadad75d7ef424748587fe694d3d08248474f",
+      "calibration_eligible": false,
+      "same_measured_executable_verified": true,
+      "traces": [
+        {
+          "report": "run-0.json",
+          "report_sha256": "30d9952fdef8abd222fdd785c966396dc5d44726e400d70e8e1b9682fcbb6bd3",
+          "system_calls": "run-0.syscalls.log",
+          "system_calls_sha256": "c7ed16fcbcdcb436374a78680526861907044b9e67c379a2d1ef060bbf5ebf1d",
+          "total_allocator_system_calls_before_workload_markers": 85,
+          "selected_workloads": {
+            "analyzer/None/korean_prose/last": {
+              "allocator_system_calls": 0,
+              "response_median_ns": 8300.36607142857,
+              "operation_median_ns": 699878.7767857143,
+              "timed_operations": 784
+            },
+            "analyzer/Discard/korean_prose/last": {
+              "allocator_system_calls": 0,
+              "response_median_ns": 7554.375,
+              "operation_median_ns": 705929.0982142857,
+              "timed_operations": 784
+            }
+          }
+        },
+        {
+          "report": "run-1.json",
+          "report_sha256": "3e4aff8d82d82ece163fba0a375048036eb0c273295c4191fd6dadf892b3036f",
+          "system_calls": "run-1.syscalls.log",
+          "system_calls_sha256": "5608066475c06fdbe4bb7096d8a07962070bdea7e670f4b10331a8b0d26e17fa",
+          "total_allocator_system_calls_before_workload_markers": 85,
+          "selected_workloads": {
+            "analyzer/None/korean_prose/last": {
+              "allocator_system_calls": 0,
+              "response_median_ns": 8304.017857142857,
+              "operation_median_ns": 698294.1071428572,
+              "timed_operations": 784
+            },
+            "analyzer/Discard/korean_prose/last": {
+              "allocator_system_calls": 0,
+              "response_median_ns": 7008.348214285715,
+              "operation_median_ns": 705800.625,
+              "timed_operations": 784
+            }
+          }
+        }
+      ]
+    }
+  }
 }
