@@ -50,15 +50,15 @@ jobs:
       - name: Check the feature-enabled analysis benchmark
         if: matrix.target == 'native'
         run: cargo clippy --locked -p uqa-analysis --features nori --bench nori -- -D warnings
-      - name: Verify ordinary analysis and collect repeated cancellation candidates
+      - name: Verify ordinary analysis and repeated cancellation gates
         env:
           RUSTFLAGS: ""
           CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS: "-D warnings"
           BENCHMARK_TARGET: ${{ matrix.target }}
         run: |
           python3 scripts/run-nori-benchmark.py --target "$BENCHMARK_TARGET" --output "target/benchmark-runs/nori-analysis-$BENCHMARK_TARGET.json"
-          python3 scripts/run-nori-cancellation-benchmark.py --target "$BENCHMARK_TARGET" --measure-only --output "target/benchmark-runs/nori-cancellation-$BENCHMARK_TARGET-baseline.json"
-          python3 scripts/run-nori-cancellation-benchmark.py --target "$BENCHMARK_TARGET" --measure-only --output "target/benchmark-runs/nori-cancellation-$BENCHMARK_TARGET-repeat.json"
+          python3 scripts/run-nori-cancellation-benchmark.py --target "$BENCHMARK_TARGET" --output "target/benchmark-runs/nori-cancellation-$BENCHMARK_TARGET-baseline.json"
+          python3 scripts/run-nori-cancellation-benchmark.py --target "$BENCHMARK_TARGET" --baseline "target/benchmark-runs/nori-cancellation-$BENCHMARK_TARGET-baseline.json" --output "target/benchmark-runs/nori-cancellation-$BENCHMARK_TARGET-repeat.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

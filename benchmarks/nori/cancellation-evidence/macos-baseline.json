@@ -1,0 +1,7842 @@
+{
+  "allocation_scope": "current-thread Rust System allocator requests during one cancelled operation; excludes preloaded dictionary, input/reference output, allowance handle, unrelated reservation, and host memory",
+  "bundle_bytes": 9829534,
+  "bundle_sha256": "0d920523991ed60909972d85df630c65747ff5d49e1138e4998ca39f0079538d",
+  "corpus_sha256": "18a50905d26e3615d9db2a8b9565cbcdefcbcfdd1036a88292624154fc228e6b",
+  "measurements": [
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 1926,
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "tokenizer/None/korean_prose/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          42365568,
+          41659638,
+          40781564,
+          42909560,
+          40742837,
+          42941279,
+          42940257
+        ],
+        "iterations": [
+          1185344,
+          1167104,
+          1142912,
+          1200416,
+          1143328,
+          1199008,
+          1200144
+        ],
+        "median_ns": 35.74115868473625
+      },
+      "output_sha256": "0b3b91ece785b5d855ea6e247e07defd6638821183236015a8b352cdb45ee32c",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          21396900,
+          21062886,
+          20579731,
+          21760189,
+          20545871,
+          21738293,
+          21770168
+        ],
+        "iterations": [
+          1185344,
+          1167104,
+          1142912,
+          1200416,
+          1143328,
+          1199008,
+          1200144
+        ],
+        "median_ns": 18.051215512121377
+      },
+      "sample_wall_ns": [
+        75000917,
+        75000167,
+        75000208,
+        75000833,
+        75000959,
+        75000083,
+        75000375
+      ],
+      "tokens": 312,
+      "verified_cancellations": 8238259,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 472492,
+        "bytes_retained": 0,
+        "bytes_total": 906412,
+        "count_peak": 687,
+        "count_retained": 0,
+        "count_total": 2784
+      },
+      "cancel_at_poll": 963,
+      "complete_polls": 1926,
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "tokenizer/None/korean_prose/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          80221709,
+          80330875,
+          79974580,
+          80099964,
+          80039581,
+          75521249,
+          75020532
+        ],
+        "iterations": [
+          192,
+          192,
+          192,
+          192,
+          192,
+          176,
+          176
+        ],
+        "median_ns": 417821.4010416667
+      },
+      "output_sha256": "0b3b91ece785b5d855ea6e247e07defd6638821183236015a8b352cdb45ee32c",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2106994,
+          2100621,
+          2080668,
+          2092133,
+          2094750,
+          1982370,
+          1977277
+        ],
+        "iterations": [
+          192,
+          192,
+          192,
+          192,
+          192,
+          176,
+          176
+        ],
+        "median_ns": 10940.734375
+      },
+      "sample_wall_ns": [
+        80229791,
+        80337542,
+        79980584,
+        80105750,
+        80045333,
+        75527042,
+        75025958
+      ],
+      "tokens": 312,
+      "verified_cancellations": 1315,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 535736,
+        "bytes_retained": 0,
+        "bytes_total": 1022970,
+        "count_peak": 1076,
+        "count_retained": 0,
+        "count_total": 3194
+      },
+      "cancel_at_poll": 1926,
+      "complete_polls": 1926,
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "tokenizer/None/korean_prose/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          81047210,
+          80491584,
+          80729791,
+          80572332,
+          80614381,
+          81004249,
+          81157125
+        ],
+        "iterations": [
+          176,
+          176,
+          176,
+          176,
+          176,
+          176,
+          176
+        ],
+        "median_ns": 458691.9943181818
+      },
+      "output_sha256": "0b3b91ece785b5d855ea6e247e07defd6638821183236015a8b352cdb45ee32c",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          919465,
+          877534,
+          874993,
+          876832,
+          876344,
+          877716,
+          876668
+        ],
+        "iterations": [
+          176,
+          176,
+          176,
+          176,
+          176,
+          176,
+          176
+        ],
+        "median_ns": 4982.0
+      },
+      "sample_wall_ns": [
+        81052542,
+        80497166,
+        80735250,
+        80577875,
+        80619708,
+        81010083,
+        81162208
+      ],
+      "tokens": 312,
+      "verified_cancellations": 1235,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 2595,
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "analyzer/None/korean_prose/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          40216949,
+          40218323,
+          40199603,
+          40574133,
+          40211710,
+          40788293,
+          40263826
+        ],
+        "iterations": [
+          1120512,
+          1119808,
+          1121040,
+          1122880,
+          1119360,
+          1108176,
+          1072144
+        ],
+        "median_ns": 35.923840408805034
+      },
+      "output_sha256": "9ccbf2cabe7481a8887580c78d8b69d944f4591301deed93f6353971c03b3311",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20479092,
+          20485248,
+          20469401,
+          20788131,
+          20469909,
+          20967848,
+          20641123
+        ],
+        "iterations": [
+          1120512,
+          1119808,
+          1121040,
+          1122880,
+          1119360,
+          1108176,
+          1072144
+        ],
+        "median_ns": 18.293536034748815
+      },
+      "sample_wall_ns": [
+        75000792,
+        75000625,
+        75000917,
+        75000417,
+        75000334,
+        75001083,
+        75000417
+      ],
+      "tokens": 168,
+      "verified_cancellations": 7783923,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 493646,
+        "bytes_retained": 0,
+        "bytes_total": 934510,
+        "count_peak": 823,
+        "count_retained": 0,
+        "count_total": 2927
+      },
+      "cancel_at_poll": 1298,
+      "complete_polls": 2595,
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "analyzer/None/korean_prose/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          76011789,
+          75714867,
+          75727370,
+          75839834,
+          75951416,
+          76310751,
+          75723174
+        ],
+        "iterations": [
+          176,
+          176,
+          176,
+          176,
+          176,
+          176,
+          176
+        ],
+        "median_ns": 430908.1477272727
+      },
+      "output_sha256": "9ccbf2cabe7481a8887580c78d8b69d944f4591301deed93f6353971c03b3311",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2142243,
+          2143577,
+          2145577,
+          2178801,
+          2175622,
+          2153626,
+          2168882
+        ],
+        "iterations": [
+          176,
+          176,
+          176,
+          176,
+          176,
+          176,
+          176
+        ],
+        "median_ns": 12236.511363636364
+      },
+      "sample_wall_ns": [
+        76017416,
+        75720709,
+        75733500,
+        75845583,
+        75957083,
+        76316541,
+        75728875
+      ],
+      "tokens": 168,
+      "verified_cancellations": 1235,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 535736,
+        "bytes_retained": 0,
+        "bytes_total": 1023074,
+        "count_peak": 1076,
+        "count_retained": 0,
+        "count_total": 3195
+      },
+      "cancel_at_poll": 2595,
+      "complete_polls": 2595,
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "analyzer/None/korean_prose/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          82313373,
+          82359794,
+          82426465,
+          75504539,
+          82403702,
+          75927247,
+          75091326
+        ],
+        "iterations": [
+          176,
+          176,
+          176,
+          160,
+          176,
+          160,
+          160
+        ],
+        "median_ns": 468332.1875
+      },
+      "output_sha256": "9ccbf2cabe7481a8887580c78d8b69d944f4591301deed93f6353971c03b3311",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          453948,
+          452337,
+          452921,
+          416247,
+          454374,
+          418134,
+          413825
+        ],
+        "iterations": [
+          176,
+          176,
+          176,
+          160,
+          176,
+          160,
+          160
+        ],
+        "median_ns": 2581.6704545454545
+      },
+      "sample_wall_ns": [
+        82318833,
+        82365667,
+        82431709,
+        75509875,
+        82408667,
+        75932958,
+        75096666
+      ],
+      "tokens": 168,
+      "verified_cancellations": 1187,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 2182,
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "tokenizer/Discard/korean_prose/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          42617294,
+          40721128,
+          42330824,
+          41244927,
+          42329471,
+          40401356,
+          42478914
+        ],
+        "iterations": [
+          1190304,
+          1143040,
+          1179808,
+          1140864,
+          1182416,
+          1133264,
+          1189552
+        ],
+        "median_ns": 35.79913583713346
+      },
+      "output_sha256": "57eab62b152404c49098feb5e5d328d024718637b0392816d201e95a989eb846",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          21580745,
+          20533901,
+          21451500,
+          20837890,
+          21449169,
+          20389148,
+          21487628
+        ],
+        "iterations": [
+          1190304,
+          1143040,
+          1179808,
+          1140864,
+          1182416,
+          1133264,
+          1189552
+        ],
+        "median_ns": 18.130448188025916
+      },
+      "sample_wall_ns": [
+        75000916,
+        75000333,
+        75000125,
+        75001000,
+        75000959,
+        75000583,
+        75000792
+      ],
+      "tokens": 376,
+      "verified_cancellations": 8159251,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 471568,
+        "bytes_retained": 0,
+        "bytes_total": 906772,
+        "count_peak": 678,
+        "count_retained": 0,
+        "count_total": 2844
+      },
+      "cancel_at_poll": 1091,
+      "complete_polls": 2182,
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "tokenizer/Discard/korean_prose/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          80822997,
+          81173378,
+          80768831,
+          80661879,
+          80758922,
+          80431003,
+          76241699
+        ],
+        "iterations": [
+          192,
+          192,
+          192,
+          192,
+          192,
+          192,
+          176
+        ],
+        "median_ns": 420670.9947916667
+      },
+      "output_sha256": "57eab62b152404c49098feb5e5d328d024718637b0392816d201e95a989eb846",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2058999,
+          2049464,
+          2058832,
+          2051836,
+          2040838,
+          2026915,
+          1937078
+        ],
+        "iterations": [
+          192,
+          192,
+          192,
+          192,
+          192,
+          192,
+          176
+        ],
+        "median_ns": 10686.645833333334
+      },
+      "sample_wall_ns": [
+        80828875,
+        81179458,
+        80775667,
+        80668417,
+        80765583,
+        80437417,
+        76248500
+      ],
+      "tokens": 376,
+      "verified_cancellations": 1331,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 532036,
+        "bytes_retained": 0,
+        "bytes_total": 1029962,
+        "count_peak": 948,
+        "count_retained": 0,
+        "count_total": 3322
+      },
+      "cancel_at_poll": 2182,
+      "complete_polls": 2182,
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "tokenizer/Discard/korean_prose/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          81313169,
+          81158752,
+          81228167,
+          81246420,
+          81070335,
+          81330999,
+          81375799
+        ],
+        "iterations": [
+          176,
+          176,
+          176,
+          176,
+          176,
+          176,
+          176
+        ],
+        "median_ns": 461627.38636363635
+      },
+      "output_sha256": "57eab62b152404c49098feb5e5d328d024718637b0392816d201e95a989eb846",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          624748,
+          622206,
+          621880,
+          620839,
+          617836,
+          619460,
+          620087
+        ],
+        "iterations": [
+          176,
+          176,
+          176,
+          176,
+          176,
+          176,
+          176
+        ],
+        "median_ns": 3527.494318181818
+      },
+      "sample_wall_ns": [
+        81318833,
+        81164083,
+        81234042,
+        81251875,
+        81075583,
+        81336334,
+        81381333
+      ],
+      "tokens": 376,
+      "verified_cancellations": 1235,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 2946,
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "analyzer/Discard/korean_prose/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          40774090,
+          41754174,
+          40781418,
+          40348627,
+          40192549,
+          40184532,
+          40209480
+        ],
+        "iterations": [
+          1132016,
+          1153776,
+          1121072,
+          1120960,
+          1116352,
+          1120576,
+          1115952
+        ],
+        "median_ns": 36.019005031731
+      },
+      "output_sha256": "1fbf62164811eb694585da8eafb29eaf2eb0ab6d9cef9acc3ab390017749a961",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20867835,
+          21481816,
+          20928881,
+          20579720,
+          20483300,
+          20477555,
+          20482557
+        ],
+        "iterations": [
+          1132016,
+          1153776,
+          1121072,
+          1120960,
+          1116352,
+          1120576,
+          1115952
+        ],
+        "median_ns": 18.35901370254068
+      },
+      "sample_wall_ns": [
+        75000333,
+        75001000,
+        75000209,
+        75000125,
+        75000625,
+        75000250,
+        75000834
+      ],
+      "tokens": 192,
+      "verified_cancellations": 7880707,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 491792,
+        "bytes_retained": 0,
+        "bytes_total": 934868,
+        "count_peak": 775,
+        "count_retained": 0,
+        "count_total": 3012
+      },
+      "cancel_at_poll": 1473,
+      "complete_polls": 2946,
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "analyzer/Discard/korean_prose/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          77466332,
+          76379638,
+          76247094,
+          76259740,
+          76821666,
+          76511206,
+          76525912
+        ],
+        "iterations": [
+          176,
+          176,
+          176,
+          176,
+          176,
+          176,
+          176
+        ],
+        "median_ns": 434722.76136363635
+      },
+      "output_sha256": "1fbf62164811eb694585da8eafb29eaf2eb0ab6d9cef9acc3ab390017749a961",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2083794,
+          2036756,
+          2039252,
+          2042158,
+          2067760,
+          2037504,
+          2022952
+        ],
+        "iterations": [
+          176,
+          176,
+          176,
+          176,
+          176,
+          176,
+          176
+        ],
+        "median_ns": 11586.65909090909
+      },
+      "sample_wall_ns": [
+        77472292,
+        76385000,
+        76252416,
+        76265042,
+        76827917,
+        76516709,
+        76531625
+      ],
+      "tokens": 192,
+      "verified_cancellations": 1235,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 532036,
+        "bytes_retained": 0,
+        "bytes_total": 1030066,
+        "count_peak": 948,
+        "count_retained": 0,
+        "count_total": 3323
+      },
+      "cancel_at_poll": 2946,
+      "complete_polls": 2946,
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "analyzer/Discard/korean_prose/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          75380000,
+          75569964,
+          75560124,
+          75513887,
+          75567208,
+          75537332,
+          75523627
+        ],
+        "iterations": [
+          160,
+          160,
+          160,
+          160,
+          160,
+          160,
+          160
+        ],
+        "median_ns": 472108.325
+      },
+      "output_sha256": "1fbf62164811eb694585da8eafb29eaf2eb0ab6d9cef9acc3ab390017749a961",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          286918,
+          286919,
+          286459,
+          286552,
+          287000,
+          286794,
+          287123
+        ],
+        "iterations": [
+          160,
+          160,
+          160,
+          160,
+          160,
+          160,
+          160
+        ],
+        "median_ns": 1793.2375
+      },
+      "sample_wall_ns": [
+        75385084,
+        75575000,
+        75565792,
+        75518917,
+        75572084,
+        75542375,
+        75528875
+      ],
+      "tokens": 192,
+      "verified_cancellations": 1123,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 2182,
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "tokenizer/Mixed/korean_prose/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          42821144,
+          42924100,
+          40735893,
+          42604995,
+          42735606,
+          42908531,
+          42171204
+        ],
+        "iterations": [
+          1199024,
+          1196320,
+          1142928,
+          1192032,
+          1194000,
+          1196496,
+          1180288
+        ],
+        "median_ns": 35.74148596681968
+      },
+      "output_sha256": "05abc9ea58ba0d85c2203ed8cce3c0cd3b4034cb298a40d4acf1f35921ed53e1",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          21670242,
+          21775711,
+          20553807,
+          21587949,
+          21661004,
+          21761510,
+          21366288
+        ],
+        "iterations": [
+          1199024,
+          1196320,
+          1142928,
+          1192032,
+          1194000,
+          1196496,
+          1180288
+        ],
+        "median_ns": 18.1102092896835
+      },
+      "sample_wall_ns": [
+        75000375,
+        75000166,
+        75000958,
+        75000208,
+        75000375,
+        75000042,
+        75000542
+      ],
+      "tokens": 440,
+      "verified_cancellations": 8301091,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 472204,
+        "bytes_retained": 0,
+        "bytes_total": 906772,
+        "count_peak": 746,
+        "count_retained": 0,
+        "count_total": 2844
+      },
+      "cancel_at_poll": 1091,
+      "complete_polls": 2182,
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "tokenizer/Mixed/korean_prose/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          80652455,
+          80894337,
+          80834925,
+          80691034,
+          80719999,
+          80761921,
+          81515874
+        ],
+        "iterations": [
+          192,
+          192,
+          192,
+          192,
+          192,
+          192,
+          192
+        ],
+        "median_ns": 420635.0052083333
+      },
+      "output_sha256": "05abc9ea58ba0d85c2203ed8cce3c0cd3b4034cb298a40d4acf1f35921ed53e1",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2172336,
+          2172995,
+          2179512,
+          2170332,
+          2182331,
+          2184591,
+          2217707
+        ],
+        "iterations": [
+          192,
+          192,
+          192,
+          192,
+          192,
+          192,
+          192
+        ],
+        "median_ns": 11351.625
+      },
+      "sample_wall_ns": [
+        80658250,
+        80903458,
+        80840708,
+        80696834,
+        80726000,
+        80767209,
+        81526500
+      ],
+      "tokens": 440,
+      "verified_cancellations": 1347,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 534720,
+        "bytes_retained": 0,
+        "bytes_total": 1036618,
+        "count_peak": 1204,
+        "count_retained": 0,
+        "count_total": 3322
+      },
+      "cancel_at_poll": 2182,
+      "complete_polls": 2182,
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "tokenizer/Mixed/korean_prose/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          81618300,
+          81461586,
+          81615911,
+          81479378,
+          81404532,
+          81440503,
+          81362757
+        ],
+        "iterations": [
+          176,
+          176,
+          176,
+          176,
+          176,
+          176,
+          176
+        ],
+        "median_ns": 462849.92045454547
+      },
+      "output_sha256": "05abc9ea58ba0d85c2203ed8cce3c0cd3b4034cb298a40d4acf1f35921ed53e1",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1079092,
+          1079836,
+          1078954,
+          1082423,
+          1077658,
+          1080580,
+          1081674
+        ],
+        "iterations": [
+          176,
+          176,
+          176,
+          176,
+          176,
+          176,
+          176
+        ],
+        "median_ns": 6135.431818181818
+      },
+      "sample_wall_ns": [
+        81623667,
+        81466959,
+        81621833,
+        81485125,
+        81410042,
+        81446458,
+        81369083
+      ],
+      "tokens": 440,
+      "verified_cancellations": 1235,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 3106,
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "analyzer/Mixed/korean_prose/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          40496176,
+          40189671,
+          40486877,
+          40226288,
+          40212445,
+          40434981,
+          40315732
+        ],
+        "iterations": [
+          1124656,
+          1117952,
+          1124480,
+          1121536,
+          1120592,
+          1121344,
+          1109664
+        ],
+        "median_ns": 36.00497741178145
+      },
+      "output_sha256": "00728b371d0c71797c42de3c9ed0c83be39aab961a4ee98eef3f4f0a486ba54f",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20646513,
+          20483685,
+          20718565,
+          20491657,
+          20475654,
+          20710576,
+          20589708
+        ],
+        "iterations": [
+          1124656,
+          1117952,
+          1124480,
+          1121536,
+          1120592,
+          1121344,
+          1109664
+        ],
+        "median_ns": 18.35806948969285
+      },
+      "sample_wall_ns": [
+        75001083,
+        75000333,
+        75000166,
+        75000125,
+        75000417,
+        75001000,
+        75000209
+      ],
+      "tokens": 224,
+      "verified_cancellations": 7840227,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 493066,
+        "bytes_retained": 0,
+        "bytes_total": 935150,
+        "count_peak": 940,
+        "count_retained": 0,
+        "count_total": 3046
+      },
+      "cancel_at_poll": 1553,
+      "complete_polls": 3106,
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "analyzer/Mixed/korean_prose/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          77046998,
+          76920328,
+          77245742,
+          76950374,
+          78005373,
+          76945915,
+          76906834
+        ],
+        "iterations": [
+          176,
+          176,
+          176,
+          176,
+          176,
+          176,
+          176
+        ],
+        "median_ns": 437218.0340909091
+      },
+      "output_sha256": "00728b371d0c71797c42de3c9ed0c83be39aab961a4ee98eef3f4f0a486ba54f",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2345997,
+          2330704,
+          2351623,
+          2331665,
+          2344966,
+          2302545,
+          2314328
+        ],
+        "iterations": [
+          176,
+          176,
+          176,
+          176,
+          176,
+          176,
+          176
+        ],
+        "median_ns": 13248.09659090909
+      },
+      "sample_wall_ns": [
+        77053042,
+        76925791,
+        77251417,
+        76956625,
+        78013291,
+        76951709,
+        76912500
+      ],
+      "tokens": 224,
+      "verified_cancellations": 1235,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 534720,
+        "bytes_retained": 0,
+        "bytes_total": 1036722,
+        "count_peak": 1204,
+        "count_retained": 0,
+        "count_total": 3323
+      },
+      "cancel_at_poll": 3106,
+      "complete_polls": 3106,
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "analyzer/Mixed/korean_prose/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          76005293,
+          76148788,
+          76445576,
+          76748623,
+          76302907,
+          76025206,
+          76333243
+        ],
+        "iterations": [
+          160,
+          160,
+          160,
+          160,
+          160,
+          160,
+          160
+        ],
+        "median_ns": 476893.16875
+      },
+      "output_sha256": "00728b371d0c71797c42de3c9ed0c83be39aab961a4ee98eef3f4f0a486ba54f",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          492622,
+          494535,
+          493880,
+          494961,
+          492663,
+          491662,
+          493532
+        ],
+        "iterations": [
+          160,
+          160,
+          160,
+          160,
+          160,
+          160,
+          160
+        ],
+        "median_ns": 3084.575
+      },
+      "sample_wall_ns": [
+        76010333,
+        76153291,
+        76451042,
+        76754083,
+        76307917,
+        76030083,
+        76338584
+      ],
+      "tokens": 224,
+      "verified_cancellations": 1123,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 40,
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "tokenizer/None/short_query/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          40664760,
+          40902622,
+          42942715,
+          42943139,
+          42700074,
+          41417220,
+          40380447
+        ],
+        "iterations": [
+          1145680,
+          1147872,
+          1198352,
+          1197536,
+          1193776,
+          1161328,
+          1133760
+        ],
+        "median_ns": 35.66367124533293
+      },
+      "output_sha256": "6f8e2914b00683ebdf1c0b8ebc245f45c9605c52c5bbb111294581792b20b47d",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20444504,
+          20644719,
+          21798602,
+          21797370,
+          21588236,
+          20930093,
+          20357402
+        ],
+        "iterations": [
+          1145680,
+          1147872,
+          1198352,
+          1197536,
+          1193776,
+          1161328,
+          1133760
+        ],
+        "median_ns": 18.022550907237232
+      },
+      "sample_wall_ns": [
+        75000584,
+        75000708,
+        75000416,
+        75000291,
+        75000292,
+        75000375,
+        75000583
+      ],
+      "tokens": 5,
+      "verified_cancellations": 8178307,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 9346,
+        "bytes_retained": 0,
+        "bytes_total": 17546,
+        "count_peak": 14,
+        "count_retained": 0,
+        "count_total": 59
+      },
+      "cancel_at_poll": 20,
+      "complete_polls": 40,
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "tokenizer/None/short_query/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          74835644,
+          74806678,
+          74849028,
+          74794207,
+          74848462,
+          74848084,
+          74762712
+        ],
+        "iterations": [
+          9248,
+          9232,
+          9216,
+          9264,
+          9280,
+          9296,
+          9264
+        ],
+        "median_ns": 8073.640651986183
+      },
+      "output_sha256": "6f8e2914b00683ebdf1c0b8ebc245f45c9605c52c5bbb111294581792b20b47d",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2614413,
+          2606576,
+          2624230,
+          2577057,
+          2527446,
+          2518933,
+          2514666
+        ],
+        "iterations": [
+          9248,
+          9232,
+          9216,
+          9264,
+          9280,
+          9296,
+          9264
+        ],
+        "median_ns": 278.1797279792746
+      },
+      "sample_wall_ns": [
+        75106750,
+        75071500,
+        75118041,
+        75061084,
+        75117958,
+        75119292,
+        75027666
+      ],
+      "tokens": 5,
+      "verified_cancellations": 64803,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 10364,
+        "bytes_retained": 0,
+        "bytes_total": 19716,
+        "count_peak": 23,
+        "count_retained": 0,
+        "count_total": 72
+      },
+      "cancel_at_poll": 40,
+      "complete_polls": 40,
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "tokenizer/None/short_query/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          74757872,
+          74875513,
+          74783122,
+          74799634,
+          74781029,
+          74842059,
+          74801004
+        ],
+        "iterations": [
+          8272,
+          8048,
+          8048,
+          8064,
+          8144,
+          8320,
+          8320
+        ],
+        "median_ns": 9182.346389980354
+      },
+      "output_sha256": "6f8e2914b00683ebdf1c0b8ebc245f45c9605c52c5bbb111294581792b20b47d",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1591355,
+          1595170,
+          1611705,
+          1607260,
+          1597895,
+          1596703,
+          1596463
+        ],
+        "iterations": [
+          8272,
+          8048,
+          8048,
+          8064,
+          8144,
+          8320,
+          8320
+        ],
+        "median_ns": 196.20518172888015
+      },
+      "sample_wall_ns": [
+        75009292,
+        75124000,
+        75034459,
+        75049708,
+        75032125,
+        75098667,
+        75054083
+      ],
+      "tokens": 5,
+      "verified_cancellations": 57219,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 58,
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "analyzer/None/short_query/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          40233431,
+          40836102,
+          40346863,
+          41781312,
+          41351937,
+          40587940,
+          40861663
+        ],
+        "iterations": [
+          1120096,
+          1126032,
+          1117856,
+          1149248,
+          1142032,
+          1124880,
+          1126160
+        ],
+        "median_ns": 36.20908783641789
+      },
+      "output_sha256": "82db3a81aced3c86036f20abe3d99914ca5ac472efae23e3485d6f5009b74dc7",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20486114,
+          20961139,
+          20621956,
+          21500739,
+          21259483,
+          20776613,
+          20995814
+        ],
+        "iterations": [
+          1120096,
+          1126032,
+          1117856,
+          1149248,
+          1142032,
+          1124880,
+          1126160
+        ],
+        "median_ns": 18.61504735211788
+      },
+      "sample_wall_ns": [
+        75006542,
+        75000167,
+        75001000,
+        75000541,
+        75000333,
+        75000542,
+        75000791
+      ],
+      "tokens": 4,
+      "verified_cancellations": 7906307,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 9346,
+        "bytes_retained": 0,
+        "bytes_total": 17936,
+        "count_peak": 18,
+        "count_retained": 0,
+        "count_total": 65
+      },
+      "cancel_at_poll": 29,
+      "complete_polls": 58,
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "analyzer/None/short_query/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          74786489,
+          74834067,
+          74865148,
+          74770801,
+          74810419,
+          74797447,
+          74818203
+        ],
+        "iterations": [
+          8784,
+          8832,
+          8816,
+          8816,
+          8800,
+          8768,
+          8832
+        ],
+        "median_ns": 8491.963248638838
+      },
+      "output_sha256": "82db3a81aced3c86036f20abe3d99914ca5ac472efae23e3485d6f5009b74dc7",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2966464,
+          2945206,
+          2940564,
+          2968552,
+          2944218,
+          2945359,
+          2960697
+        ],
+        "iterations": [
+          8784,
+          8832,
+          8816,
+          8816,
+          8800,
+          8768,
+          8832
+        ],
+        "median_ns": 335.2238451086956
+      },
+      "sample_wall_ns": [
+        75046166,
+        75099250,
+        75130042,
+        75032417,
+        75071375,
+        75061250,
+        75079708
+      ],
+      "tokens": 4,
+      "verified_cancellations": 61651,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 10364,
+        "bytes_retained": 0,
+        "bytes_total": 19716,
+        "count_peak": 23,
+        "count_retained": 0,
+        "count_total": 72
+      },
+      "cancel_at_poll": 58,
+      "complete_polls": 58,
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "analyzer/None/short_query/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          74776970,
+          74829072,
+          74882623,
+          74783077,
+          74889622,
+          74872920,
+          74897026
+        ],
+        "iterations": [
+          8032,
+          8032,
+          8048,
+          8032,
+          8064,
+          8016,
+          8032
+        ],
+        "median_ns": 9310.64205677291
+      },
+      "output_sha256": "82db3a81aced3c86036f20abe3d99914ca5ac472efae23e3485d6f5009b74dc7",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          749161,
+          749834,
+          748328,
+          748439,
+          753523,
+          783422,
+          751435
+        ],
+        "iterations": [
+          8032,
+          8032,
+          8048,
+          8032,
+          8064,
+          8016,
+          8032
+        ],
+        "median_ns": 93.35582669322709
+      },
+      "sample_wall_ns": [
+        75018791,
+        75070584,
+        75124167,
+        75026125,
+        75133375,
+        75116000,
+        75148250
+      ],
+      "tokens": 4,
+      "verified_cancellations": 56259,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 44,
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "tokenizer/Discard/short_query/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          42248987,
+          41225727,
+          41502165,
+          42865700,
+          41160744,
+          41380090,
+          42573988
+        ],
+        "iterations": [
+          1182176,
+          1155760,
+          1162304,
+          1197376,
+          1154848,
+          1162384,
+          1188896
+        ],
+        "median_ns": 35.706807341280765
+      },
+      "output_sha256": "7a25abe92c08d18b9fa332401cbd3be9fa4dc8990da7a0f72468795d0179483a",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          21378612,
+          20849434,
+          20992314,
+          21691705,
+          20716894,
+          20861560,
+          21585556
+        ],
+        "iterations": [
+          1182176,
+          1155760,
+          1162304,
+          1197376,
+          1154848,
+          1162384,
+          1188896
+        ],
+        "median_ns": 18.060949631077584
+      },
+      "sample_wall_ns": [
+        75000583,
+        75000791,
+        75000333,
+        75000084,
+        75000250,
+        75000875,
+        75000416
+      ],
+      "tokens": 6,
+      "verified_cancellations": 8203747,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 9346,
+        "bytes_retained": 0,
+        "bytes_total": 17654,
+        "count_peak": 15,
+        "count_retained": 0,
+        "count_total": 61
+      },
+      "cancel_at_poll": 22,
+      "complete_polls": 44,
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "tokenizer/Discard/short_query/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          74816344,
+          74776529,
+          74763383,
+          74863737,
+          74846039,
+          74742745,
+          74769180
+        ],
+        "iterations": [
+          9088,
+          9120,
+          9040,
+          9120,
+          9104,
+          9104,
+          9040
+        ],
+        "median_ns": 8221.225724956063
+      },
+      "output_sha256": "7a25abe92c08d18b9fa332401cbd3be9fa4dc8990da7a0f72468795d0179483a",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2493779,
+          2502987,
+          2494593,
+          2505727,
+          2491070,
+          2497743,
+          2491021
+        ],
+        "iterations": [
+          9088,
+          9120,
+          9040,
+          9120,
+          9104,
+          9104,
+          9040
+        ],
+        "median_ns": 274.4503289473684
+      },
+      "sample_wall_ns": [
+        75079708,
+        75040250,
+        75027250,
+        75125541,
+        75112625,
+        75002958,
+        75033042
+      ],
+      "tokens": 6,
+      "verified_cancellations": 63619,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 10292,
+        "bytes_retained": 0,
+        "bytes_total": 19826,
+        "count_peak": 22,
+        "count_retained": 0,
+        "count_total": 74
+      },
+      "cancel_at_poll": 44,
+      "complete_polls": 44,
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "tokenizer/Discard/short_query/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          74875850,
+          74751956,
+          74856445,
+          74839007,
+          74812833,
+          74863152,
+          74858465
+        ],
+        "iterations": [
+          8240,
+          8240,
+          8240,
+          8192,
+          8272,
+          8256,
+          8256
+        ],
+        "median_ns": 9071.83932038835
+      },
+      "output_sha256": "7a25abe92c08d18b9fa332401cbd3be9fa4dc8990da7a0f72468795d0179483a",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1459927,
+          1453486,
+          1448190,
+          1440619,
+          1490261,
+          1468282,
+          1466453
+        ],
+        "iterations": [
+          8240,
+          8240,
+          8240,
+          8192,
+          8272,
+          8256,
+          8256
+        ],
+        "median_ns": 177.1756067961165
+      },
+      "sample_wall_ns": [
+        75121833,
+        75001334,
+        75103042,
+        75088334,
+        75058959,
+        75114292,
+        75107875
+      ],
+      "tokens": 6,
+      "verified_cancellations": 57699,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 64,
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "analyzer/Discard/short_query/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          40869453,
+          43001697,
+          40572260,
+          42323294,
+          40584963,
+          40822062,
+          40558025
+        ],
+        "iterations": [
+          1128032,
+          1183072,
+          1121504,
+          1168528,
+          1120128,
+          1127568,
+          1125056
+        ],
+        "median_ns": 36.219323798830665
+      },
+      "output_sha256": "c049b1dae5d4859e288d0db98d27107fc02cc75d17971a7f775fefdac4452eb4",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20993056,
+          22191008,
+          20852196,
+          21769696,
+          20765494,
+          20975845,
+          20754135
+        ],
+        "iterations": [
+          1128032,
+          1183072,
+          1121504,
+          1168528,
+          1120128,
+          1127568,
+          1125056
+        ],
+        "median_ns": 18.602731719949485
+      },
+      "sample_wall_ns": [
+        75000291,
+        75000833,
+        75000042,
+        75000583,
+        75000833,
+        75000542,
+        75001125
+      ],
+      "tokens": 5,
+      "verified_cancellations": 7973891,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 9346,
+        "bytes_retained": 0,
+        "bytes_total": 17940,
+        "count_peak": 19,
+        "count_retained": 0,
+        "count_total": 66
+      },
+      "cancel_at_poll": 32,
+      "complete_polls": 64,
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "analyzer/Discard/short_query/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          74748684,
+          74753647,
+          74778612,
+          74773870,
+          74767759,
+          74869085,
+          74852281
+        ],
+        "iterations": [
+          8784,
+          8800,
+          8768,
+          8752,
+          8752,
+          8720,
+          8784
+        ],
+        "median_ns": 8528.5825729927
+      },
+      "output_sha256": "c049b1dae5d4859e288d0db98d27107fc02cc75d17971a7f775fefdac4452eb4",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          3002776,
+          3007264,
+          3009609,
+          2988720,
+          2997659,
+          3007581,
+          2995877
+        ],
+        "iterations": [
+          8784,
+          8800,
+          8768,
+          8752,
+          8752,
+          8720,
+          8784
+        ],
+        "median_ns": 341.8460837887067
+      },
+      "sample_wall_ns": [
+        75009541,
+        75014458,
+        75039375,
+        75036875,
+        75026792,
+        75130083,
+        75116666
+      ],
+      "tokens": 5,
+      "verified_cancellations": 61363,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 10292,
+        "bytes_retained": 0,
+        "bytes_total": 19826,
+        "count_peak": 22,
+        "count_retained": 0,
+        "count_total": 74
+      },
+      "cancel_at_poll": 64,
+      "complete_polls": 64,
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "analyzer/Discard/short_query/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          74777124,
+          74834785,
+          74866333,
+          74876770,
+          74884063,
+          74764876,
+          74885999
+        ],
+        "iterations": [
+          7984,
+          7936,
+          7968,
+          7984,
+          7984,
+          7936,
+          7984
+        ],
+        "median_ns": 9379.50889278557
+      },
+      "output_sha256": "c049b1dae5d4859e288d0db98d27107fc02cc75d17971a7f775fefdac4452eb4",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          614599,
+          617624,
+          617623,
+          614423,
+          617775,
+          613683,
+          616977
+        ],
+        "iterations": [
+          7984,
+          7936,
+          7968,
+          7984,
+          7984,
+          7936,
+          7984
+        ],
+        "median_ns": 77.32900705645162
+      },
+      "sample_wall_ns": [
+        75018667,
+        75076500,
+        75111417,
+        75117333,
+        75124791,
+        75007458,
+        75126875
+      ],
+      "tokens": 5,
+      "verified_cancellations": 55779,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 44,
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "tokenizer/Mixed/short_query/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          40743194,
+          41600648,
+          42014226,
+          42870067,
+          41360748,
+          42118235,
+          42882654
+        ],
+        "iterations": [
+          1143856,
+          1165248,
+          1177792,
+          1195952,
+          1158992,
+          1177360,
+          1201968
+        ],
+        "median_ns": 35.68682786421304
+      },
+      "output_sha256": "121c6a3cbc2885741e342d94e30f5042b95bd5e3a4e743df295294bd4c07f0f0",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20539287,
+          21003013,
+          21252687,
+          21684082,
+          20895579,
+          21342003,
+          21700328
+        ],
+        "iterations": [
+          1143856,
+          1165248,
+          1177792,
+          1195952,
+          1158992,
+          1177360,
+          1201968
+        ],
+        "median_ns": 18.044516349236538
+      },
+      "sample_wall_ns": [
+        75000209,
+        75000875,
+        75000708,
+        75000667,
+        75000500,
+        75000750,
+        75000333
+      ],
+      "tokens": 7,
+      "verified_cancellations": 8221171,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 9346,
+        "bytes_retained": 0,
+        "bytes_total": 17654,
+        "count_peak": 15,
+        "count_retained": 0,
+        "count_total": 61
+      },
+      "cancel_at_poll": 22,
+      "complete_polls": 44,
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "tokenizer/Mixed/short_query/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          74840021,
+          74855327,
+          74841512,
+          74779829,
+          74819466,
+          74852049,
+          74782154
+        ],
+        "iterations": [
+          9152,
+          9136,
+          9136,
+          9136,
+          9072,
+          9072,
+          8992
+        ],
+        "median_ns": 8193.44647548161
+      },
+      "output_sha256": "121c6a3cbc2885741e342d94e30f5042b95bd5e3a4e743df295294bd4c07f0f0",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2552239,
+          2551409,
+          2553476,
+          2547762,
+          2537337,
+          2538914,
+          2542791
+        ],
+        "iterations": [
+          9152,
+          9136,
+          9136,
+          9136,
+          9072,
+          9072,
+          8992
+        ],
+        "median_ns": 279.4960595446585
+      },
+      "sample_wall_ns": [
+        75100042,
+        75117125,
+        75102917,
+        75043333,
+        75082250,
+        75115250,
+        75046292
+      ],
+      "tokens": 7,
+      "verified_cancellations": 63699,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 10364,
+        "bytes_retained": 0,
+        "bytes_total": 19930,
+        "count_peak": 24,
+        "count_retained": 0,
+        "count_total": 74
+      },
+      "cancel_at_poll": 44,
+      "complete_polls": 44,
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "tokenizer/Mixed/short_query/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          74830956,
+          74857295,
+          74794774,
+          74897038,
+          74797820,
+          74778376,
+          74755344
+        ],
+        "iterations": [
+          8208,
+          8208,
+          8192,
+          8192,
+          8192,
+          8208,
+          8176
+        ],
+        "median_ns": 9130.221435546875
+      },
+      "output_sha256": "121c6a3cbc2885741e342d94e30f5042b95bd5e3a4e743df295294bd4c07f0f0",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1752892,
+          1754108,
+          1745980,
+          1743343,
+          1740346,
+          1741184,
+          1736791
+        ],
+        "iterations": [
+          8208,
+          8208,
+          8192,
+          8192,
+          8192,
+          8208,
+          8176
+        ],
+        "median_ns": 212.8104248046875
+      },
+      "sample_wall_ns": [
+        75075709,
+        75103041,
+        75041500,
+        75139667,
+        75043917,
+        75027625,
+        75001750
+      ],
+      "tokens": 7,
+      "verified_cancellations": 57379,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 66,
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "analyzer/Mixed/short_query/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          40208781,
+          42546056,
+          40211511,
+          40571839,
+          40226407,
+          40133309,
+          40787727
+        ],
+        "iterations": [
+          1112880,
+          1169344,
+          1120176,
+          1119728,
+          1121536,
+          1119712,
+          1124560
+        ],
+        "median_ns": 36.130383329739054
+      },
+      "output_sha256": "1405b60b42c0202bac37c2847a82b778f35cd8fbb36f557b61247170ecd46fac",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20469401,
+          21916222,
+          20460102,
+          20829398,
+          20479734,
+          20446370,
+          20914875
+        ],
+        "iterations": [
+          1112880,
+          1169344,
+          1120176,
+          1119728,
+          1121536,
+          1119712,
+          1124560
+        ],
+        "median_ns": 18.393178959097117
+      },
+      "sample_wall_ns": [
+        75000916,
+        75001041,
+        75000417,
+        75000750,
+        75000750,
+        75000459,
+        75000625
+      ],
+      "tokens": 6,
+      "verified_cancellations": 7887939,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 9346,
+        "bytes_retained": 0,
+        "bytes_total": 17940,
+        "count_peak": 19,
+        "count_retained": 0,
+        "count_total": 66
+      },
+      "cancel_at_poll": 33,
+      "complete_polls": 66,
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "analyzer/Mixed/short_query/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          74816935,
+          74816546,
+          74871508,
+          74831652,
+          74818870,
+          74882353,
+          74838111
+        ],
+        "iterations": [
+          8784,
+          8832,
+          8800,
+          8800,
+          8800,
+          8576,
+          8640
+        ],
+        "median_ns": 8508.12590909091
+      },
+      "output_sha256": "1405b60b42c0202bac37c2847a82b778f35cd8fbb36f557b61247170ecd46fac",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2814790,
+          2817758,
+          2810497,
+          2816562,
+          2850722,
+          2826335,
+          2816949
+        ],
+        "iterations": [
+          8784,
+          8832,
+          8800,
+          8800,
+          8800,
+          8576,
+          8640
+        ],
+        "median_ns": 320.44512750455374
+      },
+      "sample_wall_ns": [
+        75077917,
+        75081458,
+        75133791,
+        75094750,
+        75079250,
+        75144541,
+        75101791
+      ],
+      "tokens": 6,
+      "verified_cancellations": 61235,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 10364,
+        "bytes_retained": 0,
+        "bytes_total": 19930,
+        "count_peak": 24,
+        "count_retained": 0,
+        "count_total": 74
+      },
+      "cancel_at_poll": 66,
+      "complete_polls": 66,
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "analyzer/Mixed/short_query/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          74775665,
+          74858408,
+          74860364,
+          74909377,
+          74789707,
+          74812259,
+          74852528
+        ],
+        "iterations": [
+          7856,
+          7888,
+          7888,
+          7888,
+          7792,
+          7776,
+          7856
+        ],
+        "median_ns": 9518.287296334012
+      },
+      "output_sha256": "1405b60b42c0202bac37c2847a82b778f35cd8fbb36f557b61247170ecd46fac",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          884136,
+          882789,
+          888361,
+          885766,
+          879806,
+          879985,
+          883721
+        ],
+        "iterations": [
+          7856,
+          7888,
+          7888,
+          7888,
+          7792,
+          7776,
+          7856
+        ],
+        "median_ns": 112.54276985743381
+      },
+      "sample_wall_ns": [
+        75012542,
+        75097041,
+        75095792,
+        75147500,
+        75026292,
+        75048667,
+        75091708
+      ],
+      "tokens": 6,
+      "verified_cancellations": 54947,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 1235,
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "tokenizer/None/hanja/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          40702937,
+          40748448,
+          41016639,
+          42762959,
+          42088772,
+          41021451,
+          42299930
+        ],
+        "iterations": [
+          1135840,
+          1143024,
+          1147520,
+          1191936,
+          1176080,
+          1157008,
+          1176432
+        ],
+        "median_ns": 35.7873375960819
+      },
+      "output_sha256": "c4174d1632f62483d4a62959bd9cf126b0e43e6749d560868e8c5868f11ce48b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20527463,
+          20549892,
+          20711698,
+          21665620,
+          21283324,
+          20636954,
+          21403359
+        ],
+        "iterations": [
+          1135840,
+          1143024,
+          1147520,
+          1191936,
+          1176080,
+          1157008,
+          1176432
+        ],
+        "median_ns": 18.072495245809268
+      },
+      "sample_wall_ns": [
+        75000167,
+        75000958,
+        75000208,
+        75000375,
+        75000042,
+        75000834,
+        75000500
+      ],
+      "tokens": 160,
+      "verified_cancellations": 8127843,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 20718,
+        "bytes_retained": 0,
+        "bytes_total": 76432,
+        "count_peak": 174,
+        "count_retained": 0,
+        "count_total": 521
+      },
+      "cancel_at_poll": 618,
+      "complete_polls": 1235,
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "tokenizer/None/hanja/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          75132800,
+          75760461,
+          75156260,
+          75278930,
+          75266382,
+          75642673,
+          75635597
+        ],
+        "iterations": [
+          1456,
+          1472,
+          1472,
+          1472,
+          1472,
+          1472,
+          1472
+        ],
+        "median_ns": 51382.87839673913
+      },
+      "output_sha256": "c4174d1632f62483d4a62959bd9cf126b0e43e6749d560868e8c5868f11ce48b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2465720,
+          2504244,
+          2485763,
+          2485368,
+          2502468,
+          2498297,
+          2487499
+        ],
+        "iterations": [
+          1456,
+          1472,
+          1472,
+          1472,
+          1472,
+          1472,
+          1472
+        ],
+        "median_ns": 1693.489010989011
+      },
+      "sample_wall_ns": [
+        75176833,
+        75806500,
+        75200542,
+        75322959,
+        75310333,
+        75687917,
+        75681666
+      ],
+      "tokens": 160,
+      "verified_cancellations": 10291,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 37566,
+        "bytes_retained": 0,
+        "bytes_total": 146034,
+        "count_peak": 324,
+        "count_retained": 0,
+        "count_total": 1013
+      },
+      "cancel_at_poll": 1235,
+      "complete_polls": 1235,
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "tokenizer/None/hanja/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          75639897,
+          75430390,
+          75618266,
+          75694429,
+          75414295,
+          75736798,
+          75559363
+        ],
+        "iterations": [
+          768,
+          768,
+          768,
+          768,
+          768,
+          768,
+          768
+        ],
+        "median_ns": 98461.28385416667
+      },
+      "output_sha256": "c4174d1632f62483d4a62959bd9cf126b0e43e6749d560868e8c5868f11ce48b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2124782,
+          2121337,
+          2125247,
+          2126240,
+          2135880,
+          2126724,
+          2126909
+        ],
+        "iterations": [
+          768,
+          768,
+          768,
+          768,
+          768,
+          768,
+          768
+        ],
+        "median_ns": 2768.5416666666665
+      },
+      "sample_wall_ns": [
+        75663625,
+        75453500,
+        75642208,
+        75717583,
+        75437375,
+        75759958,
+        75582125
+      ],
+      "tokens": 160,
+      "verified_cancellations": 5379,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 1564,
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "analyzer/None/hanja/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          40677542,
+          40819097,
+          40556329,
+          40866110,
+          40513940,
+          40206478,
+          40225575
+        ],
+        "iterations": [
+          1125376,
+          1128720,
+          1121296,
+          1128096,
+          1122560,
+          1103760,
+          1089888
+        ],
+        "median_ns": 36.16915515617642
+      },
+      "output_sha256": "870a07c2a0910e5bb3f3f3998d54a9016e1ef7fe20a0e7a72313d4d421d49161",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20839316,
+          20936848,
+          20814912,
+          20984038,
+          20737237,
+          20483251,
+          20465946
+        ],
+        "iterations": [
+          1125376,
+          1128720,
+          1121296,
+          1128096,
+          1122560,
+          1103760,
+          1089888
+        ],
+        "median_ns": 18.55770366746394
+      },
+      "sample_wall_ns": [
+        75000250,
+        75000250,
+        75000666,
+        75000667,
+        75000375,
+        75000375,
+        75000375
+      ],
+      "tokens": 160,
+      "verified_cancellations": 7819699,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 20718,
+        "bytes_retained": 0,
+        "bytes_total": 88582,
+        "count_peak": 215,
+        "count_retained": 0,
+        "count_total": 648
+      },
+      "cancel_at_poll": 782,
+      "complete_polls": 1564,
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "analyzer/None/hanja/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          75890541,
+          75306385,
+          75313423,
+          75005337,
+          75162747,
+          75510123,
+          75085548
+        ],
+        "iterations": [
+          1184,
+          1184,
+          1184,
+          1184,
+          1184,
+          1184,
+          1184
+        ],
+        "median_ns": 63603.36570945946
+      },
+      "output_sha256": "870a07c2a0910e5bb3f3f3998d54a9016e1ef7fe20a0e7a72313d4d421d49161",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2454380,
+          2424921,
+          2431553,
+          2418571,
+          2423539,
+          2433795,
+          2416238
+        ],
+        "iterations": [
+          1184,
+          1184,
+          1184,
+          1184,
+          1184,
+          1184,
+          1184
+        ],
+        "median_ns": 2048.0751689189187
+      },
+      "sample_wall_ns": [
+        75927083,
+        75342125,
+        75348750,
+        75040542,
+        75199959,
+        75545375,
+        75121542
+      ],
+      "tokens": 160,
+      "verified_cancellations": 8291,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 37566,
+        "bytes_retained": 0,
+        "bytes_total": 146034,
+        "count_peak": 324,
+        "count_retained": 0,
+        "count_total": 1013
+      },
+      "cancel_at_poll": 1564,
+      "complete_polls": 1564,
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "analyzer/None/hanja/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          76208993,
+          76174933,
+          76383076,
+          76426286,
+          76322428,
+          76389301,
+          76360279
+        ],
+        "iterations": [
+          688,
+          688,
+          688,
+          688,
+          688,
+          688,
+          688
+        ],
+        "median_ns": 110988.77761627907
+      },
+      "output_sha256": "870a07c2a0910e5bb3f3f3998d54a9016e1ef7fe20a0e7a72313d4d421d49161",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1843165,
+          1839627,
+          1844584,
+          1845658,
+          1843537,
+          1846170,
+          1857670
+        ],
+        "iterations": [
+          688,
+          688,
+          688,
+          688,
+          688,
+          688,
+          688
+        ],
+        "median_ns": 2681.0813953488373
+      },
+      "sample_wall_ns": [
+        76231750,
+        76197291,
+        76404958,
+        76449166,
+        76345291,
+        76411875,
+        76385166
+      ],
+      "tokens": 160,
+      "verified_cancellations": 4819,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 1235,
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "tokenizer/Discard/hanja/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          42350095,
+          41651464,
+          40406068,
+          41602491,
+          40059345,
+          41619148,
+          42820247
+        ],
+        "iterations": [
+          1185792,
+          1172208,
+          1140192,
+          1165776,
+          1131808,
+          1157584,
+          1182976
+        ],
+        "median_ns": 35.68652211059415
+      },
+      "output_sha256": "c4174d1632f62483d4a62959bd9cf126b0e43e6749d560868e8c5868f11ce48b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          21463094,
+          20977183,
+          20295673,
+          21028104,
+          20075650,
+          21051611,
+          21684464
+        ],
+        "iterations": [
+          1185792,
+          1172208,
+          1140192,
+          1165776,
+          1131808,
+          1157584,
+          1182976
+        ],
+        "median_ns": 18.037859760365627
+      },
+      "sample_wall_ns": [
+        75000875,
+        75000583,
+        75000709,
+        75000750,
+        75000500,
+        75000541,
+        75000209
+      ],
+      "tokens": 160,
+      "verified_cancellations": 8136339,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 20718,
+        "bytes_retained": 0,
+        "bytes_total": 76432,
+        "count_peak": 174,
+        "count_retained": 0,
+        "count_total": 521
+      },
+      "cancel_at_poll": 618,
+      "complete_polls": 1235,
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "tokenizer/Discard/hanja/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          75242078,
+          75416471,
+          75186771,
+          75230256,
+          75264128,
+          75110692,
+          75053358
+        ],
+        "iterations": [
+          1472,
+          1472,
+          1472,
+          1472,
+          1472,
+          1472,
+          1456
+        ],
+        "median_ns": 51115.542119565216
+      },
+      "output_sha256": "c4174d1632f62483d4a62959bd9cf126b0e43e6749d560868e8c5868f11ce48b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2482638,
+          2504397,
+          2483984,
+          2486101,
+          2486287,
+          2498523,
+          2468873
+        ],
+        "iterations": [
+          1472,
+          1472,
+          1472,
+          1472,
+          1472,
+          1472,
+          1456
+        ],
+        "median_ns": 1689.0536684782608
+      },
+      "sample_wall_ns": [
+        75286750,
+        75460500,
+        75232125,
+        75275875,
+        75309125,
+        75155417,
+        75098083
+      ],
+      "tokens": 160,
+      "verified_cancellations": 10291,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 37566,
+        "bytes_retained": 0,
+        "bytes_total": 146034,
+        "count_peak": 324,
+        "count_retained": 0,
+        "count_total": 1013
+      },
+      "cancel_at_poll": 1235,
+      "complete_polls": 1235,
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "tokenizer/Discard/hanja/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          74986949,
+          75097345,
+          76366299,
+          75762654,
+          76343382,
+          75476087,
+          76375516
+        ],
+        "iterations": [
+          736,
+          736,
+          752,
+          752,
+          768,
+          768,
+          768
+        ],
+        "median_ns": 100748.21010638298
+      },
+      "output_sha256": "c4174d1632f62483d4a62959bd9cf126b0e43e6749d560868e8c5868f11ce48b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2108283,
+          2108888,
+          2147295,
+          2123317,
+          2146998,
+          2122628,
+          2131131
+        ],
+        "iterations": [
+          736,
+          736,
+          752,
+          752,
+          768,
+          768,
+          768
+        ],
+        "median_ns": 2823.559840425532
+      },
+      "sample_wall_ns": [
+        75012750,
+        75120458,
+        76389666,
+        75786625,
+        76366875,
+        75499292,
+        76398166
+      ],
+      "tokens": 160,
+      "verified_cancellations": 5283,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 1564,
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "analyzer/Discard/hanja/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          40217458,
+          40465394,
+          41436773,
+          40385271,
+          40283297,
+          40219830,
+          40220820
+        ],
+        "iterations": [
+          1120816,
+          1123920,
+          1146624,
+          1108992,
+          1116608,
+          1118768,
+          1116544
+        ],
+        "median_ns": 36.0226018858191
+      },
+      "output_sha256": "870a07c2a0910e5bb3f3f3998d54a9016e1ef7fe20a0e7a72313d4d421d49161",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20465920,
+          20679758,
+          21233346,
+          20638080,
+          20547999,
+          20456927,
+          20457331
+        ],
+        "iterations": [
+          1120816,
+          1123920,
+          1146624,
+          1108992,
+          1116608,
+          1118768,
+          1116544
+        ],
+        "median_ns": 18.399670795074382
+      },
+      "sample_wall_ns": [
+        75001083,
+        75001042,
+        75000167,
+        75000417,
+        75000833,
+        75000291,
+        75001000
+      ],
+      "tokens": 160,
+      "verified_cancellations": 7852275,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 20718,
+        "bytes_retained": 0,
+        "bytes_total": 88582,
+        "count_peak": 215,
+        "count_retained": 0,
+        "count_total": 648
+      },
+      "cancel_at_poll": 782,
+      "complete_polls": 1564,
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "analyzer/Discard/hanja/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          75801706,
+          75132101,
+          74971182,
+          75906593,
+          75451025,
+          75826115,
+          75261207
+        ],
+        "iterations": [
+          1200,
+          1184,
+          1184,
+          1200,
+          1184,
+          1200,
+          1184
+        ],
+        "median_ns": 63320.25506756757
+      },
+      "output_sha256": "870a07c2a0910e5bb3f3f3998d54a9016e1ef7fe20a0e7a72313d4d421d49161",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2454212,
+          2426496,
+          2415823,
+          2450512,
+          2440750,
+          2445873,
+          2429214
+        ],
+        "iterations": [
+          1200,
+          1184,
+          1184,
+          1200,
+          1184,
+          1200,
+          1184
+        ],
+        "median_ns": 2045.1766666666667
+      },
+      "sample_wall_ns": [
+        75839667,
+        75166750,
+        75006792,
+        75943208,
+        75487084,
+        75862833,
+        75297209
+      ],
+      "tokens": 160,
+      "verified_cancellations": 8339,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 37566,
+        "bytes_retained": 0,
+        "bytes_total": 146034,
+        "count_peak": 324,
+        "count_retained": 0,
+        "count_total": 1013
+      },
+      "cancel_at_poll": 1564,
+      "complete_polls": 1564,
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "analyzer/Discard/hanja/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          76293384,
+          76134107,
+          76162576,
+          76221622,
+          76347672,
+          76589454,
+          76051705
+        ],
+        "iterations": [
+          688,
+          688,
+          688,
+          688,
+          688,
+          688,
+          688
+        ],
+        "median_ns": 110787.24127906977
+      },
+      "output_sha256": "870a07c2a0910e5bb3f3f3998d54a9016e1ef7fe20a0e7a72313d4d421d49161",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1843047,
+          1842482,
+          1841203,
+          1842018,
+          1843809,
+          1853550,
+          1843094
+        ],
+        "iterations": [
+          688,
+          688,
+          688,
+          688,
+          688,
+          688,
+          688
+        ],
+        "median_ns": 2678.8473837209303
+      },
+      "sample_wall_ns": [
+        76315666,
+        76156500,
+        76184209,
+        76245334,
+        76370083,
+        76611542,
+        76074125
+      ],
+      "tokens": 160,
+      "verified_cancellations": 4819,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 1235,
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "tokenizer/Mixed/hanja/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          42368019,
+          41244658,
+          42946979,
+          42045636,
+          42507713,
+          41358960,
+          42865288
+        ],
+        "iterations": [
+          1185136,
+          1152832,
+          1190288,
+          1179360,
+          1189616,
+          1160624,
+          1198624
+        ],
+        "median_ns": 35.749499635484874
+      },
+      "output_sha256": "c4174d1632f62483d4a62959bd9cf126b0e43e6749d560868e8c5868f11ce48b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          21434882,
+          20819608,
+          21834405,
+          21266860,
+          21525792,
+          20897884,
+          21698532
+        ],
+        "iterations": [
+          1185136,
+          1152832,
+          1190288,
+          1179360,
+          1189616,
+          1160624,
+          1198624
+        ],
+        "median_ns": 18.08643227443939
+      },
+      "sample_wall_ns": [
+        75000500,
+        75001084,
+        75000958,
+        75000416,
+        75000125,
+        75000208,
+        75000208
+      ],
+      "tokens": 160,
+      "verified_cancellations": 8256483,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 20718,
+        "bytes_retained": 0,
+        "bytes_total": 76432,
+        "count_peak": 174,
+        "count_retained": 0,
+        "count_total": 521
+      },
+      "cancel_at_poll": 618,
+      "complete_polls": 1235,
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "tokenizer/Mixed/hanja/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          75184567,
+          75341437,
+          75310393,
+          75374599,
+          75228475,
+          75742550,
+          75508933
+        ],
+        "iterations": [
+          1472,
+          1472,
+          1472,
+          1472,
+          1472,
+          1472,
+          1456
+        ],
+        "median_ns": 51183.04144021739
+      },
+      "output_sha256": "c4174d1632f62483d4a62959bd9cf126b0e43e6749d560868e8c5868f11ce48b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2490125,
+          2484508,
+          2486740,
+          2482195,
+          2485793,
+          2487875,
+          2486128
+        ],
+        "iterations": [
+          1472,
+          1472,
+          1472,
+          1472,
+          1472,
+          1472,
+          1456
+        ],
+        "median_ns": 1689.3614130434783
+      },
+      "sample_wall_ns": [
+        75229125,
+        75387333,
+        75355666,
+        75419458,
+        75273125,
+        75786083,
+        75553916
+      ],
+      "tokens": 160,
+      "verified_cancellations": 10291,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 37566,
+        "bytes_retained": 0,
+        "bytes_total": 146034,
+        "count_peak": 324,
+        "count_retained": 0,
+        "count_total": 1013
+      },
+      "cancel_at_poll": 1235,
+      "complete_polls": 1235,
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "tokenizer/Mixed/hanja/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          75650510,
+          75695598,
+          75428453,
+          75658062,
+          75800428,
+          75516372,
+          75614423
+        ],
+        "iterations": [
+          752,
+          768,
+          768,
+          768,
+          768,
+          768,
+          768
+        ],
+        "median_ns": 98513.1015625
+      },
+      "output_sha256": "c4174d1632f62483d4a62959bd9cf126b0e43e6749d560868e8c5868f11ce48b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2137800,
+          2128544,
+          2126919,
+          2125087,
+          2125379,
+          2129499,
+          2125336
+        ],
+        "iterations": [
+          752,
+          768,
+          768,
+          768,
+          768,
+          768,
+          768
+        ],
+        "median_ns": 2769.42578125
+      },
+      "sample_wall_ns": [
+        75678417,
+        75718542,
+        75451583,
+        75681000,
+        75824667,
+        75540250,
+        75637833
+      ],
+      "tokens": 160,
+      "verified_cancellations": 5363,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 1564,
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "analyzer/Mixed/hanja/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          40287693,
+          40284260,
+          43012696,
+          40528516,
+          40313013,
+          40506794,
+          40563375
+        ],
+        "iterations": [
+          1120736,
+          1118992,
+          1177936,
+          1124848,
+          1121104,
+          1123728,
+          1122976
+        ],
+        "median_ns": 36.03021563802398
+      },
+      "output_sha256": "870a07c2a0910e5bb3f3f3998d54a9016e1ef7fe20a0e7a72313d4d421d49161",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20531796,
+          20562766,
+          22243321,
+          20680971,
+          20555933,
+          20714085,
+          20762585
+        ],
+        "iterations": [
+          1120736,
+          1118992,
+          1177936,
+          1124848,
+          1121104,
+          1123728,
+          1122976
+        ],
+        "median_ns": 18.385569428047166
+      },
+      "sample_wall_ns": [
+        75000625,
+        75000292,
+        75000083,
+        75001042,
+        75000042,
+        75000417,
+        75000666
+      ],
+      "tokens": 160,
+      "verified_cancellations": 7910323,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 20718,
+        "bytes_retained": 0,
+        "bytes_total": 88582,
+        "count_peak": 215,
+        "count_retained": 0,
+        "count_total": 648
+      },
+      "cancel_at_poll": 782,
+      "complete_polls": 1564,
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "analyzer/Mixed/hanja/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          75006884,
+          75484941,
+          75057552,
+          76005488,
+          75848435,
+          75027809,
+          75070281
+        ],
+        "iterations": [
+          1184,
+          1184,
+          1184,
+          1200,
+          1200,
+          1184,
+          1184
+        ],
+        "median_ns": 63368.08192567567
+      },
+      "output_sha256": "870a07c2a0910e5bb3f3f3998d54a9016e1ef7fe20a0e7a72313d4d421d49161",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2425259,
+          2438384,
+          2427881,
+          2445800,
+          2449466,
+          2418847,
+          2417633
+        ],
+        "iterations": [
+          1184,
+          1184,
+          1184,
+          1200,
+          1200,
+          1184,
+          1184
+        ],
+        "median_ns": 2042.9451013513512
+      },
+      "sample_wall_ns": [
+        75043250,
+        75521917,
+        75093042,
+        76042542,
+        75884833,
+        75063791,
+        75106667
+      ],
+      "tokens": 160,
+      "verified_cancellations": 8323,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 37566,
+        "bytes_retained": 0,
+        "bytes_total": 146034,
+        "count_peak": 324,
+        "count_retained": 0,
+        "count_total": 1013
+      },
+      "cancel_at_poll": 1564,
+      "complete_polls": 1564,
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "analyzer/Mixed/hanja/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          75224205,
+          76318002,
+          76204796,
+          76221375,
+          76311299,
+          75500286,
+          76652115
+        ],
+        "iterations": [
+          672,
+          688,
+          688,
+          688,
+          688,
+          672,
+          688
+        ],
+        "median_ns": 110927.32848837209
+      },
+      "output_sha256": "870a07c2a0910e5bb3f3f3998d54a9016e1ef7fe20a0e7a72313d4d421d49161",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1808575,
+          1842150,
+          1843157,
+          1842415,
+          1843457,
+          1828000,
+          1846956
+        ],
+        "iterations": [
+          672,
+          688,
+          688,
+          688,
+          688,
+          672,
+          688
+        ],
+        "median_ns": 2679.4433139534885
+      },
+      "sample_wall_ns": [
+        75247458,
+        76341250,
+        76227375,
+        76242834,
+        76332833,
+        75522667,
+        76673916
+      ],
+      "tokens": 160,
+      "verified_cancellations": 4787,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 1157,
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "tokenizer/None/mixed_script/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          42219024,
+          42967617,
+          40672005,
+          42887755,
+          41229328,
+          42210095,
+          42533898
+        ],
+        "iterations": [
+          1183072,
+          1200384,
+          1146304,
+          1195904,
+          1157984,
+          1168960,
+          1190608
+        ],
+        "median_ns": 35.72451890126725
+      },
+      "output_sha256": "2c1a0db6ab0acd10cd1a3d9dfc900b1e1b2b330a3a054775d41142c6c9b92dcd",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          21362540,
+          21798487,
+          20444166,
+          21681210,
+          20746178,
+          21328232,
+          21503086
+        ],
+        "iterations": [
+          1183072,
+          1200384,
+          1146304,
+          1195904,
+          1157984,
+          1168960,
+          1190608
+        ],
+        "median_ns": 18.06059257119052
+      },
+      "sample_wall_ns": [
+        75000083,
+        75000958,
+        75000375,
+        75000292,
+        75000125,
+        75000500,
+        75000166
+      ],
+      "tokens": 224,
+      "verified_cancellations": 8243219,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 23398,
+        "bytes_retained": 0,
+        "bytes_total": 119388,
+        "count_peak": 131,
+        "count_retained": 0,
+        "count_total": 561
+      },
+      "cancel_at_poll": 579,
+      "complete_polls": 1157,
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "tokenizer/None/mixed_script/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          75786727,
+          75601833,
+          76137622,
+          75863497,
+          75875429,
+          75482540,
+          75604405
+        ],
+        "iterations": [
+          928,
+          928,
+          928,
+          928,
+          928,
+          928,
+          928
+        ],
+        "median_ns": 81666.73168103448
+      },
+      "output_sha256": "2c1a0db6ab0acd10cd1a3d9dfc900b1e1b2b330a3a054775d41142c6c9b92dcd",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1219168,
+          1212713,
+          1224336,
+          1216926,
+          1218675,
+          1215744,
+          1214149
+        ],
+        "iterations": [
+          928,
+          928,
+          928,
+          928,
+          928,
+          928,
+          928
+        ],
+        "median_ns": 1311.342672413793
+      },
+      "sample_wall_ns": [
+        75815291,
+        75630959,
+        76166292,
+        75890791,
+        75903792,
+        75511333,
+        75633583
+      ],
+      "tokens": 224,
+      "verified_cancellations": 6499,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 43890,
+        "bytes_retained": 0,
+        "bytes_total": 235194,
+        "count_peak": 256,
+        "count_retained": 0,
+        "count_total": 1108
+      },
+      "cancel_at_poll": 1157,
+      "complete_polls": 1157,
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "tokenizer/None/mixed_script/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          76998212,
+          76944674,
+          76824917,
+          76782920,
+          76826503,
+          76677377,
+          76436244
+        ],
+        "iterations": [
+          480,
+          480,
+          480,
+          480,
+          480,
+          480,
+          480
+        ],
+        "median_ns": 160051.91041666668
+      },
+      "output_sha256": "2c1a0db6ab0acd10cd1a3d9dfc900b1e1b2b330a3a054775d41142c6c9b92dcd",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1142668,
+          1135038,
+          1135874,
+          1135713,
+          1138165,
+          1135371,
+          1133956
+        ],
+        "iterations": [
+          480,
+          480,
+          480,
+          480,
+          480,
+          480,
+          480
+        ],
+        "median_ns": 2366.06875
+      },
+      "sample_wall_ns": [
+        77014083,
+        76959833,
+        76839875,
+        76797625,
+        76842042,
+        76692083,
+        76451458
+      ],
+      "tokens": 224,
+      "verified_cancellations": 3363,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 1621,
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "analyzer/None/mixed_script/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          40454377,
+          40222192,
+          40182887,
+          40357072,
+          40775274,
+          40197394,
+          40997260
+        ],
+        "iterations": [
+          1122912,
+          1120864,
+          1120880,
+          1119072,
+          1126816,
+          1115296,
+          1134480
+        ],
+        "median_ns": 36.041906363871114
+      },
+      "output_sha256": "ee55a692d96b26e6ffdfa775421fae3429a8b01f01070f21b709b2e062cce44f",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20667160,
+          20493842,
+          20456568,
+          20605962,
+          20928785,
+          20512965,
+          21007951
+        ],
+        "iterations": [
+          1122912,
+          1120864,
+          1120880,
+          1119072,
+          1126816,
+          1115296,
+          1134480
+        ],
+        "median_ns": 18.404968510444274
+      },
+      "sample_wall_ns": [
+        75000375,
+        75000708,
+        75000166,
+        75000083,
+        75000709,
+        75000334,
+        75000875
+      ],
+      "tokens": 192,
+      "verified_cancellations": 7860323,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 43890,
+        "bytes_retained": 0,
+        "bytes_total": 182934,
+        "count_peak": 184,
+        "count_retained": 0,
+        "count_total": 780
+      },
+      "cancel_at_poll": 811,
+      "complete_polls": 1621,
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "analyzer/None/mixed_script/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          76330786,
+          76463791,
+          76610998,
+          76423125,
+          76385092,
+          76515282,
+          76579357
+        ],
+        "iterations": [
+          672,
+          672,
+          672,
+          672,
+          672,
+          672,
+          672
+        ],
+        "median_ns": 113785.40327380953
+      },
+      "output_sha256": "ee55a692d96b26e6ffdfa775421fae3429a8b01f01070f21b709b2e062cce44f",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1170319,
+          1167544,
+          1164737,
+          1175204,
+          1165044,
+          1165822,
+          1164911
+        ],
+        "iterations": [
+          672,
+          672,
+          672,
+          672,
+          672,
+          672,
+          672
+        ],
+        "median_ns": 1734.8541666666667
+      },
+      "sample_wall_ns": [
+        76352667,
+        76485209,
+        76632625,
+        76444792,
+        76407458,
+        76536542,
+        76601667
+      ],
+      "tokens": 192,
+      "verified_cancellations": 4707,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 43890,
+        "bytes_retained": 0,
+        "bytes_total": 235194,
+        "count_peak": 256,
+        "count_retained": 0,
+        "count_total": 1108
+      },
+      "cancel_at_poll": 1621,
+      "complete_polls": 1621,
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "analyzer/None/mixed_script/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          76744998,
+          75935627,
+          75019057,
+          75211211,
+          77473800,
+          77276537,
+          77727750
+        ],
+        "iterations": [
+          432,
+          432,
+          432,
+          432,
+          448,
+          448,
+          448
+        ],
+        "median_ns": 173655.22453703705
+      },
+      "output_sha256": "ee55a692d96b26e6ffdfa775421fae3429a8b01f01070f21b709b2e062cce44f",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          793370,
+          761624,
+          754268,
+          755339,
+          775435,
+          774173,
+          777960
+        ],
+        "iterations": [
+          432,
+          432,
+          432,
+          432,
+          448,
+          448,
+          448
+        ],
+        "median_ns": 1745.9907407407406
+      },
+      "sample_wall_ns": [
+        76758375,
+        75949916,
+        75032458,
+        75225708,
+        77488792,
+        77289958,
+        77742625
+      ],
+      "tokens": 192,
+      "verified_cancellations": 3075,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 1189,
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "tokenizer/Discard/mixed_script/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          42733896,
+          40911350,
+          41972019,
+          42856134,
+          40849571,
+          42311849,
+          40161142
+        ],
+        "iterations": [
+          1195472,
+          1149296,
+          1175904,
+          1200528,
+          1144816,
+          1174656,
+          1123984
+        ],
+        "median_ns": 35.697737995282075
+      },
+      "output_sha256": "a3b3d00ac71e0527b078b3f2737d9439cf4bf65150a12ffeba9e61dacf1fea36",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          21630496,
+          20645646,
+          21225064,
+          21692168,
+          20596126,
+          21394991,
+          20129591
+        ],
+        "iterations": [
+          1195472,
+          1149296,
+          1175904,
+          1200528,
+          1144816,
+          1174656,
+          1123984
+        ],
+        "median_ns": 18.049997278689418
+      },
+      "sample_wall_ns": [
+        75000667,
+        75000792,
+        75000084,
+        75000667,
+        75000250,
+        75001042,
+        75000375
+      ],
+      "tokens": 232,
+      "verified_cancellations": 8164659,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 23590,
+        "bytes_retained": 0,
+        "bytes_total": 120244,
+        "count_peak": 123,
+        "count_retained": 0,
+        "count_total": 570
+      },
+      "cancel_at_poll": 595,
+      "complete_polls": 1189,
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "tokenizer/Discard/mixed_script/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          75361909,
+          76268702,
+          76270501,
+          74982576,
+          75073078,
+          75295082,
+          75090914
+        ],
+        "iterations": [
+          912,
+          928,
+          928,
+          912,
+          912,
+          912,
+          912
+        ],
+        "median_ns": 82316.97149122808
+      },
+      "output_sha256": "a3b3d00ac71e0527b078b3f2737d9439cf4bf65150a12ffeba9e61dacf1fea36",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1120488,
+          1133776,
+          1140497,
+          1124319,
+          1122990,
+          1116783,
+          1121907
+        ],
+        "iterations": [
+          912,
+          928,
+          928,
+          912,
+          912,
+          912,
+          912
+        ],
+        "median_ns": 1228.9838362068965
+      },
+      "sample_wall_ns": [
+        75390000,
+        76298542,
+        76299083,
+        75011083,
+        75108083,
+        75323834,
+        75118500
+      ],
+      "tokens": 232,
+      "verified_cancellations": 6419,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 43924,
+        "bytes_retained": 0,
+        "bytes_total": 236074,
+        "count_peak": 240,
+        "count_retained": 0,
+        "count_total": 1125
+      },
+      "cancel_at_poll": 1189,
+      "complete_polls": 1189,
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "tokenizer/Discard/mixed_script/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          77229874,
+          77154956,
+          77267901,
+          77094955,
+          77173919,
+          77163868,
+          77476127
+        ],
+        "iterations": [
+          480,
+          480,
+          480,
+          480,
+          480,
+          480,
+          480
+        ],
+        "median_ns": 160778.99791666667
+      },
+      "output_sha256": "a3b3d00ac71e0527b078b3f2737d9439cf4bf65150a12ffeba9e61dacf1fea36",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1050505,
+          1050976,
+          1051377,
+          1048787,
+          1050250,
+          1058083,
+          1054503
+        ],
+        "iterations": [
+          480,
+          480,
+          480,
+          480,
+          480,
+          480,
+          480
+        ],
+        "median_ns": 2189.5333333333333
+      },
+      "sample_wall_ns": [
+        77245083,
+        77170459,
+        77283791,
+        77110167,
+        77188916,
+        77178500,
+        77495208
+      ],
+      "tokens": 232,
+      "verified_cancellations": 3363,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 1661,
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "analyzer/Discard/mixed_script/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          41000460,
+          40277531,
+          41825552,
+          40197334,
+          40178008,
+          40261668,
+          40534351
+        ],
+        "iterations": [
+          1132208,
+          1121616,
+          1157360,
+          1119488,
+          1113344,
+          1121552,
+          1119968
+        ],
+        "median_ns": 36.08768538744539
+      },
+      "output_sha256": "5930240f07d0d4b5f5e1f0f84c7316398f52ebabef022d291f411a2be5eb58f4",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          21026261,
+          20529056,
+          21464834,
+          20464143,
+          20461599,
+          20524558,
+          20800029
+        ],
+        "iterations": [
+          1132208,
+          1121616,
+          1157360,
+          1119488,
+          1113344,
+          1121552,
+          1119968
+        ],
+        "median_ns": 18.37850565503564
+      },
+      "sample_wall_ns": [
+        75000917,
+        75001084,
+        75000208,
+        75000792,
+        75000708,
+        75000542,
+        75000458
+      ],
+      "tokens": 192,
+      "verified_cancellations": 7885539,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 43924,
+        "bytes_retained": 0,
+        "bytes_total": 183800,
+        "count_peak": 173,
+        "count_retained": 0,
+        "count_total": 792
+      },
+      "cancel_at_poll": 831,
+      "complete_polls": 1661,
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "analyzer/Discard/mixed_script/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          76781632,
+          76599709,
+          76783155,
+          75234165,
+          76348668,
+          75649030,
+          75880161
+        ],
+        "iterations": [
+          672,
+          672,
+          672,
+          656,
+          656,
+          656,
+          656
+        ],
+        "median_ns": 114686.22713414633
+      },
+      "output_sha256": "5930240f07d0d4b5f5e1f0f84c7316398f52ebabef022d291f411a2be5eb58f4",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1098806,
+          1096290,
+          1098123,
+          1074299,
+          1084109,
+          1069741,
+          1078620
+        ],
+        "iterations": [
+          672,
+          672,
+          672,
+          656,
+          656,
+          656,
+          656
+        ],
+        "median_ns": 1635.1279761904761
+      },
+      "sample_wall_ns": [
+        76802708,
+        76621042,
+        76804208,
+        75253750,
+        76369500,
+        75670417,
+        75901416
+      ],
+      "tokens": 192,
+      "verified_cancellations": 4643,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 43924,
+        "bytes_retained": 0,
+        "bytes_total": 236074,
+        "count_peak": 240,
+        "count_retained": 0,
+        "count_total": 1125
+      },
+      "cancel_at_poll": 1661,
+      "complete_polls": 1661,
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "analyzer/Discard/mixed_script/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          75374365,
+          75312921,
+          75196545,
+          75525580,
+          75486368,
+          75390121,
+          75509579
+        ],
+        "iterations": [
+          432,
+          432,
+          432,
+          432,
+          432,
+          432,
+          432
+        ],
+        "median_ns": 174514.1689814815
+      },
+      "output_sha256": "5930240f07d0d4b5f5e1f0f84c7316398f52ebabef022d291f411a2be5eb58f4",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          748062,
+          747998,
+          749250,
+          749655,
+          749540,
+          748827,
+          748448
+        ],
+        "iterations": [
+          432,
+          432,
+          432,
+          432,
+          432,
+          432,
+          432
+        ],
+        "median_ns": 1733.3958333333333
+      },
+      "sample_wall_ns": [
+        75389041,
+        75328334,
+        75209291,
+        75539334,
+        75500167,
+        75403500,
+        75523708
+      ],
+      "tokens": 192,
+      "verified_cancellations": 3027,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 1189,
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "tokenizer/Mixed/mixed_script/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          41036177,
+          41553939,
+          42934377,
+          41503570,
+          42951692,
+          42600671,
+          42682422
+        ],
+        "iterations": [
+          1147312,
+          1158000,
+          1194384,
+          1156864,
+          1197248,
+          1185824,
+          1193312
+        ],
+        "median_ns": 35.87592837187431
+      },
+      "output_sha256": "17c280af3af59f834061bf9b62be9832812e67f69f35af48e29f8a80f157f7bc",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20701103,
+          21033943,
+          21791346,
+          21010438,
+          21803048,
+          21602237,
+          21648127
+        ],
+        "iterations": [
+          1147312,
+          1158000,
+          1194384,
+          1156864,
+          1197248,
+          1185824,
+          1193312
+        ],
+        "median_ns": 18.16402677029361
+      },
+      "sample_wall_ns": [
+        75000375,
+        75000708,
+        75000000,
+        75000666,
+        75000125,
+        75000708,
+        75000083
+      ],
+      "tokens": 240,
+      "verified_cancellations": 8232947,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 23728,
+        "bytes_retained": 0,
+        "bytes_total": 120244,
+        "count_peak": 139,
+        "count_retained": 0,
+        "count_total": 570
+      },
+      "cancel_at_poll": 595,
+      "complete_polls": 1189,
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "tokenizer/Mixed/mixed_script/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          76205131,
+          75320504,
+          76229533,
+          75819535,
+          76153308,
+          75000064,
+          76211117
+        ],
+        "iterations": [
+          928,
+          912,
+          928,
+          912,
+          928,
+          912,
+          928
+        ],
+        "median_ns": 82143.89331896552
+      },
+      "output_sha256": "17c280af3af59f834061bf9b62be9832812e67f69f35af48e29f8a80f157f7bc",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1286831,
+          1266951,
+          1287874,
+          1273380,
+          1286462,
+          1271799,
+          1285735
+        ],
+        "iterations": [
+          928,
+          912,
+          928,
+          912,
+          928,
+          912,
+          928
+        ],
+        "median_ns": 1387.7952586206898
+      },
+      "sample_wall_ns": [
+        76233834,
+        75349084,
+        76257625,
+        75848583,
+        76182375,
+        75028291,
+        76240375
+      ],
+      "tokens": 240,
+      "verified_cancellations": 6451,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 44288,
+        "bytes_retained": 0,
+        "bytes_total": 236074,
+        "count_peak": 272,
+        "count_retained": 0,
+        "count_total": 1125
+      },
+      "cancel_at_poll": 1189,
+      "complete_polls": 1189,
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "tokenizer/Mixed/mixed_script/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          76985235,
+          77177832,
+          77101383,
+          77082468,
+          77402702,
+          77403920,
+          77242984
+        ],
+        "iterations": [
+          480,
+          480,
+          480,
+          480,
+          480,
+          464,
+          480
+        ],
+        "median_ns": 160787.15
+      },
+      "output_sha256": "17c280af3af59f834061bf9b62be9832812e67f69f35af48e29f8a80f157f7bc",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1210582,
+          1207953,
+          1212546,
+          1208079,
+          1219042,
+          1227962,
+          1209671
+        ],
+        "iterations": [
+          480,
+          480,
+          480,
+          480,
+          480,
+          464,
+          480
+        ],
+        "median_ns": 2522.045833333333
+      },
+      "sample_wall_ns": [
+        77000583,
+        77192625,
+        77116042,
+        77097417,
+        77417958,
+        77420125,
+        77258167
+      ],
+      "tokens": 240,
+      "verified_cancellations": 3347,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 1685,
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "analyzer/Mixed/mixed_script/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          40283905,
+          40198936,
+          40248745,
+          41162849,
+          42715758,
+          40862793,
+          40184792
+        ],
+        "iterations": [
+          1120640,
+          1120080,
+          1121408,
+          1141584,
+          1173728,
+          1128880,
+          1120496
+        ],
+        "median_ns": 35.94723104654483
+      },
+      "output_sha256": "5930240f07d0d4b5f5e1f0f84c7316398f52ebabef022d291f411a2be5eb58f4",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20550614,
+          20475817,
+          20523366,
+          21062690,
+          22015654,
+          20952394,
+          20473867
+        ],
+        "iterations": [
+          1120640,
+          1120080,
+          1121408,
+          1141584,
+          1173728,
+          1128880,
+          1120496
+        ],
+        "median_ns": 18.338283480868075
+      },
+      "sample_wall_ns": [
+        75001084,
+        75000709,
+        75000250,
+        75000375,
+        75000500,
+        75001000,
+        75001000
+      ],
+      "tokens": 192,
+      "verified_cancellations": 7926819,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 44288,
+        "bytes_retained": 0,
+        "bytes_total": 186648,
+        "count_peak": 198,
+        "count_retained": 0,
+        "count_total": 805
+      },
+      "cancel_at_poll": 843,
+      "complete_polls": 1685,
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "analyzer/Mixed/mixed_script/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          76249754,
+          75801959,
+          75878753,
+          76107292,
+          76080367,
+          75870333,
+          75821089
+        ],
+        "iterations": [
+          656,
+          656,
+          656,
+          656,
+          656,
+          656,
+          656
+        ],
+        "median_ns": 115668.83079268293
+      },
+      "output_sha256": "5930240f07d0d4b5f5e1f0f84c7316398f52ebabef022d291f411a2be5eb58f4",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1243051,
+          1238205,
+          1236663,
+          1244828,
+          1245584,
+          1235785,
+          1236129
+        ],
+        "iterations": [
+          656,
+          656,
+          656,
+          656,
+          656,
+          656,
+          656
+        ],
+        "median_ns": 1887.5076219512196
+      },
+      "sample_wall_ns": [
+        76270250,
+        75822666,
+        75899792,
+        76127375,
+        76101250,
+        75890625,
+        75841833
+      ],
+      "tokens": 192,
+      "verified_cancellations": 4595,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 44288,
+        "bytes_retained": 0,
+        "bytes_total": 236074,
+        "count_peak": 272,
+        "count_retained": 0,
+        "count_total": 1125
+      },
+      "cancel_at_poll": 1685,
+      "complete_polls": 1685,
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "analyzer/Mixed/mixed_script/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          75443169,
+          75114666,
+          75470509,
+          75175629,
+          77661949,
+          77526965,
+          77433967
+        ],
+        "iterations": [
+          432,
+          432,
+          432,
+          432,
+          448,
+          448,
+          448
+        ],
+        "median_ns": 173876.54166666666
+      },
+      "output_sha256": "5930240f07d0d4b5f5e1f0f84c7316398f52ebabef022d291f411a2be5eb58f4",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          753826,
+          747577,
+          752805,
+          748759,
+          788745,
+          777709,
+          775549
+        ],
+        "iterations": [
+          432,
+          432,
+          432,
+          432,
+          448,
+          448,
+          448
+        ],
+        "median_ns": 1735.9575892857142
+      },
+      "sample_wall_ns": [
+        75456792,
+        75128709,
+        75486833,
+        75190042,
+        77677042,
+        77540459,
+        77448083
+      ],
+      "tokens": 192,
+      "verified_cancellations": 3075,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 461,
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "tokenizer/None/unknown/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          42846999,
+          41315226,
+          42741287,
+          41817205,
+          41388725,
+          40402038,
+          40769433
+        ],
+        "iterations": [
+          1198656,
+          1157056,
+          1195552,
+          1159136,
+          1163904,
+          1133408,
+          1142848
+        ],
+        "median_ns": 35.707196540184746
+      },
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          21670696,
+          20894437,
+          21601801,
+          21174306,
+          20870459,
+          20392979,
+          20576727
+        ],
+        "iterations": [
+          1198656,
+          1157056,
+          1195552,
+          1159136,
+          1163904,
+          1133408,
+          1142848
+        ],
+        "median_ns": 18.05827634963217
+      },
+      "sample_wall_ns": [
+        75000375,
+        75000875,
+        75000084,
+        75000375,
+        75000708,
+        75001000,
+        75000750
+      ],
+      "tokens": 112,
+      "verified_cancellations": 8150563,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 12114,
+        "bytes_retained": 0,
+        "bytes_total": 18368,
+        "count_peak": 62,
+        "count_retained": 0,
+        "count_total": 127
+      },
+      "cancel_at_poll": 231,
+      "complete_polls": 461,
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "tokenizer/None/unknown/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          74964058,
+          75217098,
+          74932474,
+          74958978,
+          74949709,
+          75294353,
+          75014249
+        ],
+        "iterations": [
+          3040,
+          3056,
+          3056,
+          3056,
+          2976,
+          3056,
+          2992
+        ],
+        "median_ns": 24638.204515706806
+      },
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2014616,
+          2012590,
+          2022790,
+          2007185,
+          1987594,
+          2002007,
+          1969137
+        ],
+        "iterations": [
+          3040,
+          3056,
+          3056,
+          3056,
+          2976,
+          3056,
+          2992
+        ],
+        "median_ns": 658.5700261780105
+      },
+      "sample_wall_ns": [
+        75055500,
+        75311834,
+        75024833,
+        75054417,
+        75042792,
+        75389459,
+        75106792
+      ],
+      "tokens": 112,
+      "verified_cancellations": 21235,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22350,
+        "bytes_retained": 0,
+        "bytes_total": 34410,
+        "count_peak": 119,
+        "count_retained": 0,
+        "count_total": 242
+      },
+      "cancel_at_poll": 461,
+      "complete_polls": 461,
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "tokenizer/None/unknown/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          75632520,
+          75367280,
+          75445080,
+          75477757,
+          75662616,
+          75198475,
+          75502685
+        ],
+        "iterations": [
+          1600,
+          1632,
+          1632,
+          1632,
+          1632,
+          1616,
+          1616
+        ],
+        "median_ns": 46361.89705882353
+      },
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1762446,
+          1811619,
+          1797422,
+          1800134,
+          1803904,
+          1792182,
+          1779522
+        ],
+        "iterations": [
+          1600,
+          1632,
+          1632,
+          1632,
+          1632,
+          1616,
+          1616
+        ],
+        "median_ns": 1103.0232843137255
+      },
+      "sample_wall_ns": [
+        75680417,
+        75417917,
+        75494334,
+        75528458,
+        75712125,
+        75249167,
+        75552542
+      ],
+      "tokens": 112,
+      "verified_cancellations": 11363,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 693,
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "analyzer/None/unknown/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          40859303,
+          40661187,
+          40224355,
+          40264141,
+          40478294,
+          40227263,
+          40796161
+        ],
+        "iterations": [
+          1130816,
+          1121056,
+          1119744,
+          1122400,
+          1124512,
+          1117728,
+          1127056
+        ],
+        "median_ns": 35.99632018155431
+      },
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20949636,
+          20832876,
+          20476629,
+          20512128,
+          20689091,
+          20507670,
+          20936982
+        ],
+        "iterations": [
+          1130816,
+          1121056,
+          1119744,
+          1122400,
+          1124512,
+          1117728,
+          1127056
+        ],
+        "median_ns": 18.398283877806552
+      },
+      "sample_wall_ns": [
+        75001041,
+        75000667,
+        75000417,
+        75000041,
+        75000208,
+        75000792,
+        75000875
+      ],
+      "tokens": 112,
+      "verified_cancellations": 7863315,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22350,
+        "bytes_retained": 0,
+        "bytes_total": 33066,
+        "count_peak": 91,
+        "count_retained": 0,
+        "count_total": 186
+      },
+      "cancel_at_poll": 347,
+      "complete_polls": 693,
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "analyzer/None/unknown/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          74944729,
+          75304441,
+          75278154,
+          75274663,
+          75294801,
+          75178135,
+          75465820
+        ],
+        "iterations": [
+          2096,
+          2128,
+          2128,
+          2128,
+          2128,
+          2128,
+          2128
+        ],
+        "median_ns": 35382.895206766916
+      },
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1893213,
+          1917219,
+          1897407,
+          1896085,
+          1895716,
+          1893965,
+          1895724
+        ],
+        "iterations": [
+          2096,
+          2128,
+          2128,
+          2128,
+          2128,
+          2128,
+          2128
+        ],
+        "median_ns": 891.0173872180451
+      },
+      "sample_wall_ns": [
+        75012458,
+        75370542,
+        75343625,
+        75341583,
+        75360916,
+        75244291,
+        75532542
+      ],
+      "tokens": 112,
+      "verified_cancellations": 14867,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22350,
+        "bytes_retained": 0,
+        "bytes_total": 34410,
+        "count_peak": 119,
+        "count_retained": 0,
+        "count_total": 242
+      },
+      "cancel_at_poll": 693,
+      "complete_polls": 693,
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "analyzer/None/unknown/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          75835365,
+          74964706,
+          75509234,
+          75363925,
+          75532984,
+          75383776,
+          75088185
+        ],
+        "iterations": [
+          1408,
+          1392,
+          1392,
+          1376,
+          1376,
+          1376,
+          1376
+        ],
+        "median_ns": 54569.901889534885
+      },
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1452772,
+          1435557,
+          1435256,
+          1420902,
+          1427312,
+          1417473,
+          1421472
+        ],
+        "iterations": [
+          1408,
+          1392,
+          1392,
+          1376,
+          1376,
+          1376,
+          1376
+        ],
+        "median_ns": 1031.7982954545455
+      },
+      "sample_wall_ns": [
+        75879333,
+        75009750,
+        75553291,
+        75407958,
+        75575750,
+        75427458,
+        75130208
+      ],
+      "tokens": 112,
+      "verified_cancellations": 9699,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 461,
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "tokenizer/Discard/unknown/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          42467008,
+          42929554,
+          41132341,
+          42364422,
+          42959915,
+          42575181,
+          40064824
+        ],
+        "iterations": [
+          1186656,
+          1172960,
+          1119264,
+          1174368,
+          1199584,
+          1193056,
+          1131872
+        ],
+        "median_ns": 35.81234411262571
+      },
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          21513833,
+          21797260,
+          20754779,
+          21464628,
+          21809475,
+          21530961,
+          20048029
+        ],
+        "iterations": [
+          1186656,
+          1172960,
+          1119264,
+          1174368,
+          1199584,
+          1193056,
+          1131872
+        ],
+        "median_ns": 18.180865199935976
+      },
+      "sample_wall_ns": [
+        75000958,
+        75000667,
+        75000667,
+        75000500,
+        75000917,
+        75000166,
+        75000542
+      ],
+      "tokens": 112,
+      "verified_cancellations": 8177763,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 12114,
+        "bytes_retained": 0,
+        "bytes_total": 18368,
+        "count_peak": 62,
+        "count_retained": 0,
+        "count_total": 127
+      },
+      "cancel_at_poll": 231,
+      "complete_polls": 461,
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "tokenizer/Discard/unknown/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          75033614,
+          75048219,
+          75253488,
+          75302734,
+          75044863,
+          75143474,
+          74989926
+        ],
+        "iterations": [
+          3008,
+          3024,
+          3024,
+          3024,
+          3056,
+          3040,
+          3024
+        ],
+        "median_ns": 24817.532738095237
+      },
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1985561,
+          1985237,
+          1997075,
+          1987140,
+          2007867,
+          1997515,
+          1979683
+        ],
+        "iterations": [
+          3008,
+          3024,
+          3024,
+          3024,
+          3056,
+          3040,
+          3024
+        ],
+        "median_ns": 657.077302631579
+      },
+      "sample_wall_ns": [
+        75125875,
+        75141666,
+        75345500,
+        75395542,
+        75138667,
+        75237375,
+        75083875
+      ],
+      "tokens": 112,
+      "verified_cancellations": 21203,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22350,
+        "bytes_retained": 0,
+        "bytes_total": 34410,
+        "count_peak": 119,
+        "count_retained": 0,
+        "count_total": 242
+      },
+      "cancel_at_poll": 461,
+      "complete_polls": 461,
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "tokenizer/Discard/unknown/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          75014279,
+          75363517,
+          75682054,
+          75623398,
+          74956757,
+          75499983,
+          75476592
+        ],
+        "iterations": [
+          1616,
+          1584,
+          1616,
+          1632,
+          1616,
+          1632,
+          1632
+        ],
+        "median_ns": 46384.131806930694
+      },
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1778738,
+          1748613,
+          1775722,
+          1792369,
+          1777148,
+          1799181,
+          1794995
+        ],
+        "iterations": [
+          1616,
+          1584,
+          1616,
+          1632,
+          1616,
+          1632,
+          1632
+        ],
+        "median_ns": 1099.8743872549019
+      },
+      "sample_wall_ns": [
+        75063333,
+        75412333,
+        75732667,
+        75672708,
+        75008167,
+        75551416,
+        75527334
+      ],
+      "tokens": 112,
+      "verified_cancellations": 11331,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 693,
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "analyzer/Discard/unknown/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          40293365,
+          40664669,
+          41332607,
+          40841204,
+          41935058,
+          40351587,
+          40189226
+        ],
+        "iterations": [
+          1118720,
+          1123104,
+          1142544,
+          1127120,
+          1152480,
+          1122016,
+          1119136
+        ],
+        "median_ns": 36.17594333347337
+      },
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20566883,
+          20880369,
+          21209635,
+          20961179,
+          21511851,
+          20612032,
+          20463853
+        ],
+        "iterations": [
+          1118720,
+          1123104,
+          1142544,
+          1127120,
+          1152480,
+          1122016,
+          1119136
+        ],
+        "median_ns": 18.563517028665853
+      },
+      "sample_wall_ns": [
+        75001000,
+        75000792,
+        75000792,
+        75001042,
+        75000875,
+        75000667,
+        75000375
+      ],
+      "tokens": 112,
+      "verified_cancellations": 7905123,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22350,
+        "bytes_retained": 0,
+        "bytes_total": 33066,
+        "count_peak": 91,
+        "count_retained": 0,
+        "count_total": 186
+      },
+      "cancel_at_poll": 347,
+      "complete_polls": 693,
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "analyzer/Discard/unknown/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          75481815,
+          75406614,
+          75399720,
+          75134221,
+          75433290,
+          75493903,
+          75151828
+        ],
+        "iterations": [
+          2112,
+          2128,
+          2128,
+          2112,
+          2128,
+          2112,
+          2112
+        ],
+        "median_ns": 35574.91524621212
+      },
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1892369,
+          1894058,
+          1895378,
+          1887654,
+          1896218,
+          1891248,
+          1885024
+        ],
+        "iterations": [
+          2112,
+          2128,
+          2128,
+          2112,
+          2128,
+          2112,
+          2112
+        ],
+        "median_ns": 892.530303030303
+      },
+      "sample_wall_ns": [
+        75547792,
+        75474375,
+        75466416,
+        75202292,
+        75499541,
+        75560542,
+        75219042
+      ],
+      "tokens": 112,
+      "verified_cancellations": 14835,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22350,
+        "bytes_retained": 0,
+        "bytes_total": 34410,
+        "count_peak": 119,
+        "count_retained": 0,
+        "count_total": 242
+      },
+      "cancel_at_poll": 693,
+      "complete_polls": 693,
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "analyzer/Discard/unknown/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          75449331,
+          75756864,
+          75793454,
+          74965880,
+          75794086,
+          75781069,
+          75067707
+        ],
+        "iterations": [
+          1392,
+          1408,
+          1408,
+          1392,
+          1408,
+          1408,
+          1392
+        ],
+        "median_ns": 53831.02698863636
+      },
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1438086,
+          1461025,
+          1450514,
+          1434566,
+          1453575,
+          1454953,
+          1438379
+        ],
+        "iterations": [
+          1392,
+          1408,
+          1408,
+          1392,
+          1408,
+          1408,
+          1392
+        ],
+        "median_ns": 1033.1077586206898
+      },
+      "sample_wall_ns": [
+        75494250,
+        75800292,
+        75838292,
+        75008875,
+        75838167,
+        75826583,
+        75118500
+      ],
+      "tokens": 112,
+      "verified_cancellations": 9811,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 461,
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "tokenizer/Mixed/unknown/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          42864406,
+          41088544,
+          41052816,
+          41531138,
+          42342007,
+          41502393,
+          42678852
+        ],
+        "iterations": [
+          1201232,
+          1150976,
+          1151920,
+          1160784,
+          1182512,
+          1162944,
+          1192064
+        ],
+        "median_ns": 35.69887121886121
+      },
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          21697534,
+          20756849,
+          20720252,
+          20993635,
+          21459196,
+          20971919,
+          21666598
+        ],
+        "iterations": [
+          1201232,
+          1150976,
+          1151920,
+          1160784,
+          1182512,
+          1162944,
+          1192064
+        ],
+        "median_ns": 18.062733926502123
+      },
+      "sample_wall_ns": [
+        75000834,
+        75000500,
+        75000417,
+        75000292,
+        75000625,
+        75000625,
+        75000750
+      ],
+      "tokens": 112,
+      "verified_cancellations": 8202435,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 12114,
+        "bytes_retained": 0,
+        "bytes_total": 18368,
+        "count_peak": 62,
+        "count_retained": 0,
+        "count_total": 127
+      },
+      "cancel_at_poll": 231,
+      "complete_polls": 461,
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "tokenizer/Mixed/unknown/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          75073351,
+          75091672,
+          75155944,
+          75290501,
+          75116417,
+          74954496,
+          75142427
+        ],
+        "iterations": [
+          3072,
+          3040,
+          3040,
+          3040,
+          3024,
+          3024,
+          3008
+        ],
+        "median_ns": 24766.61217105263
+      },
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2017875,
+          2011118,
+          2001433,
+          2006977,
+          2000894,
+          1989668,
+          1980416
+        ],
+        "iterations": [
+          3072,
+          3040,
+          3040,
+          3040,
+          3024,
+          3024,
+          3008
+        ],
+        "median_ns": 658.3829787234042
+      },
+      "sample_wall_ns": [
+        75168208,
+        75185167,
+        75248459,
+        75384333,
+        75210208,
+        75047250,
+        75236541
+      ],
+      "tokens": 112,
+      "verified_cancellations": 21251,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22350,
+        "bytes_retained": 0,
+        "bytes_total": 34410,
+        "count_peak": 119,
+        "count_retained": 0,
+        "count_total": 242
+      },
+      "cancel_at_poll": 461,
+      "complete_polls": 461,
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "tokenizer/Mixed/unknown/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          75352306,
+          74973611,
+          75183639,
+          75603293,
+          75303879,
+          75656355,
+          75442525
+        ],
+        "iterations": [
+          1632,
+          1600,
+          1616,
+          1632,
+          1616,
+          1632,
+          1632
+        ],
+        "median_ns": 46358.060661764706
+      },
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1796229,
+          1760815,
+          1784186,
+          1795501,
+          1782011,
+          1803610,
+          1797963
+        ],
+        "iterations": [
+          1632,
+          1600,
+          1616,
+          1632,
+          1616,
+          1632,
+          1632
+        ],
+        "median_ns": 1101.6930147058824
+      },
+      "sample_wall_ns": [
+        75402292,
+        75022542,
+        75232833,
+        75653417,
+        75356917,
+        75708958,
+        75493916
+      ],
+      "tokens": 112,
+      "verified_cancellations": 11363,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 693,
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "analyzer/Mixed/unknown/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          41004489,
+          40245442,
+          40397506,
+          40205356,
+          42014671,
+          40483463,
+          40287467
+        ],
+        "iterations": [
+          1138912,
+          1111888,
+          1114928,
+          1120208,
+          1157856,
+          1123936,
+          1119376
+        ],
+        "median_ns": 36.01936676109672
+      },
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20958949,
+          20516355,
+          20662746,
+          20463160,
+          21661361,
+          20690268,
+          20545441
+        ],
+        "iterations": [
+          1138912,
+          1111888,
+          1114928,
+          1120208,
+          1157856,
+          1123936,
+          1119376
+        ],
+        "median_ns": 18.408759929390996
+      },
+      "sample_wall_ns": [
+        75000167,
+        75000667,
+        75001041,
+        75000750,
+        75000375,
+        75000500,
+        75000500
+      ],
+      "tokens": 112,
+      "verified_cancellations": 7887107,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22350,
+        "bytes_retained": 0,
+        "bytes_total": 33066,
+        "count_peak": 91,
+        "count_retained": 0,
+        "count_total": 186
+      },
+      "cancel_at_poll": 347,
+      "complete_polls": 693,
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "analyzer/Mixed/unknown/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          75191443,
+          75475218,
+          74944690,
+          75136373,
+          75127334,
+          75299774,
+          75368270
+        ],
+        "iterations": [
+          2112,
+          2128,
+          2096,
+          2064,
+          2096,
+          2080,
+          2128
+        ],
+        "median_ns": 35756.05438931298
+      },
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1881954,
+          1900220,
+          1866242,
+          1842888,
+          1884095,
+          1853840,
+          1894801
+        ],
+        "iterations": [
+          2112,
+          2128,
+          2096,
+          2064,
+          2096,
+          2080,
+          2128
+        ],
+        "median_ns": 891.2692307692307
+      },
+      "sample_wall_ns": [
+        75258583,
+        75542666,
+        75010625,
+        75202083,
+        75195750,
+        75363667,
+        75435666
+      ],
+      "tokens": 112,
+      "verified_cancellations": 14707,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22350,
+        "bytes_retained": 0,
+        "bytes_total": 34410,
+        "count_peak": 119,
+        "count_retained": 0,
+        "count_total": 242
+      },
+      "cancel_at_poll": 693,
+      "complete_polls": 693,
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "analyzer/Mixed/unknown/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          75047584,
+          75007760,
+          75018806,
+          74985282,
+          75009519,
+          75124415,
+          75086752
+        ],
+        "iterations": [
+          1392,
+          1392,
+          1392,
+          1392,
+          1392,
+          1392,
+          1392
+        ],
+        "median_ns": 53892.82040229885
+      },
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1435379,
+          1436125,
+          1436292,
+          1434500,
+          1439382,
+          1435925,
+          1436146
+        ],
+        "iterations": [
+          1392,
+          1392,
+          1392,
+          1392,
+          1392,
+          1392,
+          1392
+        ],
+        "median_ns": 1031.6989942528735
+      },
+      "sample_wall_ns": [
+        75093000,
+        75052125,
+        75063041,
+        75029000,
+        75054250,
+        75169208,
+        75132166
+      ],
+      "tokens": 112,
+      "verified_cancellations": 9747,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 13551,
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "tokenizer/None/ambiguous_long/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          42319352,
+          42959618,
+          42914747,
+          40960994,
+          42889619,
+          42057376,
+          42041922
+        ],
+        "iterations": [
+          1184352,
+          1199312,
+          1199232,
+          1143312,
+          1198848,
+          1179104,
+          1169504
+        ],
+        "median_ns": 35.78519168934785
+      },
+      "output_sha256": "9161d86a17318a1c852402316db2595023f7af73a8711d85bcea503358a90417",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          21421600,
+          21822773,
+          21755324,
+          20691935,
+          21707236,
+          21242012,
+          21232098
+        ],
+        "iterations": [
+          1184352,
+          1199312,
+          1199232,
+          1143312,
+          1198848,
+          1179104,
+          1169504
+        ],
+        "median_ns": 18.106745809310272
+      },
+      "sample_wall_ns": [
+        75000917,
+        75000541,
+        75000542,
+        75000833,
+        75000458,
+        75000083,
+        75000625
+      ],
+      "tokens": 2050,
+      "verified_cancellations": 8273667,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 910480,
+        "bytes_retained": 0,
+        "bytes_total": 3595224,
+        "count_peak": 2721,
+        "count_retained": 0,
+        "count_total": 13252
+      },
+      "cancel_at_poll": 6776,
+      "complete_polls": 13551,
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "tokenizer/None/ambiguous_long/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          83399626,
+          83478373,
+          84378335,
+          83482873,
+          83371833,
+          83575539,
+          83406372
+        ],
+        "iterations": [
+          48,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48
+        ],
+        "median_ns": 1739132.7708333333
+      },
+      "output_sha256": "9161d86a17318a1c852402316db2595023f7af73a8711d85bcea503358a90417",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1173288,
+          1171746,
+          1183918,
+          1173831,
+          1169750,
+          1171122,
+          1166080
+        ],
+        "iterations": [
+          48,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48
+        ],
+        "median_ns": 24411.375
+      },
+      "sample_wall_ns": [
+        83401666,
+        83480000,
+        84380333,
+        83484667,
+        83373417,
+        83577209,
+        83408000
+      ],
+      "tokens": 2050,
+      "verified_cancellations": 339,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 1080798,
+        "bytes_retained": 0,
+        "bytes_total": 6796796,
+        "count_peak": 4409,
+        "count_retained": 0,
+        "count_total": 24599
+      },
+      "cancel_at_poll": 13551,
+      "complete_polls": 13551,
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "tokenizer/None/ambiguous_long/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          102839708,
+          103181916,
+          103729585,
+          103023709,
+          102848580,
+          102699250,
+          102645415
+        ],
+        "iterations": [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "median_ns": 3214018.125
+      },
+      "output_sha256": "9161d86a17318a1c852402316db2595023f7af73a8711d85bcea503358a90417",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1354708,
+          1345330,
+          1352623,
+          1337832,
+          1342790,
+          1346544,
+          1341334
+        ],
+        "iterations": [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "median_ns": 42041.5625
+      },
+      "sample_wall_ns": [
+        102841000,
+        103183334,
+        103730709,
+        103025083,
+        102849875,
+        102700417,
+        102646333
+      ],
+      "tokens": 2050,
+      "verified_cancellations": 227,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 17667,
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "analyzer/None/ambiguous_long/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          40214815,
+          40626415,
+          40453780,
+          40208620,
+          40183867,
+          40218929,
+          40201540
+        ],
+        "iterations": [
+          1116624,
+          1122384,
+          1124160,
+          1119664,
+          1113712,
+          1120000,
+          1121760
+        ],
+        "median_ns": 35.98578494164532
+      },
+      "output_sha256": "68190be8f59aaa330bb75eb9064f4a0d4a2ec718bbb8c355a0fef312ebed3666",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20470394,
+          20865244,
+          20642556,
+          20482656,
+          20452883,
+          20491700,
+          20473216
+        ],
+        "iterations": [
+          1116624,
+          1122384,
+          1124160,
+          1119664,
+          1113712,
+          1120000,
+          1121760
+        ],
+        "median_ns": 18.3323965811231
+      },
+      "sample_wall_ns": [
+        75001042,
+        75000666,
+        75000750,
+        75001041,
+        75000708,
+        75000708,
+        75001000
+      ],
+      "tokens": 1793,
+      "verified_cancellations": 7838307,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 965960,
+        "bytes_retained": 0,
+        "bytes_total": 4499112,
+        "count_peak": 3257,
+        "count_retained": 0,
+        "count_total": 17080
+      },
+      "cancel_at_poll": 8834,
+      "complete_polls": 17667,
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "analyzer/None/ambiguous_long/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          107089754,
+          107087250,
+          107030041,
+          107080373,
+          107073503,
+          107229831,
+          107049960
+        ],
+        "iterations": [
+          48,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48
+        ],
+        "median_ns": 2230841.1041666665
+      },
+      "output_sha256": "68190be8f59aaa330bb75eb9064f4a0d4a2ec718bbb8c355a0fef312ebed3666",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2088377,
+          2079082,
+          2080878,
+          2083541,
+          2077130,
+          2079833,
+          2074750
+        ],
+        "iterations": [
+          48,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48
+        ],
+        "median_ns": 43329.854166666664
+      },
+      "sample_wall_ns": [
+        107091334,
+        107088875,
+        107031792,
+        107081792,
+        107075166,
+        107231459,
+        107051250
+      ],
+      "tokens": 1793,
+      "verified_cancellations": 339,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 1080798,
+        "bytes_retained": 0,
+        "bytes_total": 6796796,
+        "count_peak": 4409,
+        "count_retained": 0,
+        "count_total": 24599
+      },
+      "cancel_at_poll": 17667,
+      "complete_polls": 17667,
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "analyzer/None/ambiguous_long/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          105598620,
+          105655707,
+          106251458,
+          105829500,
+          105766707,
+          105782039,
+          109207956
+        ],
+        "iterations": [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "median_ns": 3305688.71875
+      },
+      "output_sha256": "68190be8f59aaa330bb75eb9064f4a0d4a2ec718bbb8c355a0fef312ebed3666",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1153372,
+          1156750,
+          1168541,
+          1149165,
+          1150790,
+          1149582,
+          1191622
+        ],
+        "iterations": [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "median_ns": 36042.875
+      },
+      "sample_wall_ns": [
+        105599583,
+        105656709,
+        106253416,
+        105830583,
+        105767792,
+        105783083,
+        109208875
+      ],
+      "tokens": 1793,
+      "verified_cancellations": 227,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 15599,
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "tokenizer/Discard/ambiguous_long/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          42903737,
+          42922654,
+          41972833,
+          42296973,
+          42923539,
+          42892635,
+          42781076
+        ],
+        "iterations": [
+          1189168,
+          1197296,
+          1175296,
+          1175552,
+          1193184,
+          1196640,
+          1195904
+        ],
+        "median_ns": 35.849659566222556
+      },
+      "output_sha256": "c83b4353b7ba19433d53374bed168c09ab40e4361d4dd29cbfcabf5f5d301ae1",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          21702447,
+          21795555,
+          21234227,
+          21423089,
+          21773154,
+          21772602,
+          21665518
+        ],
+        "iterations": [
+          1189168,
+          1197296,
+          1175296,
+          1175552,
+          1193184,
+          1196640,
+          1195904
+        ],
+        "median_ns": 18.203982139754913
+      },
+      "sample_wall_ns": [
+        75000375,
+        75000125,
+        75000042,
+        75000583,
+        75000708,
+        75000375,
+        75000209
+      ],
+      "tokens": 2562,
+      "verified_cancellations": 8323043,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 959206,
+        "bytes_retained": 0,
+        "bytes_total": 3806964,
+        "count_peak": 2238,
+        "count_retained": 0,
+        "count_total": 13977
+      },
+      "cancel_at_poll": 7800,
+      "complete_polls": 15599,
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "tokenizer/Discard/ambiguous_long/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          85563917,
+          85520667,
+          85671168,
+          85776915,
+          85640044,
+          85639917,
+          85685622
+        ],
+        "iterations": [
+          48,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48
+        ],
+        "median_ns": 1784167.5833333333
+      },
+      "output_sha256": "c83b4353b7ba19433d53374bed168c09ab40e4361d4dd29cbfcabf5f5d301ae1",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          911168,
+          906917,
+          906878,
+          906745,
+          905917,
+          907001,
+          910124
+        ],
+        "iterations": [
+          48,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48
+        ],
+        "median_ns": 18894.104166666668
+      },
+      "sample_wall_ns": [
+        85565583,
+        85522292,
+        85672875,
+        85778667,
+        85641625,
+        85641167,
+        85687292
+      ],
+      "tokens": 2562,
+      "verified_cancellations": 339,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 1150168,
+        "bytes_retained": 0,
+        "bytes_total": 7095632,
+        "count_peak": 3446,
+        "count_retained": 0,
+        "count_total": 25624
+      },
+      "cancel_at_poll": 15599,
+      "complete_polls": 15599,
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "tokenizer/Discard/ambiguous_long/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          103266916,
+          103182790,
+          103184667,
+          103251837,
+          103301835,
+          103238126,
+          103322831
+        ],
+        "iterations": [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "median_ns": 3226619.90625
+      },
+      "output_sha256": "c83b4353b7ba19433d53374bed168c09ab40e4361d4dd29cbfcabf5f5d301ae1",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          857835,
+          861624,
+          859709,
+          860128,
+          864331,
+          863542,
+          862875
+        ],
+        "iterations": [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "median_ns": 26925.75
+      },
+      "sample_wall_ns": [
+        103268000,
+        103183916,
+        103185791,
+        103253250,
+        103303125,
+        103239250,
+        103323875
+      ],
+      "tokens": 2562,
+      "verified_cancellations": 227,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 20739,
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "analyzer/Discard/ambiguous_long/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          41568538,
+          40210274,
+          40472152,
+          40863763,
+          40187460,
+          40216132,
+          40209347
+        ],
+        "iterations": [
+          1150640,
+          1113984,
+          1121696,
+          1125904,
+          1115456,
+          1120976,
+          1121584
+        ],
+        "median_ns": 36.08121273500129
+      },
+      "output_sha256": "c707b60564e38238bf37fb7c85cba4eaecf6dc9b53ba4cf993a9fb49e1acb367",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          21337035,
+          20454908,
+          20682658,
+          20999285,
+          20494499,
+          20481732,
+          20479775
+        ],
+        "iterations": [
+          1150640,
+          1113984,
+          1121696,
+          1125904,
+          1115456,
+          1120976,
+          1121584
+        ],
+        "median_ns": 18.373202528831257
+      },
+      "sample_wall_ns": [
+        75000375,
+        75000042,
+        75001083,
+        75000208,
+        75000209,
+        75000833,
+        75000333
+      ],
+      "tokens": 2304,
+      "verified_cancellations": 7870243,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 1022018,
+        "bytes_retained": 0,
+        "bytes_total": 4646742,
+        "count_peak": 2684,
+        "count_retained": 0,
+        "count_total": 17830
+      },
+      "cancel_at_poll": 10370,
+      "complete_polls": 20739,
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "analyzer/Discard/ambiguous_long/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          108449377,
+          108113625,
+          108181581,
+          108202745,
+          108741500,
+          108239538,
+          108662375
+        ],
+        "iterations": [
+          48,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48
+        ],
+        "median_ns": 2254990.375
+      },
+      "output_sha256": "c707b60564e38238bf37fb7c85cba4eaecf6dc9b53ba4cf993a9fb49e1acb367",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1707545,
+          1701914,
+          1695579,
+          1700996,
+          1714040,
+          1707287,
+          1704542
+        ],
+        "iterations": [
+          48,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48
+        ],
+        "median_ns": 35511.291666666664
+      },
+      "sample_wall_ns": [
+        108451667,
+        108115666,
+        108183375,
+        108204458,
+        108743166,
+        108241209,
+        108664459
+      ],
+      "tokens": 2304,
+      "verified_cancellations": 339,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 1150168,
+        "bytes_retained": 0,
+        "bytes_total": 7095632,
+        "count_peak": 3446,
+        "count_retained": 0,
+        "count_total": 25624
+      },
+      "cancel_at_poll": 20739,
+      "complete_polls": 20739,
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "analyzer/Discard/ambiguous_long/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          106833209,
+          107012751,
+          106590377,
+          107115792,
+          106668872,
+          106754668,
+          106641626
+        ],
+        "iterations": [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "median_ns": 3336083.375
+      },
+      "output_sha256": "c707b60564e38238bf37fb7c85cba4eaecf6dc9b53ba4cf993a9fb49e1acb367",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          732290,
+          732792,
+          730379,
+          733540,
+          730374,
+          734330,
+          730541
+        ],
+        "iterations": [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "median_ns": 22884.0625
+      },
+      "sample_wall_ns": [
+        106834291,
+        107014666,
+        106591375,
+        107117500,
+        106669875,
+        106755500,
+        106642625
+      ],
+      "tokens": 2304,
+      "verified_cancellations": 227,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 15601,
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "tokenizer/Mixed/ambiguous_long/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          42004806,
+          41289558,
+          42309040,
+          42757159,
+          42900964,
+          42035473,
+          42204310
+        ],
+        "iterations": [
+          1174048,
+          1156128,
+          1178592,
+          1196352,
+          1201440,
+          1177024,
+          1183584
+        ],
+        "median_ns": 35.71365627335381
+      },
+      "output_sha256": "5bdea6a8e61e249bf0dd7a41f44309f1847f905f33c1c1bdd227272abd7d00dc",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          21257227,
+          20817393,
+          21392779,
+          21643656,
+          21708730,
+          21220715,
+          21341444
+        ],
+        "iterations": [
+          1174048,
+          1156128,
+          1178592,
+          1196352,
+          1201440,
+          1177024,
+          1183584
+        ],
+        "median_ns": 18.06892562258623
+      },
+      "sample_wall_ns": [
+        75000375,
+        75000292,
+        75000083,
+        75000709,
+        75000250,
+        75000125,
+        75000917
+      ],
+      "tokens": 3074,
+      "verified_cancellations": 8267171,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 990588,
+        "bytes_retained": 0,
+        "bytes_total": 3844916,
+        "count_peak": 3205,
+        "count_retained": 0,
+        "count_total": 13979
+      },
+      "cancel_at_poll": 7801,
+      "complete_polls": 15601,
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "tokenizer/Mixed/ambiguous_long/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          89105248,
+          86069370,
+          86322833,
+          86163088,
+          86183334,
+          86725456,
+          86200914
+        ],
+        "iterations": [
+          48,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48
+        ],
+        "median_ns": 1795852.375
+      },
+      "output_sha256": "5bdea6a8e61e249bf0dd7a41f44309f1847f905f33c1c1bdd227272abd7d00dc",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1485578,
+          1416160,
+          1425838,
+          1429044,
+          1428875,
+          1441665,
+          1417876
+        ],
+        "iterations": [
+          48,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48
+        ],
+        "median_ns": 29768.229166666668
+      },
+      "sample_wall_ns": [
+        89110917,
+        86071125,
+        86324667,
+        86164583,
+        86184875,
+        86727292,
+        86202541
+      ],
+      "tokens": 3074,
+      "verified_cancellations": 339,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 1238094,
+        "bytes_retained": 0,
+        "bytes_total": 7284392,
+        "count_peak": 5375,
+        "count_retained": 0,
+        "count_total": 25624
+      },
+      "cancel_at_poll": 15601,
+      "complete_polls": 15601,
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "tokenizer/Mixed/ambiguous_long/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          103866211,
+          103970914,
+          103815082,
+          103853542,
+          103977330,
+          104138462,
+          104321169
+        ],
+        "iterations": [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "median_ns": 3249091.0625
+      },
+      "output_sha256": "5bdea6a8e61e249bf0dd7a41f44309f1847f905f33c1c1bdd227272abd7d00dc",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1652502,
+          1650831,
+          1661458,
+          1665044,
+          1655002,
+          1656380,
+          1656044
+        ],
+        "iterations": [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "median_ns": 51751.375
+      },
+      "sample_wall_ns": [
+        103867375,
+        103972000,
+        103816250,
+        103857042,
+        103978709,
+        104139792,
+        104322375
+      ],
+      "tokens": 3074,
+      "verified_cancellations": 227,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cancel_at_poll": 1,
+      "complete_polls": 21769,
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "analyzer/Mixed/ambiguous_long/first",
+      "operation_timing": {
+        "elapsed_ns": [
+          40489161,
+          40189539,
+          40211679,
+          40200403,
+          40215483,
+          40593146,
+          40592593
+        ],
+        "iterations": [
+          1123056,
+          1115600,
+          1113872,
+          1116256,
+          1120464,
+          1120176,
+          1108320
+        ],
+        "median_ns": 36.0526643373082
+      },
+      "output_sha256": "e0c499b954afc15e6a4dee2bdf70493f4eec31e88d38f61fcf39f1348dc7ed22",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          20726291,
+          20467501,
+          20482200,
+          20481847,
+          20491124,
+          20864585,
+          20833315
+        ],
+        "iterations": [
+          1123056,
+          1115600,
+          1113872,
+          1116256,
+          1120464,
+          1120176,
+          1108320
+        ],
+        "median_ns": 18.388288780039357
+      },
+      "sample_wall_ns": [
+        75000083,
+        75000458,
+        75000625,
+        75000958,
+        75000459,
+        75000125,
+        75000917
+      ],
+      "tokens": 2816,
+      "verified_cancellations": 7817747,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 1075282,
+        "bytes_retained": 0,
+        "bytes_total": 4686850,
+        "count_peak": 4226,
+        "count_retained": 0,
+        "count_total": 18050
+      },
+      "cancel_at_poll": 10885,
+      "complete_polls": 21769,
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "analyzer/Mixed/ambiguous_long/middle",
+      "operation_timing": {
+        "elapsed_ns": [
+          109736788,
+          109724915,
+          110037295,
+          109877833,
+          109903165,
+          110167835,
+          111202041
+        ],
+        "iterations": [
+          48,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48
+        ],
+        "median_ns": 2289649.2708333335
+      },
+      "output_sha256": "e0c499b954afc15e6a4dee2bdf70493f4eec31e88d38f61fcf39f1348dc7ed22",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          2607872,
+          2598747,
+          2611249,
+          2610003,
+          2602334,
+          2615668,
+          2647875
+        ],
+        "iterations": [
+          48,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48
+        ],
+        "median_ns": 54375.0625
+      },
+      "sample_wall_ns": [
+        109738375,
+        109726542,
+        110038958,
+        109879417,
+        109905333,
+        110169667,
+        111203709
+      ],
+      "tokens": 2816,
+      "verified_cancellations": 339,
+      "verified_recoveries": 10
+    },
+    {
+      "allocation": {
+        "bytes_peak": 1238094,
+        "bytes_retained": 0,
+        "bytes_total": 7284392,
+        "count_peak": 5375,
+        "count_retained": 0,
+        "count_total": 25624
+      },
+      "cancel_at_poll": 21769,
+      "complete_polls": 21769,
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "analyzer/Mixed/ambiguous_long/last",
+      "operation_timing": {
+        "elapsed_ns": [
+          109155917,
+          109040416,
+          108930000,
+          108867874,
+          108899417,
+          109913624,
+          109258331
+        ],
+        "iterations": [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "median_ns": 3407513.0
+      },
+      "output_sha256": "e0c499b954afc15e6a4dee2bdf70493f4eec31e88d38f61fcf39f1348dc7ed22",
+      "remaining_budget_bytes": 4096,
+      "response_timing": {
+        "elapsed_ns": [
+          1524707,
+          1514538,
+          1514460,
+          1519166,
+          1513667,
+          1538416,
+          1543418
+        ],
+        "iterations": [
+          32,
+          32,
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "median_ns": 47473.9375
+      },
+      "sample_wall_ns": [
+        109157459,
+        109041750,
+        108931375,
+        108869042,
+        108900417,
+        109915334,
+        109259500
+      ],
+      "tokens": 2816,
+      "verified_cancellations": 227,
+      "verified_recoveries": 10
+    }
+  ],
+  "memory_limit_bytes": 268435456,
+  "owner": "uqa-analysis",
+  "pointer_bits": 64,
+  "protocol": {
+    "allocation_samples": 1,
+    "batch_operations": 16,
+    "clock": "per_operation",
+    "minimum_sample_time_ns": 75000000,
+    "samples": 7,
+    "warmup": 2
+  },
+  "purpose": "cooperative_cancellation",
+  "schema_version": 2,
+  "target_arch": "aarch64",
+  "target_os": "macos",
+  "threads": 1,
+  "timing_scope": "operation: entry to cancelled return; response: callback decision to cancelled return, including workspace destruction and clock-call overhead; excludes verification and subsequent recovery; no external-signal detection or scheduler latency claim",
+  "unrelated_reservation_bytes": 4096,
+  "provenance": {
+    "measured_at_utc": "2026-09-13T16:17:57.698102+00:00",
+    "revision": "9a8a5aeebc87b4b4f80713394658806ba0023d1d",
+    "worktree_dirty": false,
+    "cpu": "Apple M1 Ultra",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "rustc": "rustc 1.90.0 (1159e78c4 2025-09-14)\nbinary: rustc\ncommit-hash: 1159e78c4747b02ef996e55082b704c09b970588\ncommit-date: 2025-09-14\nhost: aarch64-apple-darwin\nrelease: 1.90.0\nLLVM version: 20.1.8",
+    "flags": {
+      "CFLAGS": "-isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk -I${HOME}/app/include -I/opt/homebrew/include",
+      "CXXFLAGS": "-isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk -I${HOME}/app/include -I/opt/homebrew/include",
+      "LDFLAGS": " -L${HOME}/app/lib -L/opt/homebrew/lib -L/opt/homebrew/opt/icu4c@77/lib -Wl,-cache_path_lto,${HOME}/.cache/llvm -L${HOME}/app/lib -L/opt/homebrew/lib -L/opt/homebrew/opt/icu4c@77/lib -Wl,-cache_path_lto,${HOME}/.cache/llvm -L${HOME}/app/lib -L/opt/homebrew/lib -L/opt/homebrew/opt/icu4c@77/lib -Wl,-cache_path_lto,${HOME}/.cache/llvm"
+    },
+    "flags_sha256": "1647b6537e50c7f2c41a549356805c798a60d8a7a5cb84434429d5d347ac84ce",
+    "node": null,
+    "emcc": null,
+    "benchmark_sha256": "213c7a1884d5e9ccf67f7488992b55986e161b2e6e6a23b35daffad0d7cc143e",
+    "cargo_lock_sha256": "888ba09b36bfdae1252ebc5838c700f4e3800060df09e081197f7fbd66ec198e",
+    "runtime_sources_sha256": "d98a822812ec71fd985b80e95e39ab5806dfbab08578f3cca9804dae2bea9bcb",
+    "profile": "bench (workspace release, thin LTO, one codegen unit, debug information)",
+    "container": null,
+    "jvm": null,
+    "artifacts": [
+      {
+        "name": "nori-1ed18a5bc17e56db",
+        "bytes": 11028696,
+        "sha256": "67a1e98f1ffe48e1d2ae6a46e2e0e842028fa455da8b585b61125bece7c0cd0a"
+      }
+    ],
+    "benchmark_sources": {
+      "crates/uqa-analysis/benches/nori.rs": "cb080660f6404f51c03f45753aa2bd34c2e17e95bff9761782780734f83f71eb",
+      "crates/uqa-analysis/benches/nori/cancellation.rs": "560874831677548100876748cc43b54a8d48474228f75f0713388625801d60fc"
+    },
+    "arguments": [
+      "--cancellation"
+    ]
+  },
+  "gate": {
+    "allocation_and_recovery_passed": false,
+    "timing_compared": false
+  }
+}

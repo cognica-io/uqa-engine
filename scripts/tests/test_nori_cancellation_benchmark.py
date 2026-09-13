@@ -7,6 +7,7 @@
 import copy
 import importlib.util
 import json
+import math
 import pathlib
 import sys
 import unittest
@@ -51,6 +52,56 @@ def fixture():
 
 
 class NoriCancellationBenchmarkTests(unittest.TestCase):
+    def test_reviewed_repeats_reproduce_outputs_allocations_and_timing_limits(self):
+        limits = json.loads(benchmark.LIMITS.read_text())
+        calibration = limits["calibration"]
+        self.assertEqual(calibration["protocol"], benchmark.PROTOCOL)
+        records = calibration["reports"]
+        self.assertEqual(len(records), 6)
+        targets = {"macos/aarch64/64", "linux/x86_64/64", "emscripten/wasm32/32"}
+        self.assertEqual(set(limits["allocation_ceilings"]), targets)
+        pairs = {}
+        for record in records:
+            path = ROOT / record["path"]
+            self.assertEqual(benchmark.common.digest(path), record["sha256"])
+            report = json.loads(path.read_text())
+            provenance = report["provenance"]
+            self.assertFalse(provenance["worktree_dirty"])
+            for key in ("revision", "benchmark_sha256", "runtime_sources_sha256", "cargo_lock_sha256"):
+                self.assertEqual(provenance[key], calibration[key])
+            self.assertEqual(benchmark.target_key(report), record["target"])
+            self.assertIs(report["gate"]["allocation_and_recovery_passed"], False)
+            self.assertIs(record["gate_passed_at_collection"], False)
+            self.assertTrue(benchmark.check(report, limits)["allocation_and_recovery_passed"])
+            pairs.setdefault(record["target"], {})[record["role"]] = report
+        maxima = {}
+        for target, pair in pairs.items():
+            self.assertEqual(set(pair), {"baseline", "repeat"})
+            first, second = pair["baseline"], pair["repeat"]
+            self.assertNotEqual(first["provenance"]["measured_at_utc"], second["provenance"]["measured_at_utc"])
+            ratios = []
+            for before, after in ((first, second), (second, first)):
+                result = benchmark.check(after, limits, before)
+                self.assertEqual(len(result["timing_ratios"]), 216)
+                ratios.extend(result["timing_ratios"].values())
+            maxima[target] = max(ratios)
+            a, b = benchmark.measurements(first), benchmark.measurements(second)
+            for name in a:
+                self.assertEqual(a[name]["allocation"], b[name]["allocation"])
+                self.assertEqual(limits["allocation_ceilings"][target][name], a[name]["allocation"])
+        self.assertEqual(maxima, calibration["target_maximum_bidirectional_repeat_ratios"])
+        self.assertEqual(max(maxima.values()), calibration["maximum_bidirectional_repeat_ratio"])
+        self.assertEqual(calibration["timing_margin_ratio"], 1.1)
+        self.assertEqual(limits["timing_max_ratio"], math.ceil(max(maxima.values()) * 1.1 * 100) / 100)
+
+    def test_ci_requires_allocation_recovery_and_both_timing_scopes(self):
+        workflow = (ROOT / ".github/workflows/nori-cancellation-benchmarks.yml").read_text()
+        self.assertIn("target: [native, wasm]", workflow)
+        self.assertNotIn("--measure-only", workflow)
+        self.assertIn('run-nori-cancellation-benchmark.py --target "$BENCHMARK_TARGET" --baseline', workflow)
+        parent = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("uses: ./.github/workflows/nori-cancellation-benchmarks.yml", parent)
+
     def test_complete_corpus_modes_stages_and_points_are_checked(self):
         report, limits = fixture()
         self.assertEqual(len(benchmark.measurements(report)), 108)

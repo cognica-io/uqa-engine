@@ -16,13 +16,19 @@ The collector previously constructed JSON records between workloads. With the wo
 
 Rust allocation counters cover one interrupted operation on the current thread. Preloaded dictionary/input/reference results, the allowance handle, the unrelated reservation, and host memory are outside that scope. Each new reference count and cancellation position comes from the same fixed complete input; changing the polling schedule makes a timing baseline incomparable until reviewed again.
 
-## Collection and acceptance
+## Regression policy and evidence
+
+The [reviewed limits](cancellation-limits.json) retain all six raw `9a8a5aee` reports and their SHA-256 identities under `cancellation-evidence/`. Each macOS aarch64, Linux x86_64, and Emscripten WASM target has two clean reports. Every one of the 108 workloads agrees on complete recovery output, polling points, and all six allocation counters. Allocation ceilings equal those observations without padding; additional retained allocations and bytes must remain zero.
+
+After deferring JSON conversion, the maximum bidirectional repeat ratios are 1.036 on macOS, 1.089 on Linux, and 1.143 on WASM. The recorded timing ceiling is 1.26: the exact observed maximum, 1.142723344362666, multiplied by a 1.1 margin and rounded up to two decimal places. Comparisons require the same CPU, platform, compiler, flags, benchmark source, arguments, inputs, polling schedule, and sampling protocol. Both complete-operation and callback-to-return medians are checked independently for every workload. These are measured cancellation scopes, not external-signal detection or scheduler guarantees.
 
 ```sh
-python3 scripts/run-nori-cancellation-benchmark.py --measure-only --output target/benchmark-runs/nori-cancellation-native.json
-python3 scripts/run-nori-cancellation-benchmark.py --target wasm --measure-only --output target/benchmark-runs/nori-cancellation-wasm.json
+python3 scripts/run-nori-cancellation-benchmark.py --output target/benchmark-runs/nori-cancellation-native-baseline.json
+python3 scripts/run-nori-cancellation-benchmark.py --baseline target/benchmark-runs/nori-cancellation-native-baseline.json --output target/benchmark-runs/nori-cancellation-native-repeat.json
+python3 scripts/run-nori-cancellation-benchmark.py --target wasm --output target/benchmark-runs/nori-cancellation-wasm-baseline.json
+python3 scripts/run-nori-cancellation-benchmark.py --target wasm --baseline target/benchmark-runs/nori-cancellation-wasm-baseline.json --output target/benchmark-runs/nori-cancellation-wasm-repeat.json
 ```
 
-Candidate collection validates all 108 workloads, complete input/output identities, every reported cancellation and recovery, unrelated-reservation preservation, allocation counters, and both timing estimators. Reports retain source, executable, compiler-flag, CPU, and toolchain provenance. A candidate records `allocation_and_recovery_passed: false`; successful collection is not a reviewed performance pass. The checker supports exact target-specific allocation ceilings and explicit same-environment comparisons of both timing scopes, but limits must come from actual repeated measurements. The workflow rechecks the existing ordinary analysis gate and collects two cancellation candidates for each of native and WASM. The tagged `uqa-nori-cancellation/**` trigger permits that workflow to run independently during other long measurements; the required Rust workflow also calls it.
+The first report enforces allocation, complete recovery, reservation cleanup, inputs, and sample validity. The repeat also enforces all 216 timing comparisons. The required native/WASM workflow checks the existing ordinary analysis gate first, then runs both cancellation gates and uploads their reports. The tagged `uqa-nori-cancellation/**` trigger permits independent verification while other workflows run.
 
-The revised collector passes all 74 Nori benchmark tooling tests and strict feature-enabled analysis-benchmark Clippy. Repeated collection with deferred JSON conversion and reviewed cancellation regression limits remain open in the [implementation plan](../../docs/plans/0006-nori-analyzer.md). The completed measurements establish their recorded behavior and allocation results, not the revised collector's timing gate.
+`--measure-only` remains an explicit candidate-collection mode and cannot be combined with a timing baseline. All six calibration reports preserve their original false gate status; reproducing the reviewed checks does not rewrite their collected bytes or claim that limits existed at collection time. Tooling tests verify raw hashes, full coverage, repeated allocation equality, both timing directions, and the recorded ceiling calculation. The gate configuration still requires execution on the final remote head, alongside the remaining SQL acceptance recorded in the [implementation plan](../../docs/plans/0006-nori-analyzer.md).
