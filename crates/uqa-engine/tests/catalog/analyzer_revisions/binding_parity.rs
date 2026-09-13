@@ -22,6 +22,15 @@ fn json_value(value: &Value) -> Json {
 
 #[test]
 fn nori_binding_contract_preserves_resources_graphs_and_reopen() {
+    verify_contract(false);
+}
+
+#[test]
+fn nori_binding_contract_survives_backup_restore_without_the_original_database() {
+    verify_contract(true);
+}
+
+fn verify_contract(restore_backup: bool) {
     let fixture: Json = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../tests/parity/nori/bindings.json"
@@ -35,13 +44,25 @@ fn nori_binding_contract_preserves_resources_graphs_and_reopen() {
     );
     let mode = if enabled { "enabled" } else { "disabled" };
     for backend in [Backend::SQLite, Backend::Redb] {
-        let directory = TempDir::new().unwrap();
-        let database = directory.path().join("nori-bindings.db");
+        let mut directory = TempDir::new().unwrap();
+        let mut database = directory.path().join("nori-bindings.db");
         let mut engine = Some(backend.open(&database));
         for step in fixture[mode].as_array().unwrap() {
-            let context = format!("{backend:?}/{mode}/{}", step["name"]);
+            let context = format!(
+                "{backend:?}/{mode}/backup={restore_backup}/{}",
+                step["name"]
+            );
             if step["reopen"].as_bool() == Some(true) {
                 drop(engine.take());
+                if restore_backup {
+                    let restored_directory = TempDir::new().unwrap();
+                    let restored_database = restored_directory.path().join("restored.db");
+                    std::fs::copy(&database, &restored_database).unwrap();
+                    directory.close().unwrap();
+                    assert!(!database.exists(), "{context}: original database remains");
+                    directory = restored_directory;
+                    database = restored_database;
+                }
                 engine = Some(backend.open(&database));
                 continue;
             }
