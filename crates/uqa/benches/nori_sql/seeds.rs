@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Capture ordinary SQL-created empty databases for reproducible catalog inputs.
+//! Pin ordinary SQL-created catalog inputs and capture replacements for review.
 
 use std::path::Path;
 use std::sync::OnceLock;
@@ -15,13 +15,48 @@ use sha2::{Digest, Sha256};
 use super::fixture::{Database, Provider};
 
 pub const TABLE_SQL: &str = "CREATE TABLE docs (id BIGINT PRIMARY KEY, body TEXT)";
-static SELECTED: OnceLock<(Provider, Vec<u8>)> = OnceLock::new();
+const SQLITE: &[u8] = include_bytes!("catalogs/sqlite-empty.db");
+#[cfg(not(target_os = "emscripten"))]
+const REDB: &[u8] = include_bytes!("catalogs/redb-empty.db");
+
+enum Catalogs {
+    Fresh,
+    Captured(Provider, Vec<u8>),
+}
+
+static SELECTED: OnceLock<Catalogs> = OnceLock::new();
 
 pub fn selected(provider: Provider) -> Option<&'static [u8]> {
-    SELECTED
-        .get()
-        .filter(|(selected, _)| *selected == provider)
-        .map(|(_, bytes)| bytes.as_slice())
+    match SELECTED.get() {
+        None => match provider {
+            Provider::Memory => None,
+            Provider::SQLite => Some(SQLITE),
+            #[cfg(not(target_os = "emscripten"))]
+            Provider::Redb => Some(REDB),
+        },
+        Some(Catalogs::Captured(selected, bytes)) if *selected == provider => Some(bytes),
+        Some(Catalogs::Fresh | Catalogs::Captured(_, _)) => None,
+    }
+}
+
+pub fn identities() -> JSONValue {
+    let providers = [
+        Provider::SQLite,
+        #[cfg(not(target_os = "emscripten"))]
+        Provider::Redb,
+    ];
+    let inputs: serde_json::Map<_, _> = providers
+        .into_iter()
+        .filter_map(|provider| {
+            selected(provider).map(|bytes| {
+                (
+                    provider.name().into(),
+                    json!({"bytes": bytes.len(), "sha256": format!("{:x}", Sha256::digest(bytes))}),
+                )
+            })
+        })
+        .collect();
+    json!(inputs)
 }
 
 pub fn command() -> Option<JSONValue> {
@@ -49,10 +84,13 @@ fn probe(provider: &str, directory: Option<&Path>) -> JSONValue {
         "redb" => Provider::Redb,
         _ => panic!("a supported persistent provider is required"),
     };
-    if let Some(directory) = directory {
+    let catalogs = if let Some(directory) = directory {
         let bytes = std::fs::read(directory.join(format!("{}-empty.db", provider.name()))).unwrap();
-        assert!(SELECTED.set((provider, bytes)).is_ok());
-    }
+        Catalogs::Captured(provider, bytes)
+    } else {
+        Catalogs::Fresh
+    };
+    assert!(SELECTED.set(catalogs).is_ok());
     let corpus: JSONValue = serde_json::from_str(super::CORPUS).unwrap();
     let cases = corpus["cases"].as_array().unwrap();
     let measurements: Vec<_> = [

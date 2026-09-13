@@ -9,6 +9,7 @@ from contextlib import redirect_stderr
 import hashlib
 import importlib.util
 import io
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -46,23 +47,66 @@ def fixture(wasm=False):
             row.update(analyzer_fingerprint=fingerprints[mode], query_sha256=hashlib.sha256(case["text"].encode()).hexdigest(),
                        rows=[[doc, 0.9] for doc in [*range(i, benchmark.DOCUMENTS, len(corpus)), benchmark.DOCUMENTS + i]])
         rows.append(row)
-    report = {"schema_version": 1, "owner": "uqa", "protocol": dict(benchmark.PROTOCOL),
+    report = {"schema_version": 2, "owner": "uqa", "protocol": dict(benchmark.PROTOCOL),
               "pointer_bits": 32 if wasm else 64, "foreground_threads": 1,
               "target_arch": "wasm32" if wasm else "aarch64", "target_os": "emscripten" if wasm else "macos",
               "providers": providers, "provider_settings": {"sqlite": {"journal_mode": "delete"}},
+              "catalog_inputs": benchmark.pinned_catalogs(providers),
               "query_documents": benchmark.DOCUMENTS + len(corpus), "work_mem_bytes": 256 * 1024 * 1024,
               "corpus_sha256": benchmark.common.digest(benchmark.common.CORPUS), "measurements": rows,
               "timing_scope": "SQL", "allocation_scope": "SQL", "background_statistics": "normal",
               "provenance": {"cpu": "CPU", "platform": "platform", "rustc": "rustc", "flags": {},
                              "flags_sha256": benchmark.common.flags_signature({}), "node": None, "emcc": None,
                              "benchmark_sha256": "c" * 64, "cargo_lock_sha256": "d" * 64}}
-    limits = {"schema_version": 1, "corpus_sha256": report["corpus_sha256"], "timing_max_ratio": 1.2,
+    limits = {"schema_version": 2, "corpus_sha256": report["corpus_sha256"], "timing_max_ratio": 1.2,
+              "catalog_inputs": benchmark.pinned_catalogs(["sqlite", "redb"]),
               "allocation_ceilings": {benchmark.target_key(report): {row["name"]: dict(row["allocation"]) for row in rows}},
               "outputs": {benchmark.output_key(row["name"]): copy.deepcopy(benchmark.output(row)) for row in rows}}
     return report, limits
 
 
 class NoriSQLBenchmarkTest(unittest.TestCase):
+    def test_catalog_inputs_are_required_in_reports_and_reviewed_limits(self):
+        for wasm in (False, True):
+            report, limits = fixture(wasm)
+            self.assertTrue(benchmark.check(report, limits)["allocation_and_rows_passed"])
+            for change in ("missing", "provider", "extra", "hash", "bytes", "legacy"):
+                changed = copy.deepcopy(report)
+                if change == "missing": del changed["catalog_inputs"]
+                elif change == "provider": del changed["catalog_inputs"]["sqlite"]
+                elif change == "extra": changed["catalog_inputs"]["memory"] = changed["catalog_inputs"]["sqlite"]
+                elif change == "hash": changed["catalog_inputs"]["sqlite"]["sha256"] = "a" * 64
+                elif change == "bytes": changed["catalog_inputs"]["sqlite"]["bytes"] += 1
+                else: changed["schema_version"] = 1
+                with self.subTest(wasm=wasm, change=change), self.assertRaises(RuntimeError):
+                    benchmark.check(changed, limits)
+            limits["catalog_inputs"]["sqlite"]["sha256"] = "a" * 64
+            with self.assertRaisesRegex(RuntimeError, "catalog input identities"):
+                benchmark.check(report, limits)
+
+    def test_changed_catalog_file_is_rejected_before_building(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            manifest = directory / "manifest.json"
+            manifest.write_bytes(benchmark.CATALOG_MANIFEST.read_bytes())
+            for provider in ("sqlite", "redb"):
+                filename = f"{provider}-empty.db"
+                (directory / filename).write_bytes((benchmark.CATALOGS / filename).read_bytes())
+            with patch.object(benchmark, "CATALOGS", directory), patch.object(benchmark, "CATALOG_MANIFEST", manifest):
+                self.assertEqual(set(benchmark.pinned_catalogs(["sqlite", "redb"])), {"sqlite", "redb"})
+                for provider in ("sqlite", "redb"):
+                    path = directory / f"{provider}-empty.db"
+                    original = path.read_bytes()
+                    for payload in (original[:-1], b"?" + original[1:]):
+                        path.write_bytes(payload)
+                        with self.subTest(provider=provider, bytes=len(payload)), \
+                                patch.object(benchmark.sys, "argv", ["sql-benchmark", "--output", str(directory / "result.json")]), \
+                                patch.object(benchmark.common, "execute_benchmark") as execute:
+                            with self.assertRaisesRegex(RuntimeError, "capture identity changed"):
+                                benchmark.main()
+                            execute.assert_not_called()
+                    path.write_bytes(original)
+
     def test_seed_capture_rejects_overwrites_and_measurement_options_before_building(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

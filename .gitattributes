@@ -39,6 +39,8 @@ python/uqa/THIRD-PARTY/** -text -whitespace linguist-vendored
 
 # Nori fixture and evidence identities hash the exact checked-out bytes.
 crates/uqa-analysis/benches/nori/corpus.json text eol=lf
+crates/uqa/benches/nori_sql/catalogs/*.db binary
+crates/uqa/benches/nori_sql/catalogs/*.json text eol=lf
 tests/parity/nori/**/*.json text eol=lf
 tests/parity/nori/**/*.jsonl text eol=lf
 benchmarks/nori/**/*.json text eol=lf

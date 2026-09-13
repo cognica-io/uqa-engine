@@ -29,6 +29,10 @@ LIMITS = ROOT / "benchmarks/nori/sql-limits.json"
 BENCHMARK = ROOT / "crates/uqa/benches/nori_sql.rs"
 SUPPORT = ROOT / "crates/uqa/benches/nori_sql/fixture.rs"
 SEED_SUPPORT = ROOT / "crates/uqa/benches/nori_sql/seeds.rs"
+CATALOGS = SEED_SUPPORT.parent / "catalogs"
+CATALOG_MANIFEST = CATALOGS / "manifest.json"
+CATALOG_FILES = tuple(CATALOGS / f"{provider}-empty.db" for provider in ("sqlite", "redb"))
+SUPPORTING = (SUPPORT, SEED_SUPPORT, CATALOG_MANIFEST, *CATALOG_FILES)
 OWNERS = ("uqa", "uqa-engine", "uqa-core", "uqa-analysis", "uqa-nori-data", "uqa-storage",
           "uqa-storage-sqlite", "uqa-sql", "uqa-pg-query", "uqa-planner", "uqa-execution",
           "uqa-operators", "uqa-scoring", "uqa-fusion", "uqa-graph", "uqa-joins", "uqa-ml", "uqa-fdw")
@@ -53,6 +57,26 @@ def expected_names(providers: list) -> set:
 
 def identity(value: object) -> bool:
     return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
+def pinned_catalogs(providers: list[str]) -> dict:
+    manifest = json.loads(CATALOG_MANIFEST.read_text())
+    if manifest.get("schema_version") != 1 or manifest.get("owner") != "uqa" or manifest.get("purpose") != "empty_sql_seed_capture" or \
+            manifest.get("table_sql") != "CREATE TABLE docs (id BIGINT PRIMARY KEY, body TEXT)":
+        raise RuntimeError("unsupported SQL catalog capture")
+    entries = manifest.get("files", [])
+    indexed = {entry["provider"]: entry for entry in entries}
+    if len(entries) != 2 or set(indexed) != {"sqlite", "redb"}:
+        raise RuntimeError("SQL catalog capture requires both persistent providers")
+    result = {}
+    for provider, entry in indexed.items():
+        path = CATALOGS / f"{provider}-empty.db"
+        if entry.get("file") != path.name or type(entry.get("bytes")) is not int or \
+                entry["bytes"] != path.stat().st_size or entry.get("sha256") != common.digest(path):
+            raise RuntimeError(f"SQL catalog capture identity changed: {provider}")
+        if provider in providers:
+            result[provider] = {key: entry[key] for key in ("bytes", "sha256")}
+    return result
 
 
 def source_hash(count: int) -> str:
@@ -175,12 +199,14 @@ def transaction_probe(report: dict) -> dict:
 
 
 def measurements(report: dict) -> dict:
-    if report.get("schema_version") != 1 or report.get("owner") != "uqa":
+    if report.get("schema_version") != 2 or report.get("owner") != "uqa":
         raise RuntimeError("unsupported SQL benchmark schema or owner")
     if report.get("protocol") != PROTOCOL or report.get("foreground_threads") != 1:
         raise RuntimeError("invalid SQL sampling protocol")
     wasm = report.get("target_os") == "emscripten"
     providers = ["memory", "sqlite"] + ([] if wasm else ["redb"])
+    if report.get("catalog_inputs") != pinned_catalogs(providers):
+        raise RuntimeError("SQL benchmark changed its pinned catalog inputs")
     if report.get("providers") != providers or report.get("pointer_bits") != (32 if wasm else 64):
         raise RuntimeError("SQL benchmark omitted a supported provider or has the wrong target width")
     if not report.get("target_arch") or report.get("query_documents") != DOCUMENTS + len(phrase.cases()):
@@ -224,8 +250,10 @@ def measurements(report: dict) -> dict:
 
 def check(report: dict, limits: dict, baseline: dict | None = None) -> dict:
     rows = measurements(report)
-    if limits.get("schema_version") != 1 or limits.get("corpus_sha256") != report["corpus_sha256"]:
+    if limits.get("schema_version") != 2 or limits.get("corpus_sha256") != report["corpus_sha256"]:
         raise RuntimeError("unsupported SQL limit schema or corpus")
+    if limits.get("catalog_inputs") != pinned_catalogs(["sqlite", "redb"]):
+        raise RuntimeError("reviewed SQL catalog input identities changed")
     ceilings = limits.get("allocation_ceilings", {}).get(target_key(report))
     if ceilings is None or set(ceilings) != set(rows):
         raise RuntimeError("SQL allocation limits do not cover this complete target")
@@ -248,7 +276,7 @@ def check(report: dict, limits: dict, baseline: dict | None = None) -> dict:
     ratios = {}
     if baseline is not None:
         before = measurements(baseline)
-        for key in ("protocol", "pointer_bits", "target_arch", "target_os", "corpus_sha256", "providers", "provider_settings",
+        for key in ("protocol", "pointer_bits", "target_arch", "target_os", "corpus_sha256", "catalog_inputs", "providers", "provider_settings",
                     "query_documents", "work_mem_bytes", "foreground_threads", "background_statistics", "timing_scope", "allocation_scope"):
             if report.get(key) != baseline.get(key):
                 raise RuntimeError(f"incomparable SQL timing scope: {key}")
@@ -288,7 +316,7 @@ def main() -> int:
         parser.error("fixture experiments require a native execution without measurement or timing options")
     if args.empty_seeds and not args.transaction_probe:
         parser.error("--empty-seeds requires a transaction fixture experiment")
-    protected = [args.limits, common.CORPUS, BENCHMARK, SUPPORT, SEED_SUPPORT] + ([args.baseline] if args.baseline else [])
+    protected = [args.limits, common.CORPUS, BENCHMARK, *SUPPORTING] + ([args.baseline] if args.baseline else [])
     if args.capture_empty_seeds:
         protected += [args.capture_empty_seeds, *(args.capture_empty_seeds / f"{provider}-empty.db" for provider in ("sqlite", "redb"))]
     if args.empty_seeds:
@@ -300,7 +328,7 @@ def main() -> int:
         if args.capture_empty_seeds.exists():
             parser.error("empty seed capture requires a new output directory")
         report = common.execute_benchmark(
-            "native", "uqa", "nori_sql", "nori", owners, (SUPPORT, SEED_SUPPORT),
+            "native", "uqa", "nori_sql", "nori", owners, SUPPORTING,
             arguments=("--capture-empty-seeds", str(args.capture_empty_seeds.resolve())))
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2) + "\n")
@@ -311,14 +339,15 @@ def main() -> int:
         if args.empty_seeds:
             arguments += (str(args.empty_seeds.resolve()),)
         report = common.execute_benchmark(
-            "native", "uqa", "nori_sql", "nori", owners, (SUPPORT, SEED_SUPPORT), arguments=arguments)
+            "native", "uqa", "nori_sql", "nori", owners, SUPPORTING, arguments=arguments)
         transaction_probe(report)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2) + "\n")
         print(f"SQL transaction fixture experiment: {args.output}")
         return 0
+    pinned_catalogs(["sqlite", "redb"])
     report = json.loads(args.report.read_text()) if args.report else common.execute_benchmark(
-        args.target, "uqa", "nori_sql", "nori", owners, (SUPPORT, SEED_SUPPORT), wasm_c_headers=True)
+        args.target, "uqa", "nori_sql", "nori", owners, SUPPORTING, wasm_c_headers=True)
     measurements(report)
     report["gate"] = {"allocation_and_rows_passed": False, "timing_compared": False}
     args.output.parent.mkdir(parents=True, exist_ok=True)

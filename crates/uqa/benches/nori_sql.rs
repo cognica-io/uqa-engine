@@ -253,11 +253,12 @@ fn main() {
     println!(
         "{}",
         json!({
-            "schema_version": 1, "owner": "uqa", "target_os": std::env::consts::OS, "target_arch": std::env::consts::ARCH,
+            "schema_version": 2, "owner": "uqa", "target_os": std::env::consts::OS, "target_arch": std::env::consts::ARCH,
             "pointer_bits": usize::BITS, "foreground_threads": 1, "work_mem_bytes": 256 * 1024 * 1024,
             "background_statistics": if cfg!(target_os = "emscripten") { "no worker threads" } else { "normal database-level provider worker; every seed is explicitly analyzed before measurement" },
             "protocol": {"samples": SAMPLES, "warmup": 1, "timed_operations_per_sample": 1, "insert_batch_rows": 64},
             "query_documents": DOCUMENTS + cases.len(), "corpus_sha256": format!("{:x}", Sha256::digest(CORPUS.as_bytes())),
+            "catalog_inputs": seeds::identities(),
             "providers": providers.iter().map(|provider| provider.name()).collect::<Vec<_>>(), "provider_settings": provider_settings(),
             "timing_scope": "public SQL transactions include BEGIN, bound INSERT batches and COMMIT/ROLLBACK; sql_query includes SQL binding, planning, complete quoted-phrase analysis, physical provider reads, calibrated scoring, implicit transaction completion and materialized rows; session_and_query also includes independent session creation, work_mem setup and session drop; excludes fixture setup, verification, initial open and final result drop",
             "allocation_scope": "current-thread Rust allocator requests during the same operations; queries retain the SQL result, transactions retain their Engine state; retained counts are net live-allocation deltas and may be negative when pre-existing state is freed; excludes pre-existing dictionary/fixture allocations, stack, SQLite C allocation and host heap",
