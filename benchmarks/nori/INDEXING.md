@@ -16,7 +16,7 @@ Memory batches previously cloned the complete existing index before applying the
 
 The original native measurement is retained as a comparison artifact with source hashes captured before the implementation change. Current native and WASM reports include full environment and executable provenance. `index-limits.json` pins complete report hashes, identical graph outputs, and separate 32-bit/64-bit allocation ceilings without padding. An optional timing baseline must match the host, target, compiler, flags, analyzer, corpus, benchmark source, and graph output. The timing margin is derived from repeated measurements and recorded in that file; CI enforces allocation and graph contracts on its own host.
 
-These results cover in-memory indexing through the storage owner. They do not measure SQLite/redb I/O, SQL/transaction snapshot overhead, phrase scoring, or full browser memory. Those remain separate acceptance measurements.
+These results cover in-memory indexing through the storage owner. [Physical provider measurements](PERSISTENT.md) separately cover SQLite/redb transactions and reopen. SQL/transaction snapshot overhead, phrase scoring, and full browser memory remain separate acceptance measurements.
 
 ## Recorded results
 

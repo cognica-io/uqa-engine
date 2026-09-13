@@ -167,6 +167,8 @@ def check(report: dict, limits: dict, baseline: dict | None = None) -> dict:
         for key in ("cpu", "platform", "rustc", "flags", "node", "emcc", "benchmark_sha256"):
             if key not in report["provenance"] or key not in baseline["provenance"] or report["provenance"][key] != baseline["provenance"][key]:
                 raise RuntimeError(f"incomparable Nori timing environment: {key}")
+        if report["provenance"].get("flags_sha256") != baseline["provenance"].get("flags_sha256"):
+            raise RuntimeError("incomparable Nori timing environment: flags_sha256")
         if report["provenance"]["cpu"] == "unknown":
             raise RuntimeError("timing comparison requires an identified CPU")
         for name, entry in entries.items():
@@ -179,12 +181,39 @@ def check(report: dict, limits: dict, baseline: dict | None = None) -> dict:
     return {"allocation_and_output_passed": True, "timing_compared": baseline is not None, "timing_ratios": ratios}
 
 
-def execute_benchmark(target: str, package: str, benchmark: str, features: str, owners: tuple[str, ...]) -> dict:
+def benchmark_sources_hash(entrypoint: pathlib.Path, supporting: tuple[pathlib.Path, ...]) -> str:
+    if not supporting:
+        return digest(entrypoint)
+    checksum = hashlib.sha256()
+    for path in sorted((entrypoint, *supporting)):
+        checksum.update(path.relative_to(ROOT).as_posix().encode() + b"\0")
+        checksum.update(path.read_bytes() + b"\0")
+    return checksum.hexdigest()
+
+
+def compiler_flags(env: dict[str, str]) -> dict[str, str]:
+    names = {"CC", "CXX", "AR", "CFLAGS", "CXXFLAGS", "LDFLAGS", "EMCC_CFLAGS"}
+    names.update(f"{scope}_{name}" for scope in ("HOST", "TARGET") for name in ("CC", "CXX", "AR", "CFLAGS", "CXXFLAGS"))
+    return {key: value for key, value in sorted(env.items())
+            if "RUSTFLAGS" in key or key.startswith("CARGO_PROFILE_") or key in names
+            or key.startswith(("CFLAGS_", "CXXFLAGS_", "CC_", "CXX_", "AR_")) or key.endswith("_LINKER")}
+
+
+def flags_signature(flags: dict[str, str]) -> str:
+    return hashlib.sha256(json.dumps(flags, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def public_flags(flags: dict[str, str]) -> dict[str, str]:
+    user_directory = str(pathlib.Path.home())
+    return {key: value.replace(user_directory, "${HOME}") for key, value in flags.items()}
+
+
+def execute_benchmark(target: str, package: str, benchmark: str, features: str, owners: tuple[str, ...], supporting: tuple[pathlib.Path, ...] = ()) -> dict:
     env = os.environ.copy()
     cpu = cpu_model()
     runtime_hash = runtime_sources_hash(owners)
     benchmark_path = ROOT / "crates" / package / "benches" / f"{benchmark}.rs"
-    benchmark_hash = digest(benchmark_path)
+    benchmark_hash = benchmark_sources_hash(benchmark_path, supporting)
     target_args = []
     if target == "wasm":
         if "EMSDK_PYTHON" not in env:
@@ -211,8 +240,9 @@ def execute_benchmark(target: str, package: str, benchmark: str, features: str, 
         paths.append(executable.with_suffix(".wasm"))
         invocation.insert(0, "node")
     report = json.loads(command(*invocation, env=env))
-    if runtime_sources_hash(owners) != runtime_hash or digest(benchmark_path) != benchmark_hash:
+    if runtime_sources_hash(owners) != runtime_hash or benchmark_sources_hash(benchmark_path, supporting) != benchmark_hash:
         raise RuntimeError("Nori sources changed during measurement; rerun with a stable checkout")
+    flags = compiler_flags(env)
     report["provenance"] = {
         "measured_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "revision": command("git", "rev-parse", "HEAD"),
@@ -220,7 +250,8 @@ def execute_benchmark(target: str, package: str, benchmark: str, features: str, 
         "cpu": cpu,
         "platform": platform.platform(),
         "rustc": command("rustc", "-Vv"),
-        "flags": {key: value for key, value in sorted(env.items()) if "RUSTFLAGS" in key or key.startswith("CARGO_PROFILE_")},
+        "flags": public_flags(flags),
+        "flags_sha256": flags_signature(flags),
         "node": command("node", "--version") if target == "wasm" else None,
         "emcc": command("emcc", "--version", env=env) if target == "wasm" else None,
         "benchmark_sha256": benchmark_hash,
@@ -231,6 +262,8 @@ def execute_benchmark(target: str, package: str, benchmark: str, features: str, 
         "jvm": None,
         "artifacts": [{"name": path.name, "bytes": path.stat().st_size, "sha256": digest(path)} for path in paths],
     }
+    if supporting:
+        report["provenance"]["benchmark_sources"] = {path.relative_to(ROOT).as_posix(): digest(path) for path in (benchmark_path, *supporting)}
     return report
 
 

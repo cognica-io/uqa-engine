@@ -1,0 +1,171 @@
+{
+  "allocation_scope": "current-thread Rust allocator requests during mutation and transaction; excludes base index, dictionary, C allocator, OS cache, stack and host heap",
+  "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+  "corpus_sha256": "18a50905d26e3615d9db2a8b9565cbcdefcbcfdd1036a88292624154fc228e6b",
+  "durability": "SQLite 3.50.4, journal_mode=wal, synchronous=1, page_size=4096",
+  "filesystem": "temporary directory on host filesystem",
+  "measurements": [
+    {
+      "allocation": {
+        "bytes_net": 0,
+        "bytes_peak": 13142035,
+        "bytes_total": 468106703,
+        "count_net": 0,
+        "count_peak": 12420,
+        "count_total": 1892692
+      },
+      "closed_result_file_bytes": 1806336,
+      "closed_seed_file_bytes": 446464,
+      "documents_after": 256,
+      "elapsed_ns": [
+        271604500,
+        284747708,
+        280877417,
+        271657208,
+        283444291,
+        283326333,
+        277847208
+      ],
+      "field_length": 125079,
+      "graph_sha256": "01bbc354e7415e5182f73b54982af1423e855cb4e727b945bd2a5f4029a8e0ea",
+      "median_ns": 280877417,
+      "name": "commit_batch_256/0",
+      "posting_count": 3507,
+      "verified_live_and_reopened_samples": 9
+    },
+    {
+      "allocation": {
+        "bytes_net": 0,
+        "bytes_peak": 1963072,
+        "bytes_total": 44328251,
+        "count_net": 0,
+        "count_peak": 3859,
+        "count_total": 137368
+      },
+      "closed_result_file_bytes": 1982464,
+      "closed_seed_file_bytes": 1806336,
+      "documents_after": 272,
+      "elapsed_ns": [
+        35127500,
+        36327000,
+        35252416,
+        38124750,
+        34899375,
+        33684125,
+        36239958
+      ],
+      "field_length": 133622,
+      "graph_sha256": "f2acfb805f20eda2e1f35ec4f4bfd094fd9c185d55f2df7e32df7b5a640d0d7e",
+      "median_ns": 35252416,
+      "name": "commit_batch_16/256",
+      "posting_count": 3719,
+      "verified_live_and_reopened_samples": 9
+    },
+    {
+      "allocation": {
+        "bytes_net": 0,
+        "bytes_peak": 6958940,
+        "bytes_total": 127356392,
+        "count_net": 0,
+        "count_peak": 3930,
+        "count_total": 165081
+      },
+      "closed_result_file_bytes": 11354112,
+      "closed_seed_file_bytes": 10481664,
+      "documents_after": 2064,
+      "elapsed_ns": [
+        159570333,
+        149178708,
+        151327166,
+        144602708,
+        146981541,
+        142583584,
+        145264667
+      ],
+      "field_length": 1019960,
+      "graph_sha256": "ec6a006122f9822322876f9802a8c7c8a1d6bec2f3dac3cb1f92636c2be2dfa7",
+      "median_ns": 146981541,
+      "name": "commit_batch_16/2048",
+      "posting_count": 28208,
+      "verified_live_and_reopened_samples": 9
+    },
+    {
+      "allocation": {
+        "bytes_net": 0,
+        "bytes_peak": 6958940,
+        "bytes_total": 127356392,
+        "count_net": 0,
+        "count_peak": 3930,
+        "count_total": 165081
+      },
+      "closed_result_file_bytes": 10481664,
+      "closed_seed_file_bytes": 10481664,
+      "documents_after": 2048,
+      "elapsed_ns": [
+        116611334,
+        119879291,
+        122265125,
+        115648375,
+        120311083,
+        132807292,
+        122246167
+      ],
+      "field_length": 1011262,
+      "graph_sha256": "0f4cecb080517dfac5fba98cca752781954cf1c7cbafb7c9d47c71bcde4fc17e",
+      "median_ns": 120311083,
+      "name": "rollback_batch_16/2048",
+      "posting_count": 27991,
+      "verified_live_and_reopened_samples": 9
+    }
+  ],
+  "owner": "uqa-storage-sqlite",
+  "pointer_bits": 64,
+  "protocol": {
+    "samples": 7,
+    "timed_operations_per_sample": 1,
+    "warmup": 1
+  },
+  "schema_version": 1,
+  "target_arch": "aarch64",
+  "target_os": "macos",
+  "threads": 1,
+  "timing_scope": "input construction, index mutation and explicit transaction begin/commit/rollback; excludes seed copying, open, close, graph verification and reopen",
+  "provenance": {
+    "measured_at_utc": "2026-09-13T07:03:06.337273+00:00",
+    "revision": "f7e05ebf14425929eff21bb04750c5057912bcba",
+    "worktree_dirty": true,
+    "cpu": "Apple M1 Ultra",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "rustc": "rustc 1.90.0 (1159e78c4 2025-09-14)\nbinary: rustc\ncommit-hash: 1159e78c4747b02ef996e55082b704c09b970588\ncommit-date: 2025-09-14\nhost: aarch64-apple-darwin\nrelease: 1.90.0\nLLVM version: 20.1.8",
+    "flags": {
+      "CFLAGS": "-isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk -I${HOME}/app/include -I/opt/homebrew/include",
+      "CXXFLAGS": "-isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk -I${HOME}/app/include -I/opt/homebrew/include",
+      "LDFLAGS": " -L${HOME}/app/lib -L/opt/homebrew/lib -L/opt/homebrew/opt/icu4c@77/lib -Wl,-cache_path_lto,${HOME}/.cache/llvm -L${HOME}/app/lib -L/opt/homebrew/lib -L/opt/homebrew/opt/icu4c@77/lib -Wl,-cache_path_lto,${HOME}/.cache/llvm -L${HOME}/app/lib -L/opt/homebrew/lib -L/opt/homebrew/opt/icu4c@77/lib -Wl,-cache_path_lto,${HOME}/.cache/llvm"
+    },
+    "node": null,
+    "emcc": null,
+    "benchmark_sha256": "af0c75fc4ec89dfc54f5e440ea07059fce9bf0ebc660303a44508a192fd30b11",
+    "cargo_lock_sha256": "8e55e43be2f8ac54e9775e56192cc260d046bf2d324a184aa0b424945f160814",
+    "runtime_sources_sha256": "01bd377024ba7b96a5c5a5f0998d21470a854679401159e85b2fe21c8740204b",
+    "profile": "bench (workspace release, thin LTO, one codegen unit, debug information)",
+    "container": null,
+    "jvm": null,
+    "artifacts": [
+      {
+        "name": "nori_persistent-ab94a1f76d1307d7",
+        "bytes": 20800080,
+        "sha256": "3aa5d5abe452b3a1c98b0ab2f2110486afa74c0f8d4a6af809898bd46645acc2"
+      }
+    ],
+    "benchmark_sources": {
+      "crates/uqa-storage-sqlite/benches/nori_persistent.rs": "efd5fbc52ef2eb75eab0288f7c1fd52bf044147a12b4eeba9011fbd7fa351765",
+      "benchmarks/nori/persistent.rs": "c3da36bd5c3bf37308ffcc2446a6bd4725d300cfde02d6b0fb1cad6c1a572adc"
+    },
+    "flags_sha256": "1647b6537e50c7f2c41a549356805c798a60d8a7a5cb84434429d5d347ac84ce"
+  },
+  "gate": {
+    "allocation_and_graph_passed": true,
+    "timing_compared": false,
+    "timing_ratios": {}
+  }
+}

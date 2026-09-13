@@ -42,6 +42,7 @@ fs2 = { workspace = true }
 rusqlite = { version = "0.39", default-features = false, features = ["bundled", "blob", "cache"] }
 
 [dev-dependencies]
+allocation-counter = "=0.8.1"
 uqa-scoring = { workspace = true }
 criterion = { workspace = true }
 tempfile = "3.13"
@@ -53,6 +54,11 @@ path = "tests/integration.rs"
 [[bench]]
 name = "storage"
 harness = false
+
+[[bench]]
+name = "nori_persistent"
+harness = false
+required-features = ["uqa-analysis/nori"]
 
 [lints]
 workspace = true

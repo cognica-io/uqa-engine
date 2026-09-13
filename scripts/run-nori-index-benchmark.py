@@ -31,8 +31,8 @@ PROTOCOL = {"samples": 7, "warmup": 1, "timed_operations_per_sample": 1}
 OWNERS = ("uqa-storage", "uqa-analysis", "uqa-core", "uqa-nori-data")
 
 
-def measurements(report: dict) -> dict:
-    if report.get("schema_version") != 1 or report.get("owner") != "uqa-storage":
+def measurements(report: dict, expected: dict = EXPECTED, owner: str = "uqa-storage") -> dict:
+    if report.get("schema_version") != 1 or report.get("owner") != owner:
         raise RuntimeError("unsupported Nori indexing benchmark schema or owner")
     if report.get("protocol") != PROTOCOL or report.get("threads") != 1 or report.get("pointer_bits") not in (32, 64):
         raise RuntimeError("invalid indexing benchmark sampling protocol or target")
@@ -40,10 +40,10 @@ def measurements(report: dict) -> dict:
         raise RuntimeError("index benchmark corpus does not match the checked-out source")
     rows = report.get("measurements", [])
     indexed = {row["name"]: row for row in rows}
-    if set(indexed) != set(EXPECTED) or len(rows) != len(EXPECTED):
+    if set(indexed) != set(expected) or len(rows) != len(expected):
         raise RuntimeError("missing, duplicate, or unknown indexing workload")
     for name, row in indexed.items():
-        if row.get("documents_after") != EXPECTED[name]:
+        if row.get("documents_after") != expected[name]:
             raise RuntimeError(f"changed indexing document count: {name}")
         samples = row["elapsed_ns"]
         if len(samples) != PROTOCOL["samples"] or any(type(sample) is not int or sample <= 0 for sample in samples):
@@ -59,21 +59,21 @@ def measurements(report: dict) -> dict:
     return indexed
 
 
-def check(report: dict, limits: dict, baseline: dict | None = None) -> dict:
-    rows = measurements(report)
+def check(report: dict, limits: dict, baseline: dict | None = None, *, expected: dict = EXPECTED, owner: str = "uqa-storage") -> dict:
+    rows = measurements(report, expected, owner)
     if limits.get("schema_version") != 1:
         raise RuntimeError("unsupported indexing limit schema")
     for key in ("corpus_sha256", "analyzer_fingerprint"):
         if report.get(key) != limits.get(key):
             raise RuntimeError(f"indexing resource identity changed: {key}")
     ceilings = limits["allocation_ceilings"][str(report["pointer_bits"])]
-    if set(ceilings) != set(EXPECTED) or set(limits["outputs"]) != set(EXPECTED):
+    if set(ceilings) != set(expected) or set(limits["outputs"]) != set(expected):
         raise RuntimeError("indexing limits do not cover every workload")
     for name, row in rows.items():
-        expected = limits["outputs"][name]
-        if not isinstance(expected, dict) or set(expected) != {"graph_sha256", "field_length", "posting_count"}:
+        output = limits["outputs"][name]
+        if not isinstance(output, dict) or set(output) != {"graph_sha256", "field_length", "posting_count"}:
             raise RuntimeError(f"incomplete indexing output contract: {name}")
-        if any(row.get(key) != value for key, value in expected.items()):
+        if any(row.get(key) != value for key, value in output.items()):
             raise RuntimeError(f"indexing graph, metadata, or statistics changed: {name}")
         if set(ceilings[name]) != ALLOCATION_KEYS:
             raise RuntimeError(f"incomplete indexing allocation ceilings: {name}")
@@ -88,13 +88,15 @@ def check(report: dict, limits: dict, baseline: dict | None = None) -> dict:
         raise RuntimeError("indexing timing ceiling must be a finite ratio greater than one")
     ratios = {}
     if baseline is not None:
-        before = measurements(baseline)
+        before = measurements(baseline, expected, owner)
         for key in ("protocol", "pointer_bits", "target_arch", "target_os", "corpus_sha256", "analyzer_fingerprint", "timing_scope", "allocation_scope"):
             if report.get(key) != baseline.get(key):
                 raise RuntimeError(f"incomparable indexing timing baseline: {key}")
         for key in ("cpu", "platform", "rustc", "flags", "node", "emcc", "benchmark_sha256"):
             if key not in report["provenance"] or key not in baseline["provenance"] or report["provenance"][key] != baseline["provenance"][key]:
                 raise RuntimeError(f"incomparable indexing timing environment: {key}")
+        if report["provenance"].get("flags_sha256") != baseline["provenance"].get("flags_sha256"):
+            raise RuntimeError("incomparable indexing timing environment: flags_sha256")
         if report["provenance"]["cpu"] == "unknown":
             raise RuntimeError("indexing timing comparison requires an identified CPU")
         for name, row in rows.items():

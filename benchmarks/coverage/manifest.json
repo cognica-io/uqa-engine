@@ -3,6 +3,14 @@
   "description": "Machine-checked inventory of Rust benchmark entrypoints and required semantic probes.",
   "surfaces": [
     {
+      "path": "crates/uqa-storage-sqlite/benches/nori_persistent.rs",
+      "tokens": ["persistent.rs", "SQLiteInvertedIndex", "begin_transaction", "commit_transaction", "rollback_transaction"]
+    },
+    {
+      "path": "crates/uqa-storage-redb/benches/nori_persistent.rs",
+      "tokens": ["persistent.rs", "KeyValueInvertedIndex", "RedbStorage", "begin_transaction", "commit_transaction", "rollback_transaction"]
+    },
+    {
       "path": "crates/uqa-storage/benches/nori_storage.rs",
       "tokens": ["build_points", "append_batch_16", "graph_fingerprint", "bytes_peak"]
     },
