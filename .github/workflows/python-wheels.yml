@@ -2,8 +2,14 @@ name: Python Wheels
 
 on:
   workflow_dispatch:
+    inputs:
+      full_matrix:
+        description: Also build and verify every release package without publishing
+        required: false
+        type: boolean
+        default: false
   # release.yml calls this workflow and attaches its full matrix to the release.
-  # A manual dispatch runs only the representative Python binding smoke test.
+  # Manual dispatch can verify the same full matrix without publishing.
   workflow_call:
     inputs:
       full_matrix:
@@ -26,7 +32,6 @@ env:
 jobs:
   smoke:
     name: Python bindings
-    if: ${{ !inputs.full_matrix }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

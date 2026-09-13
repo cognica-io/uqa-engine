@@ -2,6 +2,12 @@ name: JavaScript Bindings
 
 on:
   workflow_dispatch:
+    inputs:
+      full_matrix:
+        description: Also build and verify every release package without publishing
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -16,6 +22,11 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  packages:
+    name: Release package matrix
+    if: ${{ inputs.full_matrix }}
+    uses: ./.github/workflows/javascript-packages.yml
+
   http:
     name: Node.js HTTP without native artifacts
     runs-on: ubuntu-24.04
