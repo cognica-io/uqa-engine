@@ -151,6 +151,24 @@ class NoriSQLBenchmarkTest(unittest.TestCase):
         self.assertEqual(calibration["timing_margin_ratio"], 1.1)
         self.assertEqual(limits["timing_max_ratio"], math.ceil(max(maxima.values()) * 1.1 * 100) / 100)
 
+    def test_complete_foreground_pair_preserves_failing_timing_gates(self):
+        limits = json.loads(benchmark.LIMITS.read_text())
+        receipt = json.loads((ROOT / "benchmarks/nori/sql-timing-followup-evidence.json").read_text())["foreground_complete_pair"]
+        reports = []
+        for record in receipt["reports"]:
+            path = ROOT / record["path"]
+            self.assertEqual(path.stat().st_size, record["bytes"])
+            self.assertEqual(benchmark.common.digest(path), record["sha256"])
+            report = json.loads(path.read_text())
+            self.assertEqual(report["gate"], record["original_gate"])
+            self.assertEqual(len(benchmark.measurements(report)), 102)
+            benchmark.check(report, limits, None)
+            reports.append(report)
+        for current, baseline in (reports, reports[::-1]):
+            with self.assertRaisesRegex(RuntimeError, "SQL timing regression"):
+                benchmark.check(current, limits, baseline)
+        self.assertFalse(receipt["passed"])
+
     def test_original_macos_timing_shift_remains_a_gate_failure(self):
         limits = json.loads(benchmark.LIMITS.read_text())
         records = [record for record in limits["calibration"]["reports"] if record["target"] == "macos/aarch64/64"]

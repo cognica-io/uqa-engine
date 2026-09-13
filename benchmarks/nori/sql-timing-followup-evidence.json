@@ -622,5 +622,89 @@
     "complete_outputs_match_reviewed_sql_report": true,
     "reviewed_sql_report": "benchmarks/nori/sql-evidence/macos-baseline.json",
     "reviewed_sql_report_sha256": "d7a19fd11d0566bf69b7101d3c9fdd87d042de13dae8d7d1810d681da035b5e2"
+  },
+  "foreground_complete_pair": {
+    "reports": [
+      {
+        "role": "baseline",
+        "path": "benchmarks/nori/sql-evidence/macos-foreground-baseline.json",
+        "bytes": 3263517,
+        "sha256": "c86cace2c157128d7ea20ed65dbbc5f63fbd1fc5b2641c5189439295d1cb67d0",
+        "revision": "4c0dabdcfaef0b1bfb4fc9c4a0e2857c3114238f",
+        "complete_workloads": 102,
+        "original_gate": {
+          "allocation_and_rows_passed": true,
+          "timing_compared": false,
+          "timing_ratios": {}
+        }
+      },
+      {
+        "role": "repeat",
+        "path": "benchmarks/nori/sql-evidence/macos-foreground-repeat.json",
+        "bytes": 3263523,
+        "sha256": "de427a38ed0d9e4cc65be2ee062baf3f3a35b4b2a2137d7045d7994889e1b1cf",
+        "revision": "4c0dabdcfaef0b1bfb4fc9c4a0e2857c3114238f",
+        "complete_workloads": 102,
+        "original_gate": {
+          "allocation_and_rows_passed": false,
+          "timing_compared": false
+        }
+      }
+    ],
+    "scheduling": {
+      "policy": "macos_foundation_user_interactive",
+      "requested_qos_class": 33
+    },
+    "source_environment_and_executable_match": true,
+    "all_complete_outputs_verified": true,
+    "allocation_gates_passed": true,
+    "timing_gates": [
+      {
+        "passed": false,
+        "error": "SQL timing regression: sqlite/sql_query/discard/korean_prose: 1.902 > 1.44"
+      },
+      {
+        "passed": false,
+        "error": "SQL timing regression: sqlite/session_and_query/none/korean_prose: 1.530 > 1.44"
+      }
+    ],
+    "maximum_bidirectional_repeat_ratio": 2.1249624770321236,
+    "median_bidirectional_repeat_ratio": 1.0405141536601779,
+    "largest_ratios": [
+      [
+        "sqlite/session_and_query/discard/korean_prose",
+        2.1249624770321236
+      ],
+      [
+        "sqlite/sql_query/discard/short_query",
+        2.111823110478051
+      ],
+      [
+        "sqlite/session_and_query/discard/short_query",
+        2.072998604878508
+      ],
+      [
+        "sqlite/sql_query/discard/korean_prose",
+        1.90154634756938
+      ],
+      [
+        "sqlite/session_and_query/none/korean_prose",
+        1.529809942048512
+      ],
+      [
+        "redb/session_and_query/mixed/short_query",
+        1.2636308500804052
+      ],
+      [
+        "redb/sql_query/mixed/hanja",
+        1.2247240463111033
+      ],
+      [
+        "redb/rollback_16/256",
+        1.1618389125105935
+      ]
+    ],
+    "passed": false,
+    "conclusion": "Foreground scheduling does not resolve the complete SQLite timing variability. Preserve the unchanged 1.44 gate; this pair is excluded from timing calibration."
   }
 }
