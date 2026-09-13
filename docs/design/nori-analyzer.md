@@ -1,6 +1,6 @@
 # Lucene-compatible Nori analyzer
 
-Status: active design, prepared on 2026-09-12 against UQA commit `bbeb1026cba9001cc5f084d24ac68ec197bd1925`. Generic source mapping and structured token APIs are now implemented and described in the [Rust analyzer reference](../manual/reference/06-text-analyzers.md#structured-tokens). The standalone native Nori tokenizer, user-rule compiler, default analyzer, POS/readings/simple-lowercase filters, and separate normalization are also implemented and described in the [Korean tokenization reference](../manual/reference/06-text-analyzers.md#standalone-korean-tokenization). Korean number composition and generic pipeline compilation are implemented. Durable graph revisions and storage, quoted phrase matching, explicit-analyzer highlighting, built-in registration, SQL diagnostics, and complete execution resource controls are implemented. Feature-enabled Python, Node.js, and browser WASM artifacts now bundle the native resources and pass SQL diagnostic execution tests; measured defaults and final release gates remain open.
+Status: active design, prepared on 2026-09-12 against UQA commit `bbeb1026cba9001cc5f084d24ac68ec197bd1925`. Generic source mapping and structured token APIs are now implemented and described in the [Rust analyzer reference](../manual/reference/06-text-analyzers.md#structured-tokens). The standalone native Nori tokenizer, user-rule compiler, default analyzer, POS/readings/simple-lowercase filters, and separate normalization are also implemented and described in the [Korean tokenization reference](../manual/reference/06-text-analyzers.md#standalone-korean-tokenization). Korean number composition and generic pipeline compilation are implemented. Durable graph revisions and storage, quoted phrase matching, explicit-analyzer highlighting, built-in registration, SQL diagnostics, and complete execution resource controls are implemented. Feature-enabled Python, Node.js, and browser WASM artifacts bundle the native resources and pass the shared persistent binding contract. Analysis, indexing, graph phrases, browser memory observations, and cancellation have recorded measurements; public SQL/session calibration and final remote-head CI remain open.
 
 Development follows the active [Nori implementation plan](../plans/0006-nori-analyzer.md), which records the current implementation boundary, dependencies, and verification evidence.
 
@@ -14,7 +14,7 @@ Compatibility covers the ordered term stream, token offsets, position increments
 
 The design includes the three decompound modes, system and unknown dictionaries, user dictionaries, POS filtering, reading conversion, lowercase normalization, and the optional Korean number filter. It also includes the indexing, query, persistence, and binding changes needed to consume their output correctly. `standard_cjk` retains its documented character n-gram behavior.
 
-The checked-in [reference harness](../../tests/parity/nori/README.md) executed 31 cases using the real Lucene classes in Docker. Its [manifest](../../tests/parity/nori/manifest.json) pins all inputs, and its [expected output](../../tests/parity/nori/expected.jsonl) contains complete token attributes. The expanded reference additionally compares 38 user-dictionary cases, 238 standalone tokenizer cases, and 423 filter/analyzer/normalization cases to native Rust, including complete token/end-state hashes for long streams. The default native analyzer and its constituent filters match the recorded cases, and simple lowercase matches a complete Unicode traversal. Optional Korean number composition, end-to-end retrieval parity, and performance remain unverified. The feature-enabled WASM bundle executes the native analyzer in JavaScript tests.
+The checked-in [reference harness](../../tests/parity/nori/README.md) executed 31 cases using the real Lucene classes in Docker. Its [manifest](../../tests/parity/nori/manifest.json) pins all inputs, and its [expected output](../../tests/parity/nori/expected.jsonl) contains complete token attributes. The expanded reference additionally compares 38 user-dictionary cases, 238 standalone tokenizer cases, 423 filter/analyzer/normalization cases, 823 number-composition cases, and 138 common-pipeline cases to native Rust, including complete token/end-state hashes for long streams. Together with the original cases, all 1,691 reference cases match their native consumers. Simple lowercase also matches a complete Unicode traversal. The [persistent binding contract](../../tests/parity/nori/BINDINGS.md) verifies UQA retrieval and lifecycle behavior through Rust, Python, Node.js, and WASM; public SQL/session performance calibration remains open.
 
 | Reference input | Pinned value |
 | --- | --- |
@@ -25,24 +25,21 @@ The checked-in [reference harness](../../tests/parity/nori/README.md) executed 3
 | Dictionary normalization during Lucene generation | `normalizeEntries = false` |
 | Reference command | `python3 tests/parity/nori/run_reference.py` |
 
-The original 31 cases, expanded user/tokenizer/filter/analyzer corpora, and complete neutral model export have been reproduced on both Docker platforms with identical output. Native differential checks are recorded separately in the implementation plan; they do not establish number-filter or end-to-end retrieval parity or platform performance. The feature-enabled WASM bundle now executes Nori analysis in JavaScript tests. Changing the Docker digest, JVM, Lucene jars, dictionary, or generated Unicode tables requires an explicit fixture diff and a new compatibility fingerprint.
+The complete reference corpora and neutral model export have been reproduced on both Docker platforms with identical output. CSV regeneration also reproduces all nine Lucene dictionary resources byte for byte. The implementation plan separately records native differential checks, provider/binding conformance, and measured performance; these verify their respective contracts without claiming Lucene index-format or score identity. Changing the Docker digest, JVM, Lucene jars, dictionary, or generated Unicode tables requires an explicit fixture diff and a new compatibility fingerprint.
 
-## Current UQA constraints
+## Integration ownership
 
-The baseline inspection identified the following changes needed at the subsystem boundaries. The first two are implemented by the generic analysis foundation; their downstream consumers remain active work in the implementation plan. Some manual ownership tables predate the crate extraction; use the linked source locations for implementation placement.
+Nori uses the existing crate boundaries and provider interfaces. The original term-only pipeline and whitespace phrase lowering have been replaced by the rich contracts below; the [implementation plan](../plans/0006-nori-analyzer.md) records the corresponding tests and remaining acceptance work.
 
-| Existing owner | Observed behavior | Required change |
-| --- | --- | --- |
-| [`Analyzer`](../../crates/uqa-analysis/src/analyzer.rs), [`Tokenizer`](../../crates/uqa-analysis/src/tokenizer.rs), and [`TokenFilter`](../../crates/uqa-analysis/src/token_filter.rs) | Pass `Vec<String>` between stages | Add a structured token stream and migrate stages without changing the existing term-only API's output order |
-| [`CharFilter`](../../crates/uqa-analysis/src/char_filter.rs) | Produces a replacement string without an offset correction map | Carry source mappings through every edit |
-| [Memory index](../../crates/uqa-storage/src/inverted_index.rs), [Key/Value index](../../crates/uqa-storage/src/key_value/inverted_index.rs), and [SQLite index](../../crates/uqa-storage-sqlite/src/inverted_index/maintenance.rs) | Enumerate strings as consecutive positions and use `tokens.len()` as field length | Consume explicit positions, occurrences, and a declared length policy |
-| [`Payload`](../../crates/uqa-core/src/types/posting.rs) | Stores sorted, unique `Vec<u32>` positions | Add an occurrence contract that retains graph edges and multiplicity |
-| [`TermOperator`](../../crates/uqa-operators/src/primitive.rs) | Unions the postings of all analyzed terms in one leaf | Preserve this documented term-search behavior and separate positional query execution |
-| [FTS query lowering](../../crates/uqa-sql/src/retrieval/calls/fts.rs) | Splits quoted phrases on whitespace and lowers multiple terms to an intersection | Retain phrase text until field analysis and execute an actual positional graph match |
-| [Analyzer catalog](../../crates/uqa-engine/src/analyzers.rs) | Persists named JSON and one assignment record per field | Persist immutable resolved revisions and independent index/search bindings |
-| [Highlighter](../../crates/uqa-analysis/src/highlight.rs) | Explicit analyzers match complete-source spans; omitted analyzers retain native Unicode word scanning | Preserve corrected spans and runtime ownership through every caller |
-
-Adding a tokenizer that returns Korean strings would lose the information needed by compound alternatives and inflected forms. The structured stream and its consumers are prerequisites for advertising Nori support.
+| Owner | Implemented contract |
+| --- | --- |
+| [`uqa-analysis`](../../crates/uqa-analysis/src/analyzer.rs) | Structured tokens, immutable compilation, and source maps preserve morphology, graph edges, corrected offsets, and stream-end state; the term-only API remains an ordered projection |
+| [Memory](../../crates/uqa-storage/src/inverted_index.rs), [Key/Value](../../crates/uqa-storage/src/key_value/inverted_index.rs), and [SQLite](../../crates/uqa-storage-sqlite/src/inverted_index/maintenance.rs) indexes | Store exact occurrence multiplicity and field lengths, retain independent index/search revisions, and publish mutations atomically |
+| [`uqa-core`](../../crates/uqa-core/src/types/occurrence.rs) | Common occurrence and lossless-key values complement the existing unique-position posting projection |
+| [`uqa-operators`](../../crates/uqa-operators/src/phrase.rs) | Native graph phrases preserve paths and position gaps under the shared allowance; ordinary term support retains its documented union behavior |
+| [SQL retrieval lowering](../../crates/uqa-sql/src/retrieval/calls/fts.rs) | Retains complete quoted phrase text for field-specific query analysis and positional execution |
+| [Engine analyzer adapters](../../crates/uqa-engine/src/analyzers.rs) | Retain catalog, session, transaction, and immutable resource state while native owners implement analysis, storage, and query behavior |
+| [Highlighter](../../crates/uqa-analysis/src/highlight.rs) | Explicit analyzers match complete-source spans with corrected offsets and runtime accounting |
 
 ## Observable Nori behavior
 
@@ -50,7 +47,7 @@ Adding a tokenizer that returns Korean strings would lose the information needed
 
 The default pipeline is `KoreanTokenizer → KoreanPartOfSpeechStopFilter → KoreanReadingFormFilter → LowerCaseFilter`. The tokenizer defaults are `DISCARD`, `outputUnknownUnigrams = false`, `discardPunctuation = true`, and no user dictionary. `KoreanAnalyzer.normalize` applies lowercase only; it does not run morphological analysis or replace Hanja readings. These are separate entry points. See the pinned [analyzer](https://github.com/apache/lucene/blob/64ce863a2bea79c69c19c4d56268c26710ff0ff9/lucene/analysis/nori/src/java/org/apache/lucene/analysis/ko/KoreanAnalyzer.java) and [tokenizer factory](https://github.com/apache/lucene/blob/64ce863a2bea79c69c19c4d56268c26710ff0ff9/lucene/analysis/nori/src/java/org/apache/lucene/analysis/ko/KoreanTokenizerFactory.java).
 
-| UQA component proposed below | Required behavior |
+| UQA component | Required behavior |
 | --- | --- |
 | `nori_tokenizer` | Rolling Viterbi morphology, decompounding, punctuation option, and optional unknown unigrams |
 | `nori_part_of_speech` | Remove tokens whose left POS belongs to the configured set; preserve accumulated position gaps |
@@ -259,7 +256,7 @@ Filter order also determines inherited metadata. Number composition changes the 
 
 ## SQL and binding surface
 
-Add built-in name `nori` when the feature is available. It uses the complete default pipeline above, no user dictionary, and the release-pinned default bundle. Reserve the name consistently across the process registry and engine catalog. Upgrade preflight must detect an existing custom analyzer named `nori` and require an explicit name migration before enabling the built-in; it must never shadow that definition or change an existing field's analysis.
+The built-in name `nori` is available with the dictionary feature. It uses the complete default pipeline above, no user dictionary, and the release-pinned default bundle. Reserve the name consistently across the process registry and engine catalog. Upgrade preflight must detect an existing custom analyzer named `nori` and require an explicit name migration before enabling the built-in; it must never shadow that definition or change an existing field's analysis.
 
 The common analysis API accepts this custom configuration with the `nori` feature:
 
@@ -284,9 +281,9 @@ The common analysis API accepts this custom configuration with the `nori` featur
 
 `dictionary` omission selects the release default at registration and persists its resolved content identity. `decompound_mode` accepts exactly `none`, `discard`, or `mixed` and defaults to `discard`. Both booleans use the Lucene defaults. `user_dictionary` omission means no user entries; empty or comment-only content follows the reference. `nori_part_of_speech.stop_tags` is an optional array of exact POS names. Unknown tags, modes, resources, and new component properties are errors before publication. Serialized defaults must become explicit in the resolved descriptor.
 
-Use the existing `create_analyzer`, GIN ownership, and `set_table_analyzer` workflow. The following is proposed SQL, deliberately fenced as text because Nori registration cannot execute in the current engine:
+Nori registration, GIN ownership, and `set_table_analyzer` execute through the existing SQL interfaces. The [analyzer SQL manual](../manual/sql/05-analyzers.md) defines their current contracts, and the [Korean analyzer reference](../manual/reference/06-text-analyzers.md#standalone-korean-tokenization) describes the native components. A built-in Nori GIN index uses this SQL:
 
-```text
+```sql execute
 CREATE TABLE korean_articles (id BIGINT PRIMARY KEY, body TEXT);
 CREATE INDEX korean_articles_body_gin ON korean_articles USING gin (body)
 WITH (analyzer = 'nori');
@@ -296,9 +293,9 @@ SELECT id, _score FROM korean_articles
 WHERE text_match(body, '나물') ORDER BY _score DESC, id;
 ```
 
-For custom pipelines, pass the proposed JSON to `create_analyzer` before the index creation and use that catalog name. A field-assignment-managed index is created without an `analyzer` option and then assigned with `both`; retain one ownership path for each field.
+For custom pipelines, pass the configuration JSON to `create_analyzer` before the index creation and use that catalog name. A field-assignment-managed index is created without an `analyzer` option and then assigned with `both`; retain one ownership path for each field.
 
-Add a read-only row-producing diagnostic `analyze_text(name TEXT, input TEXT)` returning one `analysis JSONB` column. The object contains tokens, both offset coordinate systems, positions, morphology, stream end state, and the resolved analyzer fingerprint. One object preserves end state even when there are no tokens. Invalid argument types, a missing analyzer/resource, or an analysis failure returns a normal SQL error without catalog effects. Rust exposes the same information through `analyze_tokens`; Python, Node.js, and WASM can consume the SQL result without separate tokenizer implementations.
+The read-only row-producing diagnostic `analyze_text(name TEXT, input TEXT)` returns one `analysis JSONB` column. The object contains tokens, both offset coordinate systems, positions, morphology, stream end state, and the resolved analyzer fingerprint. One object preserves end state even when there are no tokens. Invalid argument types, a missing analyzer/resource, or an analysis failure returns a normal SQL error without catalog effects. Rust exposes the same information through `analyze_tokens`; Python, Node.js, and WASM can consume the SQL result without separate tokenizer implementations.
 
 SQL `uqa_highlight` now accepts an explicit analyzer-name argument after its existing six arguments. The existing call shape retains English word scanning, while the new overload uses full-source rich analysis and the selected immutable analyzer revision. The typed highlighter's explicit-analyzer path uses the same source spans, and `highlight_compiled` accepts an already retained revision. Do not infer a field analyzer from a bare text value; a later field-aware API must carry a real table/field identity.
 
@@ -306,7 +303,7 @@ SQL `uqa_highlight` now accepts an explicit analyzer-name argument after its exi
 
 Persist a resolved analyzer descriptor, not just a mutable name. Its fingerprint covers the canonical pipeline and defaults, algorithm revision, bundle hash, Unicode profile, exact user dictionary content, character-filter mapping semantics, and index length policy. Names remain catalog lookup keys; compiled handles and index generations refer to immutable descriptors.
 
-Persist the index and search descriptors independently for each field, including whether GIN DDL or an assignment owns the binding. A `both` change publishes both sides with one revision; an `index` or `search` change updates its selected side while preserving the other durable descriptor. This fixes the current one-record restoration problem instead of requiring applications to avoid it. A GIN-owned field rejects competing assignment ownership through the existing ownership contract.
+Persist the index and search descriptors independently for each field, including whether GIN DDL or an assignment owns the binding. A `both` change publishes both sides with one revision; an `index` or `search` change updates its selected side while preserving the other durable descriptor. Restoration preserves both phase descriptors without collapsing them into one assignment record. A GIN-owned field rejects competing assignment ownership through the existing ownership contract.
 
 Replacing a named definition creates a new revision and does not mutate installed index or search handles. Rebinding `index` or `both` builds replacement postings and field statistics with the candidate revision before publication. Search-only rebinding changes the search descriptor without claiming that two vocabularies are equivalent. Other sessions observe the new catalog epoch only after the descriptor, postings, statistics, and catalog binding commit together.
 
@@ -318,7 +315,7 @@ Document writes, index backfill, named registration, field rebinding, rollback, 
 
 ### Occurrences and field length
 
-The common library now implements `TokenOccurrence`, canonical lossless term keys, immutable field staging, and a [versioned occurrence codec](occurrence-posting-format.md). Memory, Key/Value, and native SQLite integrate these values with source rebuilds and durable field revisions. Graph phrases consume the persisted occurrences; source highlighting uses complete rich analysis under one retained revision. Complete runtime accounting and expanded differential coverage remain open.
+The common library now implements `TokenOccurrence`, canonical lossless term keys, immutable field staging, and a [versioned occurrence codec](occurrence-posting-format.md). Memory, Key/Value, and native SQLite integrate these values with source rebuilds and durable field revisions. Graph phrases consume the persisted occurrences; source highlighting uses complete rich analysis under one retained revision. Provider reads, phrase analysis and matching, and highlighting propagate the shared runtime allowance and cancellation controls; their owning tests and expanded differential coverage are recorded in the implementation plan.
 
 Add a provider-independent `TokenOccurrence` containing start position, position length, and corrected source offsets. Retain occurrence multiplicity and term frequency separately from the existing unique-position projection. The occurrence list is keyed by field, term, and document; generic posting unions cannot erase term identity before positional execution. `Payload.positions` can remain a compatibility projection for consumers needing starts only, but graph consumers use the occurrence API.
 
@@ -368,7 +365,7 @@ Add fixture-driven modules to the existing single `uqa-analysis` integration tar
 
 Require GIN backfill, insert/update/delete, field reassignment, independent index/search persistence, named-revision replacement, concurrent sessions, prepared-plan invalidation, rollback, savepoints, cancellation during rebuild, backup/restore, and reopen across Memory, Key/Value/redb, and SQLite as applicable. Test same terms at different positions, same-position duplicates, alternate compound paths, stop gaps, phrase false positives, Hanja highlighting, and normalization statistics. Confirm failure atomicity through actual storage failures, not only configuration parsing.
 
-Execute equivalent SQL scenarios through Rust, Python, Node.js, and browser WASM artifacts, including a supplied user dictionary, diagnostics, search, failed registration, and reopen for persistent targets. Test a custom build without Nori and a missing pinned bundle. Convert the proposed SQL examples into the manual's normal compile/execute fixtures only when the behavior exists, then run the manual SQL harness and update the binding scenario matrix.
+Execute equivalent SQL scenarios through Rust, Python, Node.js, and browser WASM artifacts, including a supplied user dictionary, diagnostics, search, failed registration, and reopen for persistent targets. Test a custom build without Nori and a missing pinned bundle. The manual contains the supported compile/execute fixtures; its SQL harness and the binding scenario matrix verify those public examples.
 
 The [persistent binding fixture](../../tests/parity/nori/BINDINGS.md) now supplies 47 equivalent SQL steps to Rust, Python, Node.js, and WASM. It fixes complete diagnostics and original-source spans, verifies connected phrase paths and particle gaps, rejects unavailable dictionary resources and invalid user rules without publication, and retains field revisions through catalog-name replacement, rollback, new writes, and two reopen boundaries. Rust, Python, Node.js, and WASM also run nine steps through actual feature-disabled artifacts; the default binding test mode still requires the complete enabled scenario. Fresh Chrome sessions verify the same enabled/disabled fixtures through real IndexedDB and page/WASM reloads. Release artifact acceptance remains a separate requirement.
 
@@ -388,7 +385,7 @@ Memory indexing now has [separate native/WASM measurements](../../benchmarks/nor
 
 [Real-browser measurements](../../benchmarks/nori/BROWSER.md) now record three Nori-enabled and three disabled Chrome sessions, all required IndexedDB reloads, and complete native/browser SQL diagnostic identity for six fixed corpora in three modes. The 165 post-GC page memory observations and actual JS/WASM artifacts have pinned hashes and browser/toolchain provenance. The largest observed values are 143,655,635 bytes enabled and 29,526,920 bytes disabled; these estimates do not establish RSS or continuous allocation peaks. Actual Python, Node.js, and WASM custom builds also pass their full package suites with Nori disabled.
 
-[Cooperative cancellation measurements](../../benchmarks/nori/CANCELLATION.md) separately cover cancellation decisions during tokenization and analysis, reservation cleanup, and complete recovery. The benchmark records both total interrupted-operation time and return latency after the callback decision; it does not measure external-signal detection or scheduler latency. Actual native/WASM calibration and regression limits remain required.
+[Cooperative cancellation measurements](../../benchmarks/nori/CANCELLATION.md) separately cover cancellation decisions during tokenization and analysis, reservation cleanup, and complete recovery. The benchmark records both total interrupted-operation time and return latency after the callback decision; it does not measure external-signal detection or scheduler latency. Six macOS/Linux/WASM reports verify all 108 workloads with shared fixed iteration counts, complete recovery, and the unchanged 1.26 timing ceiling. The cancellation evidence and its regression tests retain every raw report and reproduce the reviewed limits.
 
 ## Implementation work packages
 
@@ -404,7 +401,7 @@ Memory indexing now has [separate native/WASM measurements](../../benchmarks/nor
 
 The work packages may be implemented in separate logical commits and PRs, but the public feature is complete only when its analysis, persistence, retrieval, and binding contracts are all verified. Do not advertise Nori after tokenizer compilation alone.
 
-[Package acceptance evidence](../../benchmarks/nori/DELIVERY.md) now records the corrected full Python and JavaScript matrices, every binding archive, refreshed Rust/source archives, feature/dependency metadata checks, and actual installed-package execution. The inventory pins archive and CI report identities while distinguishing compiled tests from packaging-only checks. The refreshed four-crate preflight and complete current source archive also pass. Complete SQL and cancellation calibration and final remote-head CI remain acceptance requirements.
+[Package acceptance evidence](../../benchmarks/nori/DELIVERY.md) now records the corrected full Python and JavaScript matrices, every binding archive, refreshed Rust/source archives, feature/dependency metadata checks, and actual installed-package execution. The inventory pins archive and CI report identities while distinguishing compiled tests from packaging-only checks. The refreshed four-crate preflight and complete current source archive also pass. Public SQL/session calibration and final remote-head CI remain acceptance requirements.
 
 ## Alternatives and remaining engineering decisions
 
