@@ -84,36 +84,13 @@ impl Engine {
     pub fn analyze_text(&self, name: &str, input: &str) -> Result<uqa_core::Value, String> {
         self.synchronize_catalog_registries()
             .map_err(|err| format!("refresh analyzer catalog: {err}"))?;
-        let analyzer = self.resolve_analyzer_revision(name)?;
-        let runtime = self.query_runtime_view();
-        let budget = uqa_core::memory::MemoryBudget::new(
-            runtime
-                .work_mem_bytes()
-                .map_err(|error| error.to_string())?,
-        );
-        let mut poll = || {
-            runtime
-                .cancellation
-                .check()
-                .map_err(|_| uqa_analysis::AnalysisError::Cancelled)
-        };
-        let analysis = analyzer
-            .analyze_tokens_budgeted(input, &budget, &mut poll)
-            .map_err(|error| format!("analyze text with `{}`: {error}", name.trim()))?;
-        let analysis = analysis.into_parts().0;
-        let mut diagnostic = serde_json::to_value(&analysis)
-            .map_err(|error| format!("serialize analysis for `{}`: {error}", name.trim()))?;
-        let object = diagnostic
-            .as_object_mut()
-            .ok_or_else(|| "analysis diagnostic must be a JSON object".to_owned())?;
-        object.insert(
-            "analyzer_fingerprint".into(),
-            serde_json::to_value(analyzer.descriptor().fingerprint())
-                .map_err(|error| format!("serialize analyzer fingerprint: {error}"))?,
-        );
-        let json = serde_json::to_string(&diagnostic)
-            .map_err(|error| format!("serialize analysis diagnostic: {error}"))?;
-        Ok(uqa_core::Value::JsonB(json))
+        uqa_execution::query::table_functions::analyze_text(
+            self.query_runtime_view(),
+            self,
+            name,
+            input,
+        )
+        .map_err(|error| error.to_string())
     }
 
     pub fn drop_named_analyzer(&self, name: &str) -> Result<bool, String> {

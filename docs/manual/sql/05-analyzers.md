@@ -148,7 +148,7 @@ Inspect one complete analysis result without changing the catalog:
 | Arguments | `name` resolves a built-in or custom analyzer and `input` is the complete source string |
 | Result | One `analysis JSONB` row containing `tokens`, `final_offsets`, `final_position_increment`, and `analyzer_fingerprint` |
 | Effects | Read-only; no analyzer, table, index, or session state is changed |
-| Errors | Wrong arity or types, an unknown analyzer, unavailable resources, invalid analysis input, and analysis failures are returned as SQL errors |
+| Errors | Wrong arity or types, an unknown analyzer, unavailable resources, invalid analysis input, and analysis failures are returned as SQL errors; cancellation returns `57014` and exceeding `work_mem` during analysis or diagnostic encoding returns `53200` |
 
 Each token preserves its term, UTF-8 and UTF-16 source ranges, position increment and length, keyword state, and any analyzer-specific metadata. Nori tokens additionally include Korean morphology, readings, and morpheme origins when those attributes are present. The final offsets and final position increment are retained even when filters remove every token, and `analyzer_fingerprint` identifies the resolved immutable revision used for the call.
 
@@ -157,7 +157,7 @@ SELECT analysis
 FROM analyze_text('nori', '나물은') AS a(analysis);
 ```
 
-The JSONB diagnostic is the SQL form of the same rich token stream returned by the Rust `uqa_analysis::CompiledAnalyzer::analyze_tokens` API. A feature-disabled build reports an unknown analyzer for `nori` rather than silently falling back to another pipeline.
+The JSONB diagnostic is the SQL form of the same rich token stream returned by the Rust `uqa_analysis::CompiledAnalyzer::analyze_tokens` API. Analysis and diagnostic encoding share one memory allowance; the analysis result remains reserved until serialization finishes. A feature-disabled build reports an unknown analyzer for `nori` rather than silently falling back to another pipeline.
 
 ## Bind through CREATE INDEX
 

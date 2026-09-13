@@ -24,7 +24,7 @@ pub trait TableFunctionSession {
     fn sequence_parameters(&self, args: &[Value]) -> Result<Value, SQLError>;
 }
 
-pub trait AnalyzerTableFunctions {
+pub trait AnalyzerTableFunctions: crate::query::scalar_projection::AnalyzerRevisions {
     fn register_named_analyzer(&self, name: &str, config: &str) -> Result<(), String>;
     fn drop_named_analyzer(&self, name: &str) -> Result<bool, String>;
     fn list_named_analyzers(&self) -> Result<Vec<String>, String>;
@@ -36,7 +36,6 @@ pub trait AnalyzerTableFunctions {
         phase: &str,
     ) -> Result<(), SQLError>;
     fn fts_index_stats(&self, table: Option<&str>) -> Result<Vec<FtsIndexStat>, SQLError>;
-    fn analyze_text(&self, name: &str, input: &str) -> Result<Value, String>;
 }
 
 /// Bind both relation operands before execution schedules their independent physical plans.

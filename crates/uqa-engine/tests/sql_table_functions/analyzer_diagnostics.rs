@@ -94,3 +94,29 @@ fn analyze_text_rejects_wrong_arity_and_argument_types() {
         .unwrap_err();
     assert!(type_error.to_string().contains("analyze_text arg 2"));
 }
+
+#[test]
+fn analyze_text_preserves_work_mem_errors_and_recovers() {
+    let engine = Engine::new();
+    engine.sql("SET work_mem = '32kB'", &[]).unwrap();
+    let input = "\u{1f}\"\\\n".repeat(8192);
+    let error = engine
+        .sql(
+            "SELECT analysis FROM analyze_text('keyword', $1)",
+            &[uqa_sql::SQLParam::Scalar(Value::Str(input.clone()))],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"));
+    engine.sql("SET work_mem = '16MB'", &[]).unwrap();
+    let result = engine
+        .sql(
+            "SELECT analysis FROM analyze_text('keyword', $1)",
+            &[uqa_sql::SQLParam::Scalar(Value::Str(input.clone()))],
+        )
+        .unwrap();
+    let Value::JsonB(json) = &result.rows[0]["analysis"] else {
+        panic!("JSONB diagnostic");
+    };
+    let diagnostic: serde_json::Value = serde_json::from_str(json).unwrap();
+    assert_eq!(diagnostic["tokens"][0]["term"], input);
+}

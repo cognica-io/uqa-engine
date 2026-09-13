@@ -18,6 +18,7 @@ use crate::token_filter::TokenFilter;
 use crate::tokenizer::Tokenizer;
 
 mod compiled;
+mod diagnostics;
 pub use compiled::CompiledAnalyzer;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

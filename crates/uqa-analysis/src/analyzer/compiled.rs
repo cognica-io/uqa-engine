@@ -109,7 +109,7 @@ impl CompiledAnalyzer {
 
     /// Execute all prepared stages with one allowance for runtime buffers and retained output.
     ///
-    /// Immutable compiled resources and borrowed input have separate owners. Character maps, tokenization, common/Korean filters and source projections share this allowance. Errors return no partial output. Library regex searches run between callback checks; the callback does not interrupt an active search inside that library.
+    /// Immutable compiled resources and borrowed input have separate owners. Character maps, tokenization, common/Korean filters and source projections share this allowance. Errors return no partial output. Prepared regex automata retain analysis-owned search workspaces and poll during traversal and capture resolution.
     ///
     /// ```
     /// use uqa_analysis::standard_analyzer;

@@ -131,6 +131,7 @@ pub mod values;
 pub mod rows_from;
 
 mod analyzers;
+pub use analyzers::analyze_text;
 pub mod context;
 mod dispatch;
 mod graphs;
