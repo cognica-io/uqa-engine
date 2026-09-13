@@ -608,6 +608,18 @@
     "python_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34762160110"
   },
   "current_source_distribution": {
+    "revision": "ec114821f525d1694937b87da2b149007311bf8a",
+    "filename": "uqa-0.2.3.tar.gz",
+    "bytes": 15680963,
+    "sha256": "be4c8756333dd368b0b70b13832953e0f930fd196c730caecff0dfb63e465600",
+    "all_benchmark_inputs_verified": true,
+    "both_embedded_catalogs_identical": true,
+    "canonical_licenses_and_exact_nori_resources": true,
+    "extracted_workspace_metadata_verified": true,
+    "cancellation_benchmark_source_identical_to_recorded_revision": true,
+    "scope": "Source archive inspection and locked offline metadata; does not claim a new wheel matrix or compilation of all packaged crates."
+  },
+  "previous_source_distribution": {
     "revision": "9a8a5aeebc87b4b4f80713394658806ba0023d1d",
     "filename": "uqa-0.2.3.tar.gz",
     "bytes": 15680263,

@@ -3658,5 +3658,67 @@
         "artifact_id": 10321049544
       }
     ]
+  },
+  "fixed_sampling_verification": {
+    "revision": "ec114821f525d1694937b87da2b149007311bf8a",
+    "schema_version": 3,
+    "benchmark_sha256": "437b882d8b85d9daef0f7c6290417dbf10ac180439d25da8b7749b0290fd68b3",
+    "runtime_sources_sha256": "d98a822812ec71fd985b80e95e39ab5806dfbab08578f3cca9804dae2bea9bcb",
+    "cargo_lock_sha256": "888ba09b36bfdae1252ebc5838c700f4e3800060df09e081197f7fbd66ec198e",
+    "run": "https://github.com/cognica-io/uqa-engine/actions/runs/34773828010",
+    "timing_ceiling_unchanged": 1.26,
+    "maximum_bidirectional_repeat_ratios": {
+      "macos/aarch64/64": 1.116617215617902,
+      "linux/x86_64/64": 1.0596376733208497,
+      "emscripten/wasm32/32": 1.2270936856744368
+    },
+    "reports": [
+      {
+        "target": "macos/aarch64/64",
+        "role": "baseline",
+        "path": "benchmarks/nori/cancellation-evidence/fixed/macos-baseline.json",
+        "sha256": "61d2d354cc9cad49680892784a7889f03bc047d2db13195bad01f92e241632fd",
+        "gate_passed_at_collection": true
+      },
+      {
+        "target": "macos/aarch64/64",
+        "role": "repeat",
+        "path": "benchmarks/nori/cancellation-evidence/fixed/macos-repeat.json",
+        "sha256": "6df6440ba1e11ace925099a2fd898a01203811bdcc503437e4b30c777c19eb60",
+        "gate_passed_at_collection": true
+      },
+      {
+        "target": "linux/x86_64/64",
+        "role": "baseline",
+        "path": "benchmarks/nori/cancellation-evidence/fixed/linux-baseline.json",
+        "sha256": "bf28a2e68d20873c8855debe71cb84c95fb588ab79fa3a5d47c4c37a5032d7fa",
+        "gate_passed_at_collection": true,
+        "artifact_id": 10322638534
+      },
+      {
+        "target": "linux/x86_64/64",
+        "role": "repeat",
+        "path": "benchmarks/nori/cancellation-evidence/fixed/linux-repeat.json",
+        "sha256": "099053a58adceb49db65769c9564e92ecea47c5a689bd5ed42894e23986e839a",
+        "gate_passed_at_collection": true,
+        "artifact_id": 10322638534
+      },
+      {
+        "target": "emscripten/wasm32/32",
+        "role": "baseline",
+        "path": "benchmarks/nori/cancellation-evidence/fixed/wasm-baseline.json",
+        "sha256": "b551821b75c806435be4ac36f99899b4170a2406f8e4d9c7d387be6faa27c37a",
+        "gate_passed_at_collection": true,
+        "artifact_id": 10322718340
+      },
+      {
+        "target": "emscripten/wasm32/32",
+        "role": "repeat",
+        "path": "benchmarks/nori/cancellation-evidence/fixed/wasm-repeat.json",
+        "sha256": "f285fbe43106a08d4117bb4a781a789f7948e20105802fbe2e199cee6bdaeffc",
+        "gate_passed_at_collection": true,
+        "artifact_id": 10322718340
+      }
+    ]
   }
 }

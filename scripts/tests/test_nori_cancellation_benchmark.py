@@ -71,6 +71,42 @@ def fixed_fixture():
 
 
 class NoriCancellationBenchmarkTests(unittest.TestCase):
+    def test_reviewed_fixed_reports_reproduce_all_targets_with_unchanged_limits(self):
+        limits = json.loads(benchmark.LIMITS.read_text())
+        verification = limits["fixed_sampling_verification"]
+        self.assertEqual(verification["schema_version"], 3)
+        self.assertEqual(verification["timing_ceiling_unchanged"], limits["timing_max_ratio"])
+        self.assertEqual(len(verification["reports"]), 6)
+        pairs = {}
+        for record in verification["reports"]:
+            path = ROOT / record["path"]
+            self.assertEqual(benchmark.common.digest(path), record["sha256"])
+            report = json.loads(path.read_text())
+            self.assertEqual(report["schema_version"], 3)
+            self.assertEqual(benchmark.target_key(report), record["target"])
+            self.assertIs(record["gate_passed_at_collection"], True)
+            self.assertIs(report["gate"]["allocation_and_recovery_passed"], True)
+            for value in (report, report["sampling_pilot"]):
+                self.assertFalse(value["provenance"]["worktree_dirty"])
+                for key in ("revision", "benchmark_sha256", "runtime_sources_sha256", "cargo_lock_sha256"):
+                    self.assertEqual(value["provenance"][key], verification[key])
+            pairs.setdefault(record["target"], {})[record["role"]] = report
+        self.assertEqual(set(pairs), set(limits["allocation_ceilings"]))
+        for target, pair in pairs.items():
+            self.assertEqual(set(pair), {"baseline", "repeat"})
+            first, second = pair["baseline"], pair["repeat"]
+            self.assertEqual(benchmark.check(first, limits), first["gate"])
+            self.assertEqual(benchmark.check(second, limits, first), second["gate"])
+            backward = benchmark.check(first, limits, second)
+            self.assertEqual(first["sampling_pilot"], second["sampling_pilot"])
+            self.assertEqual(first["sampling_iterations"], second["sampling_iterations"])
+            for report in (first, second):
+                self.assertEqual(report["provenance"]["artifacts"], report["sampling_pilot"]["provenance"]["artifacts"])
+            a, b = benchmark.measurements(first), benchmark.measurements(second)
+            self.assertEqual({name: row["allocation"] for name, row in a.items()}, {name: row["allocation"] for name, row in b.items()})
+            maximum = max(*second["gate"]["timing_ratios"].values(), *backward["timing_ratios"].values())
+            self.assertEqual(maximum, verification["maximum_bidirectional_repeat_ratios"][target])
+
     def test_fixed_sampling_preserves_every_existing_gate(self):
         report, limits = fixed_fixture()
         self.assertEqual(len(benchmark.measurements(report)), 108)

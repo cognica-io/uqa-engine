@@ -830,5 +830,162 @@
       ]
     },
     "inference": "Matched timed controls retain large variability while fixed workloads remain within the existing 1.26 timing ceiling. Use one pilot-derived iteration plan for both fresh measured processes with the default allocator; verify the revised ordinary protocol before accepting it."
+  },
+  "fixed_sampling_verification": {
+    "macos": {
+      "revision": "ec114821f525d1694937b87da2b149007311bf8a",
+      "target": "macos/aarch64/64",
+      "reports": [
+        {
+          "filename": "nori-cancellation-native-fixed-baseline.json",
+          "sha256": "61d2d354cc9cad49680892784a7889f03bc047d2db13195bad01f92e241632fd",
+          "source_lock_flags_and_executable_verified": true
+        },
+        {
+          "filename": "nori-cancellation-native-fixed-repeat.json",
+          "sha256": "6df6440ba1e11ace925099a2fd898a01203811bdcc503437e4b30c777c19eb60",
+          "source_lock_flags_and_executable_verified": true
+        }
+      ],
+      "schema_version": 3,
+      "complete_workloads": 108,
+      "both_gates_reproduced": true,
+      "same_pilot_plan_and_executable": true,
+      "all_allocations_equal": true,
+      "all_outputs_polls_sampling_cancellations_and_recoveries_verified": true,
+      "plan_sha256": "61488a9b969001ec77efdeaaf3df578bf97e142da0037f219ed388bf7be9b5ba",
+      "minimum_sample_wall_ns": 141180750,
+      "maximum_bidirectional_timing_ratio": 1.116617215617902,
+      "largest_ratios": [
+        [
+          "tokenizer/Discard/korean_prose/middle/response_timing",
+          1.116617215617902
+        ],
+        [
+          "tokenizer/Discard/korean_prose/middle/operation_timing",
+          1.0662137733797243
+        ],
+        [
+          "analyzer/Discard/mixed_script/last/response_timing",
+          1.0589127028419336
+        ],
+        [
+          "tokenizer/Mixed/korean_prose/middle/response_timing",
+          1.0545780041400574
+        ],
+        [
+          "analyzer/Discard/korean_prose/middle/response_timing",
+          1.0495274267289276
+        ]
+      ]
+    },
+    "linux": {
+      "revision": "ec114821f525d1694937b87da2b149007311bf8a",
+      "run": "https://github.com/cognica-io/uqa-engine/actions/runs/34773828010",
+      "artifact_id": 10322638534,
+      "target": "linux/x86_64/64",
+      "reports": [
+        {
+          "filename": "nori-analysis-native.json",
+          "sha256": "6d4e0f6b4166f807832ecc2664b0effde73dac01e321da13cfd2f752739605f5",
+          "source_lock_flags_verified": true
+        },
+        {
+          "filename": "nori-cancellation-native-baseline.json",
+          "sha256": "bf28a2e68d20873c8855debe71cb84c95fb588ab79fa3a5d47c4c37a5032d7fa",
+          "source_lock_flags_verified": true
+        },
+        {
+          "filename": "nori-cancellation-native-repeat.json",
+          "sha256": "099053a58adceb49db65769c9564e92ecea47c5a689bd5ed42894e23986e839a",
+          "source_lock_flags_verified": true
+        }
+      ],
+      "schema_version": 3,
+      "ordinary_analysis_and_both_cancellation_gates_reproduced": true,
+      "complete_workloads": 108,
+      "same_pilot_plan_and_executable": true,
+      "all_allocations_equal": true,
+      "all_outputs_polls_sampling_cancellations_and_recoveries_verified": true,
+      "plan_sha256": "1ed7bd3989c973145c44e155d12a204ff61aaa0a04dc92e14f31b0473a478842",
+      "minimum_sample_wall_ns": 135264424,
+      "maximum_bidirectional_timing_ratio": 1.0596376733208497,
+      "largest_ratios": [
+        [
+          "tokenizer/Discard/mixed_script/last/response_timing",
+          1.0596376733208497
+        ],
+        [
+          "tokenizer/None/korean_prose/middle/response_timing",
+          1.0486955021715403
+        ],
+        [
+          "analyzer/Discard/korean_prose/last/response_timing",
+          1.0393496861551024
+        ],
+        [
+          "analyzer/Mixed/mixed_script/middle/response_timing",
+          1.0381642571644827
+        ],
+        [
+          "tokenizer/Discard/mixed_script/last/operation_timing",
+          1.0350408978816106
+        ]
+      ]
+    },
+    "wasm": {
+      "revision": "ec114821f525d1694937b87da2b149007311bf8a",
+      "run": "https://github.com/cognica-io/uqa-engine/actions/runs/34773828010",
+      "artifact_id": 10322718340,
+      "target": "emscripten/wasm32/32",
+      "reports": [
+        {
+          "filename": "nori-analysis-wasm.json",
+          "sha256": "16f1a4f1efdcc0d6b3b5447813432c58636c0983b09eb2b0ddf65e05759bf499",
+          "source_lock_flags_verified": true
+        },
+        {
+          "filename": "nori-cancellation-wasm-baseline.json",
+          "sha256": "b551821b75c806435be4ac36f99899b4170a2406f8e4d9c7d387be6faa27c37a",
+          "source_lock_flags_verified": true
+        },
+        {
+          "filename": "nori-cancellation-wasm-repeat.json",
+          "sha256": "f285fbe43106a08d4117bb4a781a789f7948e20105802fbe2e199cee6bdaeffc",
+          "source_lock_flags_verified": true
+        }
+      ],
+      "schema_version": 3,
+      "ordinary_analysis_and_both_cancellation_gates_reproduced": true,
+      "complete_workloads": 108,
+      "same_pilot_plan_and_executable": true,
+      "all_allocations_equal": true,
+      "all_outputs_polls_sampling_cancellations_and_recoveries_verified": true,
+      "plan_sha256": "adf9b470ad5eac5899ecdba5cd03823e6ec86dab3ac2a2ad145dce491aec3f35",
+      "minimum_sample_wall_ns": 145063020,
+      "maximum_bidirectional_timing_ratio": 1.2270936856744368,
+      "largest_ratios": [
+        [
+          "analyzer/Mixed/mixed_script/middle/response_timing",
+          1.2270936856744368
+        ],
+        [
+          "analyzer/Discard/mixed_script/middle/response_timing",
+          1.2139110421787844
+        ],
+        [
+          "analyzer/None/mixed_script/middle/response_timing",
+          1.2074970204438298
+        ],
+        [
+          "analyzer/Discard/mixed_script/last/response_timing",
+          1.1796354304703764
+        ],
+        [
+          "tokenizer/Discard/hanja/middle/response_timing",
+          1.1388983649436013
+        ]
+      ]
+    }
   }
 }
