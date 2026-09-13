@@ -284,6 +284,8 @@ Analyzer creation, assignment, and deletion are mutating SQL operations. Each st
 
 Persistent engines store exact named descriptors and independent index/search bindings. Registered synonym files are resolved into the descriptor, so later assignment, document writes, search, and reopen need no original synonym file. Re-register the name to read changed file contents and then reapply the desired binding. A fresh compilation of an unresolved configuration still requires its files. Initial open migrates legacy name/phase rows, resolves any legacy files, and rebuilds affected indexes from original documents in the owning catalog transaction. Invalid descriptors, unavailable legacy resources, inconsistent ownership, or migration writes that fail abort restoration.
 
+Cancelling an analyzer reassignment or GIN rebuild interrupts source analysis and storage staging. An interrupted rebuild does not publish partial postings or replacement analyzer revisions. SQL preserves the query-cancellation state `57014`; transaction rollback restores the prior catalog bindings and physical index.
+
 ## Limits and deliberate differences
 
 - UQA Engine does not implement PostgreSQL text-search parser, dictionary, configuration, or template DDL.

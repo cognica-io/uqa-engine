@@ -733,4 +733,31 @@ pub trait InvertedIndex: Send + Sync {
             "atomic analyzer revision rebuild is not supported by this backend".into(),
         ))
     }
+
+    /// Rebuild under the caller's cancellation token. Cancellation must retain the complete previous index; custom providers must implement atomic staging and cancellation.
+    fn try_rebuild_documents_cancellable(
+        &mut self,
+        _documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<()> {
+        cancellation.check()?;
+        Err(StorageBackendError::Other(
+            "cancellable atomic index rebuild is not supported by this backend".into(),
+        ))
+    }
+
+    /// Replace postings and selected analyzer revisions together, retaining both on cancellation before publication.
+    fn rebuild_with_analyzer_revision_cancellable(
+        &mut self,
+        _field: &str,
+        _revision: Arc<uqa_analysis::CompiledAnalyzer>,
+        _phase: AnalyzerPhase,
+        _documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<()> {
+        cancellation.check()?;
+        Err(StorageBackendError::Other(
+            "cancellable atomic analyzer revision rebuild is not supported by this backend".into(),
+        ))
+    }
 }

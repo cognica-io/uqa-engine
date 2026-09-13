@@ -23,7 +23,7 @@ pub trait ColumnAdditionState {
         column: String,
         dimensions: u32,
     ) -> StorageBackendResult<bool>;
-    fn add_text_field(&self, table: &str, column: String) -> Result<(), String>;
+    fn add_text_field(&self, table: &str, column: String) -> Result<(), SQLError>;
     fn set_missing_value(
         &self,
         table: &str,
@@ -99,9 +99,7 @@ pub fn add_column<S: Clone + 'static>(
                 .map_err(|err| ddl_storage_error("ALTER TABLE vector field", err))?;
         }
         ColumnType::Text if generated_kind != Some(GeneratedColumnKind::Virtual) => {
-            if let Err(e) = context.state.add_text_field(table, col_name.clone()) {
-                return Err(SQLError::Internal(format!("add_fts_field: {e}")));
-            }
+            context.state.add_text_field(table, col_name.clone())?;
         }
         _ => {}
     }

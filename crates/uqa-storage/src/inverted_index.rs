@@ -34,8 +34,9 @@ mod read_cursor;
 mod tests;
 
 pub use analysis::{
-    analyze_index_field, analyze_query_graph, analyze_query_graph_budgeted, analyze_query_terms,
-    analyze_query_terms_budgeted, AnalyzedField, IndexedFieldMetadata,
+    analyze_index_field, analyze_index_field_cancellable, analyze_query_graph,
+    analyze_query_graph_budgeted, analyze_query_terms, analyze_query_terms_budgeted, AnalyzedField,
+    IndexedFieldMetadata,
 };
 pub use bindings::AnalyzerBindings;
 pub use contract::{AnalyzerPhase, InvertedIndex};
@@ -142,17 +143,37 @@ impl MemoryInvertedIndex {
         doc_id: DocId,
         fields: BTreeMap<FieldName, String>,
     ) -> StorageBackendResult<StagedMemoryDocument> {
+        self.stage_document_inner(doc_id, fields, None)
+    }
+
+    fn stage_document_inner(
+        &self,
+        doc_id: DocId,
+        fields: BTreeMap<FieldName, String>,
+        cancellation: Option<&uqa_core::CancellationToken>,
+    ) -> StorageBackendResult<StagedMemoryDocument> {
         let mut metadata = BTreeMap::new();
         let mut terms = BTreeSet::new();
         let mut postings = Vec::new();
         for (field, text) in fields {
+            if let Some(cancellation) = cancellation {
+                cancellation.check()?;
+            }
             let revision = self.bindings.index_revision(&field)?;
-            let analyzed = analyze_index_field(&revision, &text)?;
+            let analyzed = match cancellation {
+                Some(cancellation) => {
+                    analyze_index_field_cancellable(&revision, &text, cancellation)?
+                }
+                None => analyze_index_field(&revision, &text)?,
+            };
             metadata.insert(
                 field.clone(),
                 IndexedFieldMetadata::new(&revision, &analyzed),
             );
             for (term, occurrences) in analyzed.terms {
+                if let Some(cancellation) = cancellation {
+                    cancellation.check()?;
+                }
                 let mut positions: Vec<_> = occurrences.iter().map(|item| item.position).collect();
                 positions.sort_unstable();
                 positions.dedup();

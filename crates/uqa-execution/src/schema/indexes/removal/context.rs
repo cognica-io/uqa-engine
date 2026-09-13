@@ -34,8 +34,8 @@ pub trait IndexRemovalPublication {
         &self,
         relation: &RelationIdentity,
     ) -> StorageBackendResult<Option<CatalogIndexRow>>;
-    fn drop_fts_field(&self, table: &str, field: &str) -> Result<(), String>;
-    fn release_fts_analyzer_owner(&self, table: &str, field: &str) -> Result<(), String>;
+    fn drop_fts_field(&self, table: &str, field: &str) -> Result<(), SQLError>;
+    fn release_fts_analyzer_owner(&self, table: &str, field: &str) -> Result<(), SQLError>;
     fn drop_vector_field_index(
         &self,
         table: &str,

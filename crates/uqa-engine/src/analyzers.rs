@@ -235,10 +235,16 @@ impl Engine {
         let rebuild = matches!(phase, AnalyzerPhase::Index | AnalyzerPhase::Both)
             && t.fts_fields().iter().any(|f| f == field);
         if rebuild {
-            let documents = Self::project_fts_sources(&t)?;
+            let documents = Self::project_fts_sources_cancellable(&t, &self.runtime.cancellation)?;
             t.inverted_index
                 .write()
-                .rebuild_with_analyzer_revision(field, analyzer, phase, documents)
+                .rebuild_with_analyzer_revision_cancellable(
+                    field,
+                    analyzer,
+                    phase,
+                    documents,
+                    &self.runtime.cancellation,
+                )
                 .map_err(|error| format!("set_table_analyzer: {error}"))?;
         } else {
             t.inverted_index

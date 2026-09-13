@@ -80,6 +80,14 @@ impl InvertedIndex for KeyValueInvertedIndex {
         self.rebuild_documents(documents)
     }
 
+    fn try_rebuild_documents_cancellable(
+        &mut self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<()> {
+        self.rebuild_documents_inner(documents, Some(cancellation))
+    }
+
     fn clear(&mut self) -> StorageBackendResult<()> {
         let mut batch = self.store.batch();
         self.clear_index_batch(batch.as_mut())?;
@@ -448,6 +456,22 @@ impl InvertedIndex for KeyValueInvertedIndex {
         let mut replacement = self.clone();
         replacement.bindings.bind_revision(field, revision, phase)?;
         replacement.rebuild_documents(documents)?;
+        *self = replacement;
+        Ok(())
+    }
+
+    fn rebuild_with_analyzer_revision_cancellable(
+        &mut self,
+        field: &str,
+        revision: Arc<uqa_analysis::CompiledAnalyzer>,
+        phase: AnalyzerPhase,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<()> {
+        cancellation.check()?;
+        let mut replacement = self.clone();
+        replacement.bindings.bind_revision(field, revision, phase)?;
+        replacement.rebuild_documents_inner(documents, Some(cancellation))?;
         *self = replacement;
         Ok(())
     }

@@ -73,6 +73,9 @@ arrow-array = { workspace = true }
 arrow-ipc = { workspace = true }
 arrow-schema = { workspace = true }
 
+[target.'cfg(not(target_os = "emscripten"))'.dev-dependencies]
+rusqlite = { workspace = true, features = ["functions"] }
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"

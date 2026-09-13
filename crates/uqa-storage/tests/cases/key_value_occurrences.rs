@@ -399,3 +399,222 @@ fn binary_nori_terms_and_source_metadata_follow_column_and_table_lifecycles() {
     catalog.drop_table_and_data("public.renamed").unwrap();
     assert!(store.scan_prefix(b"e").unwrap().is_empty());
 }
+
+struct CancellingStore {
+    inner: MemoryKeyValueStore,
+    cancellation: uqa_core::CancellationToken,
+    after_put: std::sync::atomic::AtomicUsize,
+    puts: std::sync::atomic::AtomicUsize,
+}
+
+struct CancellingBatch<'a> {
+    inner: Box<dyn uqa_storage::key_value::KeyValueBatch + 'a>,
+    store: &'a CancellingStore,
+}
+
+impl uqa_storage::key_value::KeyValueBatch for CancellingBatch<'_> {
+    fn put(&mut self, key: &[u8], value: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.put(key, value)?;
+        let count = self
+            .store
+            .puts
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
+        if count
+            == self
+                .store
+                .after_put
+                .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            self.store.cancellation.cancel();
+        }
+        Ok(())
+    }
+    fn delete(&mut self, key: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.delete(key)
+    }
+    fn delete_prefix(&mut self, prefix: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.delete_prefix(prefix)
+    }
+    fn commit(self: Box<Self>) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.commit()
+    }
+}
+
+impl KeyValueStore for CancellingStore {
+    fn get(&self, key: &[u8]) -> uqa_storage::StorageBackendResult<Option<Vec<u8>>> {
+        self.inner.get(key)
+    }
+    fn put(&self, key: &[u8], value: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.put(key, value)
+    }
+    fn delete(&self, key: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.delete(key)
+    }
+    fn scan_prefix(
+        &self,
+        prefix: &[u8],
+    ) -> uqa_storage::StorageBackendResult<Vec<(Vec<u8>, Vec<u8>)>> {
+        self.inner.scan_prefix(prefix)
+    }
+    fn delete_prefix(&self, prefix: &[u8]) -> uqa_storage::StorageBackendResult<usize> {
+        self.inner.delete_prefix(prefix)
+    }
+    fn batch(&self) -> Box<dyn uqa_storage::key_value::KeyValueBatch + '_> {
+        Box::new(CancellingBatch {
+            inner: self.inner.batch(),
+            store: self,
+        })
+    }
+    fn in_transaction(&self) -> bool {
+        self.inner.in_transaction()
+    }
+    fn transaction_has_written(&self) -> uqa_storage::StorageBackendResult<bool> {
+        self.inner.transaction_has_written()
+    }
+    fn visit_value(
+        &self,
+        key: &[u8],
+        control: &uqa_storage::read_control::StorageReadControl,
+        visit: &mut uqa_storage::read_control::ValueReadVisitor<'_>,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.visit_value(key, control, visit)
+    }
+    fn visit_prefix_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &uqa_storage::read_control::StorageReadControl,
+        visit: &mut uqa_storage::read_control::KeyValueReadVisitor<'_>,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.inner
+            .visit_prefix_after(prefix, after, limit, control, visit)
+    }
+}
+
+#[test]
+fn cancelled_rebuild_discards_buffered_writes_and_preserves_both_revisions() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let cancellation = uqa_core::CancellationToken::new();
+    let store = Arc::new(CancellingStore {
+        inner: MemoryKeyValueStore::new(),
+        cancellation: cancellation.clone(),
+        after_put: AtomicUsize::new(usize::MAX),
+        puts: AtomicUsize::new(0),
+    });
+    let mut index = KeyValueInvertedIndex::new(store.clone(), "docs", config());
+    let mut expected = MemoryInvertedIndex::new(config());
+    for (id, text) in [(1, "a gap old"), (2, "old a")] {
+        index.add_document(id, fields(text)).unwrap();
+        expected.add_document(id, fields(text)).unwrap();
+    }
+    let before = store.scan_prefix(b"").unwrap();
+    let index_revision = index.index_analyzer_revision("body").unwrap();
+    let search_revision = index.search_analyzer_revision("body").unwrap();
+    let next = uqa_analysis::keyword_analyzer().compile().unwrap();
+    let documents = || {
+        vec![
+            (3, fields("new one")),
+            (4, fields("new two")),
+            (5, fields("new three")),
+        ]
+    };
+    for target in [1, 2, 4] {
+        store.puts.store(0, Ordering::Relaxed);
+        store.after_put.store(target, Ordering::Relaxed);
+        let error = index
+            .rebuild_with_analyzer_revision_cancellable(
+                "body",
+                next.clone(),
+                AnalyzerPhase::Both,
+                documents(),
+                &cancellation,
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            uqa_storage::StorageBackendError::Cancelled(_)
+        ));
+        assert!(store.puts.load(Ordering::Relaxed) >= target);
+        assert_eq!(store.scan_prefix(b"").unwrap(), before);
+        assert!(Arc::ptr_eq(
+            &index_revision,
+            &index.index_analyzer_revision("body").unwrap()
+        ));
+        assert!(Arc::ptr_eq(
+            &search_revision,
+            &index.search_analyzer_revision("body").unwrap()
+        ));
+        cancellation.reset();
+        assert_same(&expected, &index, &[1, 2, 3, 4, 5]);
+    }
+    store.after_put.store(usize::MAX, Ordering::Relaxed);
+    index
+        .rebuild_with_analyzer_revision_cancellable(
+            "body",
+            next,
+            AnalyzerPhase::Both,
+            documents(),
+            &cancellation,
+        )
+        .unwrap();
+    let mut recovered = MemoryInvertedIndex::new(uqa_analysis::keyword_analyzer());
+    recovered.try_rebuild_documents(documents()).unwrap();
+    assert_same(&recovered, &index, &[1, 2, 3, 4, 5]);
+}
+
+#[test]
+fn cancelled_memory_rebuild_retains_graphs_metadata_and_revisions_until_recovery() {
+    for change_revision in [false, true] {
+        let documents = vec![(1, fields("gap a b")), (2, fields("a gap"))];
+        let mut index = MemoryInvertedIndex::new(config());
+        let mut expected = MemoryInvertedIndex::new(config());
+        index.try_rebuild_documents(documents.clone()).unwrap();
+        expected.try_rebuild_documents(documents).unwrap();
+        let before_index = index.index_analyzer_revision("body").unwrap();
+        let before_search = index.search_analyzer_revision("body").unwrap();
+        let next = uqa_analysis::keyword_analyzer().compile().unwrap();
+        let cancellation = uqa_core::CancellationToken::new();
+        cancellation.cancel();
+        let replacement = vec![(3, fields("new whole")), (4, fields("한국어 😀"))];
+        let error = if change_revision {
+            index.rebuild_with_analyzer_revision_cancellable(
+                "body",
+                next.clone(),
+                AnalyzerPhase::Both,
+                replacement.clone(),
+                &cancellation,
+            )
+        } else {
+            index.try_rebuild_documents_cancellable(replacement.clone(), &cancellation)
+        }
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            uqa_storage::StorageBackendError::Cancelled(_)
+        ));
+        assert!(Arc::ptr_eq(
+            &before_index,
+            &index.index_analyzer_revision("body").unwrap()
+        ));
+        assert!(Arc::ptr_eq(
+            &before_search,
+            &index.search_analyzer_revision("body").unwrap()
+        ));
+        assert_same(&expected, &index, &[1, 2, 3, 4]);
+        cancellation.reset();
+        index
+            .rebuild_with_analyzer_revision_cancellable(
+                "body",
+                next,
+                AnalyzerPhase::Both,
+                replacement.clone(),
+                &cancellation,
+            )
+            .unwrap();
+        let mut recovered = MemoryInvertedIndex::new(uqa_analysis::keyword_analyzer());
+        recovered.try_rebuild_documents(replacement).unwrap();
+        assert_same(&recovered, &index, &[1, 2, 3, 4]);
+    }
+}

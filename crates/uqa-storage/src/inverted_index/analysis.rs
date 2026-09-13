@@ -64,7 +64,39 @@ pub fn analyze_index_field(
     analyzer: &CompiledAnalyzer,
     text: &str,
 ) -> StorageBackendResult<AnalyzedField> {
-    let output = analyzer.analyze_tokens(text)?;
+    analyze_index_field_with_poll(analyzer, text, || Ok(()))
+}
+
+/// Analyze and project one source field while observing the caller's cancellation token.
+pub fn analyze_index_field_cancellable(
+    analyzer: &CompiledAnalyzer,
+    text: &str,
+    cancellation: &uqa_core::CancellationToken,
+) -> StorageBackendResult<AnalyzedField> {
+    analyze_index_field_with_poll(analyzer, text, || {
+        cancellation.check().map_err(|_| AnalysisError::Cancelled)
+    })
+    .map_err(|error| match error {
+        StorageBackendError::Analysis(AnalysisError::Cancelled) => {
+            StorageBackendError::Cancelled(uqa_core::QueryCancelled)
+        }
+        other => other,
+    })
+}
+
+fn analyze_index_field_with_poll(
+    analyzer: &CompiledAnalyzer,
+    text: &str,
+    mut poll: impl FnMut() -> Result<(), AnalysisError>,
+) -> StorageBackendResult<AnalyzedField> {
+    let output = analyzer
+        .analyze_tokens_budgeted(
+            text,
+            &uqa_core::memory::MemoryBudget::new(usize::MAX),
+            &mut poll,
+        )?
+        .into_parts()
+        .0;
     let mut staged = AnalyzedField {
         length: 0,
         terms: BTreeMap::new(),
@@ -73,6 +105,7 @@ pub fn analyze_index_field(
     };
     let mut position = -1_i64;
     for token in output.tokens() {
+        poll()?;
         position = position
             .checked_add(i64::from(token.position_increment()))
             .ok_or(AnalysisError::TokenPositionOverflow)?;
@@ -108,6 +141,7 @@ pub fn analyze_index_field(
                 .ok_or_else(|| super::counter_error("document token count"))?;
         }
     }
+    poll()?;
     Ok(staged)
 }
 
@@ -128,3 +162,7 @@ fn source_offsets(offsets: &SourceOffsets) -> StorageBackendResult<TokenOffsets>
         end_utf16: offset(offsets.utf16.end)?,
     })
 }
+
+#[cfg(test)]
+#[path = "analysis/index_tests.rs"]
+mod index_tests;

@@ -477,3 +477,83 @@ fn rejected_populated_index_change_does_not_publish_the_candidate_search_side() 
         assert_eq!(index.doc_freq("body", "old").unwrap(), 1);
     }
 }
+
+#[cfg(not(target_os = "emscripten"))]
+#[test]
+fn sqlite_cancellation_after_a_posting_write_rolls_back_complete_rebuilds() {
+    use rusqlite::functions::FunctionFlags;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    for change_revision in [false, true] {
+        let connection = connection();
+        let mut index = SQLiteInvertedIndex::new(connection.clone(), "docs", whitespace_analyzer());
+        index.add_document(1, fields("old value")).unwrap();
+        let before_index = index.index_analyzer_revision("body").unwrap();
+        let before_search = index.search_analyzer_revision("body").unwrap();
+        let cancellation = uqa_core::CancellationToken::new();
+        let signal = cancellation.clone();
+        let writes = Arc::new(AtomicUsize::new(0));
+        let observed = writes.clone();
+        connection.with(|db| {
+            db.create_scalar_function("cancel_rebuild", 0,
+                FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_INNOCUOUS,
+                move |_| {
+                    observed.fetch_add(1, Ordering::Relaxed);
+                    signal.cancel();
+                    Ok(0_i32)
+                })?;
+            db.execute_batch("CREATE TRIGGER cancel_rebuild_posting AFTER INSERT ON _occurrence_clusters BEGIN SELECT cancel_rebuild(); END;")?;
+            Ok(())
+        }).unwrap();
+        let next = uqa_analysis::keyword_analyzer().compile().unwrap();
+        let documents = vec![(2, fields("new one")), (3, fields("new two"))];
+        let error = if change_revision {
+            index.rebuild_with_analyzer_revision_cancellable(
+                "body",
+                next.clone(),
+                AnalyzerPhase::Both,
+                documents.clone(),
+                &cancellation,
+            )
+        } else {
+            index.try_rebuild_documents_cancellable(documents.clone(), &cancellation)
+        }
+        .unwrap_err();
+        assert!(
+            matches!(error, uqa_storage::StorageBackendError::Cancelled(_)),
+            "{error}"
+        );
+        assert_eq!(writes.load(Ordering::Relaxed), 1);
+        assert_eq!(index.doc_count().unwrap(), 1);
+        assert_eq!(index.doc_freq("body", "old").unwrap(), 1);
+        assert_eq!(index.doc_freq("body", "new").unwrap(), 0);
+        assert!(Arc::ptr_eq(
+            &before_index,
+            &index.index_analyzer_revision("body").unwrap()
+        ));
+        assert!(Arc::ptr_eq(
+            &before_search,
+            &index.search_analyzer_revision("body").unwrap()
+        ));
+        connection
+            .with(|db| {
+                assert!(db.is_autocommit());
+                db.execute_batch("DROP TRIGGER cancel_rebuild_posting")?;
+                Ok(())
+            })
+            .unwrap();
+        cancellation.reset();
+        index
+            .rebuild_with_analyzer_revision_cancellable(
+                "body",
+                next,
+                AnalyzerPhase::Both,
+                documents,
+                &cancellation,
+            )
+            .unwrap();
+        assert_eq!(index.doc_count().unwrap(), 2);
+        assert_eq!(index.doc_freq("body", "old").unwrap(), 0);
+        assert_eq!(index.doc_freq("body", "new one").unwrap(), 1);
+        assert_eq!(index.doc_freq("body", "new two").unwrap(), 1);
+    }
+}

@@ -160,14 +160,15 @@ impl InvertedIndex for MemoryInvertedIndex {
         &mut self,
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
     ) -> StorageBackendResult<()> {
-        let mut replacement = Self::with_bindings(self.bindings.clone());
-        for (doc_id, fields) in documents {
-            if !fields.is_empty() {
-                replacement.add_document(doc_id, fields)?;
-            }
-        }
-        *self = replacement;
-        Ok(())
+        self.rebuild_documents_inner(documents, None)
+    }
+
+    fn try_rebuild_documents_cancellable(
+        &mut self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<()> {
+        self.rebuild_documents_inner(documents, Some(cancellation))
     }
 
     fn try_add_documents(
@@ -533,9 +534,50 @@ impl InvertedIndex for MemoryInvertedIndex {
         *self = replacement;
         Ok(())
     }
+
+    fn rebuild_with_analyzer_revision_cancellable(
+        &mut self,
+        field: &str,
+        revision: Arc<uqa_analysis::CompiledAnalyzer>,
+        phase: AnalyzerPhase,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<()> {
+        cancellation.check()?;
+        let mut replacement = Self::with_bindings(self.bindings.clone());
+        replacement
+            .set_field_analyzer_revision(field, revision, phase)
+            .map_err(crate::StorageBackendError::Other)?;
+        replacement.rebuild_documents_inner(documents, Some(cancellation))?;
+        *self = replacement;
+        Ok(())
+    }
 }
 
 impl MemoryInvertedIndex {
+    fn rebuild_documents_inner(
+        &mut self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        cancellation: Option<&uqa_core::CancellationToken>,
+    ) -> StorageBackendResult<()> {
+        let mut replacement = Self::with_bindings(self.bindings.clone());
+        for (doc_id, fields) in documents {
+            if let Some(cancellation) = cancellation {
+                cancellation.check()?;
+            }
+            if !fields.is_empty() {
+                let staged = replacement.stage_document_inner(doc_id, fields, cancellation)?;
+                let plan = replacement.plan_replacement(doc_id, &staged.fields)?;
+                replacement.apply_replacement(doc_id, staged, plan)?;
+            }
+        }
+        if let Some(cancellation) = cancellation {
+            cancellation.check()?;
+        }
+        *self = replacement;
+        Ok(())
+    }
+
     fn validate_index_revision_change(
         &self,
         field: &str,

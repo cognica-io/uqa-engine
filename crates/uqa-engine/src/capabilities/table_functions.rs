@@ -54,8 +54,12 @@ impl AnalyzerTableFunctions for Engine {
         field: &str,
         analyzer: &str,
         phase: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), SQLError> {
         self.set_table_field_analyzer(table, field, analyzer, phase)
+            .map_err(|error| match self.runtime.cancellation.check() {
+                Err(cancelled) => SQLError::Cancelled(cancelled),
+                Ok(()) => SQLError::Unsupported(error),
+            })
     }
     fn fts_index_stats(&self, table: Option<&str>) -> Result<Vec<FtsIndexStat>, SQLError> {
         self.fts_index_stats(table)

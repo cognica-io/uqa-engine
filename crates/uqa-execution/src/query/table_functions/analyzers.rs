@@ -102,9 +102,7 @@ pub(super) fn build_rows(
         "set_table_analyzer" => {
             let (target_table, field, analyzer_name, phase) =
                 set_table_analyzer_arguments(evaluated)?;
-            runtime
-                .set_table_field_analyzer(&target_table, &field, &analyzer_name, &phase)
-                .map_err(SQLError::Unsupported)?;
+            runtime.set_table_field_analyzer(&target_table, &field, &analyzer_name, &phase)?;
             let mut msg = format!("analyzer '{analyzer_name}' assigned to {target_table}.{field}");
             if phase != "both" {
                 use std::fmt::Write as _;

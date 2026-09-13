@@ -109,6 +109,23 @@ impl Engine {
     }
 
     pub(crate) fn project_fts_sources(t: &Arc<TableState>) -> Result<TextIndexDocuments, String> {
+        Self::project_fts_sources_inner(t, None)
+    }
+
+    pub(crate) fn project_fts_sources_cancellable(
+        t: &Arc<TableState>,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> Result<TextIndexDocuments, String> {
+        Self::project_fts_sources_inner(t, Some(cancellation))
+    }
+
+    fn project_fts_sources_inner(
+        t: &Arc<TableState>,
+        cancellation: Option<&uqa_core::CancellationToken>,
+    ) -> Result<TextIndexDocuments, String> {
+        if let Some(cancellation) = cancellation {
+            cancellation.check().map_err(|error| error.to_string())?;
+        }
         let fts_fields = t.fts_fields();
         let indexed_docs = {
             let store = t.document_store.read();
@@ -117,6 +134,9 @@ impl Engine {
             let mut indexed_docs = Vec::with_capacity(doc_ids.len());
             store
                 .for_each_fields_multi_ref(&doc_ids, &fields, &mut |doc_id, projected_values| {
+                    if cancellation.is_some_and(uqa_core::CancellationToken::is_cancelled) {
+                        return false;
+                    }
                     let mut text_fields: BTreeMap<FieldName, String> = BTreeMap::new();
                     for (field, value) in fts_fields.iter().zip(projected_values) {
                         if let Value::Str(text) = value {
@@ -129,6 +149,9 @@ impl Engine {
                     true
                 })
                 .map_err(|error| error.to_string())?;
+            if let Some(cancellation) = cancellation {
+                cancellation.check().map_err(|error| error.to_string())?;
+            }
             indexed_docs
         };
         Ok(indexed_docs)
@@ -139,6 +162,17 @@ impl Engine {
         t.inverted_index
             .write()
             .try_rebuild_documents(documents)
+            .map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn rebuild_fts_index_cancellable(
+        t: &Arc<TableState>,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> Result<(), String> {
+        let documents = Self::project_fts_sources_cancellable(t, cancellation)?;
+        t.inverted_index
+            .write()
+            .try_rebuild_documents_cancellable(documents, cancellation)
             .map_err(|error| error.to_string())
     }
 

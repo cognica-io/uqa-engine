@@ -92,6 +92,14 @@ impl InvertedIndex for SQLiteInvertedIndex {
         Ok(self.rebuild_documents_inner(documents)?)
     }
 
+    fn try_rebuild_documents_cancellable(
+        &mut self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<()> {
+        Ok(self.rebuild_documents_with_cancellation(documents, Some(cancellation))?)
+    }
+
     fn get_posting_list(&self, field: &str, term: &str) -> StorageBackendResult<PostingList> {
         self.get_posting_list_key(field, &TokenTermKey::from_text(term))
     }
@@ -643,6 +651,22 @@ impl InvertedIndex for SQLiteInvertedIndex {
         let mut replacement = self.clone();
         replacement.bindings.bind_revision(field, revision, phase)?;
         replacement.rebuild_documents_inner(documents)?;
+        *self = replacement;
+        Ok(())
+    }
+
+    fn rebuild_with_analyzer_revision_cancellable(
+        &mut self,
+        field: &str,
+        revision: Arc<uqa_analysis::CompiledAnalyzer>,
+        phase: AnalyzerPhase,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<()> {
+        cancellation.check()?;
+        let mut replacement = self.clone();
+        replacement.bindings.bind_revision(field, revision, phase)?;
+        replacement.rebuild_documents_with_cancellation(documents, Some(cancellation))?;
         *self = replacement;
         Ok(())
     }

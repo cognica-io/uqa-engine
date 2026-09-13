@@ -74,10 +74,21 @@ impl SQLiteInvertedIndex {
         &self,
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
     ) -> SQLiteResult<Documents> {
+        self.stage_documents_inner(documents, None)
+    }
+
+    fn stage_documents_inner(
+        &self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        cancellation: Option<&uqa_core::CancellationToken>,
+    ) -> SQLiteResult<Documents> {
         let mut staged = BTreeMap::new();
         for (doc_id, fields) in documents {
+            if let Some(cancellation) = cancellation {
+                cancellation.check()?;
+            }
             encode_index_u64("document", doc_id)?;
-            staged.insert(doc_id, self.analyze_fields(fields)?);
+            staged.insert(doc_id, self.analyze_fields(fields, cancellation)?);
         }
         Ok(staged)
     }
@@ -232,7 +243,18 @@ impl SQLiteInvertedIndex {
         &self,
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
     ) -> SQLiteResult<()> {
-        let staged = self.stage_documents(documents)?;
+        self.rebuild_documents_with_cancellation(documents, None)
+    }
+
+    pub(super) fn rebuild_documents_with_cancellation(
+        &self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        cancellation: Option<&uqa_core::CancellationToken>,
+    ) -> SQLiteResult<()> {
+        if let Some(cancellation) = cancellation {
+            cancellation.check()?;
+        }
+        let staged = self.stage_documents_inner(documents, cancellation)?;
         let mut totals = BTreeMap::new();
         let mut clusters =
             BTreeMap::<(FieldName, TokenTermKey, u64), Vec<OccurrencePosting>>::new();
@@ -240,6 +262,9 @@ impl SQLiteInvertedIndex {
             add_statistics(&mut totals, fields)?;
             for (field, snapshot) in fields {
                 for (term, occurrences) in &snapshot.postings {
+                    if let Some(cancellation) = cancellation {
+                        cancellation.check()?;
+                    }
                     clusters
                         .entry((field.clone(), term.clone(), cluster_id(*doc_id)))
                         .or_default()
@@ -253,15 +278,27 @@ impl SQLiteInvertedIndex {
         }
         self.conn.with_mut(|conn| {
             let tx = conn.savepoint()?;
+            if let Some(cancellation) = cancellation {
+                cancellation.check()?;
+            }
             self.clear_index_on(&tx)?;
             for ((field, term, cluster), entries) in clusters {
+                if let Some(cancellation) = cancellation {
+                    cancellation.check()?;
+                }
                 write_cluster(&tx, &self.table, &field, &term, cluster, &entries)?;
             }
             for (doc_id, fields) in &staged {
+                if let Some(cancellation) = cancellation {
+                    cancellation.check()?;
+                }
                 self.write_document_on(&tx, *doc_id, fields)?;
             }
             self.write_statistics_on(&tx, &totals)?;
             for field in totals.keys() {
+                if let Some(cancellation) = cancellation {
+                    cancellation.check()?;
+                }
                 Self::ensure_aux_tables_on(
                     &tx,
                     &self.skip_table_name(field),
@@ -269,6 +306,9 @@ impl SQLiteInvertedIndex {
                 )?;
             }
             invalidate_posting_accelerators(&tx, &self.table)?;
+            if let Some(cancellation) = cancellation {
+                cancellation.check()?;
+            }
             tx.commit()?;
             Ok(())
         })

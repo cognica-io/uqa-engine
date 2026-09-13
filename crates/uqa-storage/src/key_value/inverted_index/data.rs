@@ -82,15 +82,34 @@ impl KeyValueInvertedIndex {
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
         rebuilding: bool,
     ) -> StorageBackendResult<StagedDocuments> {
+        self.stage_documents_inner(documents, rebuilding, None)
+    }
+
+    pub(super) fn stage_documents_inner(
+        &self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        rebuilding: bool,
+        cancellation: Option<&uqa_core::CancellationToken>,
+    ) -> StorageBackendResult<StagedDocuments> {
         let mut staged = BTreeMap::new();
         for (doc_id, fields) in documents {
+            if let Some(cancellation) = cancellation {
+                cancellation.check()?;
+            }
             let mut snapshot = DocumentFields::new();
             for (field, text) in fields {
                 if !rebuilding {
                     self.validate_index_revision_change(&field, &self.bindings)?;
                 }
                 let revision = self.bindings.index_revision(&field)?;
-                let analyzed = analyze_index_field(&revision, &text)?;
+                let analyzed = match cancellation {
+                    Some(cancellation) => crate::inverted_index::analyze_index_field_cancellable(
+                        &revision,
+                        &text,
+                        cancellation,
+                    )?,
+                    None => analyze_index_field(&revision, &text)?,
+                };
                 let metadata = IndexedFieldMetadata::new(&revision, &analyzed);
                 snapshot.insert(
                     field,

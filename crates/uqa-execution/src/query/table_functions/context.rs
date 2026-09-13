@@ -34,7 +34,7 @@ pub trait AnalyzerTableFunctions {
         field: &str,
         analyzer: &str,
         phase: &str,
-    ) -> Result<(), String>;
+    ) -> Result<(), SQLError>;
     fn fts_index_stats(&self, table: Option<&str>) -> Result<Vec<FtsIndexStat>, SQLError>;
     fn analyze_text(&self, name: &str, input: &str) -> Result<Value, String>;
 }

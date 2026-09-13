@@ -47,6 +47,9 @@ uqa-scoring = { workspace = true }
 criterion = { workspace = true }
 tempfile = "3.13"
 
+[target.'cfg(not(target_os = "emscripten"))'.dev-dependencies]
+rusqlite = { workspace = true, features = ["functions"] }
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"

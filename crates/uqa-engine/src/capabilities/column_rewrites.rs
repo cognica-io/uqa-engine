@@ -122,8 +122,12 @@ impl uqa_execution::schema::columns::addition::ColumnAdditionState for Engine {
     ) -> StorageBackendResult<bool> {
         Engine::create_vector_field(self, table, column, dimensions)
     }
-    fn add_text_field(&self, table: &str, column: String) -> Result<(), String> {
+    fn add_text_field(&self, table: &str, column: String) -> Result<(), SQLError> {
         self.add_fts_field(table, column)
+            .map_err(|error| match self.runtime.cancellation.check() {
+                Err(cancelled) => SQLError::Cancelled(cancelled),
+                Ok(()) => SQLError::Internal(format!("add_fts_field: {error}")),
+            })
     }
     fn set_missing_value(
         &self,

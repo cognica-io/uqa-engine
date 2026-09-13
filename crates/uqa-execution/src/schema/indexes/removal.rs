@@ -167,8 +167,7 @@ fn drop_gin_index_side_effects(
             if !named_owner_remains {
                 context
                     .publication
-                    .release_fts_analyzer_owner(&row.table_name, &field)
-                    .map_err(SQLError::Internal)?;
+                    .release_fts_analyzer_owner(&row.table_name, &field)?;
             }
         }
         if !still_referenced {
@@ -176,6 +175,9 @@ fn drop_gin_index_side_effects(
                 .publication
                 .drop_fts_field(&row.table_name, &field)
                 .map_err(|err| {
+                    if matches!(err, SQLError::Cancelled(_)) {
+                        return err;
+                    }
                     SQLError::Internal(format!(
                         "DROP INDEX `{}`: failed to remove FTS field `{}`.`{field}`: {err}",
                         row.relation.qualified_name(),

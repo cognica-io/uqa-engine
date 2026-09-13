@@ -68,11 +68,19 @@ impl SQLiteInvertedIndex {
     pub(super) fn analyze_fields(
         &self,
         fields: BTreeMap<FieldName, String>,
+        cancellation: Option<&uqa_core::CancellationToken>,
     ) -> SQLiteResult<BTreeMap<FieldName, StagedField>> {
         let mut staged = BTreeMap::new();
         for (field, text) in fields {
             let revision = self.bindings.index_revision(&field)?;
-            let analyzed = analyze_index_field(&revision, &text)?;
+            let analyzed = match cancellation {
+                Some(cancellation) => uqa_storage::inverted_index::analyze_index_field_cancellable(
+                    &revision,
+                    &text,
+                    cancellation,
+                )?,
+                None => analyze_index_field(&revision, &text)?,
+            };
             let metadata = IndexedFieldMetadata::new(&revision, &analyzed);
             encode_index_counter("document length", metadata.length)?;
             staged.insert(

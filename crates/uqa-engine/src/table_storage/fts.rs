@@ -89,7 +89,7 @@ impl Engine {
                 fts.push(field.clone());
             }
         }
-        let documents = Self::project_fts_sources(&t)?;
+        let documents = Self::project_fts_sources_cancellable(&t, &self.runtime.cancellation)?;
         let phase = if analyzer.is_some() {
             AnalyzerPhase::Both
         } else {
@@ -97,11 +97,12 @@ impl Engine {
         };
         t.inverted_index
             .write()
-            .rebuild_with_analyzer_revision(
+            .rebuild_with_analyzer_revision_cancellable(
                 &field,
                 candidate.index.compiled.clone(),
                 phase,
                 documents,
+                &self.runtime.cancellation,
             )
             .map_err(|error| format!("add_fts_field: {error}"))?;
         candidate
@@ -157,7 +158,7 @@ impl Engine {
         }
 
         t.fts_fields.write().retain(|candidate| candidate != field);
-        Self::rebuild_fts_index(&t)
+        Self::rebuild_fts_index_cancellable(&t, &self.runtime.cancellation)
             .map_err(|err| format!("rebuild FTS index for `{table_name}`: {err}"))?;
         t.inverted_index
             .write()
@@ -219,10 +220,16 @@ impl Engine {
             .map_err(|error| error.to_string())?;
         let binding =
             uqa_storage::FieldAnalyzerBinding::unassigned(revision.clone(), revision.clone());
-        let documents = Self::project_fts_sources(&t)?;
+        let documents = Self::project_fts_sources_cancellable(&t, &self.runtime.cancellation)?;
         t.inverted_index
             .write()
-            .rebuild_with_analyzer_revision(field, revision.clone(), AnalyzerPhase::Both, documents)
+            .rebuild_with_analyzer_revision_cancellable(
+                field,
+                revision.clone(),
+                AnalyzerPhase::Both,
+                documents,
+                &self.runtime.cancellation,
+            )
             .map_err(|error| error.to_string())?;
         *t.analyzer.write() = revision
             .descriptor()
