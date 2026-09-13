@@ -51,3 +51,48 @@ fn empty_phrase_graph_still_uses_current_session_budget_for_complete_analysis() 
         .rows
         .is_empty());
 }
+
+#[test]
+fn phrase_provider_occurrence_reads_obey_session_work_mem() {
+    let directory = tempdir().unwrap();
+    let engine = Engine::open(&directory.path().join("occurrences.sqlite3")).unwrap();
+    let config = r#"{"tokenizer":{"type":"nori_tokenizer"},"token_filters":[]}"#;
+    if let Err(error) = serde_json::from_str::<uqa_analysis::Analyzer>(config) {
+        assert!(error
+            .to_string()
+            .contains("unknown variant `nori_tokenizer`"));
+        return;
+    }
+    engine
+        .sql(
+            "CREATE TABLE nori_phrases (id INTEGER PRIMARY KEY, body TEXT); CREATE INDEX nori_phrases_fts ON nori_phrases USING gin(body)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .register_named_analyzer("nori_phrase", config)
+        .unwrap();
+    engine
+        .set_table_field_analyzer("nori_phrases", "body", "nori_phrase", "both")
+        .unwrap();
+    let source = format!("{}서울", "서울 ".repeat(4096));
+    engine
+        .sql(
+            "INSERT INTO nori_phrases (id, body) VALUES (1, $1)",
+            &[SQLParam::Scalar(Value::Str(source))],
+        )
+        .unwrap();
+
+    engine.sql("SET work_mem = '16MB'", &[]).unwrap();
+    let query = r#"SELECT id FROM nori_phrases WHERE fts_match(body, '"서울 서울"')"#;
+    let rows = engine.sql(query, &[]).unwrap().rows;
+    assert!(rows.iter().any(|row| row["id"] == Value::Int(1)));
+
+    engine.sql("SET work_mem = '64kB'", &[]).unwrap();
+    let error = engine.sql(query, &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"));
+
+    engine.sql("SET work_mem = '16MB'", &[]).unwrap();
+    let rows = engine.sql(query, &[]).unwrap().rows;
+    assert!(rows.iter().any(|row| row["id"] == Value::Int(1)));
+}
