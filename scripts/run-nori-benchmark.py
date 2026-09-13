@@ -194,6 +194,9 @@ def execute_benchmark(target: str, package: str, benchmark: str, features: str, 
         flag_key = "CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS"
         if env.get("RUSTFLAGS") or env.get("CARGO_ENCODED_RUSTFLAGS"):
             raise RuntimeError("use target-scoped Rust flags for WASM; global flags override required linker options")
+        # Cargo gives even empty global flag variables precedence over target flags.
+        env.pop("RUSTFLAGS", None)
+        env.pop("CARGO_ENCODED_RUSTFLAGS", None)
         env[flag_key] = f"{env.get(flag_key, '')} {WASM_FLAGS}".strip()
         target_args = ["--target", WASM_TARGET]
     build = command("cargo", "bench", "--locked", "-p", package, "--features", features, "--bench", benchmark, "--no-run", "--message-format=json", *target_args, env=env)

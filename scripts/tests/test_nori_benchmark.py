@@ -10,6 +10,7 @@ import importlib.util
 import json
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -54,6 +55,35 @@ def fixture():
 
 
 class NoriBenchmarkTest(unittest.TestCase):
+    def test_empty_global_flags_do_not_shadow_wasm_link_options(self):
+        class BuildCaptured(Exception):
+            pass
+
+        flag_key = "CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS"
+        for empty in ({"RUSTFLAGS": ""}, {"CARGO_ENCODED_RUSTFLAGS": ""}, {"RUSTFLAGS": "", "CARGO_ENCODED_RUSTFLAGS": ""}):
+            environment = {"EMSDK_PYTHON": "/python", flag_key: "-D warnings", **empty}
+
+            def capture(*args, env=None):
+                self.assertEqual(args[:2], ("cargo", "bench"))
+                self.assertEqual(args[-2:], ("--target", benchmark.WASM_TARGET))
+                self.assertNotIn("RUSTFLAGS", env)
+                self.assertNotIn("CARGO_ENCODED_RUSTFLAGS", env)
+                self.assertEqual(env[flag_key], "-D warnings " + benchmark.WASM_FLAGS)
+                self.assertEqual(dict(benchmark.os.environ), environment)
+                raise BuildCaptured
+
+            with self.subTest(empty=empty), patch.dict(benchmark.os.environ, environment, clear=True), patch.object(benchmark, "cpu_model", return_value="CPU"), patch.object(benchmark, "runtime_sources_hash", return_value="sources"), patch.object(benchmark, "digest", return_value="digest"), patch.object(benchmark, "command", side_effect=capture):
+                with self.assertRaises(BuildCaptured):
+                    benchmark.execute_benchmark("wasm", "uqa-analysis", "nori", "nori", ("uqa-analysis",))
+
+    def test_nonempty_global_flags_are_rejected_before_wasm_build(self):
+        for key in ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"):
+            environment = {"EMSDK_PYTHON": "/python", key: "-D warnings"}
+            with self.subTest(key=key), patch.dict(benchmark.os.environ, environment, clear=True), patch.object(benchmark, "cpu_model", return_value="CPU"), patch.object(benchmark, "runtime_sources_hash", return_value="sources"), patch.object(benchmark, "digest", return_value="digest"), patch.object(benchmark, "command") as command:
+                with self.assertRaisesRegex(RuntimeError, "global flags override required linker options"):
+                    benchmark.execute_benchmark("wasm", "uqa-analysis", "nori", "nori", ("uqa-analysis",))
+                command.assert_not_called()
+
     def test_ci_requires_native_and_wasm_resource_checks(self):
         workflow = (ROOT / ".github/workflows/ci.yml").read_text()
         gate = workflow.split("  gate:\n", 1)[1]
