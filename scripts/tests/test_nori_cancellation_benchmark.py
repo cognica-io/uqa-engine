@@ -5,6 +5,7 @@
 #
 
 import copy
+import hashlib
 import importlib.util
 import json
 import math
@@ -51,7 +52,107 @@ def fixture():
     return report, limits
 
 
+def fixed_fixture():
+    pilot, limits = fixture()
+    pilot["provenance"].update(cargo_lock_sha256="3" * 64, runtime_sources_sha256="4" * 64,
+                               artifacts=[{"name": "nori-0123456789abcdef", "bytes": 16, "sha256": "5" * 64}])
+    report = copy.deepcopy(pilot)
+    plan = {row["name"]: 32 for row in pilot["measurements"]}
+    argument = json.dumps(plan, sort_keys=True, separators=(",", ":"))
+    report.update(schema_version=3, sampling_iterations=plan, sampling_pilot=pilot)
+    report["protocol"]["fixed_iterations_sha256"] = hashlib.sha256(argument.encode()).hexdigest()
+    report["provenance"]["arguments"] = ["--cancellation", "--cancellation-fixed-iterations", argument]
+    for row in report["measurements"]:
+        for scope in benchmark.TIMINGS:
+            row[scope]["iterations"] = [32] * 7
+            row[scope]["elapsed_ns"] = [value * 2 for value in row[scope]["elapsed_ns"]]
+        row["verified_cancellations"] = 227
+    return report, limits
+
+
 class NoriCancellationBenchmarkTests(unittest.TestCase):
+    def test_fixed_sampling_preserves_every_existing_gate(self):
+        report, limits = fixed_fixture()
+        self.assertEqual(len(benchmark.measurements(report)), 108)
+        result = benchmark.check(report, limits, copy.deepcopy(report))
+        self.assertTrue(result["allocation_and_recovery_passed"])
+        self.assertEqual(set(result["timing_ratios"].values()), {1.0})
+        changed = copy.deepcopy(report)
+        changed["measurements"][0]["allocation"]["bytes_total"] += 1
+        with self.assertRaisesRegex(RuntimeError, "allocation regression"):
+            benchmark.check(changed, limits)
+
+    def test_fixed_plan_requires_complete_names_valid_counts_and_exact_identity(self):
+        for mutate in (lambda plan: plan.pop(next(iter(plan))),
+                       lambda plan: plan.update({next(iter(plan)): True}),
+                       lambda plan: plan.update({next(iter(plan)): 33})):
+            report, _ = fixed_fixture()
+            mutate(report["sampling_iterations"])
+            with self.assertRaises(RuntimeError):
+                benchmark.measurements(report)
+        report, _ = fixed_fixture()
+        report["protocol"]["fixed_iterations_sha256"] = "6" * 64
+        with self.assertRaisesRegex(RuntimeError, "sampling protocol"):
+            benchmark.measurements(report)
+        report, _ = fixed_fixture()
+        name = next(iter(report["sampling_iterations"]))
+        report["sampling_iterations"][name] = 64
+        argument = json.dumps(report["sampling_iterations"], sort_keys=True, separators=(",", ":"))
+        report["protocol"]["fixed_iterations_sha256"] = hashlib.sha256(argument.encode()).hexdigest()
+        report["provenance"]["arguments"][-1] = argument
+        with self.assertRaisesRegex(RuntimeError, "differs from its pilot"):
+            benchmark.measurements(report)
+
+    def test_fixed_samples_cannot_change_work_even_with_consistent_timing_totals(self):
+        report, _ = fixed_fixture()
+        row = report["measurements"][0]
+        for scope in benchmark.TIMINGS:
+            row[scope]["iterations"][0] = 48
+            row[scope]["elapsed_ns"][0] = int(row[scope]["median_ns"] * 48)
+        row["verified_cancellations"] += 16
+        with self.assertRaisesRegex(RuntimeError, "sample differs from its fixed iteration plan"):
+            benchmark.measurements(report)
+
+    def test_fixed_pilot_and_invocation_must_match_the_measured_environment(self):
+        for change in (lambda report: report.pop("sampling_pilot"),
+                       lambda report: report["sampling_pilot"].update(schema_version=3),
+                       lambda report: report["sampling_pilot"]["provenance"].update(cpu="different CPU"),
+                       lambda report: report["provenance"].update(arguments=["--cancellation"])):
+            report, _ = fixed_fixture()
+            change(report)
+            with self.assertRaises(RuntimeError):
+                benchmark.measurements(report)
+
+    def test_new_measurement_uses_a_fresh_process_and_repeat_reuses_the_same_plan(self):
+        report, _ = fixed_fixture()
+        pilot = report["sampling_pilot"]
+        bare = copy.deepcopy(report)
+        bare.pop("sampling_pilot")
+        with patch.object(benchmark.common, "execute_benchmark", side_effect=[copy.deepcopy(pilot), copy.deepcopy(bare)]) as execute:
+            first = benchmark.run("native")
+        self.assertEqual(execute.call_count, 2)
+        self.assertEqual(execute.call_args_list[0].kwargs["arguments"], ("--cancellation",))
+        self.assertEqual(execute.call_args_list[1].kwargs["arguments"], tuple(report["provenance"]["arguments"]))
+        with patch.object(benchmark.common, "execute_benchmark", return_value=copy.deepcopy(bare)) as execute:
+            second = benchmark.run("native", first)
+        execute.assert_called_once()
+        self.assertEqual(execute.call_args.kwargs["arguments"], tuple(report["provenance"]["arguments"]))
+        self.assertEqual(first["sampling_iterations"], second["sampling_iterations"])
+        self.assertEqual(first["sampling_pilot"], second["sampling_pilot"])
+
+    def test_collection_rejects_an_adaptive_baseline_or_changed_pilot_executable(self):
+        legacy, _ = fixture()
+        with patch.object(benchmark.common, "execute_benchmark") as execute:
+            with self.assertRaisesRegex(RuntimeError, "baseline with a shared iteration plan"):
+                benchmark.run("native", legacy)
+            execute.assert_not_called()
+        report, _ = fixed_fixture()
+        pilot = report.pop("sampling_pilot")
+        report["provenance"]["artifacts"][0]["sha256"] = "7" * 64
+        with patch.object(benchmark.common, "execute_benchmark", side_effect=[pilot, report]):
+            with self.assertRaisesRegex(RuntimeError, "executable changed after selecting"):
+                benchmark.run("native")
+
     def test_reviewed_repeats_reproduce_outputs_allocations_and_timing_limits(self):
         limits = json.loads(benchmark.LIMITS.read_text())
         calibration = limits["calibration"]

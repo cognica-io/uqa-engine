@@ -31,6 +31,19 @@ PROTOCOL = {"samples": 7, "warmup": 2, "batch_operations": 16, "minimum_sample_t
 TIMINGS = ("operation_timing", "response_timing")
 OUTPUT_KEYS = ("input_bytes", "input_utf16", "input_sha256", "output_sha256", "tokens", "complete_polls", "cancel_at_poll")
 POINTS = ("first", "middle", "last")
+FIXED_ITERATIONS_ARGUMENT = "--cancellation-fixed-iterations"
+
+
+def plan_argument(plan: dict) -> str:
+    return json.dumps(plan, sort_keys=True, separators=(",", ":"))
+
+
+def fixed_plan(report: dict) -> dict:
+    plan = report.get("sampling_iterations")
+    if not isinstance(plan, dict) or any(not isinstance(name, str) or type(count) is not int or count < 16 or count % 16
+                                        for name, count in plan.items()):
+        raise RuntimeError("invalid fixed cancellation iteration plan")
+    return plan
 
 
 def target_key(report: dict) -> str:
@@ -54,9 +67,13 @@ def expected_outputs() -> dict:
 
 
 def measurements(report: dict) -> dict:
-    if report.get("schema_version") != 2 or report.get("owner") != "uqa-analysis" or report.get("purpose") != "cooperative_cancellation":
+    if report.get("schema_version") not in (2, 3) or report.get("owner") != "uqa-analysis" or report.get("purpose") != "cooperative_cancellation":
         raise RuntimeError("unsupported cancellation measurement schema or owner")
-    if report.get("protocol") != PROTOCOL or report.get("threads") != 1:
+    plan = fixed_plan(report) if report["schema_version"] == 3 else None
+    protocol = dict(PROTOCOL)
+    if plan is not None:
+        protocol["fixed_iterations_sha256"] = hashlib.sha256(plan_argument(plan).encode()).hexdigest()
+    if report.get("protocol") != protocol or report.get("threads") != 1:
         raise RuntimeError("invalid cancellation sampling protocol")
     if report.get("pointer_bits") not in (32, 64) or not report.get("target_arch") or not report.get("target_os"):
         raise RuntimeError("invalid cancellation target")
@@ -79,6 +96,21 @@ def measurements(report: dict) -> dict:
     indexed = {row["name"]: row for row in rows}
     if set(indexed) != names or len(rows) != len(names):
         raise RuntimeError("missing, duplicate, or unknown cancellation workload")
+    if plan is not None:
+        if set(plan) != names:
+            raise RuntimeError("fixed cancellation plan omits or changes workloads")
+        pilot = report.get("sampling_pilot")
+        if not isinstance(pilot, dict) or pilot.get("schema_version") != 2:
+            raise RuntimeError("fixed cancellation sampling requires its complete timed pilot")
+        pilot_rows = measurements(pilot)
+        for name, count in plan.items():
+            if count != 2 * max(pilot_rows[name]["operation_timing"]["iterations"]):
+                raise RuntimeError(f"fixed cancellation plan differs from its pilot: {name}")
+        for key in ("cpu", "platform", "rustc", "flags", "flags_sha256", "node", "emcc", "benchmark_sha256", "cargo_lock_sha256"):
+            if key not in report["provenance"] or report["provenance"][key] != pilot["provenance"].get(key):
+                raise RuntimeError(f"incomparable cancellation sampling pilot: {key}")
+        if report["provenance"].get("arguments") != ["--cancellation", FIXED_ITERATIONS_ARGUMENT, plan_argument(plan)]:
+            raise RuntimeError("fixed cancellation invocation differs from its iteration plan")
     polls = {}
     for name, row in indexed.items():
         base, point = name.rsplit("/", 1)
@@ -94,6 +126,8 @@ def measurements(report: dict) -> dict:
         wall = row.get("sample_wall_ns", [])
         if not isinstance(iterations, list) or len(iterations) != 7 or any(type(value) is not int or value < 16 or value % 16 for value in iterations):
             raise RuntimeError(f"invalid cancellation sample operation counts: {name}")
+        if plan is not None and iterations != [plan[name]] * 7:
+            raise RuntimeError(f"cancellation sample differs from its fixed iteration plan: {name}")
         if len(wall) != 7 or any(type(value) is not int or value < PROTOCOL["minimum_sample_time_ns"] for value in wall):
             raise RuntimeError(f"insufficient cancellation sample duration: {name}")
         if row.get("verified_cancellations") != 3 + sum(iterations) or row.get("verified_recoveries") != 10 or row.get("remaining_budget_bytes") != 4096:
@@ -166,6 +200,28 @@ def check(report: dict, limits: dict, baseline: dict | None = None) -> dict:
     return {"allocation_and_recovery_passed": True, "timing_compared": baseline is not None, "timing_ratios": ratios}
 
 
+def run(target: str, baseline: dict | None = None) -> dict:
+    if baseline is None:
+        pilot = common.execute_benchmark(target, "uqa-analysis", "nori", "nori", OWNERS, (SUPPORT,), arguments=("--cancellation",))
+        pilot_rows = measurements(pilot)
+        plan = {name: 2 * max(row["operation_timing"]["iterations"]) for name, row in pilot_rows.items()}
+    else:
+        measurements(baseline)
+        if baseline["schema_version"] != 3:
+            raise RuntimeError("fixed cancellation timing requires a baseline with a shared iteration plan")
+        pilot = baseline["sampling_pilot"]
+        plan = baseline["sampling_iterations"]
+    report = common.execute_benchmark(target, "uqa-analysis", "nori", "nori", OWNERS, (SUPPORT,),
+                                      arguments=("--cancellation", FIXED_ITERATIONS_ARGUMENT, plan_argument(plan)))
+    report["sampling_pilot"] = pilot
+    if baseline is None:
+        for key in ("runtime_sources_sha256", "artifacts"):
+            if report["provenance"][key] != pilot["provenance"][key]:
+                raise RuntimeError(f"cancellation executable changed after selecting its iteration plan: {key}")
+    measurements(report)
+    return report
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", choices=("native", "wasm"), default="native")
@@ -180,14 +236,13 @@ def main() -> int:
     protected = [args.limits, common.LIMITS, common.CORPUS, BENCHMARK, SUPPORT] + ([args.baseline] if args.baseline else [])
     if args.output.resolve() in [path.resolve() for path in protected]:
         parser.error("output must not overwrite reviewed inputs, source, or baseline")
-    report = json.loads(args.report.read_text()) if args.report else common.execute_benchmark(
-        args.target, "uqa-analysis", "nori", "nori", OWNERS, (SUPPORT,), arguments=("--cancellation",))
+    baseline = json.loads(args.baseline.read_text()) if args.baseline else None
+    report = json.loads(args.report.read_text()) if args.report else run(args.target, baseline)
     measurements(report)
     report["gate"] = {"allocation_and_recovery_passed": False, "timing_compared": False}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     if not args.measure_only:
-        baseline = json.loads(args.baseline.read_text()) if args.baseline else None
         report["gate"] = check(report, json.loads(args.limits.read_text()), baseline)
         args.output.write_text(json.dumps(report, indent=2) + "\n")
     print(f"Nori cancellation {'candidate measurement' if args.measure_only else 'gate passed'}: {args.output}")

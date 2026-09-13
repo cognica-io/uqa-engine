@@ -53,7 +53,13 @@ def main():
     report = json.loads(source.read_text())
     expected = {row["name"]: row for row in report["measurements"]}
     provenance = report["provenance"]
-    if provenance["arguments"] != ["--cancellation"]:
+    arguments = provenance["arguments"]
+    if report["schema_version"] == 3:
+        valid_arguments = len(arguments) == 3 and arguments[:2] == ["--cancellation", "--cancellation-fixed-iterations"] and \
+            json.loads(arguments[2]) == report["sampling_iterations"]
+    else:
+        valid_arguments = arguments == ["--cancellation"]
+    if not valid_arguments:
         raise RuntimeError("expected the existing cancellation benchmark invocation")
     artifacts = provenance["artifacts"]
     if len(artifacts) != 1 or not re.fullmatch(r"nori-[0-9a-f]{16}", artifacts[0]["name"]):

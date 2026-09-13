@@ -32,11 +32,19 @@ const RETAINED: usize = 4096;
 struct Sampling {
     iterations: Option<BTreeMap<String, usize>>,
     fixed: bool,
+    diagnostic: bool,
     identity: Option<String>,
 }
 
 impl Sampling {
     fn load() -> Self {
+        let mut arguments = std::env::args().skip(1);
+        while let Some(argument) = arguments.next() {
+            if argument == "--cancellation-fixed-iterations" {
+                let input = arguments.next().expect("fixed iteration plan argument");
+                return Self::from_bytes(input.as_bytes(), true, false);
+            }
+        }
         let Some(path) = std::env::var_os("UQA_NORI_CANCELLATION_SAMPLING") else {
             return Self::default();
         };
@@ -46,8 +54,12 @@ impl Sampling {
             _ => panic!("sampling control requires a fixed or timed mode"),
         };
         let bytes = std::fs::read(path).expect("sampling control input");
+        Self::from_bytes(&bytes, fixed, true)
+    }
+
+    fn from_bytes(bytes: &[u8], fixed: bool, diagnostic: bool) -> Self {
         let iterations: BTreeMap<String, usize> =
-            serde_json::from_slice(&bytes).expect("sampling control iterations");
+            serde_json::from_slice(bytes).expect("sampling control iterations");
         assert_eq!(iterations.len(), 108, "complete sampling control coverage");
         assert!(iterations
             .values()
@@ -55,7 +67,8 @@ impl Sampling {
         Self {
             iterations: Some(iterations),
             fixed,
-            identity: Some(format!("{:x}", Sha256::digest(&bytes))),
+            diagnostic,
+            identity: Some(format!("{:x}", Sha256::digest(bytes))),
         }
     }
 
@@ -69,10 +82,14 @@ impl Sampling {
     fn protocol(&self) -> Value {
         let mut protocol = json!({"samples": SAMPLES, "warmup": WARMUP, "batch_operations": BATCH, "minimum_sample_time_ns": SAMPLE_TIME.as_nanos() as u64, "allocation_samples": 1, "clock": "per_operation"});
         if let Some(identity) = &self.identity {
-            protocol["sampling_control"] = json!({
-                "mode": if self.fixed { "fixed" } else { "timed" },
-                "iterations_sha256": identity,
-            });
+            if self.diagnostic {
+                protocol["sampling_control"] = json!({
+                    "mode": if self.fixed { "fixed" } else { "timed" },
+                    "iterations_sha256": identity,
+                });
+            } else {
+                protocol["fixed_iterations_sha256"] = json!(identity);
+            }
         }
         protocol
     }
@@ -368,8 +385,9 @@ pub(super) fn run() -> Value {
             ));
         }
     }
-    json!({
-        "schema_version": 2,
+    let fixed = sampling.fixed && !sampling.diagnostic;
+    let mut report = json!({
+        "schema_version": if fixed { 3 } else { 2 },
         "owner": "uqa-analysis",
         "purpose": "cooperative_cancellation",
         "target_arch": std::env::consts::ARCH,
@@ -385,5 +403,9 @@ pub(super) fn run() -> Value {
         "timing_scope": "operation: entry to cancelled return; response: callback decision to cancelled return, including workspace destruction and clock-call overhead; excludes verification and subsequent recovery; no external-signal detection or scheduler latency claim",
         "allocation_scope": "current-thread Rust System allocator requests during one cancelled operation; excludes preloaded dictionary, input/reference output, allowance handle, unrelated reservation, and host memory",
         "measurements": results,
-    })
+    });
+    if fixed {
+        report["sampling_iterations"] = json!(sampling.iterations);
+    }
+    report
 }
