@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Recorded package and report acceptance; SQL and cancellation calibration and final remote-head CI remain pending.",
+  "status": "Recorded package and report acceptance, with reviewed cancellation limits; SQL calibration and final remote-head gates remain pending.",
   "python": {
     "revision": "39df0bd8d5d267bf98385aa65b4af265e17fa05d",
     "run": "https://github.com/cognica-io/uqa-engine/actions/runs/34758420618",
@@ -521,7 +521,7 @@
           "sha256": "71f34ae78003ad852d008167f69e95b8cc403929d0ad74f9ccca15478304ad9c"
         }
       ],
-      "source_inputs_unchanged_through_revision": "437d61c0226b194ed2833833a0f50b7c957dce7c"
+      "source_inputs_unchanged_through_revision": "9a8a5aeebc87b4b4f80713394658806ba0023d1d"
     }
   },
   "current_ci_report_verification": {
@@ -608,10 +608,10 @@
     "python_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34762160110"
   },
   "current_source_distribution": {
-    "revision": "437d61c0226b194ed2833833a0f50b7c957dce7c",
+    "revision": "9a8a5aeebc87b4b4f80713394658806ba0023d1d",
     "filename": "uqa-0.2.3.tar.gz",
-    "bytes": 15679949,
-    "sha256": "a53c6361be820e68c3b61eacbb438861a66dca1fa978944ba5b736e2231a8d3e",
+    "bytes": 15680263,
+    "sha256": "7820a2ae8634285f95ac8e09fdb8a5a9e560c7f60c5ca59e8a4593ba852640ff",
     "all_benchmark_inputs_verified": true,
     "both_embedded_catalogs_identical": true,
     "canonical_licenses_and_exact_nori_resources": true,
