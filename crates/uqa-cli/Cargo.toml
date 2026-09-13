@@ -16,13 +16,17 @@ exclude.workspace = true
 keywords = ["database", "sql", "postgresql", "repl"]
 categories = ["command-line-utilities", "database"]
 
+[features]
+default = ["nori"]
+nori = ["uqa-engine/nori"]
+
 [[bin]]
 name = "usql"
 path = "src/main.rs"
 test = false
 
 [dependencies]
-uqa-engine = { workspace = true }
+uqa-engine = { workspace = true, default-features = false }
 uqa-core = { workspace = true }
 uqa-fdw = { workspace = true }
 uqa-graph = { workspace = true }

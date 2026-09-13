@@ -56,6 +56,14 @@ jobs:
         run: cargo test --workspace --exclude uqa-fdw --locked -- --skip manual_sql_examples::manual_sql_examples_compile_or_execute
       - name: Test Nori bundle tools and embedded model
         run: cargo test -p uqa-analysis -p uqa-nori-data --features uqa-analysis/nori-tools --locked
+      - name: Verify the standalone CLI without Nori
+        run: |
+          cargo test -p uqa-cli --locked --no-default-features --test integration
+          cargo tree --locked -p uqa-cli --no-default-features --edges normal > target/cli-without-nori.txt
+          if grep -q uqa-nori-data target/cli-without-nori.txt; then
+            echo "Nori dictionary present in the feature-disabled CLI" >&2
+            exit 1
+          fi
 
   test-fdw-linux:
     name: test FDW Linux
