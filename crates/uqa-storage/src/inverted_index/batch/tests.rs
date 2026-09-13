@@ -7,6 +7,7 @@
 //! Batch atomicity, untouched allocation ownership, and ordered update equivalence.
 
 use super::*;
+use crate::InvertedIndex;
 use proptest::prelude::*;
 use uqa_analysis::whitespace_analyzer;
 
@@ -23,28 +24,45 @@ fn seeded() -> MemoryInvertedIndex {
 }
 
 fn assert_state(left: &MemoryInvertedIndex, right: &MemoryInvertedIndex) {
-    assert_eq!(left.doc_count, right.doc_count);
-    assert_eq!(left.total_length, right.total_length);
-    assert_eq!(left.field_doc_counts, right.field_doc_counts);
-    assert_eq!(left.doc_fields, right.doc_fields);
-    assert_eq!(left.doc_terms, right.doc_terms);
-    assert_eq!(format!("{:?}", left.index), format!("{:?}", right.index));
+    assert_eq!(left.state.doc_count, right.state.doc_count);
+    assert_eq!(left.state.total_length, right.state.total_length);
+    assert_eq!(left.state.field_doc_counts, right.state.field_doc_counts);
+    assert_eq!(left.state.doc_fields, right.state.doc_fields);
+    assert_eq!(left.state.doc_terms, right.state.doc_terms);
+    assert_eq!(
+        format!("{:?}", left.state.index),
+        format!("{:?}", right.state.index)
+    );
 }
 
 #[test]
 fn batches_preserve_untouched_posting_allocations() {
     let mut index = seeded();
     let key = ("body".into(), crate::TokenTermKey::from_text("shared"));
-    let occurrences = index.index[&key][&99].occurrences.as_ptr();
-    let positions = index.index[&key][&99].projection.payload.positions.as_ptr();
+    let occurrences = index.state.index[&key][&99].occurrences.as_ptr();
+    let positions = index.state.index[&key][&99]
+        .projection
+        .payload
+        .positions
+        .as_ptr();
     index.try_add_documents(Vec::new()).unwrap();
-    assert_eq!(index.index[&key][&99].occurrences.as_ptr(), occurrences);
+    assert_eq!(
+        index.state.index[&key][&99].occurrences.as_ptr(),
+        occurrences
+    );
     index
         .try_add_documents(vec![(1, fields("new shared")), (3, fields("new"))])
         .unwrap();
-    assert_eq!(index.index[&key][&99].occurrences.as_ptr(), occurrences);
     assert_eq!(
-        index.index[&key][&99].projection.payload.positions.as_ptr(),
+        index.state.index[&key][&99].occurrences.as_ptr(),
+        occurrences
+    );
+    assert_eq!(
+        index.state.index[&key][&99]
+            .projection
+            .payload
+            .positions
+            .as_ptr(),
         positions
     );
     assert_eq!(index.doc_count().unwrap(), 4);
@@ -57,9 +75,11 @@ fn late_document_and_field_counter_failures_publish_nothing() {
     for field_overflow in [false, true] {
         let mut index = seeded();
         if field_overflow {
-            index.total_length.insert("body".into(), u64::MAX - 1);
+            Arc::make_mut(&mut index.state)
+                .total_length
+                .insert("body".into(), u64::MAX - 1);
         } else {
-            index.doc_count = u64::MAX - 1;
+            Arc::make_mut(&mut index.state).doc_count = u64::MAX - 1;
         }
         let before = index.clone();
         let error = index
@@ -79,9 +99,9 @@ fn corrupt_affected_postings_or_reverse_metadata_publish_nothing() {
     for missing_field in [false, true] {
         let mut index = seeded();
         if missing_field {
-            index.doc_fields.remove(&2);
+            Arc::make_mut(&mut index.state).doc_fields.remove(&2);
         } else {
-            index
+            Arc::make_mut(&mut index.state)
                 .index
                 .remove(&("body".into(), crate::TokenTermKey::from_text("other")));
         }

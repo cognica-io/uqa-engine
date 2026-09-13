@@ -721,7 +721,7 @@
         "pinned_manifest": "tests/parity/nori/csv_manifest.json"
       }
     ],
-    "scope": "Downloaded CI reports were checked against the current sources, complete output contracts, original allocation gates, and both cancellation timing directions. Binary hashes reported by CI were not independently rehashed by this report audit.",
+    "scope": "Downloaded CI reports were checked against bbef474a sources, complete output contracts, original allocation gates, and both cancellation timing directions. This checkpoint predates the storage snapshot fix. Binary hashes reported by CI were not independently rehashed by this report audit.",
     "rust_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34783732405",
     "javascript_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34783734980",
     "python_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34783737460"
@@ -755,7 +755,7 @@
     "native_and_wasm": "Both complete SQL pairs must pass output, allocation, and timing checks in both directions.",
     "isolated_macos_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34783983872",
     "isolated_macos_revision": "d71ae449ea19fd0a858f7698a3251d7fa3fee0bc",
-    "isolated_macos_source_equivalence": "Only workflow runner selection differs from bbef474a. All runtime, benchmark, fixture, Cargo, and limit files are identical. The complete 102-workload pair must pass the unchanged gates.",
+    "isolated_macos_source_equivalence": "This pre-fix run differs from bbef474a only in workflow runner selection. It passes all 102 output/allocation checks but fails timing at 1.513. Subsequent source acceptance requires a successful complete macOS pair under the unchanged gates; PR 106 records that verification.",
     "results_location": "PR 106 records final CI outcomes without creating another source revision merely to update status."
   }
 }

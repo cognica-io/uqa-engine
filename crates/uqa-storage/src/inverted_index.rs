@@ -82,9 +82,25 @@ fn checked_sum_u64(
     })
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct MemoryInvertedIndex {
     bindings: AnalyzerBindings,
+    /// Snapshots share immutable corpus state; validated writes detach it once.
+    state: Arc<MemoryIndexState>,
+}
+
+/// Cloning retains the existing independently owned corpus maps; snapshot APIs share them until a write.
+impl Clone for MemoryInvertedIndex {
+    fn clone(&self) -> Self {
+        Self {
+            bindings: self.bindings.clone(),
+            state: Arc::new((*self.state).clone()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct MemoryIndexState {
     /// `(field, term) -> doc_id -> entry (positions inside the doc)`
     index: BTreeMap<PostingKey, BTreeMap<DocId, MemoryPosting>>,
     /// Reverse index for `remove_document` so we touch only relevant
@@ -129,12 +145,14 @@ impl MemoryInvertedIndex {
     fn with_bindings(bindings: AnalyzerBindings) -> Self {
         Self {
             bindings,
-            index: BTreeMap::new(),
-            doc_terms: BTreeMap::new(),
-            doc_fields: BTreeMap::new(),
-            total_length: BTreeMap::new(),
-            field_doc_counts: BTreeMap::new(),
-            doc_count: 0,
+            state: Arc::default(),
+        }
+    }
+
+    fn shared_snapshot(&self) -> Self {
+        Self {
+            bindings: self.bindings.clone(),
+            state: Arc::clone(&self.state),
         }
     }
 
@@ -201,7 +219,9 @@ impl MemoryInvertedIndex {
             postings,
         })
     }
+}
 
+impl MemoryIndexState {
     fn plan_replacement(
         &self,
         doc_id: DocId,

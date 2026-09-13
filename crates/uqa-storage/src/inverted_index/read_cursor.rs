@@ -29,7 +29,7 @@ impl<'a> MemoryPostingReadCursor<'a> {
         field: &'a str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<Self> {
-        let postings = index.index.get(&(field.to_owned(), term.clone()));
+        let postings = index.state.index.get(&(field.to_owned(), term.clone()));
         Self::from_postings(index, field, postings, None)
     }
 
@@ -81,6 +81,7 @@ impl<'a> MemoryPostingReadCursor<'a> {
                     term_freq: usize_to_u64(posting.occurrences.len(), "term frequency")?,
                     doc_length: self
                         .index
+                        .state
                         .doc_fields
                         .get(&doc_id)
                         .and_then(|fields| fields.get(self.field))
@@ -139,7 +140,7 @@ pub(super) fn controlled_postings<'a>(
     let (term_key, term_memory) = term_key.into_parts();
     memory.absorb(term_memory);
     let key = uqa_core::memory::Budgeted::new((field_key, term_key), memory);
-    let postings = index.index.get(&*key);
+    let postings = index.state.index.get(&*key);
     control.check()?;
     Ok(postings)
 }

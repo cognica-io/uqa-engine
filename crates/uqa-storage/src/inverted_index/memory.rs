@@ -78,30 +78,32 @@ impl InvertedIndex for MemoryInvertedIndex {
     ) -> StorageBackendResult<()> {
         // Resolve and analyze every field before touching postings. A deferred default can fail even when another field already has a valid revision.
         let staged = self.stage_document(doc_id, fields)?;
-        let plan = self.plan_replacement(doc_id, &staged.fields)?;
-        self.apply_replacement(doc_id, staged, plan)
+        let plan = self.state.plan_replacement(doc_id, &staged.fields)?;
+        Arc::make_mut(&mut self.state).apply_replacement(doc_id, staged, plan)
     }
 
     fn remove_document(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
-        let Some(keys) = self.doc_terms.get(&doc_id).cloned() else {
-            if self.doc_fields.contains_key(&doc_id) {
+        let Some(keys) = self.state.doc_terms.get(&doc_id).cloned() else {
+            if self.state.doc_fields.contains_key(&doc_id) {
                 return Err(StorageBackendError::Other(format!(
                     "inverted-index document {doc_id} has lengths but no reverse postings"
                 )));
             }
             return Ok(());
         };
-        let lengths = self.doc_fields.get(&doc_id).cloned().ok_or_else(|| {
+        let lengths = self.state.doc_fields.get(&doc_id).cloned().ok_or_else(|| {
             StorageBackendError::Other(format!(
                 "inverted-index document {doc_id} has reverse postings but no lengths"
             ))
         })?;
         let next_doc_count = self
+            .state
             .doc_count
             .checked_sub(1)
             .ok_or_else(|| counter_error("document count"))?;
         for key in &keys {
             if !self
+                .state
                 .index
                 .get(key)
                 .is_some_and(|postings| postings.contains_key(&doc_id))
@@ -114,6 +116,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         let mut next_field_counters = BTreeMap::new();
         for (field, metadata) in &lengths {
             let total = self
+                .state
                 .total_length
                 .get(field)
                 .copied()
@@ -121,6 +124,7 @@ impl InvertedIndex for MemoryInvertedIndex {
                 .checked_sub(metadata.length)
                 .ok_or_else(|| counter_error("total field length"))?;
             let field_docs = self
+                .state
                 .field_doc_counts
                 .get(field)
                 .copied()
@@ -130,29 +134,30 @@ impl InvertedIndex for MemoryInvertedIndex {
             next_field_counters.insert(field.clone(), (total, field_docs));
         }
 
+        let state = Arc::make_mut(&mut self.state);
         for key in keys {
-            let inner = self.index.get_mut(&key).ok_or_else(|| {
+            let inner = state.index.get_mut(&key).ok_or_else(|| {
                 StorageBackendError::Other(format!(
                     "inverted-index document {doc_id} lost a validated posting before removal"
                 ))
             })?;
             inner.remove(&doc_id);
             if inner.is_empty() {
-                self.index.remove(&key);
+                state.index.remove(&key);
             }
         }
-        self.doc_terms.remove(&doc_id);
-        self.doc_fields.remove(&doc_id);
+        state.doc_terms.remove(&doc_id);
+        state.doc_fields.remove(&doc_id);
         for (field, (total, field_docs)) in next_field_counters {
             if field_docs == 0 {
-                self.total_length.remove(&field);
-                self.field_doc_counts.remove(&field);
+                state.total_length.remove(&field);
+                state.field_doc_counts.remove(&field);
             } else {
-                self.total_length.insert(field.clone(), total);
-                self.field_doc_counts.insert(field, field_docs);
+                state.total_length.insert(field.clone(), total);
+                state.field_doc_counts.insert(field, field_docs);
             }
         }
-        self.doc_count = next_doc_count;
+        state.doc_count = next_doc_count;
         Ok(())
     }
 
@@ -179,12 +184,12 @@ impl InvertedIndex for MemoryInvertedIndex {
     }
 
     fn clear(&mut self) -> StorageBackendResult<()> {
-        self.index.clear();
-        self.doc_terms.clear();
-        self.doc_fields.clear();
-        self.total_length.clear();
-        self.field_doc_counts.clear();
-        self.doc_count = 0;
+        // Clearing a shared snapshot must not copy the state it is discarding.
+        if let Some(state) = Arc::get_mut(&mut self.state) {
+            *state = super::MemoryIndexState::default();
+        } else {
+            self.state = Arc::default();
+        }
         Ok(())
     }
 
@@ -198,6 +203,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         term: &TokenTermKey,
     ) -> StorageBackendResult<PostingList> {
         let entries = self
+            .state
             .index
             .get(&(field.to_owned(), term.clone()))
             .into_iter()
@@ -221,6 +227,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         term: &TokenTermKey,
     ) -> StorageBackendResult<Box<dyn PostingCursor>> {
         let entries = self
+            .state
             .index
             .get(&(field.to_owned(), term.clone()))
             .into_iter()
@@ -241,7 +248,8 @@ impl InvertedIndex for MemoryInvertedIndex {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<Vec<crate::clustered_postings::OccurrencePosting>> {
-        self.index
+        self.state
+            .index
             .get(&(field.to_owned(), term.clone()))
             .into_iter()
             .flat_map(|postings| postings.values())
@@ -262,6 +270,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         term: &TokenTermKey,
     ) -> StorageBackendResult<Vec<TokenOccurrence>> {
         Ok(self
+            .state
             .index
             .get(&(field.to_owned(), term.clone()))
             .and_then(|postings| postings.get(&doc_id))
@@ -274,6 +283,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         field: &str,
     ) -> StorageBackendResult<Option<IndexedFieldMetadata>> {
         Ok(self
+            .state
             .doc_fields
             .get(&doc_id)
             .and_then(|fields| fields.get(field))
@@ -287,6 +297,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         visit: &mut dyn FnMut(&PostingEntry),
     ) -> StorageBackendResult<()> {
         if let Some(postings) = self
+            .state
             .index
             .get(&(field.to_owned(), TokenTermKey::from_text(term)))
         {
@@ -304,6 +315,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         visit: &mut dyn FnMut(DocId, u64),
     ) -> StorageBackendResult<()> {
         if let Some(postings) = self
+            .state
             .index
             .get(&(field.to_owned(), TokenTermKey::from_text(term)))
         {
@@ -322,7 +334,8 @@ impl InvertedIndex for MemoryInvertedIndex {
     }
 
     fn doc_freq_key(&self, field: &str, term: &TokenTermKey) -> StorageBackendResult<u64> {
-        self.index
+        self.state
+            .index
             .get(&(field.to_owned(), term.clone()))
             .map_or(Ok(0), |postings| {
                 usize_to_u64(postings.len(), "document frequency")
@@ -331,6 +344,7 @@ impl InvertedIndex for MemoryInvertedIndex {
 
     fn get_doc_length(&self, doc_id: DocId, field: &str) -> StorageBackendResult<u64> {
         Ok(self
+            .state
             .doc_fields
             .get(&doc_id)
             .and_then(|fields| fields.get(field))
@@ -347,7 +361,8 @@ impl InvertedIndex for MemoryInvertedIndex {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<u64> {
-        self.index
+        self.state
+            .index
             .get(&(field.to_owned(), term.clone()))
             .and_then(|postings| postings.get(&doc_id))
             .map_or(Ok(0), |posting| {
@@ -356,11 +371,11 @@ impl InvertedIndex for MemoryInvertedIndex {
     }
 
     fn doc_count(&self) -> StorageBackendResult<u64> {
-        Ok(self.doc_count)
+        Ok(self.state.doc_count)
     }
 
     fn total_field_length(&self, field: &str) -> StorageBackendResult<u64> {
-        Ok(self.total_length.get(field).copied().unwrap_or(0))
+        Ok(self.state.total_length.get(field).copied().unwrap_or(0))
     }
 
     fn vocabulary_terms(&self, field: &str) -> StorageBackendResult<Vec<String>> {
@@ -372,6 +387,7 @@ impl InvertedIndex for MemoryInvertedIndex {
 
     fn vocabulary_keys(&self, field: &str) -> StorageBackendResult<Vec<TokenTermKey>> {
         Ok(self
+            .state
             .index
             .keys()
             .filter(|(indexed_field, _)| indexed_field == field)
@@ -381,13 +397,15 @@ impl InvertedIndex for MemoryInvertedIndex {
 
     fn stats(&self) -> StorageBackendResult<IndexStats> {
         let mut s = IndexStats::default();
-        s.total_docs = self.doc_count;
-        if self.doc_count > 0 {
-            let total =
-                checked_sum_u64(self.total_length.values().copied(), "total document length")?;
-            s.avg_doc_length = total as f64 / self.doc_count as f64;
+        s.total_docs = self.state.doc_count;
+        if self.state.doc_count > 0 {
+            let total = checked_sum_u64(
+                self.state.total_length.values().copied(),
+                "total document length",
+            )?;
+            s.avg_doc_length = total as f64 / self.state.doc_count as f64;
         }
-        for ((field, term), inner) in &self.index {
+        for ((field, term), inner) in &self.state.index {
             let term = term.to_term();
             let frequency = usize_to_u64(inner.len(), "document frequency")?;
             if let Some(text) = term.as_str() {
@@ -401,7 +419,8 @@ impl InvertedIndex for MemoryInvertedIndex {
 
     fn posting_count(&self, field: Option<&str>) -> StorageBackendResult<u64> {
         checked_sum_u64(
-            self.index
+            self.state
+                .index
                 .iter()
                 .filter(|((f, _), _)| field.is_none_or(|target| f == target))
                 .map(|(_, postings)| usize_to_u64(postings.len(), "posting count"))
@@ -412,9 +431,14 @@ impl InvertedIndex for MemoryInvertedIndex {
 
     fn doc_length_count(&self, field: Option<&str>) -> StorageBackendResult<u64> {
         Ok(match field {
-            Some(target) => self.field_doc_counts.get(target).copied().unwrap_or(0),
+            Some(target) => self
+                .state
+                .field_doc_counts
+                .get(target)
+                .copied()
+                .unwrap_or(0),
             None => checked_sum_u64(
-                self.field_doc_counts.values().copied(),
+                self.state.field_doc_counts.values().copied(),
                 "document-length row count",
             )?,
         })
@@ -422,7 +446,8 @@ impl InvertedIndex for MemoryInvertedIndex {
 
     fn term_count(&self, field: Option<&str>) -> StorageBackendResult<u64> {
         usize_to_u64(
-            self.index
+            self.state
+                .index
                 .keys()
                 .filter(|(f, _)| field.is_none_or(|target| f == target))
                 .map(|(_, term)| term)
@@ -433,15 +458,15 @@ impl InvertedIndex for MemoryInvertedIndex {
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn InvertedIndex>> {
-        Ok(Arc::new(self.clone()))
+        Ok(Arc::new(self.shared_snapshot()))
     }
 
     fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn InvertedIndex>> {
-        Ok(Box::new(self.clone()))
+        Ok(Box::new(self.shared_snapshot()))
     }
 
     fn field_names(&self) -> StorageBackendResult<Vec<FieldName>> {
-        Ok(self.total_length.keys().cloned().collect())
+        Ok(self.state.total_length.keys().cloned().collect())
     }
 
     fn set_field_analyzer(
@@ -567,8 +592,8 @@ impl MemoryInvertedIndex {
             }
             if !fields.is_empty() {
                 let staged = replacement.stage_document_inner(doc_id, fields, cancellation)?;
-                let plan = replacement.plan_replacement(doc_id, &staged.fields)?;
-                replacement.apply_replacement(doc_id, staged, plan)?;
+                let plan = replacement.state.plan_replacement(doc_id, &staged.fields)?;
+                Arc::make_mut(&mut replacement.state).apply_replacement(doc_id, staged, plan)?;
             }
         }
         if let Some(cancellation) = cancellation {
@@ -583,7 +608,7 @@ impl MemoryInvertedIndex {
         field: &str,
         candidate: &AnalyzerBindings,
     ) -> Result<(), String> {
-        if self.field_doc_counts.get(field).copied().unwrap_or(0) > 0 {
+        if self.state.field_doc_counts.get(field).copied().unwrap_or(0) > 0 {
             let current = self
                 .bindings
                 .index_revision(field)

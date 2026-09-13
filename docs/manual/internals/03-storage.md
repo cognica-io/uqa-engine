@@ -2,6 +2,8 @@
 
 The engine separates logical table and index behavior from provider mechanics. Persistent providers bind catalog and data handles to one session transaction context, while in-memory implementations satisfy the same high-level contracts without file durability.
 
+Memory document stores and inverted indexes share immutable corpus state when creating read or writable snapshots. Their owning storage implementations copy shared state only when it is mutated; clearing or rebuilding a snapshot replaces the state without copying discarded data. Documents retain their layout IDs and tuple metadata, while inverted indexes retain postings, occurrences, field metadata, and corpus counters together. Analyzer bindings remain independent across snapshots. The concrete stores' `Clone` implementations retain their independently owned maps, so preparing a cloned index does not defer that preparation cost into its first mutation. This keeps read snapshots independent of corpus size and preserves writable rollback snapshots without placing snapshot algorithms in Engine.
+
 ## Storage boundary
 
 ```mermaid
