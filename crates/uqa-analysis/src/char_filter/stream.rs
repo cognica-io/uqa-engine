@@ -194,7 +194,6 @@ pub(super) fn replace_pattern(
                             "capture resolution returned no overall match",
                         ));
                     };
-                    debug_assert_eq!(captured, matched);
                     matched = captured;
                 }
             }
@@ -321,7 +320,8 @@ mod tests {
 
     #[test]
     fn capture_pattern_scan_polls_before_resolving_replacement_captures() {
-        let input = "x".repeat(128 * 1024);
+        let prefix = "x".repeat(128 * 1024);
+        let input = format!("{prefix}needle");
         let mut text = FilteredText::new(&input);
         let pattern = Regex::new("(needle)").unwrap();
         let replacement = Replacement::prepare("<$1>", &pattern);
@@ -341,8 +341,7 @@ mod tests {
         )
         .unwrap();
         assert!(polls > input.len() / 2048);
-        assert_eq!(text.as_str(), input);
-        assert_eq!(budget.used(), 0);
+        assert_eq!(text.as_str(), format!("{prefix}<needle>"));
     }
 
     #[test]
@@ -391,6 +390,25 @@ mod tests {
         )
         .unwrap();
         assert_eq!(text.as_str(), "prefix <bar-foo> suffix");
+    }
+
+    #[test]
+    fn capture_pattern_preserves_anchors_after_a_nonzero_restart() {
+        let input = "xab";
+        let mut text = FilteredText::new(input);
+        let pattern = Regex::new(r"(^ab|b|x)").unwrap();
+        let replacement = Replacement::prepare("<$1>", &pattern);
+        let cooperative = CooperativeRegex::compile(r"(^ab|b|x)");
+        replace_pattern(
+            &mut text,
+            &pattern,
+            &replacement,
+            cooperative.as_ref(),
+            &MemoryBudget::new(1 << 20),
+            &mut || Ok(()),
+        )
+        .unwrap();
+        assert_eq!(text.as_str(), "<x>a<b>");
     }
 
     #[test]

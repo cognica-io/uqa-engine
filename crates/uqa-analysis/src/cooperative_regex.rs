@@ -17,6 +17,8 @@ use regex_automata::{
 use crate::{AnalysisError, AnalysisResult};
 
 const POLL_INTERVAL: usize = 1024;
+// Keep preparation bounded; patterns exceeding this per-automaton budget use the validated regex fallback.
+const DFA_SIZE_LIMIT_BYTES: usize = 1 << 20;
 
 #[derive(Debug)]
 pub(crate) struct CooperativeRegex {
@@ -36,13 +38,14 @@ impl CooperativeRegex {
     /// Capturing groups are ignored while finding the overall range and can be resolved by the
     /// validated expression after this search returns. Unicode word-boundary expressions are
     /// intentionally left to the `regex` fallback: the pinned DFA builder cannot represent their
-    /// full Unicode look-around semantics. A failed DFA construction likewise keeps the validated
-    /// library expression as the fallback.
+    /// full Unicode look-around semantics. A failed or size-limited DFA construction likewise
+    /// keeps the validated library expression as the fallback.
     pub(crate) fn compile(pattern: &str) -> Option<Self> {
         if pattern.contains(r"\b") || pattern.contains(r"\B") {
             return None;
         }
         let forward = dense::Builder::new()
+            .configure(cooperative_dfa_config())
             .build(pattern)
             .ok()?
             .to_sparse()
@@ -50,7 +53,7 @@ impl CooperativeRegex {
         let reverse = dense::Builder::new()
             .thompson(thompson::Config::new().reverse(true))
             .configure(
-                dense::Config::new()
+                cooperative_dfa_config()
                     .start_kind(StartKind::Anchored)
                     .match_kind(MatchKind::All),
             )
@@ -72,7 +75,7 @@ impl CooperativeRegex {
         }
         let start = Self::next_boundary(text, start, poll)?;
         let bytes = text.as_bytes();
-        let input = Input::new(bytes).range(start..);
+        let input = Input::new(bytes).span(start..bytes.len());
         let mut state = self
             .forward
             .start_state_forward(&input)
@@ -105,7 +108,7 @@ impl CooperativeRegex {
             return Ok(None);
         };
 
-        let input = Input::new(bytes).range(start..end).anchored(Anchored::Yes);
+        let input = Input::new(bytes).span(start..end).anchored(Anchored::Yes);
         let mut state = self
             .reverse
             .start_state_reverse(&input)
@@ -126,12 +129,22 @@ impl CooperativeRegex {
                 break;
             }
         }
-        state = self.reverse.next_eoi_state(state);
-        if self.reverse.is_quit_state(state) {
-            return Err(SearchError::Automaton);
-        }
-        if self.reverse.is_match_state(state) {
-            begin = Some(start);
+        if start > 0 {
+            state = self.reverse.next_state(state, bytes[start - 1]);
+            if self.reverse.is_quit_state(state) {
+                return Err(SearchError::Automaton);
+            }
+            if self.reverse.is_match_state(state) {
+                begin = Some(start);
+            }
+        } else {
+            state = self.reverse.next_eoi_state(state);
+            if self.reverse.is_quit_state(state) {
+                return Err(SearchError::Automaton);
+            }
+            if self.reverse.is_match_state(state) {
+                begin = Some(start);
+            }
         }
         let Some(begin) = begin else {
             return Err(SearchError::Automaton);
@@ -152,6 +165,12 @@ impl CooperativeRegex {
     }
 }
 
+fn cooperative_dfa_config() -> dense::Config {
+    dense::Config::new()
+        .dfa_size_limit(Some(DFA_SIZE_LIMIT_BYTES))
+        .determinize_size_limit(Some(DFA_SIZE_LIMIT_BYTES))
+}
+
 #[cfg(test)]
 mod tests {
     use regex::Regex;
@@ -167,6 +186,7 @@ mod tests {
             r"a*",
             r"(?:ab)+",
             r"(?m)^foo$",
+            r"(?m)(b|^ab)",
             r"\w+",
             r"\p{Greek}+",
             r"[^>]+",
@@ -182,7 +202,7 @@ mod tests {
             let expression = Regex::new(pattern).unwrap();
             let cooperative = CooperativeRegex::compile(pattern).unwrap();
             for text in [
-                "", "aa", "foobar", "xfoo\n", "é", "🙂", "aé", "αβfoo", "a1 b22",
+                "", "aa", "foobar", "xfoo\n", "\n\rab", "é", "🙂", "aé", "αβfoo", "a1 b22",
             ] {
                 for start in 0..=text.len() {
                     if !text.is_char_boundary(start) {
@@ -258,5 +278,24 @@ mod tests {
                 assert_eq!(actual, expected, "text={text:?}, start={start}");
             }
         }
+    }
+
+    #[test]
+    fn anchored_alternatives_keep_their_original_context_after_restart() {
+        let pattern = r"(^ab|b|x)";
+        let expression = Regex::new(pattern).unwrap();
+        let cooperative = CooperativeRegex::compile(pattern).unwrap();
+        let text = "xab";
+        let start = 1;
+        let expected = expression
+            .find_at(text, start)
+            .map(|matched| matched.range());
+        let actual = cooperative.find_at(text, start, &mut || Ok(())).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn pathological_dfa_construction_uses_the_library_fallback() {
+        assert!(CooperativeRegex::compile(r"([ab]*a[ab]{16})").is_none());
     }
 }
