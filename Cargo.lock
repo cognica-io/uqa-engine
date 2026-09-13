@@ -4038,11 +4038,13 @@ dependencies = [
 name = "uqa-storage"
 version = "0.2.3"
 dependencies = [
+ "allocation-counter",
  "criterion",
  "parking_lot",
  "proptest",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "uqa-analysis",
