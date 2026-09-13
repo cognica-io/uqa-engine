@@ -6,8 +6,9 @@
 
 //! Cooperative cancellation return latency, cleanup, and recovery through public owner APIs.
 
-use super::{allocation, Case, Corpus, CORPUS};
-use allocation_counter::{measure, opt_out};
+use super::{Case, Corpus, CORPUS};
+use allocation_counter::{measure, opt_out, AllocationInfo};
+use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::hint::black_box;
@@ -25,6 +26,68 @@ const BATCH: usize = 16;
 const SAMPLE_TIME: Duration = Duration::from_millis(75);
 const ALLOWANCE: usize = 256 * 1024 * 1024;
 const RETAINED: usize = 4096;
+
+#[derive(Serialize)]
+struct Allocation {
+    count_total: u64,
+    count_peak: u64,
+    count_retained: i64,
+    bytes_total: u64,
+    bytes_peak: u64,
+    bytes_retained: i64,
+}
+
+impl From<AllocationInfo> for Allocation {
+    fn from(info: AllocationInfo) -> Self {
+        Self {
+            count_total: info.count_total,
+            count_peak: info.count_max,
+            count_retained: info.count_current,
+            bytes_total: info.bytes_total,
+            bytes_peak: info.bytes_max,
+            bytes_retained: info.bytes_current,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct Timing {
+    elapsed_ns: [u64; SAMPLES],
+    iterations: [usize; SAMPLES],
+    median_ns: f64,
+}
+
+impl Timing {
+    fn new(elapsed_ns: [u64; SAMPLES], iterations: [usize; SAMPLES]) -> Self {
+        let mut sorted: [f64; SAMPLES] =
+            std::array::from_fn(|index| elapsed_ns[index] as f64 / iterations[index] as f64);
+        sorted.sort_by(f64::total_cmp);
+        Self {
+            elapsed_ns,
+            iterations,
+            median_ns: sorted[SAMPLES / 2],
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct Measurement {
+    name: String,
+    input_bytes: usize,
+    input_utf16: usize,
+    input_sha256: String,
+    output_sha256: String,
+    tokens: usize,
+    complete_polls: usize,
+    cancel_at_poll: usize,
+    verified_cancellations: usize,
+    verified_recoveries: usize,
+    remaining_budget_bytes: usize,
+    sample_wall_ns: [u64; SAMPLES],
+    allocation: Allocation,
+    operation_timing: Timing,
+    response_timing: Timing,
+}
 
 enum Runner<'a> {
     Tokenizer(&'a KoreanTokenizer),
@@ -92,21 +155,7 @@ fn recover(runner: &Runner<'_>, text: &str, budget: &MemoryBudget, expected: &No
     assert_eq!(budget.used(), RETAINED);
 }
 
-fn timing(elapsed_ns: &[u64], iterations: &[usize]) -> Value {
-    let mut sorted: Vec<f64> = elapsed_ns
-        .iter()
-        .zip(iterations)
-        .map(|(&elapsed, &count)| elapsed as f64 / count as f64)
-        .collect();
-    sorted.sort_by(f64::total_cmp);
-    json!({
-        "elapsed_ns": elapsed_ns,
-        "iterations": iterations,
-        "median_ns": sorted[SAMPLES / 2],
-    })
-}
-
-fn cases(case: &Case, stage: &str, mode: DecompoundMode, runner: &Runner<'_>) -> Vec<Value> {
+fn cases(case: &Case, stage: &str, mode: DecompoundMode, runner: &Runner<'_>) -> Vec<Measurement> {
     let expected = runner.full(&case.text);
     let output_sha256 = format!(
         "{:x}",
@@ -128,22 +177,22 @@ fn cases(case: &Case, stage: &str, mode: DecompoundMode, runner: &Runner<'_>) ->
         complete_polls >= 3,
         "distinct beginning, middle, and final polls"
     );
-    let mut results = Vec::new();
+    let mut results = Vec::with_capacity(3);
     for (point, at) in [
         ("first", 1),
         ("middle", complete_polls.div_ceil(2)),
         ("last", complete_polls),
     ] {
-        let mut operation = Vec::with_capacity(SAMPLES);
-        let mut response = Vec::with_capacity(SAMPLES);
-        let mut iterations = Vec::with_capacity(SAMPLES);
-        let mut sample_wall_ns = Vec::with_capacity(SAMPLES);
+        let mut operation = [0; SAMPLES];
+        let mut response = [0; SAMPLES];
+        let mut iterations = [0; SAMPLES];
+        let mut sample_wall_ns = [0; SAMPLES];
         opt_out(|| {
             for _ in 0..WARMUP {
                 black_box(cancel(runner, &case.text, &budget, at));
                 recover(runner, &case.text, &budget, &expected);
             }
-            for _ in 0..SAMPLES {
+            for sample in 0..SAMPLES {
                 let mut total = 0;
                 let mut propagation = 0;
                 let mut count = 0;
@@ -159,10 +208,10 @@ fn cases(case: &Case, stage: &str, mode: DecompoundMode, runner: &Runner<'_>) ->
                         break;
                     }
                 }
-                sample_wall_ns.push(started.elapsed().as_nanos() as u64);
-                iterations.push(count);
-                operation.push(total);
-                response.push(propagation);
+                sample_wall_ns[sample] = started.elapsed().as_nanos() as u64;
+                iterations[sample] = count;
+                operation[sample] = total;
+                response[sample] = propagation;
                 recover(runner, &case.text, &budget, &expected);
             }
         });
@@ -172,23 +221,23 @@ fn cases(case: &Case, stage: &str, mode: DecompoundMode, runner: &Runner<'_>) ->
         assert_eq!(info.bytes_current, 0);
         assert_eq!(info.count_current, 0);
         recover(runner, &case.text, &budget, &expected);
-        results.push(json!({
-            "name": format!("{stage}/{mode:?}/{}/{point}", case.name),
-            "input_bytes": case.text.len(),
-            "input_utf16": case.text.encode_utf16().count(),
-            "input_sha256": format!("{:x}", Sha256::digest(case.text.as_bytes())),
-            "output_sha256": output_sha256,
-            "tokens": expected.tokens.len(),
-            "complete_polls": complete_polls,
-            "cancel_at_poll": at,
-            "verified_cancellations": WARMUP + iterations.iter().sum::<usize>() + 1,
-            "verified_recoveries": WARMUP + SAMPLES + 1,
-            "remaining_budget_bytes": budget.used(),
-            "allocation": allocation(info),
-            "sample_wall_ns": sample_wall_ns,
-            "operation_timing": timing(&operation, &iterations),
-            "response_timing": timing(&response, &iterations),
-        }));
+        results.push(Measurement {
+            name: format!("{stage}/{mode:?}/{}/{point}", case.name),
+            input_bytes: case.text.len(),
+            input_utf16: case.text.encode_utf16().count(),
+            input_sha256: format!("{:x}", Sha256::digest(case.text.as_bytes())),
+            output_sha256: output_sha256.clone(),
+            tokens: expected.tokens.len(),
+            complete_polls,
+            cancel_at_poll: at,
+            verified_cancellations: WARMUP + iterations.iter().sum::<usize>() + 1,
+            verified_recoveries: WARMUP + SAMPLES + 1,
+            remaining_budget_bytes: budget.used(),
+            allocation: info.into(),
+            sample_wall_ns,
+            operation_timing: Timing::new(operation, iterations),
+            response_timing: Timing::new(response, iterations),
+        });
         eprintln!(
             "measured cancellation {stage}/{mode:?}/{}/{point}",
             case.name
@@ -203,7 +252,8 @@ pub(super) fn run() -> Value {
     let resources = NoriResources::default();
     let resolved = resources.load_default().expect("bundled dictionary");
     let corpus: Corpus = serde_json::from_str(CORPUS).expect("fixed corpus");
-    let mut results = Vec::new();
+    // Timing-dependent JSON number strings must not change subsequent heap state.
+    let mut results = Vec::with_capacity(corpus.cases.len() * 3 * 2 * 3);
     for mut case in corpus.cases {
         case.text = case.text.repeat(case.repeat);
         for mode in [
