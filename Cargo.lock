@@ -3667,8 +3667,14 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 name = "uqa"
 version = "0.2.3"
 dependencies = [
+ "allocation-counter",
+ "serde_json",
+ "sha2",
+ "tempfile",
  "uqa-core",
  "uqa-engine",
+ "uqa-storage-redb",
+ "uqa-storage-sqlite",
 ]
 
 [[package]]

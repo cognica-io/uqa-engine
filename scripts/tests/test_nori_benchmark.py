@@ -64,17 +64,21 @@ class NoriBenchmarkTest(unittest.TestCase):
             environment = {"EMSDK_PYTHON": "/python", flag_key: "-D warnings", **empty}
 
             def capture(*args, env=None):
+                if args == ("em-config", "CACHE"):
+                    return "/emsdk/cache"
                 self.assertEqual(args[:2], ("cargo", "bench"))
                 self.assertEqual(args[-2:], ("--target", benchmark.WASM_TARGET))
                 self.assertNotIn("RUSTFLAGS", env)
                 self.assertNotIn("CARGO_ENCODED_RUSTFLAGS", env)
-                self.assertEqual(env[flag_key], "-D warnings " + benchmark.WASM_FLAGS)
+                self.assertEqual(env[flag_key], "-D warnings " + benchmark.WASM_FLAGS + " -C link-arg=-sINITIAL_HEAP=16777216")
+                self.assertEqual(env["BINDGEN_EXTRA_CLANG_ARGS_wasm32_unknown_emscripten"], "--sysroot=/emsdk/cache/sysroot -fvisibility=default")
+                self.assertEqual(env["CFLAGS_wasm32_unknown_emscripten"], "")
                 self.assertEqual(dict(benchmark.os.environ), environment)
                 raise BuildCaptured
 
             with self.subTest(empty=empty), patch.dict(benchmark.os.environ, environment, clear=True), patch.object(benchmark, "cpu_model", return_value="CPU"), patch.object(benchmark, "runtime_sources_hash", return_value="sources"), patch.object(benchmark, "digest", return_value="digest"), patch.object(benchmark, "command", side_effect=capture):
                 with self.assertRaises(BuildCaptured):
-                    benchmark.execute_benchmark("wasm", "uqa-analysis", "nori", "nori", ("uqa-analysis",))
+                    benchmark.execute_benchmark("wasm", "uqa-analysis", "nori", "nori", ("uqa-analysis",), wasm_c_headers=True)
 
     def test_nonempty_global_flags_are_rejected_before_wasm_build(self):
         for key in ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"):

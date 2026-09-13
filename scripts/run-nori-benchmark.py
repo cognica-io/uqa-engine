@@ -196,7 +196,7 @@ def compiler_flags(env: dict[str, str]) -> dict[str, str]:
     names.update(f"{scope}_{name}" for scope in ("HOST", "TARGET") for name in ("CC", "CXX", "AR", "CFLAGS", "CXXFLAGS"))
     return {key: value for key, value in sorted(env.items())
             if "RUSTFLAGS" in key or key.startswith("CARGO_PROFILE_") or key in names
-            or key.startswith(("CFLAGS_", "CXXFLAGS_", "CC_", "CXX_", "AR_")) or key.endswith("_LINKER")}
+            or key.startswith(("CFLAGS_", "CXXFLAGS_", "CC_", "CXX_", "AR_", "BINDGEN_EXTRA_CLANG_ARGS")) or key.endswith("_LINKER")}
 
 
 def flags_signature(flags: dict[str, str]) -> str:
@@ -208,7 +208,7 @@ def public_flags(flags: dict[str, str]) -> dict[str, str]:
     return {key: value.replace(user_directory, "${HOME}") for key, value in flags.items()}
 
 
-def execute_benchmark(target: str, package: str, benchmark: str, features: str, owners: tuple[str, ...], supporting: tuple[pathlib.Path, ...] = ()) -> dict:
+def execute_benchmark(target: str, package: str, benchmark: str, features: str, owners: tuple[str, ...], supporting: tuple[pathlib.Path, ...] = (), *, wasm_c_headers: bool = False) -> dict:
     env = os.environ.copy()
     cpu = cpu_model()
     runtime_hash = runtime_sources_hash(owners)
@@ -227,6 +227,13 @@ def execute_benchmark(target: str, package: str, benchmark: str, features: str, 
         env.pop("RUSTFLAGS", None)
         env.pop("CARGO_ENCODED_RUSTFLAGS", None)
         env[flag_key] = f"{env.get(flag_key, '')} {WASM_FLAGS}".strip()
+        if wasm_c_headers:
+            # SQL consumers need the parser's C headers and more static data.
+            # Let Emscripten size static memory separately from the initial heap.
+            env[flag_key] += " -C link-arg=-sINITIAL_HEAP=16777216"
+            sysroot = pathlib.Path(command("em-config", "CACHE", env=env)) / "sysroot"
+            env["BINDGEN_EXTRA_CLANG_ARGS_wasm32_unknown_emscripten"] = f"--sysroot={sysroot} -fvisibility=default"
+            env["CFLAGS_wasm32_unknown_emscripten"] = ""
         target_args = ["--target", WASM_TARGET]
     build = command("cargo", "bench", "--locked", "-p", package, "--features", features, "--bench", benchmark, "--no-run", "--message-format=json", *target_args, env=env)
     artifacts = [json.loads(line) for line in build.splitlines() if line.startswith("{")]

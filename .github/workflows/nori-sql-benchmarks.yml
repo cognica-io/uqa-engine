@@ -1,0 +1,62 @@
+name: Nori SQL Benchmarks
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  measurements:
+    name: SQL and session measurements (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [native, wasm]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Free Linux runner disk
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: actions/setup-node@v4
+        if: matrix.target == 'wasm'
+        with:
+          node-version: "20"
+      - uses: mymindstorm/setup-emsdk@v14
+        if: matrix.target == 'wasm'
+        with:
+          version: latest
+      - name: Install the Emscripten Rust target
+        if: matrix.target == 'wasm'
+        run: rustup target add wasm32-unknown-emscripten
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: true
+          key: nori-sql-${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Check the feature-enabled SQL benchmark
+        if: matrix.target == 'native'
+        run: cargo clippy --locked -p uqa --features nori --bench nori_sql -- -D warnings
+      - name: Collect repeated SQL calibration candidates with complete result verification
+        env:
+          RUSTFLAGS: ""
+          CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS: "-D warnings"
+          BENCHMARK_TARGET: ${{ matrix.target }}
+        run: |
+          python3 scripts/run-nori-sql-benchmark.py --target "$BENCHMARK_TARGET" --measure-only --output "target/benchmark-runs/nori-sql-$BENCHMARK_TARGET-baseline.json"
+          python3 scripts/run-nori-sql-benchmark.py --target "$BENCHMARK_TARGET" --measure-only --output "target/benchmark-runs/nori-sql-$BENCHMARK_TARGET-repeat.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nori-sql-${{ matrix.target }}-${{ github.sha }}
+          path: target/benchmark-runs/nori-sql-*.json
+          if-no-files-found: error

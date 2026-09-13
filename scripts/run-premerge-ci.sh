@@ -133,7 +133,8 @@ while IFS= read -r path; do
     tests/parity/* | \
     docs/manual/* | \
     .github/scripts/* | \
-    .github/workflows/ci.yml)
+    .github/workflows/ci.yml | \
+    .github/workflows/nori-sql-benchmarks.yml)
       run_rust=true
       ;;
   esac

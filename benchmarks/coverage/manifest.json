@@ -3,6 +3,10 @@
   "description": "Machine-checked inventory of Rust benchmark entrypoints and required semantic probes.",
   "surfaces": [
     {
+      "path": "crates/uqa/benches/nori_sql.rs",
+      "tokens": ["session_and_query", "verify_snapshot", "reopened_snapshot", "sql_query", "provider_settings", "allocation_scope"]
+    },
+    {
       "path": "crates/uqa-storage-redb/benches/commit_allocation_order.rs",
       "tokens": ["allocation_counter::measure", "mixed_types", "existing_tables", "type_name_delta", "verified_reopened_samples"]
     },
