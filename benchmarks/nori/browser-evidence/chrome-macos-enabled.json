@@ -1,0 +1,6539 @@
+{
+  "schema_version": 1,
+  "feature": "enabled",
+  "runs": [
+    {
+      "schema_version": 1,
+      "feature": "enabled",
+      "run_id": "59503421-6a30-420a-bcd0-4b4c742d1523",
+      "next_step": 47,
+      "pages": [
+        "d02f2300-cbce-4088-a46b-63b11d61a2c0",
+        "3e8a72c7-1916-4658-b8f4-2f00c2e1100b",
+        "05f989dd-e3d3-48e5-957e-99c6053ce572"
+      ],
+      "completed_steps": [
+        "register_user_dictionary",
+        "complete_graph_and_original_offsets",
+        "missing_bundle",
+        "missing_bundle_preserves_revision",
+        "invalid_user_rule",
+        "invalid_user_rule_preserves_revision",
+        "missing_bundle_publishes_no_name",
+        "failed_name_absent",
+        "protect_builtin",
+        "create_documents",
+        "create_physical_index",
+        "bind_both_revisions",
+        "insert_graph_sources",
+        "hanja_reading_hits",
+        "compound_path_order_and_pos_holes",
+        "complete_source_query_mapping",
+        "reversed_phrase",
+        "original_source_highlighting",
+        "begin_write",
+        "insert_before_savepoint",
+        "savepoint",
+        "change_indexed_source",
+        "uncommitted_phrase_support",
+        "rollback_savepoint",
+        "release_savepoint",
+        "savepoint_restores_graph",
+        "rollback_transaction",
+        "rollback_restores_graph",
+        "replace_catalog_name",
+        "field_keeps_retained_revision",
+        "close_all_handles_and_reopen",
+        "reopen_restores_original_revision",
+        "insert_using_retained_revision",
+        "new_documents_use_retained_revision",
+        "restore_named_revision",
+        "recreated_descriptor_identity",
+        "begin_search_change",
+        "replace_search_only",
+        "search_revision_is_independent",
+        "rollback_search_change",
+        "rollback_restores_search_revision",
+        "reopen_after_new_write",
+        "diagnostic_survives_reopen",
+        "graphs_survive_second_reopen",
+        "drop_documents",
+        "release_named_revision",
+        "released_name_absent"
+      ],
+      "checkpoints": [
+        {
+          "next_step": 31,
+          "databases": [
+            {
+              "name": "/uqa",
+              "version": 21
+            }
+          ],
+          "storage": {
+            "quota": 10737512448,
+            "usage": 94208,
+            "usageDetails": {
+              "indexedDB": 94208
+            }
+          }
+        },
+        {
+          "next_step": 42,
+          "databases": [
+            {
+              "name": "/uqa",
+              "version": 21
+            }
+          ],
+          "storage": {
+            "quota": 10737512448,
+            "usage": 94208,
+            "usageDetails": {
+              "indexedDB": 94208
+            }
+          }
+        }
+      ],
+      "memory": [
+        {
+          "page": 1,
+          "label": "before_load",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 351937,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 376883,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 756764
+        },
+        {
+          "page": 1,
+          "label": "opened",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 919082,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 37319817,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 38266763
+        },
+        {
+          "page": 1,
+          "label": "after_complete_graph_and_original_offsets",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140571485,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 494016,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 141093365
+        },
+        {
+          "page": 1,
+          "label": "closed_and_persisted",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 141407569,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 577712,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142013225
+        },
+        {
+          "page": 2,
+          "label": "before_load",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 417124,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2067643,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 2512711
+        },
+        {
+          "page": 2,
+          "label": "opened",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 138081303,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 1786632,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 139895799
+        },
+        {
+          "page": 2,
+          "label": "after_recreated_descriptor_identity",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2487806,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 138913637,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 141429307
+        },
+        {
+          "page": 2,
+          "label": "closed_and_persisted",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139261254,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 1617248,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 140906446
+        },
+        {
+          "page": 3,
+          "label": "before_load",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 851236,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2711789,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 3590969
+        },
+        {
+          "page": 3,
+          "label": "opened",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2738513,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 138198618,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 140964995
+        },
+        {
+          "page": 3,
+          "label": "after_graphs_survive_second_reopen",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 138811176,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2880533,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 141719573
+        },
+        {
+          "page": 3,
+          "label": "retained/none/korean_prose",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2786250,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139285134,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142099248
+        },
+        {
+          "page": 3,
+          "label": "released/none/korean_prose",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139318463,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2792317,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142138644
+        },
+        {
+          "page": 3,
+          "label": "retained/none/short_query",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 4154177,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 137931643,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142113684
+        },
+        {
+          "page": 3,
+          "label": "released/none/short_query",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139434482,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2612727,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142075153
+        },
+        {
+          "page": 3,
+          "label": "retained/none/hanja",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 138934592,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 3240647,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142203103
+        },
+        {
+          "page": 3,
+          "label": "released/none/hanja",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2639927,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139447488,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142115279
+        },
+        {
+          "page": 3,
+          "label": "retained/none/mixed_script",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2637649,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139503174,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142168687
+        },
+        {
+          "page": 3,
+          "label": "released/none/mixed_script",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139307944,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 3135890,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142471698
+        },
+        {
+          "page": 3,
+          "label": "retained/none/unknown",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2645269,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139476308,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142149441
+        },
+        {
+          "page": 3,
+          "label": "released/none/unknown",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139517236,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2550815,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142095915
+        },
+        {
+          "page": 3,
+          "label": "retained/none/ambiguous_long",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140154990,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2597561,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142780415
+        },
+        {
+          "page": 3,
+          "label": "released/none/ambiguous_long",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 3117778,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139041749,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142187391
+        },
+        {
+          "page": 3,
+          "label": "retained/discard/korean_prose",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 3063950,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139114493,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142206307
+        },
+        {
+          "page": 3,
+          "label": "released/discard/korean_prose",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139373208,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 3164785,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142565857
+        },
+        {
+          "page": 3,
+          "label": "retained/discard/short_query",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 3329364,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 138945609,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142302837
+        },
+        {
+          "page": 3,
+          "label": "released/discard/short_query",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139260456,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2863518,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142151838
+        },
+        {
+          "page": 3,
+          "label": "retained/discard/hanja",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2599509,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139584002,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142211375
+        },
+        {
+          "page": 3,
+          "label": "released/discard/hanja",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 3013838,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139108985,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142150687
+        },
+        {
+          "page": 3,
+          "label": "retained/discard/mixed_script",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139568902,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2578339,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142175105
+        },
+        {
+          "page": 3,
+          "label": "released/discard/mixed_script",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139232366,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2908257,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142168487
+        },
+        {
+          "page": 3,
+          "label": "retained/discard/unknown",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 3021496,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139512044,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142561404
+        },
+        {
+          "page": 3,
+          "label": "released/discard/unknown",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2941050,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139230141,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142199055
+        },
+        {
+          "page": 3,
+          "label": "retained/discard/ambiguous_long",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140222092,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2566035,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142815991
+        },
+        {
+          "page": 3,
+          "label": "released/discard/ambiguous_long",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2792459,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139361293,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142181616
+        },
+        {
+          "page": 3,
+          "label": "retained/mixed/korean_prose",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139602350,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2614073,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142244287
+        },
+        {
+          "page": 3,
+          "label": "released/mixed/korean_prose",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2616751,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139527248,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142171863
+        },
+        {
+          "page": 3,
+          "label": "retained/mixed/short_query",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139483304,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2647883,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142159051
+        },
+        {
+          "page": 3,
+          "label": "released/mixed/short_query",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139527184,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2571347,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142126395
+        },
+        {
+          "page": 3,
+          "label": "retained/mixed/hanja",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2567959,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139583804,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142179627
+        },
+        {
+          "page": 3,
+          "label": "released/mixed/hanja",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2568707,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139525532,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142122103
+        },
+        {
+          "page": 3,
+          "label": "retained/mixed/mixed_script",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139249157,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2905673,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142182694
+        },
+        {
+          "page": 3,
+          "label": "released/mixed/mixed_script",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2568870,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139532788,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142129522
+        },
+        {
+          "page": 3,
+          "label": "retained/mixed/unknown",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139007434,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 3118262,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142153560
+        },
+        {
+          "page": 3,
+          "label": "released/mixed/unknown",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139480385,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2653686,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142161935
+        },
+        {
+          "page": 3,
+          "label": "retained/mixed/ambiguous_long",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140059646,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 3508599,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 143596109
+        },
+        {
+          "page": 3,
+          "label": "released/mixed/ambiguous_long",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139730054,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2948386,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142706384
+        },
+        {
+          "page": 3,
+          "label": "finished_and_persisted",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=c6853582350747759f860f9f656a25e9&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139433383,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2890026,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142351353
+        }
+      ],
+      "analyses": [
+        {
+          "mode": "none",
+          "name": "korean_prose",
+          "input_utf8_bytes": 1744,
+          "token_count": 168,
+          "analyzer_fingerprint": "4d4bfda9b47864136bca19782eeb91ca4173b3de811ae986e6923dca023363cc",
+          "diagnostic_sha256": "fd9c40db86e09986a7be63a7d00567d99fc3f9d2d80ff313596bb54a4ca52b94"
+        },
+        {
+          "mode": "none",
+          "name": "short_query",
+          "input_utf8_bytes": 33,
+          "token_count": 4,
+          "analyzer_fingerprint": "4d4bfda9b47864136bca19782eeb91ca4173b3de811ae986e6923dca023363cc",
+          "diagnostic_sha256": "c9a35d7f7a7c20fb10df6670d306a400479d26dda816da234cca745d9d7f8780"
+        },
+        {
+          "mode": "none",
+          "name": "hanja",
+          "input_utf8_bytes": 1184,
+          "token_count": 160,
+          "analyzer_fingerprint": "4d4bfda9b47864136bca19782eeb91ca4173b3de811ae986e6923dca023363cc",
+          "diagnostic_sha256": "5f2649ee1565f7756dd16e53a755377f796718013eed95f3f5d48c57debe4bb0"
+        },
+        {
+          "mode": "none",
+          "name": "mixed_script",
+          "input_utf8_bytes": 1168,
+          "token_count": 192,
+          "analyzer_fingerprint": "4d4bfda9b47864136bca19782eeb91ca4173b3de811ae986e6923dca023363cc",
+          "diagnostic_sha256": "c58823f56260966ea06b668739a6ebff0df03bbb40937826f6acd25fe1534f32"
+        },
+        {
+          "mode": "none",
+          "name": "unknown",
+          "input_utf8_bytes": 1024,
+          "token_count": 112,
+          "analyzer_fingerprint": "4d4bfda9b47864136bca19782eeb91ca4173b3de811ae986e6923dca023363cc",
+          "diagnostic_sha256": "3cedc2ba96cb0ee73760faaa33986955ea1a33832422816dd8fba3b371ea6157"
+        },
+        {
+          "mode": "none",
+          "name": "ambiguous_long",
+          "input_utf8_bytes": 13056,
+          "token_count": 1793,
+          "analyzer_fingerprint": "4d4bfda9b47864136bca19782eeb91ca4173b3de811ae986e6923dca023363cc",
+          "diagnostic_sha256": "480ea6b5c949ca970ddb9e11e4d7ba3cd71000fd75535f04f1ae5775e55315d6"
+        },
+        {
+          "mode": "discard",
+          "name": "korean_prose",
+          "input_utf8_bytes": 1744,
+          "token_count": 192,
+          "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+          "diagnostic_sha256": "f2efba9db5017570937315f8e8c32b57bf489825b6701cfb271f29e46787b1a9"
+        },
+        {
+          "mode": "discard",
+          "name": "short_query",
+          "input_utf8_bytes": 33,
+          "token_count": 5,
+          "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+          "diagnostic_sha256": "e19c08be8aca33ea9414c8a3ca498e2be2ffdd922de3de40dae9aa8a07000135"
+        },
+        {
+          "mode": "discard",
+          "name": "hanja",
+          "input_utf8_bytes": 1184,
+          "token_count": 160,
+          "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+          "diagnostic_sha256": "d4f54cda514a14149ad97d4e8e6029f4796ddf56fe4bc3c259ef8f1e853b9bdb"
+        },
+        {
+          "mode": "discard",
+          "name": "mixed_script",
+          "input_utf8_bytes": 1168,
+          "token_count": 192,
+          "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+          "diagnostic_sha256": "8bd86ecfcdb1da97b9bab9d61d948085f046701a6b2f21e83dd9345c5be96972"
+        },
+        {
+          "mode": "discard",
+          "name": "unknown",
+          "input_utf8_bytes": 1024,
+          "token_count": 112,
+          "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+          "diagnostic_sha256": "03542449937cf352e1509ccb10c6e85c876f3d20648c6d247f439420400c0c1d"
+        },
+        {
+          "mode": "discard",
+          "name": "ambiguous_long",
+          "input_utf8_bytes": 13056,
+          "token_count": 2304,
+          "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+          "diagnostic_sha256": "b25dc0a77938601baa880894e8d99bc25f2f30794008f30b975ed9e412784e36"
+        },
+        {
+          "mode": "mixed",
+          "name": "korean_prose",
+          "input_utf8_bytes": 1744,
+          "token_count": 224,
+          "analyzer_fingerprint": "c18fe31f801390470a8d35ba7b7186f4cd04f67dbdde2bdbf3ea4d0854cc30be",
+          "diagnostic_sha256": "042d30c1e0787107f584b62d7b4e8feefb88bbd773e7af3bb3291aa75ee90f82"
+        },
+        {
+          "mode": "mixed",
+          "name": "short_query",
+          "input_utf8_bytes": 33,
+          "token_count": 6,
+          "analyzer_fingerprint": "c18fe31f801390470a8d35ba7b7186f4cd04f67dbdde2bdbf3ea4d0854cc30be",
+          "diagnostic_sha256": "eaf39a9e002c8ae6ce041080ff4070b5878e963eb3f6aff26fdfb00e916ccae5"
+        },
+        {
+          "mode": "mixed",
+          "name": "hanja",
+          "input_utf8_bytes": 1184,
+          "token_count": 160,
+          "analyzer_fingerprint": "c18fe31f801390470a8d35ba7b7186f4cd04f67dbdde2bdbf3ea4d0854cc30be",
+          "diagnostic_sha256": "54b1159607376671abf7d5f15417e6f940691439e4d817fbd84df400378a1738"
+        },
+        {
+          "mode": "mixed",
+          "name": "mixed_script",
+          "input_utf8_bytes": 1168,
+          "token_count": 192,
+          "analyzer_fingerprint": "c18fe31f801390470a8d35ba7b7186f4cd04f67dbdde2bdbf3ea4d0854cc30be",
+          "diagnostic_sha256": "9ef658cfe1d929b1bb6ad1e10277de067945274ffa9d3ef79f2aac998e67b479"
+        },
+        {
+          "mode": "mixed",
+          "name": "unknown",
+          "input_utf8_bytes": 1024,
+          "token_count": 112,
+          "analyzer_fingerprint": "c18fe31f801390470a8d35ba7b7186f4cd04f67dbdde2bdbf3ea4d0854cc30be",
+          "diagnostic_sha256": "cd22d1923aa0c135e5751b4cb7f926bd7c4887ba8bf09b6bf011a8035dd14a98"
+        },
+        {
+          "mode": "mixed",
+          "name": "ambiguous_long",
+          "input_utf8_bytes": 13056,
+          "token_count": 2816,
+          "analyzer_fingerprint": "c18fe31f801390470a8d35ba7b7186f4cd04f67dbdde2bdbf3ea4d0854cc30be",
+          "diagnostic_sha256": "ce88000dea1058b0aa017a3c685dd169dd46588ec49825bc1f17678cd484ebb9"
+        }
+      ],
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+      "status": "Passed: 47 steps across 3 page loads",
+      "completed_at_utc": "2026-09-13T10:52:33.964Z"
+    },
+    {
+      "schema_version": 1,
+      "feature": "enabled",
+      "run_id": "b129b008-880b-4898-938e-40c140513381",
+      "next_step": 47,
+      "pages": [
+        "4ffa8445-8ef4-4e2b-85e8-471c8fa544bc",
+        "cb8d0e64-3245-456f-98f3-af97d03924a5",
+        "a2859667-86ba-4feb-a497-3be758e78d7e"
+      ],
+      "completed_steps": [
+        "register_user_dictionary",
+        "complete_graph_and_original_offsets",
+        "missing_bundle",
+        "missing_bundle_preserves_revision",
+        "invalid_user_rule",
+        "invalid_user_rule_preserves_revision",
+        "missing_bundle_publishes_no_name",
+        "failed_name_absent",
+        "protect_builtin",
+        "create_documents",
+        "create_physical_index",
+        "bind_both_revisions",
+        "insert_graph_sources",
+        "hanja_reading_hits",
+        "compound_path_order_and_pos_holes",
+        "complete_source_query_mapping",
+        "reversed_phrase",
+        "original_source_highlighting",
+        "begin_write",
+        "insert_before_savepoint",
+        "savepoint",
+        "change_indexed_source",
+        "uncommitted_phrase_support",
+        "rollback_savepoint",
+        "release_savepoint",
+        "savepoint_restores_graph",
+        "rollback_transaction",
+        "rollback_restores_graph",
+        "replace_catalog_name",
+        "field_keeps_retained_revision",
+        "close_all_handles_and_reopen",
+        "reopen_restores_original_revision",
+        "insert_using_retained_revision",
+        "new_documents_use_retained_revision",
+        "restore_named_revision",
+        "recreated_descriptor_identity",
+        "begin_search_change",
+        "replace_search_only",
+        "search_revision_is_independent",
+        "rollback_search_change",
+        "rollback_restores_search_revision",
+        "reopen_after_new_write",
+        "diagnostic_survives_reopen",
+        "graphs_survive_second_reopen",
+        "drop_documents",
+        "release_named_revision",
+        "released_name_absent"
+      ],
+      "checkpoints": [
+        {
+          "next_step": 31,
+          "databases": [
+            {
+              "name": "/uqa",
+              "version": 21
+            }
+          ],
+          "storage": {
+            "quota": 10737512448,
+            "usage": 94208,
+            "usageDetails": {
+              "indexedDB": 94208
+            }
+          }
+        },
+        {
+          "next_step": 42,
+          "databases": [
+            {
+              "name": "/uqa",
+              "version": 21
+            }
+          ],
+          "storage": {
+            "quota": 10737512448,
+            "usage": 94208,
+            "usageDetails": {
+              "indexedDB": 94208
+            }
+          }
+        }
+      ],
+      "memory": [
+        {
+          "page": 1,
+          "label": "before_load",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 265223,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 498217,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 791304
+        },
+        {
+          "page": 1,
+          "label": "opened",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 940028,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 37324357,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 38292249
+        },
+        {
+          "page": 1,
+          "label": "after_complete_graph_and_original_offsets",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140446645,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 719717,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 141194226
+        },
+        {
+          "page": 1,
+          "label": "closed_and_persisted",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 141416349,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 597672,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142041965
+        },
+        {
+          "page": 2,
+          "label": "before_load",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 1615475,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 869300,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 2512719
+        },
+        {
+          "page": 2,
+          "label": "opened",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 1976465,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 137888994,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 139893323
+        },
+        {
+          "page": 2,
+          "label": "after_recreated_descriptor_identity",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 138952059,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2340256,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 141320179
+        },
+        {
+          "page": 2,
+          "label": "closed_and_persisted",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 1575171,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139205946,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 140809061
+        },
+        {
+          "page": 3,
+          "label": "before_load",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 3266498,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 289261,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 3583703
+        },
+        {
+          "page": 3,
+          "label": "opened",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 3130659,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 137803496,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 140962019
+        },
+        {
+          "page": 3,
+          "label": "after_graphs_survive_second_reopen",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 3212491,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 138477186,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 141717541
+        },
+        {
+          "page": 3,
+          "label": "retained/none/korean_prose",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139029654,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 3477306,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142534824
+        },
+        {
+          "page": 3,
+          "label": "released/none/korean_prose",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 138982859,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 3466367,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142477090
+        },
+        {
+          "page": 3,
+          "label": "retained/none/short_query",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 137425102,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 4709484,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142162450
+        },
+        {
+          "page": 3,
+          "label": "released/none/short_query",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2910763,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139171020,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142109727
+        },
+        {
+          "page": 3,
+          "label": "retained/none/hanja",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 3063620,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139061297,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142152781
+        },
+        {
+          "page": 3,
+          "label": "released/none/hanja",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 138909148,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 3219522,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142156534
+        },
+        {
+          "page": 3,
+          "label": "retained/none/mixed_script",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2581137,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139519018,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142128019
+        },
+        {
+          "page": 3,
+          "label": "released/none/mixed_script",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2586597,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139489618,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142104079
+        },
+        {
+          "page": 3,
+          "label": "retained/none/unknown",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2681685,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139478556,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142188105
+        },
+        {
+          "page": 3,
+          "label": "released/none/unknown",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139510146,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2559709,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142097719
+        },
+        {
+          "page": 3,
+          "label": "retained/none/ambiguous_long",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2603611,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140153136,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142784611
+        },
+        {
+          "page": 3,
+          "label": "released/none/ambiguous_long",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 3118004,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 138999342,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142145210
+        },
+        {
+          "page": 3,
+          "label": "retained/discard/korean_prose",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139587248,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2606579,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142221691
+        },
+        {
+          "page": 3,
+          "label": "released/discard/korean_prose",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2557379,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139525484,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142110727
+        },
+        {
+          "page": 3,
+          "label": "retained/discard/short_query",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2591880,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139486720,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142106464
+        },
+        {
+          "page": 3,
+          "label": "released/discard/short_query",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2610233,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139527618,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142165795
+        },
+        {
+          "page": 3,
+          "label": "retained/discard/hanja",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139582162,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2559973,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142169999
+        },
+        {
+          "page": 3,
+          "label": "released/discard/hanja",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 3530798,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139021734,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142580396
+        },
+        {
+          "page": 3,
+          "label": "retained/discard/mixed_script",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139589504,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2610443,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142227811
+        },
+        {
+          "page": 3,
+          "label": "released/discard/mixed_script",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 138976537,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 3195719,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142200120
+        },
+        {
+          "page": 3,
+          "label": "retained/discard/unknown",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2703925,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139987529,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142719318
+        },
+        {
+          "page": 3,
+          "label": "released/discard/unknown",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139986706,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2590564,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142605214
+        },
+        {
+          "page": 3,
+          "label": "retained/discard/ambiguous_long",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140725360,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2581491,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 143334715
+        },
+        {
+          "page": 3,
+          "label": "released/discard/ambiguous_long",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139789415,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2824156,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142641435
+        },
+        {
+          "page": 3,
+          "label": "retained/mixed/korean_prose",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140093557,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2578123,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142699544
+        },
+        {
+          "page": 3,
+          "label": "released/mixed/korean_prose",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2676104,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139965520,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142669568
+        },
+        {
+          "page": 3,
+          "label": "retained/mixed/short_query",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2975711,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139603471,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142607126
+        },
+        {
+          "page": 3,
+          "label": "released/mixed/short_query",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2622075,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140061384,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142711403
+        },
+        {
+          "page": 3,
+          "label": "retained/mixed/hanja",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 3401586,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139798384,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 143227914
+        },
+        {
+          "page": 3,
+          "label": "released/mixed/hanja",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2593048,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139997713,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142618705
+        },
+        {
+          "page": 3,
+          "label": "retained/mixed/mixed_script",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140062997,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2591152,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142682093
+        },
+        {
+          "page": 3,
+          "label": "released/mixed/mixed_script",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139929609,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2649783,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142607336
+        },
+        {
+          "page": 3,
+          "label": "retained/mixed/unknown",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139694668,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2963599,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142686131
+        },
+        {
+          "page": 3,
+          "label": "released/mixed/unknown",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2672055,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139926281,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142626280
+        },
+        {
+          "page": 3,
+          "label": "retained/mixed/ambiguous_long",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140886676,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2702410,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 143616950
+        },
+        {
+          "page": 3,
+          "label": "released/mixed/ambiguous_long",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2959912,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139659568,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142647424
+        },
+        {
+          "page": 3,
+          "label": "finished_and_persisted",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2604553,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=e28ff94a00044070b7e7495f661ac95d&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139677555,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142310052
+        }
+      ],
+      "analyses": [
+        {
+          "mode": "none",
+          "name": "korean_prose",
+          "input_utf8_bytes": 1744,
+          "token_count": 168,
+          "analyzer_fingerprint": "4d4bfda9b47864136bca19782eeb91ca4173b3de811ae986e6923dca023363cc",
+          "diagnostic_sha256": "fd9c40db86e09986a7be63a7d00567d99fc3f9d2d80ff313596bb54a4ca52b94"
+        },
+        {
+          "mode": "none",
+          "name": "short_query",
+          "input_utf8_bytes": 33,
+          "token_count": 4,
+          "analyzer_fingerprint": "4d4bfda9b47864136bca19782eeb91ca4173b3de811ae986e6923dca023363cc",
+          "diagnostic_sha256": "c9a35d7f7a7c20fb10df6670d306a400479d26dda816da234cca745d9d7f8780"
+        },
+        {
+          "mode": "none",
+          "name": "hanja",
+          "input_utf8_bytes": 1184,
+          "token_count": 160,
+          "analyzer_fingerprint": "4d4bfda9b47864136bca19782eeb91ca4173b3de811ae986e6923dca023363cc",
+          "diagnostic_sha256": "5f2649ee1565f7756dd16e53a755377f796718013eed95f3f5d48c57debe4bb0"
+        },
+        {
+          "mode": "none",
+          "name": "mixed_script",
+          "input_utf8_bytes": 1168,
+          "token_count": 192,
+          "analyzer_fingerprint": "4d4bfda9b47864136bca19782eeb91ca4173b3de811ae986e6923dca023363cc",
+          "diagnostic_sha256": "c58823f56260966ea06b668739a6ebff0df03bbb40937826f6acd25fe1534f32"
+        },
+        {
+          "mode": "none",
+          "name": "unknown",
+          "input_utf8_bytes": 1024,
+          "token_count": 112,
+          "analyzer_fingerprint": "4d4bfda9b47864136bca19782eeb91ca4173b3de811ae986e6923dca023363cc",
+          "diagnostic_sha256": "3cedc2ba96cb0ee73760faaa33986955ea1a33832422816dd8fba3b371ea6157"
+        },
+        {
+          "mode": "none",
+          "name": "ambiguous_long",
+          "input_utf8_bytes": 13056,
+          "token_count": 1793,
+          "analyzer_fingerprint": "4d4bfda9b47864136bca19782eeb91ca4173b3de811ae986e6923dca023363cc",
+          "diagnostic_sha256": "480ea6b5c949ca970ddb9e11e4d7ba3cd71000fd75535f04f1ae5775e55315d6"
+        },
+        {
+          "mode": "discard",
+          "name": "korean_prose",
+          "input_utf8_bytes": 1744,
+          "token_count": 192,
+          "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+          "diagnostic_sha256": "f2efba9db5017570937315f8e8c32b57bf489825b6701cfb271f29e46787b1a9"
+        },
+        {
+          "mode": "discard",
+          "name": "short_query",
+          "input_utf8_bytes": 33,
+          "token_count": 5,
+          "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+          "diagnostic_sha256": "e19c08be8aca33ea9414c8a3ca498e2be2ffdd922de3de40dae9aa8a07000135"
+        },
+        {
+          "mode": "discard",
+          "name": "hanja",
+          "input_utf8_bytes": 1184,
+          "token_count": 160,
+          "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+          "diagnostic_sha256": "d4f54cda514a14149ad97d4e8e6029f4796ddf56fe4bc3c259ef8f1e853b9bdb"
+        },
+        {
+          "mode": "discard",
+          "name": "mixed_script",
+          "input_utf8_bytes": 1168,
+          "token_count": 192,
+          "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+          "diagnostic_sha256": "8bd86ecfcdb1da97b9bab9d61d948085f046701a6b2f21e83dd9345c5be96972"
+        },
+        {
+          "mode": "discard",
+          "name": "unknown",
+          "input_utf8_bytes": 1024,
+          "token_count": 112,
+          "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+          "diagnostic_sha256": "03542449937cf352e1509ccb10c6e85c876f3d20648c6d247f439420400c0c1d"
+        },
+        {
+          "mode": "discard",
+          "name": "ambiguous_long",
+          "input_utf8_bytes": 13056,
+          "token_count": 2304,
+          "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+          "diagnostic_sha256": "b25dc0a77938601baa880894e8d99bc25f2f30794008f30b975ed9e412784e36"
+        },
+        {
+          "mode": "mixed",
+          "name": "korean_prose",
+          "input_utf8_bytes": 1744,
+          "token_count": 224,
+          "analyzer_fingerprint": "c18fe31f801390470a8d35ba7b7186f4cd04f67dbdde2bdbf3ea4d0854cc30be",
+          "diagnostic_sha256": "042d30c1e0787107f584b62d7b4e8feefb88bbd773e7af3bb3291aa75ee90f82"
+        },
+        {
+          "mode": "mixed",
+          "name": "short_query",
+          "input_utf8_bytes": 33,
+          "token_count": 6,
+          "analyzer_fingerprint": "c18fe31f801390470a8d35ba7b7186f4cd04f67dbdde2bdbf3ea4d0854cc30be",
+          "diagnostic_sha256": "eaf39a9e002c8ae6ce041080ff4070b5878e963eb3f6aff26fdfb00e916ccae5"
+        },
+        {
+          "mode": "mixed",
+          "name": "hanja",
+          "input_utf8_bytes": 1184,
+          "token_count": 160,
+          "analyzer_fingerprint": "c18fe31f801390470a8d35ba7b7186f4cd04f67dbdde2bdbf3ea4d0854cc30be",
+          "diagnostic_sha256": "54b1159607376671abf7d5f15417e6f940691439e4d817fbd84df400378a1738"
+        },
+        {
+          "mode": "mixed",
+          "name": "mixed_script",
+          "input_utf8_bytes": 1168,
+          "token_count": 192,
+          "analyzer_fingerprint": "c18fe31f801390470a8d35ba7b7186f4cd04f67dbdde2bdbf3ea4d0854cc30be",
+          "diagnostic_sha256": "9ef658cfe1d929b1bb6ad1e10277de067945274ffa9d3ef79f2aac998e67b479"
+        },
+        {
+          "mode": "mixed",
+          "name": "unknown",
+          "input_utf8_bytes": 1024,
+          "token_count": 112,
+          "analyzer_fingerprint": "c18fe31f801390470a8d35ba7b7186f4cd04f67dbdde2bdbf3ea4d0854cc30be",
+          "diagnostic_sha256": "cd22d1923aa0c135e5751b4cb7f926bd7c4887ba8bf09b6bf011a8035dd14a98"
+        },
+        {
+          "mode": "mixed",
+          "name": "ambiguous_long",
+          "input_utf8_bytes": 13056,
+          "token_count": 2816,
+          "analyzer_fingerprint": "c18fe31f801390470a8d35ba7b7186f4cd04f67dbdde2bdbf3ea4d0854cc30be",
+          "diagnostic_sha256": "ce88000dea1058b0aa017a3c685dd169dd46588ec49825bc1f17678cd484ebb9"
+        }
+      ],
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+      "status": "Passed: 47 steps across 3 page loads",
+      "completed_at_utc": "2026-09-13T10:52:48.063Z"
+    },
+    {
+      "schema_version": 1,
+      "feature": "enabled",
+      "run_id": "ab270e1f-d092-41fc-9ebe-b0b91425598b",
+      "next_step": 47,
+      "pages": [
+        "a2b730a8-5d52-4210-8e8f-cd46faa359b6",
+        "df2d7e45-0792-4cec-98e1-6f9bbdadd984",
+        "554450c6-364a-451f-92cd-6c01f9210698"
+      ],
+      "completed_steps": [
+        "register_user_dictionary",
+        "complete_graph_and_original_offsets",
+        "missing_bundle",
+        "missing_bundle_preserves_revision",
+        "invalid_user_rule",
+        "invalid_user_rule_preserves_revision",
+        "missing_bundle_publishes_no_name",
+        "failed_name_absent",
+        "protect_builtin",
+        "create_documents",
+        "create_physical_index",
+        "bind_both_revisions",
+        "insert_graph_sources",
+        "hanja_reading_hits",
+        "compound_path_order_and_pos_holes",
+        "complete_source_query_mapping",
+        "reversed_phrase",
+        "original_source_highlighting",
+        "begin_write",
+        "insert_before_savepoint",
+        "savepoint",
+        "change_indexed_source",
+        "uncommitted_phrase_support",
+        "rollback_savepoint",
+        "release_savepoint",
+        "savepoint_restores_graph",
+        "rollback_transaction",
+        "rollback_restores_graph",
+        "replace_catalog_name",
+        "field_keeps_retained_revision",
+        "close_all_handles_and_reopen",
+        "reopen_restores_original_revision",
+        "insert_using_retained_revision",
+        "new_documents_use_retained_revision",
+        "restore_named_revision",
+        "recreated_descriptor_identity",
+        "begin_search_change",
+        "replace_search_only",
+        "search_revision_is_independent",
+        "rollback_search_change",
+        "rollback_restores_search_revision",
+        "reopen_after_new_write",
+        "diagnostic_survives_reopen",
+        "graphs_survive_second_reopen",
+        "drop_documents",
+        "release_named_revision",
+        "released_name_absent"
+      ],
+      "checkpoints": [
+        {
+          "next_step": 31,
+          "databases": [
+            {
+              "name": "/uqa",
+              "version": 21
+            }
+          ],
+          "storage": {
+            "quota": 10737512448,
+            "usage": 94208,
+            "usageDetails": {
+              "indexedDB": 94208
+            }
+          }
+        },
+        {
+          "next_step": 42,
+          "databases": [
+            {
+              "name": "/uqa",
+              "version": 21
+            }
+          ],
+          "storage": {
+            "quota": 10737512448,
+            "usage": 94208,
+            "usageDetails": {
+              "indexedDB": 94208
+            }
+          }
+        }
+      ],
+      "memory": [
+        {
+          "page": 1,
+          "label": "before_load",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 258285,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 464589,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 750818
+        },
+        {
+          "page": 1,
+          "label": "opened",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 942545,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 36907834,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 37878243
+        },
+        {
+          "page": 1,
+          "label": "after_complete_graph_and_original_offsets",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 804167,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140347245,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 141179276
+        },
+        {
+          "page": 1,
+          "label": "closed_and_persisted",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 141469991,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 521921,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142019856
+        },
+        {
+          "page": 2,
+          "label": "before_load",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 416777,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2067914,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 2512635
+        },
+        {
+          "page": 2,
+          "label": "opened",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 1740770,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 138130751,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 139899385
+        },
+        {
+          "page": 2,
+          "label": "after_recreated_descriptor_identity",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139386151,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 1587632,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 141001647
+        },
+        {
+          "page": 2,
+          "label": "closed_and_persisted",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 138814291,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2305970,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 141148205
+        },
+        {
+          "page": 3,
+          "label": "before_load",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 903588,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2659809,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 3591341
+        },
+        {
+          "page": 3,
+          "label": "opened",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 138225175,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2711152,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 140964191
+        },
+        {
+          "page": 3,
+          "label": "after_graphs_survive_second_reopen",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2640997,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139041622,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 141710483
+        },
+        {
+          "page": 3,
+          "label": "retained/none/korean_prose",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139468438,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2642217,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142138519
+        },
+        {
+          "page": 3,
+          "label": "released/none/korean_prose",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 138990742,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 3122247,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142140853
+        },
+        {
+          "page": 3,
+          "label": "retained/none/short_query",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 137922810,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 4200865,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142151539
+        },
+        {
+          "page": 3,
+          "label": "released/none/short_query",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 138903978,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 3553183,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142485025
+        },
+        {
+          "page": 3,
+          "label": "retained/none/hanja",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139546837,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2631807,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142206508
+        },
+        {
+          "page": 3,
+          "label": "released/none/hanja",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 3478466,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 138973291,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142479621
+        },
+        {
+          "page": 3,
+          "label": "retained/none/mixed_script",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 3186312,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139485147,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142699323
+        },
+        {
+          "page": 3,
+          "label": "released/none/mixed_script",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139013119,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 3118769,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142159752
+        },
+        {
+          "page": 3,
+          "label": "retained/none/unknown",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139476836,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2693617,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142198317
+        },
+        {
+          "page": 3,
+          "label": "released/none/unknown",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139048702,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 3057128,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142133694
+        },
+        {
+          "page": 3,
+          "label": "retained/none/ambiguous_long",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140197554,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2559189,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142784607
+        },
+        {
+          "page": 3,
+          "label": "released/none/ambiguous_long",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139503460,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2649029,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142180353
+        },
+        {
+          "page": 3,
+          "label": "retained/discard/korean_prose",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2643245,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139582210,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142253319
+        },
+        {
+          "page": 3,
+          "label": "released/discard/korean_prose",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139475024,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 3058792,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142561680
+        },
+        {
+          "page": 3,
+          "label": "retained/discard/short_query",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139573488,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2565199,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142166551
+        },
+        {
+          "page": 3,
+          "label": "released/discard/short_query",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139565063,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2570080,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142163087
+        },
+        {
+          "page": 3,
+          "label": "retained/discard/hanja",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139099192,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 3121656,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142248712
+        },
+        {
+          "page": 3,
+          "label": "released/discard/hanja",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139552119,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2581644,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142161627
+        },
+        {
+          "page": 3,
+          "label": "retained/discard/mixed_script",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 3083505,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139147110,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142258479
+        },
+        {
+          "page": 3,
+          "label": "released/discard/mixed_script",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139401108,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2742203,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142171175
+        },
+        {
+          "page": 3,
+          "label": "retained/discard/unknown",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139143870,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 3034421,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142206155
+        },
+        {
+          "page": 3,
+          "label": "released/discard/unknown",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139576366,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2567749,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142171979
+        },
+        {
+          "page": 3,
+          "label": "retained/discard/ambiguous_long",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139782384,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 3084127,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142894375
+        },
+        {
+          "page": 3,
+          "label": "released/discard/ambiguous_long",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2620845,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139531762,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142180471
+        },
+        {
+          "page": 3,
+          "label": "retained/mixed/korean_prose",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 3091313,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139668266,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142787443
+        },
+        {
+          "page": 3,
+          "label": "released/mixed/korean_prose",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2587679,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140062602,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142678225
+        },
+        {
+          "page": 3,
+          "label": "retained/mixed/short_query",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2751489,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139996421,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142775854
+        },
+        {
+          "page": 3,
+          "label": "released/mixed/short_query",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140036910,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2591585,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142656439
+        },
+        {
+          "page": 3,
+          "label": "retained/mixed/hanja",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140068538,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2607597,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142704079
+        },
+        {
+          "page": 3,
+          "label": "released/mixed/hanja",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139976725,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2659301,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 142663970
+        },
+        {
+          "page": 3,
+          "label": "retained/mixed/mixed_script",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 3265531,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139451359,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142744834
+        },
+        {
+          "page": 3,
+          "label": "released/mixed/mixed_script",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140035802,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2587500,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142651246
+        },
+        {
+          "page": 3,
+          "label": "retained/mixed/unknown",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140069177,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2589535,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142686576
+        },
+        {
+          "page": 3,
+          "label": "released/mixed/unknown",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 2679848,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139958459,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 142666251
+        },
+        {
+          "page": 3,
+          "label": "retained/mixed/ambiguous_long",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 141005930,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2621841,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 143655635
+        },
+        {
+          "page": 3,
+          "label": "released/mixed/ambiguous_long",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2592249,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 140040936,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 142661049
+        },
+        {
+          "page": 3,
+          "label": "finished_and_persisted",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56765/tests/wasm/browser_nori.html?run=56a35409f5f74be4981f86a6b28d8349&nori=enabled&bundle=%2Fcrates%2Fuqa-wasm%2Fjs%2Findex.mjs"
+                }
+              ],
+              "bytes": 139360225,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2949509,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 142337678
+        }
+      ],
+      "analyses": [
+        {
+          "mode": "none",
+          "name": "korean_prose",
+          "input_utf8_bytes": 1744,
+          "token_count": 168,
+          "analyzer_fingerprint": "4d4bfda9b47864136bca19782eeb91ca4173b3de811ae986e6923dca023363cc",
+          "diagnostic_sha256": "fd9c40db86e09986a7be63a7d00567d99fc3f9d2d80ff313596bb54a4ca52b94"
+        },
+        {
+          "mode": "none",
+          "name": "short_query",
+          "input_utf8_bytes": 33,
+          "token_count": 4,
+          "analyzer_fingerprint": "4d4bfda9b47864136bca19782eeb91ca4173b3de811ae986e6923dca023363cc",
+          "diagnostic_sha256": "c9a35d7f7a7c20fb10df6670d306a400479d26dda816da234cca745d9d7f8780"
+        },
+        {
+          "mode": "none",
+          "name": "hanja",
+          "input_utf8_bytes": 1184,
+          "token_count": 160,
+          "analyzer_fingerprint": "4d4bfda9b47864136bca19782eeb91ca4173b3de811ae986e6923dca023363cc",
+          "diagnostic_sha256": "5f2649ee1565f7756dd16e53a755377f796718013eed95f3f5d48c57debe4bb0"
+        },
+        {
+          "mode": "none",
+          "name": "mixed_script",
+          "input_utf8_bytes": 1168,
+          "token_count": 192,
+          "analyzer_fingerprint": "4d4bfda9b47864136bca19782eeb91ca4173b3de811ae986e6923dca023363cc",
+          "diagnostic_sha256": "c58823f56260966ea06b668739a6ebff0df03bbb40937826f6acd25fe1534f32"
+        },
+        {
+          "mode": "none",
+          "name": "unknown",
+          "input_utf8_bytes": 1024,
+          "token_count": 112,
+          "analyzer_fingerprint": "4d4bfda9b47864136bca19782eeb91ca4173b3de811ae986e6923dca023363cc",
+          "diagnostic_sha256": "3cedc2ba96cb0ee73760faaa33986955ea1a33832422816dd8fba3b371ea6157"
+        },
+        {
+          "mode": "none",
+          "name": "ambiguous_long",
+          "input_utf8_bytes": 13056,
+          "token_count": 1793,
+          "analyzer_fingerprint": "4d4bfda9b47864136bca19782eeb91ca4173b3de811ae986e6923dca023363cc",
+          "diagnostic_sha256": "480ea6b5c949ca970ddb9e11e4d7ba3cd71000fd75535f04f1ae5775e55315d6"
+        },
+        {
+          "mode": "discard",
+          "name": "korean_prose",
+          "input_utf8_bytes": 1744,
+          "token_count": 192,
+          "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+          "diagnostic_sha256": "f2efba9db5017570937315f8e8c32b57bf489825b6701cfb271f29e46787b1a9"
+        },
+        {
+          "mode": "discard",
+          "name": "short_query",
+          "input_utf8_bytes": 33,
+          "token_count": 5,
+          "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+          "diagnostic_sha256": "e19c08be8aca33ea9414c8a3ca498e2be2ffdd922de3de40dae9aa8a07000135"
+        },
+        {
+          "mode": "discard",
+          "name": "hanja",
+          "input_utf8_bytes": 1184,
+          "token_count": 160,
+          "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+          "diagnostic_sha256": "d4f54cda514a14149ad97d4e8e6029f4796ddf56fe4bc3c259ef8f1e853b9bdb"
+        },
+        {
+          "mode": "discard",
+          "name": "mixed_script",
+          "input_utf8_bytes": 1168,
+          "token_count": 192,
+          "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+          "diagnostic_sha256": "8bd86ecfcdb1da97b9bab9d61d948085f046701a6b2f21e83dd9345c5be96972"
+        },
+        {
+          "mode": "discard",
+          "name": "unknown",
+          "input_utf8_bytes": 1024,
+          "token_count": 112,
+          "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+          "diagnostic_sha256": "03542449937cf352e1509ccb10c6e85c876f3d20648c6d247f439420400c0c1d"
+        },
+        {
+          "mode": "discard",
+          "name": "ambiguous_long",
+          "input_utf8_bytes": 13056,
+          "token_count": 2304,
+          "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+          "diagnostic_sha256": "b25dc0a77938601baa880894e8d99bc25f2f30794008f30b975ed9e412784e36"
+        },
+        {
+          "mode": "mixed",
+          "name": "korean_prose",
+          "input_utf8_bytes": 1744,
+          "token_count": 224,
+          "analyzer_fingerprint": "c18fe31f801390470a8d35ba7b7186f4cd04f67dbdde2bdbf3ea4d0854cc30be",
+          "diagnostic_sha256": "042d30c1e0787107f584b62d7b4e8feefb88bbd773e7af3bb3291aa75ee90f82"
+        },
+        {
+          "mode": "mixed",
+          "name": "short_query",
+          "input_utf8_bytes": 33,
+          "token_count": 6,
+          "analyzer_fingerprint": "c18fe31f801390470a8d35ba7b7186f4cd04f67dbdde2bdbf3ea4d0854cc30be",
+          "diagnostic_sha256": "eaf39a9e002c8ae6ce041080ff4070b5878e963eb3f6aff26fdfb00e916ccae5"
+        },
+        {
+          "mode": "mixed",
+          "name": "hanja",
+          "input_utf8_bytes": 1184,
+          "token_count": 160,
+          "analyzer_fingerprint": "c18fe31f801390470a8d35ba7b7186f4cd04f67dbdde2bdbf3ea4d0854cc30be",
+          "diagnostic_sha256": "54b1159607376671abf7d5f15417e6f940691439e4d817fbd84df400378a1738"
+        },
+        {
+          "mode": "mixed",
+          "name": "mixed_script",
+          "input_utf8_bytes": 1168,
+          "token_count": 192,
+          "analyzer_fingerprint": "c18fe31f801390470a8d35ba7b7186f4cd04f67dbdde2bdbf3ea4d0854cc30be",
+          "diagnostic_sha256": "9ef658cfe1d929b1bb6ad1e10277de067945274ffa9d3ef79f2aac998e67b479"
+        },
+        {
+          "mode": "mixed",
+          "name": "unknown",
+          "input_utf8_bytes": 1024,
+          "token_count": 112,
+          "analyzer_fingerprint": "c18fe31f801390470a8d35ba7b7186f4cd04f67dbdde2bdbf3ea4d0854cc30be",
+          "diagnostic_sha256": "cd22d1923aa0c135e5751b4cb7f926bd7c4887ba8bf09b6bf011a8035dd14a98"
+        },
+        {
+          "mode": "mixed",
+          "name": "ambiguous_long",
+          "input_utf8_bytes": 13056,
+          "token_count": 2816,
+          "analyzer_fingerprint": "c18fe31f801390470a8d35ba7b7186f4cd04f67dbdde2bdbf3ea4d0854cc30be",
+          "diagnostic_sha256": "ce88000dea1058b0aa017a3c685dd169dd46588ec49825bc1f17678cd484ebb9"
+        }
+      ],
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+      "status": "Passed: 47 steps across 3 page loads",
+      "completed_at_utc": "2026-09-13T10:53:02.762Z"
+    }
+  ],
+  "memory_summary": {
+    "1/before_load": {
+      "min_bytes": 750818,
+      "median_bytes": 756764,
+      "max_bytes": 791304
+    },
+    "1/opened": {
+      "min_bytes": 37878243,
+      "median_bytes": 38266763,
+      "max_bytes": 38292249
+    },
+    "1/after_complete_graph_and_original_offsets": {
+      "min_bytes": 141093365,
+      "median_bytes": 141179276,
+      "max_bytes": 141194226
+    },
+    "1/closed_and_persisted": {
+      "min_bytes": 142013225,
+      "median_bytes": 142019856,
+      "max_bytes": 142041965
+    },
+    "2/before_load": {
+      "min_bytes": 2512635,
+      "median_bytes": 2512711,
+      "max_bytes": 2512719
+    },
+    "2/opened": {
+      "min_bytes": 139893323,
+      "median_bytes": 139895799,
+      "max_bytes": 139899385
+    },
+    "2/after_recreated_descriptor_identity": {
+      "min_bytes": 141001647,
+      "median_bytes": 141320179,
+      "max_bytes": 141429307
+    },
+    "2/closed_and_persisted": {
+      "min_bytes": 140809061,
+      "median_bytes": 140906446,
+      "max_bytes": 141148205
+    },
+    "3/before_load": {
+      "min_bytes": 3583703,
+      "median_bytes": 3590969,
+      "max_bytes": 3591341
+    },
+    "3/opened": {
+      "min_bytes": 140962019,
+      "median_bytes": 140964191,
+      "max_bytes": 140964995
+    },
+    "3/after_graphs_survive_second_reopen": {
+      "min_bytes": 141710483,
+      "median_bytes": 141717541,
+      "max_bytes": 141719573
+    },
+    "3/retained/none/korean_prose": {
+      "min_bytes": 142099248,
+      "median_bytes": 142138519,
+      "max_bytes": 142534824
+    },
+    "3/released/none/korean_prose": {
+      "min_bytes": 142138644,
+      "median_bytes": 142140853,
+      "max_bytes": 142477090
+    },
+    "3/retained/none/short_query": {
+      "min_bytes": 142113684,
+      "median_bytes": 142151539,
+      "max_bytes": 142162450
+    },
+    "3/released/none/short_query": {
+      "min_bytes": 142075153,
+      "median_bytes": 142109727,
+      "max_bytes": 142485025
+    },
+    "3/retained/none/hanja": {
+      "min_bytes": 142152781,
+      "median_bytes": 142203103,
+      "max_bytes": 142206508
+    },
+    "3/released/none/hanja": {
+      "min_bytes": 142115279,
+      "median_bytes": 142156534,
+      "max_bytes": 142479621
+    },
+    "3/retained/none/mixed_script": {
+      "min_bytes": 142128019,
+      "median_bytes": 142168687,
+      "max_bytes": 142699323
+    },
+    "3/released/none/mixed_script": {
+      "min_bytes": 142104079,
+      "median_bytes": 142159752,
+      "max_bytes": 142471698
+    },
+    "3/retained/none/unknown": {
+      "min_bytes": 142149441,
+      "median_bytes": 142188105,
+      "max_bytes": 142198317
+    },
+    "3/released/none/unknown": {
+      "min_bytes": 142095915,
+      "median_bytes": 142097719,
+      "max_bytes": 142133694
+    },
+    "3/retained/none/ambiguous_long": {
+      "min_bytes": 142780415,
+      "median_bytes": 142784607,
+      "max_bytes": 142784611
+    },
+    "3/released/none/ambiguous_long": {
+      "min_bytes": 142145210,
+      "median_bytes": 142180353,
+      "max_bytes": 142187391
+    },
+    "3/retained/discard/korean_prose": {
+      "min_bytes": 142206307,
+      "median_bytes": 142221691,
+      "max_bytes": 142253319
+    },
+    "3/released/discard/korean_prose": {
+      "min_bytes": 142110727,
+      "median_bytes": 142561680,
+      "max_bytes": 142565857
+    },
+    "3/retained/discard/short_query": {
+      "min_bytes": 142106464,
+      "median_bytes": 142166551,
+      "max_bytes": 142302837
+    },
+    "3/released/discard/short_query": {
+      "min_bytes": 142151838,
+      "median_bytes": 142163087,
+      "max_bytes": 142165795
+    },
+    "3/retained/discard/hanja": {
+      "min_bytes": 142169999,
+      "median_bytes": 142211375,
+      "max_bytes": 142248712
+    },
+    "3/released/discard/hanja": {
+      "min_bytes": 142150687,
+      "median_bytes": 142161627,
+      "max_bytes": 142580396
+    },
+    "3/retained/discard/mixed_script": {
+      "min_bytes": 142175105,
+      "median_bytes": 142227811,
+      "max_bytes": 142258479
+    },
+    "3/released/discard/mixed_script": {
+      "min_bytes": 142168487,
+      "median_bytes": 142171175,
+      "max_bytes": 142200120
+    },
+    "3/retained/discard/unknown": {
+      "min_bytes": 142206155,
+      "median_bytes": 142561404,
+      "max_bytes": 142719318
+    },
+    "3/released/discard/unknown": {
+      "min_bytes": 142171979,
+      "median_bytes": 142199055,
+      "max_bytes": 142605214
+    },
+    "3/retained/discard/ambiguous_long": {
+      "min_bytes": 142815991,
+      "median_bytes": 142894375,
+      "max_bytes": 143334715
+    },
+    "3/released/discard/ambiguous_long": {
+      "min_bytes": 142180471,
+      "median_bytes": 142181616,
+      "max_bytes": 142641435
+    },
+    "3/retained/mixed/korean_prose": {
+      "min_bytes": 142244287,
+      "median_bytes": 142699544,
+      "max_bytes": 142787443
+    },
+    "3/released/mixed/korean_prose": {
+      "min_bytes": 142171863,
+      "median_bytes": 142669568,
+      "max_bytes": 142678225
+    },
+    "3/retained/mixed/short_query": {
+      "min_bytes": 142159051,
+      "median_bytes": 142607126,
+      "max_bytes": 142775854
+    },
+    "3/released/mixed/short_query": {
+      "min_bytes": 142126395,
+      "median_bytes": 142656439,
+      "max_bytes": 142711403
+    },
+    "3/retained/mixed/hanja": {
+      "min_bytes": 142179627,
+      "median_bytes": 142704079,
+      "max_bytes": 143227914
+    },
+    "3/released/mixed/hanja": {
+      "min_bytes": 142122103,
+      "median_bytes": 142618705,
+      "max_bytes": 142663970
+    },
+    "3/retained/mixed/mixed_script": {
+      "min_bytes": 142182694,
+      "median_bytes": 142682093,
+      "max_bytes": 142744834
+    },
+    "3/released/mixed/mixed_script": {
+      "min_bytes": 142129522,
+      "median_bytes": 142607336,
+      "max_bytes": 142651246
+    },
+    "3/retained/mixed/unknown": {
+      "min_bytes": 142153560,
+      "median_bytes": 142686131,
+      "max_bytes": 142686576
+    },
+    "3/released/mixed/unknown": {
+      "min_bytes": 142161935,
+      "median_bytes": 142626280,
+      "max_bytes": 142666251
+    },
+    "3/retained/mixed/ambiguous_long": {
+      "min_bytes": 143596109,
+      "median_bytes": 143616950,
+      "max_bytes": 143655635
+    },
+    "3/released/mixed/ambiguous_long": {
+      "min_bytes": 142647424,
+      "median_bytes": 142661049,
+      "max_bytes": 142706384
+    },
+    "3/finished_and_persisted": {
+      "min_bytes": 142310052,
+      "median_bytes": 142337678,
+      "max_bytes": 142351353
+    }
+  },
+  "provenance": {
+    "measured_at_utc": "2026-09-13T10:53:06.325499+00:00",
+    "revision": "b3c804c0eae5e3e3bb6f65d7f1e661dca376867b",
+    "worktree_dirty": true,
+    "cpu": "Apple M1 Ultra",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "browser": "Chrome",
+    "browser_version": "152.0.7977.83",
+    "headless": true,
+    "browser_flags": [
+      "--enable-blink-features=ForceEagerMeasureMemory"
+    ],
+    "playwright_cli": "0.1.19",
+    "rustc": "rustc 1.90.0 (1159e78c4 2025-09-14)\nbinary: rustc\ncommit-hash: 1159e78c4747b02ef996e55082b704c09b970588\ncommit-date: 2025-09-14\nhost: aarch64-apple-darwin\nrelease: 1.90.0\nLLVM version: 20.1.8",
+    "emcc": "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 6.0.3-git\nCopyright (C) 2026 the Emscripten authors (see AUTHORS.txt)\nThis is free and open source software under the MIT license.\nThere is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+    "node": "v22.12.0",
+    "cargo_features": "enabled",
+    "requested_compiler_flags": {
+      "CFLAGS": "-isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk -I${HOME}/app/include -I/opt/homebrew/include",
+      "CXXFLAGS": "-isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk -I${HOME}/app/include -I/opt/homebrew/include",
+      "LDFLAGS": " -L${HOME}/app/lib -L/opt/homebrew/lib -L/opt/homebrew/opt/icu4c@77/lib -Wl,-cache_path_lto,${HOME}/.cache/llvm -L${HOME}/app/lib -L/opt/homebrew/lib -L/opt/homebrew/opt/icu4c@77/lib -Wl,-cache_path_lto,${HOME}/.cache/llvm -L${HOME}/app/lib -L/opt/homebrew/lib -L/opt/homebrew/opt/icu4c@77/lib -Wl,-cache_path_lto,${HOME}/.cache/llvm"
+    },
+    "flags_sha256": "1647b6537e50c7f2c41a549356805c798a60d8a7a5cb84434429d5d347ac84ce",
+    "runtime_crates": [
+      "uqa-analysis",
+      "uqa-core",
+      "uqa-engine",
+      "uqa-execution",
+      "uqa-fdw",
+      "uqa-fusion",
+      "uqa-graph",
+      "uqa-joins",
+      "uqa-ml",
+      "uqa-nori-data",
+      "uqa-operators",
+      "uqa-pg-query",
+      "uqa-planner",
+      "uqa-scoring",
+      "uqa-sql",
+      "uqa-storage",
+      "uqa-storage-sqlite",
+      "uqa-wasm"
+    ],
+    "runtime_sources_sha256": "533c8421e00f8c0194999bf5ffc3cb7cad51a5162393f0a1610959fb18a3e074",
+    "artifacts": [
+      {
+        "name": "crates/uqa-wasm/js/index.mjs",
+        "bytes": 47644,
+        "sha256": "0b16554d3f510ee667169512930cc8e3dc23505679d5e5a5bbb78f43051aceeb"
+      },
+      {
+        "name": "crates/uqa-wasm/js/uqa.js",
+        "bytes": 122398,
+        "sha256": "390cffadcf27110d9628d50713af145a56fafff3f174d969a5f9e88b6fe06447"
+      },
+      {
+        "name": "crates/uqa-wasm/js/uqa.wasm",
+        "bytes": 56648788,
+        "sha256": "6e8bfc0e163405a706c759f7b13f11931c53a79ba733de8d94b21a751c6a2f74"
+      }
+    ],
+    "sources": {
+      "scripts/verify-nori-browser.py": "10243535485e926c1b64971e996de9fa98fc0649c77cb1276928e6492c178aad",
+      "scripts/serve-wasm-tests.py": "c14b9578475385386ab007580d452de5b9affbcf3cafc849ffae3e48a2654f56",
+      "scripts/run-nori-benchmark.py": "2fdd119bc0cf62c16ff3efb3999175bdbf3f8ed8c494e79f7779fd90630e977d",
+      "scripts/build-wasm.sh": "471b402957b989980a17ae637563bff5f5fe4a1d6a7e839ca3de7cf86883800a",
+      "crates/uqa-wasm/build.rs": "8518992a4c71065012d8c82b0d830ddaf07bc767bb462fd66d1bbfde3059fa9c",
+      "crates/uqa-wasm/js/callback-library.js": "f13c5a10de2b8424c3611a04f07e979c19e239de9c384242df8448cfbe43fdae",
+      "tests/wasm/browser_nori.html": "13c4bb201aa22b4575a1a8203ae21581e53fdc546ed44a1e857c3f49c9d20cb5",
+      "tests/wasm/browser_nori.mjs": "4ffeedce50e93926f37582869452d992567d3da511f74824bbe1c161549d99e1",
+      "tests/wasm/export_nori_diagnostics.py": "c3d01bd0cd94aff4bddc639ea5547b6b7d55d1b72eab48f9109ff9567765bac8",
+      "tests/parity/nori/bindings.core.mjs": "9e014dce0d93b95f54a6f96d5cf49d4ee31ed24e2ab4563a911762c2a0e1b101",
+      "tests/parity/nori/bindings.json": "81486e920275f62095bd600b9d5abe4c9b7694f891c205ce1eb3ae2b573d0b0c",
+      "examples/javascript/common.mjs": "5ca386cc878a1a3beb0876b555fb721ef010c17733de8a67c8ec8c23abfdcb6c",
+      "benchmarks/nori/browser-contract.json": "3f0a4158d383450598461b46c0edebd0d34d311f03eed216c963faef2d9d246a",
+      "crates/uqa-analysis/benches/nori/corpus.json": "18a50905d26e3615d9db2a8b9565cbcdefcbcfdd1036a88292624154fc228e6b"
+    },
+    "cargo_lock_sha256": "72841a94b2e30dd995a6b19ed51c31555458c1e097a9bc478d821602ab8b2583",
+    "jvm": null
+  },
+  "gate": {
+    "passed": true,
+    "scope": "SQL, page reload, IndexedDB, complete diagnostic output, and memory observation completeness; no RSS or continuous-peak claim"
+  }
+}

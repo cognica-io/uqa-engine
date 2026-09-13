@@ -1,0 +1,1059 @@
+{
+  "schema_version": 1,
+  "feature": "disabled",
+  "runs": [
+    {
+      "schema_version": 1,
+      "feature": "disabled",
+      "run_id": "2ae8a821-cf6e-4721-b9e0-e08bcbcd431a",
+      "next_step": 9,
+      "pages": [
+        "0744fe3b-dd27-47f6-8d6c-b7c4bc2d502f",
+        "71d13bea-7bb7-4632-9d62-54f7880a1307"
+      ],
+      "completed_steps": [
+        "builtin_is_absent",
+        "korean_tokenizer_fails",
+        "korean_filter_fails",
+        "failed_name_absent",
+        "diagnostics_do_not_fallback",
+        "generic_pipeline_remains_available",
+        "generic_source_highlight",
+        "generic_definition_reopens",
+        "generic_source_highlight_after_reopen"
+      ],
+      "checkpoints": [
+        {
+          "next_step": 8,
+          "databases": [
+            {
+              "name": "/uqa",
+              "version": 21
+            }
+          ],
+          "storage": {
+            "quota": 10737504256,
+            "usage": 86016,
+            "usageDetails": {
+              "indexedDB": 86016
+            }
+          }
+        }
+      ],
+      "memory": [
+        {
+          "page": 1,
+          "label": "before_load",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 240005,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=5bf5bddacfe541a5894fffc46ab0fce5&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 484615,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 752564
+        },
+        {
+          "page": 1,
+          "label": "opened",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=5bf5bddacfe541a5894fffc46ab0fce5&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 27438021,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 558494,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 28024379
+        },
+        {
+          "page": 1,
+          "label": "after_korean_tokenizer_fails",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=5bf5bddacfe541a5894fffc46ab0fce5&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 28011045,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 650549,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 28689458
+        },
+        {
+          "page": 1,
+          "label": "closed_and_persisted",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 925540,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=5bf5bddacfe541a5894fffc46ab0fce5&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 28094154,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 29047638
+        },
+        {
+          "page": 2,
+          "label": "before_load",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=5bf5bddacfe541a5894fffc46ab0fce5&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 431395,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 2008634,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 2467973
+        },
+        {
+          "page": 2,
+          "label": "opened",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=5bf5bddacfe541a5894fffc46ab0fce5&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 27126989,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2036310,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 29191163
+        },
+        {
+          "page": 2,
+          "label": "finished_and_persisted",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=5bf5bddacfe541a5894fffc46ab0fce5&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 27846867,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 1652189,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 29526920
+        }
+      ],
+      "analyses": [],
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+      "status": "Passed: 9 steps across 2 page loads",
+      "completed_at_utc": "2026-09-13T10:53:12.734Z"
+    },
+    {
+      "schema_version": 1,
+      "feature": "disabled",
+      "run_id": "7dade50a-2732-4b7f-a0cc-96dd4c4b5e42",
+      "next_step": 9,
+      "pages": [
+        "ead06087-23f6-430a-a6f0-004ec45f600a",
+        "0fc02ea1-5511-4bd8-b15d-5f77506fe4be"
+      ],
+      "completed_steps": [
+        "builtin_is_absent",
+        "korean_tokenizer_fails",
+        "korean_filter_fails",
+        "failed_name_absent",
+        "diagnostics_do_not_fallback",
+        "generic_pipeline_remains_available",
+        "generic_source_highlight",
+        "generic_definition_reopens",
+        "generic_source_highlight_after_reopen"
+      ],
+      "checkpoints": [
+        {
+          "next_step": 8,
+          "databases": [
+            {
+              "name": "/uqa",
+              "version": 21
+            }
+          ],
+          "storage": {
+            "quota": 10737504256,
+            "usage": 86016,
+            "usageDetails": {
+              "indexedDB": 86016
+            }
+          }
+        }
+      ],
+      "memory": [
+        {
+          "page": 1,
+          "label": "before_load",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 850731,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=a55cfb4fbf304a8cab8fdf68086ee4bd&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 326506,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 1205101
+        },
+        {
+          "page": 1,
+          "label": "opened",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 1003807,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=a55cfb4fbf304a8cab8fdf68086ee4bd&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 27480069,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 28511740
+        },
+        {
+          "page": 1,
+          "label": "after_korean_tokenizer_fails",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=a55cfb4fbf304a8cab8fdf68086ee4bd&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 28001797,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 538207,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 28567868
+        },
+        {
+          "page": 1,
+          "label": "closed_and_persisted",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=a55cfb4fbf304a8cab8fdf68086ee4bd&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 28046316,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 956671,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 29030931
+        },
+        {
+          "page": 2,
+          "label": "before_load",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=a55cfb4fbf304a8cab8fdf68086ee4bd&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 817288,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 1623041,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 2468273
+        },
+        {
+          "page": 2,
+          "label": "opened",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=a55cfb4fbf304a8cab8fdf68086ee4bd&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 27195860,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 1967407,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 29191131
+        },
+        {
+          "page": 2,
+          "label": "finished_and_persisted",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=a55cfb4fbf304a8cab8fdf68086ee4bd&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 27657039,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 1841949,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 29526852
+        }
+      ],
+      "analyses": [],
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+      "status": "Passed: 9 steps across 2 page loads",
+      "completed_at_utc": "2026-09-13T10:53:22.131Z"
+    },
+    {
+      "schema_version": 1,
+      "feature": "disabled",
+      "run_id": "58c8b5f1-cd55-44f0-be08-02bc2c1e1c20",
+      "next_step": 9,
+      "pages": [
+        "5f4f8e05-e2af-4199-8ee2-0e5457940f34",
+        "881e4eff-d93a-4ce3-b8e2-6623bd4b5c3f"
+      ],
+      "completed_steps": [
+        "builtin_is_absent",
+        "korean_tokenizer_fails",
+        "korean_filter_fails",
+        "failed_name_absent",
+        "diagnostics_do_not_fallback",
+        "generic_pipeline_remains_available",
+        "generic_source_highlight",
+        "generic_definition_reopens",
+        "generic_source_highlight_after_reopen"
+      ],
+      "checkpoints": [
+        {
+          "next_step": 8,
+          "databases": [
+            {
+              "name": "/uqa",
+              "version": 21
+            }
+          ],
+          "storage": {
+            "quota": 10737504256,
+            "usage": 86016,
+            "usageDetails": {
+              "indexedDB": 86016
+            }
+          }
+        }
+      ],
+      "memory": [
+        {
+          "page": 1,
+          "label": "before_load",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 693352,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=b7facaca10f4487093da7507a9f6b148&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 481063,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 1202279
+        },
+        {
+          "page": 1,
+          "label": "opened",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=b7facaca10f4487093da7507a9f6b148&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 27486887,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 459660,
+              "types": [
+                "Shared"
+              ]
+            }
+          ],
+          "bytes": 27974411
+        },
+        {
+          "page": 1,
+          "label": "after_korean_tokenizer_fails",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 559160,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=b7facaca10f4487093da7507a9f6b148&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 27920533,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 28507557
+        },
+        {
+          "page": 1,
+          "label": "closed_and_persisted",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 475298,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=b7facaca10f4487093da7507a9f6b148&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 28092890,
+              "types": [
+                "JavaScript"
+              ]
+            }
+          ],
+          "bytes": 28596132
+        },
+        {
+          "page": 2,
+          "label": "before_load",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=b7facaca10f4487093da7507a9f6b148&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 407115,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 2032914,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 27944,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 2467973
+        },
+        {
+          "page": 2,
+          "label": "opened",
+          "breakdown": [
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=b7facaca10f4487093da7507a9f6b148&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 27527461,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 1635822,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            },
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            }
+          ],
+          "bytes": 29191147
+        },
+        {
+          "page": 2,
+          "label": "finished_and_persisted",
+          "breakdown": [
+            {
+              "attribution": [],
+              "bytes": 27864,
+              "types": [
+                "DOM"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 1636901,
+              "types": [
+                "Shared"
+              ]
+            },
+            {
+              "attribution": [
+                {
+                  "scope": "Window",
+                  "url": "http://127.0.0.1:56992/tests/wasm/browser_nori.html?run=b7facaca10f4487093da7507a9f6b148&nori=disabled&bundle=%2Ftarget%2Fnori-binding-disabled%2Fwasm%2Findex.mjs"
+                }
+              ],
+              "bytes": 27862079,
+              "types": [
+                "JavaScript"
+              ]
+            },
+            {
+              "attribution": [],
+              "bytes": 0,
+              "types": []
+            }
+          ],
+          "bytes": 29526844
+        }
+      ],
+      "analyses": [],
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+      "status": "Passed: 9 steps across 2 page loads",
+      "completed_at_utc": "2026-09-13T10:53:30.859Z"
+    }
+  ],
+  "memory_summary": {
+    "1/before_load": {
+      "min_bytes": 752564,
+      "median_bytes": 1202279,
+      "max_bytes": 1205101
+    },
+    "1/opened": {
+      "min_bytes": 27974411,
+      "median_bytes": 28024379,
+      "max_bytes": 28511740
+    },
+    "1/after_korean_tokenizer_fails": {
+      "min_bytes": 28507557,
+      "median_bytes": 28567868,
+      "max_bytes": 28689458
+    },
+    "1/closed_and_persisted": {
+      "min_bytes": 28596132,
+      "median_bytes": 29030931,
+      "max_bytes": 29047638
+    },
+    "2/before_load": {
+      "min_bytes": 2467973,
+      "median_bytes": 2467973,
+      "max_bytes": 2468273
+    },
+    "2/opened": {
+      "min_bytes": 29191131,
+      "median_bytes": 29191147,
+      "max_bytes": 29191163
+    },
+    "2/finished_and_persisted": {
+      "min_bytes": 29526844,
+      "median_bytes": 29526852,
+      "max_bytes": 29526920
+    }
+  },
+  "provenance": {
+    "measured_at_utc": "2026-09-13T10:53:35.368498+00:00",
+    "revision": "b3c804c0eae5e3e3bb6f65d7f1e661dca376867b",
+    "worktree_dirty": true,
+    "cpu": "Apple M1 Ultra",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "browser": "Chrome",
+    "browser_version": "152.0.7977.83",
+    "headless": true,
+    "browser_flags": [
+      "--enable-blink-features=ForceEagerMeasureMemory"
+    ],
+    "playwright_cli": "0.1.19",
+    "rustc": "rustc 1.90.0 (1159e78c4 2025-09-14)\nbinary: rustc\ncommit-hash: 1159e78c4747b02ef996e55082b704c09b970588\ncommit-date: 2025-09-14\nhost: aarch64-apple-darwin\nrelease: 1.90.0\nLLVM version: 20.1.8",
+    "emcc": "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 6.0.3-git\nCopyright (C) 2026 the Emscripten authors (see AUTHORS.txt)\nThis is free and open source software under the MIT license.\nThere is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+    "node": "v22.12.0",
+    "cargo_features": "disabled",
+    "requested_compiler_flags": {
+      "CFLAGS": "-isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk -I${HOME}/app/include -I/opt/homebrew/include",
+      "CXXFLAGS": "-isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk -I${HOME}/app/include -I/opt/homebrew/include",
+      "LDFLAGS": " -L${HOME}/app/lib -L/opt/homebrew/lib -L/opt/homebrew/opt/icu4c@77/lib -Wl,-cache_path_lto,${HOME}/.cache/llvm -L${HOME}/app/lib -L/opt/homebrew/lib -L/opt/homebrew/opt/icu4c@77/lib -Wl,-cache_path_lto,${HOME}/.cache/llvm -L${HOME}/app/lib -L/opt/homebrew/lib -L/opt/homebrew/opt/icu4c@77/lib -Wl,-cache_path_lto,${HOME}/.cache/llvm"
+    },
+    "flags_sha256": "1647b6537e50c7f2c41a549356805c798a60d8a7a5cb84434429d5d347ac84ce",
+    "runtime_crates": [
+      "uqa-analysis",
+      "uqa-core",
+      "uqa-engine",
+      "uqa-execution",
+      "uqa-fdw",
+      "uqa-fusion",
+      "uqa-graph",
+      "uqa-joins",
+      "uqa-ml",
+      "uqa-operators",
+      "uqa-pg-query",
+      "uqa-planner",
+      "uqa-scoring",
+      "uqa-sql",
+      "uqa-storage",
+      "uqa-storage-sqlite",
+      "uqa-wasm"
+    ],
+    "runtime_sources_sha256": "422cba94dab28212aa5168949a4526f92a20a334ee804c10116495c56f58bda2",
+    "artifacts": [
+      {
+        "name": "target/nori-binding-disabled/wasm/index.mjs",
+        "bytes": 47644,
+        "sha256": "0b16554d3f510ee667169512930cc8e3dc23505679d5e5a5bbb78f43051aceeb"
+      },
+      {
+        "name": "target/nori-binding-disabled/wasm/uqa.js",
+        "bytes": 122398,
+        "sha256": "77c50b8397ef7dc44ca493ef0fb9b37184c794a5a33b9272f39961146cbfeb59"
+      },
+      {
+        "name": "target/nori-binding-disabled/wasm/uqa.wasm",
+        "bytes": 46267072,
+        "sha256": "4b322dfbe06e1d462a11d18297165dfb54fd6fd4d64b3f956508608fbf3d3b07"
+      }
+    ],
+    "sources": {
+      "scripts/verify-nori-browser.py": "10243535485e926c1b64971e996de9fa98fc0649c77cb1276928e6492c178aad",
+      "scripts/serve-wasm-tests.py": "c14b9578475385386ab007580d452de5b9affbcf3cafc849ffae3e48a2654f56",
+      "scripts/run-nori-benchmark.py": "2fdd119bc0cf62c16ff3efb3999175bdbf3f8ed8c494e79f7779fd90630e977d",
+      "scripts/build-wasm.sh": "471b402957b989980a17ae637563bff5f5fe4a1d6a7e839ca3de7cf86883800a",
+      "crates/uqa-wasm/build.rs": "8518992a4c71065012d8c82b0d830ddaf07bc767bb462fd66d1bbfde3059fa9c",
+      "crates/uqa-wasm/js/callback-library.js": "f13c5a10de2b8424c3611a04f07e979c19e239de9c384242df8448cfbe43fdae",
+      "tests/wasm/browser_nori.html": "13c4bb201aa22b4575a1a8203ae21581e53fdc546ed44a1e857c3f49c9d20cb5",
+      "tests/wasm/browser_nori.mjs": "4ffeedce50e93926f37582869452d992567d3da511f74824bbe1c161549d99e1",
+      "tests/wasm/export_nori_diagnostics.py": "c3d01bd0cd94aff4bddc639ea5547b6b7d55d1b72eab48f9109ff9567765bac8",
+      "tests/parity/nori/bindings.core.mjs": "9e014dce0d93b95f54a6f96d5cf49d4ee31ed24e2ab4563a911762c2a0e1b101",
+      "tests/parity/nori/bindings.json": "81486e920275f62095bd600b9d5abe4c9b7694f891c205ce1eb3ae2b573d0b0c",
+      "examples/javascript/common.mjs": "5ca386cc878a1a3beb0876b555fb721ef010c17733de8a67c8ec8c23abfdcb6c",
+      "benchmarks/nori/browser-contract.json": "3f0a4158d383450598461b46c0edebd0d34d311f03eed216c963faef2d9d246a",
+      "crates/uqa-analysis/benches/nori/corpus.json": "18a50905d26e3615d9db2a8b9565cbcdefcbcfdd1036a88292624154fc228e6b"
+    },
+    "cargo_lock_sha256": "72841a94b2e30dd995a6b19ed51c31555458c1e097a9bc478d821602ab8b2583",
+    "jvm": null
+  },
+  "gate": {
+    "passed": true,
+    "scope": "SQL, page reload, IndexedDB, complete diagnostic output, and memory observation completeness; no RSS or continuous-peak claim"
+  }
+}

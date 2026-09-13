@@ -145,12 +145,16 @@ while IFS= read -r path; do
     tests/wasm/* | \
     tests/parity/nori/bindings.* | \
     examples/node/* | \
+    examples/javascript/* | \
     examples/browser/* | \
     benchmarks/nori/* | \
     crates/uqa-analysis/benches/nori/* | \
     scripts/run-nori-*benchmark.py | \
     scripts/build-wasm.sh | \
+    scripts/serve-wasm-tests.py | \
+    scripts/verify-nori-browser.py | \
     scripts/npm-release.py | \
+    .github/workflows/javascript-packages.yml | \
     .github/workflows/javascript-bindings.yml)
       run_javascript=true
       ;;
@@ -162,6 +166,8 @@ while IFS= read -r path; do
     crates/uqa-python/* | \
     tests/python/* | \
     tests/parity/nori/bindings.* | \
+    tests/wasm/export_nori_diagnostics.py | \
+    benchmarks/nori/browser-contract.json | \
     examples/python/* | \
     .github/workflows/python-wheels.yml)
       run_python=true

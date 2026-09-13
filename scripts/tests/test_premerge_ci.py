@@ -393,12 +393,29 @@ class PremergeCITest(unittest.TestCase):
 
     def test_nori_resource_and_binding_inputs_select_all_runtime_bindings(self) -> None:
         for path in ("crates/uqa-nori-data/data/nori.uqan", "crates/uqa-nori-data/data/resource_manifest.json",
-                     "tests/parity/nori/bindings.json", "tests/parity/nori/bindings.mjs"):
+                     "tests/parity/nori/bindings.json", "tests/parity/nori/bindings.mjs",
+                     "tests/parity/nori/bindings.core.mjs"):
             result, invocations, _ = self.run_script(changed_files=(path,))
             with self.subTest(path=path):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(len(invocations), 3)
                 self.assertTrue(any("ci.yml" in item and "run_rust=true" in item for item in invocations))
+
+    def test_browser_driver_and_shared_examples_select_javascript(self) -> None:
+        for path in ("examples/javascript/common.mjs", "scripts/serve-wasm-tests.py",
+                     "scripts/verify-nori-browser.py", ".github/workflows/javascript-packages.yml"):
+            result, invocations, _ = self.run_script(changed_files=(path,))
+            with self.subTest(path=path):
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(any("javascript-bindings.yml" in item for item in invocations))
+
+    def test_browser_native_contract_selects_python(self) -> None:
+        for path in ("tests/wasm/export_nori_diagnostics.py", "benchmarks/nori/browser-contract.json"):
+            result, invocations, _ = self.run_script(changed_files=(path,))
+            with self.subTest(path=path):
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(any("python-wheels.yml" in item for item in invocations))
+                self.assertTrue(any("javascript-bindings.yml" in item for item in invocations))
 
     def test_dry_run_does_not_create_a_remote_tag(self) -> None:
         result, gh_invocations, git_invocations = self.run_script("--dry-run")

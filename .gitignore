@@ -33,6 +33,7 @@ Thumbs.db
 rust-project.json
 
 # Profiling
+/output/playwright/
 perf.data
 perf.data.old
 flamegraph.svg

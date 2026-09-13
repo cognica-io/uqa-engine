@@ -21,6 +21,8 @@ Start with unified search for the complete relational, full-text, vector, graph,
 
 The Node.js and Browser WASM entry points share the binding-neutral JavaScript scenarios in [`javascript/`](javascript). Platform-specific files still own engine construction, persistence, callback registration, and resource cleanup.
 
+The [persistent Nori binding contract](../tests/parity/nori/BINDINGS.md) supplements this example matrix with identical analyzer, phrase, highlighting, rollback, and retained-revision assertions in all four bindings. It covers actual packages with and without Nori, including [real Chrome IndexedDB reloads and memory observations](../benchmarks/nori/BROWSER.md). The five examples above remain the general API scenario matrix.
+
 All four environments also expose the local and Cloud HTTP SQL path: Rust uses `uqa_client::HttpEngine`, while Python, Node.js, and Browser WASM export `HttpEngine` from their existing packages. Rust, Python, and Node.js can resolve a project through the installed `uqa` CLI; browsers require explicit connection material. The binding test suites execute materialized SQL, atomic batch, and streaming requests against controlled HTTP servers; the [HTTP Engine reference](../docs/manual/reference/09-http-engine.md) contains user-facing examples.
 
 The engine also ships smaller single-file Rust examples under [`crates/uqa-engine/examples/`](../crates/uqa-engine/examples), including encrypted-storage variants and the `doomql` demo.

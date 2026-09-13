@@ -2,6 +2,8 @@
 
 These programs mirror the Rust, Python, and browser WASM scenarios with the Node-API binding. Build `crates/uqa-node`, then run any file with `node examples/node/<name>.mjs`.
 
+For Nori-specific artifact verification, run `node --test tests/node/test_uqa_node.mjs`. The [shared persistent contract](../../tests/parity/nori/BINDINGS.md) documents explicit feature-disabled tests and selecting an isolated addon package, including matching CommonJS/ESM exports.
+
 | Example | Coverage |
 | --- | --- |
 | [`unified-search.mjs`](unified-search.mjs) | Raw and Bayesian text retrieval, vector KNN, exact and robust fusion, cross-relation typed operator joins, a scalar callback, and Cypher over shared identities |

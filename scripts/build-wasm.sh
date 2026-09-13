@@ -11,11 +11,44 @@
 #   brew install emscripten          # or emsdk
 #   rustup target add wasm32-unknown-emscripten
 #
-# Usage: scripts/build-wasm.sh [--debug]
+# Usage: scripts/build-wasm.sh [--debug] [--no-default-features] [--output-dir DIR]
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+
+wasm_profile="release"
+wasm_build_args=(--release)
+wasm_feature_args=()
+wasm_output_dir="crates/uqa-wasm/js"
+while (($#)); do
+    case "$1" in
+        --debug)
+            wasm_profile="debug"
+            wasm_build_args=()
+            ;;
+        --no-default-features)
+            wasm_feature_args=(--no-default-features)
+            ;;
+        --output-dir)
+            if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+                echo "error: --output-dir requires a directory" >&2
+                exit 2
+            fi
+            wasm_output_dir="$2"
+            shift
+            ;;
+        -h|--help)
+            echo "usage: scripts/build-wasm.sh [--debug] [--no-default-features] [--output-dir DIR]"
+            exit 0
+            ;;
+        *)
+            echo "error: unknown argument: $1" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
 
 if ! command -v emcc > /dev/null; then
     echo "error: emcc not found; install emscripten first" >&2
@@ -47,13 +80,6 @@ else
     fi
 fi
 
-PROFILE="release"
-PROFILE_FLAG="--release"
-if [[ "${1:-}" == "--debug" ]]; then
-    PROFILE="debug"
-    PROFILE_FLAG=""
-fi
-
 # The emscripten sysroot provides the libc headers bindgen needs when
 # it parses C headers for the wasm target.
 EM_SYSROOT="$(em-config CACHE)/sysroot"
@@ -76,10 +102,12 @@ export BINDGEN_EXTRA_CLANG_ARGS_wasm32_unknown_emscripten="--sysroot=${EM_SYSROO
 # CFLAGS that point at a native sysroot.
 export CFLAGS_wasm32_unknown_emscripten=""
 
-cargo build --target wasm32-unknown-emscripten -p uqa-wasm --features nori ${PROFILE_FLAG}
+cargo build --locked --target wasm32-unknown-emscripten -p uqa-wasm \
+    ${wasm_build_args[@]+"${wasm_build_args[@]}"} ${wasm_feature_args[@]+"${wasm_feature_args[@]}"}
 
-OUT_DIR="crates/uqa-wasm/js"
-cp "target/wasm32-unknown-emscripten/${PROFILE}/uqa.js" "${OUT_DIR}/uqa.js"
-cp "target/wasm32-unknown-emscripten/${PROFILE}/uqa.wasm" "${OUT_DIR}/uqa.wasm"
+wasm_target_dir="$(cargo metadata --locked --no-deps --format-version 1 | "${EMSDK_PYTHON}" -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
+mkdir -p "${wasm_output_dir}"
+cp "${wasm_target_dir}/wasm32-unknown-emscripten/${wasm_profile}/uqa.js" "${wasm_output_dir}/uqa.js"
+cp "${wasm_target_dir}/wasm32-unknown-emscripten/${wasm_profile}/uqa.wasm" "${wasm_output_dir}/uqa.wasm"
 
-echo "built ${OUT_DIR}/uqa.js and ${OUT_DIR}/uqa.wasm (${PROFILE})"
+echo "built ${wasm_output_dir}/uqa.js and ${wasm_output_dir}/uqa.wasm (${wasm_profile})"

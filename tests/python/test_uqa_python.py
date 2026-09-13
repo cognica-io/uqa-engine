@@ -19,6 +19,9 @@ import pytest
 
 import uqa
 
+NORI_FEATURE = os.environ.get("UQA_TEST_NORI", "enabled")
+assert NORI_FEATURE in {"enabled", "disabled"}, "UQA_TEST_NORI must be enabled or disabled"
+
 
 @pytest.mark.parametrize("input_mode", ["stdin", "script"])
 def test_installed_usql_dispatches_python_arguments(tmp_path, input_mode):
@@ -245,10 +248,15 @@ def test_sql_text_vector_tensor_and_cypher_surfaces() -> None:
     assert cypher.rows == [{"name": "Ada"}]
 
 
-def test_native_nori_diagnostics_reach_python_binding() -> None:
+def test_nori_diagnostics_match_the_requested_feature_configuration() -> None:
     engine = uqa.Engine()
     listed = engine.sql("SELECT analyzer_name FROM list_analyzers() ORDER BY analyzer_name")
-    assert "nori" in [row["analyzer_name"] for row in listed.rows]
+    assert ("nori" in [row["analyzer_name"] for row in listed.rows]) == (NORI_FEATURE == "enabled")
+    if NORI_FEATURE == "disabled":
+        with pytest.raises(RuntimeError, match="is not registered"):
+            engine.sql("SELECT * FROM analyze_text('nori', '나물은')")
+        engine.close()
+        return
 
     result = engine.sql("SELECT analysis FROM analyze_text('nori', '나물은')")
     assert result.columns == ["analysis"]
@@ -256,6 +264,7 @@ def test_native_nori_diagnostics_reach_python_binding() -> None:
     assert len(analysis["analyzer_fingerprint"]) == 64
     assert analysis["final_offsets"]["utf16"]["end"] == 3
     assert any("korean_morphology" in token for token in analysis["tokens"])
+    engine.close()
 
 
 def test_nori_user_dictionary_and_retained_graph_revisions_survive_reopen(tmp_path):
@@ -266,7 +275,7 @@ def test_nori_user_dictionary_and_retained_graph_revisions_survive_reopen(tmp_pa
     path = tmp_path / "nori.db"
     engine = uqa.open(path)
     try:
-        for step in fixture["enabled"]:
+        for step in fixture[NORI_FEATURE]:
             if step.get("reopen"):
                 engine.close()
                 engine = None

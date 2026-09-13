@@ -79,6 +79,20 @@ jobs:
           for example in examples/python/*.py; do
             python "$example"
           done
+          python tests/wasm/export_nori_diagnostics.py > nori-browser-native-diagnostics.json
+          python -c 'import json; assert json.load(open("nori-browser-native-diagnostics.json")) == json.load(open("benchmarks/nori/browser-contract.json"))'
+
+      - name: Build and test the Python wheel without Nori
+        run: |
+          set -euo pipefail
+          maturin build --locked --no-default-features --out target/nori-binding-disabled/python
+          python -m pip install --force-reinstall target/nori-binding-disabled/python/*.whl
+          cargo tree --locked -p uqa-python --no-default-features --edges normal > target/nori-binding-disabled/python-dependencies.txt
+          if grep -q uqa-nori-data target/nori-binding-disabled/python-dependencies.txt; then
+            echo "Nori dictionary present in a feature-disabled Python wheel" >&2
+            exit 1
+          fi
+          UQA_TEST_NORI=disabled python -m pytest -q tests/python
 
   build-wheels:
     name: ${{ matrix.label }}
@@ -187,6 +201,8 @@ jobs:
           for example in examples/python/*.py; do
             python "$example"
           done
+          python tests/wasm/export_nori_diagnostics.py > nori-browser-native-diagnostics.json
+          python -c 'import json; assert json.load(open("nori-browser-native-diagnostics.json")) == json.load(open("benchmarks/nori/browser-contract.json"))'
 
       - uses: actions/upload-artifact@v4
         with:

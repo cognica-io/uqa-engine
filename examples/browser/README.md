@@ -2,6 +2,8 @@
 
 These modules mirror the Rust, Python, and Node.js scenarios with the browser WASM binding. Build the WASM package with `bash scripts/build-wasm.sh`, serve the repository root with an HTTP server, and open `examples/browser/`.
 
+The [real-browser Nori verification](../../benchmarks/nori/BROWSER.md) separately runs enabled and disabled packages in fresh Chrome sessions, checks persistent analyzer/index revisions after whole-page IndexedDB reloads, compares complete diagnostics with the native binding, and records host memory observations. Its commands also show how to retain a separate feature-disabled WASM artifact.
+
 | Example | Coverage |
 | --- | --- |
 | [`unified-search.mjs`](unified-search.mjs) | Raw and Bayesian text retrieval, vector KNN, exact and robust fusion, cross-relation typed operator joins, a scalar callback, and Cypher over shared identities |
