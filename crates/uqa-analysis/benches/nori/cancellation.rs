@@ -91,8 +91,8 @@ fn recover(runner: &Runner<'_>, text: &str, budget: &MemoryBudget, expected: &No
     assert_eq!(budget.used(), RETAINED);
 }
 
-fn timing(elapsed_ns: Vec<u64>) -> Value {
-    let mut sorted = elapsed_ns.clone();
+fn timing(elapsed_ns: &[u64]) -> Value {
+    let mut sorted = elapsed_ns.to_vec();
     sorted.sort_unstable();
     json!({
         "elapsed_ns": elapsed_ns,
@@ -101,7 +101,7 @@ fn timing(elapsed_ns: Vec<u64>) -> Value {
     })
 }
 
-fn cases(case: &Case, stage: &str, mode: DecompoundMode, runner: Runner<'_>) -> Vec<Value> {
+fn cases(case: &Case, stage: &str, mode: DecompoundMode, runner: &Runner<'_>) -> Vec<Value> {
     let expected = runner.full(&case.text);
     let output_sha256 = format!(
         "{:x}",
@@ -133,28 +133,28 @@ fn cases(case: &Case, stage: &str, mode: DecompoundMode, runner: Runner<'_>) -> 
         let mut response = Vec::with_capacity(SAMPLES);
         opt_out(|| {
             for _ in 0..WARMUP {
-                black_box(cancel(&runner, &case.text, &budget, at));
-                recover(&runner, &case.text, &budget, &expected);
+                black_box(cancel(runner, &case.text, &budget, at));
+                recover(runner, &case.text, &budget, &expected);
             }
             for _ in 0..SAMPLES {
                 let mut total = 0;
                 let mut propagation = 0;
                 for _ in 0..ITERATIONS {
-                    let (elapsed, returned) = cancel(&runner, &case.text, &budget, at);
+                    let (elapsed, returned) = cancel(runner, &case.text, &budget, at);
                     total += elapsed;
                     propagation += returned;
                 }
                 operation.push(total);
                 response.push(propagation);
-                recover(&runner, &case.text, &budget, &expected);
+                recover(runner, &case.text, &budget, &expected);
             }
         });
         let info = measure(|| {
-            black_box(cancel(&runner, &case.text, &budget, at));
+            black_box(cancel(runner, &case.text, &budget, at));
         });
         assert_eq!(info.bytes_current, 0);
         assert_eq!(info.count_current, 0);
-        recover(&runner, &case.text, &budget, &expected);
+        recover(runner, &case.text, &budget, &expected);
         results.push(json!({
             "name": format!("{stage}/{mode:?}/{}/{point}", case.name),
             "input_bytes": case.text.len(),
@@ -168,8 +168,8 @@ fn cases(case: &Case, stage: &str, mode: DecompoundMode, runner: Runner<'_>) -> 
             "verified_recoveries": WARMUP + SAMPLES + 1,
             "remaining_budget_bytes": budget.used(),
             "allocation": allocation(info),
-            "operation_timing": timing(operation),
-            "response_timing": timing(response),
+            "operation_timing": timing(&operation),
+            "response_timing": timing(&response),
         }));
         eprintln!(
             "measured cancellation {stage}/{mode:?}/{}/{point}",
@@ -203,9 +203,9 @@ pub(super) fn run() -> Value {
                 &case,
                 "tokenizer",
                 mode,
-                Runner::Tokenizer(&tokenizer),
+                &Runner::Tokenizer(&tokenizer),
             ));
-            results.extend(cases(&case, "analyzer", mode, Runner::Analyzer(&analyzer)));
+            results.extend(cases(&case, "analyzer", mode, &Runner::Analyzer(&analyzer)));
         }
     }
     json!({
