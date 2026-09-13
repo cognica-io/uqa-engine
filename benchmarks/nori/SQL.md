@@ -40,3 +40,31 @@ Use `redb` for the other native provider. Each transaction experiment reuses all
 The [controlled experiment evidence](sql-fixture-evidence/manifest.json) records two clean executions per provider at `9c213b2c`, using identical benchmark binaries and captured files. All six allocation counters agree for every one of the four transaction workloads in both SQLite and redb, and complete live/reopened results agree with the original full SQL runs. The SQLite file also opens in the actual CI WASM package: empty rows and columns, both constraints, rollback, a Nori GIN write and complete quoted phrase, and reopened source rows and scores pass under its virtual filesystem. This is input-portability evidence, without a browser durability claim. The capture manifest retains its original dirty-worktree provenance; its three recorded benchmark source hashes match the subsequently committed generator at `9c213b2c`.
 
 These transaction controls establish the inputs for complete SQL/session calibration. Their timings are not calibration evidence. Full repeated native and WASM measurements, including every provider/session query, are still required before recording SQL allocation ceilings and enabling their CI gate.
+
+## SQLite session allocation control
+
+The complete pinned macOS pair has one differing SQLite session/query allocation record: `sqlite/session_and_query/none/korean_prose`. Two separate controlled executions now reproduce every counter in both original observations and every scored result. The [raw reports and trace receipt](sql-fixture-evidence/sqlite-session-cache-evidence.json) retain their hashes, exact diagnostic source identities, pinned dependency versions, and verification scope. All 284 registry dependency versions and checksums match the workspace lockfile.
+
+Each diagnostic first measures the warmed query. After the same query warmups, it substitutes a fresh, identically configured physical connection over the same database and prepares one unrelated `SELECT 1` outside allocation counting. It then measures the existing public independent-session, work_mem, query, and session-drop operation with its complete result retained. A final warmed observation returns to the original lower counters. Both processes reproduce the same warm/fresh/warm sequence. The setup uses existing public provider and driver interfaces:
+
+```rust
+let fresh = ManagedConnection::open(managed.database_path().unwrap())?;
+fresh.with_mut(|replacement| managed.with_mut(|connection| {
+    std::mem::swap(connection, replacement);
+    drop(connection.prepare_cached("SELECT 1")?);
+    Ok(())
+}))?;
+```
+
+| Current-thread Rust allocation counter | Warm cache | Fresh connection with one cached statement | Difference |
+| --- | ---: | ---: | ---: |
+| Total bytes | 7,710,724 | 7,711,068 | 344 |
+| Peak bytes | 356,101 | 357,913 | 1,812 |
+| Retained bytes | 227,998 | 229,810 | 1,812 |
+| Total allocations | 47,136 | 47,140 | 4 |
+| Peak allocations | 1,600 | 1,606 | 6 |
+| Retained allocations | 1,035 | 1,041 | 6 |
+
+The scoped allocation traces identify three new 88-byte prepared-statement cache nodes and an 80-byte hash-table allocation replacing a 44-byte table in `hashbrown::raw::RawTable::reserve_rehash`, reached from `rusqlite::cache::StatementCache::cache_stmt`. The warmed operation also frees three pre-existing SQL cache keys of 72, 160, and 1,280 bytes; the fresh state has no such previous keys to free. Thus the total-byte difference is `3 * 88 + 80 = 344`, and the retained-byte difference is `3 * 88 + 80 - 44 + 72 + 160 + 1280 = 1812`. The cache-table replacement adds no net allocation count, giving four additional total allocations and six additional retained allocations. These measurements apply to the pinned rusqlite 0.39.0/hashlink 0.11.1/hashbrown 0.16.1 cache path on macOS aarch64.
+
+These cache states account for the two complete SQL report observations without changing runtime code, result ownership, or accounting. The original executions were not stack-traced; the diagnostic establishes a reproducible causal path with exactly matching counters. Instrumented diagnostic timings are excluded from calibration. The macOS SQLite timing shift, reviewed SQL limits, and final regression-gate execution remain open.
