@@ -116,8 +116,8 @@ class NoriSQLBenchmarkTest(unittest.TestCase):
         limits = json.loads(benchmark.LIMITS.read_text())
         calibration = limits["calibration"]
         self.assertEqual(calibration["protocol"], benchmark.PROTOCOL)
-        self.assertEqual(len(calibration["reports"]), 7)
-        observed, pairs = {}, {}
+        self.assertEqual(len(calibration["reports"]), 9)
+        observed, pairs, commit_counters = {}, {}, {}
         for record in calibration["reports"]:
             path = ROOT / record["path"]
             self.assertEqual(benchmark.common.digest(path), record["sha256"])
@@ -136,11 +136,25 @@ class NoriSQLBenchmarkTest(unittest.TestCase):
                 counters = maxima.setdefault(name, dict(row["allocation"]))
                 for key, value in row["allocation"].items():
                     counters[key] = max(counters[key], value)
+                if name.startswith("redb/commit_"):
+                    samples = commit_counters.setdefault((target, name), {})
+                    for key, value in row["allocation"].items():
+                        samples.setdefault(key, set()).add(value)
             if record["timing_calibration_eligible"]:
-                pairs.setdefault(target, {})[record["role"]] = report
+                comparison = (target, record.get("comparison", "initial"))
+                pairs.setdefault(comparison, {})[record["role"]] = report
         self.assertEqual(observed, limits["allocation_ceilings"])
+        self.assertEqual(len(commit_counters), 6)
+        for (target, name), counters in commit_counters.items():
+            for key, values in counters.items():
+                with self.subTest(target=target, workload=name, counter=key):
+                    if key == "bytes_total":
+                        self.assertEqual(len(values), 2, "calibration must cover both redb table-update orders")
+                        self.assertEqual(max(values) - min(values), 3)
+                    else:
+                        self.assertEqual(len(values), 1, "table-update order cannot change another counter")
         maxima = {}
-        for target, pair in pairs.items():
+        for (target, _), pair in pairs.items():
             self.assertEqual(set(pair), {"baseline", "repeat"})
             first, second = pair["baseline"], pair["repeat"]
             self.assertEqual(first["provenance"]["artifacts"], second["provenance"]["artifacts"])
@@ -150,7 +164,7 @@ class NoriSQLBenchmarkTest(unittest.TestCase):
                 result = benchmark.check(after, limits, before)
                 self.assertEqual(len(result["timing_ratios"]), 62 if target.startswith("emscripten/") else 102)
                 ratios.extend(result["timing_ratios"].values())
-            maxima[target] = max(ratios)
+            maxima[target] = max(maxima.get(target, 0), max(ratios))
         self.assertEqual(set(maxima), {"linux/x86_64/64", "emscripten/wasm32/32"})
         self.assertEqual(maxima, calibration["target_maximum_bidirectional_repeat_ratios"])
         self.assertEqual(max(maxima.values()), calibration["maximum_bidirectional_repeat_ratio"])

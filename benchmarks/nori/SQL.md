@@ -26,15 +26,17 @@ Normal collection verifies every provider/session result and the [reviewed alloc
 
 ## Reviewed limits and remaining timing acceptance
 
-Seven complete original reports are retained byte for byte in [`sql-evidence`](sql-evidence), with hashes, source identities, and original gate statuses in `sql-limits.json`. All complete outputs agree. Each target/workload/counter ceiling is exactly its largest observed allocation value, with no padding. The SQLite statement-cache experiment below explains its two macOS allocation states. The three-byte redb commit differences match the provider's [table-root update-order experiment](persistent-evidence/redb-commit-allocation-probe.json); the macOS reports cover both values for all three commit workloads, while the original Linux pair observes both values for `commit_16/256`. Fresh gated Linux collection must verify the remaining observed ceilings before final acceptance.
+Nine complete original reports are retained byte for byte in [`sql-evidence`](sql-evidence), with hashes, source identities, and original gate statuses in `sql-limits.json`. All complete outputs agree. Each target/workload/counter ceiling is exactly its largest observed allocation value, with no padding. The SQLite statement-cache experiment below explains its two macOS allocation states. The three-byte redb commit differences match the provider's [table-root update-order experiment](persistent-evidence/redb-commit-allocation-probe.json); the macOS reports and four Linux reports cover both values for every commit workload, with the other five counters unchanged. Regression tests require this complete allocation inventory.
 
 | Target | Complete workloads per report | Allocation reference | Timing calibration |
 | --- | ---: | --- | --- |
 | macOS aarch64 | 102 | Three complete reports | Pending; the original shift and confirmation still fail the timing ceiling |
-| Linux x86_64 | 102 | Two complete reports | Maximum bidirectional repeat ratio 1.2260139597171253 |
+| Linux x86_64 | 102 | Four complete reports | Maximum bidirectional repeat ratio 1.2260139597171253 |
 | Emscripten wasm32 | 62 | Two complete reports | Maximum bidirectional repeat ratio 1.3080659909144803 |
 
 The timing ceiling is `ceil(1.3080659909144803 * 1.1 * 100) / 100 = 1.44`, derived from the comparable CI pairs. The native timing follow-up below explains why the original macOS timings are not calibration inputs. Their complete output/allocation evidence remains included, and regression tests require the observed macOS timing shifts to fail the same 1.44 ceiling. A fresh complete macOS pair and fresh native/WASM gated CI remain required; the isolated single-query diagnostics do not establish that acceptance.
+
+The [complete Linux confirmation](https://github.com/cognica-io/uqa-engine/actions/runs/34776341405) at `56f69e20` originally failed because both reports observe `redb/commit_16/2048/bytes_total = 208781358`, while the first pair had only observed `208781355`. This is the only changed allocation ceiling. The original failed gate statuses remain in the reports. Rechecking their complete outputs and all six counters against the completed inventory passes, and the maximum bidirectional timing ratio is 1.13883033728126 under the unchanged 1.44 ceiling. This verifies the missing measured allocation outcome; final remote-head native/WASM CI and macOS timing acceptance remain open.
 
 ## Catalog fixture experiments
 
