@@ -380,6 +380,25 @@ class PremergeCITest(unittest.TestCase):
         self.assertNotEqual(refs[0], "fix/premerge-ci")
         self.assertEqual(len(git_invocations), 2)
 
+    def test_nori_measurement_inputs_select_native_and_wasm_gates(self) -> None:
+        for path in ("scripts/run-nori-benchmark.py", "scripts/run-nori-index-benchmark.py",
+                     "scripts/run-nori-persistent-benchmark.py", "benchmarks/nori/persistent.rs",
+                     "benchmarks/nori/persistent-limits.json", "crates/uqa-analysis/benches/nori/corpus.json"):
+            result, invocations, _ = self.run_script(changed_files=(path,))
+            with self.subTest(path=path):
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(invocations), 2)
+                self.assertTrue(any("ci.yml" in item and "run_rust=true" in item for item in invocations))
+                self.assertTrue(any("javascript-bindings.yml" in item for item in invocations))
+
+    def test_nori_bundle_inputs_select_all_runtime_bindings(self) -> None:
+        for path in ("crates/uqa-nori-data/data/nori.uqan", "crates/uqa-nori-data/data/resource_manifest.json"):
+            result, invocations, _ = self.run_script(changed_files=(path,))
+            with self.subTest(path=path):
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(invocations), 3)
+                self.assertTrue(any("ci.yml" in item and "run_rust=true" in item for item in invocations))
+
     def test_dry_run_does_not_create_a_remote_tag(self) -> None:
         result, gh_invocations, git_invocations = self.run_script("--dry-run")
 

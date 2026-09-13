@@ -115,6 +115,7 @@ while IFS= read -r path; do
     Cargo.lock | \
     crates/*/Cargo.toml | \
     crates/*/build.rs | \
+    crates/uqa-nori-data/data/* | \
     crates/*.rs)
       run_rust=true
       run_javascript=true
@@ -126,6 +127,8 @@ while IFS= read -r path; do
     crates/uqa-pg-query/libpg_query/* | \
     examples/rust/* | \
     benchmarks/* | \
+    crates/uqa-analysis/benches/nori/* | \
+    scripts/run-nori-*benchmark.py | \
     tests/*.rs | \
     tests/parity/* | \
     docs/manual/* | \
@@ -142,6 +145,9 @@ while IFS= read -r path; do
     tests/wasm/* | \
     examples/node/* | \
     examples/browser/* | \
+    benchmarks/nori/* | \
+    crates/uqa-analysis/benches/nori/* | \
+    scripts/run-nori-*benchmark.py | \
     scripts/build-wasm.sh | \
     scripts/npm-release.py | \
     .github/workflows/javascript-bindings.yml)
