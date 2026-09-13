@@ -157,7 +157,7 @@ jobs:
 
       - name: Check wheel license contents
         shell: bash
-        run: python scripts/check-release-licenses.py dist/*.whl
+        run: python scripts/check-release-licenses.py --require-nori dist/*.whl
 
       # `requires-python = ">=3.8"` only holds because pyo3 is built against
       # the CPython stable ABI. Dropping the abi3 feature would silently
@@ -231,7 +231,7 @@ jobs:
           args: --out dist
 
       - name: Check sdist license contents
-        run: python scripts/check-release-licenses.py dist/*.tar.gz
+        run: python scripts/check-release-licenses.py --require-nori dist/*.tar.gz
 
       - name: Validate the sdist Cargo workspace
         shell: bash

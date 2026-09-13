@@ -111,7 +111,7 @@ jobs:
           --artifacts-dir native-addons
           --output-dir dist
       - name: Check npm package license contents
-        run: python3 scripts/check-release-licenses.py dist/*.tgz
+        run: python3 scripts/check-release-licenses.py --require-nori dist/*.tgz
       - uses: actions/upload-artifact@v4
         with:
           name: node-packages
@@ -173,7 +173,7 @@ jobs:
         run: npm pack --pack-destination .
 
       - name: Check package license contents
-        run: python3 scripts/check-release-licenses.py crates/uqa-wasm/js/*.tgz
+        run: python3 scripts/check-release-licenses.py --require-nori crates/uqa-wasm/js/*.tgz
 
       - uses: actions/upload-artifact@v4
         with:

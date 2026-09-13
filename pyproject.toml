@@ -9,7 +9,7 @@ description = "Python bindings and usql CLI for embedded UQA and local or Cloud 
 readme = "README.md"
 requires-python = ">=3.8"
 license = "AGPL-3.0-only"
-license-files = ["LICENSE", "LICENSING.md", "LICENSES/*.txt"]
+license-files = ["LICENSE", "LICENSING.md", "LICENSES/*.txt", "python/uqa/THIRD-PARTY/*"]
 authors = [{ name = "Jaepil Jeong", email = "jaepil@cognica.io" }]
 classifiers = [
     "Programming Language :: Python :: 3",

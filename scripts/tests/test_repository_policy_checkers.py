@@ -38,6 +38,43 @@ LICENSES = load_script("uqa_check_release_licenses", "check-release-licenses.py"
 
 
 class RepositoryPolicyCheckerTest(unittest.TestCase):
+    def test_binding_archives_require_every_nori_notice_and_provenance_file(self) -> None:
+        canonical = LICENSES.binding_nori_payloads()
+        files = {**canonical, "LICENSE": b"license", "LICENSE-NOTICE.md": b"notice"}
+        for suffix in (".whl", ".tgz"):
+            path = pathlib.Path(f"uqa-0.0.0{suffix}")
+            members = {f"package/{name}": data for name, data in files.items()}
+            with mock.patch.object(LICENSES, "archive_members", return_value=members):
+                LICENSES.check_archive(path, {"LICENSE": b"license"})
+            for relative in canonical:
+                for mode in ("missing", "changed", "conflicting_duplicate"):
+                    changed = dict(members)
+                    if mode == "missing": del changed[f"package/{relative}"]
+                    elif mode == "changed": changed[f"package/{relative}"] = b"changed"
+                    else: changed[f"licenses/{relative}"] = b"changed"
+                    with self.subTest(suffix=suffix, relative=relative, mode=mode), \
+                         mock.patch.object(LICENSES, "archive_members", return_value=changed), \
+                         self.assertRaisesRegex(RuntimeError, "Nori attribution or source-resource identity"):
+                        LICENSES.check_archive(path, {"LICENSE": b"license"})
+
+    def test_release_bundle_check_rejects_partial_missing_and_duplicate_runtimes(self) -> None:
+        bundle = (ROOT / "crates/uqa-nori-data/data/nori.uqan").read_bytes()
+        for extension in ("node", "so", "pyd", "wasm"):
+            name = f"package/uqa.{extension}"
+            valid = {name: b"header" + bundle + b"footer"}
+            LICENSES.check_embedded_nori(pathlib.Path("release.tgz"), valid)
+            for changed in ({name: bundle[:-1]}, {name: b"without feature"}, {**valid, f"copy/{name}": bundle}):
+                with self.subTest(extension=extension), self.assertRaisesRegex(RuntimeError, "exactly one runtime"):
+                    LICENSES.check_embedded_nori(pathlib.Path("release.tgz"), changed)
+
+    def test_npm_platform_packages_include_the_complete_nori_attribution(self) -> None:
+        release = load_script("uqa_npm_nori_licenses", "npm-release.py")
+        root = json.loads((ROOT / "crates/uqa-node/package.json").read_text())
+        for platform in release.PLATFORMS:
+            manifest = release.platform_manifest(root, platform)
+            self.assertTrue(set(LICENSES.binding_nori_payloads()) <= set(manifest["files"]))
+        self.assertTrue(set(LICENSES.binding_nori_payloads()) <= set(release.canonical_legal_payloads()))
+
     def test_analysis_archive_retains_ported_lucene_notices_and_modification_attribution(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
@@ -192,6 +229,7 @@ license-files = [
     "LICENSE",
     "LICENSING.md",
     "LICENSES/*.txt",
+    "python/uqa/THIRD-PARTY/*",
 ]
 
 [project.urls]

@@ -28,4 +28,6 @@ For existing installations, read the [0.2.3 upgrade guide](https://github.com/co
 
 ## License
 
+The package embeds the pinned Nori dictionary in `uqa.wasm`. `THIRD-PARTY/` contains the complete Lucene, MeCab-ko-dic, and JDK Unicode notices, modification attribution, and original resource/model manifests. The manifests describe source resources; the dictionary requires no separate download.
+
 UQA Engine is licensed under AGPL-3.0-only with optional FOSS and noncommercial application exceptions. See `LICENSING.md` in this package.

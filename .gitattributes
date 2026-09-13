@@ -31,3 +31,7 @@ crates/uqa-nori-data/data/nori.uqan binary
 crates/uqa-nori-data/data/*.json text eol=lf linguist-generated
 crates/uqa-nori-data/THIRD-PARTY/** -text -whitespace linguist-vendored
 crates/uqa-analysis/THIRD-PARTY/LUCENE-*.txt -text -whitespace linguist-vendored
+# Binding copies are checked against the same canonical resource inventory.
+crates/uqa-node/THIRD-PARTY/** -text -whitespace linguist-vendored
+crates/uqa-wasm/js/THIRD-PARTY/** -text -whitespace linguist-vendored
+python/uqa/THIRD-PARTY/** -text -whitespace linguist-vendored

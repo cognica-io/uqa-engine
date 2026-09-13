@@ -106,7 +106,7 @@ jobs:
               exit 1
             fi
           done
-          python3 scripts/check-release-licenses.py "${actual[@]}"
+          python3 scripts/check-release-licenses.py --require-nori "${actual[@]}"
 
       - name: Check whether PyPI already has this exact release
         id: pypi

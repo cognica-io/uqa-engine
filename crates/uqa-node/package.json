@@ -43,7 +43,14 @@
     "http-transport.js",
     "http-cli.js",
     "http-stream.js",
-    "sql-param.js"
+    "sql-param.js",
+    "THIRD-PARTY/JDK-UNICODE.md",
+    "THIRD-PARTY/LUCENE-LICENSE.txt",
+    "THIRD-PARTY/LUCENE-NOTICE.txt",
+    "THIRD-PARTY/MECAB-COPYING.txt",
+    "THIRD-PARTY/LUCENE-SOURCE.md",
+    "THIRD-PARTY/NORI-RESOURCE-MANIFEST.json",
+    "THIRD-PARTY/NORI-MODEL-MANIFEST.json"
   ],
   "engines": {
     "node": ">= 16"
