@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "status": "Linux callback-to-return timing variation remains unresolved; allocation and recovery checks pass.",
+  "run": "https://github.com/cognica-io/uqa-engine/actions/runs/34769006087",
+  "revision": "93b245fdc5797b8e142697983a90c68618876c25",
+  "source_identity_matches_reviewed_calibration": true,
+  "every_target_pair_has_identical_executable_bytes_and_all_108_allocation_rows": true,
+  "wasm_maximum_forward_timing_ratio": 1.1449924162155822,
+  "linux_failure": {
+    "error": "cancellation timing regression: analyzer/Discard/korean_prose/last/response_timing: 3.577755434262185 > 1.26",
+    "name": "analyzer/Discard/korean_prose/last",
+    "observations": [
+      {
+        "allocation": {
+          "bytes_peak": 532036,
+          "bytes_retained": 0,
+          "bytes_total": 1030066,
+          "count_peak": 948,
+          "count_retained": 0,
+          "count_total": 3323
+        },
+        "cancel_at_poll": 2946,
+        "complete_polls": 2946,
+        "input_bytes": 1744,
+        "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+        "input_utf16": 704,
+        "name": "analyzer/Discard/korean_prose/last",
+        "operation_timing": {
+          "elapsed_ns": [
+            80280194,
+            80274321,
+            80366664,
+            80288341,
+            80631953,
+            80731300,
+            80619792
+          ],
+          "iterations": [
+            144,
+            144,
+            144,
+            144,
+            144,
+            144,
+            144
+          ],
+          "median_ns": 558101.8333333334
+        },
+        "output_sha256": "1fbf62164811eb694585da8eafb29eaf2eb0ab6d9cef9acc3ab390017749a961",
+        "remaining_budget_bytes": 4096,
+        "response_timing": {
+          "elapsed_ns": [
+            244812,
+            243412,
+            261290,
+            243950,
+            256544,
+            250632,
+            262789
+          ],
+          "iterations": [
+            144,
+            144,
+            144,
+            144,
+            144,
+            144,
+            144
+          ],
+          "median_ns": 1740.5
+        },
+        "sample_wall_ns": [
+          80290186,
+          80284708,
+          80377255,
+          80298369,
+          80641777,
+          80741625,
+          80630159
+        ],
+        "tokens": 192,
+        "verified_cancellations": 1011,
+        "verified_recoveries": 10
+      },
+      {
+        "allocation": {
+          "bytes_peak": 532036,
+          "bytes_retained": 0,
+          "bytes_total": 1030066,
+          "count_peak": 948,
+          "count_retained": 0,
+          "count_total": 3323
+        },
+        "cancel_at_poll": 2946,
+        "complete_polls": 2946,
+        "input_bytes": 1744,
+        "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+        "input_utf16": 704,
+        "name": "analyzer/Discard/korean_prose/last",
+        "operation_timing": {
+          "elapsed_ns": [
+            78684303,
+            78801377,
+            78773915,
+            78839753,
+            79063809,
+            78691644,
+            78865231
+          ],
+          "iterations": [
+            144,
+            144,
+            144,
+            144,
+            144,
+            144,
+            144
+          ],
+          "median_ns": 547231.7847222222
+        },
+        "output_sha256": "1fbf62164811eb694585da8eafb29eaf2eb0ab6d9cef9acc3ab390017749a961",
+        "remaining_budget_bytes": 4096,
+        "response_timing": {
+          "elapsed_ns": [
+            890850,
+            892722,
+            896700,
+            903416,
+            899075,
+            894343,
+            918399
+          ],
+          "iterations": [
+            144,
+            144,
+            144,
+            144,
+            144,
+            144,
+            144
+          ],
+          "median_ns": 6227.083333333333
+        },
+        "sample_wall_ns": [
+          78694807,
+          78811701,
+          78784390,
+          78850408,
+          79074249,
+          78701588,
+          78875635
+        ],
+        "tokens": 192,
+        "verified_cancellations": 1011,
+        "verified_recoveries": 10
+      }
+    ],
+    "provenance": {
+      "measured_at_utc": "2026-09-13T16:38:56.688446+00:00",
+      "revision": "93b245fdc5797b8e142697983a90c68618876c25",
+      "worktree_dirty": false,
+      "cpu": "AMD EPYC 9V74 80-Core Processor",
+      "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+      "rustc": "rustc 1.90.0 (1159e78c4 2025-09-14)\nbinary: rustc\ncommit-hash: 1159e78c4747b02ef996e55082b704c09b970588\ncommit-date: 2025-09-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.90.0\nLLVM version: 20.1.8",
+      "flags": {
+        "CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS": "-D warnings",
+        "RUSTFLAGS": ""
+      },
+      "flags_sha256": "fb15109ef61d5280d8b9d30fbeec0158b8a2fff8541c0cde5ca70240bcc3dda6",
+      "node": null,
+      "emcc": null,
+      "benchmark_sha256": "213c7a1884d5e9ccf67f7488992b55986e161b2e6e6a23b35daffad0d7cc143e",
+      "cargo_lock_sha256": "888ba09b36bfdae1252ebc5838c700f4e3800060df09e081197f7fbd66ec198e",
+      "runtime_sources_sha256": "d98a822812ec71fd985b80e95e39ab5806dfbab08578f3cca9804dae2bea9bcb",
+      "profile": "bench (workspace release, thin LTO, one codegen unit, debug information)",
+      "container": null,
+      "jvm": null,
+      "artifacts": [
+        {
+          "name": "nori-93048034c419b05a",
+          "bytes": 20177248,
+          "sha256": "023d2e377678248367ecf1064c2dd17761b514398c7d30a8dd6ea9edeca30425"
+        }
+      ],
+      "benchmark_sources": {
+        "crates/uqa-analysis/benches/nori.rs": "cb080660f6404f51c03f45753aa2bd34c2e17e95bff9761782780734f83f71eb",
+        "crates/uqa-analysis/benches/nori/cancellation.rs": "560874831677548100876748cc43b54a8d48474228f75f0713388625801d60fc"
+      },
+      "arguments": [
+        "--cancellation"
+      ]
+    }
+  },
+  "reports": [
+    {
+      "target": "native",
+      "role": "baseline",
+      "artifact_id": 10321242976,
+      "filename": "nori-cancellation-native-baseline.json",
+      "sha256": "16a2d9b2e18b674cf277b1cc270890a18d0b96d468c6b29f44655e23506e5cd9",
+      "gate": {
+        "allocation_and_recovery_passed": true,
+        "timing_compared": false
+      }
+    },
+    {
+      "target": "native",
+      "role": "repeat",
+      "artifact_id": 10321242976,
+      "filename": "nori-cancellation-native-repeat.json",
+      "sha256": "52647d441938e4bef7009768ab2e9504d83a0ab79a2d101966774a92c36e49d2",
+      "gate": {
+        "allocation_and_recovery_passed": false,
+        "timing_compared": false
+      }
+    },
+    {
+      "target": "wasm",
+      "role": "baseline",
+      "artifact_id": 10321920721,
+      "filename": "nori-cancellation-wasm-baseline.json",
+      "sha256": "886d5ccffdcf5476d89d3f0a5ecf64484cd97bd0b483cb83824c9a40ab73d0de",
+      "gate": {
+        "allocation_and_recovery_passed": true,
+        "timing_compared": false
+      }
+    },
+    {
+      "target": "wasm",
+      "role": "repeat",
+      "artifact_id": 10321920721,
+      "filename": "nori-cancellation-wasm-repeat.json",
+      "sha256": "93220ac9a03a4553d7c5904b6aa83443f61cb6ca9b26e68b52abc756c5be3a6c",
+      "gate": {
+        "allocation_and_recovery_passed": true,
+        "timing_compared": true
+      }
+    }
+  ]
+}
