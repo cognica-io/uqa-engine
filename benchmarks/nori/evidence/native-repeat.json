@@ -1,0 +1,1513 @@
+{
+  "allocation_counter": "0.8.1; current-thread Rust System allocator requests; excludes stack, static bundle, allocator metadata and host JS heap",
+  "bundle_bytes": 9829534,
+  "bundle_sha256": "0d920523991ed60909972d85df630c65747ff5d49e1138e4998ca39f0079538d",
+  "corpus_sha256": "18a50905d26e3615d9db2a8b9565cbcdefcbcfdd1036a88292624154fc228e6b",
+  "measurements": [
+    {
+      "allocation": {
+        "bytes_peak": 88384710,
+        "bytes_retained": 76856018,
+        "bytes_total": 139698589,
+        "count_peak": 175566,
+        "count_retained": 175564,
+        "count_total": 175824
+      },
+      "name": "cold_decode_validate_drop",
+      "timing": {
+        "elapsed_ns": [
+          297507292,
+          295231709,
+          295603125
+        ],
+        "iterations": [
+          1,
+          1,
+          1
+        ],
+        "median_ns": 295603125.0
+      }
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "handles": 64,
+      "name": "cached_name_resolve_64_shared_handles",
+      "timing": {
+        "elapsed_ns": [
+          112735208,
+          113053875,
+          113213500,
+          113116459,
+          113014584,
+          113279417,
+          113019625
+        ],
+        "iterations": [
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4
+        ],
+        "median_ns": 28263468.75
+      }
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "handles": 64,
+      "name": "cached_identity_resolve_64_shared_handles",
+      "timing": {
+        "elapsed_ns": [
+          76745167,
+          77359041,
+          76917208,
+          77348916,
+          77270000,
+          76948583,
+          76764125
+        ],
+        "iterations": [
+          5421684,
+          5421684,
+          5421684,
+          5421684,
+          5421684,
+          5421684,
+          5421684
+        ],
+        "median_ns": 14.192745833213444
+      }
+    },
+    {
+      "allocation": {
+        "bytes_peak": 535776,
+        "bytes_retained": 0,
+        "bytes_total": 1023010,
+        "count_peak": 1077,
+        "count_retained": 0,
+        "count_total": 3195
+      },
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "tokenizer/None/korean_prose",
+      "output_sha256": "0b3b91ece785b5d855ea6e247e07defd6638821183236015a8b352cdb45ee32c",
+      "timing": {
+        "elapsed_ns": [
+          136751333,
+          136057375,
+          135357042,
+          135667250,
+          135023750,
+          136006000,
+          136723917
+        ],
+        "iterations": [
+          292,
+          292,
+          292,
+          292,
+          292,
+          292,
+          292
+        ],
+        "median_ns": 465773.9726027397
+      },
+      "tokens": 312
+    },
+    {
+      "allocation": {
+        "bytes_peak": 535776,
+        "bytes_retained": 0,
+        "bytes_total": 1023114,
+        "count_peak": 1077,
+        "count_retained": 0,
+        "count_total": 3196
+      },
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "analyzer/None/korean_prose",
+      "output_sha256": "9ccbf2cabe7481a8887580c78d8b69d944f4591301deed93f6353971c03b3311",
+      "timing": {
+        "elapsed_ns": [
+          75693541,
+          76193042,
+          75565250,
+          77304667,
+          75711291,
+          75857292,
+          75270917
+        ],
+        "iterations": [
+          160,
+          160,
+          160,
+          160,
+          160,
+          160,
+          160
+        ],
+        "median_ns": 473195.56875
+      },
+      "tokens": 168
+    },
+    {
+      "allocation": {
+        "bytes_peak": 532076,
+        "bytes_retained": 0,
+        "bytes_total": 1030002,
+        "count_peak": 949,
+        "count_retained": 0,
+        "count_total": 3323
+      },
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "tokenizer/Discard/korean_prose",
+      "output_sha256": "57eab62b152404c49098feb5e5d328d024718637b0392816d201e95a989eb846",
+      "timing": {
+        "elapsed_ns": [
+          76419584,
+          76755875,
+          76733292,
+          76944750,
+          77243500,
+          76691333,
+          77793833
+        ],
+        "iterations": [
+          164,
+          164,
+          164,
+          164,
+          164,
+          164,
+          164
+        ],
+        "median_ns": 468023.6280487805
+      },
+      "tokens": 376
+    },
+    {
+      "allocation": {
+        "bytes_peak": 532076,
+        "bytes_retained": 0,
+        "bytes_total": 1030106,
+        "count_peak": 949,
+        "count_retained": 0,
+        "count_total": 3324
+      },
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "analyzer/Discard/korean_prose",
+      "output_sha256": "1fbf62164811eb694585da8eafb29eaf2eb0ab6d9cef9acc3ab390017749a961",
+      "timing": {
+        "elapsed_ns": [
+          75617500,
+          75977750,
+          76314458,
+          76777208,
+          76107000,
+          76544500,
+          75873916
+        ],
+        "iterations": [
+          159,
+          159,
+          159,
+          159,
+          159,
+          159,
+          159
+        ],
+        "median_ns": 478660.37735849054
+      },
+      "tokens": 192
+    },
+    {
+      "allocation": {
+        "bytes_peak": 534760,
+        "bytes_retained": 0,
+        "bytes_total": 1036658,
+        "count_peak": 1205,
+        "count_retained": 0,
+        "count_total": 3323
+      },
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "tokenizer/Mixed/korean_prose",
+      "output_sha256": "05abc9ea58ba0d85c2203ed8cce3c0cd3b4034cb298a40d4acf1f35921ed53e1",
+      "timing": {
+        "elapsed_ns": [
+          149026459,
+          147484667,
+          147695833,
+          148801958,
+          75821208,
+          150579709,
+          75521958
+        ],
+        "iterations": [
+          314,
+          314,
+          314,
+          314,
+          157,
+          314,
+          157
+        ],
+        "median_ns": 474606.55732484075
+      },
+      "tokens": 440
+    },
+    {
+      "allocation": {
+        "bytes_peak": 534760,
+        "bytes_retained": 0,
+        "bytes_total": 1036762,
+        "count_peak": 1205,
+        "count_retained": 0,
+        "count_total": 3324
+      },
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "analyzer/Mixed/korean_prose",
+      "output_sha256": "00728b371d0c71797c42de3c9ed0c83be39aab961a4ee98eef3f4f0a486ba54f",
+      "timing": {
+        "elapsed_ns": [
+          144203459,
+          143976833,
+          143236667,
+          142833125,
+          143269917,
+          146495125,
+          145741541
+        ],
+        "iterations": [
+          298,
+          298,
+          298,
+          298,
+          298,
+          298,
+          298
+        ],
+        "median_ns": 483143.73489932885
+      },
+      "tokens": 224
+    },
+    {
+      "allocation": {
+        "bytes_peak": 10404,
+        "bytes_retained": 0,
+        "bytes_total": 19756,
+        "count_peak": 24,
+        "count_retained": 0,
+        "count_total": 73
+      },
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "tokenizer/None/short_query",
+      "output_sha256": "6f8e2914b00683ebdf1c0b8ebc245f45c9605c52c5bbb111294581792b20b47d",
+      "timing": {
+        "elapsed_ns": [
+          129589709,
+          129202334,
+          128525750,
+          128568375,
+          130925334,
+          129605208,
+          128414917
+        ],
+        "iterations": [
+          14172,
+          14172,
+          14172,
+          14172,
+          14172,
+          14172,
+          14172
+        ],
+        "median_ns": 9116.732571267288
+      },
+      "tokens": 5
+    },
+    {
+      "allocation": {
+        "bytes_peak": 10404,
+        "bytes_retained": 0,
+        "bytes_total": 19756,
+        "count_peak": 24,
+        "count_retained": 0,
+        "count_total": 73
+      },
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "analyzer/None/short_query",
+      "output_sha256": "82db3a81aced3c86036f20abe3d99914ca5ac472efae23e3485d6f5009b74dc7",
+      "timing": {
+        "elapsed_ns": [
+          143350917,
+          143148000,
+          143849167,
+          143669542,
+          145820709,
+          143261625,
+          143094708
+        ],
+        "iterations": [
+          15320,
+          15320,
+          15320,
+          15320,
+          15320,
+          15320,
+          15320
+        ],
+        "median_ns": 9357.109464751959
+      },
+      "tokens": 4
+    },
+    {
+      "allocation": {
+        "bytes_peak": 10332,
+        "bytes_retained": 0,
+        "bytes_total": 19866,
+        "count_peak": 23,
+        "count_retained": 0,
+        "count_total": 75
+      },
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "tokenizer/Discard/short_query",
+      "output_sha256": "7a25abe92c08d18b9fa332401cbd3be9fa4dc8990da7a0f72468795d0179483a",
+      "timing": {
+        "elapsed_ns": [
+          75516375,
+          75502916,
+          75925167,
+          75691834,
+          75819708,
+          75305083,
+          75314541
+        ],
+        "iterations": [
+          8257,
+          8257,
+          8257,
+          8257,
+          8257,
+          8257,
+          8257
+        ],
+        "median_ns": 9145.739978200314
+      },
+      "tokens": 6
+    },
+    {
+      "allocation": {
+        "bytes_peak": 10332,
+        "bytes_retained": 0,
+        "bytes_total": 19866,
+        "count_peak": 23,
+        "count_retained": 0,
+        "count_total": 75
+      },
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "analyzer/Discard/short_query",
+      "output_sha256": "c049b1dae5d4859e288d0db98d27107fc02cc75d17971a7f775fefdac4452eb4",
+      "timing": {
+        "elapsed_ns": [
+          149094584,
+          148701875,
+          148372125,
+          148857416,
+          149076875,
+          148764875,
+          148694166
+        ],
+        "iterations": [
+          15788,
+          15788,
+          15788,
+          15788,
+          15788,
+          15788,
+          15788
+        ],
+        "median_ns": 9422.654864454016
+      },
+      "tokens": 5
+    },
+    {
+      "allocation": {
+        "bytes_peak": 10404,
+        "bytes_retained": 0,
+        "bytes_total": 19970,
+        "count_peak": 25,
+        "count_retained": 0,
+        "count_total": 75
+      },
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "tokenizer/Mixed/short_query",
+      "output_sha256": "121c6a3cbc2885741e342d94e30f5042b95bd5e3a4e743df295294bd4c07f0f0",
+      "timing": {
+        "elapsed_ns": [
+          145334125,
+          145146834,
+          144915250,
+          145361083,
+          144858875,
+          144443417,
+          144951667
+        ],
+        "iterations": [
+          15720,
+          15720,
+          15720,
+          15720,
+          15720,
+          15720,
+          15720
+        ],
+        "median_ns": 9220.843956743003
+      },
+      "tokens": 7
+    },
+    {
+      "allocation": {
+        "bytes_peak": 10404,
+        "bytes_retained": 0,
+        "bytes_total": 19970,
+        "count_peak": 25,
+        "count_retained": 0,
+        "count_total": 75
+      },
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "analyzer/Mixed/short_query",
+      "output_sha256": "1405b60b42c0202bac37c2847a82b778f35cd8fbb36f557b61247170ecd46fac",
+      "timing": {
+        "elapsed_ns": [
+          148265333,
+          148663208,
+          148622333,
+          148325667,
+          148864167,
+          148312834,
+          148717542
+        ],
+        "iterations": [
+          15516,
+          15516,
+          15516,
+          15516,
+          15516,
+          15516,
+          15516
+        ],
+        "median_ns": 9578.64997422016
+      },
+      "tokens": 6
+    },
+    {
+      "allocation": {
+        "bytes_peak": 37606,
+        "bytes_retained": 0,
+        "bytes_total": 146074,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "tokenizer/None/hanja",
+      "output_sha256": "c4174d1632f62483d4a62959bd9cf126b0e43e6749d560868e8c5868f11ce48b",
+      "timing": {
+        "elapsed_ns": [
+          144895209,
+          144645917,
+          144586667,
+          144735458,
+          145431291,
+          145269083,
+          144775334
+        ],
+        "iterations": [
+          1460,
+          1460,
+          1460,
+          1460,
+          1460,
+          1460,
+          1460
+        ],
+        "median_ns": 99161.18767123288
+      },
+      "tokens": 160
+    },
+    {
+      "allocation": {
+        "bytes_peak": 37606,
+        "bytes_retained": 0,
+        "bytes_total": 146074,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "analyzer/None/hanja",
+      "output_sha256": "870a07c2a0910e5bb3f3f3998d54a9016e1ef7fe20a0e7a72313d4d421d49161",
+      "timing": {
+        "elapsed_ns": [
+          145931292,
+          145683625,
+          146326542,
+          145739209,
+          145381208,
+          145808042,
+          146318042
+        ],
+        "iterations": [
+          1310,
+          1310,
+          1310,
+          1310,
+          1310,
+          1310,
+          1310
+        ],
+        "median_ns": 111303.84885496183
+      },
+      "tokens": 160
+    },
+    {
+      "allocation": {
+        "bytes_peak": 37606,
+        "bytes_retained": 0,
+        "bytes_total": 146074,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "tokenizer/Discard/hanja",
+      "output_sha256": "c4174d1632f62483d4a62959bd9cf126b0e43e6749d560868e8c5868f11ce48b",
+      "timing": {
+        "elapsed_ns": [
+          149775750,
+          150279250,
+          149216000,
+          75484875,
+          149890667,
+          75493084,
+          149960042
+        ],
+        "iterations": [
+          1510,
+          1510,
+          1510,
+          755,
+          1510,
+          755,
+          1510
+        ],
+        "median_ns": 99311.28609271524
+      },
+      "tokens": 160
+    },
+    {
+      "allocation": {
+        "bytes_peak": 37606,
+        "bytes_retained": 0,
+        "bytes_total": 146074,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "analyzer/Discard/hanja",
+      "output_sha256": "870a07c2a0910e5bb3f3f3998d54a9016e1ef7fe20a0e7a72313d4d421d49161",
+      "timing": {
+        "elapsed_ns": [
+          118168833,
+          118254125,
+          118172875,
+          117991083,
+          117779084,
+          118038750,
+          118113542
+        ],
+        "iterations": [
+          1060,
+          1060,
+          1060,
+          1060,
+          1060,
+          1060,
+          1060
+        ],
+        "median_ns": 111427.86981132075
+      },
+      "tokens": 160
+    },
+    {
+      "allocation": {
+        "bytes_peak": 37606,
+        "bytes_retained": 0,
+        "bytes_total": 146074,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "tokenizer/Mixed/hanja",
+      "output_sha256": "c4174d1632f62483d4a62959bd9cf126b0e43e6749d560868e8c5868f11ce48b",
+      "timing": {
+        "elapsed_ns": [
+          75792709,
+          75850417,
+          76104291,
+          76370458,
+          75803208,
+          75645000,
+          76426500
+        ],
+        "iterations": [
+          766,
+          766,
+          766,
+          766,
+          766,
+          766,
+          766
+        ],
+        "median_ns": 99021.43211488251
+      },
+      "tokens": 160
+    },
+    {
+      "allocation": {
+        "bytes_peak": 37606,
+        "bytes_retained": 0,
+        "bytes_total": 146074,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "analyzer/Mixed/hanja",
+      "output_sha256": "870a07c2a0910e5bb3f3f3998d54a9016e1ef7fe20a0e7a72313d4d421d49161",
+      "timing": {
+        "elapsed_ns": [
+          75595667,
+          75901708,
+          75717000,
+          76032250,
+          76041583,
+          76450000,
+          75753667
+        ],
+        "iterations": [
+          682,
+          682,
+          682,
+          682,
+          682,
+          682,
+          682
+        ],
+        "median_ns": 111292.82697947214
+      },
+      "tokens": 160
+    },
+    {
+      "allocation": {
+        "bytes_peak": 43930,
+        "bytes_retained": 0,
+        "bytes_total": 235234,
+        "count_peak": 257,
+        "count_retained": 0,
+        "count_total": 1109
+      },
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "tokenizer/None/mixed_script",
+      "output_sha256": "2c1a0db6ab0acd10cd1a3d9dfc900b1e1b2b330a3a054775d41142c6c9b92dcd",
+      "timing": {
+        "elapsed_ns": [
+          145751000,
+          146145459,
+          146044459,
+          145712750,
+          145473125,
+          145813125,
+          145689458
+        ],
+        "iterations": [
+          904,
+          904,
+          904,
+          904,
+          904,
+          904,
+          904
+        ],
+        "median_ns": 161228.98230088496
+      },
+      "tokens": 224
+    },
+    {
+      "allocation": {
+        "bytes_peak": 43930,
+        "bytes_retained": 0,
+        "bytes_total": 235234,
+        "count_peak": 257,
+        "count_retained": 0,
+        "count_total": 1109
+      },
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "analyzer/None/mixed_script",
+      "output_sha256": "ee55a692d96b26e6ffdfa775421fae3429a8b01f01070f21b709b2e062cce44f",
+      "timing": {
+        "elapsed_ns": [
+          76419250,
+          76049916,
+          75758625,
+          76920541,
+          77828458,
+          77072750,
+          76014250
+        ],
+        "iterations": [
+          436,
+          436,
+          436,
+          436,
+          436,
+          436,
+          436
+        ],
+        "median_ns": 175273.50917431194
+      },
+      "tokens": 192
+    },
+    {
+      "allocation": {
+        "bytes_peak": 43964,
+        "bytes_retained": 0,
+        "bytes_total": 236114,
+        "count_peak": 241,
+        "count_retained": 0,
+        "count_total": 1126
+      },
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "tokenizer/Discard/mixed_script",
+      "output_sha256": "a3b3d00ac71e0527b078b3f2737d9439cf4bf65150a12ffeba9e61dacf1fea36",
+      "timing": {
+        "elapsed_ns": [
+          77075333,
+          77015959,
+          77005375,
+          76069458,
+          76606208,
+          76964875,
+          76572125
+        ],
+        "iterations": [
+          470,
+          470,
+          470,
+          470,
+          470,
+          470,
+          470
+        ],
+        "median_ns": 163755.05319148937
+      },
+      "tokens": 232
+    },
+    {
+      "allocation": {
+        "bytes_peak": 43964,
+        "bytes_retained": 0,
+        "bytes_total": 236114,
+        "count_peak": 241,
+        "count_retained": 0,
+        "count_total": 1126
+      },
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "analyzer/Discard/mixed_script",
+      "output_sha256": "5930240f07d0d4b5f5e1f0f84c7316398f52ebabef022d291f411a2be5eb58f4",
+      "timing": {
+        "elapsed_ns": [
+          150045708,
+          75014250,
+          75277792,
+          75003291,
+          75590750,
+          149720208,
+          150424042
+        ],
+        "iterations": [
+          856,
+          428,
+          428,
+          428,
+          428,
+          856,
+          856
+        ],
+        "median_ns": 175287.04205607477
+      },
+      "tokens": 192
+    },
+    {
+      "allocation": {
+        "bytes_peak": 44328,
+        "bytes_retained": 0,
+        "bytes_total": 236114,
+        "count_peak": 273,
+        "count_retained": 0,
+        "count_total": 1126
+      },
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "tokenizer/Mixed/mixed_script",
+      "output_sha256": "17c280af3af59f834061bf9b62be9832812e67f69f35af48e29f8a80f157f7bc",
+      "timing": {
+        "elapsed_ns": [
+          76300250,
+          76368291,
+          76150625,
+          76113750,
+          76239167,
+          76440000,
+          76442542
+        ],
+        "iterations": [
+          470,
+          470,
+          470,
+          470,
+          470,
+          470,
+          470
+        ],
+        "median_ns": 162340.95744680852
+      },
+      "tokens": 240
+    },
+    {
+      "allocation": {
+        "bytes_peak": 44328,
+        "bytes_retained": 0,
+        "bytes_total": 236114,
+        "count_peak": 273,
+        "count_retained": 0,
+        "count_total": 1126
+      },
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "analyzer/Mixed/mixed_script",
+      "output_sha256": "5930240f07d0d4b5f5e1f0f84c7316398f52ebabef022d291f411a2be5eb58f4",
+      "timing": {
+        "elapsed_ns": [
+          76488125,
+          76088208,
+          76772083,
+          76589042,
+          76371333,
+          76781125,
+          76447750
+        ],
+        "iterations": [
+          435,
+          435,
+          435,
+          435,
+          435,
+          435,
+          435
+        ],
+        "median_ns": 175834.77011494254
+      },
+      "tokens": 192
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22390,
+        "bytes_retained": 0,
+        "bytes_total": 34450,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "tokenizer/None/unknown",
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "timing": {
+        "elapsed_ns": [
+          75847250,
+          75746375,
+          75610333,
+          76006916,
+          150170875,
+          75065000,
+          75236333
+        ],
+        "iterations": [
+          1583,
+          1583,
+          1583,
+          1583,
+          3166,
+          1583,
+          1583
+        ],
+        "median_ns": 47763.950094756794
+      },
+      "tokens": 112
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22390,
+        "bytes_retained": 0,
+        "bytes_total": 34450,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "analyzer/None/unknown",
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "timing": {
+        "elapsed_ns": [
+          75623250,
+          75172000,
+          75526167,
+          75266000,
+          149396875,
+          150490458,
+          75022625
+        ],
+        "iterations": [
+          1368,
+          1368,
+          1368,
+          1368,
+          2736,
+          2736,
+          1368
+        ],
+        "median_ns": 55003.82236842105
+      },
+      "tokens": 112
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22390,
+        "bytes_retained": 0,
+        "bytes_total": 34450,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "tokenizer/Discard/unknown",
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "timing": {
+        "elapsed_ns": [
+          76428125,
+          76856042,
+          75672500,
+          75744500,
+          76385625,
+          76215917,
+          76042500
+        ],
+        "iterations": [
+          1605,
+          1605,
+          1605,
+          1605,
+          1605,
+          1605,
+          1605
+        ],
+        "median_ns": 47486.55264797508
+      },
+      "tokens": 112
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22390,
+        "bytes_retained": 0,
+        "bytes_total": 34450,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "analyzer/Discard/unknown",
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "timing": {
+        "elapsed_ns": [
+          75221917,
+          75042458,
+          150397458,
+          148733166,
+          148512417,
+          148218750,
+          148318583
+        ],
+        "iterations": [
+          1362,
+          1362,
+          2724,
+          2724,
+          2724,
+          2724,
+          2724
+        ],
+        "median_ns": 54601.015418502204
+      },
+      "tokens": 112
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22390,
+        "bytes_retained": 0,
+        "bytes_total": 34450,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "tokenizer/Mixed/unknown",
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "timing": {
+        "elapsed_ns": [
+          75062875,
+          75197875,
+          75028209,
+          76484250,
+          75612042,
+          75528542,
+          75835875
+        ],
+        "iterations": [
+          1594,
+          1594,
+          1594,
+          1594,
+          1594,
+          1594,
+          1594
+        ],
+        "median_ns": 47383.025094102886
+      },
+      "tokens": 112
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22390,
+        "bytes_retained": 0,
+        "bytes_total": 34450,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "analyzer/Mixed/unknown",
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "timing": {
+        "elapsed_ns": [
+          76150708,
+          75937292,
+          75742875,
+          76007500,
+          76841625,
+          75845917,
+          75681708
+        ],
+        "iterations": [
+          1396,
+          1396,
+          1396,
+          1396,
+          1396,
+          1396,
+          1396
+        ],
+        "median_ns": 54396.340974212035
+      },
+      "tokens": 112
+    },
+    {
+      "allocation": {
+        "bytes_peak": 1080838,
+        "bytes_retained": 0,
+        "bytes_total": 6796836,
+        "count_peak": 4410,
+        "count_retained": 0,
+        "count_total": 24600
+      },
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "tokenizer/None/ambiguous_long",
+      "output_sha256": "9161d86a17318a1c852402316db2595023f7af73a8711d85bcea503358a90417",
+      "timing": {
+        "elapsed_ns": [
+          76251625,
+          75327000,
+          148831292,
+          148949333,
+          148938666,
+          148268875,
+          78172083
+        ],
+        "iterations": [
+          23,
+          23,
+          46,
+          46,
+          46,
+          46,
+          23
+        ],
+        "median_ns": 3238028.9782608696
+      },
+      "tokens": 2050
+    },
+    {
+      "allocation": {
+        "bytes_peak": 1080838,
+        "bytes_retained": 0,
+        "bytes_total": 6796836,
+        "count_peak": 4410,
+        "count_retained": 0,
+        "count_total": 24600
+      },
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "analyzer/None/ambiguous_long",
+      "output_sha256": "68190be8f59aaa330bb75eb9064f4a0d4a2ec718bbb8c355a0fef312ebed3666",
+      "timing": {
+        "elapsed_ns": [
+          75036375,
+          146369375,
+          146698125,
+          146385916,
+          147061041,
+          146831584,
+          147148041
+        ],
+        "iterations": [
+          22,
+          44,
+          44,
+          44,
+          44,
+          44,
+          44
+        ],
+        "median_ns": 3337081.4545454546
+      },
+      "tokens": 1793
+    },
+    {
+      "allocation": {
+        "bytes_peak": 1150208,
+        "bytes_retained": 0,
+        "bytes_total": 7095672,
+        "count_peak": 3447,
+        "count_retained": 0,
+        "count_total": 25625
+      },
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "tokenizer/Discard/ambiguous_long",
+      "output_sha256": "c83b4353b7ba19433d53374bed168c09ab40e4361d4dd29cbfcabf5f5d301ae1",
+      "timing": {
+        "elapsed_ns": [
+          143163709,
+          143232250,
+          143204416,
+          143804000,
+          145180583,
+          143785709,
+          143331959
+        ],
+        "iterations": [
+          44,
+          44,
+          44,
+          44,
+          44,
+          44,
+          44
+        ],
+        "median_ns": 3257544.522727273
+      },
+      "tokens": 2562
+    },
+    {
+      "allocation": {
+        "bytes_peak": 1150208,
+        "bytes_retained": 0,
+        "bytes_total": 7095672,
+        "count_peak": 3447,
+        "count_retained": 0,
+        "count_total": 25625
+      },
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "analyzer/Discard/ambiguous_long",
+      "output_sha256": "c707b60564e38238bf37fb7c85cba4eaecf6dc9b53ba4cf993a9fb49e1acb367",
+      "timing": {
+        "elapsed_ns": [
+          145819916,
+          141315500,
+          140996041,
+          141099458,
+          141296750,
+          141316042,
+          144011375
+        ],
+        "iterations": [
+          42,
+          42,
+          42,
+          42,
+          42,
+          42,
+          42
+        ],
+        "median_ns": 3364654.761904762
+      },
+      "tokens": 2304
+    },
+    {
+      "allocation": {
+        "bytes_peak": 1238134,
+        "bytes_retained": 0,
+        "bytes_total": 7284432,
+        "count_peak": 5376,
+        "count_retained": 0,
+        "count_total": 25625
+      },
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "tokenizer/Mixed/ambiguous_long",
+      "output_sha256": "5bdea6a8e61e249bf0dd7a41f44309f1847f905f33c1c1bdd227272abd7d00dc",
+      "timing": {
+        "elapsed_ns": [
+          146713083,
+          144658875,
+          144291167,
+          145402375,
+          144256541,
+          147932541,
+          144478625
+        ],
+        "iterations": [
+          44,
+          44,
+          44,
+          44,
+          44,
+          44,
+          44
+        ],
+        "median_ns": 3287701.7045454546
+      },
+      "tokens": 3074
+    },
+    {
+      "allocation": {
+        "bytes_peak": 1238134,
+        "bytes_retained": 0,
+        "bytes_total": 7284432,
+        "count_peak": 5376,
+        "count_retained": 0,
+        "count_total": 25625
+      },
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "analyzer/Mixed/ambiguous_long",
+      "output_sha256": "e0c499b954afc15e6a4dee2bdf70493f4eec31e88d38f61fcf39f1348dc7ed22",
+      "timing": {
+        "elapsed_ns": [
+          144578083,
+          146034916,
+          146453917,
+          145392667,
+          144420583,
+          143915584,
+          144290500
+        ],
+        "iterations": [
+          42,
+          42,
+          42,
+          42,
+          42,
+          42,
+          42
+        ],
+        "median_ns": 3442335.3095238097
+      },
+      "tokens": 2816
+    }
+  ],
+  "pointer_bits": 64,
+  "protocol": {
+    "clock": "per_batch",
+    "cold_samples": 3,
+    "pilot": 1,
+    "sample_ms": 75,
+    "samples": 7,
+    "warmup": 2
+  },
+  "schema_version": 1,
+  "target_arch": "aarch64",
+  "target_os": "macos",
+  "threads": 1,
+  "timing_scope": "create and drop each result; warmed code and input pages; counter updates disabled",
+  "provenance": {
+    "measured_at_utc": "2026-09-13T05:54:42.123694+00:00",
+    "revision": "c07bec01443a753f8936c75ea78b3cfcad52ad5d",
+    "worktree_dirty": true,
+    "cpu": "Apple M1 Ultra",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "rustc": "rustc 1.90.0 (1159e78c4 2025-09-14)\nbinary: rustc\ncommit-hash: 1159e78c4747b02ef996e55082b704c09b970588\ncommit-date: 2025-09-14\nhost: aarch64-apple-darwin\nrelease: 1.90.0\nLLVM version: 20.1.8",
+    "flags": {},
+    "node": null,
+    "emcc": null,
+    "benchmark_sha256": "c98e40c45eec0ff7c7cafde5e4faa7252238d73c489be5143e721d027bc8603c",
+    "cargo_lock_sha256": "701ed36e4c281978f052f85df597e6d21f22ff8d660877011e76c6878a5f0cce",
+    "runtime_sources_sha256": "f66cf1b2254adec4b624fc03417aa09246a08ef0849052f666c456c0ebe72525",
+    "profile": "bench (workspace release, thin LTO, one codegen unit, debug information)",
+    "container": null,
+    "jvm": null,
+    "artifacts": [
+      {
+        "name": "nori-1ed18a5bc17e56db",
+        "bytes": 10910920,
+        "sha256": "e11d35964e80ef46686a680200db5bf2a01730650640103e6ce1dfddcaee8b4c"
+      }
+    ]
+  },
+  "gate": {
+    "allocation_and_output_passed": true,
+    "timing_compared": true,
+    "timing_ratios": {
+      "cold_decode_validate_drop": 0.9966532730155439,
+      "cached_name_resolve_64_shared_handles": 0.9998448679549569,
+      "cached_identity_resolve_64_shared_handles": 0.9993694065302675,
+      "tokenizer/None/korean_prose": 1.0011950726989507,
+      "analyzer/None/korean_prose": 0.9863578715177341,
+      "tokenizer/Discard/korean_prose": 0.9878417124378932,
+      "analyzer/Discard/korean_prose": 0.9800866887581057,
+      "tokenizer/Mixed/korean_prose": 1.0032581975526251,
+      "analyzer/Mixed/korean_prose": 1.0041677816810477,
+      "tokenizer/None/short_query": 1.0005209148473067,
+      "analyzer/None/short_query": 0.9991671156547687,
+      "tokenizer/Discard/short_query": 0.9940084866349681,
+      "analyzer/Discard/short_query": 0.9865284010417009,
+      "tokenizer/Mixed/short_query": 1.0008296854697474,
+      "analyzer/Mixed/short_query": 0.9996606036698362,
+      "tokenizer/None/hanja": 1.0014435035395333,
+      "analyzer/None/hanja": 1.0030817867196065,
+      "tokenizer/Discard/hanja": 0.9977024218077047,
+      "analyzer/Discard/hanja": 0.993422545993564,
+      "tokenizer/Mixed/hanja": 0.9959448850847515,
+      "analyzer/Mixed/hanja": 0.9978712839125268,
+      "tokenizer/None/mixed_script": 0.9916286148402129,
+      "analyzer/None/mixed_script": 1.0017029510534585,
+      "tokenizer/Discard/mixed_script": 1.0046575833463403,
+      "analyzer/Discard/mixed_script": 0.996278655976212,
+      "tokenizer/Mixed/mixed_script": 0.9945137312141656,
+      "analyzer/Mixed/mixed_script": 0.9972252084069387,
+      "tokenizer/None/unknown": 1.006632030381184,
+      "analyzer/None/unknown": 0.9875221440550837,
+      "tokenizer/Discard/unknown": 0.9980825300127079,
+      "analyzer/Discard/unknown": 0.9986461746512205,
+      "tokenizer/Mixed/unknown": 0.9969572214713571,
+      "analyzer/Mixed/unknown": 0.9975279460432807,
+      "tokenizer/None/ambiguous_long": 1.0035943459552423,
+      "analyzer/None/ambiguous_long": 1.0032952591494633,
+      "tokenizer/Discard/ambiguous_long": 1.0008789275759062,
+      "analyzer/Discard/ambiguous_long": 0.9955412961773881,
+      "tokenizer/Mixed/ambiguous_long": 0.9547910070581029,
+      "analyzer/Mixed/ambiguous_long": 0.9614683525746083
+    }
+  }
+}

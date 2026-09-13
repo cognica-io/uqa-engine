@@ -376,6 +376,8 @@ Measure dictionary transfer/package size, cold decode/open latency, peak allocat
 
 Establish baselines before selecting compression and lookup optimizations. Initial release gates are exact fixture agreement, deterministic bundle regeneration, bounded failure on adversarial inputs, one shared dictionary allocation per bundle identity, and artifact-size compliance for every distribution. Performance thresholds must be recorded from those measurements and enforced by the existing benchmark policy; no throughput or memory target in this document is presented as an achieved result. Use native and WASM measurements, since the serialized Java resource size does not predict either runtime's peak memory.
 
+The standalone analysis measurements and regression gates are now recorded in [the Nori benchmark](../../benchmarks/nori/README.md). The analysis owner exercises six fixed corpora in all three decompound modes, separates tokenization from default filters, and measures dictionary loading and name/content-identity sharing. Repeated native and WASM executions reproduce all allocation counters and token graphs; reviewed 32-bit/64-bit allocation ceilings and same-environment timing comparisons are machine checked. The evidence records allocator-request scope and does not claim RSS, indexing throughput, phrase-query cost, browser host memory, or complete release acceptance.
+
 ## Implementation work packages
 
 | Work package | Deliverable and completion evidence |

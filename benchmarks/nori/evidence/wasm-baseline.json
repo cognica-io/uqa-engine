@@ -1,0 +1,1480 @@
+{
+  "allocation_counter": "0.8.1; current-thread Rust System allocator requests; excludes stack, static bundle, allocator metadata and host JS heap",
+  "bundle_bytes": 9829534,
+  "bundle_sha256": "0d920523991ed60909972d85df630c65747ff5d49e1138e4998ca39f0079538d",
+  "corpus_sha256": "18a50905d26e3615d9db2a8b9565cbcdefcbcfdd1036a88292624154fc228e6b",
+  "measurements": [
+    {
+      "allocation": {
+        "bytes_peak": 86255402,
+        "bytes_retained": 74726638,
+        "bytes_total": 136869493,
+        "count_peak": 175566,
+        "count_retained": 175564,
+        "count_total": 175824
+      },
+      "name": "cold_decode_validate_drop",
+      "timing": {
+        "elapsed_ns": [
+          335125833,
+          336959333,
+          337339708
+        ],
+        "iterations": [
+          1,
+          1,
+          1
+        ],
+        "median_ns": 336959333.0
+      }
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "handles": 64,
+      "name": "cached_name_resolve_64_shared_handles",
+      "timing": {
+        "elapsed_ns": [
+          115955250,
+          115407875,
+          116121250,
+          116083334,
+          116558667,
+          115333166,
+          115473000
+        ],
+        "iterations": [
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4
+        ],
+        "median_ns": 28988812.5
+      }
+    },
+    {
+      "allocation": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "handles": 64,
+      "name": "cached_identity_resolve_64_shared_handles",
+      "timing": {
+        "elapsed_ns": [
+          75755000,
+          75182917,
+          75396958,
+          75707667,
+          75811958,
+          75353167,
+          75605792
+        ],
+        "iterations": [
+          701661,
+          711830,
+          711830,
+          721999,
+          711830,
+          701661,
+          691492
+        ],
+        "median_ns": 106.50289816388745
+      }
+    },
+    {
+      "allocation": {
+        "bytes_peak": 357108,
+        "bytes_retained": 0,
+        "bytes_total": 682666,
+        "count_peak": 1077,
+        "count_retained": 0,
+        "count_total": 3195
+      },
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "tokenizer/None/korean_prose",
+      "output_sha256": "0b3b91ece785b5d855ea6e247e07defd6638821183236015a8b352cdb45ee32c",
+      "timing": {
+        "elapsed_ns": [
+          135499000,
+          131009500,
+          131148292,
+          131037625,
+          131271167,
+          130631000,
+          131183291
+        ],
+        "iterations": [
+          142,
+          142,
+          142,
+          142,
+          142,
+          142,
+          142
+        ],
+        "median_ns": 923579.5211267605
+      },
+      "tokens": 312
+    },
+    {
+      "allocation": {
+        "bytes_peak": 357108,
+        "bytes_retained": 0,
+        "bytes_total": 682726,
+        "count_peak": 1077,
+        "count_retained": 0,
+        "count_total": 3196
+      },
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "analyzer/None/korean_prose",
+      "output_sha256": "9ccbf2cabe7481a8887580c78d8b69d944f4591301deed93f6353971c03b3311",
+      "timing": {
+        "elapsed_ns": [
+          148407958,
+          146662458,
+          146459875,
+          146788333,
+          145318459,
+          148471083,
+          78309417
+        ],
+        "iterations": [
+          152,
+          152,
+          152,
+          152,
+          152,
+          152,
+          76
+        ],
+        "median_ns": 965712.7171052631
+      },
+      "tokens": 168
+    },
+    {
+      "allocation": {
+        "bytes_peak": 355072,
+        "bytes_retained": 0,
+        "bytes_total": 686842,
+        "count_peak": 949,
+        "count_retained": 0,
+        "count_total": 3323
+      },
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "tokenizer/Discard/korean_prose",
+      "output_sha256": "57eab62b152404c49098feb5e5d328d024718637b0392816d201e95a989eb846",
+      "timing": {
+        "elapsed_ns": [
+          82448125,
+          80775000,
+          80022250,
+          80086542,
+          80199500,
+          79504417,
+          81703209
+        ],
+        "iterations": [
+          84,
+          84,
+          84,
+          84,
+          84,
+          84,
+          84
+        ],
+        "median_ns": 954755.9523809524
+      },
+      "tokens": 376
+    },
+    {
+      "allocation": {
+        "bytes_peak": 355072,
+        "bytes_retained": 0,
+        "bytes_total": 686902,
+        "count_peak": 949,
+        "count_retained": 0,
+        "count_total": 3324
+      },
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "analyzer/Discard/korean_prose",
+      "output_sha256": "1fbf62164811eb694585da8eafb29eaf2eb0ab6d9cef9acc3ab390017749a961",
+      "timing": {
+        "elapsed_ns": [
+          136646500,
+          134835292,
+          134729375,
+          136351417,
+          133416750,
+          131416542,
+          133491958
+        ],
+        "iterations": [
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132
+        ],
+        "median_ns": 1020677.0833333334
+      },
+      "tokens": 192
+    },
+    {
+      "allocation": {
+        "bytes_peak": 356540,
+        "bytes_retained": 0,
+        "bytes_total": 690682,
+        "count_peak": 1205,
+        "count_retained": 0,
+        "count_total": 3323
+      },
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "tokenizer/Mixed/korean_prose",
+      "output_sha256": "05abc9ea58ba0d85c2203ed8cce3c0cd3b4034cb298a40d4acf1f35921ed53e1",
+      "timing": {
+        "elapsed_ns": [
+          149851375,
+          147822334,
+          147185167,
+          75963666,
+          149295875,
+          146503833,
+          146923958
+        ],
+        "iterations": [
+          156,
+          156,
+          156,
+          78,
+          156,
+          156,
+          156
+        ],
+        "median_ns": 947579.0641025641
+      },
+      "tokens": 440
+    },
+    {
+      "allocation": {
+        "bytes_peak": 356540,
+        "bytes_retained": 0,
+        "bytes_total": 690742,
+        "count_peak": 1205,
+        "count_retained": 0,
+        "count_total": 3324
+      },
+      "input_bytes": 1744,
+      "input_sha256": "2503e09bff8f85b91baa515f765ea88ddf49dc5069f299e23b7088a23ac6f5bd",
+      "input_utf16": 704,
+      "name": "analyzer/Mixed/korean_prose",
+      "output_sha256": "00728b371d0c71797c42de3c9ed0c83be39aab961a4ee98eef3f4f0a486ba54f",
+      "timing": {
+        "elapsed_ns": [
+          76019292,
+          77341500,
+          77783916,
+          78320791,
+          78334875,
+          78661208,
+          77548083
+        ],
+        "iterations": [
+          74,
+          74,
+          74,
+          74,
+          74,
+          74,
+          74
+        ],
+        "median_ns": 1051134.0
+      },
+      "tokens": 224
+    },
+    {
+      "allocation": {
+        "bytes_peak": 6996,
+        "bytes_retained": 0,
+        "bytes_total": 13320,
+        "count_peak": 24,
+        "count_retained": 0,
+        "count_total": 73
+      },
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "tokenizer/None/short_query",
+      "output_sha256": "6f8e2914b00683ebdf1c0b8ebc245f45c9605c52c5bbb111294581792b20b47d",
+      "timing": {
+        "elapsed_ns": [
+          108617375,
+          109450166,
+          109029667,
+          108176250,
+          108066375,
+          107033291,
+          107011958
+        ],
+        "iterations": [
+          5910,
+          5910,
+          5910,
+          5910,
+          5910,
+          5910,
+          5910
+        ],
+        "median_ns": 18303.934010152283
+      },
+      "tokens": 5
+    },
+    {
+      "allocation": {
+        "bytes_peak": 6996,
+        "bytes_retained": 0,
+        "bytes_total": 13320,
+        "count_peak": 24,
+        "count_retained": 0,
+        "count_total": 73
+      },
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "analyzer/None/short_query",
+      "output_sha256": "82db3a81aced3c86036f20abe3d99914ca5ac472efae23e3485d6f5009b74dc7",
+      "timing": {
+        "elapsed_ns": [
+          135812417,
+          136363042,
+          135816250,
+          136243375,
+          136057791,
+          136025250,
+          136142458
+        ],
+        "iterations": [
+          6936,
+          6936,
+          6936,
+          6936,
+          6936,
+          6936,
+          6936
+        ],
+        "median_ns": 19616.175173010382
+      },
+      "tokens": 4
+    },
+    {
+      "allocation": {
+        "bytes_peak": 6956,
+        "bytes_retained": 0,
+        "bytes_total": 13386,
+        "count_peak": 23,
+        "count_retained": 0,
+        "count_total": 75
+      },
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "tokenizer/Discard/short_query",
+      "output_sha256": "7a25abe92c08d18b9fa332401cbd3be9fa4dc8990da7a0f72468795d0179483a",
+      "timing": {
+        "elapsed_ns": [
+          137629958,
+          138322667,
+          141256625,
+          139399209,
+          139060958,
+          138639417,
+          139472834
+        ],
+        "iterations": [
+          7392,
+          7392,
+          7392,
+          7392,
+          7392,
+          7392,
+          7392
+        ],
+        "median_ns": 18812.359036796537
+      },
+      "tokens": 6
+    },
+    {
+      "allocation": {
+        "bytes_peak": 6956,
+        "bytes_retained": 0,
+        "bytes_total": 13386,
+        "count_peak": 23,
+        "count_retained": 0,
+        "count_total": 75
+      },
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "analyzer/Discard/short_query",
+      "output_sha256": "c049b1dae5d4859e288d0db98d27107fc02cc75d17971a7f775fefdac4452eb4",
+      "timing": {
+        "elapsed_ns": [
+          126854000,
+          128711875,
+          124719541,
+          126080541,
+          126169833,
+          125112583,
+          125713958
+        ],
+        "iterations": [
+          6060,
+          6060,
+          6060,
+          6060,
+          6060,
+          6060,
+          6060
+        ],
+        "median_ns": 20805.3698019802
+      },
+      "tokens": 5
+    },
+    {
+      "allocation": {
+        "bytes_peak": 6996,
+        "bytes_retained": 0,
+        "bytes_total": 13446,
+        "count_peak": 25,
+        "count_retained": 0,
+        "count_total": 75
+      },
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "tokenizer/Mixed/short_query",
+      "output_sha256": "121c6a3cbc2885741e342d94e30f5042b95bd5e3a4e743df295294bd4c07f0f0",
+      "timing": {
+        "elapsed_ns": [
+          134281542,
+          133566125,
+          132799667,
+          131841583,
+          134650917,
+          135885084,
+          133752416
+        ],
+        "iterations": [
+          7058,
+          7058,
+          7058,
+          7058,
+          7058,
+          7058,
+          7058
+        ],
+        "median_ns": 18950.46982147917
+      },
+      "tokens": 7
+    },
+    {
+      "allocation": {
+        "bytes_peak": 6996,
+        "bytes_retained": 0,
+        "bytes_total": 13446,
+        "count_peak": 25,
+        "count_retained": 0,
+        "count_total": 75
+      },
+      "input_bytes": 33,
+      "input_sha256": "09ce67c5202f084ac27534c71275f5b744f58ba950c8db5ef09fce94828cabe0",
+      "input_utf16": 13,
+      "name": "analyzer/Mixed/short_query",
+      "output_sha256": "1405b60b42c0202bac37c2847a82b778f35cd8fbb36f557b61247170ecd46fac",
+      "timing": {
+        "elapsed_ns": [
+          142289667,
+          142743958,
+          143667208,
+          142980875,
+          143547250,
+          141543084,
+          145719083
+        ],
+        "iterations": [
+          6830,
+          6830,
+          6830,
+          6830,
+          6830,
+          6830,
+          6830
+        ],
+        "median_ns": 20934.24231332357
+      },
+      "tokens": 6
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22502,
+        "bytes_retained": 0,
+        "bytes_total": 96934,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "tokenizer/None/hanja",
+      "output_sha256": "c4174d1632f62483d4a62959bd9cf126b0e43e6749d560868e8c5868f11ce48b",
+      "timing": {
+        "elapsed_ns": [
+          142739625,
+          142096250,
+          142043500,
+          141012375,
+          141709709,
+          141885541,
+          140920750
+        ],
+        "iterations": [
+          580,
+          580,
+          580,
+          580,
+          580,
+          580,
+          580
+        ],
+        "median_ns": 244630.24310344827
+      },
+      "tokens": 160
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22502,
+        "bytes_retained": 0,
+        "bytes_total": 96934,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "analyzer/None/hanja",
+      "output_sha256": "870a07c2a0910e5bb3f3f3998d54a9016e1ef7fe20a0e7a72313d4d421d49161",
+      "timing": {
+        "elapsed_ns": [
+          148407791,
+          148240542,
+          147907959,
+          147134916,
+          147941833,
+          147254958,
+          148659417
+        ],
+        "iterations": [
+          500,
+          500,
+          500,
+          500,
+          500,
+          500,
+          500
+        ],
+        "median_ns": 295883.666
+      },
+      "tokens": 160
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22502,
+        "bytes_retained": 0,
+        "bytes_total": 96934,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "tokenizer/Discard/hanja",
+      "output_sha256": "c4174d1632f62483d4a62959bd9cf126b0e43e6749d560868e8c5868f11ce48b",
+      "timing": {
+        "elapsed_ns": [
+          104135250,
+          104664375,
+          104391791,
+          104499958,
+          103784083,
+          103698208,
+          104875583
+        ],
+        "iterations": [
+          424,
+          424,
+          424,
+          424,
+          424,
+          424,
+          424
+        ],
+        "median_ns": 246207.054245283
+      },
+      "tokens": 160
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22502,
+        "bytes_retained": 0,
+        "bytes_total": 96934,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "analyzer/Discard/hanja",
+      "output_sha256": "870a07c2a0910e5bb3f3f3998d54a9016e1ef7fe20a0e7a72313d4d421d49161",
+      "timing": {
+        "elapsed_ns": [
+          145884334,
+          145075042,
+          144678167,
+          144555625,
+          148120791,
+          146214417,
+          146179041
+        ],
+        "iterations": [
+          492,
+          492,
+          492,
+          492,
+          492,
+          492,
+          492
+        ],
+        "median_ns": 296512.8739837398
+      },
+      "tokens": 160
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22502,
+        "bytes_retained": 0,
+        "bytes_total": 96934,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "tokenizer/Mixed/hanja",
+      "output_sha256": "c4174d1632f62483d4a62959bd9cf126b0e43e6749d560868e8c5868f11ce48b",
+      "timing": {
+        "elapsed_ns": [
+          146737708,
+          146435542,
+          145741584,
+          145284625,
+          145589625,
+          146949708,
+          145455958
+        ],
+        "iterations": [
+          598,
+          598,
+          598,
+          598,
+          598,
+          598,
+          598
+        ],
+        "median_ns": 243715.02341137125
+      },
+      "tokens": 160
+    },
+    {
+      "allocation": {
+        "bytes_peak": 22502,
+        "bytes_retained": 0,
+        "bytes_total": 96934,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "input_bytes": 1184,
+      "input_sha256": "6e81b5990858c288b145166cce9525713dc2d92b2bacd4a7df7492e5683f3fc7",
+      "input_utf16": 480,
+      "name": "analyzer/Mixed/hanja",
+      "output_sha256": "870a07c2a0910e5bb3f3f3998d54a9016e1ef7fe20a0e7a72313d4d421d49161",
+      "timing": {
+        "elapsed_ns": [
+          75820709,
+          75549167,
+          75973375,
+          75767875,
+          75265083,
+          75387333,
+          75344417
+        ],
+        "iterations": [
+          257,
+          257,
+          257,
+          257,
+          257,
+          257,
+          257
+        ],
+        "median_ns": 293965.6303501946
+      },
+      "tokens": 160
+    },
+    {
+      "allocation": {
+        "bytes_peak": 26346,
+        "bytes_retained": 0,
+        "bytes_total": 158666,
+        "count_peak": 257,
+        "count_retained": 0,
+        "count_total": 1109
+      },
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "tokenizer/None/mixed_script",
+      "output_sha256": "2c1a0db6ab0acd10cd1a3d9dfc900b1e1b2b330a3a054775d41142c6c9b92dcd",
+      "timing": {
+        "elapsed_ns": [
+          141792458,
+          142095292,
+          143443375,
+          142323792,
+          142834416,
+          141688833,
+          141386166
+        ],
+        "iterations": [
+          366,
+          366,
+          366,
+          366,
+          366,
+          366,
+          366
+        ],
+        "median_ns": 388238.5027322404
+      },
+      "tokens": 224
+    },
+    {
+      "allocation": {
+        "bytes_peak": 26346,
+        "bytes_retained": 0,
+        "bytes_total": 158666,
+        "count_peak": 257,
+        "count_retained": 0,
+        "count_total": 1109
+      },
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "analyzer/None/mixed_script",
+      "output_sha256": "ee55a692d96b26e6ffdfa775421fae3429a8b01f01070f21b709b2e062cce44f",
+      "timing": {
+        "elapsed_ns": [
+          75903583,
+          75281917,
+          76565041,
+          76255542,
+          75523375,
+          75082416,
+          75365833
+        ],
+        "iterations": [
+          168,
+          168,
+          168,
+          168,
+          168,
+          168,
+          168
+        ],
+        "median_ns": 449543.8988095238
+      },
+      "tokens": 192
+    },
+    {
+      "allocation": {
+        "bytes_peak": 26364,
+        "bytes_retained": 0,
+        "bytes_total": 159194,
+        "count_peak": 241,
+        "count_retained": 0,
+        "count_total": 1126
+      },
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "tokenizer/Discard/mixed_script",
+      "output_sha256": "a3b3d00ac71e0527b078b3f2737d9439cf4bf65150a12ffeba9e61dacf1fea36",
+      "timing": {
+        "elapsed_ns": [
+          141932958,
+          141497583,
+          141303042,
+          143166667,
+          145265541,
+          143598084,
+          144351208
+        ],
+        "iterations": [
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360
+        ],
+        "median_ns": 397685.18611111114
+      },
+      "tokens": 232
+    },
+    {
+      "allocation": {
+        "bytes_peak": 26364,
+        "bytes_retained": 0,
+        "bytes_total": 159194,
+        "count_peak": 241,
+        "count_retained": 0,
+        "count_total": 1126
+      },
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "analyzer/Discard/mixed_script",
+      "output_sha256": "5930240f07d0d4b5f5e1f0f84c7316398f52ebabef022d291f411a2be5eb58f4",
+      "timing": {
+        "elapsed_ns": [
+          75602250,
+          75785708,
+          75305625,
+          78072917,
+          149098666,
+          149058250,
+          75061500
+        ],
+        "iterations": [
+          162,
+          162,
+          162,
+          162,
+          324,
+          324,
+          162
+        ],
+        "median_ns": 464849.537037037
+      },
+      "tokens": 192
+    },
+    {
+      "allocation": {
+        "bytes_peak": 26568,
+        "bytes_retained": 0,
+        "bytes_total": 159194,
+        "count_peak": 273,
+        "count_retained": 0,
+        "count_total": 1126
+      },
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "tokenizer/Mixed/mixed_script",
+      "output_sha256": "17c280af3af59f834061bf9b62be9832812e67f69f35af48e29f8a80f157f7bc",
+      "timing": {
+        "elapsed_ns": [
+          147652209,
+          76244500,
+          147410458,
+          148121333,
+          147924500,
+          147389417,
+          147108792
+        ],
+        "iterations": [
+          368,
+          184,
+          368,
+          368,
+          368,
+          368,
+          368
+        ],
+        "median_ns": 401228.82880434784
+      },
+      "tokens": 240
+    },
+    {
+      "allocation": {
+        "bytes_peak": 26568,
+        "bytes_retained": 0,
+        "bytes_total": 159194,
+        "count_peak": 273,
+        "count_retained": 0,
+        "count_total": 1126
+      },
+      "input_bytes": 1168,
+      "input_sha256": "b5d1dac03e781d4bc3c9bec0e4d0522fbf812503558fa62786979e1652800311",
+      "input_utf16": 864,
+      "name": "analyzer/Mixed/mixed_script",
+      "output_sha256": "5930240f07d0d4b5f5e1f0f84c7316398f52ebabef022d291f411a2be5eb58f4",
+      "timing": {
+        "elapsed_ns": [
+          75152250,
+          149978458,
+          75384375,
+          149288125,
+          148290750,
+          148510334,
+          149484375
+        ],
+        "iterations": [
+          161,
+          322,
+          161,
+          322,
+          322,
+          322,
+          322
+        ],
+        "median_ns": 464237.18944099377
+      },
+      "tokens": 192
+    },
+    {
+      "allocation": {
+        "bytes_peak": 13546,
+        "bytes_retained": 0,
+        "bytes_total": 21178,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "tokenizer/None/unknown",
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "timing": {
+        "elapsed_ns": [
+          76920250,
+          77338041,
+          77393667,
+          76902792,
+          76613083,
+          77215792,
+          77405042
+        ],
+        "iterations": [
+          518,
+          518,
+          518,
+          518,
+          518,
+          518,
+          518
+        ],
+        "median_ns": 149065.23552123553
+      },
+      "tokens": 112
+    },
+    {
+      "allocation": {
+        "bytes_peak": 13546,
+        "bytes_retained": 0,
+        "bytes_total": 21178,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "analyzer/None/unknown",
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "timing": {
+        "elapsed_ns": [
+          144378084,
+          144211583,
+          144245417,
+          144502750,
+          145286958,
+          144585875,
+          144394000
+        ],
+        "iterations": [
+          792,
+          792,
+          792,
+          792,
+          792,
+          792,
+          792
+        ],
+        "median_ns": 182315.65656565657
+      },
+      "tokens": 112
+    },
+    {
+      "allocation": {
+        "bytes_peak": 13546,
+        "bytes_retained": 0,
+        "bytes_total": 21178,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "tokenizer/Discard/unknown",
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "timing": {
+        "elapsed_ns": [
+          75062667,
+          75176792,
+          75503625,
+          149940209,
+          75012208,
+          149999166,
+          150335834
+        ],
+        "iterations": [
+          510,
+          510,
+          510,
+          1020,
+          510,
+          1020,
+          1020
+        ],
+        "median_ns": 147181.7
+      },
+      "tokens": 112
+    },
+    {
+      "allocation": {
+        "bytes_peak": 13546,
+        "bytes_retained": 0,
+        "bytes_total": 21178,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "analyzer/Discard/unknown",
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "timing": {
+        "elapsed_ns": [
+          148898083,
+          76066916,
+          75128958,
+          149784084,
+          75100541,
+          149295250,
+          149334000
+        ],
+        "iterations": [
+          820,
+          410,
+          410,
+          820,
+          410,
+          820,
+          820
+        ],
+        "median_ns": 182663.51707317072
+      },
+      "tokens": 112
+    },
+    {
+      "allocation": {
+        "bytes_peak": 13546,
+        "bytes_retained": 0,
+        "bytes_total": 21178,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "tokenizer/Mixed/unknown",
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "timing": {
+        "elapsed_ns": [
+          129286292,
+          129881750,
+          129211125,
+          129832417,
+          130508584,
+          130058209,
+          130648750
+        ],
+        "iterations": [
+          884,
+          884,
+          884,
+          884,
+          884,
+          884,
+          884
+        ],
+        "median_ns": 146925.05656108598
+      },
+      "tokens": 112
+    },
+    {
+      "allocation": {
+        "bytes_peak": 13546,
+        "bytes_retained": 0,
+        "bytes_total": 21178,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "input_bytes": 1024,
+      "input_sha256": "ed9ca7239b12105c6a441668476e425ed0d5347f0b1a098515bd70a5a810df5a",
+      "input_utf16": 544,
+      "name": "analyzer/Mixed/unknown",
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b",
+      "timing": {
+        "elapsed_ns": [
+          146329458,
+          145188334,
+          145307000,
+          145240958,
+          145153167,
+          144740959,
+          143217959
+        ],
+        "iterations": [
+          800,
+          800,
+          800,
+          800,
+          800,
+          800,
+          800
+        ],
+        "median_ns": 181485.4175
+      },
+      "tokens": 112
+    },
+    {
+      "allocation": {
+        "bytes_peak": 708838,
+        "bytes_retained": 0,
+        "bytes_total": 4619032,
+        "count_peak": 4410,
+        "count_retained": 0,
+        "count_total": 24600
+      },
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "tokenizer/None/ambiguous_long",
+      "output_sha256": "9161d86a17318a1c852402316db2595023f7af73a8711d85bcea503358a90417",
+      "timing": {
+        "elapsed_ns": [
+          135895167,
+          135141167,
+          138199625,
+          136519042,
+          135061208,
+          135379083,
+          135753000
+        ],
+        "iterations": [
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22
+        ],
+        "median_ns": 6170590.909090909
+      },
+      "tokens": 2050
+    },
+    {
+      "allocation": {
+        "bytes_peak": 708838,
+        "bytes_retained": 0,
+        "bytes_total": 4619032,
+        "count_peak": 4410,
+        "count_retained": 0,
+        "count_total": 24600
+      },
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "analyzer/None/ambiguous_long",
+      "output_sha256": "68190be8f59aaa330bb75eb9064f4a0d4a2ec718bbb8c355a0fef312ebed3666",
+      "timing": {
+        "elapsed_ns": [
+          150023541,
+          75140083,
+          148223042,
+          147718542,
+          148245500,
+          148660834,
+          148521083
+        ],
+        "iterations": [
+          22,
+          11,
+          22,
+          22,
+          22,
+          22,
+          22
+        ],
+        "median_ns": 6750958.318181818
+      },
+      "tokens": 1793
+    },
+    {
+      "allocation": {
+        "bytes_peak": 749808,
+        "bytes_retained": 0,
+        "bytes_total": 4792952,
+        "count_peak": 3447,
+        "count_retained": 0,
+        "count_total": 25625
+      },
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "tokenizer/Discard/ambiguous_long",
+      "output_sha256": "c83b4353b7ba19433d53374bed168c09ab40e4361d4dd29cbfcabf5f5d301ae1",
+      "timing": {
+        "elapsed_ns": [
+          142262458,
+          142458500,
+          141897709,
+          141717625,
+          141763208,
+          141741667,
+          141730750
+        ],
+        "iterations": [
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22
+        ],
+        "median_ns": 6443782.181818182
+      },
+      "tokens": 2562
+    },
+    {
+      "allocation": {
+        "bytes_peak": 749808,
+        "bytes_retained": 0,
+        "bytes_total": 4792952,
+        "count_peak": 3447,
+        "count_retained": 0,
+        "count_total": 25625
+      },
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "analyzer/Discard/ambiguous_long",
+      "output_sha256": "c707b60564e38238bf37fb7c85cba4eaecf6dc9b53ba4cf993a9fb49e1acb367",
+      "timing": {
+        "elapsed_ns": [
+          142316042,
+          143361958,
+          143446333,
+          142084375,
+          143575334,
+          142801000,
+          142875000
+        ],
+        "iterations": [
+          20,
+          20,
+          20,
+          20,
+          20,
+          20,
+          20
+        ],
+        "median_ns": 7143750.0
+      },
+      "tokens": 2304
+    },
+    {
+      "allocation": {
+        "bytes_peak": 801014,
+        "bytes_retained": 0,
+        "bytes_total": 4901852,
+        "count_peak": 5376,
+        "count_retained": 0,
+        "count_total": 25625
+      },
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "tokenizer/Mixed/ambiguous_long",
+      "output_sha256": "5bdea6a8e61e249bf0dd7a41f44309f1847f905f33c1c1bdd227272abd7d00dc",
+      "timing": {
+        "elapsed_ns": [
+          143670542,
+          144512417,
+          143686542,
+          143431084,
+          143615875,
+          144224292,
+          143813250
+        ],
+        "iterations": [
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22
+        ],
+        "median_ns": 6531206.454545454
+      },
+      "tokens": 3074
+    },
+    {
+      "allocation": {
+        "bytes_peak": 801014,
+        "bytes_retained": 0,
+        "bytes_total": 4901852,
+        "count_peak": 5376,
+        "count_retained": 0,
+        "count_total": 25625
+      },
+      "input_bytes": 13056,
+      "input_sha256": "da11cd1174c57a1d13ef1b882519d78e5f8adc1e7ca89e101cfe88daa1678cd7",
+      "input_utf16": 4352,
+      "name": "analyzer/Mixed/ambiguous_long",
+      "output_sha256": "e0c499b954afc15e6a4dee2bdf70493f4eec31e88d38f61fcf39f1348dc7ed22",
+      "timing": {
+        "elapsed_ns": [
+          133761083,
+          132839625,
+          132118209,
+          132770292,
+          132275500,
+          135709166,
+          133801250
+        ],
+        "iterations": [
+          18,
+          18,
+          18,
+          18,
+          18,
+          18,
+          18
+        ],
+        "median_ns": 7379979.166666667
+      },
+      "tokens": 2816
+    }
+  ],
+  "pointer_bits": 32,
+  "protocol": {
+    "clock": "per_batch",
+    "cold_samples": 3,
+    "pilot": 1,
+    "sample_ms": 75,
+    "samples": 7,
+    "warmup": 2
+  },
+  "schema_version": 1,
+  "target_arch": "wasm32",
+  "target_os": "emscripten",
+  "threads": 1,
+  "timing_scope": "create and drop each result; warmed code and input pages; counter updates disabled",
+  "provenance": {
+    "measured_at_utc": "2026-09-13T05:55:39.792173+00:00",
+    "revision": "c07bec01443a753f8936c75ea78b3cfcad52ad5d",
+    "worktree_dirty": true,
+    "cpu": "Apple M1 Ultra",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "rustc": "rustc 1.90.0 (1159e78c4 2025-09-14)\nbinary: rustc\ncommit-hash: 1159e78c4747b02ef996e55082b704c09b970588\ncommit-date: 2025-09-14\nhost: aarch64-apple-darwin\nrelease: 1.90.0\nLLVM version: 20.1.8",
+    "flags": {
+      "CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS": "-C link-arg=-sALLOW_MEMORY_GROWTH=1 -C link-arg=-sMAXIMUM_MEMORY=2147483648 -C link-arg=-sDEFAULT_TO_CXX -C link-arg=-sSTACK_SIZE=5242880"
+    },
+    "node": "v22.12.0",
+    "emcc": "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 6.0.3-git\nCopyright (C) 2026 the Emscripten authors (see AUTHORS.txt)\nThis is free and open source software under the MIT license.\nThere is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+    "benchmark_sha256": "c98e40c45eec0ff7c7cafde5e4faa7252238d73c489be5143e721d027bc8603c",
+    "cargo_lock_sha256": "701ed36e4c281978f052f85df597e6d21f22ff8d660877011e76c6878a5f0cce",
+    "runtime_sources_sha256": "f66cf1b2254adec4b624fc03417aa09246a08ef0849052f666c456c0ebe72525",
+    "profile": "bench (workspace release, thin LTO, one codegen unit, debug information)",
+    "container": null,
+    "jvm": null,
+    "artifacts": [
+      {
+        "name": "nori-89023126ec618ca0.js",
+        "bytes": 133941,
+        "sha256": "e43d70edb0348b2225b6e258815de125d7292046515c9e814cfdf440de15edd8"
+      },
+      {
+        "name": "nori-89023126ec618ca0.wasm",
+        "bytes": 15967323,
+        "sha256": "81bed9139488ead9fabd9d78ceb233a5bc9568b39ded9f42e11dd2c57a55c511"
+      }
+    ]
+  },
+  "gate": {
+    "allocation_and_output_passed": true,
+    "timing_compared": false,
+    "timing_ratios": {}
+  }
+}

@@ -234,10 +234,32 @@ jobs:
             target/nori-csv-regeneration/regeneration_manifest.json
             target/nori-reference-model/model_manifest.json
 
+  nori-benchmark:
+    name: Nori native allocation and output gate
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Measure native analysis and enforce reviewed allocation ceilings
+        run: python3 scripts/run-nori-benchmark.py --output target/benchmark-runs/nori-native.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nori-native-${{ github.sha }}
+          path: target/benchmark-runs/nori-native.json
+
   gate:
     name: pre-merge CI
     if: ${{ always() }}
-    needs: [test-linux, test-fdw-linux, test-macos, clippy, msrv, doc, deny, upstream-regression-oracle, nori-reference]
+    needs: [test-linux, test-fdw-linux, test-macos, clippy, msrv, doc, deny, upstream-regression-oracle, nori-reference, nori-benchmark]
     runs-on: ubuntu-24.04
     env:
       RESULTS: ${{ join(needs.*.result, ' ') }}

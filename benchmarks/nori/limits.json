@@ -1,0 +1,812 @@
+{
+  "schema_version": 1,
+  "corpus_sha256": "18a50905d26e3615d9db2a8b9565cbcdefcbcfdd1036a88292624154fc228e6b",
+  "bundle_sha256": "0d920523991ed60909972d85df630c65747ff5d49e1138e4998ca39f0079538d",
+  "bundle_bytes": 9829534,
+  "allocation_counter": "0.8.1; current-thread Rust System allocator requests; excludes stack, static bundle, allocator metadata and host JS heap",
+  "timing_max_ratio": 1.16,
+  "allocation_ceilings": {
+    "64": {
+      "cold_decode_validate_drop": {
+        "bytes_peak": 88384710,
+        "bytes_retained": 76856018,
+        "bytes_total": 139698589,
+        "count_peak": 175566,
+        "count_retained": 175564,
+        "count_total": 175824
+      },
+      "cached_name_resolve_64_shared_handles": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cached_identity_resolve_64_shared_handles": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "tokenizer/None/korean_prose": {
+        "bytes_peak": 535776,
+        "bytes_retained": 0,
+        "bytes_total": 1023010,
+        "count_peak": 1077,
+        "count_retained": 0,
+        "count_total": 3195
+      },
+      "analyzer/None/korean_prose": {
+        "bytes_peak": 535776,
+        "bytes_retained": 0,
+        "bytes_total": 1023114,
+        "count_peak": 1077,
+        "count_retained": 0,
+        "count_total": 3196
+      },
+      "tokenizer/Discard/korean_prose": {
+        "bytes_peak": 532076,
+        "bytes_retained": 0,
+        "bytes_total": 1030002,
+        "count_peak": 949,
+        "count_retained": 0,
+        "count_total": 3323
+      },
+      "analyzer/Discard/korean_prose": {
+        "bytes_peak": 532076,
+        "bytes_retained": 0,
+        "bytes_total": 1030106,
+        "count_peak": 949,
+        "count_retained": 0,
+        "count_total": 3324
+      },
+      "tokenizer/Mixed/korean_prose": {
+        "bytes_peak": 534760,
+        "bytes_retained": 0,
+        "bytes_total": 1036658,
+        "count_peak": 1205,
+        "count_retained": 0,
+        "count_total": 3323
+      },
+      "analyzer/Mixed/korean_prose": {
+        "bytes_peak": 534760,
+        "bytes_retained": 0,
+        "bytes_total": 1036762,
+        "count_peak": 1205,
+        "count_retained": 0,
+        "count_total": 3324
+      },
+      "tokenizer/None/short_query": {
+        "bytes_peak": 10404,
+        "bytes_retained": 0,
+        "bytes_total": 19756,
+        "count_peak": 24,
+        "count_retained": 0,
+        "count_total": 73
+      },
+      "analyzer/None/short_query": {
+        "bytes_peak": 10404,
+        "bytes_retained": 0,
+        "bytes_total": 19756,
+        "count_peak": 24,
+        "count_retained": 0,
+        "count_total": 73
+      },
+      "tokenizer/Discard/short_query": {
+        "bytes_peak": 10332,
+        "bytes_retained": 0,
+        "bytes_total": 19866,
+        "count_peak": 23,
+        "count_retained": 0,
+        "count_total": 75
+      },
+      "analyzer/Discard/short_query": {
+        "bytes_peak": 10332,
+        "bytes_retained": 0,
+        "bytes_total": 19866,
+        "count_peak": 23,
+        "count_retained": 0,
+        "count_total": 75
+      },
+      "tokenizer/Mixed/short_query": {
+        "bytes_peak": 10404,
+        "bytes_retained": 0,
+        "bytes_total": 19970,
+        "count_peak": 25,
+        "count_retained": 0,
+        "count_total": 75
+      },
+      "analyzer/Mixed/short_query": {
+        "bytes_peak": 10404,
+        "bytes_retained": 0,
+        "bytes_total": 19970,
+        "count_peak": 25,
+        "count_retained": 0,
+        "count_total": 75
+      },
+      "tokenizer/None/hanja": {
+        "bytes_peak": 37606,
+        "bytes_retained": 0,
+        "bytes_total": 146074,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "analyzer/None/hanja": {
+        "bytes_peak": 37606,
+        "bytes_retained": 0,
+        "bytes_total": 146074,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "tokenizer/Discard/hanja": {
+        "bytes_peak": 37606,
+        "bytes_retained": 0,
+        "bytes_total": 146074,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "analyzer/Discard/hanja": {
+        "bytes_peak": 37606,
+        "bytes_retained": 0,
+        "bytes_total": 146074,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "tokenizer/Mixed/hanja": {
+        "bytes_peak": 37606,
+        "bytes_retained": 0,
+        "bytes_total": 146074,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "analyzer/Mixed/hanja": {
+        "bytes_peak": 37606,
+        "bytes_retained": 0,
+        "bytes_total": 146074,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "tokenizer/None/mixed_script": {
+        "bytes_peak": 43930,
+        "bytes_retained": 0,
+        "bytes_total": 235234,
+        "count_peak": 257,
+        "count_retained": 0,
+        "count_total": 1109
+      },
+      "analyzer/None/mixed_script": {
+        "bytes_peak": 43930,
+        "bytes_retained": 0,
+        "bytes_total": 235234,
+        "count_peak": 257,
+        "count_retained": 0,
+        "count_total": 1109
+      },
+      "tokenizer/Discard/mixed_script": {
+        "bytes_peak": 43964,
+        "bytes_retained": 0,
+        "bytes_total": 236114,
+        "count_peak": 241,
+        "count_retained": 0,
+        "count_total": 1126
+      },
+      "analyzer/Discard/mixed_script": {
+        "bytes_peak": 43964,
+        "bytes_retained": 0,
+        "bytes_total": 236114,
+        "count_peak": 241,
+        "count_retained": 0,
+        "count_total": 1126
+      },
+      "tokenizer/Mixed/mixed_script": {
+        "bytes_peak": 44328,
+        "bytes_retained": 0,
+        "bytes_total": 236114,
+        "count_peak": 273,
+        "count_retained": 0,
+        "count_total": 1126
+      },
+      "analyzer/Mixed/mixed_script": {
+        "bytes_peak": 44328,
+        "bytes_retained": 0,
+        "bytes_total": 236114,
+        "count_peak": 273,
+        "count_retained": 0,
+        "count_total": 1126
+      },
+      "tokenizer/None/unknown": {
+        "bytes_peak": 22390,
+        "bytes_retained": 0,
+        "bytes_total": 34450,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "analyzer/None/unknown": {
+        "bytes_peak": 22390,
+        "bytes_retained": 0,
+        "bytes_total": 34450,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "tokenizer/Discard/unknown": {
+        "bytes_peak": 22390,
+        "bytes_retained": 0,
+        "bytes_total": 34450,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "analyzer/Discard/unknown": {
+        "bytes_peak": 22390,
+        "bytes_retained": 0,
+        "bytes_total": 34450,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "tokenizer/Mixed/unknown": {
+        "bytes_peak": 22390,
+        "bytes_retained": 0,
+        "bytes_total": 34450,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "analyzer/Mixed/unknown": {
+        "bytes_peak": 22390,
+        "bytes_retained": 0,
+        "bytes_total": 34450,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "tokenizer/None/ambiguous_long": {
+        "bytes_peak": 1080838,
+        "bytes_retained": 0,
+        "bytes_total": 6796836,
+        "count_peak": 4410,
+        "count_retained": 0,
+        "count_total": 24600
+      },
+      "analyzer/None/ambiguous_long": {
+        "bytes_peak": 1080838,
+        "bytes_retained": 0,
+        "bytes_total": 6796836,
+        "count_peak": 4410,
+        "count_retained": 0,
+        "count_total": 24600
+      },
+      "tokenizer/Discard/ambiguous_long": {
+        "bytes_peak": 1150208,
+        "bytes_retained": 0,
+        "bytes_total": 7095672,
+        "count_peak": 3447,
+        "count_retained": 0,
+        "count_total": 25625
+      },
+      "analyzer/Discard/ambiguous_long": {
+        "bytes_peak": 1150208,
+        "bytes_retained": 0,
+        "bytes_total": 7095672,
+        "count_peak": 3447,
+        "count_retained": 0,
+        "count_total": 25625
+      },
+      "tokenizer/Mixed/ambiguous_long": {
+        "bytes_peak": 1238134,
+        "bytes_retained": 0,
+        "bytes_total": 7284432,
+        "count_peak": 5376,
+        "count_retained": 0,
+        "count_total": 25625
+      },
+      "analyzer/Mixed/ambiguous_long": {
+        "bytes_peak": 1238134,
+        "bytes_retained": 0,
+        "bytes_total": 7284432,
+        "count_peak": 5376,
+        "count_retained": 0,
+        "count_total": 25625
+      }
+    },
+    "32": {
+      "cold_decode_validate_drop": {
+        "bytes_peak": 86255402,
+        "bytes_retained": 74726638,
+        "bytes_total": 136869493,
+        "count_peak": 175566,
+        "count_retained": 175564,
+        "count_total": 175824
+      },
+      "cached_name_resolve_64_shared_handles": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "cached_identity_resolve_64_shared_handles": {
+        "bytes_peak": 0,
+        "bytes_retained": 0,
+        "bytes_total": 0,
+        "count_peak": 0,
+        "count_retained": 0,
+        "count_total": 0
+      },
+      "tokenizer/None/korean_prose": {
+        "bytes_peak": 357108,
+        "bytes_retained": 0,
+        "bytes_total": 682666,
+        "count_peak": 1077,
+        "count_retained": 0,
+        "count_total": 3195
+      },
+      "analyzer/None/korean_prose": {
+        "bytes_peak": 357108,
+        "bytes_retained": 0,
+        "bytes_total": 682726,
+        "count_peak": 1077,
+        "count_retained": 0,
+        "count_total": 3196
+      },
+      "tokenizer/Discard/korean_prose": {
+        "bytes_peak": 355072,
+        "bytes_retained": 0,
+        "bytes_total": 686842,
+        "count_peak": 949,
+        "count_retained": 0,
+        "count_total": 3323
+      },
+      "analyzer/Discard/korean_prose": {
+        "bytes_peak": 355072,
+        "bytes_retained": 0,
+        "bytes_total": 686902,
+        "count_peak": 949,
+        "count_retained": 0,
+        "count_total": 3324
+      },
+      "tokenizer/Mixed/korean_prose": {
+        "bytes_peak": 356540,
+        "bytes_retained": 0,
+        "bytes_total": 690682,
+        "count_peak": 1205,
+        "count_retained": 0,
+        "count_total": 3323
+      },
+      "analyzer/Mixed/korean_prose": {
+        "bytes_peak": 356540,
+        "bytes_retained": 0,
+        "bytes_total": 690742,
+        "count_peak": 1205,
+        "count_retained": 0,
+        "count_total": 3324
+      },
+      "tokenizer/None/short_query": {
+        "bytes_peak": 6996,
+        "bytes_retained": 0,
+        "bytes_total": 13320,
+        "count_peak": 24,
+        "count_retained": 0,
+        "count_total": 73
+      },
+      "analyzer/None/short_query": {
+        "bytes_peak": 6996,
+        "bytes_retained": 0,
+        "bytes_total": 13320,
+        "count_peak": 24,
+        "count_retained": 0,
+        "count_total": 73
+      },
+      "tokenizer/Discard/short_query": {
+        "bytes_peak": 6956,
+        "bytes_retained": 0,
+        "bytes_total": 13386,
+        "count_peak": 23,
+        "count_retained": 0,
+        "count_total": 75
+      },
+      "analyzer/Discard/short_query": {
+        "bytes_peak": 6956,
+        "bytes_retained": 0,
+        "bytes_total": 13386,
+        "count_peak": 23,
+        "count_retained": 0,
+        "count_total": 75
+      },
+      "tokenizer/Mixed/short_query": {
+        "bytes_peak": 6996,
+        "bytes_retained": 0,
+        "bytes_total": 13446,
+        "count_peak": 25,
+        "count_retained": 0,
+        "count_total": 75
+      },
+      "analyzer/Mixed/short_query": {
+        "bytes_peak": 6996,
+        "bytes_retained": 0,
+        "bytes_total": 13446,
+        "count_peak": 25,
+        "count_retained": 0,
+        "count_total": 75
+      },
+      "tokenizer/None/hanja": {
+        "bytes_peak": 22502,
+        "bytes_retained": 0,
+        "bytes_total": 96934,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "analyzer/None/hanja": {
+        "bytes_peak": 22502,
+        "bytes_retained": 0,
+        "bytes_total": 96934,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "tokenizer/Discard/hanja": {
+        "bytes_peak": 22502,
+        "bytes_retained": 0,
+        "bytes_total": 96934,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "analyzer/Discard/hanja": {
+        "bytes_peak": 22502,
+        "bytes_retained": 0,
+        "bytes_total": 96934,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "tokenizer/Mixed/hanja": {
+        "bytes_peak": 22502,
+        "bytes_retained": 0,
+        "bytes_total": 96934,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "analyzer/Mixed/hanja": {
+        "bytes_peak": 22502,
+        "bytes_retained": 0,
+        "bytes_total": 96934,
+        "count_peak": 325,
+        "count_retained": 0,
+        "count_total": 1014
+      },
+      "tokenizer/None/mixed_script": {
+        "bytes_peak": 26346,
+        "bytes_retained": 0,
+        "bytes_total": 158666,
+        "count_peak": 257,
+        "count_retained": 0,
+        "count_total": 1109
+      },
+      "analyzer/None/mixed_script": {
+        "bytes_peak": 26346,
+        "bytes_retained": 0,
+        "bytes_total": 158666,
+        "count_peak": 257,
+        "count_retained": 0,
+        "count_total": 1109
+      },
+      "tokenizer/Discard/mixed_script": {
+        "bytes_peak": 26364,
+        "bytes_retained": 0,
+        "bytes_total": 159194,
+        "count_peak": 241,
+        "count_retained": 0,
+        "count_total": 1126
+      },
+      "analyzer/Discard/mixed_script": {
+        "bytes_peak": 26364,
+        "bytes_retained": 0,
+        "bytes_total": 159194,
+        "count_peak": 241,
+        "count_retained": 0,
+        "count_total": 1126
+      },
+      "tokenizer/Mixed/mixed_script": {
+        "bytes_peak": 26568,
+        "bytes_retained": 0,
+        "bytes_total": 159194,
+        "count_peak": 273,
+        "count_retained": 0,
+        "count_total": 1126
+      },
+      "analyzer/Mixed/mixed_script": {
+        "bytes_peak": 26568,
+        "bytes_retained": 0,
+        "bytes_total": 159194,
+        "count_peak": 273,
+        "count_retained": 0,
+        "count_total": 1126
+      },
+      "tokenizer/None/unknown": {
+        "bytes_peak": 13546,
+        "bytes_retained": 0,
+        "bytes_total": 21178,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "analyzer/None/unknown": {
+        "bytes_peak": 13546,
+        "bytes_retained": 0,
+        "bytes_total": 21178,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "tokenizer/Discard/unknown": {
+        "bytes_peak": 13546,
+        "bytes_retained": 0,
+        "bytes_total": 21178,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "analyzer/Discard/unknown": {
+        "bytes_peak": 13546,
+        "bytes_retained": 0,
+        "bytes_total": 21178,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "tokenizer/Mixed/unknown": {
+        "bytes_peak": 13546,
+        "bytes_retained": 0,
+        "bytes_total": 21178,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "analyzer/Mixed/unknown": {
+        "bytes_peak": 13546,
+        "bytes_retained": 0,
+        "bytes_total": 21178,
+        "count_peak": 120,
+        "count_retained": 0,
+        "count_total": 243
+      },
+      "tokenizer/None/ambiguous_long": {
+        "bytes_peak": 708838,
+        "bytes_retained": 0,
+        "bytes_total": 4619032,
+        "count_peak": 4410,
+        "count_retained": 0,
+        "count_total": 24600
+      },
+      "analyzer/None/ambiguous_long": {
+        "bytes_peak": 708838,
+        "bytes_retained": 0,
+        "bytes_total": 4619032,
+        "count_peak": 4410,
+        "count_retained": 0,
+        "count_total": 24600
+      },
+      "tokenizer/Discard/ambiguous_long": {
+        "bytes_peak": 749808,
+        "bytes_retained": 0,
+        "bytes_total": 4792952,
+        "count_peak": 3447,
+        "count_retained": 0,
+        "count_total": 25625
+      },
+      "analyzer/Discard/ambiguous_long": {
+        "bytes_peak": 749808,
+        "bytes_retained": 0,
+        "bytes_total": 4792952,
+        "count_peak": 3447,
+        "count_retained": 0,
+        "count_total": 25625
+      },
+      "tokenizer/Mixed/ambiguous_long": {
+        "bytes_peak": 801014,
+        "bytes_retained": 0,
+        "bytes_total": 4901852,
+        "count_peak": 5376,
+        "count_retained": 0,
+        "count_total": 25625
+      },
+      "analyzer/Mixed/ambiguous_long": {
+        "bytes_peak": 801014,
+        "bytes_retained": 0,
+        "bytes_total": 4901852,
+        "count_peak": 5376,
+        "count_retained": 0,
+        "count_total": 25625
+      }
+    }
+  },
+  "outputs": {
+    "tokenizer/None/korean_prose": {
+      "tokens": 312,
+      "output_sha256": "0b3b91ece785b5d855ea6e247e07defd6638821183236015a8b352cdb45ee32c"
+    },
+    "analyzer/None/korean_prose": {
+      "tokens": 168,
+      "output_sha256": "9ccbf2cabe7481a8887580c78d8b69d944f4591301deed93f6353971c03b3311"
+    },
+    "tokenizer/Discard/korean_prose": {
+      "tokens": 376,
+      "output_sha256": "57eab62b152404c49098feb5e5d328d024718637b0392816d201e95a989eb846"
+    },
+    "analyzer/Discard/korean_prose": {
+      "tokens": 192,
+      "output_sha256": "1fbf62164811eb694585da8eafb29eaf2eb0ab6d9cef9acc3ab390017749a961"
+    },
+    "tokenizer/Mixed/korean_prose": {
+      "tokens": 440,
+      "output_sha256": "05abc9ea58ba0d85c2203ed8cce3c0cd3b4034cb298a40d4acf1f35921ed53e1"
+    },
+    "analyzer/Mixed/korean_prose": {
+      "tokens": 224,
+      "output_sha256": "00728b371d0c71797c42de3c9ed0c83be39aab961a4ee98eef3f4f0a486ba54f"
+    },
+    "tokenizer/None/short_query": {
+      "tokens": 5,
+      "output_sha256": "6f8e2914b00683ebdf1c0b8ebc245f45c9605c52c5bbb111294581792b20b47d"
+    },
+    "analyzer/None/short_query": {
+      "tokens": 4,
+      "output_sha256": "82db3a81aced3c86036f20abe3d99914ca5ac472efae23e3485d6f5009b74dc7"
+    },
+    "tokenizer/Discard/short_query": {
+      "tokens": 6,
+      "output_sha256": "7a25abe92c08d18b9fa332401cbd3be9fa4dc8990da7a0f72468795d0179483a"
+    },
+    "analyzer/Discard/short_query": {
+      "tokens": 5,
+      "output_sha256": "c049b1dae5d4859e288d0db98d27107fc02cc75d17971a7f775fefdac4452eb4"
+    },
+    "tokenizer/Mixed/short_query": {
+      "tokens": 7,
+      "output_sha256": "121c6a3cbc2885741e342d94e30f5042b95bd5e3a4e743df295294bd4c07f0f0"
+    },
+    "analyzer/Mixed/short_query": {
+      "tokens": 6,
+      "output_sha256": "1405b60b42c0202bac37c2847a82b778f35cd8fbb36f557b61247170ecd46fac"
+    },
+    "tokenizer/None/hanja": {
+      "tokens": 160,
+      "output_sha256": "c4174d1632f62483d4a62959bd9cf126b0e43e6749d560868e8c5868f11ce48b"
+    },
+    "analyzer/None/hanja": {
+      "tokens": 160,
+      "output_sha256": "870a07c2a0910e5bb3f3f3998d54a9016e1ef7fe20a0e7a72313d4d421d49161"
+    },
+    "tokenizer/Discard/hanja": {
+      "tokens": 160,
+      "output_sha256": "c4174d1632f62483d4a62959bd9cf126b0e43e6749d560868e8c5868f11ce48b"
+    },
+    "analyzer/Discard/hanja": {
+      "tokens": 160,
+      "output_sha256": "870a07c2a0910e5bb3f3f3998d54a9016e1ef7fe20a0e7a72313d4d421d49161"
+    },
+    "tokenizer/Mixed/hanja": {
+      "tokens": 160,
+      "output_sha256": "c4174d1632f62483d4a62959bd9cf126b0e43e6749d560868e8c5868f11ce48b"
+    },
+    "analyzer/Mixed/hanja": {
+      "tokens": 160,
+      "output_sha256": "870a07c2a0910e5bb3f3f3998d54a9016e1ef7fe20a0e7a72313d4d421d49161"
+    },
+    "tokenizer/None/mixed_script": {
+      "tokens": 224,
+      "output_sha256": "2c1a0db6ab0acd10cd1a3d9dfc900b1e1b2b330a3a054775d41142c6c9b92dcd"
+    },
+    "analyzer/None/mixed_script": {
+      "tokens": 192,
+      "output_sha256": "ee55a692d96b26e6ffdfa775421fae3429a8b01f01070f21b709b2e062cce44f"
+    },
+    "tokenizer/Discard/mixed_script": {
+      "tokens": 232,
+      "output_sha256": "a3b3d00ac71e0527b078b3f2737d9439cf4bf65150a12ffeba9e61dacf1fea36"
+    },
+    "analyzer/Discard/mixed_script": {
+      "tokens": 192,
+      "output_sha256": "5930240f07d0d4b5f5e1f0f84c7316398f52ebabef022d291f411a2be5eb58f4"
+    },
+    "tokenizer/Mixed/mixed_script": {
+      "tokens": 240,
+      "output_sha256": "17c280af3af59f834061bf9b62be9832812e67f69f35af48e29f8a80f157f7bc"
+    },
+    "analyzer/Mixed/mixed_script": {
+      "tokens": 192,
+      "output_sha256": "5930240f07d0d4b5f5e1f0f84c7316398f52ebabef022d291f411a2be5eb58f4"
+    },
+    "tokenizer/None/unknown": {
+      "tokens": 112,
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b"
+    },
+    "analyzer/None/unknown": {
+      "tokens": 112,
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b"
+    },
+    "tokenizer/Discard/unknown": {
+      "tokens": 112,
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b"
+    },
+    "analyzer/Discard/unknown": {
+      "tokens": 112,
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b"
+    },
+    "tokenizer/Mixed/unknown": {
+      "tokens": 112,
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b"
+    },
+    "analyzer/Mixed/unknown": {
+      "tokens": 112,
+      "output_sha256": "c872878c78a3b79ab07da85a5830ad0a47ebceedf1f797ada9d6f46913d41c2b"
+    },
+    "tokenizer/None/ambiguous_long": {
+      "tokens": 2050,
+      "output_sha256": "9161d86a17318a1c852402316db2595023f7af73a8711d85bcea503358a90417"
+    },
+    "analyzer/None/ambiguous_long": {
+      "tokens": 1793,
+      "output_sha256": "68190be8f59aaa330bb75eb9064f4a0d4a2ec718bbb8c355a0fef312ebed3666"
+    },
+    "tokenizer/Discard/ambiguous_long": {
+      "tokens": 2562,
+      "output_sha256": "c83b4353b7ba19433d53374bed168c09ab40e4361d4dd29cbfcabf5f5d301ae1"
+    },
+    "analyzer/Discard/ambiguous_long": {
+      "tokens": 2304,
+      "output_sha256": "c707b60564e38238bf37fb7c85cba4eaecf6dc9b53ba4cf993a9fb49e1acb367"
+    },
+    "tokenizer/Mixed/ambiguous_long": {
+      "tokens": 3074,
+      "output_sha256": "5bdea6a8e61e249bf0dd7a41f44309f1847f905f33c1c1bdd227272abd7d00dc"
+    },
+    "analyzer/Mixed/ambiguous_long": {
+      "tokens": 2816,
+      "output_sha256": "e0c499b954afc15e6a4dee2bdf70493f4eec31e88d38f61fcf39f1348dc7ed22"
+    }
+  },
+  "calibration": {
+    "host": "Apple M1 Ultra",
+    "maximum_bidirectional_repeat_ratio": {
+      "native": 1.0473496216530094,
+      "wasm": 1.033740715086606
+    },
+    "timing_margin_rule": "Round the largest measured repeat ratio times 1.10 upward to two decimals. This 10% margin is policy headroom, not a measured speed target.",
+    "allocation_margin_bytes": 0,
+    "allocation_margin_count": 0,
+    "reports": [
+      {
+        "path": "benchmarks/nori/evidence/native-baseline.json",
+        "sha256": "2de111ee75229b414530c486cc5bc8a780bd5616199cccf8b2402df8744895d0"
+      },
+      {
+        "path": "benchmarks/nori/evidence/native-repeat.json",
+        "sha256": "6f19f884baa606caa15231f7b124544e892e30329ebb8711068ac2f06c0787da"
+      },
+      {
+        "path": "benchmarks/nori/evidence/wasm-baseline.json",
+        "sha256": "bfcf88d198ee70e6010a1f12f732ab63d2f3b1a0fe465fc4cfbdde46d64f33e3"
+      },
+      {
+        "path": "benchmarks/nori/evidence/wasm-repeat.json",
+        "sha256": "6083c06ef65b07db2aba398ab9791a887d9615ae2d1a1c44efab9f292e9002fc"
+      }
+    ]
+  }
+}
