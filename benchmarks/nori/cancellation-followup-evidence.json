@@ -524,5 +524,311 @@
       }
     },
     "inference": "The observed thread-cache-disabled pair is stable, while fixing address layout alone retains large variation. A fixed-iteration comparison with the default allocator remains required."
+  },
+  "sampling_controls_run": {
+    "run": "https://github.com/cognica-io/uqa-engine/actions/runs/34772092329",
+    "revision": "3c2890982f6ee64cce27a9fe1a7bc49e3f565956",
+    "artifact_id": 10323000861,
+    "reports": [
+      {
+        "filename": "nori-analysis-native.json",
+        "sha256": "631d1d6323d2d854d6eebd6050e691395e2dde1e28d9bacea3054915e2a609b3",
+        "source_lock_flags_verified": true
+      },
+      {
+        "filename": "nori-cancellation-native-baseline.json",
+        "sha256": "d609f041e6dc4d4e4fc9cf8feae50d8c78b2a823bc8dadefe0612d7f76f55001",
+        "source_lock_flags_verified": true
+      },
+      {
+        "filename": "nori-cancellation-native-repeat.json",
+        "sha256": "682dcedaabd3c781a5a599b9753845a8a91a1cc3df7e9deee76fedb49b580c93",
+        "source_lock_flags_verified": true
+      }
+    ],
+    "diagnostic_receipt_sha256": "3dbc657cbf1b99002f73d439d2ac7b899ac3c6bd0c7d511dbd9490edeb79a745",
+    "sampling_iterations": {
+      "path": "sampling-iterations.json",
+      "sha256": "d653f784523ebadaed492d148fbecf6f4b0f9cb08e9a8a013b55a7bb8b39c9f8",
+      "rule": "Twice the largest observed operation count for each workload in the ordinary pair."
+    },
+    "controls": [
+      {
+        "control": "system_call_trace",
+        "report": "run-0.json",
+        "report_sha256": "5f9f4a5477efb9dd29f05b6aee7ef37d89283ec4b8de9c194eeff8c5546f337d",
+        "system_calls": "run-0.syscalls.log",
+        "system_calls_sha256": "108ae5cb6699213d8bf8e577a5566c263ac95c34e88cc3aa76204ef9361d9c0d"
+      },
+      {
+        "control": "system_call_trace",
+        "report": "run-1.json",
+        "report_sha256": "ce223eaee483b936ce0d1850669142646c0f971f561f1d1721d623401f95617b",
+        "system_calls": "run-1.syscalls.log",
+        "system_calls_sha256": "4c9cf8cadc4c6b80998cb07746896540f7158ed5c35ac76269bc8e0707f0f76c"
+      },
+      {
+        "control": "thread_cache_disabled",
+        "environment_overrides": {
+          "GLIBC_TUNABLES": "glibc.malloc.tcache_count=0"
+        },
+        "returncode": 0,
+        "report": "thread_cache_disabled-0.json",
+        "report_sha256": "e9c9a2116a6259d1e027afc296fefccaded5017b132e5363b89cbc5c4d7a335c"
+      },
+      {
+        "control": "thread_cache_disabled",
+        "environment_overrides": {
+          "GLIBC_TUNABLES": "glibc.malloc.tcache_count=0"
+        },
+        "returncode": 0,
+        "report": "thread_cache_disabled-1.json",
+        "report_sha256": "aa4e732867ae24fb0db679fc8ff9b3b4a9c3aa138bbf7638f266abacad3446c8"
+      },
+      {
+        "control": "fixed_address_layout",
+        "environment_overrides": {},
+        "returncode": 0,
+        "report": "fixed_address_layout-0.json",
+        "report_sha256": "a27c6071676a790799bf1a6a4df1397745ab42dbd763ea76f35ad196993eda2d"
+      },
+      {
+        "control": "fixed_address_layout",
+        "environment_overrides": {},
+        "returncode": 0,
+        "report": "fixed_address_layout-1.json",
+        "report_sha256": "2bf4c1e28aabbfc8d7d3345d8a8387bb01201ee88000e73207eabbad2b960920"
+      },
+      {
+        "control": "sampling_control_timed",
+        "environment_overrides": {
+          "UQA_NORI_CANCELLATION_SAMPLING": "target/benchmark-runs/cancellation-diagnostics/sampling-iterations.json",
+          "UQA_NORI_CANCELLATION_SAMPLING_MODE": "timed"
+        },
+        "returncode": 0,
+        "report": "sampling_control_timed-0.json",
+        "report_sha256": "8d431fe0b83fab01422dee283cc6de45df49e731d6f29de0e1dc215b752d83b5"
+      },
+      {
+        "control": "sampling_control_timed",
+        "environment_overrides": {
+          "UQA_NORI_CANCELLATION_SAMPLING": "target/benchmark-runs/cancellation-diagnostics/sampling-iterations.json",
+          "UQA_NORI_CANCELLATION_SAMPLING_MODE": "timed"
+        },
+        "returncode": 0,
+        "report": "sampling_control_timed-1.json",
+        "report_sha256": "da541649045a65ebfcb0655ee64533ec2e41e29b914d8cbdb66216accf5ca764"
+      },
+      {
+        "control": "sampling_control_fixed",
+        "environment_overrides": {
+          "UQA_NORI_CANCELLATION_SAMPLING": "target/benchmark-runs/cancellation-diagnostics/sampling-iterations.json",
+          "UQA_NORI_CANCELLATION_SAMPLING_MODE": "fixed"
+        },
+        "returncode": 0,
+        "report": "sampling_control_fixed-0.json",
+        "report_sha256": "92d590bfecb0386c2d2d85b4274dfe97b5f77e25c4e6483417128c1a5cb86eb5"
+      },
+      {
+        "control": "sampling_control_fixed",
+        "environment_overrides": {
+          "UQA_NORI_CANCELLATION_SAMPLING": "target/benchmark-runs/cancellation-diagnostics/sampling-iterations.json",
+          "UQA_NORI_CANCELLATION_SAMPLING_MODE": "fixed"
+        },
+        "returncode": 0,
+        "report": "sampling_control_fixed-1.json",
+        "report_sha256": "efd39fd8575abbb298aa22f7ee42215b5a0fb83c75eaab1808fffee88d553f39"
+      }
+    ],
+    "ordinary_native_timing_failure": "cancellation timing regression: analyzer/None/korean_prose/last/response_timing: 3.3944880837294025 > 1.26",
+    "all_ordinary_allocation_and_recovery_checks_reproduced": true,
+    "all_control_outputs_polls_allocations_sampling_and_recoveries_verified": true,
+    "fixed_samples_match_the_complete_iteration_plan": true,
+    "controlled_timings_are_calibration_eligible": false,
+    "comparison": {
+      "ordinary": {
+        "maximum_bidirectional_timing_ratio": 3.3944880837294025,
+        "median_bidirectional_timing_ratio": 1.01129880603031,
+        "largest_ratios": [
+          [
+            "analyzer/None/korean_prose/last/response_timing",
+            3.3944880837294025
+          ],
+          [
+            "tokenizer/Discard/mixed_script/last/response_timing",
+            1.2171224844664978
+          ],
+          [
+            "tokenizer/Mixed/unknown/middle/response_timing",
+            1.1828040568301323
+          ],
+          [
+            "analyzer/None/unknown/last/response_timing",
+            1.1756598038388202
+          ]
+        ]
+      },
+      "system_call_trace": {
+        "maximum_bidirectional_timing_ratio": 3.8811722701948987,
+        "median_bidirectional_timing_ratio": 1.020606527423729,
+        "largest_ratios": [
+          [
+            "analyzer/Mixed/korean_prose/last/response_timing",
+            3.8811722701948987
+          ],
+          [
+            "analyzer/None/korean_prose/last/response_timing",
+            3.1948602596959863
+          ],
+          [
+            "analyzer/Mixed/korean_prose/middle/response_timing",
+            1.21088260091997
+          ],
+          [
+            "analyzer/Discard/korean_prose/last/operation_timing",
+            1.1927928279888662
+          ]
+        ]
+      },
+      "thread_cache_disabled": {
+        "maximum_bidirectional_timing_ratio": 1.1707989184257954,
+        "median_bidirectional_timing_ratio": 1.0117014998793277,
+        "largest_ratios": [
+          [
+            "analyzer/None/korean_prose/last/response_timing",
+            1.1707989184257954
+          ],
+          [
+            "analyzer/None/korean_prose/last/operation_timing",
+            1.168455435538576
+          ],
+          [
+            "tokenizer/Discard/korean_prose/first/response_timing",
+            1.137031565885403
+          ],
+          [
+            "analyzer/None/mixed_script/last/operation_timing",
+            1.1370266763501684
+          ]
+        ]
+      },
+      "fixed_address_layout": {
+        "maximum_bidirectional_timing_ratio": 3.8846437909209612,
+        "median_bidirectional_timing_ratio": 1.0229293183876678,
+        "largest_ratios": [
+          [
+            "analyzer/Mixed/korean_prose/last/response_timing",
+            3.8846437909209612
+          ],
+          [
+            "tokenizer/Discard/hanja/last/response_timing",
+            1.4774078663847228
+          ],
+          [
+            "tokenizer/Mixed/hanja/last/response_timing",
+            1.4359844184285029
+          ],
+          [
+            "analyzer/None/mixed_script/middle/response_timing",
+            1.431030857350073
+          ]
+        ]
+      },
+      "sampling_control_timed": {
+        "maximum_bidirectional_timing_ratio": 3.9291757814618626,
+        "median_bidirectional_timing_ratio": 1.0161952777516667,
+        "largest_ratios": [
+          [
+            "analyzer/Discard/korean_prose/last/response_timing",
+            3.9291757814618626
+          ],
+          [
+            "analyzer/None/korean_prose/last/response_timing",
+            2.7806916851903303
+          ],
+          [
+            "analyzer/Mixed/korean_prose/middle/response_timing",
+            1.3318669159989902
+          ],
+          [
+            "analyzer/Discard/mixed_script/first/response_timing",
+            1.2054232383319297
+          ]
+        ]
+      },
+      "sampling_control_fixed": {
+        "maximum_bidirectional_timing_ratio": 1.1734089662129874,
+        "median_bidirectional_timing_ratio": 1.0092236101828136,
+        "largest_ratios": [
+          [
+            "tokenizer/Mixed/short_query/last/response_timing",
+            1.1734089662129874
+          ],
+          [
+            "tokenizer/None/short_query/last/response_timing",
+            1.172319624291483
+          ],
+          [
+            "tokenizer/None/hanja/middle/response_timing",
+            1.1613435268151377
+          ],
+          [
+            "tokenizer/None/hanja/middle/operation_timing",
+            1.1598800012446049
+          ]
+        ]
+      }
+    },
+    "wasm": {
+      "run": "https://github.com/cognica-io/uqa-engine/actions/runs/34772092329",
+      "artifact_id": 10322501802,
+      "revision": "3c2890982f6ee64cce27a9fe1a7bc49e3f565956",
+      "reports": [
+        {
+          "filename": "nori-analysis-wasm.json",
+          "sha256": "375c01df03df6193109fc26f79b7e6252ed2c76f459fa352c880f4976afb9513",
+          "source_lock_flags_verified": true
+        },
+        {
+          "filename": "nori-cancellation-wasm-baseline.json",
+          "sha256": "300b9b6afcc4173070f7b85771634a71f184f99d305f0d210c1a34fc1a810539",
+          "source_lock_flags_verified": true
+        },
+        {
+          "filename": "nori-cancellation-wasm-repeat.json",
+          "sha256": "0b80f43d34ac31f8ba8a76372fabc62c42e7bea9b716baa8c2c227d320561404",
+          "source_lock_flags_verified": true
+        }
+      ],
+      "ordinary_analysis_gate_reproduced": true,
+      "both_cancellation_gates_reproduced": true,
+      "all_108_allocations_equal": true,
+      "all_cancellations_outputs_polls_and_recoveries_verified": true,
+      "same_executable_within_pair": true,
+      "maximum_bidirectional_timing_ratio": 1.1476376389426755,
+      "largest_ratios": [
+        [
+          "analyzer/Discard/short_query/last/response_timing",
+          1.1476376389426755
+        ],
+        [
+          "tokenizer/None/korean_prose/first/response_timing",
+          1.1299244920781488
+        ],
+        [
+          "tokenizer/Mixed/short_query/middle/response_timing",
+          1.1268713661008827
+        ],
+        [
+          "analyzer/Mixed/unknown/first/response_timing",
+          1.1222972371350115
+        ],
+        [
+          "analyzer/Discard/korean_prose/first/response_timing",
+          1.1216867681851108
+        ]
+      ]
+    },
+    "inference": "Matched timed controls retain large variability while fixed workloads remain within the existing 1.26 timing ceiling. Use one pilot-derived iteration plan for both fresh measured processes with the default allocator; verify the revised ordinary protocol before accepting it."
   }
 }

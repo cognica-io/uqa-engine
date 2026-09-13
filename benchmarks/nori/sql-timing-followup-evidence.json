@@ -77,5 +77,431 @@
       1511817917
     ],
     "interpretation": "The end of the first SQLite collection approaches the repeat values. No CPU profile or scheduler trace was collected during that run."
+  },
+  "confirmation": {
+    "report": "nori-sql-native-pinned-confirmation-c266a8ec.json",
+    "sha256": "1c9e43646b16665757428c26d02cd0907c3dc8827d6eec0b1a13841f9cd7b6b2",
+    "revision": "6ddf019ffd3e0bee705b0ee028403051b5972c5d",
+    "measured_at_utc": "2026-09-13T17:51:55.707759+00:00",
+    "complete_workloads": 102,
+    "source_lock_flags_catalog_and_executable_verified": true,
+    "comparisons": {
+      "nori-sql-native-pinned-baseline.json": {
+        "sha256": "d7a19fd11d0566bf69b7101d3c9fdd87d042de13dae8d7d1810d681da035b5e2",
+        "complete_outputs_equal": true,
+        "maximum_bidirectional_timing_ratio": 1.599218109601429,
+        "median_bidirectional_timing_ratio": 1.0632845438712915,
+        "largest_ratios": [
+          [
+            "memory/sql_query/discard/short_query",
+            1.599218109601429
+          ],
+          [
+            "memory/sql_query/none/short_query",
+            1.5871707768005825
+          ],
+          [
+            "memory/sql_query/mixed/short_query",
+            1.5310400662766985
+          ],
+          [
+            "sqlite/session_and_query/mixed/hanja",
+            1.48854668408087
+          ],
+          [
+            "memory/sql_query/mixed/hanja",
+            1.4833352064896372
+          ],
+          [
+            "memory/sql_query/none/unknown",
+            1.4756498542093182
+          ],
+          [
+            "sqlite/sql_query/mixed/hanja",
+            1.4718106273223999
+          ],
+          [
+            "memory/sql_query/discard/unknown",
+            1.4427936591355992
+          ],
+          [
+            "memory/sql_query/mixed/unknown",
+            1.4392057299279806
+          ],
+          [
+            "memory/sql_query/none/hanja",
+            1.4211483204324404
+          ]
+        ],
+        "allocation_differences": {
+          "sqlite/session_and_query/none/korean_prose": {
+            "count_total": {
+              "before": 47140,
+              "after": 47136
+            },
+            "count_retained": {
+              "before": 1041,
+              "after": 1035
+            },
+            "count_peak": {
+              "before": 1606,
+              "after": 1600
+            },
+            "bytes_total": {
+              "before": 7711068,
+              "after": 7710724
+            },
+            "bytes_retained": {
+              "before": 229810,
+              "after": 227998
+            },
+            "bytes_peak": {
+              "before": 357913,
+              "after": 356101
+            }
+          },
+          "redb/commit_256/0": {
+            "bytes_total": {
+              "before": 544126220,
+              "after": 544126223
+            }
+          },
+          "redb/commit_16/256": {
+            "bytes_total": {
+              "before": 56832288,
+              "after": 56832291
+            }
+          }
+        },
+        "provider_ratios": {
+          "memory": 1.599218109601429,
+          "sqlite": 1.48854668408087,
+          "redb": 1.1201841092223828
+        },
+        "all_bidirectional_timing_ratios": {
+          "memory/commit_256/0": 1.1047938056268463,
+          "memory/commit_16/256": 1.1485812756454503,
+          "memory/commit_16/2048": 1.37664784398471,
+          "memory/rollback_16/256": 1.204752376188094,
+          "memory/sql_query/none/korean_prose": 1.3248212773319092,
+          "memory/sql_query/none/short_query": 1.5871707768005825,
+          "memory/sql_query/none/hanja": 1.4211483204324404,
+          "memory/sql_query/none/mixed_script": 1.3473021077967835,
+          "memory/sql_query/none/unknown": 1.4756498542093182,
+          "memory/sql_query/none/ambiguous_long": 1.0652552783902445,
+          "memory/sql_query/discard/korean_prose": 1.2847694205306348,
+          "memory/sql_query/discard/short_query": 1.599218109601429,
+          "memory/sql_query/discard/hanja": 1.4134147483812243,
+          "memory/sql_query/discard/mixed_script": 1.3575476241878086,
+          "memory/sql_query/discard/unknown": 1.4427936591355992,
+          "memory/sql_query/discard/ambiguous_long": 1.0773333378401675,
+          "memory/sql_query/mixed/korean_prose": 1.2950539472278604,
+          "memory/sql_query/mixed/short_query": 1.5310400662766985,
+          "memory/sql_query/mixed/hanja": 1.4833352064896372,
+          "memory/sql_query/mixed/mixed_script": 1.3695501902823186,
+          "memory/sql_query/mixed/unknown": 1.4392057299279806,
+          "memory/sql_query/mixed/ambiguous_long": 1.0245089977583053,
+          "sqlite/commit_256/0": 1.0081352644022745,
+          "sqlite/commit_16/256": 1.122207766899372,
+          "sqlite/commit_16/2048": 1.0796650433650723,
+          "sqlite/rollback_16/256": 1.3172194304882912,
+          "sqlite/sql_query/none/korean_prose": 1.3962919638977687,
+          "sqlite/session_and_query/none/korean_prose": 1.4082180660397692,
+          "sqlite/sql_query/none/short_query": 1.4178754902549393,
+          "sqlite/session_and_query/none/short_query": 1.3894148957533279,
+          "sqlite/sql_query/none/hanja": 1.368792441019965,
+          "sqlite/session_and_query/none/hanja": 1.2735334920888055,
+          "sqlite/sql_query/none/mixed_script": 1.1267772540824441,
+          "sqlite/session_and_query/none/mixed_script": 1.1395997410158518,
+          "sqlite/sql_query/none/unknown": 1.3083610722991366,
+          "sqlite/session_and_query/none/unknown": 1.316438385774148,
+          "sqlite/sql_query/none/ambiguous_long": 1.1068003256916306,
+          "sqlite/session_and_query/none/ambiguous_long": 1.105958890326387,
+          "sqlite/sql_query/discard/korean_prose": 1.0069609775314383,
+          "sqlite/session_and_query/discard/korean_prose": 1.0071896690503213,
+          "sqlite/sql_query/discard/short_query": 1.0126952439254944,
+          "sqlite/session_and_query/discard/short_query": 1.0086134482283449,
+          "sqlite/sql_query/discard/hanja": 1.0093892306213632,
+          "sqlite/session_and_query/discard/hanja": 1.0062911190111776,
+          "sqlite/sql_query/discard/mixed_script": 1.0062081679368584,
+          "sqlite/session_and_query/discard/mixed_script": 1.003327647606475,
+          "sqlite/sql_query/discard/unknown": 1.0084463901727359,
+          "sqlite/session_and_query/discard/unknown": 1.0021725279486065,
+          "sqlite/sql_query/discard/ambiguous_long": 1.0131688365736495,
+          "sqlite/session_and_query/discard/ambiguous_long": 1.0060250315158332,
+          "sqlite/sql_query/mixed/korean_prose": 1.1183768557342366,
+          "sqlite/session_and_query/mixed/korean_prose": 1.1352550557314574,
+          "sqlite/sql_query/mixed/short_query": 1.1690294367522804,
+          "sqlite/session_and_query/mixed/short_query": 1.1888486413204091,
+          "sqlite/sql_query/mixed/hanja": 1.4718106273223999,
+          "sqlite/session_and_query/mixed/hanja": 1.48854668408087,
+          "sqlite/sql_query/mixed/mixed_script": 1.0793787660699061,
+          "sqlite/session_and_query/mixed/mixed_script": 1.0037065562321494,
+          "sqlite/sql_query/mixed/unknown": 1.0050850491926255,
+          "sqlite/session_and_query/mixed/unknown": 1.0001617444224913,
+          "sqlite/sql_query/mixed/ambiguous_long": 1.1039725235855933,
+          "sqlite/session_and_query/mixed/ambiguous_long": 1.1125626219671207,
+          "redb/commit_256/0": 1.0879961782189178,
+          "redb/commit_16/256": 1.1201841092223828,
+          "redb/commit_16/2048": 1.0522885395369643,
+          "redb/rollback_16/256": 1.0062080693338809,
+          "redb/sql_query/none/korean_prose": 1.0071628062335496,
+          "redb/session_and_query/none/korean_prose": 1.0046770577720021,
+          "redb/sql_query/none/short_query": 1.0294127905918016,
+          "redb/session_and_query/none/short_query": 1.0007284431288204,
+          "redb/sql_query/none/hanja": 1.007364950896371,
+          "redb/session_and_query/none/hanja": 1.0002100962022873,
+          "redb/sql_query/none/mixed_script": 1.0072016444242655,
+          "redb/session_and_query/none/mixed_script": 1.0214008067525395,
+          "redb/sql_query/none/unknown": 1.003099241113222,
+          "redb/session_and_query/none/unknown": 1.011496608721385,
+          "redb/sql_query/none/ambiguous_long": 1.0025897829079624,
+          "redb/session_and_query/none/ambiguous_long": 1.0311563424182573,
+          "redb/sql_query/discard/korean_prose": 1.0340740455367907,
+          "redb/session_and_query/discard/korean_prose": 1.0266116738605149,
+          "redb/sql_query/discard/short_query": 1.0013637182574433,
+          "redb/session_and_query/discard/short_query": 1.04234943596471,
+          "redb/sql_query/discard/hanja": 1.023644912044016,
+          "redb/session_and_query/discard/hanja": 1.0252118123493092,
+          "redb/sql_query/discard/mixed_script": 1.0322772988453366,
+          "redb/session_and_query/discard/mixed_script": 1.0361697269821109,
+          "redb/sql_query/discard/unknown": 1.0301641588519572,
+          "redb/session_and_query/discard/unknown": 1.0285960079460654,
+          "redb/sql_query/discard/ambiguous_long": 1.0339054437543058,
+          "redb/session_and_query/discard/ambiguous_long": 1.0511497527504414,
+          "redb/sql_query/mixed/korean_prose": 1.0613138093523384,
+          "redb/session_and_query/mixed/korean_prose": 1.0530175398584316,
+          "redb/sql_query/mixed/short_query": 1.0656213062657076,
+          "redb/session_and_query/mixed/short_query": 1.0603027468072896,
+          "redb/sql_query/mixed/hanja": 1.058580670827436,
+          "redb/session_and_query/mixed/hanja": 1.0575390073300996,
+          "redb/sql_query/mixed/mixed_script": 1.0580114717695133,
+          "redb/session_and_query/mixed/mixed_script": 1.106033700648048,
+          "redb/sql_query/mixed/unknown": 1.0869826501352144,
+          "redb/session_and_query/mixed/unknown": 1.0926009285351728,
+          "redb/sql_query/mixed/ambiguous_long": 1.0436369789132467,
+          "redb/session_and_query/mixed/ambiguous_long": 1.0268555056306576
+        }
+      },
+      "nori-sql-native-pinned-repeat.json": {
+        "sha256": "1467cfd84970c72fcda9fc8748e2284c5ddc4ebc1c524aec82987a08804998c5",
+        "complete_outputs_equal": true,
+        "maximum_bidirectional_timing_ratio": 2.073738992815645,
+        "median_bidirectional_timing_ratio": 1.1126579857439238,
+        "largest_ratios": [
+          [
+            "sqlite/session_and_query/mixed/short_query",
+            2.073738992815645
+          ],
+          [
+            "sqlite/sql_query/mixed/short_query",
+            2.049743907239209
+          ],
+          [
+            "sqlite/sql_query/discard/short_query",
+            1.9163436880984315
+          ],
+          [
+            "sqlite/session_and_query/discard/short_query",
+            1.9081911759461319
+          ],
+          [
+            "sqlite/sql_query/discard/unknown",
+            1.8373028463605425
+          ],
+          [
+            "sqlite/session_and_query/discard/unknown",
+            1.8167584177311356
+          ],
+          [
+            "sqlite/sql_query/discard/hanja",
+            1.8159356092901018
+          ],
+          [
+            "sqlite/session_and_query/discard/hanja",
+            1.8090088412992738
+          ],
+          [
+            "memory/sql_query/discard/short_query",
+            1.6930810013783835
+          ],
+          [
+            "sqlite/session_and_query/discard/korean_prose",
+            1.6849042631074624
+          ]
+        ],
+        "allocation_differences": {
+          "redb/commit_256/0": {
+            "bytes_total": {
+              "before": 544126220,
+              "after": 544126223
+            }
+          },
+          "redb/commit_16/2048": {
+            "bytes_total": {
+              "before": 208778683,
+              "after": 208778686
+            }
+          }
+        },
+        "provider_ratios": {
+          "memory": 1.6930810013783835,
+          "sqlite": 2.073738992815645,
+          "redb": 1.12476598812188
+        },
+        "all_bidirectional_timing_ratios": {
+          "memory/commit_256/0": 1.1058273899525495,
+          "memory/commit_16/256": 1.1475858950574185,
+          "memory/commit_16/2048": 1.3655576737854673,
+          "memory/rollback_16/256": 1.1500039610027224,
+          "memory/sql_query/none/korean_prose": 1.3285720458024002,
+          "memory/sql_query/none/short_query": 1.6536883585820594,
+          "memory/sql_query/none/hanja": 1.3894077276363213,
+          "memory/sql_query/none/mixed_script": 1.3284252980611593,
+          "memory/sql_query/none/unknown": 1.4793720088834468,
+          "memory/sql_query/none/ambiguous_long": 1.0695259794614296,
+          "memory/sql_query/discard/korean_prose": 1.3568752885158644,
+          "memory/sql_query/discard/short_query": 1.6930810013783835,
+          "memory/sql_query/discard/hanja": 1.5027655011655012,
+          "memory/sql_query/discard/mixed_script": 1.4487442662425494,
+          "memory/sql_query/discard/unknown": 1.5845728778042165,
+          "memory/sql_query/discard/ambiguous_long": 1.0749437374793709,
+          "memory/sql_query/mixed/korean_prose": 1.4063518647586957,
+          "memory/sql_query/mixed/short_query": 1.6158783870341262,
+          "memory/sql_query/mixed/hanja": 1.5617498150406528,
+          "memory/sql_query/mixed/mixed_script": 1.4498445049745445,
+          "memory/sql_query/mixed/unknown": 1.5525883269382308,
+          "memory/sql_query/mixed/ambiguous_long": 1.0553166642602603,
+          "sqlite/commit_256/0": 1.0863372805120823,
+          "sqlite/commit_16/256": 1.1494377718661384,
+          "sqlite/commit_16/2048": 1.121573940096218,
+          "sqlite/rollback_16/256": 1.151205502191516,
+          "sqlite/sql_query/none/korean_prose": 1.2561296272935787,
+          "sqlite/session_and_query/none/korean_prose": 1.235820335979383,
+          "sqlite/sql_query/none/short_query": 1.3000638999989909,
+          "sqlite/session_and_query/none/short_query": 1.211382492694431,
+          "sqlite/sql_query/none/hanja": 1.2769682965267914,
+          "sqlite/session_and_query/none/hanja": 1.2385179652599798,
+          "sqlite/sql_query/none/mixed_script": 1.1317819514837932,
+          "sqlite/session_and_query/none/mixed_script": 1.1171825146757086,
+          "sqlite/sql_query/none/unknown": 1.2946598326018606,
+          "sqlite/session_and_query/none/unknown": 1.2843810216800982,
+          "sqlite/sql_query/none/ambiguous_long": 1.0742990230027958,
+          "sqlite/session_and_query/none/ambiguous_long": 1.06323454801316,
+          "sqlite/sql_query/discard/korean_prose": 1.6827514364610299,
+          "sqlite/session_and_query/discard/korean_prose": 1.6849042631074624,
+          "sqlite/sql_query/discard/short_query": 1.9163436880984315,
+          "sqlite/session_and_query/discard/short_query": 1.9081911759461319,
+          "sqlite/sql_query/discard/hanja": 1.8159356092901018,
+          "sqlite/session_and_query/discard/hanja": 1.8090088412992738,
+          "sqlite/sql_query/discard/mixed_script": 1.5378714467545351,
+          "sqlite/session_and_query/discard/mixed_script": 1.5404856246616192,
+          "sqlite/sql_query/discard/unknown": 1.8373028463605425,
+          "sqlite/session_and_query/discard/unknown": 1.8167584177311356,
+          "sqlite/sql_query/discard/ambiguous_long": 1.2141636455777436,
+          "sqlite/session_and_query/discard/ambiguous_long": 1.224142729131128,
+          "sqlite/sql_query/mixed/korean_prose": 1.5621402210302595,
+          "sqlite/session_and_query/mixed/korean_prose": 1.5948731682646409,
+          "sqlite/sql_query/mixed/short_query": 2.049743907239209,
+          "sqlite/session_and_query/mixed/short_query": 2.073738992815645,
+          "sqlite/sql_query/mixed/hanja": 1.1290513280071706,
+          "sqlite/session_and_query/mixed/hanja": 1.1228358119735233,
+          "sqlite/sql_query/mixed/mixed_script": 1.0983662977341648,
+          "sqlite/session_and_query/mixed/mixed_script": 1.0024281369358097,
+          "sqlite/sql_query/mixed/unknown": 1.000642287237243,
+          "sqlite/session_and_query/mixed/unknown": 1.0016491685139735,
+          "sqlite/sql_query/mixed/ambiguous_long": 1.108133456812139,
+          "sqlite/session_and_query/mixed/ambiguous_long": 1.1179640514147957,
+          "redb/commit_256/0": 1.0813271349561995,
+          "redb/commit_16/256": 1.12476598812188,
+          "redb/commit_16/2048": 1.0380789061501488,
+          "redb/rollback_16/256": 1.0101942508218575,
+          "redb/sql_query/none/korean_prose": 1.0072720044453682,
+          "redb/session_and_query/none/korean_prose": 1.002469344457343,
+          "redb/sql_query/none/short_query": 1.0258591178406846,
+          "redb/session_and_query/none/short_query": 1.0016093021281534,
+          "redb/sql_query/none/hanja": 1.0065842161853948,
+          "redb/session_and_query/none/hanja": 1.0017858151647336,
+          "redb/sql_query/none/mixed_script": 1.0070361768601988,
+          "redb/session_and_query/none/mixed_script": 1.020419704740934,
+          "redb/sql_query/none/unknown": 1.0014130327321649,
+          "redb/session_and_query/none/unknown": 1.0107590017089159,
+          "redb/sql_query/none/ambiguous_long": 1.010946780416408,
+          "redb/session_and_query/none/ambiguous_long": 1.0307583161516765,
+          "redb/sql_query/discard/korean_prose": 1.0220048236833783,
+          "redb/session_and_query/discard/korean_prose": 1.0374955723498058,
+          "redb/sql_query/discard/short_query": 1.0286079886357264,
+          "redb/session_and_query/discard/short_query": 1.0444200448216754,
+          "redb/sql_query/discard/hanja": 1.0329523156849831,
+          "redb/session_and_query/discard/hanja": 1.0312956426739663,
+          "redb/sql_query/discard/mixed_script": 1.037344516737119,
+          "redb/session_and_query/discard/mixed_script": 1.04217738289457,
+          "redb/sql_query/discard/unknown": 1.0332243239633603,
+          "redb/session_and_query/discard/unknown": 1.0003692042191172,
+          "redb/sql_query/discard/ambiguous_long": 1.028145547115283,
+          "redb/session_and_query/discard/ambiguous_long": 1.0010270384022195,
+          "redb/sql_query/mixed/korean_prose": 1.0011669300286505,
+          "redb/session_and_query/mixed/korean_prose": 1.0071418398793148,
+          "redb/sql_query/mixed/short_query": 1.0059192609507486,
+          "redb/session_and_query/mixed/short_query": 1.0009736471892274,
+          "redb/sql_query/mixed/hanja": 1.0016624706732247,
+          "redb/session_and_query/mixed/hanja": 1.002155776630855,
+          "redb/sql_query/mixed/mixed_script": 1.0044860734809022,
+          "redb/session_and_query/mixed/mixed_script": 1.0026451317561658,
+          "redb/sql_query/mixed/unknown": 1.0013993894418403,
+          "redb/session_and_query/mixed/unknown": 1.0770063274849055,
+          "redb/sql_query/mixed/ambiguous_long": 1.0000232817166574,
+          "redb/session_and_query/mixed/ambiguous_long": 1.0253653365219502
+        }
+      }
+    },
+    "unobserved_allocation_vectors": {
+      "redb/commit_256/0": {
+        "bytes_peak": 7991445,
+        "bytes_retained": 3311938,
+        "bytes_total": 544126223,
+        "count_peak": 11066,
+        "count_retained": 436,
+        "count_total": 2391272
+      }
+    },
+    "timing_accepted": false
+  },
+  "profile_diagnostic": {
+    "schema_version": 1,
+    "purpose": "native_sql_execution_profile",
+    "calibration_eligible": false,
+    "reason": "Sampling the running process changes its measurement environment. Its timing observations must not establish regression limits.",
+    "process_id": 81315,
+    "session_id": 87505,
+    "report": "target/benchmark-runs/nori-sql-native-isolated-repeat-6ddf019f.json",
+    "started_at_utc": "2026-09-13T17:55:29.754517+00:00",
+    "profiles": [
+      {
+        "filename": "uqa-nori-sql-current-profile-0.txt",
+        "sha256": "bcf78795c854ffc1a7282ca8dcced225a307d8d73c71e7a4d4a3a519bab1b54a",
+        "duration_seconds": 3,
+        "interval_ms": 5,
+        "main_thread_samples": 2
+      },
+      {
+        "filename": "uqa-nori-sql-current-profile-1.txt",
+        "sha256": "c6ad0dc9614e97a9316322a4fa75f55eca626f11ac4022f67148a8a61834fd96",
+        "duration_seconds": 10,
+        "interval_ms": 1,
+        "main_thread_samples": 7141
+      }
+    ],
+    "first_profile_insufficient_for_hotspot_attribution": true,
+    "second_profile_main_thread_leaf_samples": {
+      "pread": 2312,
+      "clustered_postings::read_varint": 1712,
+      "decode_occurrence_document_budgeted": 1033,
+      "occurrences::read_offsets": 1024
+    },
+    "interpretation": "The complete-cluster validation path and SQLite reads are prominent in this sampled transaction-verification interval. This is not a comparison of matched slow and fast query executions and does not yet explain timing variability.",
+    "full_sql_report_completed": false,
+    "updated_at_utc": "2026-09-13T18:02:42.718734+00:00",
+    "disposition": "Stopped the owned diagnostic with SIGINT after the two profiles; the runner terminated with exit code 1."
   }
 }
