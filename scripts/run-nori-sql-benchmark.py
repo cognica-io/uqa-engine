@@ -28,6 +28,7 @@ common = phrase.common
 LIMITS = ROOT / "benchmarks/nori/sql-limits.json"
 BENCHMARK = ROOT / "crates/uqa/benches/nori_sql.rs"
 SUPPORT = ROOT / "crates/uqa/benches/nori_sql/fixture.rs"
+SEED_SUPPORT = ROOT / "crates/uqa/benches/nori_sql/seeds.rs"
 OWNERS = ("uqa", "uqa-engine", "uqa-core", "uqa-analysis", "uqa-nori-data", "uqa-storage",
           "uqa-storage-sqlite", "uqa-sql", "uqa-pg-query", "uqa-planner", "uqa-execution",
           "uqa-operators", "uqa-scoring", "uqa-fusion", "uqa-graph", "uqa-joins", "uqa-ml", "uqa-fdw")
@@ -116,6 +117,63 @@ def same_output(left: dict, right: dict) -> bool:
         left["analyzer_fingerprint"] == right["analyzer_fingerprint"] and phrase.same_rows(left["rows"], right["rows"])
 
 
+def sample_counters(row: dict) -> None:
+    name = row["name"]
+    samples = row["elapsed_ns"]
+    if len(samples) != PROTOCOL["samples"] or any(type(value) is not int or value <= 0 for value in samples):
+        raise RuntimeError(f"invalid SQL timing samples: {name}")
+    if type(row.get("median_ns")) is not int or row["median_ns"] != statistics.median(samples) or row.get("verified_samples") != 9:
+        raise RuntimeError(f"invalid SQL estimator or repeated output verification: {name}")
+    allocation = row["allocation"]
+    if set(allocation) != set(common.ALLOCATION_KEYS) or any(type(value) is not int for value in allocation.values()):
+        raise RuntimeError(f"invalid SQL allocation counters: {name}")
+    for unit in ("count", "bytes"):
+        # Retention is a signed delta: these operations can release pre-existing state.
+        if not allocation[f"{unit}_retained"] <= allocation[f"{unit}_peak"] <= allocation[f"{unit}_total"] or allocation[f"{unit}_peak"] < 0:
+            raise RuntimeError(f"inconsistent SQL allocation counters: {name}")
+
+
+def transaction_snapshot(row: dict, provider: str, count: int) -> None:
+    name = row["name"]
+    snapshot(row["snapshot"], count)
+    if row.get("reopened_samples") != (0 if provider == "memory" else 9):
+        raise RuntimeError(f"SQL mutation lacks repeated reopen verification: {name}")
+    if "reopened_snapshot" not in row:
+        raise RuntimeError(f"SQL mutation lacks its actual reopened result: {name}")
+    if provider == "memory":
+        if row["reopened_snapshot"] is not None:
+            raise RuntimeError("Memory does not provide durable reopen evidence")
+    else:
+        snapshot(row["reopened_snapshot"], count)
+        if not same_snapshot(row["snapshot"], row["reopened_snapshot"]):
+            raise RuntimeError(f"live and reopened SQL results differ: {name}")
+
+
+def transaction_probe(report: dict) -> dict:
+    if report.get("schema_version") != 1 or report.get("owner") != "uqa" or report.get("purpose") != "transaction_fixture_probe":
+        raise RuntimeError("unsupported transaction fixture experiment")
+    if report.get("corpus_sha256") != common.digest(common.CORPUS):
+        raise RuntimeError("transaction fixture experiment changed its corpus")
+    provider = report.get("provider")
+    if provider not in ("sqlite", "redb") or report.get("protocol") != {"samples": 7, "warmup": 1, "allocation_samples": 1}:
+        raise RuntimeError("invalid transaction fixture experiment protocol")
+    seed = report.get("empty_seed")
+    if seed is not None and (set(seed) != {"bytes", "sha256"} or type(seed["bytes"]) is not int or seed["bytes"] <= 0 or not identity(seed["sha256"])):
+        raise RuntimeError("invalid transaction fixture identity")
+    rows = report.get("measurements", [])
+    indexed = {row["name"]: row for row in rows}
+    if len(rows) != len(indexed) or set(indexed) != {f"{provider}/{name}" for name in MUTATIONS}:
+        raise RuntimeError("transaction fixture experiment requires every commit and rollback workload")
+    for name, row in indexed.items():
+        sample_counters(row)
+        transaction_snapshot(row, provider, MUTATIONS[output_key(name)])
+    if len({row["snapshot"]["analyzer_fingerprint"] for row in rows}) != 1:
+        raise RuntimeError("transaction fixture experiment changed its analyzer")
+    if report.get("gate") != {"allocation_and_rows_passed": False, "timing_compared": False}:
+        raise RuntimeError("a transaction fixture experiment cannot claim a complete regression pass")
+    return indexed
+
+
 def measurements(report: dict) -> dict:
     if report.get("schema_version") != 1 or report.get("owner") != "uqa":
         raise RuntimeError("unsupported SQL benchmark schema or owner")
@@ -140,34 +198,12 @@ def measurements(report: dict) -> dict:
         raise RuntimeError("missing, duplicate, or unknown SQL workload")
     fingerprints, outputs = {}, {}
     for name, row in indexed.items():
-        samples = row["elapsed_ns"]
-        if len(samples) != PROTOCOL["samples"] or any(type(value) is not int or value <= 0 for value in samples):
-            raise RuntimeError(f"invalid SQL timing samples: {name}")
-        if type(row.get("median_ns")) is not int or row["median_ns"] != statistics.median(samples) or row.get("verified_samples") != 9:
-            raise RuntimeError(f"invalid SQL estimator or repeated output verification: {name}")
-        allocation = row["allocation"]
-        if set(allocation) != set(common.ALLOCATION_KEYS) or any(type(value) is not int for value in allocation.values()):
-            raise RuntimeError(f"invalid SQL allocation counters: {name}")
-        for unit in ("count", "bytes"):
-            # Retention is a signed delta: these operations can release pre-existing state.
-            if not allocation[f"{unit}_retained"] <= allocation[f"{unit}_peak"] <= allocation[f"{unit}_total"] or allocation[f"{unit}_peak"] < 0:
-                raise RuntimeError(f"inconsistent SQL allocation counters: {name}")
+        sample_counters(row)
         provider, stage, *rest = name.split("/")
         key = output_key(name)
         if key in MUTATIONS:
             mode = "mixed"
-            snapshot(row["snapshot"], MUTATIONS[key])
-            if row.get("reopened_samples") != (0 if provider == "memory" else 9):
-                raise RuntimeError(f"SQL mutation lacks repeated reopen verification: {name}")
-            if "reopened_snapshot" not in row:
-                raise RuntimeError(f"SQL mutation lacks its actual reopened result: {name}")
-            if provider == "memory":
-                if row["reopened_snapshot"] is not None:
-                    raise RuntimeError("Memory does not provide durable reopen evidence")
-            else:
-                snapshot(row["reopened_snapshot"], MUTATIONS[key])
-                if not same_snapshot(row["snapshot"], row["reopened_snapshot"]):
-                    raise RuntimeError(f"live and reopened SQL results differ: {name}")
+            transaction_snapshot(row, provider, MUTATIONS[key])
         else:
             mode, case_name = rest
             i, case = next((i, case) for i, case in enumerate(phrase.cases()) if case["name"] == case_name)
@@ -238,15 +274,51 @@ def main() -> int:
     parser.add_argument("--limits", type=pathlib.Path, default=LIMITS)
     parser.add_argument("--measure-only", action="store_true")
     parser.add_argument("--baseline", type=pathlib.Path)
+    parser.add_argument("--capture-empty-seeds", type=pathlib.Path,
+                        help="capture native empty SQL databases with their original catalog identities")
+    parser.add_argument("--transaction-probe", choices=("sqlite", "redb"),
+                        help="compare complete SQL transactions while isolating their initial catalog fixture")
+    parser.add_argument("--empty-seeds", type=pathlib.Path, help="use captured empty databases in a transaction probe")
     args = parser.parse_args()
     if args.measure_only and args.baseline:
         parser.error("--baseline requires reviewed gates")
-    protected = [args.limits, common.CORPUS, BENCHMARK, SUPPORT] + ([args.baseline] if args.baseline else [])
+    if args.capture_empty_seeds and args.transaction_probe:
+        parser.error("capture and transaction experiments are separate executions")
+    if (args.capture_empty_seeds or args.transaction_probe) and (args.target != "native" or args.report or args.measure_only or args.baseline):
+        parser.error("fixture experiments require a native execution without measurement or timing options")
+    if args.empty_seeds and not args.transaction_probe:
+        parser.error("--empty-seeds requires a transaction fixture experiment")
+    protected = [args.limits, common.CORPUS, BENCHMARK, SUPPORT, SEED_SUPPORT] + ([args.baseline] if args.baseline else [])
+    if args.capture_empty_seeds:
+        protected += [args.capture_empty_seeds, *(args.capture_empty_seeds / f"{provider}-empty.db" for provider in ("sqlite", "redb"))]
+    if args.empty_seeds:
+        protected += [args.empty_seeds, *(args.empty_seeds / f"{provider}-empty.db" for provider in ("sqlite", "redb"))]
     if args.output.resolve() in [path.resolve() for path in protected]:
         parser.error("output must not overwrite reviewed limits, corpus, benchmark sources, or baseline")
     owners = OWNERS + (("uqa-storage-redb",) if args.target == "native" else ())
+    if args.capture_empty_seeds:
+        if args.capture_empty_seeds.exists():
+            parser.error("empty seed capture requires a new output directory")
+        report = common.execute_benchmark(
+            "native", "uqa", "nori_sql", "nori", owners, (SUPPORT, SEED_SUPPORT),
+            arguments=("--capture-empty-seeds", str(args.capture_empty_seeds.resolve())))
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, indent=2) + "\n")
+        print(f"Empty SQL seed capture: {args.output}")
+        return 0
+    if args.transaction_probe:
+        arguments = ("--transaction-probe", args.transaction_probe)
+        if args.empty_seeds:
+            arguments += (str(args.empty_seeds.resolve()),)
+        report = common.execute_benchmark(
+            "native", "uqa", "nori_sql", "nori", owners, (SUPPORT, SEED_SUPPORT), arguments=arguments)
+        transaction_probe(report)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, indent=2) + "\n")
+        print(f"SQL transaction fixture experiment: {args.output}")
+        return 0
     report = json.loads(args.report.read_text()) if args.report else common.execute_benchmark(
-        args.target, "uqa", "nori_sql", "nori", owners, (SUPPORT,), wasm_c_headers=True)
+        args.target, "uqa", "nori_sql", "nori", owners, (SUPPORT, SEED_SUPPORT), wasm_c_headers=True)
     measurements(report)
     report["gate"] = {"allocation_and_rows_passed": False, "timing_compared": False}
     args.output.parent.mkdir(parents=True, exist_ok=True)

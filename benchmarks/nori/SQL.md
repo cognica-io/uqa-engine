@@ -20,3 +20,17 @@ python3 scripts/run-nori-sql-benchmark.py --target wasm --measure-only --output 
 ```
 
 Candidate collection always validates complete provider/session coverage, original rows, analyzer identities, scores, repeated reopen evidence, counters, and sampling. It records `allocation_and_rows_passed: false` until reviewed limits are available. Repeated native and WASM CI collection supplies calibration candidates; candidate collection alone is not an allocation or timing regression pass. Source, fixture, Cargo lock, executable, compiler flags, CPU, and toolchain identities accompany each report. The runner rejects changes to measured source files during execution and output paths that overwrite reviewed inputs. Its gate tests reject missing providers or sessions, incomplete live/reopened results, altered query inputs, missing documents, changed scores, one-unit allocation regressions, and incomparable timing environments.
+
+## Catalog fixture experiments
+
+Fresh SQL tables have random durable table, column, and storage identities. Their JSON representation can have different lengths even when the table definition and source documents agree. Two clean native repeats preserve all complete SQL outputs but differ in transaction and some redb read allocations. An observation of eight ordinary SQL-created catalogs confirms equal observed non-identity metadata, with column metadata ranging from 638 to 647 bytes and statistics-maintenance metadata from 155 to 163 bytes. Allocation limits remain under review while these inputs and provider layouts are isolated.
+
+The facade benchmark can capture empty SQLite and redb databases created through the same public SQL statement as its ordinary fixtures. It closes all original handles and checks columns, primary-key and not-null errors, rollback, and empty rows through separate reopened copies. Captured files retain their original identities and have recorded byte lengths and hashes. Capture requires a new directory and rejects output paths that would replace input files or the captured databases.
+
+```sh
+python3 scripts/run-nori-sql-benchmark.py --capture-empty-seeds target/benchmark-runs/nori-sql-empty-seeds --output target/benchmark-runs/nori-sql-empty-seed-capture.json
+python3 scripts/run-nori-sql-benchmark.py --transaction-probe sqlite --output target/benchmark-runs/nori-sql-sqlite-fresh-catalog.json
+python3 scripts/run-nori-sql-benchmark.py --transaction-probe sqlite --empty-seeds target/benchmark-runs/nori-sql-empty-seeds --output target/benchmark-runs/nori-sql-sqlite-fixed-catalog.json
+```
+
+Use `redb` for the other native provider. Each transaction experiment reuses all four existing commit/rollback workloads and their nine complete live/reopened validations, including original rows and all six quoted queries against Memory. A supplied empty fixture is loaded once and reused without modifying its bytes. Experiment reports record the selected fixture hash and remain explicitly marked as experiments with no complete regression pass; the normal SQL gate rejects their partial workload inventory. Repeated controlled measurements determine whether fixing the catalog inputs accounts for the observed allocation changes.

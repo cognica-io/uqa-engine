@@ -77,11 +77,21 @@ impl Database {
         controls: bool,
         cases: &[JSONValue],
     ) -> Self {
-        let database = Self::empty(provider);
+        let database = if let Some(bytes) = super::seeds::selected(provider) {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("nori.db");
+            std::fs::write(&path, bytes).unwrap();
+            Self {
+                engine: provider.open(&path),
+                directory,
+                provider,
+            }
+        } else {
+            let database = Self::empty(provider);
+            database.engine.sql(super::seeds::TABLE_SQL, &[]).unwrap();
+            database
+        };
         let engine = &database.engine;
-        engine
-            .sql("CREATE TABLE docs (id BIGINT PRIMARY KEY, body TEXT)", &[])
-            .unwrap();
         let config = json!({
             "tokenizer": {"type": "nori_tokenizer", "decompound_mode": mode},
             "token_filters": [{"type": "nori_part_of_speech"}, {"type": "nori_readingform"}, {"type": "unicode_simple_lowercase"}],

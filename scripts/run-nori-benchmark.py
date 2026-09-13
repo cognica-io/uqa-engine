@@ -208,7 +208,7 @@ def public_flags(flags: dict[str, str]) -> dict[str, str]:
     return {key: value.replace(user_directory, "${HOME}") for key, value in flags.items()}
 
 
-def execute_benchmark(target: str, package: str, benchmark: str, features: str, owners: tuple[str, ...], supporting: tuple[pathlib.Path, ...] = (), *, wasm_c_headers: bool = False) -> dict:
+def execute_benchmark(target: str, package: str, benchmark: str, features: str, owners: tuple[str, ...], supporting: tuple[pathlib.Path, ...] = (), *, wasm_c_headers: bool = False, arguments: tuple[str, ...] = ()) -> dict:
     env = os.environ.copy()
     cpu = cpu_model()
     runtime_hash = runtime_sources_hash(owners)
@@ -242,7 +242,7 @@ def execute_benchmark(target: str, package: str, benchmark: str, features: str, 
         raise RuntimeError("Cargo did not produce exactly one Nori benchmark executable")
     executable = binaries[0]
     paths = [executable]
-    invocation = [str(executable)]
+    invocation = [str(executable), *arguments]
     if target == "wasm":
         paths.append(executable.with_suffix(".wasm"))
         invocation.insert(0, "node")
@@ -271,6 +271,8 @@ def execute_benchmark(target: str, package: str, benchmark: str, features: str, 
     }
     if supporting:
         report["provenance"]["benchmark_sources"] = {path.relative_to(ROOT).as_posix(): digest(path) for path in (benchmark_path, *supporting)}
+    if arguments:
+        report["provenance"]["arguments"] = [argument.replace(str(pathlib.Path.home()), "${HOME}") for argument in arguments]
     return report
 
 

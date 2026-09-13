@@ -16,6 +16,8 @@ use uqa::{SQLParam, SQLResult};
 
 #[path = "nori_sql/fixture.rs"]
 mod fixture;
+#[path = "nori_sql/seeds.rs"]
+mod seeds;
 use fixture::{Database, Provider, DOCUMENTS, QUERY};
 
 const CORPUS: &str = include_str!("../../uqa-analysis/benches/nori/corpus.json");
@@ -224,6 +226,10 @@ fn provider_settings() -> JSONValue {
 }
 
 fn main() {
+    if let Some(report) = seeds::command() {
+        println!("{report}");
+        return;
+    }
     let corpus: JSONValue = serde_json::from_str(CORPUS).unwrap();
     let cases = corpus["cases"].as_array().unwrap();
     let providers = [

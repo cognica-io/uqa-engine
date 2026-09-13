@@ -5,10 +5,14 @@
 #
 
 import copy
+from contextlib import redirect_stderr
 import hashlib
 import importlib.util
+import io
 from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -59,6 +63,74 @@ def fixture(wasm=False):
 
 
 class NoriSQLBenchmarkTest(unittest.TestCase):
+    def test_seed_capture_rejects_overwrites_and_measurement_options_before_building(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            seed = directory / "capture"
+            basic = ["sql-benchmark", "--capture-empty-seeds", str(seed)]
+            invalid = [
+                ["--output", str(seed)],
+                ["--output", str(seed / "sqlite-empty.db")],
+                ["--output", str(seed / "redb-empty.db")],
+                ["--output", str(benchmark.BENCHMARK)],
+                ["--output", str(directory / "report.json"), "--target", "wasm"],
+                ["--output", str(directory / "report.json"), "--measure-only"],
+                ["--output", str(directory / "report.json"), "--report", "existing.json"],
+                ["--output", str(directory / "report.json"), "--baseline", "existing.json"],
+                ["--output", str(directory / "report.json"), "--transaction-probe", "sqlite"],
+                ["--output", str(directory / "report.json"), "--empty-seeds", str(directory)],
+            ]
+            for options in invalid:
+                with self.subTest(options=options), patch.object(benchmark.sys, "argv", basic + options), \
+                        patch.object(benchmark.common, "execute_benchmark") as execute, redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as error:
+                        benchmark.main()
+                    self.assertEqual(error.exception.code, 2)
+                    execute.assert_not_called()
+            seed.mkdir()
+            marker = seed / "keep"
+            marker.write_text("existing capture")
+            with patch.object(benchmark.sys, "argv", basic + ["--output", str(directory / "report.json")]), \
+                    patch.object(benchmark.common, "execute_benchmark") as execute, redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    benchmark.main()
+                self.assertEqual(error.exception.code, 2)
+                execute.assert_not_called()
+            self.assertEqual(marker.read_text(), "existing capture")
+
+    def test_transaction_experiments_require_complete_results_without_claiming_a_full_gate(self):
+        source, _ = fixture()
+        for provider in ("sqlite", "redb"):
+            probe = {
+                "schema_version": 1, "owner": "uqa", "purpose": "transaction_fixture_probe", "provider": provider,
+                "corpus_sha256": source["corpus_sha256"],
+                "protocol": {"samples": 7, "warmup": 1, "allocation_samples": 1},
+                "empty_seed": {"bytes": 4096, "sha256": "d" * 64},
+                "gate": {"allocation_and_rows_passed": False, "timing_compared": False},
+                "measurements": [row for row in source["measurements"]
+                                 if row["name"].startswith(provider + "/") and benchmark.output_key(row["name"]) in benchmark.MUTATIONS],
+            }
+            self.assertEqual(len(benchmark.transaction_probe(probe)), 4)
+            with self.assertRaises(RuntimeError):
+                benchmark.measurements(probe)
+            for change in ("missing", "duplicate", "rows", "reopened", "samples", "counters", "analyzer", "seed", "corpus", "gate"):
+                changed = copy.deepcopy(probe)
+                row = changed["measurements"][0]
+                if change == "missing": changed["measurements"].pop()
+                elif change == "duplicate": changed["measurements"].append(row)
+                elif change == "rows": row["snapshot"]["rows_sha256"] = "e" * 64
+                elif change == "reopened": row["reopened_samples"] = 8
+                elif change == "samples": row["elapsed_ns"].pop()
+                elif change == "counters": row["allocation"]["count_total"] = -1
+                elif change == "analyzer":
+                    row["snapshot"]["analyzer_fingerprint"] = "e" * 64
+                    row["reopened_snapshot"]["analyzer_fingerprint"] = "e" * 64
+                elif change == "seed": changed["empty_seed"]["sha256"] = "invalid"
+                elif change == "corpus": changed["corpus_sha256"] = "e" * 64
+                else: changed["gate"]["allocation_and_rows_passed"] = True
+                with self.subTest(provider=provider, change=change), self.assertRaises(RuntimeError):
+                    benchmark.transaction_probe(changed)
+
     def test_native_wasm_complete_contract_and_signed_retention(self):
         for wasm, count in ((False, 102), (True, 62)):
             report, limits = fixture(wasm)
