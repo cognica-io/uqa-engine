@@ -59,14 +59,6 @@ jobs:
           python3 scripts/run-nori-benchmark.py --target "$BENCHMARK_TARGET" --output "target/benchmark-runs/nori-analysis-$BENCHMARK_TARGET.json"
           python3 scripts/run-nori-cancellation-benchmark.py --target "$BENCHMARK_TARGET" --output "target/benchmark-runs/nori-cancellation-$BENCHMARK_TARGET-baseline.json"
           python3 scripts/run-nori-cancellation-benchmark.py --target "$BENCHMARK_TARGET" --baseline "target/benchmark-runs/nori-cancellation-$BENCHMARK_TARGET-baseline.json" --output "target/benchmark-runs/nori-cancellation-$BENCHMARK_TARGET-repeat.json"
-      - name: Diagnose native cancellation allocator system calls
-        if: ${{ !cancelled() && matrix.target == 'native' && (failure() || startsWith(github.ref, 'refs/tags/uqa-nori-cancellation/diagnostic-')) }}
-        run: |
-          if ! command -v strace >/dev/null; then
-            sudo apt-get update -qq
-            sudo apt-get install --no-install-recommends -y strace
-          fi
-          python3 scripts/diagnose-nori-cancellation.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -74,5 +66,4 @@ jobs:
           path: |
             target/benchmark-runs/nori-analysis-*.json
             target/benchmark-runs/nori-cancellation-*.json
-            target/benchmark-runs/cancellation-diagnostics/
           if-no-files-found: error

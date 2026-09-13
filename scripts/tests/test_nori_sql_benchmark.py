@@ -105,6 +105,12 @@ class NoriSQLBenchmarkTest(unittest.TestCase):
         changed["provenance"]["scheduling_launcher"]["compiler"] = "another Swift compiler"
         with self.assertRaisesRegex(RuntimeError, "scheduling launcher"):
             benchmark.check(changed, limits, report)
+        ordinary = copy.deepcopy(report)
+        ordinary["scheduling"] = {"policy": "platform_default"}
+        del ordinary["provenance"]["scheduling_launcher"]
+        self.assertTrue(benchmark.check(ordinary, limits, copy.deepcopy(ordinary))["timing_compared"])
+        with self.assertRaisesRegex(RuntimeError, "scheduling"):
+            benchmark.check(ordinary, limits, report)
 
     def test_reviewed_reports_reproduce_complete_outputs_and_exact_allocation_ceilings(self):
         limits = json.loads(benchmark.LIMITS.read_text())

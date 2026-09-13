@@ -31,8 +31,6 @@ const RETAINED: usize = 4096;
 #[derive(Default)]
 struct Sampling {
     iterations: Option<BTreeMap<String, usize>>,
-    fixed: bool,
-    diagnostic: bool,
     identity: Option<String>,
 }
 
@@ -42,22 +40,13 @@ impl Sampling {
         while let Some(argument) = arguments.next() {
             if argument == "--cancellation-fixed-iterations" {
                 let input = arguments.next().expect("fixed iteration plan argument");
-                return Self::from_bytes(input.as_bytes(), true, false);
+                return Self::from_bytes(input.as_bytes());
             }
         }
-        let Some(path) = std::env::var_os("UQA_NORI_CANCELLATION_SAMPLING") else {
-            return Self::default();
-        };
-        let fixed = match std::env::var("UQA_NORI_CANCELLATION_SAMPLING_MODE").as_deref() {
-            Ok("fixed") => true,
-            Ok("timed") => false,
-            _ => panic!("sampling control requires a fixed or timed mode"),
-        };
-        let bytes = std::fs::read(path).expect("sampling control input");
-        Self::from_bytes(&bytes, fixed, true)
+        Self::default()
     }
 
-    fn from_bytes(bytes: &[u8], fixed: bool, diagnostic: bool) -> Self {
+    fn from_bytes(bytes: &[u8]) -> Self {
         let iterations: BTreeMap<String, usize> =
             serde_json::from_slice(bytes).expect("sampling control iterations");
         assert_eq!(iterations.len(), 108, "complete sampling control coverage");
@@ -66,8 +55,6 @@ impl Sampling {
             .all(|count| *count > 0 && count.is_multiple_of(BATCH)));
         Self {
             iterations: Some(iterations),
-            fixed,
-            diagnostic,
             identity: Some(format!("{:x}", Sha256::digest(bytes))),
         }
     }
@@ -76,20 +63,13 @@ impl Sampling {
         let iterations = self.iterations.as_ref()?;
         let name = format!("{stage}/{mode:?}/{}/{point}", case.name);
         let count = *iterations.get(&name).expect("sampling control workload");
-        self.fixed.then_some(count)
+        Some(count)
     }
 
     fn protocol(&self) -> Value {
         let mut protocol = json!({"samples": SAMPLES, "warmup": WARMUP, "batch_operations": BATCH, "minimum_sample_time_ns": SAMPLE_TIME.as_nanos() as u64, "allocation_samples": 1, "clock": "per_operation"});
         if let Some(identity) = &self.identity {
-            if self.diagnostic {
-                protocol["sampling_control"] = json!({
-                    "mode": if self.fixed { "fixed" } else { "timed" },
-                    "iterations_sha256": identity,
-                });
-            } else {
-                protocol["fixed_iterations_sha256"] = json!(identity);
-            }
+            protocol["fixed_iterations_sha256"] = json!(identity);
         }
         protocol
     }
@@ -385,7 +365,7 @@ pub(super) fn run() -> Value {
             ));
         }
     }
-    let fixed = sampling.fixed && !sampling.diagnostic;
+    let fixed = sampling.iterations.is_some();
     let mut report = json!({
         "schema_version": if fixed { 3 } else { 2 },
         "owner": "uqa-analysis",

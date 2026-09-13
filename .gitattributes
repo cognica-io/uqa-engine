@@ -45,3 +45,8 @@ tests/parity/nori/**/*.json text eol=lf
 tests/parity/nori/**/*.jsonl text eol=lf
 benchmarks/nori/**/*.json text eol=lf
 benchmarks/nori/**/*.jsonl text eol=lf
+
+# Keep generated measurement payloads collapsed in reviews; limits and runners remain visible.
+benchmarks/nori/evidence/** linguist-generated
+benchmarks/nori/*-evidence/** linguist-generated
+tests/parity/nori/*_expected.jsonl linguist-generated

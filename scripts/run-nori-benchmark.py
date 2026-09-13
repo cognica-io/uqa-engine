@@ -210,7 +210,7 @@ def public_flags(flags: dict[str, str]) -> dict[str, str]:
     return {key: value.replace(user_directory, "${HOME}") for key, value in flags.items()}
 
 
-def execute_benchmark(target: str, package: str, benchmark: str, features: str, owners: tuple[str, ...], supporting: tuple[pathlib.Path, ...] = (), *, wasm_c_headers: bool = False, arguments: tuple[str, ...] = (), command_prefix: tuple[str, ...] = ()) -> dict:
+def execute_benchmark(target: str, package: str, benchmark: str, features: str, owners: tuple[str, ...], supporting: tuple[pathlib.Path, ...] = (), *, wasm_c_headers: bool = False, arguments: tuple[str, ...] = ()) -> dict:
     env = os.environ.copy()
     cpu = cpu_model()
     runtime_hash = runtime_sources_hash(owners)
@@ -248,7 +248,7 @@ def execute_benchmark(target: str, package: str, benchmark: str, features: str, 
     if target == "wasm":
         paths.append(executable.with_suffix(".wasm"))
         invocation.insert(0, "node")
-    report = json.loads(command(*command_prefix, *invocation, env=env))
+    report = json.loads(command(*invocation, env=env))
     if runtime_sources_hash(owners) != runtime_hash or benchmark_sources_hash(benchmark_path, supporting) != benchmark_hash:
         raise RuntimeError("Nori sources changed during measurement; rerun with a stable checkout")
     flags = compiler_flags(env)
