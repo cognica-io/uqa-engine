@@ -7,15 +7,12 @@
 //! Common-token filter mutation retains exact source projection and replacement leases.
 
 use super::AnalysisToken;
-#[cfg(feature = "nori")]
 use crate::morphology::filter::{covering_range, ComposingToken};
 use crate::morphology::filter::{FilterToken, Work};
 use crate::source::SourceProjection;
 use crate::{AnalysisResult, TokenTerm};
-#[cfg(feature = "nori")]
 use std::ops::Range;
 use std::sync::Arc;
-#[cfg(feature = "nori")]
 use uqa_core::memory::MemoryBudget;
 use uqa_core::memory::{Budgeted, MemoryReservation};
 
@@ -76,7 +73,6 @@ impl FilterToken for AnalysisToken {
     }
 }
 
-#[cfg(feature = "nori")]
 impl ComposingToken for AnalysisToken {
     type Span = Option<Range<usize>>;
     fn clone_reserved(

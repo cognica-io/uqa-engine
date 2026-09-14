@@ -17,13 +17,24 @@ use std::sync::Arc;
 
 #[test]
 fn japanese_filters_and_default_analyzer_match_complete_docker_outputs() {
-    let cases_bytes = include_bytes!("../../../../../../tests/parity/kuromoji/filter_cases.json");
-    let expected_bytes =
-        include_bytes!("../../../../../../tests/parity/kuromoji/filter_expected.jsonl");
-    let manifest: Value = serde_json::from_str(include_str!(
-        "../../../../../../tests/parity/kuromoji/filter_manifest.json"
-    ))
-    .unwrap();
+    verify(
+        include_bytes!("../../../../../../tests/parity/kuromoji/filter_cases.json"),
+        include_bytes!("../../../../../../tests/parity/kuromoji/filter_expected.jsonl"),
+        include_str!("../../../../../../tests/parity/kuromoji/filter_manifest.json"),
+    );
+}
+
+#[test]
+fn japanese_number_prefixes_and_composition_match_complete_docker_outputs() {
+    verify(
+        include_bytes!("../../../../../../tests/parity/kuromoji/number_cases.json"),
+        include_bytes!("../../../../../../tests/parity/kuromoji/number_expected.jsonl"),
+        include_str!("../../../../../../tests/parity/kuromoji/number_manifest.json"),
+    );
+}
+
+fn verify(cases_bytes: &[u8], expected_bytes: &[u8], manifest: &str) {
+    let manifest: Value = serde_json::from_str(manifest).unwrap();
     assert_eq!(
         format!("{:x}", Sha256::digest(cases_bytes)),
         manifest["cases_sha256"]
@@ -54,6 +65,27 @@ fn japanese_filters_and_default_analyzer_match_complete_docker_outputs() {
             assert_eq!(result, expected["normalized_utf16"], "{id}");
             continue;
         }
+        if case["kind"] == "number_normalize" || case["kind"] == "number_units" {
+            let count_field = if case["kind"] == "number_normalize" {
+                "normalized_unit_count"
+            } else {
+                "normalization_count"
+            };
+            assert_eq!(
+                json!(result.as_array().unwrap().len()),
+                expected[count_field],
+                "{id}"
+            );
+            if let Some(units) = expected.get("normalized_utf16") {
+                assert_eq!(&result, units, "{id}");
+            }
+            assert_eq!(
+                format!("{:x}", Sha256::digest(serde_json::to_vec(&result).unwrap())),
+                expected["sha256"],
+                "{id}"
+            );
+            continue;
+        }
         result.sort_all_objects();
         assert_eq!(
             json!(result["tokens"].as_array().unwrap().len()),
@@ -73,6 +105,20 @@ fn japanese_filters_and_default_analyzer_match_complete_docker_outputs() {
 
 fn run_case(case: &Value, model: &Arc<KuromojiDictionary>) -> AnalysisResult<Value> {
     let input = input(case);
+    let normalize = |units: &[u16]| {
+        crate::kuromoji::normalize_number_utf16(units, KuromojiLimits::default(), &mut || Ok(()))
+    };
+    if case["kind"] == "number_normalize" {
+        return Ok(json!(normalize(&input)?));
+    }
+    if case["kind"] == "number_units" {
+        let mut normalized = Vec::with_capacity(input.len() * 2);
+        for unit in input {
+            normalized.push(normalize(&[unit])?);
+            normalized.push(normalize(&[u16::from(b'1'), unit, u16::from(b'2')])?);
+        }
+        return Ok(json!(normalized));
+    }
     let user = case["user_dictionary"]
         .as_str()
         .map(|source| UserDictionary::compile(source, model, UserDictionaryLimits::default()))
@@ -143,8 +189,24 @@ fn run_case(case: &Value, model: &Arc<KuromojiDictionary>) -> AnalysisResult<Val
     Ok(expected)
 }
 fn input(case: &Value) -> Vec<u16> {
-    if let Some(raw) = case.get("input_utf16") {
+    if let Some(range) = case.get("input_utf16_range") {
+        (range[0].as_u64().unwrap()..range[1].as_u64().unwrap())
+            .map(|unit| u16::try_from(unit).unwrap())
+            .collect()
+    } else if let Some(raw) = case.get("input_utf16") {
         serde_json::from_value(raw.clone()).unwrap()
+    } else if let Some(parts) = case["input_parts"].as_array() {
+        parts
+            .iter()
+            .flat_map(|part| {
+                part["text"]
+                    .as_str()
+                    .unwrap()
+                    .repeat(part["repeat"].as_u64().unwrap_or(1) as usize)
+                    .encode_utf16()
+                    .collect::<Vec<_>>()
+            })
+            .collect()
     } else {
         case["input"]
             .as_str()

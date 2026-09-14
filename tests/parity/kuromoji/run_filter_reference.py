@@ -42,8 +42,13 @@ def term_units(token):
 
 
 def fields(case):
-    raw = (b''.join(struct.pack('>H', unit) for unit in case['input_utf16'])
-           if 'input_utf16' in case else (case.get('input', '') * case.get('repeat', 1)).encode('utf-16-be'))
+    if 'input_utf16_range' in case:
+        raw = b''.join(struct.pack('>H', unit) for unit in range(*case['input_utf16_range']))
+    elif 'input_utf16' in case:
+        raw = b''.join(struct.pack('>H', unit) for unit in case['input_utf16'])
+    else:
+        parts = case.get('input_parts', [{'text': case.get('input', ''), 'repeat': case.get('repeat', 1)}])
+        raw = ''.join(part['text'] * part.get('repeat', 1) for part in parts).encode('utf-16-be')
     chain = []
     for stage in case.get('filters', []):
         kind = stage['type']
@@ -57,6 +62,7 @@ def fields(case):
             chain.append('reading:' + str(stage.get('use_romaji', False)).lower())
         else:
             chain.append({'kuromoji_baseform': 'base', 'unicode_simple_lowercase': 'lower',
+                          'kuromoji_number': 'number',
                           'kuromoji_hiragana_uppercase': 'hiragana_uppercase',
                           'kuromoji_katakana_uppercase': 'katakana_uppercase'}[kind])
     tokens = case.get('tokens', [])

@@ -53,6 +53,7 @@ mod filters;
 mod frame;
 pub use filters::JapaneseFilter;
 mod morphology;
+mod number;
 mod provenance;
 mod resources;
 mod tables;
@@ -74,6 +75,10 @@ pub use dictionary::KuromojiDictionary;
 pub use error::{DictionaryError, DictionaryResult};
 pub use frame::DictionaryId;
 pub use morphology::DictionaryWord;
+pub use number::{
+    normalize_number, normalize_number_budgeted, normalize_number_utf16,
+    normalize_number_utf16_budgeted,
+};
 pub use tokenizer::{
     JapaneseTokenizer, KuromojiLimits, KuromojiMode, KuromojiOptions, KuromojiOrigin,
     KuromojiOutput, KuromojiToken,

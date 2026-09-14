@@ -6,10 +6,7 @@
 
 //! Japanese filter decisions are identical over raw and source-mapped tokens.
 
-use super::super::{
-    error::{check_limit, invalid},
-    KuromojiDictionary, KuromojiLimits,
-};
+use super::super::{error::check_limit, KuromojiDictionary, KuromojiLimits};
 use super::{stream::JapaneseToken, words::lowercase, CompiledFilter};
 use crate::morphology::filter::{text_units, AllocatedStream, Work};
 use crate::AnalysisResult;
@@ -23,6 +20,9 @@ impl CompiledFilter {
         limits: KuromojiLimits,
         poll: &mut dyn FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<AllocatedStream<T>> {
+        if matches!(self, Self::Number) {
+            return super::super::number::filter(input, limits, poll);
+        }
         poll()?;
         check_limit(
             "Kuromoji output tokens",
@@ -154,7 +154,9 @@ impl CompiledFilter {
                 Self::BaseForm | Self::KatakanaStem(_) => {
                     token.refresh_context(&input.context, &mut work)?;
                 }
-                Self::PartOfSpeech(_) | Self::Stop(_, _) => unreachable!("non-removing filter"),
+                Self::PartOfSpeech(_) | Self::Stop(_, _) | Self::Number => {
+                    unreachable!("term mapping filter")
+                }
             }
             output_units = units(token, length, output_units, limits, &mut work)?;
             Ok(())
@@ -196,13 +198,7 @@ fn units<T: JapaneseToken>(
     limits: KuromojiLimits,
     work: &mut Work<'_>,
 ) -> AnalysisResult<usize> {
-    let overflow = || invalid("Kuromoji filter", "UTF-16 output size overflow");
-    let mut total = previous.checked_add(term).ok_or_else(overflow)?;
-    for attribute in token.attributes().into_iter().flatten() {
-        total = total
-            .checked_add(text_units(attribute, work)?)
-            .ok_or_else(overflow)?;
-    }
+    let total = super::stream::token_units(token, term, previous, work)?;
     check_limit(
         "Kuromoji output UTF-16 units",
         total,

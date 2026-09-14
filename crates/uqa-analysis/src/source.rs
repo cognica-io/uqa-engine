@@ -406,7 +406,7 @@ impl SourceProjection {
         self.filtered.utf16_len()
     }
 
-    #[cfg(feature = "nori")]
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
     pub(crate) fn project_with_control(
         &self,
         mut range: Range<usize>,

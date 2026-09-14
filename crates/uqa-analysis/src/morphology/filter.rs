@@ -10,10 +10,8 @@ use crate::token::{
     allocation::{AllocatedToken, TokenBatchAllocation},
     TokenBatch,
 };
-#[cfg(feature = "nori")]
 use crate::AnalysisError;
 use crate::AnalysisResult;
-#[cfg(feature = "nori")]
 use std::ops::Range;
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryReservation};
 
@@ -119,7 +117,6 @@ impl<T: FilterToken> AllocatedStream<T> {
     }
 }
 
-#[cfg(feature = "nori")]
 pub(crate) fn covering_range(
     first: &Range<usize>,
     last: &Range<usize>,
@@ -164,7 +161,6 @@ pub(crate) fn text_units(text: &str, work: &mut Work<'_>) -> AnalysisResult<usiz
     Ok(length)
 }
 
-#[cfg(feature = "nori")]
 pub(crate) trait ComposingToken: FilterToken {
     type Span;
     fn clone_reserved(

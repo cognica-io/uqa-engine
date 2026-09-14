@@ -7,12 +7,10 @@
 //! Raw Japanese terms and independent morphology buffers retain exact reservation ownership.
 
 use super::super::KuromojiToken;
-#[cfg(test)]
 use crate::allocation::{copy_text, copy_units};
 use crate::token::allocation::AllocatedToken;
 use crate::AnalysisResult;
 use uqa_core::memory::MemoryError;
-#[cfg(test)]
 use uqa_core::memory::{Budgeted, MemoryBudget};
 
 impl KuromojiToken {
@@ -26,7 +24,6 @@ impl KuromojiToken {
             self.inflection_form.as_ref(),
         ]
     }
-    #[cfg(test)]
     pub(crate) fn clone_budgeted(
         &self,
         budget: &MemoryBudget,

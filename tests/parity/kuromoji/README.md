@@ -88,3 +88,17 @@ python3 tests/parity/kuromoji/run_filter_reference.py --offline --platform linux
 ```
 
 Both default and custom analyzer results retain corrected original offsets. Normalization runs independently of tokenization and stop removal. Reference values come only from the pinned Docker JVM; Rust owner tests check those complete results as well as prepared/runtime byte and count limits, source lifetime, cancellation and immutable recovery.
+
+## Japanese numbers
+
+`run_number_reference.py` reuses the filter oracle's raw UTF-16 transport, synthetic six-field morphology and stream recorder to verify the public `JapaneseNumberFilter` normalizer and token composition. Its separate 220-case corpus contains 134 numeric-prefix observations, 81 complete streams, four errors and one matrix normalizing all 65,536 UTF-16 units both alone and between digits. Fixed inputs cover every Japanese digit/power/punctuation rule, formal/unsupported numerals, signs, suffixes, malformed decimals, all tokenizer modes, N-best, user segments, keyword continuation, nonadjacent and stacked tokens, lookahead attributes, aborted-prefix replay, hidden terminal state and invalid promoted fields. Selected arithmetic and stream cases retain the existing Korean test shapes with Japanese numeral/attribute inputs; all expected results come from the independent Japanese Lucene filter in Docker.
+
+Inputs, outputs and provenance total 180,667 bytes. Repeated-part input recipes keep the 131,075-digit integer, deep fractional scale, carry and alignment cases compact. Normalized outputs longer than 512 units retain a canonical complete SHA-256 and unit count; complete stream snapshots use the existing token/serialized-size ceilings. The exhaustive unit matrix retains its complete hash and normalization count. Extending the shared Java driver changes source provenance but leaves all preceding 195 filter observations byte-identical.
+
+```sh
+python3 tests/parity/kuromoji/run_number_reference.py --offline
+python3 tests/parity/kuromoji/run_number_reference.py --offline --platform linux/amd64
+cargo test -p uqa-analysis --no-default-features --features kuromoji-tools --locked japanese_number
+```
+
+Native and common owner tests also verify exact retained buffers, every cancellation callback for bounded coefficient/fallback/composition cases, byte and numeric/input/token/attribute limits, shared source lifetime, corrected HTML/width spans, independent normalization and invalid terminal-attribute rejection. Both language features use the same private decimal/parser/composition machinery with separate symbol, morphology and diagnostic policies.

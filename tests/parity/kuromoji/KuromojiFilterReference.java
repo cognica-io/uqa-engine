@@ -168,6 +168,7 @@ public class KuromojiFilterReference {
         case "hiragana_uppercase" -> new JapaneseHiraganaUppercaseFilter(input);
         case "katakana_uppercase" -> new JapaneseKatakanaUppercaseFilter(input);
         case "reading" -> new JapaneseReadingFormFilter(input, Boolean.parseBoolean(part[1]));
+        case "number" -> new JapaneseNumberFilter(input);
         default -> throw new IllegalArgumentException("unknown filter");
       };
     }
@@ -199,6 +200,26 @@ public class KuromojiFilterReference {
     var result = object("id", fields[0]);
     try {
       String input = rawInput(fields[2]);
+      if (fields[1].equals("number_normalize") || fields[1].equals("number_units")) {
+        try (var normalizer = new JapaneseNumberFilter(new Materialized(fields))) {
+          if (fields[1].equals("number_normalize")) {
+            var normalized = units(normalizer.normalizeNumber(input));
+            result.put("normalized_unit_count", normalized.size());
+            result.put("sha256", digest(json(normalized)));
+            if (normalized.size() <= 512) result.put("normalized_utf16", normalized);
+          } else {
+            List<Object> normalized = new ArrayList<>();
+            for (int i = 0; i < input.length(); i++) {
+              String value = String.valueOf(input.charAt(i));
+              normalized.add(units(normalizer.normalizeNumber(value)));
+              normalized.add(units(normalizer.normalizeNumber("1" + value + "2")));
+            }
+            result.put("normalization_count", normalized.size());
+            result.put("sha256", digest(json(normalized)));
+          }
+        }
+        return result;
+      }
       UserDictionary user = fields[7].equals("-") ? null : UserDictionary.open(new StringReader(new String(Base64.getDecoder().decode(fields[7]), StandardCharsets.UTF_8)));
       var mode = JapaneseTokenizer.Mode.valueOf(fields[3]);
       if (fields[1].equals("normalize") || fields[1].equals("analyzer")) {
@@ -220,9 +241,12 @@ public class KuromojiFilterReference {
   }
   static void record(Map<String, Object> result, Map<String, Object> analysis) throws Exception {
     String complete = json(analysis);
-    result.put("sha256", HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(complete.getBytes(StandardCharsets.UTF_8))));
+    result.put("sha256", digest(complete));
     int count = ((List<?>) analysis.get("tokens")).size(); result.put("token_count", count);
     if (count <= 12 && complete.length() <= 8192) result.put("analysis", analysis);
+  }
+  static String digest(String value) throws Exception {
+    return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
   }
   public static void main(String[] args) throws Exception {
     System.out.println(json(object("runtime", object("java_version", System.getProperty("java.version"), "java_runtime_version", System.getProperty("java.runtime.version"), "java_vendor", System.getProperty("java.vendor")))));

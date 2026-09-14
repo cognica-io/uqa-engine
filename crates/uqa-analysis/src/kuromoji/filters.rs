@@ -15,7 +15,7 @@ use uqa_core::memory::{Budgeted, MemoryBudget};
 mod kana;
 mod kernel;
 mod reading;
-mod stream;
+pub(super) mod stream;
 mod words;
 use kana::Kana;
 pub(super) use words::lowercase;
@@ -43,6 +43,8 @@ pub enum JapaneseFilter {
     KatakanaUppercase,
     #[serde(rename = "kuromoji_readingform")]
     ReadingForm { use_romaji: bool },
+    #[serde(rename = "kuromoji_number")]
+    Number,
 }
 
 #[derive(Deserialize)]
@@ -78,6 +80,8 @@ enum FilterConfig {
         #[serde(default)]
         use_romaji: bool,
     },
+    #[serde(rename = "kuromoji_number")]
+    Number {},
 }
 fn default_ignore_case() -> bool {
     true
@@ -96,6 +100,7 @@ impl<'de> Deserialize<'de> for JapaneseFilter {
             FilterConfig::HiraganaUppercase {} => Self::HiraganaUppercase,
             FilterConfig::KatakanaUppercase {} => Self::KatakanaUppercase,
             FilterConfig::ReadingForm { use_romaji } => Self::ReadingForm { use_romaji },
+            FilterConfig::Number {} => Self::Number,
         })
     }
 }
@@ -109,6 +114,7 @@ pub(super) enum CompiledFilter {
     SimpleLowercase,
     SmallKana(Kana),
     ReadingForm(bool),
+    Number,
 }
 
 impl JapaneseFilter {
@@ -127,6 +133,7 @@ impl JapaneseFilter {
             Self::HiraganaUppercase => CompiledFilter::SmallKana(Kana::Hiragana),
             Self::KatakanaUppercase => CompiledFilter::SmallKana(Kana::Katakana),
             Self::ReadingForm { use_romaji } => CompiledFilter::ReadingForm(*use_romaji),
+            Self::Number => CompiledFilter::Number,
             Self::KatakanaStem { minimum_length } => {
                 if *minimum_length < 1 {
                     return Err(super::error::invalid(

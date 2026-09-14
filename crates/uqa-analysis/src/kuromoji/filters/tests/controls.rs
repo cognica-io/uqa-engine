@@ -25,7 +25,10 @@ fn filters() -> Vec<JapaneseFilter> {
         JapaneseFilter::SimpleLowercase,
     ]
 }
-fn copy(input: &KuromojiOutput, budget: &MemoryBudget) -> AnalysisResult<Budgeted<KuromojiOutput>> {
+pub(super) fn copy(
+    input: &KuromojiOutput,
+    budget: &MemoryBudget,
+) -> AnalysisResult<Budgeted<KuromojiOutput>> {
     let mut buffer = TokenBuffer::new(budget);
     buffer.reserve_tokens(input.tokens.len())?;
     for token in &input.tokens {
@@ -45,7 +48,7 @@ fn copy(input: &KuromojiOutput, budget: &MemoryBudget) -> AnalysisResult<Budgete
     output.terminal = batch.terminal;
     Ok(Budgeted::new(output, memory))
 }
-fn retained(output: &KuromojiOutput) -> usize {
+pub(super) fn retained(output: &KuromojiOutput) -> usize {
     let mut bytes = output.tokens.capacity() * size_of::<crate::kuromoji::KuromojiToken>();
     for token in &output.tokens {
         bytes += token.allocation_bytes(&mut || Ok(())).unwrap();
@@ -154,6 +157,7 @@ fn japanese_filter_configuration_bounds_and_absent_attributes_are_explicit() {
         .all(|token| token.japanese_morphology().is_none()));
     for invalid in [
         r#"{"type":"kuromoji_baseform","unknown":true}"#,
+        r#"{"type":"kuromoji_number","unknown":true}"#,
         r#"{"type":"kuromoji_readingform","unknown":true}"#,
         r#"{"type":"kuromoji_readingform","use_romaji":null}"#,
         r#"{"type":"kuromoji_readingform","use_romaji":"true"}"#,
