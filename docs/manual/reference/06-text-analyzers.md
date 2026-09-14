@@ -98,6 +98,7 @@ N-gram bounds require `min_gram > 0` and `max_gram >= min_gram`. A pattern token
 | JSON type | Configuration | Behavior |
 | --- | --- | --- |
 | `lowercase` | None | Applies Unicode lowercase conversion |
+| `unicode_simple_lowercase` | Optional legacy Nori string `unicode_profile`, or an explicit provider/dictionary object | Applies the pinned Java simple mapping from that profile; see [profile selection](#simple-lowercase-profile-selection) |
 | `stop` | Optional `language`, optional `custom_words` | Removes built-in English stop words plus exact custom words; the default language is `english` |
 | `porter_stem` | None | Applies the built-in Porter stemmer |
 | `ascii_folding` | None | Uses Unicode decomposition to fold characters with ASCII equivalents and preserves characters without one |
@@ -327,6 +328,14 @@ let compiled = Analyzer::default()
     .compile()?;
 assert_eq!(compiled.normalize("ＵＱＡ ｶﾞ")?, "UQA ガ");
 ```
+
+### Simple-lowercase profile selection
+
+The common `unicode_simple_lowercase` token filter accepts `{"unicode_profile":{"provider":"kuromoji","dictionary":"lucene-10.5.1"}}` with `uqa-analysis/kuromoji`; use `provider: "nori"` to select the Korean dictionary with `uqa-analysis/nori`. The provider is independent of the tokenizer and of explicit normalization. Compilation freezes its exact artifact hash and restoration requires that hash. Tokenizer, filter and normalization references to the same alias share one verified dictionary snapshot per language. Prepared filters retain their own lookup state and never resolve resources during analysis.
+
+Omitting `unicode_profile` still selects the historical Nori `"jdk21"` string. Existing string values and resolved string hashes retain their original serialized form and fingerprint contribution. Strings always require `nori`, including in a Kuromoji-only build; they never select the Japanese dictionary implicitly. The special `"jdk21"` alias applies only to the legacy string form. In an explicit provider object, `dictionary` follows ordinary dictionary-name or `sha256:` resolution. Unknown properties and unavailable providers are rejected.
+
+In Rust, `SimpleLowercaseConfig` and `UnicodeProfileSource` belong to the common analysis API; `nori::SimpleLowercaseConfig` remains a re-export. Use `UnicodeProfile::Kuromoji { dictionary: "lucene-10.5.1".into() }.into()` for the config field, or convert an existing legacy string with `.into()`. Simple lowercase preserves positions, source spans, keyword flags and morphology. It does not perform contextual final-sigma conversion or expand a character into multiple scalars. Both compiled and uncompiled forms execute the existing language filter over the common stream.
 
 ### Structured tokens
 
@@ -795,7 +804,7 @@ let restored = AnalyzerResources::new(AnalyzerLimits::default())
 assert_eq!(restored.analyze_tokens("東京大学")?, compiled.analyze_tokens("東京大学")?);
 ```
 
-The native bridge retains all Japanese attributes, raw token terms, token graphs, terminal state and corrected source spans. Both compiled and uncompiled analyzer chains defer user-attribute failures until a filter actually accesses the field or the completed stream is returned; a later generic stop filter can remove an otherwise invalid token. Standalone tokenizer and token-filter calls still validate their public output. Compiled Japanese tokenizers default to overlap-discounted field lengths. Linear term/position adapters reject them because they require immutable revisions and complete occurrence storage. Native/common memory ownership and every-callback cancellation are tested after HTML/width edits and N-best graph expansion. This is unreleased analysis support; Japanese token-filter configuration, built-ins and full provider/SQL/binding delivery remain in progress.
+The native bridge retains all Japanese attributes, raw token terms, token graphs, terminal state and corrected source spans. Both compiled and uncompiled analyzer chains defer user-attribute failures until a filter actually accesses the field or the completed stream is returned; a later generic stop filter can remove an otherwise invalid token. Standalone tokenizer and token-filter calls still validate their public output. Compiled Japanese tokenizers default to overlap-discounted field lengths. Linear term/position adapters reject them because they require immutable revisions and complete occurrence storage. Native/common memory ownership and every-callback cancellation are tested after HTML/width edits and N-best graph expansion. This is unreleased analysis support. The common simple-lowercase filter now accepts an explicit Japanese profile; the other Japanese token-filter configurations, built-ins and full provider/SQL/binding delivery remain in progress.
 
 ### Japanese tokens in the common representation
 
@@ -877,7 +886,7 @@ The example runs as a doctest. `with_filters(model, user, options, filters)` com
 | `Completion { mode }` | Default `index` emits the original surface followed by ordered romanized alternatives. `query` also joins adjacent kana and recovers a following lowercase IME suffix. Width conversion must precede this filter. Generated tokens have increments 1/0, position length 1, keyword false, no dictionary origin and no morphology; source spans cover the joined input. |
 | `SimpleLowercase` | Apply the selected Java simple mapping, preserving raw unpaired UTF-16 units. Keyword marks do not disable lowercasing. |
 
-`JapaneseFilter` serializes with the respective tags `kuromoji_baseform`, `kuromoji_part_of_speech`, `kuromoji_stop`, `kuromoji_stemmer`, `kuromoji_hiragana_uppercase`, `kuromoji_katakana_uppercase`, `kuromoji_readingform`, `kuromoji_number` and `unicode_simple_lowercase`. Standalone deserialization rejects unknown properties; omitted stop-case and stem settings resolve to `true` and `4`, while `use_romaji` defaults to `false`. These tags describe the standalone Rust filter configuration until common-pipeline compilation is implemented.
+`JapaneseFilter` serializes with the respective tags `kuromoji_baseform`, `kuromoji_part_of_speech`, `kuromoji_stop`, `kuromoji_stemmer`, `kuromoji_hiragana_uppercase`, `kuromoji_katakana_uppercase`, `kuromoji_readingform`, `kuromoji_number` and `unicode_simple_lowercase`. Standalone deserialization rejects unknown properties; omitted stop-case and stem settings resolve to `true` and `4`, while `use_romaji` defaults to `false`. These tags describe standalone Rust filter configuration. Common `unicode_simple_lowercase` additionally carries the explicit profile described above; the other Japanese token-filter tags are not yet part of the common `TokenFilter` configuration.
 
 Each filter provides `apply`/`apply_controlled` for `KuromojiOutput` and `filter_analyzed`/`filter_analyzed_controlled` for `AnalyzedText`. Its `apply_budgeted` and `filter_analyzed_budgeted` forms take `(input, model, limits, poll)` and retain the input allowance through lookup preparation and mutation. Both representations share one algorithm. Removed tokens preserve skipped increments, trailing holes and opaque exhaustion attributes. Term-only transformations preserve independent morphology and graph fields. Number composition takes the keyword, position increment/length and all six morphology attributes from its lookahead or terminal state, as Lucene does; it replaces only the term and covering source span. A stacked lookahead aborts composition and preserves replay state, including any accumulated numeric prefix. Whitespace gaps and later keyword marks do not end an eligible numeric run.
 

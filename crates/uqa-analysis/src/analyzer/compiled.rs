@@ -83,10 +83,17 @@ impl CompiledAnalyzer {
         let token_filters = config
             .token_filters
             .iter()
-            .map(|filter| {
+            .enumerate()
+            .map(|(index, filter)| {
+                #[cfg(not(feature = "kuromoji"))]
+                let _ = index;
                 #[cfg(feature = "nori")]
                 if let Some(filter) = nori.filter(filter)? {
                     return Ok(PreparedTokenFilter::Nori(filter));
+                }
+                #[cfg(feature = "kuromoji")]
+                if let Some(filter) = kuromoji.filter(index, filter)? {
+                    return Ok(PreparedTokenFilter::Kuromoji(filter));
                 }
                 filter.prepare().map(PreparedTokenFilter::into_owned)
             })

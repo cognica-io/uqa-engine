@@ -28,6 +28,9 @@ mod term_memory;
 #[path = "analysis/token_filters.rs"]
 mod token_filters;
 
+#[path = "analysis/unicode_lowercase.rs"]
+mod unicode_lowercase;
+
 #[path = "analysis/char_filters.rs"]
 mod char_filters;
 

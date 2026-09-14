@@ -14,6 +14,7 @@ fn korean_components_require_the_nori_feature() {
         serde_json::json!({"token_filters":[{"type":"nori_part_of_speech"}]}),
         serde_json::json!({"token_filters":[{"type":"nori_readingform"}]}),
         serde_json::json!({"token_filters":[{"type":"nori_number"}]}),
+        #[cfg(not(feature = "kuromoji"))]
         serde_json::json!({"token_filters":[{"type":"unicode_simple_lowercase"}]}),
     ] {
         assert!(serde_json::from_value::<Analyzer>(config)

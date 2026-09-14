@@ -59,6 +59,10 @@ impl Analyzer {
         #[cfg(feature = "kuromoji")]
         {
             matches!(self.tokenizer, Tokenizer::Kuromoji(_))
+                || self.token_filters.iter().any(|filter| {
+                    matches!(filter, TokenFilter::UnicodeSimpleLowercase(config)
+                        if config.unicode_profile.kuromoji_dictionary().is_some())
+                })
         }
         #[cfg(not(feature = "kuromoji"))]
         {
@@ -71,14 +75,14 @@ impl Analyzer {
         #[cfg(feature = "nori")]
         {
             matches!(self.tokenizer, Tokenizer::Nori(_))
-                || self.token_filters.iter().any(|filter| {
-                    matches!(
-                        filter,
-                        TokenFilter::NoriPartOfSpeech(_)
-                            | TokenFilter::NoriReadingForm(_)
-                            | TokenFilter::UnicodeSimpleLowercase(_)
-                            | TokenFilter::NoriNumber(_)
-                    )
+                || self.token_filters.iter().any(|filter| match filter {
+                    TokenFilter::NoriPartOfSpeech(_)
+                    | TokenFilter::NoriReadingForm(_)
+                    | TokenFilter::NoriNumber(_) => true,
+                    TokenFilter::UnicodeSimpleLowercase(config) => {
+                        config.unicode_profile.nori_dictionary().is_some()
+                    }
+                    _ => false,
                 })
         }
         #[cfg(not(feature = "nori"))]

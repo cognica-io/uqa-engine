@@ -187,7 +187,14 @@ fn compiled_japanese_graphs_keep_source_and_release_every_cancelled_or_bounded_r
     tokenizer.discard_compound_token = false;
     tokenizer.n_best_examples = Some("関西国際空港-関西".into());
     config.char_filters = vec![CharFilter::HTMLStrip, CharFilter::CJKWidth];
-    config.token_filters = vec![TokenFilter::Lowercase];
+    config.token_filters = vec![TokenFilter::UnicodeSimpleLowercase(
+        crate::SimpleLowercaseConfig {
+            unicode_profile: UnicodeProfile::Kuromoji {
+                dictionary: "lucene-10.5.1".into(),
+            }
+            .into(),
+        },
+    )];
     let compiled = config.compile().unwrap();
     let source = "<b>関西国際空港 ＵＱＡ</b>";
     let budget = MemoryBudget::new(usize::MAX);

@@ -22,6 +22,8 @@ fn apply(
         PreparedTokenFilter::Common(filter) => filter.filter_analyzed_budgeted(input, poll),
         #[cfg(feature = "nori")]
         PreparedTokenFilter::Nori(_) => panic!("common filter expected"),
+        #[cfg(feature = "kuromoji")]
+        PreparedTokenFilter::Kuromoji(_) => panic!("common filter expected"),
     }
 }
 

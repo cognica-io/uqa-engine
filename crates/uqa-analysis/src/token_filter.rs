@@ -20,9 +20,13 @@ mod compiled;
 pub(crate) mod lowercase;
 mod stream;
 mod synonyms;
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+mod unicode;
 pub(crate) use compiled::PreparedTokenFilter;
 use synonyms::parse_synonym_body;
 pub(crate) use synonyms::parse_synonym_body_bounded;
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+pub use unicode::{SimpleLowercaseConfig, UnicodeProfileSource};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -33,9 +37,9 @@ pub enum TokenFilter {
     #[cfg(feature = "nori")]
     #[serde(rename = "nori_readingform")]
     NoriReadingForm(crate::nori::EmptyFilterConfig),
-    #[cfg(feature = "nori")]
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
     #[serde(rename = "unicode_simple_lowercase")]
-    UnicodeSimpleLowercase(crate::nori::SimpleLowercaseConfig),
+    UnicodeSimpleLowercase(SimpleLowercaseConfig),
     #[cfg(feature = "nori")]
     #[serde(rename = "nori_number")]
     NoriNumber(crate::nori::EmptyFilterConfig),
@@ -101,7 +105,7 @@ impl TokenFilter {
     /// deletion, permission changes, and edits.
     pub fn validate(&self) -> AnalysisResult<()> {
         match self {
-            #[cfg(feature = "nori")]
+            #[cfg(any(feature = "nori", feature = "kuromoji"))]
             TokenFilter::UnicodeSimpleLowercase(_) => self.prepare().map(|_| ()),
             TokenFilter::Synonym {
                 synonyms_path: Some(_),

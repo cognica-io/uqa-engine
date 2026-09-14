@@ -19,6 +19,8 @@ pub(super) fn filter(
     batch: TokenBatch,
 ) -> AnalysisResult<TokenBatch> {
     match filter {
+        #[cfg(feature = "kuromoji")]
+        PreparedTokenFilter::Kuromoji(filter) => filter.filter_batch(batch),
         #[cfg(feature = "nori")]
         PreparedTokenFilter::Nori(filter) => {
             filter.filter_batch(batch, crate::FilteredText::new("").projection())

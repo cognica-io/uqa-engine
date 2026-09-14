@@ -22,13 +22,47 @@ fn artifact() -> DictionaryArtifact {
 }
 
 #[test]
+fn explicit_nori_dictionary_names_do_not_use_legacy_jdk_alias_resolution() {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let recorded = requests.clone();
+    let nori = NoriResources::with_resolver(
+        Arc::new(move |request: &DictionaryRequest| {
+            recorded.lock().unwrap().push(request.clone());
+            Ok(Some(artifact()))
+        }),
+        ResourceLimits::default(),
+    );
+    let resources = AnalyzerResources::with_nori_resources(AnalyzerLimits::default(), nori);
+    let config = Analyzer::new(
+        Tokenizer::Keyword,
+        vec![TokenFilter::UnicodeSimpleLowercase(SimpleLowercaseConfig {
+            unicode_profile: uqa_analysis::UnicodeProfile::Nori {
+                dictionary: "jdk21".into(),
+            }
+            .into(),
+        })],
+        Vec::new(),
+    );
+    assert_eq!(
+        resources.compile(&config).unwrap().analyze("UQA").unwrap(),
+        ["uqa"]
+    );
+    assert_eq!(
+        *requests.lock().unwrap(),
+        [DictionaryRequest::Name("jdk21".into())]
+    );
+}
+
+#[test]
 fn name_resolution_is_reentrant_and_retained_handles_need_no_later_lookup() {
     for explicit_normalization in [false, true] {
-        verify_named_resolution(explicit_normalization);
+        for explicit_filter in [false, true] {
+            verify_named_resolution(explicit_normalization, explicit_filter);
+        }
     }
 }
 
-fn verify_named_resolution(explicit_normalization: bool) {
+fn verify_named_resolution(explicit_normalization: bool, explicit_filter: bool) {
     let slot = Arc::new(Mutex::new(None::<AnalyzerResources>));
     let owner = Arc::downgrade(&slot);
     let available = Arc::new(AtomicBool::new(true));
@@ -67,7 +101,14 @@ fn verify_named_resolution(explicit_normalization: bool) {
     config
         .token_filters
         .push(TokenFilter::UnicodeSimpleLowercase(SimpleLowercaseConfig {
-            unicode_profile: "custom".into(),
+            unicode_profile: if explicit_filter {
+                uqa_analysis::UnicodeProfile::Nori {
+                    dictionary: "custom".into(),
+                }
+                .into()
+            } else {
+                "custom".into()
+            },
         }));
     config.normalization =
         explicit_normalization.then(

@@ -18,6 +18,12 @@ use super::{
 use crate::{AnalysisResult, Analyzer, SynonymFileError, TokenFilter};
 
 pub(super) fn check_config(config: &Analyzer, limits: AnalyzerLimits) -> AnalysisResult<()> {
+    #[cfg(all(feature = "kuromoji", not(feature = "nori")))]
+    for filter in &config.token_filters {
+        if let TokenFilter::UnicodeSimpleLowercase(config) = filter {
+            config.unicode_profile.validate_features()?;
+        }
+    }
     let count = config
         .char_filters
         .len()
@@ -46,8 +52,9 @@ pub(super) fn snapshot(config: &Analyzer, limits: AnalyzerLimits) -> AnalysisRes
             #[cfg(feature = "nori")]
             TokenFilter::NoriPartOfSpeech(_)
             | TokenFilter::NoriReadingForm(_)
-            | TokenFilter::UnicodeSimpleLowercase(_)
             | TokenFilter::NoriNumber(_) => {}
+            #[cfg(any(feature = "nori", feature = "kuromoji"))]
+            TokenFilter::UnicodeSimpleLowercase(_) => {}
             TokenFilter::Stop {
                 language,
                 custom_words,

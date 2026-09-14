@@ -7,12 +7,15 @@
 //! Japanese pipeline resources are frozen before descriptor publication.
 
 use super::{
-    DictionaryRequest, JapaneseTokenizer, KuromojiResources, KuromojiTokenizerConfig,
-    ResolvedDictionary,
+    DictionaryRequest, JapaneseFilter, JapaneseTokenizer, KuromojiResources,
+    KuromojiTokenizerConfig, ResolvedDictionary,
 };
 use crate::morphology::resources::Snapshot;
-use crate::{AnalysisError, AnalysisResult, Analyzer, Tokenizer, UnicodeProfile};
+use crate::{AnalysisError, AnalysisResult, Analyzer, TokenFilter, Tokenizer, UnicodeProfile};
 use std::sync::Arc;
+
+mod stages;
+pub(crate) use stages::PreparedKuromojiFilter;
 
 #[cfg(test)]
 mod tests;
@@ -21,6 +24,7 @@ mod tests;
 pub(crate) struct ResolvedKuromojiPipeline {
     pub tokenizer: Option<JapaneseTokenizer>,
     pub normalizer: Option<Arc<ResolvedDictionary>>,
+    filters: Vec<Option<Arc<PreparedKuromojiFilter>>>,
 }
 
 impl ResolvedKuromojiPipeline {
@@ -38,6 +42,16 @@ impl ResolvedKuromojiPipeline {
             tokenizer.n_best_examples = None;
             resolved.tokenizer = Some(prepared);
         }
+        for filter in &mut config.token_filters {
+            let prepared = if let Some((stage, dictionary)) = japanese_filter_mut(filter) {
+                let profile = load(&mut snapshot, request(dictionary)?, resources)?;
+                *dictionary = format!("sha256:{}", profile.sha256());
+                Some(Arc::new(PreparedKuromojiFilter::new(&stage, profile)?))
+            } else {
+                None
+            };
+            resolved.filters.push(prepared);
+        }
         if let Some(UnicodeProfile::Kuromoji { dictionary }) = config
             .normalization
             .as_mut()
@@ -49,6 +63,45 @@ impl ResolvedKuromojiPipeline {
         }
         Ok(resolved)
     }
+
+    pub(crate) fn filter(
+        &self,
+        index: usize,
+        filter: &TokenFilter,
+    ) -> AnalysisResult<Option<Arc<PreparedKuromojiFilter>>> {
+        if !matches!(filter, TokenFilter::UnicodeSimpleLowercase(config)
+            if config.unicode_profile.kuromoji_dictionary().is_some())
+        {
+            return Ok(None);
+        }
+        self.filters
+            .get(index)
+            .and_then(Clone::clone)
+            .map(Some)
+            .ok_or(AnalysisError::Descriptor(
+                "missing resolved Japanese filter",
+            ))
+    }
+}
+
+fn japanese_filter_mut(filter: &mut TokenFilter) -> Option<(JapaneseFilter, &mut String)> {
+    match filter {
+        TokenFilter::UnicodeSimpleLowercase(config) => config
+            .unicode_profile
+            .kuromoji_dictionary_mut()
+            .map(|dictionary| (JapaneseFilter::SimpleLowercase, dictionary)),
+        _ => None,
+    }
+}
+
+pub(crate) fn prepare_filter(
+    dictionary: &str,
+    resources: &KuromojiResources,
+) -> AnalysisResult<Arc<PreparedKuromojiFilter>> {
+    Ok(Arc::new(PreparedKuromojiFilter::new(
+        &JapaneseFilter::SimpleLowercase,
+        resources.load(&request(dictionary)?)?,
+    )?))
 }
 
 pub(crate) fn request(name: &str) -> AnalysisResult<DictionaryRequest> {
@@ -70,6 +123,13 @@ fn load(
 }
 
 pub(crate) fn check_resolved(config: &Analyzer) -> AnalysisResult<()> {
+    for filter in &config.token_filters {
+        if let TokenFilter::UnicodeSimpleLowercase(config) = filter {
+            if let Some(dictionary) = config.unicode_profile.kuromoji_dictionary() {
+                exact(dictionary)?;
+            }
+        }
+    }
     if let Tokenizer::Kuromoji(tokenizer) = &config.tokenizer {
         exact(&tokenizer.dictionary)?;
         if tokenizer.n_best_examples.is_some() {

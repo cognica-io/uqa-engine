@@ -67,11 +67,10 @@ mod user_dictionary;
 pub mod pack;
 
 pub use crate::morphology::unicode::UnicodeProperties;
+pub use crate::token_filter::SimpleLowercaseConfig;
 pub use analyzer::KoreanAnalyzer;
 pub use attributes::KoreanMorphology;
-pub use config::{
-    nori_analyzer, EmptyFilterConfig, NoriPOSConfig, NoriTokenizerConfig, SimpleLowercaseConfig,
-};
+pub use config::{nori_analyzer, EmptyFilterConfig, NoriPOSConfig, NoriTokenizerConfig};
 pub use dictionary::{DictionaryLimits, NoriDictionary, SurfaceWords};
 pub use error::{DictionaryError, DictionaryResult};
 pub use filters::{KoreanFilter, DEFAULT_STOP_TAGS};

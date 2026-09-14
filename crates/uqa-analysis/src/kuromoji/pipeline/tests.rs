@@ -46,7 +46,18 @@ fn normalization_profiles_snapshot_alias_changes_and_restore_only_exact_artifact
             dictionary: "current".into(),
             ..Default::default()
         }),
-        Vec::new(),
+        vec![
+            crate::TokenFilter::Stop {
+                language: String::new(),
+                custom_words: Vec::new(),
+            },
+            crate::TokenFilter::UnicodeSimpleLowercase(crate::SimpleLowercaseConfig {
+                unicode_profile: UnicodeProfile::Kuromoji {
+                    dictionary: "current".into(),
+                }
+                .into(),
+            }),
+        ],
         Vec::new(),
     )
     .with_normalization(NormalizationConfig::UnicodeSimpleLowercase {
@@ -60,6 +71,7 @@ fn normalization_profiles_snapshot_alias_changes_and_restore_only_exact_artifact
         [DictionaryRequest::Name("current".into())]
     );
     assert_eq!(retained.normalize("UQA").unwrap(), "uqa");
+    assert_eq!(retained.analyze("UQA").unwrap(), ["uqa"]);
     let reopened = owner()
         .restore_json(retained.descriptor().canonical_json())
         .unwrap();
@@ -76,7 +88,9 @@ fn normalization_profiles_snapshot_alias_changes_and_restore_only_exact_artifact
         retained.descriptor().fingerprint()
     );
     assert_eq!(changed.normalize("UQA").unwrap(), "UQA");
+    assert_eq!(changed.analyze("UQA").unwrap(), ["UQA"]);
     assert_eq!(retained.normalize("UQA").unwrap(), "uqa");
+    assert_eq!(retained.analyze("UQA").unwrap(), ["uqa"]);
     let fresh = owner();
     assert!(fresh
         .restore_json(retained.descriptor().canonical_json())

@@ -13,7 +13,10 @@ use super::{
     ResolvedDictionary, ResourceHash, DEFAULT_STOP_TAGS,
 };
 use crate::morphology::resources::Snapshot;
-use crate::{AnalysisError, AnalysisResult, Analyzer, TokenFilter, Tokenizer, UnicodeProfile};
+use crate::{
+    AnalysisError, AnalysisResult, Analyzer, TokenFilter, Tokenizer, UnicodeProfile,
+    UnicodeProfileSource,
+};
 
 mod stages;
 pub(crate) use stages::PreparedNoriFilter;
@@ -39,15 +42,21 @@ impl ResolvedNoriPipeline {
         }
         for filter in &mut config.token_filters {
             if let TokenFilter::UnicodeSimpleLowercase(config) = filter {
+                if config.unicode_profile.nori_dictionary().is_none() {
+                    continue;
+                }
                 let profile = load(
                     &mut snapshot,
                     profile_request(&config.unicode_profile)?,
                     resources,
                 )?;
-                config.unicode_profile = exact_name(profile.sha256());
-                resolved
-                    .profiles
-                    .insert(config.unicode_profile.clone(), profile);
+                let name = exact_name(profile.sha256());
+                config
+                    .unicode_profile
+                    .nori_dictionary_mut()
+                    .expect("Nori profile")
+                    .clone_from(&name);
+                resolved.profiles.insert(name, profile);
             }
         }
         if let Some(UnicodeProfile::Nori { dictionary }) = config
@@ -68,9 +77,19 @@ impl ResolvedNoriPipeline {
             return Ok(None);
         };
         let profile = if let TokenFilter::UnicodeSimpleLowercase(config) = filter {
-            Some(self.profiles.get(&config.unicode_profile).cloned().ok_or(
-                AnalysisError::Descriptor("missing resolved Unicode profile"),
-            )?)
+            Some(
+                self.profiles
+                    .get(
+                        config
+                            .unicode_profile
+                            .nori_dictionary()
+                            .expect("Nori profile"),
+                    )
+                    .cloned()
+                    .ok_or(AnalysisError::Descriptor(
+                        "missing resolved Unicode profile",
+                    ))?,
+            )
         } else {
             None
         };
@@ -90,18 +109,24 @@ fn exact_name(hash: ResourceHash) -> String {
 }
 
 pub(crate) fn load_profile(
-    name: &str,
+    profile: &UnicodeProfileSource,
     resources: &NoriResources,
 ) -> AnalysisResult<Arc<ResolvedDictionary>> {
-    Ok(resources.load(&profile_request(name)?)?)
+    Ok(resources.load(&profile_request(profile)?)?)
 }
 
-fn profile_request(name: &str) -> AnalysisResult<DictionaryRequest> {
-    Ok(if name == "jdk21" {
-        DictionaryRequest::Sha256(uqa_nori_data::BUNDLE_SHA256.parse()?)
+fn profile_request(profile: &UnicodeProfileSource) -> AnalysisResult<DictionaryRequest> {
+    if matches!(profile, UnicodeProfileSource::LegacyNori(name) if name == "jdk21") {
+        Ok(DictionaryRequest::Sha256(
+            uqa_nori_data::BUNDLE_SHA256.parse()?,
+        ))
     } else {
-        request(name)?
-    })
+        request(
+            profile
+                .nori_dictionary()
+                .ok_or(AnalysisError::Descriptor("expected a Nori Unicode profile"))?,
+        )
+    }
 }
 
 fn load(
@@ -138,7 +163,11 @@ pub(crate) fn korean_filter(filter: &TokenFilter) -> Option<KoreanFilter> {
             stop_tags: config.stop_tags.clone(),
         },
         TokenFilter::NoriReadingForm(_) => KoreanFilter::ReadingForm,
-        TokenFilter::UnicodeSimpleLowercase(_) => KoreanFilter::SimpleLowercase,
+        TokenFilter::UnicodeSimpleLowercase(config)
+            if config.unicode_profile.nori_dictionary().is_some() =>
+        {
+            KoreanFilter::SimpleLowercase
+        }
         TokenFilter::NoriNumber(_) => KoreanFilter::Number,
         _ => return None,
     })
@@ -182,7 +211,9 @@ pub(crate) fn check_resolved(config: &Analyzer) -> AnalysisResult<()> {
     }
     for filter in &config.token_filters {
         if let TokenFilter::UnicodeSimpleLowercase(config) = filter {
-            exact(&config.unicode_profile)?;
+            if let Some(dictionary) = config.unicode_profile.nori_dictionary() {
+                exact(dictionary)?;
+            }
         }
     }
     Ok(())
