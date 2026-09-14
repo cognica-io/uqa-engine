@@ -50,6 +50,8 @@ Each file begins with the eight ASCII magic bytes below. All integers are big-en
 
 Class flags use bit 0 for invoke and bit 1 for group. Unicode flags use bit 0 for digit, bit 1 for whitespace and bit 2 for space character; script ordinals index the manifest's full vocabulary. Connection lookup is `backward * forward_count + forward`; a predecessor's right context selects the column, and the next word's left context selects the row. Every exported context is checked against those dimensions. Sorting uses Java UTF-16 ordering; alternative order is never sorted.
 
+Patch validation and application operate on the extracted input directory independently of enclosing Git checkout metadata, so output beneath `target/` and output outside the repository reproduce the same reviewed source inventory. The original EUC-JP bytes and exact one-file patch target remain mandatory.
+
 ## Japanese user dictionaries
 
 `KuromojiUserReference.java` uses the public Japanese user dictionary, FST and morphology APIs to record 62 fixed cases. The corpus covers Java comment/line/whitespace rules, CSV quoting and its unchanged final field, duplicate rejection, segmentation/readings, source and word order, overlapping longest matches, supplementary characters, embedded NUL, empty entries and morphology-access errors. UTF-16 lengths and every available or absent morphology field are compared independently from tokenization. The original Nori drivers use the same language-independent fixture transport and retain their existing inputs, Java sources, manifests and expected bytes.

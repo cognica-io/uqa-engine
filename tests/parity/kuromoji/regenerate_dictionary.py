@@ -9,6 +9,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -52,14 +53,18 @@ def prepare_patch(manifest, cache, offline):
 
 def apply_patch(inputs, patch):
     # The pinned EUC-JP patch must edit exactly the existing proper-noun CSV.
+    # Treat extracted inputs as plain files even when staged beneath a checkout.
+    environment = {key: value for key, value in os.environ.items()
+                   if key not in {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_PREFIX"}}
+    environment["GIT_CEILING_DIRECTORIES"] = str(inputs.resolve().parent)
     changes = subprocess.run(["git", "apply", "--numstat", str(patch)], cwd=inputs,
-                             capture_output=True, text=True, check=True).stdout.splitlines()
+                             env=environment, capture_output=True, text=True, check=True).stdout.splitlines()
     if len(changes) != 1 or changes[0].split("\t")[-1] != "Noun.proper.csv":
         raise RuntimeError("Japanese dictionary patch changes an unexpected file")
     subprocess.run(["git", "apply", "--check", str(patch)], cwd=inputs, check=True,
-                   capture_output=True, text=True, encoding="utf-8", errors="replace")
+                   env=environment, capture_output=True, text=True, encoding="utf-8", errors="replace")
     subprocess.run(["git", "apply", str(patch)], cwd=inputs, check=True,
-                   capture_output=True, text=True, encoding="utf-8", errors="replace")
+                   env=environment, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
 
 def provenance(manifest, archive, original, patched):

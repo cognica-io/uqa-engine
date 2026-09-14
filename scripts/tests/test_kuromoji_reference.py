@@ -8,6 +8,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -102,6 +103,26 @@ class KuromojiReferenceTest(unittest.TestCase):
                     regenerate.apply_patch(inputs, patch)
                 self.assertEqual(len(run.call_args_list), 2)
             self.assertEqual(target.read_bytes(), original)
+
+    def test_patch_scope_is_independent_of_enclosing_checkout_and_inherited_git_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            subprocess.run(["git", "init", "--quiet", str(root)], check=True)
+            original = "昭和\n".encode("euc-jp")
+            untouched = root / "Noun.proper.csv"
+            untouched.write_bytes(original)
+            inputs = root / "target" / "regeneration" / "input"
+            inputs.mkdir(parents=True)
+            target = inputs / "Noun.proper.csv"
+            patch = root / "source.patch"
+            patch.write_bytes(patch_bytes())
+            for inherited in ({}, {"GIT_DIR": str(root / ".git"), "GIT_WORK_TREE": str(root)}):
+                target.write_bytes(original)
+                with mock.patch.dict(os.environ, inherited):
+                    regenerate.apply_patch(inputs, patch)
+                self.assertEqual(target.read_bytes(), "昭和\n令和\n".encode("euc-jp"))
+                self.assertEqual(untouched.read_bytes(), original)
+                self.assertFalse((root / ".git" / "index").exists())
 
     def test_invalid_patch_download_or_cache_is_never_published_or_replaced(self):
         data = patch_bytes()
