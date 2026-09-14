@@ -30,3 +30,6 @@ pub(crate) mod resources;
 
 #[cfg(feature = "nori")]
 pub(crate) mod lattice;
+
+#[cfg(feature = "nori")]
+pub(crate) mod viterbi;

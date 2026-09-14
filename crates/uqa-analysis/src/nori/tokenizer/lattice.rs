@@ -12,7 +12,6 @@ use crate::nori::error::{check_limit, invalid};
 use crate::{AnalysisError, AnalysisResult};
 
 pub(super) use crate::morphology::lattice::{Node, WordId};
-pub(super) type Lattice = crate::morphology::lattice::Lattice<NoriLimits>;
 
 impl LatticeConfig for NoriLimits {
     fn check_positions(self, required: usize) -> AnalysisResult<()> {

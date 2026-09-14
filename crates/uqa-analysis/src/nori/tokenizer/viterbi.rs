@@ -8,9 +8,10 @@
 
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryReservation};
 
-use super::lattice::{Lattice, Node, WordId};
+use super::lattice::{Node, WordId};
 use super::word::Word;
 use super::{NoriLimits, NoriOptions, NoriOutput, NoriToken};
+use crate::morphology::viterbi::{Search, Traversal};
 use crate::nori::error::{check_limit, invalid};
 use crate::nori::{NoriDictionary, POSTag, UserDictionary};
 use crate::AnalysisResult;
@@ -20,18 +21,14 @@ pub(super) struct State<'a> {
     pub model: &'a NoriDictionary,
     pub user: Option<&'a UserDictionary>,
     pub options: NoriOptions,
-    pub lattice: Lattice,
-    pub position: usize,
-    pub last_backtrace: usize,
+    pub traversal: Traversal<'a, NoriLimits>,
     pub pending: BudgetedVec<NoriToken>,
     pub ngram: Option<u32>,
     pub budget: &'a MemoryBudget,
     limits: NoriLimits,
     total_tokens: usize,
     output_units: usize,
-    work: usize,
     output_memory: MemoryReservation,
-    pub poll: &'a mut dyn FnMut() -> AnalysisResult<()>,
 }
 
 pub(super) fn analyze(
@@ -69,18 +66,14 @@ pub(super) fn analyze(
         model,
         user,
         options,
-        lattice: Lattice::new(limits, budget, poll)?,
-        position: 0,
-        last_backtrace: 0,
+        traversal: Traversal::new(input.len(), limits, budget, poll)?,
         pending: BudgetedVec::new(budget),
         ngram,
         budget,
         limits,
         total_tokens: 0,
         output_units: 0,
-        work: 0,
         output_memory: budget.empty_reservation(),
-        poll,
     };
     let mut tokens = BudgetedVec::new(budget);
     loop {
@@ -94,22 +87,18 @@ pub(super) fn analyze(
             break;
         }
     }
-    (state.poll)()?;
+    (state.traversal.poll)()?;
     let (tokens, mut memory) = tokens.into_parts();
     memory.absorb(state.output_memory);
     Ok(Budgeted::new(
-        NoriOutput::from_tokens(tokens, state.position, 0),
+        NoriOutput::from_tokens(tokens, state.traversal.position, 0),
         memory,
     ))
 }
 
 impl State<'_> {
     pub fn tick(&mut self) -> AnalysisResult<()> {
-        self.work = (self.work + 1) % 1024;
-        if self.work == 0 {
-            (self.poll)()?;
-        }
-        Ok(())
+        self.traversal.tick()
     }
 
     pub fn check_units(&self, additional: usize) -> AnalysisResult<()> {
@@ -139,7 +128,7 @@ impl State<'_> {
                 .checked_add(super::allocation::utf16_len(
                     reading,
                     usize::MAX,
-                    self.poll,
+                    self.traversal.poll,
                 )?)
                 .ok_or_else(|| invalid("Nori emission", "reading size overflow"))?;
         }
@@ -159,139 +148,65 @@ impl State<'_> {
     }
 
     fn forward(&mut self) -> AnalysisResult<bool> {
-        // The reference resets this bound whenever a nonempty pending batch is consumed.
-        let mut user_maximum = None;
-        while self.position < self.input.len() {
-            self.tick()?;
-            self.lattice.ensure(self.position, self.poll)?;
-            if self.lattice.get(self.position).is_empty() {
-                self.position += 1;
-                continue;
-            }
-            let frontier = self.lattice.next_pos() == self.position + 1;
-            if self.position > self.last_backtrace
-                && frontier
-                && self.lattice.get(self.position).len() == 1
-            {
-                super::emission::backtrace(self, self.position, 0)?;
-                self.lattice.rebase(self.position);
-                if !self.pending.is_empty() {
-                    return Ok(false);
-                }
-            }
-            if self.position - self.last_backtrace >= 1024 {
-                self.force_backtrace()?;
-                if !self.pending.is_empty() {
-                    return Ok(false);
-                }
-                continue;
-            }
-            let from = self.position;
-            if self
-                .model
-                .unicode(u32::from(self.input[self.position]))
-                .expect("complete Unicode table")
-                .category
-                == 12
-                && self.position + 1 < self.input.len()
-            {
-                self.position += 1;
-            }
-            let mut matched = false;
-            if let Some(user) = self.user {
-                let mut longest = None;
-                let mut cursor = user.cursor();
-                for (offset, &unit) in self.input[self.position..].iter().enumerate() {
-                    self.tick()?;
-                    if cursor.advance(unit).is_none() {
-                        break;
-                    }
-                    if let Some(id) = cursor.rank() {
-                        longest = Some((offset + 1, id));
-                    }
-                }
-                if let Some((length, id)) = longest {
-                    matched = true;
-                    let end = self.position + length;
-                    if user_maximum.is_none_or(|previous| end > previous) {
-                        self.add(from, self.position, end, WordId::User(id))?;
-                        user_maximum = Some(end);
-                    }
-                }
-            }
-            if !matched {
-                let model = self.model;
-                let mut cursor = model.lexicon.cursor();
-                for (offset, &unit) in self.input[self.position..].iter().enumerate() {
-                    self.tick()?;
-                    if cursor.advance(unit).is_none() {
-                        break;
-                    }
-                    if let Some(rank) = cursor.rank() {
-                        for id in model.surfaces[rank as usize].word_ids.clone() {
-                            self.add(
-                                from,
-                                self.position,
-                                self.position + offset + 1,
-                                WordId::Known(id),
-                            )?;
-                            matched = true;
-                        }
-                    }
-                }
-            }
-            self.unknown(from, matched)?;
-            self.position += 1;
-        }
-        self.finish()?;
-        Ok(true)
+        crate::morphology::viterbi::forward(self)
     }
 
-    fn finish(&mut self) -> AnalysisResult<()> {
-        if self.position > 0 {
-            self.lattice.ensure(self.position, self.poll)?;
-            let mut best = None;
-            let mut least_cost = i32::MAX;
-            for index in 0..self.lattice.get(self.position).len() {
+    fn extend_at(&mut self, user_maximum: &mut Option<usize>) -> AnalysisResult<()> {
+        let from = self.traversal.position;
+        if self
+            .model
+            .unicode(u32::from(self.input[self.traversal.position]))
+            .expect("complete Unicode table")
+            .category
+            == 12
+            && self.traversal.position + 1 < self.input.len()
+        {
+            self.traversal.position += 1;
+        }
+        let mut matched = false;
+        if let Some(user) = self.user {
+            let mut longest = None;
+            let mut cursor = user.cursor();
+            for (offset, &unit) in self.input[self.traversal.position..].iter().enumerate() {
                 self.tick()?;
-                let node = self.lattice.get(self.position)[index];
-                let cost = node.cost.wrapping_add(i32::from(
-                    self.model
-                        .connection_cost(node.right, 0)
-                        .expect("validated context"),
-                ));
-                if cost < least_cost {
-                    least_cost = cost;
-                    best = Some(index);
+                if cursor.advance(unit).is_none() {
+                    break;
+                }
+                if let Some(id) = cursor.rank() {
+                    longest = Some((offset + 1, id));
                 }
             }
-            let best = best.ok_or_else(|| invalid("Nori lattice", "no complete path"))?;
-            super::emission::backtrace(self, self.position, best)?;
-        }
-        Ok(())
-    }
-
-    fn force_backtrace(&mut self) -> AnalysisResult<()> {
-        let mut best = None;
-        let mut least = i32::MAX;
-        for position in self.position..self.lattice.next_pos() {
-            self.tick()?;
-            for index in 0..self.lattice.get(position).len() {
-                self.tick()?;
-                let node = self.lattice.get(position)[index];
-                if node.cost < least {
-                    least = node.cost;
-                    best = Some((position, index));
+            if let Some((length, id)) = longest {
+                matched = true;
+                let end = self.traversal.position + length;
+                if user_maximum.is_none_or(|previous| end > previous) {
+                    self.add(from, self.traversal.position, end, WordId::User(id))?;
+                    *user_maximum = Some(end);
                 }
             }
         }
-        let (position, index) =
-            best.ok_or_else(|| invalid("Nori lattice", "no live path at forced backtrace"))?;
-        self.lattice
-            .prune(self.position, position, index, self.poll)?;
-        super::emission::backtrace(self, position, 0)?;
-        self.lattice.rebase(position);
-        self.position = position;
+        if !matched {
+            let model = self.model;
+            let mut cursor = model.lexicon.cursor();
+            for (offset, &unit) in self.input[self.traversal.position..].iter().enumerate() {
+                self.tick()?;
+                if cursor.advance(unit).is_none() {
+                    break;
+                }
+                if let Some(rank) = cursor.rank() {
+                    for id in model.surfaces[rank as usize].word_ids.clone() {
+                        self.add(
+                            from,
+                            self.traversal.position,
+                            self.traversal.position + offset + 1,
+                            WordId::Known(id),
+                        )?;
+                        matched = true;
+                    }
+                }
+            }
+        }
+        self.unknown(from, matched)?;
         Ok(())
     }
 
@@ -305,9 +220,9 @@ impl State<'_> {
         };
         let mut least = i32::MAX;
         let mut best = None;
-        for index in 0..self.lattice.get(from).len() {
+        for index in 0..self.traversal.lattice.get(from).len() {
             self.tick()?;
-            let node = self.lattice.get(from)[index];
+            let node = self.traversal.lattice.get(from)[index];
             let cost = node
                 .cost
                 .wrapping_add(i32::from(
@@ -323,7 +238,7 @@ impl State<'_> {
         }
         let back_index =
             best.ok_or_else(|| invalid("Nori lattice", "no incoming least-cost path"))?;
-        self.lattice.push(
+        self.traversal.lattice.push(
             end,
             Node {
                 cost: least.wrapping_add(word.cost()),
@@ -333,13 +248,13 @@ impl State<'_> {
                 back_index,
                 word: id,
             },
-            self.poll,
+            self.traversal.poll,
         )?;
         Ok(())
     }
 
     fn unknown(&mut self, from: usize, matched: bool) -> AnalysisResult<()> {
-        let first = self.input[self.position];
+        let first = self.input[self.traversal.position];
         if matched && !self.model.invokes_unknown(first) {
             return Ok(());
         }
@@ -352,9 +267,9 @@ impl State<'_> {
                 .expect("complete Unicode table");
             let mut script = first_properties.script;
             let punct = punctuation(first, first_properties.category);
-            while length < 1024 && self.position + length < self.input.len() {
+            while length < 1024 && self.traversal.position + length < self.input.len() {
                 self.tick()?;
-                let unit = self.input[self.position + length];
+                let unit = self.input[self.traversal.position + length];
                 let properties = self
                     .model
                     .unicode(u32::from(unit))
@@ -384,8 +299,8 @@ impl State<'_> {
         {
             self.add(
                 from,
-                self.position,
-                self.position + length,
+                self.traversal.position,
+                self.traversal.position + length,
                 WordId::Unknown(id),
             )?;
         }
@@ -396,6 +311,39 @@ impl State<'_> {
         matches!(
             self.model.unicode_script_name(script),
             Some("COMMON" | "INHERITED")
+        )
+    }
+}
+
+impl<'a> Search<'a> for State<'a> {
+    type Config = NoriLimits;
+    type Batch = Option<usize>;
+
+    fn traversal(&self) -> &Traversal<'a, NoriLimits> {
+        &self.traversal
+    }
+
+    fn traversal_mut(&mut self) -> &mut Traversal<'a, NoriLimits> {
+        &mut self.traversal
+    }
+
+    fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
+    fn extend(&mut self, batch: &mut Self::Batch) -> AnalysisResult<()> {
+        self.extend_at(batch)
+    }
+
+    fn backtrace(&mut self, position: usize, index: usize) -> AnalysisResult<()> {
+        super::emission::backtrace(self, position, index)
+    }
+
+    fn eos_cost(&self, right: u16) -> i32 {
+        i32::from(
+            self.model
+                .connection_cost(right, 0)
+                .expect("validated context"),
         )
     }
 }

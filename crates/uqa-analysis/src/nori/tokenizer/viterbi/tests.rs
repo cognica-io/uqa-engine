@@ -7,8 +7,9 @@
 //! Candidate ties, future-path pruning, and EOS costs are observable path-selection rules.
 
 use super::{analyze, State};
+use crate::morphology::viterbi::Traversal;
 use crate::nori::frame;
-use crate::nori::tokenizer::lattice::{Lattice, Node, WordId};
+use crate::nori::tokenizer::lattice::{Node, WordId};
 use crate::nori::{
     DecompoundMode, DictionaryLimits, NoriDictionary, NoriLimits, NoriOptions, POSType,
 };
@@ -33,21 +34,19 @@ fn forced_backtrace_selects_the_first_cheapest_future_candidate_and_rebases_it()
             decompound_mode: DecompoundMode::None,
             ..NoriOptions::default()
         },
-        lattice: Lattice::new(limits, &budget, &mut poll).unwrap(),
-        position: 1024,
-        last_backtrace: 0,
+        traversal: Traversal::new(input.len(), limits, &budget, &mut poll).unwrap(),
         pending: BudgetedVec::new(&budget),
         ngram: None,
         budget: &budget,
         limits,
         total_tokens: 0,
         output_units: 0,
-        work: 0,
         output_memory: budget.empty_reservation(),
-        poll: &mut poll,
     };
+    state.traversal.position = 1024;
     for (end, cost, word_pos) in [(1024, 50, 0), (1025, 3, 0), (1025, 3, 1), (1026, 3, 0)] {
         state
+            .traversal
             .lattice
             .push(
                 end,
@@ -59,21 +58,21 @@ fn forced_backtrace_selects_the_first_cheapest_future_candidate_and_rebases_it()
                     back_index: 0,
                     word: WordId::Known(0),
                 },
-                state.poll,
+                state.traversal.poll,
             )
             .unwrap();
     }
     assert!(!state.forward().unwrap());
-    assert_eq!(state.position, 1025);
-    assert_eq!(state.last_backtrace, 1025);
+    assert_eq!(state.traversal.position, 1025);
+    assert_eq!(state.traversal.last_backtrace, 1025);
     assert_eq!(state.pending.len(), 1);
     assert_eq!(state.pending[0].start_utf16, 0);
     assert_eq!(state.pending[0].end_utf16, 1025);
-    assert_eq!(state.lattice.get(1025).len(), 1);
-    assert_eq!(state.lattice.get(1025)[0].cost, 0);
-    assert_eq!(state.lattice.get(1025)[0].right, 2);
-    assert!(state.lattice.get(1026).is_empty());
-    assert_eq!(state.lattice.next_pos(), 1027);
+    assert_eq!(state.traversal.lattice.get(1025).len(), 1);
+    assert_eq!(state.traversal.lattice.get(1025)[0].cost, 0);
+    assert_eq!(state.traversal.lattice.get(1025)[0].right, 2);
+    assert!(state.traversal.lattice.get(1026).is_empty());
+    assert_eq!(state.traversal.lattice.next_pos(), 1027);
 }
 
 #[test]

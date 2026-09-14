@@ -43,6 +43,10 @@ pub(crate) struct Lattice<C> {
 }
 
 impl<C: LatticeConfig> Lattice<C> {
+    pub fn invalid(&self, reason: &'static str) -> AnalysisError {
+        self.limits.invalid(reason)
+    }
+
     pub fn new(
         limits: C,
         budget: &MemoryBudget,
