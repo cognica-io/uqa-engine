@@ -2,6 +2,8 @@
 
 Status: Implementation in progress against UQA 0.3.0 and Lucene 10.5.1. The private shared dictionary reader/writer, UTF-16 lexicon, and connection-cost matrix are extracted from Nori into `uqa-analysis::morphology`. Japanese dictionary conversion, tokenization, analyzer integration, and reference verification remain to be implemented. The 0.3.0 release proceeds independently.
 
+The [implementation plan](../plans/0007-kuromoji-analyzer.md) tracks ordered work units, dependencies, verified results and remaining acceptance gates. Update it with each logical implementation unit.
+
 ## Objective
 
 Implement Lucene Kuromoji in Rust, including its Japanese tokenizer, default analyzer, optional analysis components, normalization, and completion analysis. Integrate it with the existing durable analyzer revisions, occurrence graphs, phrase matching, highlighting, SQL diagnostics, and Rust/Python/Node.js/WASM surfaces. Extract the mechanisms already implemented for Nori into their existing owning crate before adding a second language. Preserve Nori outputs, serialized descriptors, dictionary identities, resource ownership, and provider behavior throughout that extraction.
@@ -48,7 +50,7 @@ The [analyzer ownership contract](../manual/internals/04-analyzer-pipeline.md), 
 | Current UQA implementation | Decision | Target and invariant |
 | --- | --- | --- |
 | `uqa-core::memory`; analysis `source.rs`, `term.rs`, `token.rs`, `cache.rs` | Reuse | Keep allowances, lossless terms, source-edit maps, token/end-state contracts, and bounded caches in their existing owners. |
-| `nori/io.rs`, `frame.rs`, `lexicon.rs`, `lexicon/*`, dictionary matrix decoding | Extract reusable mechanics | Private `uqa_analysis::morphology::{binary, lexicon, matrix}`; retain language-specific framing/schema adapters and entry interpretation. Nori's existing bundle remains byte-for-byte readable and reproducible. |
+| Former Nori I/O/lexicon modules and dictionary matrix decoding; `nori/frame.rs` | Extract reusable mechanics | Reader/writer, lexicon and matrix now live in private `uqa_analysis::morphology::{io, lexicon, matrix}`. Frame extraction remains pending; retain language-specific framing/schema adapters and entry interpretation. Nori's existing bundle remains byte-for-byte readable and reproducible. |
 | `nori/unicode.rs`, `resources/hash.rs` | Extract profile and identity mechanisms | Shared immutable, content-identified Unicode profiles and hashes. Korean and Japanese character-class tables remain separate. Identical JDK tables may share one allocation only after their identities match. |
 | `nori/resources.rs` | Extract resource ownership | Shared encoded-byte validation, bounded cache publication, and resolver machinery; typed `NoriResources` and `KuromojiResources` wrappers preserve separate model/user-rule compilers. |
 | `nori/tokenizer/lattice.rs`, reusable parts of `viterbi.rs` | Extract bounded candidate/lattice mechanics | `morphology::lattice` and the common forward-search machinery; preserve candidate order, checked indexing, Java cost arithmetic, frontier release, and reservation ownership. |
