@@ -1,8 +1,14 @@
-# Upgrading to UQA Engine 0.2.3
+# Upgrading to UQA Engine 0.3.0
 
-Version 0.2.3 replaces resident persistent-graph replicas with direct storage access, shares immutable catalog and statistics snapshots across sessions, and maintains persistent column statistics in a background worker. It also prevents staged document-ID reuse during transaction snapshot refresh. The [release history](../../../HISTORY.md#023---2026-09-09) records the changes.
+Version 0.3.0 adds native Korean Nori analysis, durable analyzer revisions and token graphs, graph-aware phrases and highlighting, PostgreSQL domains and data-modifying CTEs, and prepared-plan improvements. It also moves concrete SQLite APIs into `uqa-storage-sqlite` and changes low-level Rust SQL and retrieval interfaces. The [release history](../../../HISTORY.md#030---2026-09-14) records the changes.
 
 The 0.2 series includes SQL object and privilege lifecycle changes, durable expression and unique indexes, expanded sequences and PL/pgSQL, native cross-process notifications, and a Node.js HTTP client that runs without native addons. These changes were introduced in [0.2.0](../../../HISTORY.md#020---2026-09-05); the [compatibility guide](../sql/09-compatibility.md) defines the verified PostgreSQL 18 surface and the behavior still being implemented.
+
+## Korean analysis and package features
+
+Rust applications using Korean analysis enable `nori` on `uqa` or `uqa-engine`, for example `cargo add uqa@0.3.0 --features nori`. The feature includes the immutable dictionary through `uqa-nori-data`; the official Python, Node.js, and browser WASM packages enable it. No JVM or runtime dictionary download is required. Builds without this feature retain the non-Korean analyzers and reject Korean analysis requests explicitly.
+
+The built-in `nori` analyzer and custom Korean pipelines retain exact dictionary and user-rule identities in durable descriptors. Deploy the same feature configuration and required resources in every process opening the database. Rich analysis retains UTF-16 terms, morphology, token graph edges, and corrected source spans; existing string projections remain available but cannot represent isolated UTF-16 units. See the [analyzer reference](06-text-analyzers.md) and [binding contracts](08-bindings-and-extensions.md) for analysis, normalization, and result APIs.
 
 ## Rust graph API and custom catalogs
 
@@ -14,20 +20,20 @@ SQLite catalogs advance to version 46 for durable cache revisions, graph access 
 
 ## Package versions
 
-Update the UQA packages used by one application together. Rust's `0.1` dependency requirement does not select `0.2.3`; change the requirement explicitly and regenerate the application's lockfile.
+Update the UQA packages used by one application together. Rust's `0.1` and `0.2` dependency requirements do not select `0.3.0`; change the requirement explicitly and regenerate the application's lockfile.
 
 | Environment | Versioned installation |
 | --- | --- |
-| Embedded Rust | `cargo add uqa@0.2.3` |
-| Rust HTTP client | `cargo add uqa-client@0.2.3` |
-| Python and `usql` | `python -m pip install --upgrade uqa==0.2.3` |
-| Embedded Node.js | `npm install @cognica-io/uqa@0.2.3` |
-| Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.2.3` |
-| Browser WASM | `npm install @cognica-io/uqa-wasm@0.2.3` |
+| Embedded Rust | `cargo add uqa@0.3.0` |
+| Rust HTTP client | `cargo add uqa-client@0.3.0` |
+| Python and `usql` | `python -m pip install --upgrade uqa==0.3.0` |
+| Embedded Node.js | `npm install @cognica-io/uqa@0.3.0` |
+| Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.3.0` |
+| Browser WASM | `npm install @cognica-io/uqa-wasm@0.3.0` |
 
 The Rust workspace requires Rust 1.90 or newer. Python requires Python 3.8 or newer, and the Node.js package requires Node.js 16 or newer. The Node.js root package selects an exact-version native optional package for embedded execution; deploy the root and native packages from the same release. Deploy the Browser WASM JavaScript module and `uqa.wasm` from the same package together, including when updating a browser cache.
 
-The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.2.3) contains the Python and npm archives, standalone Node.js addons, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.2.3"` consistently for every UQA dependency.
+The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.3.0) contains the Python and npm archives, standalone Node.js addons, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.3.0"` consistently for every UQA dependency.
 
 ## Automatic statistics and session caches
 
@@ -37,17 +43,17 @@ Automatic collection samples at most 4,096 hierarchy rows. Both automatic and ex
 
 SQLite tracks transactional cache revisions so data-only or statistics-only commits reuse unchanged definitions and physical handles. `Engine::new_session()` shares immutable committed catalog and statistics allocations while retaining independent transactions and storage handles. Custom providers may implement `CatalogFacade::cache_revisions()` with the same snapshot and rollback guarantees or return `None` for conservative refresh; an empty revision map must not stand in for unsupported tracking. See [cross-session cache refresh](04-storage-and-security.md#cross-session-cache-refresh).
 
-The development branch releases unwritten rollback-journal readers before waiting for writer ownership or snapshot publication. This prevents automatic statistics publication from retaining a SQLite read lock while an application COMMIT waits for readers to finish. The logical transaction, savepoints, and detached repeatable-read snapshot remain intact.
+Version 0.3.0 releases unwritten rollback-journal readers before waiting for writer ownership or snapshot publication. This prevents automatic statistics publication from retaining a SQLite read lock while an application COMMIT waits for readers to finish. The logical transaction, savepoints, and detached repeatable-read snapshot remain intact.
 
 ## Cypher expression validation
 
 Deeply nested Cypher and long operator or indexing chains now fail with a parse error instead of exhausting the process stack. The parser limits recursive expression parsing and constructed expression trees to 64 levels; flat lists and independent projection items remain supported. Rust code that exhaustively matches `uqa_graph::cypher::ParseError` must handle `ExpressionTooDeep { limit, position }`. See the [Cypher contract](../sql/07-graph.md#cypher-table-function).
 
-## Prepared statement analysis in development
+## Prepared statement analysis
 
-The development branch analyzes `PREPARE` before execution and infers omitted parameter types in PostgreSQL occurrence order. Statements with missing references or incompatible types can now fail when prepared. Replanning a statement whose result columns, types, or modifiers changed reports `0A000`; deallocate and prepare the updated query to adopt its new result contract. The session metadata view retains the original client SQL string. Register native SQL callbacks before preparing statements that refer to them; later callback registration invalidates cached plans and preserves the original result contract. Two-argument `round` calls require a numeric first argument, so cast floating-point expressions explicitly before supplying a precision. See [prepared statements](../sql/08-transactions-and-routines.md#prepared-statements).
+Version 0.3.0 analyzes `PREPARE` before execution and infers omitted parameter types in PostgreSQL occurrence order. Statements with missing references or incompatible types can now fail when prepared. Replanning a statement whose result columns, types, or modifiers changed reports `0A000`; deallocate and prepare the updated query to adopt its new result contract. The session metadata view retains the original client SQL string. Register native SQL callbacks before preparing statements that refer to them; later callback registration invalidates cached plans and preserves the original result contract. Two-argument `round` calls require a numeric first argument, so cast floating-point expressions explicitly before supplying a precision. See [prepared statements](../sql/08-transactions-and-routines.md#prepared-statements).
 
-The development optimizer returns `OptimizerResult<T>` with either `OptimizerError::Expression(SQLError)` or `OptimizerError::JoinGraph(JoinGraphError)`. Update exhaustive error matches and preserve the SQL error instead of converting every planning failure into an internal error. Immutable constant failures can now occur before execution; unused rule inputs are removed first, and EXECUTE binds arguments before planning the prepared body. Stored routines and views are optimized only when execution needs their definitions.
+The optimizer returns `OptimizerResult<T>` with either `OptimizerError::Expression(SQLError)` or `OptimizerError::JoinGraph(JoinGraphError)`. Update exhaustive error matches and preserve the SQL error instead of converting every planning failure into an internal error. Immutable constant failures can now occur before execution; unused rule inputs are removed first, and EXECUTE binds arguments before planning the prepared body. Stored routines and views are optimized only when execution needs their definitions.
 
 `SQLError::Diagnostic` carries separate SQLSTATE, primary message, detail, and hint fields. Exhaustive error matches must handle this variant; the PostgreSQL server sends detail and hint in their protocol fields. `TableConstraintSet::columns_declared` records whether an empty relation has a declared SQL schema. Engine-managed SQL declarations set it to `Some(true)`; custom catalogs must preserve this field, while missing legacy metadata infers declaration from existing columns. Native document tables and table functions can retain deferred descriptors without making declared SQL tables accept missing columns.
 
@@ -71,7 +77,7 @@ The public Rust SQL AST adds `ColumnDef.not_null_is_local`. Applications using e
 
 ## Compatibility verification
 
-The development branch adds `bound_columns: Option<Vec<String>>` to `FromClause::Table` and `SourcePlan::Table`. Initialize it to `None` when constructing an ordinary query AST or plan. Engine-owned SQL-standard routine definitions capture their source columns and maintain them across column deletion and renaming, so later additions cannot shift stored positional aliases. Initial open migrates legacy source metadata and explicit string-to-regclass constants in stored schema expressions transactionally; subsequent catalog reloads validate the persisted definitions. See [stored column lifecycle](../sql/02-ddl.md#alter-table) for the SQL behavior.
+Version 0.3.0 adds `bound_columns: Option<Vec<String>>` to `FromClause::Table` and `SourcePlan::Table`. Initialize it to `None` when constructing an ordinary query AST or plan. Engine-owned SQL-standard routine definitions capture their source columns and maintain them across column deletion and renaming, so later additions cannot shift stored positional aliases. Initial open migrates legacy source metadata and explicit string-to-regclass constants in stored schema expressions transactionally; subsequent catalog reloads validate the persisted definitions. See [stored column lifecycle](../sql/02-ddl.md#alter-table) for the SQL behavior.
 
 The release includes all 354 PostgreSQL 18.4 core and isolation tests through the official PostgreSQL drivers, with a pinned source inventory and recorded execution provenance. The PostgreSQL reference run passes this corpus in CI. The UQA run of the complete corpus remains unaudited; release compatibility claims continue to follow the checked differential fixtures and feature manifest. See [verification](../internals/09-verification.md) for commands and evidence boundaries.
 
@@ -85,17 +91,17 @@ The following storage guidance applies when upgrading from the 0.1 series.
 
 The storage traits changed in the 0.2 minor release. Applications implementing `uqa_storage::DocumentStore` must implement `put_stored` and `get_stored` using `StoredDocument`. A record keeps its public field map separate from `DocumentMetadata`, including tuple `xmin`. Preserve metadata through scans, rewrites, snapshots, and persistence; storing it as a user field can collide with application data. The default `put` implementation replaces public fields while preserving existing metadata, while a new tuple version uses `put_stored` with explicit metadata.
 
-The B-tree methods on `uqa_storage::PersistentStorageBackend` now use `ValueIndexKey::Column` and `ValueIndexKey::Index`. Preserve both namespaces even when the enclosed names are equal. Named expression indexes store composite `Value::Row` keys; SQL expression binding and evaluation belong to the engine. Update custom backend signatures and physical key encoding before compiling against 0.2.3. See [Storage internals](../internals/03-storage.md) and the trait definitions in [`document_store.rs`](../../../crates/uqa-storage/src/document_store.rs) and [`backend.rs`](../../../crates/uqa-storage/src/backend.rs).
+The B-tree methods on `uqa_storage::PersistentStorageBackend` now use `ValueIndexKey::Column` and `ValueIndexKey::Index`. Preserve both namespaces even when the enclosed names are equal. Named expression indexes store composite `Value::Row` keys; SQL expression binding and evaluation belong to the engine. Update custom backend signatures and physical key encoding before compiling against 0.3.0. See [Storage internals](../internals/03-storage.md) and the trait definitions in [`document_store.rs`](../../../crates/uqa-storage/src/document_store.rs) and [`backend.rs`](../../../crates/uqa-storage/src/backend.rs).
 
 ## Persistent database migration
 
 Opening an older supported database performs the required provider and catalog migrations. The 0.2 minor release adds typed tuple metadata, richer object and column identities, ownership and ACL records, bound routine and rule dependencies, and expression-index metadata. Initial open owns migration writes; later catalog refresh validates the persisted representation. The shipped SQLite and key-value providers handle their storage migrations through the normal engine open path.
 
 1. Stop writers, close every engine using the database, and create a recoverable backup through the [storage backup procedure](04-storage-and-security.md#backups-and-copies).
-2. Open a copy with the exact 0.2.3 application and its selected provider, encryption key, and compression configuration.
+2. Open a copy with the exact 0.3.0 application and its selected provider, encryption key, and compression configuration.
 3. Execute representative reads, writes, role and privilege checks, stored routines and views, and retrieval queries. Verify indexes, transaction rollback, and close-and-reopen behavior with the application's data.
 4. Update every process sharing the database before reopening the original file. Register process-local runtime callbacks again when the application starts.
-5. If the application must return to an older binary, restore the pre-upgrade backup. Do not rely on an older binary reading a file migrated by 0.2.3.
+5. If the application must return to an older binary, restore the pre-upgrade backup. Do not rely on an older binary reading a file migrated by 0.3.0.
 
 Keep migration failures visible and resolve them before admitting writes. Retain encryption keys and any external rollback anchor according to the [storage and security contract](04-storage-and-security.md).
 
@@ -105,11 +111,11 @@ Keep migration failures visible and resolve them before admitting writes. Retain
 
 Use an explicit URL and token or `HttpEngine.fromEnv()` when deployment configuration already supplies credentials. The asynchronous `local()` and `cloud()` constructors require the installed `uqa` CLI and resolve a project once. Keep using the documented parameter wrappers for vectors and tensors, JavaScript `bigint` for exact signed 64-bit integers, and `Buffer` or `Uint8Array` for binary values. The [HTTP Engine reference](09-http-engine.md) describes errors, response limits, streaming, and cancellation.
 
-## SQLite provider ownership in development
+## SQLite provider ownership
 
-The development branch moves all concrete SQLite persistence into `uqa-storage-sqlite`. This is a Rust source migration after 0.2.3; it does not change the SQLite database format, schema version, SQL behavior, encryption options, or compressed-container layout. High-level `Engine` constructors keep their signatures.
+Version 0.3.0 moves all concrete SQLite persistence into `uqa-storage-sqlite`. This provider extraction is a Rust source migration from 0.2.3 and does not itself change the database format, SQL behavior, encryption options, or compressed-container layout. The analyzer and positional-index changes in this release require the separate migration described below. High-level `Engine` constructors keep their signatures.
 
-| Previous Rust API | Development Rust API |
+| Previous Rust API | Rust API in 0.3.0 |
 | --- | --- |
 | `uqa_storage::sqlite::{Catalog, ManagedConnection, ...}` | `uqa_storage_sqlite::{Catalog, ManagedConnection, ...}` |
 | `uqa_storage::{SQLiteStorageBackend, SQLiteStorageProvider, SQLiteTransaction, SQLiteCompressionOptions, SQLiteError, ...}` | The same concrete types under `uqa_storage_sqlite` |
@@ -127,15 +133,15 @@ Construct the plan-native `uqa_planner::OptimizerConfig` with `OptimizerConfig::
 
 The operator-tree `QueryOptimizer` accepts immutable `IndexScanCandidate` values through `with_index_candidates`. Its `index_manager` field and `with_index_manager` constructor are removed; callers discover applicable indexes and their scan costs from their catalog snapshot before invoking the optimizer. The planner no longer imports `uqa-storage` directly. Its existing retrieval IR still has transitive storage dependencies through `uqa-operators`; removing that coupling requires separating logical descriptors from bound execution objects.
 
-## Durable analyzer descriptors in development
+## Durable analyzer descriptors
 
-The development branch persists exact named analyzer descriptors and independent index/search bindings. SQLite schema version 47 adds `descriptor_json` to `_analyzers` and `binding_json` to `_table_field_analyzers`. Key/Value catalogs store equivalent descriptor records alongside their compatibility labels. Initial open resolves legacy definitions and any synonym files, validates ownership, and rebuilds affected full-text indexes from original documents in the owning catalog transaction. Subsequent opens restore verified descriptors without reading original synonym files. See [analyzer persistence](../sql/05-analyzers.md#transactions-and-persistence).
+Version 0.3.0 persists exact named analyzer descriptors and independent index/search bindings. SQLite schema version 47 adds `descriptor_json` to `_analyzers` and `binding_json` to `_table_field_analyzers`. Key/Value catalogs store equivalent descriptor records alongside their compatibility labels. Initial open resolves legacy definitions and any synonym files, validates ownership, and rebuilds affected full-text indexes from original documents in the owning catalog transaction. Subsequent opens restore verified descriptors without reading original synonym files. See [analyzer persistence](../sql/05-analyzers.md#transactions-and-persistence).
 
 Custom `CatalogFacade` implementations must atomically implement `save_analyzer_revision` and `replace_table_field_analyzer_binding`, expose the corresponding `load_analyzer_descriptors` and `load_table_field_analyzer_bindings` reads, and carry the complete records through rename, deletion, and transaction operations. The default write methods reject unsupported persistence. Custom inverted indexes must implement atomic `set_field_analyzer_revisions` for exact restoration. A configuration-only implementation cannot safely substitute for either contract.
 
-Key/Value indexes on the development branch now store complete token occurrences and original-source metadata under canonical binary term keys. Opening an older positional index requires its original documents and resolvable analyzer descriptors; Engine rebuilds it in the initial catalog transaction, including tokenless fields. Failure preserves the prior positional data. Direct `KeyValueInvertedIndex` users must supply original documents to `try_rebuild_documents` when `source_rebuild_required` returns true. The [occurrence format](../../design/occurrence-posting-format.md#keyvalue-publication-and-migration) describes the persistent keys and migration boundary. SQLite graph migration remains pending.
+Key/Value indexes now store complete token occurrences and original-source metadata under canonical binary term keys. Opening an older positional index requires its original documents and resolvable analyzer descriptors; Engine rebuilds it in the initial catalog transaction, including tokenless fields. Failure preserves the prior positional data. Direct `KeyValueInvertedIndex` users must supply original documents to `try_rebuild_documents` when `source_rebuild_required` returns true. The [occurrence format](../../design/occurrence-posting-format.md#keyvalue-publication-and-migration) describes the persistent keys and migration boundary. SQLite schema 48 stores complete occurrence graphs and source metadata separately from legacy positional tables. Initial open rebuilds legacy full-text indexes from original documents in the same catalog transaction; missing sources or unresolved descriptors fail without committing a partial migration. Standalone SQLite catalog preparation preserves the source-rebuild obligation. See [native SQLite ownership](../../design/occurrence-posting-format.md#native-sqlite-ownership) for the format and publication contract.
 
-## Lossless Rust query terms in development
+## Lossless Rust query terms
 
 `WANDQuery::terms`, `CursorWANDQuery::terms`, and `ScoreOperator::query_terms` now contain `TokenTermKey` values, and `BlockMaxIndex::entries` yields those canonical keys. Existing `new` constructors still accept string term arrays; use `new_keys` for terms obtained from rich analysis. Explicit struct construction and direct term-array mutation should convert strings with `TokenTermKey::from_text` or `Into`, and preserve non-scalar terms with `TokenTermKey::from_term`. Analyzer string projections still reject unpaired UTF-16; query execution consumes lossless keys directly. See [search internals](../internals/05-search-and-ranking.md) for scoring and cursor semantics.
 

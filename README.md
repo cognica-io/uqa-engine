@@ -23,15 +23,13 @@ It is designed for applications that need more than a relational table but do no
 - Use the same SQL result and parameter shapes against a local or Cloud UQA node through authenticated Rust, Python, Node.js, and browser HTTP engines.
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
-## New in 0.2.3
+## New in 0.3.0
 
-Version 0.2.3 reads persistent graphs and path indexes directly from storage, removing complete resident replicas from engine startup, session creation, and catalog refresh. Immutable catalog definitions and decoded statistics are shared across sessions, and SQLite refreshes only changed table dependencies while preserving transaction and rollback visibility.
+Version 0.3.0 adds native Korean Nori analysis with an embedded dictionary, user dictionaries, morphological token attributes, and optional number composition. Rust applications enable the `nori` feature; the official Python, Node.js, and browser WASM packages include it. Analysis runs without a JVM. Memory, SQLite, and redb preserve exact analyzer revisions and complete token graphs for phrase queries and highlighting at original source offsets.
 
-Persistent engines now maintain column statistics automatically in a database-level background worker. Bounded row samples and value-size limits keep large payloads out of statistics, and legacy statistics are refreshed after reopen without requiring another write. The release also fixes staged document-ID reuse during concurrent transaction snapshot refresh, preventing INSERT and COPY from overwriting earlier rows. Excessively nested Cypher expressions return parse errors instead of exhausting the process stack.
+The release also adds PostgreSQL-style domains, data-modifying CTEs, prepared parameter inference and custom/generic plan selection, and a source-distributed PostgreSQL Simple Query TCP server. SQL fixes cover object ownership and dependency cascades, stored routine bindings, floating-point behavior, temporal precision, and transaction clocks. Concrete SQLite APIs now belong to `uqa-storage-sqlite`.
 
-Read the [release history](HISTORY.md#023---2026-09-09) for the complete changes and the [upgrade guide](docs/manual/reference/10-upgrading.md) for the Rust graph API changes and persistent catalog migration before updating an application or custom storage provider.
-
-The development branch adds a [PostgreSQL Simple Query TCP listener](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/reference/11-postgresql-server.md), [data-modifying CTEs](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/sql/03-queries-and-dml.md#data-modifying-ctes), [schema deletion and dependency cascades](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/sql/02-ddl.md#schemas), [stored relation/routine dependencies, source aliases, and column lifecycle](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/sql/02-ddl.md#stored-relation-and-routine-dependencies), the Rust [Simple Query API with PostgreSQL command completion](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/reference/02-rust-engine-api.md#simple-query-messages), [domain declarations, constraint-checked conversions, and deletion](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/sql/02-ddl.md#domain-declarations-and-deletion), [prepared parameter inference, custom/generic plan selection, and session metadata](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/sql/08-transactions-and-routines.md#prepared-statements), [floating-point conversion, arithmetic, and aggregate widths](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/sql/01-data-types.md#floating-point), [SQL value-expression types and statement/transaction clocks](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/sql/04-expressions-and-functions.md#temporal-functions), and [temporal precision and interval field restrictions](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/sql/01-data-types.md). These changes are recorded under [Unreleased](https://github.com/cognica-io/uqa-engine/blob/main/HISTORY.md#unreleased).
+Read the [release history](HISTORY.md#030---2026-09-14) for the complete changes and the [upgrade guide](docs/manual/reference/10-upgrading.md) for Rust API changes and persistent analyzer/index migration before updating an application or custom storage provider.
 
 ## Mathematical foundation
 
@@ -44,7 +42,7 @@ The manuscript consolidates and revises the published work on [unified query alg
 Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
 ```sh
-python -m pip install uqa==0.2.3
+python -m pip install uqa==0.3.0
 usql
 ```
 
@@ -96,7 +94,7 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 Add the released package to your application:
 
 ```sh
-cargo add uqa@0.2.3
+cargo add uqa@0.3.0
 ```
 
 `uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.
@@ -192,7 +190,7 @@ Python and Node.js provide matching `local` and `cloud` project constructors; br
 
 `Engine::new()` keeps data in memory, while `Engine::open(path)` and `usql --db <path>` use the default persistent SQLite backend. Persistent engines restore schemas, documents, text postings, graphs, scoring parameters, models, views, and statistics when reopened.
 
-On the development branch, `uqa-storage` owns provider-independent contracts and shared data structures, while `uqa-storage-sqlite` owns SQLite connections, catalogs, indexes, transactions, graph persistence, and compressed storage. Rust callers using concrete storage types must use the [updated provider imports](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/reference/10-upgrading.md#sqlite-provider-ownership-in-development). This ownership change preserves the database format and engine SQL API.
+In 0.3.0, `uqa-storage` owns provider-independent contracts and shared data structures, while `uqa-storage-sqlite` owns SQLite connections, catalogs, indexes, transactions, graph persistence, and compressed storage. Rust callers using concrete storage types must use the [updated provider imports](docs/manual/reference/10-upgrading.md#sqlite-provider-ownership). This ownership change preserves the database format and engine SQL API.
 
 Applications that want a pure-Rust single-file store can compose the engine with `uqa-storage-redb`. The provider owns the database, and every `Engine::new_session()` receives independent transaction state over the same file.
 
