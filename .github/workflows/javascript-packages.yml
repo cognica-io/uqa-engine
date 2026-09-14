@@ -100,7 +100,7 @@ jobs:
       - name: Install Node package tooling
         working-directory: crates/uqa-node
         run: npm ci --ignore-scripts
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: node-addon-*
           path: native-addons
