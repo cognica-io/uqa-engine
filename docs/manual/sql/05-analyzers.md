@@ -57,6 +57,7 @@ Stages run in this order: every `char_filters` entry, the one `tokenizer`, and e
 | Type | Required properties | Optional properties |
 | --- | --- | --- |
 | `html_strip` | None | None |
+| `cjk_width` | None | None |
 | `mapping` | `mapping` object from source string to replacement string | None |
 | `pattern_replace` | `pattern` | `replacement`, default empty |
 

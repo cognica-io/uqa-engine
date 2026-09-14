@@ -29,7 +29,7 @@ impl RuntimeProfiles {
             let pattern = match filter {
                 CharFilter::HTMLStrip => "<[^>]+>",
                 CharFilter::PatternReplace { pattern, .. } => pattern,
-                CharFilter::Mapping { .. } => continue,
+                CharFilter::Mapping { .. } | CharFilter::CJKWidth => continue,
             };
             expressions.push(expression(pattern, "pattern-replace character filter")?);
         }
@@ -62,7 +62,11 @@ impl RuntimeProfiles {
         let normalization = config
             .token_filters
             .iter()
-            .any(|filter| matches!(filter, TokenFilter::ASCIIFolding));
+            .any(|filter| matches!(filter, TokenFilter::ASCIIFolding))
+            || config
+                .char_filters
+                .iter()
+                .any(|filter| matches!(filter, CharFilter::CJKWidth));
         Ok(Self {
             rust_unicode: (rust_tokenizer || rust_lower).then_some(char::UNICODE_VERSION),
             normalization_unicode: normalization.then_some(unicode_normalization::UNICODE_VERSION),

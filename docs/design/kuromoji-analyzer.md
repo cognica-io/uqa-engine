@@ -1,6 +1,6 @@
 # Native Kuromoji analysis and shared morphology
 
-Status: Implementation in progress against UQA 0.3.0 and Lucene 10.5.1. The private shared dictionary reader/writer, UTF-16 lexicon, and connection-cost matrix are extracted from Nori into `uqa-analysis::morphology`. Japanese dictionary conversion, tokenization, analyzer integration, and reference verification remain to be implemented. The 0.3.0 release proceeds independently.
+Status: Implementation in progress against UQA 0.3.0 and Lucene 10.5.1. The private shared dictionary reader/writer, UTF-16 lexicon, and connection-cost matrix are extracted from Nori into `uqa-analysis::morphology`; the common CJK width character filter is implemented and verified against Lucene. Japanese dictionary conversion, tokenization, analyzer integration, and their reference verification remain to be implemented. The 0.3.0 release proceeds independently.
 
 The [implementation plan](../plans/0007-kuromoji-analyzer.md) tracks ordered work units, dependencies, verified results and remaining acceptance gates. Update it with each logical implementation unit.
 

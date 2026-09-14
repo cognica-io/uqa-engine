@@ -40,7 +40,7 @@ class NoriModelExportTest(unittest.TestCase):
                 }],
             }
             (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-            with mock.patch.object(runtime, "ROOT", root), mock.patch.object(runtime, "urlopen") as download:
+            with mock.patch.object(runtime, "ROOT", root), mock.patch.object(runtime.lucene_runtime, "urlopen") as download:
                 with self.assertRaisesRegex(RuntimeError, "Cached artifact checksum mismatch"):
                     runtime.prepare_jars(root, offline=False)
                 download.assert_not_called()

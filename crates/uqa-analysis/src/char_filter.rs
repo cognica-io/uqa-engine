@@ -17,6 +17,7 @@ use uqa_core::memory::MemoryBudget;
 mod compiled;
 mod replacement;
 mod stream;
+mod width;
 pub(crate) use compiled::PreparedCharFilter;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +27,17 @@ pub enum CharFilter {
     // deserializable: releases up to 0.1.2 wrote the derived spelling.
     #[serde(rename = "html_strip", alias = "h_t_m_l_strip")]
     HTMLStrip,
+    /// Fold fullwidth ASCII and halfwidth Katakana, preserving original source spans.
+    ///
+    /// ```
+    /// use uqa_analysis::CharFilter;
+    /// let filtered = CharFilter::CJKWidth.filter_with_offsets("ｶﾞＡ①")?;
+    /// assert_eq!(filtered.as_str(), "ガA①");
+    /// assert_eq!(filtered.source_offsets(0..3)?.utf16, 0..2);
+    /// # Ok::<(), uqa_analysis::AnalysisError>(())
+    /// ```
+    #[serde(rename = "cjk_width")]
+    CJKWidth,
     Mapping {
         mapping: BTreeMap<String, String>,
     },

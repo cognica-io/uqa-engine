@@ -18,6 +18,7 @@ use crate::{AnalysisError, AnalysisResult, FilteredText};
 #[derive(Debug)]
 pub(crate) enum PreparedCharFilter<'a> {
     HTMLStrip,
+    CJKWidth,
     Mapping(Vec<(String, String)>),
     PatternReplace {
         expression: Box<CooperativeRegex>,
@@ -29,6 +30,7 @@ impl CharFilter {
     pub(crate) fn prepare(&self) -> AnalysisResult<PreparedCharFilter<'_>> {
         Ok(match self {
             Self::HTMLStrip => PreparedCharFilter::HTMLStrip,
+            Self::CJKWidth => PreparedCharFilter::CJKWidth,
             Self::Mapping { mapping } => {
                 PreparedCharFilter::Mapping(mapping_longest_first(mapping))
             }
@@ -63,6 +65,7 @@ impl PreparedCharFilter<'_> {
     pub(crate) fn into_owned(self) -> PreparedCharFilter<'static> {
         match self {
             Self::HTMLStrip => PreparedCharFilter::HTMLStrip,
+            Self::CJKWidth => PreparedCharFilter::CJKWidth,
             Self::Mapping(mapping) => PreparedCharFilter::Mapping(mapping),
             Self::PatternReplace {
                 expression,
@@ -90,6 +93,7 @@ impl PreparedCharFilter<'_> {
     ) -> AnalysisResult<FilteredText<'a>> {
         poll()?;
         match self {
+            Self::CJKWidth => super::width::replace_width(&mut text, budget, poll)?,
             Self::HTMLStrip => {
                 replace_html(&mut text, budget, poll)?;
                 for (entity, replacement) in HTML_ENTITIES {

@@ -4,6 +4,8 @@ Status: Runtime implementation, owner review fixes, and package verification are
 
 Update rule: Reconcile this plan in every Nori implementation PR that changes a task, public contract, dictionary input, verification result, or remaining gate. Completion requires the full [Nori design](../design/nori-analyzer.md), including consumers of morphological token graphs, rather than tokenizer compilation alone.
 
+The [Kuromoji implementation plan](0007-kuromoji-analyzer.md) tracks extraction of shared morphology mechanisms. Nori now uses the private analysis-owned dictionary reader/writer, UTF-16 lexicon and cost matrix, and its Docker tools use the common Lucene artifact/execution helper. Existing Nori bundle identities, descriptor fixtures and runtime outputs remain unchanged; the cross-language plan records the owning regression checks for these moves.
+
 ## Objective and fixed decisions
 
 Implement the Lucene 10.5.1 Nori analyzer in native Rust for UQA Engine and its supported bindings. Preserve exact reference token attributes and dictionary interpretation, integrate positional graphs and source offsets into retrieval and highlighting, and make analyzer revisions durable and transactional. Keep the existing `standard_cjk` n-gram analyzer distinct.
