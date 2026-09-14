@@ -40,3 +40,6 @@ pub(crate) mod filter;
 
 #[cfg(feature = "nori")]
 pub(crate) mod decimal;
+
+#[cfg(feature = "nori")]
+pub(crate) mod number;

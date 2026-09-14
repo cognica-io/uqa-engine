@@ -6,10 +6,8 @@
 
 //! Number composition retains lookahead, terminal attributes, and their unique allocation leases.
 
-use crate::nori::error::{check_limit, invalid};
-use crate::nori::filters::stream::{AllocatedStream, FilterToken};
-use crate::nori::filters::{token_units, Work};
-use crate::nori::NoriLimits;
+use super::{Policy, Resource};
+use crate::morphology::filter::{AllocatedStream, ComposingToken, Work};
 use crate::token::allocation::{TokenBatchAllocation, TokenBatchInput, TokenBuffer};
 use crate::{AnalysisError, AnalysisResult};
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryReservation};
@@ -39,7 +37,7 @@ impl<T> std::ops::Deref for OwnedToken<T> {
     }
 }
 
-struct State<'a, T: FilterToken> {
+struct State<'a, T: ComposingToken, P: Policy<T>> {
     context: T::Context,
     input: Option<TokenBatchInput<T>>,
     current: Option<OwnedToken<T>>,
@@ -52,26 +50,18 @@ struct State<'a, T: FilterToken> {
     output_units: usize,
     final_position_increment: u32,
     budget: MemoryBudget,
-    limits: NoriLimits,
+    policy: P,
     work: Work<'a>,
 }
 
-pub(in crate::nori) fn filter<T: FilterToken>(
+pub(crate) fn filter<T: ComposingToken>(
     input: AllocatedStream<T>,
-    limits: NoriLimits,
-    poll: &mut impl FnMut() -> AnalysisResult<()>,
+    policy: impl Policy<T>,
+    poll: &mut dyn FnMut() -> AnalysisResult<()>,
 ) -> AnalysisResult<AllocatedStream<T>> {
     let work = Work::new(poll)?;
-    check_limit(
-        "Nori output tokens",
-        input.batch.tokens().len(),
-        limits.max_tokens,
-    )?;
-    check_limit(
-        "Nori input UTF-16 units",
-        input.final_offset_utf16,
-        limits.max_input_utf16,
-    )?;
+    policy.check(Resource::Tokens, input.batch.tokens().len())?;
+    policy.check(Resource::InputUnits, input.final_offset_utf16)?;
     let budget = input.batch.budget().clone();
     let mut state = State {
         context: input.context,
@@ -86,18 +76,16 @@ pub(in crate::nori) fn filter<T: FilterToken>(
         output_units: 0,
         final_position_increment: 0,
         budget,
-        limits,
+        policy,
         work,
     };
     while state.next()? {
         let token = state.current.take().expect("emitted attributes");
         let length = token.term_len(&mut state.work)?;
         state.output_units = state.total_units(&token, length)?;
-        check_limit(
-            "Nori output tokens",
-            state.output.len() + 1,
-            limits.max_tokens,
-        )?;
+        state
+            .policy
+            .check(Resource::Tokens, state.output.len() + 1)?;
         state.output.push(token.into_budgeted())?;
         state.changed = false;
     }
@@ -120,17 +108,13 @@ pub(in crate::nori) fn filter<T: FilterToken>(
     })
 }
 
-impl<T: FilterToken> State<'_, T> {
+impl<T: ComposingToken, P: Policy<T>> State<'_, T, P> {
     fn total_units(&mut self, token: &T, term_units: usize) -> AnalysisResult<usize> {
         let total = self
             .output_units
-            .checked_add(token_units(token, term_units, &mut self.work)?)
-            .ok_or_else(|| invalid("Nori number", "attribute size overflow"))?;
-        check_limit(
-            "Nori output UTF-16 units",
-            total,
-            self.limits.max_output_utf16,
-        )?;
+            .checked_add(self.policy.token_units(token, term_units, &mut self.work)?)
+            .ok_or_else(|| self.policy.invalid("attribute size overflow"))?;
+        self.policy.check(Resource::OutputUnits, total)?;
         Ok(total)
     }
 
@@ -195,7 +179,7 @@ impl<T: FilterToken> State<'_, T> {
                 .ok_or(AnalysisError::InvalidTokenPosition)?;
             return Ok(true);
         }
-        if !super::numeral(current.term(), &mut self.work)? {
+        if !super::numeral::<P::Symbols>(current.term(), &mut self.work)? {
             return Ok(true);
         }
         self.compose()
@@ -236,8 +220,8 @@ impl<T: FilterToken> State<'_, T> {
                 .numeral
                 .len()
                 .checked_add(term.len())
-                .ok_or_else(|| invalid("Nori number", "numeral size overflow"))?;
-            check_limit("Nori numeric units", required, self.limits.max_output_utf16)?;
+                .ok_or_else(|| self.policy.invalid("numeral size overflow"))?;
+            self.policy.check(Resource::NumericUnits, required)?;
             self.numeral.reserve(term.len())?;
             for unit in term.iter() {
                 self.work.tick()?;
@@ -252,8 +236,8 @@ impl<T: FilterToken> State<'_, T> {
                 self.work.tick()?;
                 term.push(unit)?;
             }
-            if !super::numeral(term.iter().copied(), &mut self.work)?
-                && !super::punctuation(term.iter().copied(), &mut self.work)?
+            if !super::numeral::<P::Symbols>(term.iter().copied(), &mut self.work)?
+                && !super::punctuation::<P::Symbols>(term.iter().copied(), &mut self.work)?
             {
                 break true;
             }
@@ -274,10 +258,11 @@ impl<T: FilterToken> State<'_, T> {
             .token
             .cover(&first, &last, &self.context, &mut self.work)?;
         let metadata = self.total_units(&current, 0)?;
-        let maximum = self.limits.max_output_utf16 - metadata;
+        let maximum = self.policy.maximum_output() - metadata;
         let numeral = std::mem::replace(&mut self.numeral, BudgetedVec::new(&self.budget));
-        let normalized =
-            super::normalize_budgeted(&numeral, maximum, &self.budget, &mut self.work)?;
+        let normalized = self
+            .policy
+            .normalize(&numeral, maximum, &self.budget, &mut self.work)?;
         current.token.replace_term(
             normalized,
             &mut current.memory,

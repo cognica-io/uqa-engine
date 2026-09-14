@@ -6,9 +6,11 @@
 
 //! Reference prefix parsing, with malformed decimals distinct from resource errors.
 
-use super::{digit, exponent, Context};
+use super::Symbols;
+use crate::morphology::decimal::Context;
 use crate::morphology::decimal::Decimal;
 use crate::AnalysisError;
+use std::marker::PhantomData;
 use uqa_core::memory::BudgetedDeque;
 
 enum ParseError {
@@ -24,30 +26,31 @@ impl From<AnalysisError> for ParseError {
 
 type Result<T> = std::result::Result<T, ParseError>;
 
-struct Parser<'a, 'b, 'c> {
+struct Parser<'a, C: Context, S: Symbols> {
     input: &'a [u16],
     offset: usize,
-    context: &'a mut Context<'b, 'c>,
+    context: &'a mut C,
+    symbols: PhantomData<S>,
 }
 
-impl Parser<'_, '_, '_> {
+impl<C: Context, S: Symbols> Parser<'_, C, S> {
     fn basic(&mut self) -> Result<Option<Decimal>> {
         let start = self.offset;
         let mut count = 0;
         let mut dot = false;
         let mut scale = 0;
         while let Some(&unit) = self.input.get(self.offset) {
-            self.context.work.tick()?;
-            if digit(unit).is_some() {
+            self.context.tick()?;
+            if S::digit(unit).is_some() {
                 count += 1;
                 self.context.check_digits(count)?;
                 scale += usize::from(dot);
-            } else if matches!(unit, 0x002e | 0xff0e) {
+            } else if S::decimal_point(unit) {
                 if dot {
                     return Err(ParseError::Malformed);
                 }
                 dot = true;
-            } else if !matches!(unit, 0x002c | 0xff0c) {
+            } else if !S::separator(unit) {
                 break;
             }
             self.offset += 1;
@@ -59,11 +62,11 @@ impl Parser<'_, '_, '_> {
                 Ok(None)
             };
         }
-        let mut digits = BudgetedDeque::new(self.context.budget);
+        let mut digits = BudgetedDeque::new(self.context.budget());
         digits.reserve(count).map_err(AnalysisError::from)?;
         for unit in &self.input[start..self.offset] {
-            self.context.work.tick()?;
-            if let Some(value) = digit(*unit) {
+            self.context.tick()?;
+            if let Some(value) = S::digit(*unit) {
                 digits.push_back(value).map_err(AnalysisError::from)?;
             }
         }
@@ -74,8 +77,8 @@ impl Parser<'_, '_, '_> {
         let power = self
             .input
             .get(self.offset)
-            .map_or(0, |unit| exponent(*unit));
-        if power > 0 && (power > 3) == large {
+            .map_or(0, |unit| S::exponent(*unit));
+        if power > 0 && S::large_power(power) == large {
             self.offset += 1;
             power
         } else {
@@ -103,21 +106,22 @@ impl Parser<'_, '_, '_> {
             return Ok(None);
         }
         while let Some(next) = self.pair(large)? {
-            self.context.work.tick()?;
+            self.context.tick()?;
             sum = Some(sum.take().expect("nonempty sum").add(&next, self.context)?);
         }
         Ok(sum)
     }
 }
 
-pub(super) fn parse(
+pub(crate) fn parse<S: Symbols>(
     input: &[u16],
-    context: &mut Context<'_, '_>,
+    context: &mut impl Context,
 ) -> crate::AnalysisResult<Option<Decimal>> {
     match (Parser {
         input,
         offset: 0,
         context,
+        symbols: PhantomData::<S>,
     })
     .sum(true)
     {
