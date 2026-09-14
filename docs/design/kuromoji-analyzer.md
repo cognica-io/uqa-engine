@@ -53,7 +53,7 @@ The [analyzer ownership contract](../manual/internals/04-analyzer-pipeline.md), 
 | Former Nori I/O, frame, surface, matrix and string codecs | Shared mechanisms extracted | Reader/writer, bounded frame verification, lexicon, surface ranges, matrix and string pools now live in private `uqa_analysis::morphology`. Language wrappers retain the exact schema, hash domain, typed identity and entry interpretation. Nori's existing bundle remains byte-for-byte readable and reproducible. |
 | `morphology/unicode.rs`, `resources/hash.rs` | Unicode codec extracted; resource identity work remains | Shared immutable, content-identified Unicode profiles and hashes. Korean and Japanese character-class tables remain separate. Identical JDK tables may share one allocation only after their identities match. |
 | `morphology/resources.rs`, language resource wrappers | Shared resource ownership implemented | Both languages use shared artifact/hash validation, serialized immutable publication, bounded dictionary/user caches and retention statistics. Each retains typed requests, resolvers, resolved handles and public errors. The common analyzer builder installs both owners independently. |
-| `nori/tokenizer/lattice.rs`, reusable parts of `viterbi.rs` | Extract bounded candidate/lattice mechanics | `morphology::lattice` and the common forward-search machinery; preserve candidate order, checked indexing, Java cost arithmetic, frontier release, and reservation ownership. |
+| `morphology/lattice.rs`, reusable parts of language Viterbi implementations | Bounded candidate storage extracted; shared traversal remains | Nori uses common rolling positions, ordered candidate insertion, pruning/rebasing, checked limits and reserved frontier release. Language configuration supplies the original error variants and labels. Japanese resegmentation and N-best storage remain separate consumers. |
 | Nori `word.rs`, `emission.rs`, POS, spaces and unknown rules | Keep Korean policy | Japanese policies live under `kuromoji/tokenizer`; do not add Japanese branches throughout the Korean tokenizer or make Japanese modules import `nori`. |
 | `token.rs`, `token/allocation.rs`, `token/korean.rs` | Generalize the bridge | A language-tagged internal morphology value and shared source projection with typed language adapters. Preserve existing `korean_morphology()` and serialized Korean output. |
 | `resources.rs`, `descriptor.rs`, `analyzer/compiled.rs` | Generalize compiled resource and normalization selection | Replace the Nori-only resolved resource/normalizer slots with analysis-owned typed preparation and normalization plans. Preserve legacy descriptor bytes and fingerprints. |
@@ -62,6 +62,16 @@ The [analyzer ownership contract](../manual/internals/04-analyzer-pipeline.md), 
 | Storage occurrences, scoring, graph phrase matcher and highlighting | Reuse existing interfaces | No Japanese posting namespace, morphology-aware storage dependency, duplicated scorer, or Engine-side phrase implementation. |
 
 Do not extract a new general-purpose morphology crate now: both implementations belong to `uqa-analysis`, and no independent runtime consumer requires a crate boundary. Use private modules and narrow typed interfaces. Share the forward-search mechanisms after recording a correspondence between both pinned algorithms; keep Japanese resegmentation and N-best traversal distinct where their state requirements differ. Nori's single-best lattice must not acquire N-best arrays or allocate Japanese scratch.
+
+The pinned common `Viterbi.forward` supplies the same ordered position traversal, single-node frontier commit, least-cost forced backtrace at a 1,024-unit gap, and EOS connection-cost choice to both languages. Its `Position`/`WrappedPositionArray` correspond to UQA's shared rolling lattice: candidate insertion order decides exact cost ties, pruning keeps the chosen candidate at index zero, and rebasing preserves the selected right context. The extraction changes neither candidate layout nor the reservation and polling order; its language adapter supplies only limits and existing diagnostics.
+
+| Forward-search decision | Korean policy | Japanese policy |
+| --- | --- | --- |
+| User matches | Longest entry with the per-forward maximum bound | Every matching prefix, suppressing system matches at that start |
+| Space treatment | One space-separator prefix and POS-dependent transition penalty | No implicit prefix skip or Korean space penalty |
+| Unknown grouping | Script/category/digit compatibility | Exact character class and punctuation compatibility; NORMAL suppresses overlaps within the previous unknown span |
+| Backtrace emission | Korean decompound modes and morphology | Search penalties, alternate segmentation, optional compounds and EXTENDED unigrams |
+| Alternative paths | No N-best state | Independently bounded Japanese N-best traversal and graph fixups when requested |
 
 ## Crate and feature design
 
