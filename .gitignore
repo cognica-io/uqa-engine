@@ -58,3 +58,8 @@ crates/uqa-wasm/js/uqa.wasm
 # napi build outputs
 crates/uqa-node/*.node
 crates/uqa-node/node_modules/
+
+# Generated Nori measurements belong in target/benchmark-runs or CI artifacts.
+/benchmarks/nori/evidence/
+/benchmarks/nori/*-evidence/
+/benchmarks/nori/*followup-evidence.json

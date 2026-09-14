@@ -23,15 +23,4 @@ Memory comes from `performance.measureUserAgentSpecificMemory()`. This is a brow
 
 The page samples before WASM initialization, after Engine open, after the first complete Nori diagnostic, and at persistence/reopen boundaries. Each of the 18 corpus conditions adds a sample with its complete returned diagnostic still live and another after releasing it. The final sample follows cleanup and persistence. There are 48 points per enabled run and seven per disabled run. The exact diagnostic hash is computed after the retained sample so the result remains live while the browser measures it.
 
-The hash-pinned reports in `browser-evidence/manifest.json` contain three enabled and three disabled runs on Chrome 152.0.7977.83, macOS aarch64, and Apple M1 Ultra. They were collected from the stable dirty tree based on `b3c804c0`; their source and executable identities record the measured implementation. Every run passed, providing 165 memory observations, 15 distinct page instances, nine IndexedDB reloads, and 54 full corpus comparisons. The build and browser measurements ran sequentially. The earlier driver trial is not calibration evidence.
-
-| Observation | Minimum | Median | Maximum |
-| --- | ---: | ---: | ---: |
-| Enabled, first Engine open before Nori use | 37,878,243 bytes | 38,266,763 bytes | 38,292,249 bytes |
-| Enabled, first complete Nori diagnostic | 141,093,365 bytes | 141,179,276 bytes | 141,194,226 bytes |
-| Enabled, first open restored from IndexedDB | 139,893,323 bytes | 139,895,799 bytes | 139,899,385 bytes |
-| Enabled, final cleanup and persistence | 142,310,052 bytes | 142,337,678 bytes | 142,351,353 bytes |
-| Disabled, first Engine open | 27,974,411 bytes | 28,024,379 bytes | 28,511,740 bytes |
-| Disabled, final cleanup and persistence | 29,526,844 bytes | 29,526,852 bytes | 29,526,920 bytes |
-
-The largest observed value across all enabled points is 143,655,635 bytes; the disabled maximum is 29,526,920 bytes. The generated WASM files are 56,648,788 and 46,267,072 bytes respectively, before HTTP compression. Dictionary initialization and durable descriptor restoration explain why an enabled reopen is larger than the first empty Engine open. The complete reports retain per-corpus values and browser attribution rather than collapsing them into a claimed heap peak.
+Browser reports remain CI artifacts. Verifier unit tests use a small synthetic fixture with sentinel memory and IndexedDB byte counts; those values are not browser observations. The complete SQL diagnostic contract remains in `browser-contract.json`.

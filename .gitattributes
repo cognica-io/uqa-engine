@@ -37,7 +37,7 @@ crates/uqa-node/THIRD-PARTY/** -text -whitespace linguist-vendored
 crates/uqa-wasm/js/THIRD-PARTY/** -text -whitespace linguist-vendored
 python/uqa/THIRD-PARTY/** -text -whitespace linguist-vendored
 
-# Nori fixture and evidence identities hash the exact checked-out bytes.
+# Nori contract and fixture identities hash the exact checked-out bytes.
 crates/uqa-analysis/benches/nori/corpus.json text eol=lf
 crates/uqa/benches/nori_sql/catalogs/*.db binary
 crates/uqa/benches/nori_sql/catalogs/*.json text eol=lf
@@ -46,7 +46,5 @@ tests/parity/nori/**/*.jsonl text eol=lf
 benchmarks/nori/**/*.json text eol=lf
 benchmarks/nori/**/*.jsonl text eol=lf
 
-# Keep generated measurement payloads collapsed in reviews; limits and runners remain visible.
-benchmarks/nori/evidence/** linguist-generated
-benchmarks/nori/*-evidence/** linguist-generated
+# Reference-oracle fixtures are generated from pinned inputs.
 tests/parity/nori/*_expected.jsonl linguist-generated

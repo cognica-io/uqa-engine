@@ -38393,13 +38393,13 @@
       "macos/aarch64/64": "Original full repeats overlapped other local work; the complete confirmation still differs. Resolve the measured variation and verify a fresh complete pair under the same ceiling before final acceptance."
     },
     "allocation_followups": [
-      "benchmarks/nori/sql-fixture-evidence/sqlite-session-cache-evidence.json",
-      "benchmarks/nori/sql-timing-followup-evidence.json",
-      "benchmarks/nori/persistent-evidence/redb-commit-allocation-probe.json"
+      "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/sql-fixture-evidence/sqlite-session-cache-evidence.json",
+      "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/sql-timing-followup-evidence.json",
+      "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-commit-allocation-probe.json"
     ],
     "reports": [
       {
-        "path": "benchmarks/nori/sql-evidence/macos-baseline.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/sql-evidence/macos-baseline.json",
         "sha256": "d7a19fd11d0566bf69b7101d3c9fdd87d042de13dae8d7d1810d681da035b5e2",
         "target": "macos/aarch64/64",
         "role": "baseline",
@@ -38411,7 +38411,7 @@
         "timing_calibration_eligible": false
       },
       {
-        "path": "benchmarks/nori/sql-evidence/macos-repeat.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/sql-evidence/macos-repeat.json",
         "sha256": "1467cfd84970c72fcda9fc8748e2284c5ddc4ebc1c524aec82987a08804998c5",
         "target": "macos/aarch64/64",
         "role": "repeat",
@@ -38423,7 +38423,7 @@
         "timing_calibration_eligible": false
       },
       {
-        "path": "benchmarks/nori/sql-evidence/macos-confirmation.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/sql-evidence/macos-confirmation.json",
         "sha256": "1c9e43646b16665757428c26d02cd0907c3dc8827d6eec0b1a13841f9cd7b6b2",
         "target": "macos/aarch64/64",
         "role": "confirmation",
@@ -38435,7 +38435,7 @@
         "timing_calibration_eligible": false
       },
       {
-        "path": "benchmarks/nori/sql-evidence/linux-baseline.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/sql-evidence/linux-baseline.json",
         "sha256": "6b5ddd34d6b8a204170035511b1c5e3f1fdc69e8a7f1b6cb002ad590ee4ff126",
         "target": "linux/x86_64/64",
         "role": "baseline",
@@ -38449,7 +38449,7 @@
         "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34762155525/artifacts/10320709893"
       },
       {
-        "path": "benchmarks/nori/sql-evidence/linux-repeat.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/sql-evidence/linux-repeat.json",
         "sha256": "4786ad9aae988bdcefbeecbd369a91304e3cd775ad465808b826ff49f46035b2",
         "target": "linux/x86_64/64",
         "role": "repeat",
@@ -38463,7 +38463,7 @@
         "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34762155525/artifacts/10320709893"
       },
       {
-        "path": "benchmarks/nori/sql-evidence/wasm-baseline.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/sql-evidence/wasm-baseline.json",
         "sha256": "1ca2daf82ffb7b89aa79db494289c10fbd61f195a46e6f9ab34d043df967b64b",
         "target": "emscripten/wasm32/32",
         "role": "baseline",
@@ -38477,7 +38477,7 @@
         "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34762155525/artifacts/10321132186"
       },
       {
-        "path": "benchmarks/nori/sql-evidence/wasm-repeat.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/sql-evidence/wasm-repeat.json",
         "sha256": "8011561964021eddac4f4315f02dff5e1014fb545b68da2d54dca1032726b5f6",
         "target": "emscripten/wasm32/32",
         "role": "repeat",
@@ -38491,7 +38491,7 @@
         "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34762155525/artifacts/10321132186"
       },
       {
-        "path": "benchmarks/nori/sql-evidence/linux-order-baseline.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/sql-evidence/linux-order-baseline.json",
         "sha256": "50a94671167a3147810441ff34aac7c7ede1cc03cb279b88fe6d10ef3078a1ab",
         "target": "linux/x86_64/64",
         "role": "baseline",
@@ -38506,7 +38506,7 @@
         "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34776341405/artifacts/10325835339"
       },
       {
-        "path": "benchmarks/nori/sql-evidence/linux-order-repeat.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/sql-evidence/linux-order-repeat.json",
         "sha256": "7c8f5ebc2857b5dbb7a43fbf79d627b60b58a6e671e77e3fb88c03c3c4002b1c",
         "target": "linux/x86_64/64",
         "role": "repeat",

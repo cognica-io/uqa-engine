@@ -10,6 +10,8 @@ Before implementing or moving functionality, inspect the relevant crates' `Cargo
 
 Implement behavior in its owning crate and keep its tests there. Keep Engine responsible for state, session, transaction, and retained-resource adapters; do not place analysis, planning, scoring, storage, or execution algorithms in Engine for convenience. Reuse or extend the owning crate's interfaces instead of duplicating behavior, adding reverse dependencies, or weakening dependency and capability policies. Run the relevant ownership and dependency checks before committing.
 
+Keep generated benchmark reports and diagnostic traces in ignored output directories or CI artifacts. Commit only workload fixtures, expected results, limits, and compact provenance references; verifier unit tests must not depend on historical machine reports. Performance acceptance requires a controlled host and an independently established noise bound. Do not retry uncontrolled measurements until they pass, infer host control from matching metadata or a clean worktree, or delay independent code review and fixes while waiting for noisy timing results.
+
 Keep each prose paragraph on one physical line. Do not insert line breaks inside paragraphs.
 
 Preserve the established `CPU`, `MLX`, and `UQA` initialisms in Rust identifiers and design pseudocode; do not apply mixed-case acronym normalization to them.

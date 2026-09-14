@@ -35,6 +35,13 @@ def fixture():
 
 
 class NoriIndexBenchmarkTest(unittest.TestCase):
+    def test_reviewed_limits_cover_both_pointer_widths_and_every_workload(self):
+        limits = json.loads(benchmark.LIMITS.read_text())
+        self.assertEqual(set(limits["allocation_ceilings"]), {"32", "64"})
+        self.assertEqual(set(limits["outputs"]), set(benchmark.EXPECTED))
+        for ceilings in limits["allocation_ceilings"].values():
+            self.assertEqual(set(ceilings), set(benchmark.EXPECTED))
+
     def test_full_mutation_contract_passes_and_timing_is_separate(self):
         report, limits = fixture()
         self.assertEqual(benchmark.check(report, limits), {"allocation_and_graph_passed": True, "timing_compared": False, "timing_ratios": {}})
@@ -105,23 +112,6 @@ class NoriIndexBenchmarkTest(unittest.TestCase):
         report["measurements"][0].update(elapsed_ns=[2000] * 7, median_ns=2000)
         with self.assertRaisesRegex(RuntimeError, "indexing timing regression"):
             benchmark.check(report, limits, baseline)
-
-    def test_checked_in_measurements_support_both_pointer_widths(self):
-        limits = json.loads(benchmark.LIMITS.read_text())
-        self.assertEqual(set(limits["allocation_ceilings"]), {"32", "64"})
-        for record in limits["evidence"]:
-            path = ROOT / record["path"]
-            self.assertEqual(benchmark.common.digest(path), record["sha256"])
-            report = json.loads(path.read_text())
-            self.assertTrue(benchmark.check(report, limits)["allocation_and_graph_passed"])
-
-    def test_measured_whole_index_copy_exceeds_the_new_ceiling(self):
-        limits = json.loads(benchmark.LIMITS.read_text())
-        before = limits["before_comparison"]
-        path = ROOT / before["path"]
-        self.assertEqual(benchmark.common.digest(path), before["sha256"])
-        with self.assertRaisesRegex(RuntimeError, "indexing allocation regression"):
-            benchmark.check(json.loads(path.read_text()), limits)
 
     def test_ci_and_feature_configuration_require_the_storage_owner(self):
         native = (ROOT / ".github/workflows/ci.yml").read_text()

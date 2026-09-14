@@ -24,84 +24,21 @@ python3 scripts/run-nori-sql-benchmark.py --target wasm --output target/benchmar
 
 Normal collection verifies every provider/session result and the [reviewed allocation ceilings](sql-limits.json). Supplying `--baseline` also checks comparable environments and each timing ratio. CI executes two fresh complete reports and checks timing in both directions; its reverse-comparison file rechecks the original baseline and is not a third measurement. `--measure-only` remains available for candidate collection and records `allocation_and_rows_passed: false`. Candidate collection alone is not a regression pass. Source, fixture, Cargo lock, executable, compiler flags, CPU, and toolchain identities accompany each report. The runner rejects changes to measured source files during execution and output paths that overwrite reviewed inputs. Its gate tests reject missing providers or sessions, incomplete live/reopened results, altered query inputs, missing documents, changed scores, one-unit allocation regressions, and incomparable timing environments.
 
-## Reviewed limits and remaining timing acceptance
+## Reviewed limits and timing interpretation
 
-Nine complete original reports are retained byte for byte in [`sql-evidence`](sql-evidence), with hashes, source identities, and original gate statuses in `sql-limits.json`. All complete outputs agree. Each recorded target/workload/counter ceiling is exactly its largest observed allocation value, with no padding. The SQLite statement-cache experiment below explains its two macOS allocation states. The three-byte redb commit differences match the provider's [table-root update-order experiment](persistent-evidence/redb-commit-allocation-probe.json); the macOS reports and four Linux reports cover both values for every commit workload, with the other five counters unchanged. Regression tests require this complete allocation inventory.
+`sql-limits.json` retains complete expected results, exact target/workload allocation ceilings, and historical source references. Allocation validation remains independent of optional timing comparison. Generated full reports and intermediate diagnostics belong in ignored output directories and CI artifacts.
 
 The effective ceiling for each signed retained counter is `max(0, recorded_ceiling)`. A negative calibration requires no positive net growth; it does not require future implementations to free the same amount of pre-existing storage. For example, rollback can restore an unchanged shared snapshot instead of replacing its original buffers with compacted copies. Both the raw observation and recorded calibration remain signed and unchanged. Positive retained ceilings and all total/peak ceilings apply exactly, and an increase of one byte or allocation above the effective ceiling fails. These counters bound net growth during the measured operation, not the absolute size of the retained database or allocation leaks hidden by unrelated frees.
 
-| Target | Complete workloads per report | Allocation reference | Timing calibration |
-| --- | ---: | --- | --- |
-| macOS aarch64 | 102 | Three complete reports | Pending; the original shift and confirmation still fail the timing ceiling |
-| Linux x86_64 | 102 | Four complete reports | Maximum bidirectional repeat ratio 1.2260139597171253 |
-| Emscripten wasm32 | 62 | Two complete reports | Maximum bidirectional repeat ratio 1.3080659909144803 |
+The explicit timing comparison retains its 1.44 ceiling and rejects incomparable reports. A passing or failing pair on a shared or otherwise uncontrolled host does not establish performance acceptance or a runtime regression. Apply the [controlled-host timing policy](README.md#report-storage-and-timing-interpretation); repeated noisy trials must not delay code review and deterministic verification.
 
-The timing ceiling is `ceil(1.3080659909144803 * 1.1 * 100) / 100 = 1.44`, derived from the comparable CI pairs. The native timing follow-up below explains why the original macOS timings are not calibration inputs. Their complete output/allocation evidence remains included, and regression tests require the observed macOS timing shifts to fail the same 1.44 ceiling. A fresh complete macOS pair and fresh native/WASM gated CI remain required; the isolated single-query diagnostics do not establish that acceptance.
+## Capturing catalog fixtures
 
-The [complete Linux confirmation](https://github.com/cognica-io/uqa-engine/actions/runs/34776341405) at `56f69e20` originally failed because both reports observe `redb/commit_16/2048/bytes_total = 208781358`, while the first pair had only observed `208781355`. This is the only changed allocation ceiling. The original failed gate statuses remain in the reports. Rechecking their complete outputs and all six counters against the completed inventory passes, and the maximum bidirectional timing ratio is 1.13883033728126 under the unchanged 1.44 ceiling. This verifies the missing measured allocation outcome; final remote-head native/WASM CI and macOS timing acceptance remain open.
-
-## Catalog fixture experiments
-
-Fresh SQL tables have random durable table, column, and storage identities. Their JSON representation can have different lengths even when the table definition and source documents agree. Two clean native repeats preserve all complete SQL outputs but differ in transaction and some redb read allocations. An observation of eight ordinary SQL-created catalogs confirms equal observed non-identity metadata, with column metadata ranging from 638 to 647 bytes and statistics-maintenance metadata from 155 to 163 bytes. Allocation limits remain under review while these inputs and provider layouts are isolated.
-
-The facade benchmark can capture empty SQLite and redb databases created through the same public SQL statement as its ordinary fixtures. It closes all original handles and checks columns, primary-key and not-null errors, rollback, and empty rows through separate reopened copies. Captured files retain their original identities and have recorded byte lengths and hashes. Capture requires a new directory and rejects output paths that would replace input files or the captured databases.
+Fresh SQL tables have random durable table, column, and storage identities whose serialized lengths can differ. The benchmark captures empty SQLite and redb databases through its ordinary public SQL statement, closes all handles, and verifies columns, constraints, rollback, and empty rows through reopened copies. Captures preserve their original identities and pin byte lengths and hashes. Capture requires a new directory and rejects overwriting inputs or captured databases.
 
 ```sh
 python3 scripts/run-nori-sql-benchmark.py --capture-empty-seeds target/benchmark-runs/nori-sql-empty-seeds --output target/benchmark-runs/nori-sql-empty-seed-capture.json
-python3 scripts/run-nori-sql-benchmark.py --transaction-probe sqlite --output target/benchmark-runs/nori-sql-sqlite-fresh-catalog.json
 python3 scripts/run-nori-sql-benchmark.py --transaction-probe sqlite --empty-seeds target/benchmark-runs/nori-sql-empty-seeds --output target/benchmark-runs/nori-sql-sqlite-fixed-catalog.json
 ```
 
-Use `redb` for the other native provider. Each transaction experiment reuses all four existing commit/rollback workloads and their nine complete live/reopened validations, including original rows and all six quoted queries against Memory. A supplied empty fixture is loaded once and reused without modifying its bytes. Experiment reports record the selected fixture hash and remain explicitly marked as experiments with no complete regression pass; the normal SQL gate rejects their partial workload inventory. Repeated controlled measurements determine whether fixing the catalog inputs accounts for the observed allocation changes.
-
-The [controlled experiment evidence](sql-fixture-evidence/manifest.json) records two clean executions per provider at `9c213b2c`, using identical benchmark binaries and captured files. All six allocation counters agree for every one of the four transaction workloads in both SQLite and redb, and complete live/reopened results agree with the original full SQL runs. The SQLite file also opens in the actual CI WASM package: empty rows and columns, both constraints, rollback, a Nori GIN write and complete quoted phrase, and reopened source rows and scores pass under its virtual filesystem. This is input-portability evidence, without a browser durability claim. The capture manifest retains its original dirty-worktree provenance; its three recorded benchmark source hashes match the subsequently committed generator at `9c213b2c`.
-
-These transaction controls establish the inputs for the subsequent complete SQL/session reports. Their timings are not calibration evidence. The complete native/WASM reports now supply the reviewed limits above; the macOS timing follow-up and fresh gated CI remain open.
-
-## SQLite session allocation control
-
-The complete pinned macOS pair has one differing SQLite session/query allocation record: `sqlite/session_and_query/none/korean_prose`. Two separate controlled executions now reproduce every counter in both original observations and every scored result. The [raw reports and trace receipt](sql-fixture-evidence/sqlite-session-cache-evidence.json) retain their hashes, exact diagnostic source identities, pinned dependency versions, and verification scope. All 284 registry dependency versions and checksums match the workspace lockfile.
-
-Each diagnostic first measures the warmed query. After the same query warmups, it substitutes a fresh, identically configured physical connection over the same database and prepares one unrelated `SELECT 1` outside allocation counting. It then measures the existing public independent-session, work_mem, query, and session-drop operation with its complete result retained. A final warmed observation returns to the original lower counters. Both processes reproduce the same warm/fresh/warm sequence. The setup uses existing public provider and driver interfaces:
-
-```rust
-let fresh = ManagedConnection::open(managed.database_path().unwrap())?;
-fresh.with_mut(|replacement| managed.with_mut(|connection| {
-    std::mem::swap(connection, replacement);
-    drop(connection.prepare_cached("SELECT 1")?);
-    Ok(())
-}))?;
-```
-
-| Current-thread Rust allocation counter | Warm cache | Fresh connection with one cached statement | Difference |
-| --- | ---: | ---: | ---: |
-| Total bytes | 7,710,724 | 7,711,068 | 344 |
-| Peak bytes | 356,101 | 357,913 | 1,812 |
-| Retained bytes | 227,998 | 229,810 | 1,812 |
-| Total allocations | 47,136 | 47,140 | 4 |
-| Peak allocations | 1,600 | 1,606 | 6 |
-| Retained allocations | 1,035 | 1,041 | 6 |
-
-The scoped allocation traces identify three new 88-byte prepared-statement cache nodes and an 80-byte hash-table allocation replacing a 44-byte table in `hashbrown::raw::RawTable::reserve_rehash`, reached from `rusqlite::cache::StatementCache::cache_stmt`. The warmed operation also frees three pre-existing SQL cache keys of 72, 160, and 1,280 bytes; the fresh state has no such previous keys to free. Thus the total-byte difference is `3 * 88 + 80 = 344`, and the retained-byte difference is `3 * 88 + 80 - 44 + 72 + 160 + 1280 = 1812`. The cache-table replacement adds no net allocation count, giving four additional total allocations and six additional retained allocations. These measurements apply to the pinned rusqlite 0.39.0/hashlink 0.11.1/hashbrown 0.16.1 cache path on macOS aarch64.
-
-These cache states account for the two complete SQL report observations without changing runtime code, result ownership, or accounting. The original executions were not stack-traced; the diagnostic establishes a reproducible causal path with exactly matching counters. Instrumented diagnostic timings are excluded from calibration. The macOS SQLite timing shift and final regression-gate execution remain open.
-
-## Historical foreground scheduling on macOS
-
-The historical macOS experiment launched the measured executable through Foundation `Process.qualityOfService` with `userInteractive` requested. The [launcher at `9f635613`](https://github.com/cognica-io/uqa-engine/blob/9f635613/crates/uqa/benches/nori_sql/foreground.swift) recorded compiler/source/executable identities and child PID; its probe verified QoS class 33, argument forwarding, and exit handling. The complete pair below still failed timing acceptance. The launcher and its Swift build dependency have been removed from ordinary collection; current native and WASM runners execute the benchmark directly with platform-default scheduling.
-
-Schema-version-3 reports record the actual collection policy. Historical foreground reports still require their launcher compiler/source identities, and timing comparisons reject different policies. Version-2 reports remain readable without a scheduling claim. All comparisons retain the unchanged 1.44 ceiling, including the recorded foreground failures.
-
-The [scheduling control receipt](sql-timing-followup-evidence.json) records 45 verified executions of one query on the same live SQLite database. Warm samples have no page-cache misses. Changing thread QoS to background raises the median from roughly 1.62 seconds to 8.78 seconds; restoring foreground priority returns it to roughly 1.49 seconds. The observed wall and kernel CPU costs establish scheduling as a relevant measurement condition, without proving the sole cause of earlier full-report differences. The controlled single-query reports are diagnostic evidence, not substitutes for complete native/WASM gates.
-
-## Native timing collection
-
-Review of the original native execution history identifies concurrent work on the same host: all 23 Rust archives were packaged during the first SQLite query collection, followed by extraction, manifest checks, and repeated payload/checksum audits. The [timing follow-up receipt](sql-timing-followup-evidence.json) preserves both original report identities and the observed activity timestamps. The source worktrees were clean, but that records source provenance rather than host isolation. These activities do not prove the cause of the full 1.892-times SQLite timing difference; no CPU profile or scheduler trace was collected during that interval. The original results and allocation evidence remain available, while their timing difference cannot establish an isolated calibration ceiling.
-
-Complete native timing repetitions must run sequentially after builds finish, without concurrent local builds, tests, packaging, broad archive audits, or other benchmarks. Lightweight source and result review can continue while measurement runs. Fresh complete repetitions must retain the same executable, source, inputs, flags, provider configuration, and every original result check. Their observed timing agreement remains an acceptance requirement; neither successful functional checks nor the completed cache-allocation diagnosis substitutes for it.
-
-The complete confirmation collected at `6ddf019f` verifies all 102 results and the same executable, sources, flags, catalogs, and provider settings. Its SQLite session allocation matches the previously explained warm-cache observation. A three-byte total-allocation difference also appears in `redb/commit_256/0`, with its other five counters unchanged; the receipt retains this newly observed allocation vector. Timings still differ from the earlier repeat by up to 2.074 times, so removing the recorded concurrent work has not established timing stability.
-
-The following local execution was explicitly converted to a profiling diagnostic and stopped after two scoped profiles; it produced no complete SQL report and is excluded from calibration. The first profile has only two main-thread observations. The second has 7,141 main-thread samples during transaction verification: 2,312 leaf samples in SQLite `pread` and 3,769 across the clustered occurrence varint/document/offset decoding functions. The background statistics thread is waiting in those samples. This identifies prominent execution paths, but it does not compare matched slow and fast query executions or establish the timing-variation cause. Raw profile hashes, selected symbols, and the exclusion are preserved in the follow-up receipt.
-
-The complete foreground pair at `4c0dabdc` retains all 102 workloads with the same clean source, executable, lock, flags, scheduling policy, and complete results. Both reports pass the existing allocation ceilings, but timing still differs by up to 2.125 times, concentrated in several SQLite query samples. The [original reports and review](sql-timing-followup-evidence.json) preserve both failing comparison directions. Foreground scheduling alone has not resolved this variability; the unchanged 1.44 timing gate remains open.
+Use `redb` for the other native provider. A transaction probe reuses the four commit/rollback workloads and all nine complete live/reopened validations. It reads the supplied captured bytes without modifying them. Its report is explicitly partial, and the normal SQL gate rejects its incomplete workload inventory. Schema-version-2 and historical foreground-scheduling reports remain readable; comparison still requires matching scheduling policies and their recorded identities.

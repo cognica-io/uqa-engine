@@ -812,19 +812,19 @@
     },
     "reports": [
       {
-        "path": "benchmarks/nori/phrase-evidence/native-baseline.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/phrase-evidence/native-baseline.json",
         "sha256": "dea5d58ab0e96c89dc5e97a99d92db85057789bfd26dfb1c3350cf3180077938"
       },
       {
-        "path": "benchmarks/nori/phrase-evidence/native-repeat.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/phrase-evidence/native-repeat.json",
         "sha256": "102e701c638877c69ab9b1f0615b4587f25af331957c73fb38c279f769a7c6fa"
       },
       {
-        "path": "benchmarks/nori/phrase-evidence/wasm-baseline.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/phrase-evidence/wasm-baseline.json",
         "sha256": "5f3df38aaf8c717c85eccc0b269dd28b6659856d5ef6821dc74ccb217f14f1a4"
       },
       {
-        "path": "benchmarks/nori/phrase-evidence/wasm-repeat.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/phrase-evidence/wasm-repeat.json",
         "sha256": "9b7a190d16b1f38e83dd0d217e372692e8680dbbf27b7491a576d973745dc698"
       }
     ]

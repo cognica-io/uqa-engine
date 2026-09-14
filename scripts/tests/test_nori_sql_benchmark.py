@@ -10,7 +10,6 @@ import hashlib
 import importlib.util
 import io
 import json
-import math
 from pathlib import Path
 import tempfile
 import unittest
@@ -111,94 +110,6 @@ class NoriSQLBenchmarkTest(unittest.TestCase):
         self.assertTrue(benchmark.check(ordinary, limits, copy.deepcopy(ordinary))["timing_compared"])
         with self.assertRaisesRegex(RuntimeError, "scheduling"):
             benchmark.check(ordinary, limits, report)
-
-    def test_reviewed_reports_reproduce_complete_outputs_and_exact_allocation_ceilings(self):
-        limits = json.loads(benchmark.LIMITS.read_text())
-        calibration = limits["calibration"]
-        self.assertEqual(calibration["protocol"], benchmark.PROTOCOL)
-        self.assertEqual(len(calibration["reports"]), 9)
-        observed, pairs, commit_counters = {}, {}, {}
-        for record in calibration["reports"]:
-            path = ROOT / record["path"]
-            self.assertEqual(benchmark.common.digest(path), record["sha256"])
-            report = json.loads(path.read_text())
-            self.assertFalse(report["provenance"]["worktree_dirty"])
-            self.assertFalse(report["gate"]["allocation_and_rows_passed"])
-            self.assertFalse(record["gate_passed_at_collection"])
-            target = benchmark.target_key(report)
-            self.assertEqual(target, record["target"])
-            for key in ("revision", "benchmark_sha256", "runtime_sources_sha256", "cargo_lock_sha256"):
-                self.assertEqual(report["provenance"][key], record[key])
-            self.assertTrue(benchmark.check(report, limits)["allocation_and_rows_passed"])
-            rows = benchmark.measurements(report)
-            maxima = observed.setdefault(target, {})
-            for name, row in rows.items():
-                counters = maxima.setdefault(name, dict(row["allocation"]))
-                for key, value in row["allocation"].items():
-                    counters[key] = max(counters[key], value)
-                if name.startswith("redb/commit_"):
-                    samples = commit_counters.setdefault((target, name), {})
-                    for key, value in row["allocation"].items():
-                        samples.setdefault(key, set()).add(value)
-            if record["timing_calibration_eligible"]:
-                comparison = (target, record.get("comparison", "initial"))
-                pairs.setdefault(comparison, {})[record["role"]] = report
-        self.assertEqual(observed, limits["allocation_ceilings"])
-        self.assertEqual(len(commit_counters), 6)
-        for (target, name), counters in commit_counters.items():
-            for key, values in counters.items():
-                with self.subTest(target=target, workload=name, counter=key):
-                    if key == "bytes_total":
-                        self.assertEqual(len(values), 2, "calibration must cover both redb table-update orders")
-                        self.assertEqual(max(values) - min(values), 3)
-                    else:
-                        self.assertEqual(len(values), 1, "table-update order cannot change another counter")
-        maxima = {}
-        for (target, _), pair in pairs.items():
-            self.assertEqual(set(pair), {"baseline", "repeat"})
-            first, second = pair["baseline"], pair["repeat"]
-            self.assertEqual(first["provenance"]["artifacts"], second["provenance"]["artifacts"])
-            self.assertNotEqual(first["provenance"]["measured_at_utc"], second["provenance"]["measured_at_utc"])
-            ratios = []
-            for before, after in ((first, second), (second, first)):
-                result = benchmark.check(after, limits, before)
-                self.assertEqual(len(result["timing_ratios"]), 62 if target.startswith("emscripten/") else 102)
-                ratios.extend(result["timing_ratios"].values())
-            maxima[target] = max(maxima.get(target, 0), max(ratios))
-        self.assertEqual(set(maxima), {"linux/x86_64/64", "emscripten/wasm32/32"})
-        self.assertEqual(maxima, calibration["target_maximum_bidirectional_repeat_ratios"])
-        self.assertEqual(max(maxima.values()), calibration["maximum_bidirectional_repeat_ratio"])
-        self.assertEqual(calibration["timing_margin_ratio"], 1.1)
-        self.assertEqual(limits["timing_max_ratio"], math.ceil(max(maxima.values()) * 1.1 * 100) / 100)
-
-    def test_complete_foreground_pair_preserves_failing_timing_gates(self):
-        limits = json.loads(benchmark.LIMITS.read_text())
-        receipt = json.loads((ROOT / "benchmarks/nori/sql-timing-followup-evidence.json").read_text())["foreground_complete_pair"]
-        reports = []
-        for record in receipt["reports"]:
-            path = ROOT / record["path"]
-            self.assertEqual(path.stat().st_size, record["bytes"])
-            self.assertEqual(benchmark.common.digest(path), record["sha256"])
-            report = json.loads(path.read_text())
-            self.assertEqual(report["gate"], record["original_gate"])
-            self.assertEqual(len(benchmark.measurements(report)), 102)
-            benchmark.check(report, limits, None)
-            reports.append(report)
-        for current, baseline in (reports, reports[::-1]):
-            with self.assertRaisesRegex(RuntimeError, "SQL timing regression"):
-                benchmark.check(current, limits, baseline)
-        self.assertFalse(receipt["passed"])
-
-    def test_original_macos_timing_shift_remains_a_gate_failure(self):
-        limits = json.loads(benchmark.LIMITS.read_text())
-        records = [record for record in limits["calibration"]["reports"] if record["target"] == "macos/aarch64/64"]
-        self.assertEqual(len(records), 3)
-        self.assertTrue(all(not record["timing_calibration_eligible"] for record in records))
-        reports = {record["role"]: json.loads((ROOT / record["path"]).read_text()) for record in records}
-        with self.assertRaisesRegex(RuntimeError, "timing regression"):
-            benchmark.check(reports["baseline"], limits, reports["repeat"])
-        with self.assertRaisesRegex(RuntimeError, "timing regression"):
-            benchmark.check(reports["confirmation"], limits, reports["repeat"])
 
     def test_ci_checks_allocations_and_both_timing_directions(self):
         workflow = (ROOT / ".github/workflows/nori-sql-benchmarks.yml").read_text()

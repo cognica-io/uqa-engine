@@ -9,6 +9,8 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -55,6 +57,32 @@ def fixture():
 
 
 class NoriBenchmarkTest(unittest.TestCase):
+    def test_generated_reports_are_rejected_but_contracts_remain_allowed(self):
+        script = "scripts/check-public-repository-hygiene.sh"
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / script).parent.mkdir()
+            (directory / script).write_bytes((ROOT / script).read_bytes())
+            subprocess.run(["git", "init", "--quiet", str(directory)], check=True)
+            contract = directory / "benchmarks/nori/limits.json"
+            contract.parent.mkdir(parents=True)
+            contract.write_text("{}\n")
+            for tracked in (False, True):
+                for filename in ("benchmarks/nori/sql-evidence/report.json", "benchmarks/nori/evidence/report.json.gz",
+                                 "benchmarks/nori/sql-timing-followup-evidence.json"):
+                    with self.subTest(tracked=tracked, filename=filename):
+                        report = directory / filename
+                        report.parent.mkdir(parents=True, exist_ok=True)
+                        report.write_text("{}\n")
+                        if tracked:
+                            subprocess.run(["git", "add", filename], cwd=directory, check=True)
+                        result = subprocess.run(["bash", script], cwd=directory, capture_output=True, text=True)
+                        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                        self.assertIn("generated benchmark reports belong in", result.stderr)
+                        report.unlink()
+                result = subprocess.run(["bash", script], cwd=directory, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_empty_global_flags_do_not_shadow_wasm_link_options(self):
         class BuildCaptured(Exception):
             pass
@@ -205,17 +233,6 @@ class NoriBenchmarkTest(unittest.TestCase):
         self.assertEqual(set(limits["allocation_ceilings"]), {"32", "64"})
         self.assertEqual(set(limits["allocation_ceilings"]["32"]), set(limits["allocation_ceilings"]["64"]))
         self.assertEqual(len(limits["outputs"]), 36)
-
-    def test_calibration_is_backed_by_complete_hashed_measurements(self):
-        limits = json.loads(benchmark.LIMITS.read_text())
-        self.assertEqual(len(limits["calibration"]["reports"]), 4)
-        for record in limits["calibration"]["reports"]:
-            path = ROOT / record["path"]
-            self.assertEqual(benchmark.digest(path), record["sha256"])
-            report = json.loads(path.read_text())
-            self.assertTrue(benchmark.check(report, limits)["allocation_and_output_passed"])
-            self.assertTrue(report["gate"]["allocation_and_output_passed"])
-
 
 if __name__ == "__main__":
     unittest.main()

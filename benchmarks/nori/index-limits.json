@@ -126,24 +126,24 @@
   },
   "evidence": [
     {
-      "path": "benchmarks/nori/index-evidence/native-final.json",
+      "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/index-evidence/native-final.json",
       "sha256": "5694c9978db60207a2274f61c771a2b9aa99f13f19b54c2f96bbcdbd696955ee"
     },
     {
-      "path": "benchmarks/nori/index-evidence/native-repeat.json",
+      "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/index-evidence/native-repeat.json",
       "sha256": "0601e5f1362fb13883bb1fd8d4efba40a05e25303fd5e958a87389f5bd2eb6fd"
     },
     {
-      "path": "benchmarks/nori/index-evidence/wasm-final.json",
+      "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/index-evidence/wasm-final.json",
       "sha256": "20e8c41678eefae92432093da0cf9079eb67dab6104a2aac203beaf92a355634"
     },
     {
-      "path": "benchmarks/nori/index-evidence/wasm-repeat.json",
+      "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/index-evidence/wasm-repeat.json",
       "sha256": "a6aa27ed002e8b201db35759b4e770e1579680461e2d1f115463a7d674379478"
     }
   ],
   "before_comparison": {
-    "path": "benchmarks/nori/index-evidence/native-before.json",
+    "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/index-evidence/native-before.json",
     "sha256": "f554841464c7d934c73647446089bc29231582cf323a836ef45d349383bc03dc"
   }
 }

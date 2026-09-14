@@ -16,25 +16,4 @@ Allocation figures are current-thread Rust allocator requests, with the final sc
 
 The runner rejects missing workloads, incomplete samples, changed source text, missing matching documents, unexpected documents, duplicate or unordered identities, nonfinite scores, analyzer identity drift, and differences between the two analysis scopes. Reviewed output contracts compare document identities exactly and scores with a relative/absolute tolerance of 1e-12; the recorded native/WASM scores agree exactly. Every allocation counter has a reviewed 32-bit or 64-bit ceiling without padding. Timing comparisons require the same CPU, platform, target, compiler, flags including their original SHA-256 identity, benchmark source, and complete result set. CI enforces allocation and output gates on native and WASM; timing comparison is explicit. `--measure-only` collects an unaccepted candidate with a false gate status.
 
-## Recorded evidence
-
-Four complete reports in `phrase-evidence/` record two native and two WASM executions on an Apple M1 Ultra with Rust 1.90.0, Node 22.12.0, and Emscripten 6.0.3. They identify the working tree based on `1a75c653` and contain runtime-source, benchmark, corpus, compiler-flag, and executable hashes; collection was from a dirty working tree. All six allocation counters reproduce exactly for every workload in each target. Analyzer identities, query occurrence counts, document identities, and scores also agree across native and WASM. Maximum additional requested heap is 187,416 bytes on native and 186,484 bytes on WASM.
-
-The maximum bidirectional repeat time ratio is 1.10958. Applying the existing 1.10 timing-policy margin and rounding upward to two decimals produces a 1.23 ceiling. The four report hashes and every observed allocation ceiling are pinned in `phrase-limits.json`. The instrumented benchmark is excluded from Cargo archives.
-
-The table shows Mixed mode; the reports contain all three modes and all timing samples.
-
-| Scope / corpus | Native median | WASM median | Native additional heap peak | WASM additional heap peak |
-| --- | ---: | ---: | ---: | ---: |
-| `match_graph/korean_prose` | 8.466 ms | 22.189 ms | 33,088 bytes | 31,020 bytes |
-| `analysis_and_match/korean_prose` | 8.600 ms | 22.241 ms | 68,468 bytes | 45,396 bytes |
-| `match_graph/short_query` | 0.560 ms | 2.824 ms | 14,016 bytes | 13,532 bytes |
-| `analysis_and_match/short_query` | 0.624 ms | 2.744 ms | 14,490 bytes | 13,958 bytes |
-| `match_graph/hanja` | 3.574 ms | 9.811 ms | 24,224 bytes | 23,452 bytes |
-| `analysis_and_match/hanja` | 3.833 ms | 10.110 ms | 25,020 bytes | 24,168 bytes |
-| `match_graph/mixed_script` | 6.093 ms | 16.971 ms | 28,672 bytes | 26,892 bytes |
-| `analysis_and_match/mixed_script` | 6.194 ms | 17.276 ms | 30,527 bytes | 28,555 bytes |
-| `match_graph/unknown` | 2.453 ms | 6.861 ms | 20,272 bytes | 19,716 bytes |
-| `analysis_and_match/unknown` | 2.440 ms | 6.915 ms | 20,841 bytes | 20,229 bytes |
-| `match_graph/ambiguous_long` | 107.836 ms | 153.263 ms | 186,544 bytes | 185,700 bytes |
-| `analysis_and_match/ambiguous_long` | 107.899 ms | 141.778 ms | 187,416 bytes | 186,484 bytes |
+Generated reports stay in ignored output directories and CI artifacts. See the [report storage and timing policy](README.md#report-storage-and-timing-interpretation); historical source references in the limits do not establish performance acceptance on an uncontrolled host.

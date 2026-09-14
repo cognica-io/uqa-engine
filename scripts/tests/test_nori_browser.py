@@ -5,7 +5,6 @@
 #
 
 import copy
-import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -16,23 +15,23 @@ ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("nori_browser", ROOT / "scripts/verify-nori-browser.py")
 browser = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(browser)
-EVIDENCE = ROOT / "benchmarks/nori/browser-evidence"
+FIXTURE = ROOT / "scripts/tests/fixtures/nori_browser.json"
 
 
 class NoriBrowserTest(unittest.TestCase):
-    def setUp(self):
-        self.report = json.loads((EVIDENCE / "chrome-macos-enabled.json").read_text())["runs"][0]
+    def fixture(self, feature):
+        report = json.loads(FIXTURE.read_text())[feature]
+        contract = json.loads((ROOT / "benchmarks/nori/browser-contract.json").read_text())
+        report["analyses"] = contract["checks"] if feature == "enabled" else []
+        return report
 
-    def test_recorded_browser_evidence_is_complete_and_hash_pinned(self):
-        manifest = json.loads((EVIDENCE / "manifest.json").read_text())
-        self.assertEqual(len(manifest["reports"]), 2)
-        for item in manifest["reports"]:
-            path = EVIDENCE / item["file"]
-            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), item["sha256"])
-            report = json.loads(path.read_text())
-            self.assertEqual(len(report["runs"]), 3)
-            for run in report["runs"]:
-                browser.verify_run(run, report["feature"])
+    def setUp(self):
+        self.report = self.fixture("enabled")
+
+    def test_complete_enabled_and_disabled_reports_pass(self):
+        for feature in ("enabled", "disabled"):
+            with self.subTest(feature=feature):
+                browser.verify_run(self.fixture(feature), feature)
 
     def test_omitted_steps_and_fake_reloads_fail(self):
         for mutation in [lambda r: r["completed_steps"].pop(), lambda r: r["pages"].__setitem__(1, r["pages"][0]), lambda r: r["checkpoints"].pop()]:

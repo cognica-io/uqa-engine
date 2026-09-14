@@ -30,18 +30,8 @@ Timing comparisons require an explicit baseline with the same CPU, OS, target, t
 
 These measurements cover the standalone analysis owner. [Memory indexing measurements](INDEXING.md) separately exercise the storage owner. Persistent indexing and phrase-query costs, full browser process memory, persistent binding scenarios, and release package acceptance remain separate verification work.
 
-## Recorded baseline
+## Report storage and timing interpretation
 
-The four reports in `evidence/` were collected sequentially on an Apple M1 Ultra using Rust 1.90.0, with Node 22.12.0 and Emscripten 6.0.3 for WASM. They record the working tree based on `c07bec01`, exact benchmark/runtime source hashes, and executable hashes; they do not claim a clean commit at collection time. `limits.json` pins every report's complete file hash. Both native runs and both WASM runs reproduce all 39 allocation measurements exactly, and all 36 token-stream hashes agree across targets. Maximum bidirectional repeat timing ratios were 1.04735 native and 1.03374 WASM. The optional timing ceiling is 1.16, obtained by multiplying the larger measured ratio by a policy margin of 1.10 and rounding upward to two decimal places.
+Commit workload fixtures, complete expected outputs, allocation ceilings, and compact source or artifact references. Write generated measurements and intermediate diagnostics under ignored `target/benchmark-runs/` and retain CI outputs as workflow artifacts. Historical report identities in the limits link to their original source commit; raw reports are not repository fixtures. Verifier unit tests use deterministic inputs and do not depend on past machine observations.
 
-| Measurement | Native | WASM |
-| --- | ---: | ---: |
-| Encoded static bundle | 9,829,534 bytes | 9,829,534 bytes |
-| Cold decode, validate, and drop | 296.60 ms | 336.96 ms |
-| Dictionary maximum requested heap | 88,384,710 bytes | 86,255,402 bytes |
-| Decoded dictionary retained heap | 76,856,018 bytes | 74,726,638 bytes |
-| Short-query default analysis | 9.55 µs | 20.81 µs |
-| Ambiguous long-input default analysis | 3.38 ms | 7.14 ms |
-| Additional heap for 64 cached handles | 0 bytes | 0 bytes |
-
-The existing dictionary limits of 128 MiB encoded data and 256 MiB decoded sections admit the measured pinned bundle. The 32 MiB encoded-resource cache allows its default two retained dictionary identities; the measured decoded payload is about 73.3 MiB per native model and 71.3 MiB per WASM model, so the encoded cache limit is not a decoded-memory or RSS limit. No default limit was lowered from one corpus's footprint. The long input uses 4,352 UTF-16 units, exceeding the rolling lattice's 1,024-unit backtrace threshold in length; its output and allocation limits remain verified independently by adversarial tests.
+Timing acceptance requires a controlled benchmark host and an independently established noise bound. Matching CPU labels, a clean source tree, sequential runs, or suspending this task's builds does not establish host control. Shared CI and uncontrolled workstations provide observations, not reliable performance acceptance. Do not retry noisy measurements until one passes or widen limits to accommodate them. Keep unverified performance explicitly unverified while completing functional, ownership, dependency, and allocation checks.

@@ -43,6 +43,13 @@ while IFS= read -r -d '' file; do
   fi
 done < <(git ls-files -z --others --exclude-standard)
 
+while IFS= read -r -d '' file; do
+  [[ -f "$file" ]] || continue
+  report_matches "$file: generated benchmark reports belong in target/benchmark-runs or CI artifacts"
+done < <(git ls-files -z --cached --others --exclude-standard -- \
+  'benchmarks/nori/evidence/**' 'benchmarks/nori/*-evidence/**' \
+  'benchmarks/nori/*followup-evidence.json')
+
 if (( failed != 0 )); then
   exit 1
 fi

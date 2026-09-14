@@ -3602,7 +3602,7 @@
     },
     "reports": [
       {
-        "path": "benchmarks/nori/cancellation-evidence/macos-baseline.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/cancellation-evidence/macos-baseline.json",
         "sha256": "ea109ebb023223d7ddbd0b979bb6eca6da558528e254e4f0073c06ec3080f45b",
         "target": "macos/aarch64/64",
         "pair": "macos",
@@ -3610,7 +3610,7 @@
         "gate_passed_at_collection": false
       },
       {
-        "path": "benchmarks/nori/cancellation-evidence/macos-repeat.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/cancellation-evidence/macos-repeat.json",
         "sha256": "d8218494247d8abe7d810fa8dbc2463817535a9b9f755b9613bb961f0e40682d",
         "target": "macos/aarch64/64",
         "pair": "macos",
@@ -3618,7 +3618,7 @@
         "gate_passed_at_collection": false
       },
       {
-        "path": "benchmarks/nori/cancellation-evidence/linux-baseline.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/cancellation-evidence/linux-baseline.json",
         "sha256": "e224476bf4e59200821abc00eac6697e3feacab8cde2d9c911d2cb357b4b2bc8",
         "target": "linux/x86_64/64",
         "pair": "linux",
@@ -3628,7 +3628,7 @@
         "artifact_id": 10321097765
       },
       {
-        "path": "benchmarks/nori/cancellation-evidence/linux-repeat.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/cancellation-evidence/linux-repeat.json",
         "sha256": "95ccddec691998112d848daee401b7ea0668962bc10f5fd748dc3ae2b9ee47b4",
         "target": "linux/x86_64/64",
         "pair": "linux",
@@ -3638,7 +3638,7 @@
         "artifact_id": 10321097765
       },
       {
-        "path": "benchmarks/nori/cancellation-evidence/wasm-baseline.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/cancellation-evidence/wasm-baseline.json",
         "sha256": "1b621771826d1e866541318e5d5617aacd96855ead2bd3e4b78fedf86edc7406",
         "target": "emscripten/wasm32/32",
         "pair": "wasm",
@@ -3648,7 +3648,7 @@
         "artifact_id": 10321049544
       },
       {
-        "path": "benchmarks/nori/cancellation-evidence/wasm-repeat.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/cancellation-evidence/wasm-repeat.json",
         "sha256": "7eb0d81dabd4d29756a09fc71e95f3822e3ccc7a793db5083035cd1f5e9f9ed5",
         "target": "emscripten/wasm32/32",
         "pair": "wasm",
@@ -3676,21 +3676,21 @@
       {
         "target": "macos/aarch64/64",
         "role": "baseline",
-        "path": "benchmarks/nori/cancellation-evidence/fixed/macos-baseline.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/cancellation-evidence/fixed/macos-baseline.json",
         "sha256": "61d2d354cc9cad49680892784a7889f03bc047d2db13195bad01f92e241632fd",
         "gate_passed_at_collection": true
       },
       {
         "target": "macos/aarch64/64",
         "role": "repeat",
-        "path": "benchmarks/nori/cancellation-evidence/fixed/macos-repeat.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/cancellation-evidence/fixed/macos-repeat.json",
         "sha256": "6df6440ba1e11ace925099a2fd898a01203811bdcc503437e4b30c777c19eb60",
         "gate_passed_at_collection": true
       },
       {
         "target": "linux/x86_64/64",
         "role": "baseline",
-        "path": "benchmarks/nori/cancellation-evidence/fixed/linux-baseline.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/cancellation-evidence/fixed/linux-baseline.json",
         "sha256": "bf28a2e68d20873c8855debe71cb84c95fb588ab79fa3a5d47c4c37a5032d7fa",
         "gate_passed_at_collection": true,
         "artifact_id": 10322638534
@@ -3698,7 +3698,7 @@
       {
         "target": "linux/x86_64/64",
         "role": "repeat",
-        "path": "benchmarks/nori/cancellation-evidence/fixed/linux-repeat.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/cancellation-evidence/fixed/linux-repeat.json",
         "sha256": "099053a58adceb49db65769c9564e92ecea47c5a689bd5ed42894e23986e839a",
         "gate_passed_at_collection": true,
         "artifact_id": 10322638534
@@ -3706,7 +3706,7 @@
       {
         "target": "emscripten/wasm32/32",
         "role": "baseline",
-        "path": "benchmarks/nori/cancellation-evidence/fixed/wasm-baseline.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/cancellation-evidence/fixed/wasm-baseline.json",
         "sha256": "b551821b75c806435be4ac36f99899b4170a2406f8e4d9c7d387be6faa27c37a",
         "gate_passed_at_collection": true,
         "artifact_id": 10322718340
@@ -3714,7 +3714,7 @@
       {
         "target": "emscripten/wasm32/32",
         "role": "repeat",
-        "path": "benchmarks/nori/cancellation-evidence/fixed/wasm-repeat.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/cancellation-evidence/fixed/wasm-repeat.json",
         "sha256": "f285fbe43106a08d4117bb4a781a789f7948e20105802fbe2e199cee6bdaeffc",
         "gate_passed_at_collection": true,
         "artifact_id": 10322718340

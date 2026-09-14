@@ -792,19 +792,19 @@
     "allocation_margin_count": 0,
     "reports": [
       {
-        "path": "benchmarks/nori/evidence/native-baseline.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/evidence/native-baseline.json",
         "sha256": "2de111ee75229b414530c486cc5bc8a780bd5616199cccf8b2402df8744895d0"
       },
       {
-        "path": "benchmarks/nori/evidence/native-repeat.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/evidence/native-repeat.json",
         "sha256": "6f19f884baa606caa15231f7b124544e892e30329ebb8711068ac2f06c0787da"
       },
       {
-        "path": "benchmarks/nori/evidence/wasm-baseline.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/evidence/wasm-baseline.json",
         "sha256": "bfcf88d198ee70e6010a1f12f732ab63d2f3b1a0fe465fc4cfbdde46d64f33e3"
       },
       {
-        "path": "benchmarks/nori/evidence/wasm-repeat.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/evidence/wasm-repeat.json",
         "sha256": "6083c06ef65b07db2aba398ab9791a887d9615ae2d1a1c44efab9f292e9002fc"
       }
     ]

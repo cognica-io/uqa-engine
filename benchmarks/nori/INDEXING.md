@@ -14,18 +14,8 @@ Workloads build 256 and 2,048 documents through point insertion, then append bat
 
 Memory batches previously cloned the complete existing index before applying their input. They now prepare a private projection containing affected documents and the relevant global counters, apply the existing point replacement path in order, and publish after all analysis and arithmetic checks succeed. Repeated identities, deletions, field moves, and late failures retain their contract. Untouched documents keep their posting allocations. Full source rebuilds continue to construct complete replacement indexes.
 
-The original native measurement is retained as a comparison artifact with source hashes captured before the implementation change. Current native and WASM reports include full environment and executable provenance. `index-limits.json` pins complete report hashes, identical graph outputs, and separate 32-bit/64-bit allocation ceilings without padding. An optional timing baseline must match the host, target, compiler, flags, analyzer, corpus, benchmark source, and graph output. The timing margin is derived from repeated measurements and recorded in that file; CI enforces allocation and graph contracts on its own host.
+`index-limits.json` retains complete expected graph outputs, separate 32-bit/64-bit allocation ceilings without padding, and source references for the original observations. An optional timing baseline must match the host, target, compiler, flags, analyzer, corpus, benchmark source, and graph output. CI enforces allocation and graph contracts on its own host.
 
 These results cover in-memory indexing through the storage owner. [Physical provider measurements](PERSISTENT.md) separately cover SQLite/redb transactions and reopen. SQL/transaction snapshot overhead, phrase scoring, and full browser memory remain separate acceptance measurements.
 
-## Recorded results
-
-Current measurements used an Apple M1 Ultra, Rust 1.90.0, Node 22.12.0, and Emscripten 6.0.3. Both runs per target reproduced every allocation counter exactly, and all five complete graph digests match the original implementation across native and WASM. Maximum bidirectional timing ratios were 1.01696 native and 1.02310 WASM. The optional timing ceiling is 1.13, using the larger measured ratio multiplied by a 1.10 policy margin and rounded upward to two decimal places.
-
-| Workload | Native median | WASM median | Native maximum additional heap | WASM maximum additional heap |
-| --- | ---: | ---: | ---: | ---: |
-| Build 256 documents | 237.66 ms | 682.90 ms | 9,362,090 bytes | 8,196,798 bytes |
-| Build 2,048 documents | 1,958.35 ms | 5,551.65 ms | 65,221,268 bytes | 61,045,520 bytes |
-| Append 16 to 2,048 documents | 16.59 ms | 46.28 ms | 2,102,359 bytes | 1,317,263 bytes |
-
-The original native implementation requested a peak of 65,311,546 additional bytes for the last workload; affected-document staging reduces that by approximately 96.8%. The recorded original sample had a 24.22 ms median. Its source/compiler identity was captured before the change, but the initial run did not capture complete CPU/executable metadata, so it is retained as an allocation/output comparison rather than an eligible timing-gate baseline. The gate's regression test explicitly confirms that these original whole-index-copy allocation measurements fail the new ceiling.
+Generated reports stay in ignored output directories and CI artifacts. See the [report storage and timing policy](README.md#report-storage-and-timing-interpretation); historical source references in the limits do not establish performance acceptance on an uncontrolled host.

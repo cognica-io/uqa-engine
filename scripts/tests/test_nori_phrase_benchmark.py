@@ -120,28 +120,6 @@ class NoriPhraseBenchmarkTest(unittest.TestCase):
         self.assertFalse(benchmark.same_rows([[1, 1.0]], [[2, 1.0]]))
         self.assertFalse(benchmark.same_rows([[1, 1.0]], [[1, 1.0 + 1e-9]]))
 
-    def test_reviewed_reports_reproduce_all_counters_and_scored_rows(self):
-        limits = json.loads(benchmark.LIMITS.read_text())
-        records = limits["calibration"]["reports"]
-        self.assertEqual(len(records), 4)
-        reports = []
-        for record in records:
-            path = ROOT / record["path"]
-            self.assertEqual(benchmark.common.digest(path), record["sha256"])
-            report = json.loads(path.read_text())
-            self.assertTrue(benchmark.check(report, limits)["allocation_and_rows_passed"])
-            self.assertTrue(report["gate"]["allocation_and_rows_passed"])
-            reports.append(report)
-        for width, ceilings in limits["allocation_ceilings"].items():
-            matching = [r for r in reports if str(r["pointer_bits"]) == width]
-            self.assertEqual(len(matching), 2)
-            self.assertEqual(len({r["provenance"]["measured_at_utc"] for r in matching}), 2)
-            for first, second in (matching, list(reversed(matching))):
-                self.assertTrue(benchmark.check(second, limits, first)["timing_compared"])
-            for a, b in zip(matching[0]["measurements"], matching[1]["measurements"]):
-                self.assertEqual(a["allocation"], b["allocation"])
-                self.assertEqual(ceilings[a["name"]], a["allocation"])
-
     def test_ci_enforces_native_and_wasm_phrase_gates(self):
         native = (ROOT / ".github/workflows/ci.yml").read_text()
         wasm = (ROOT / ".github/workflows/javascript-bindings.yml").read_text()

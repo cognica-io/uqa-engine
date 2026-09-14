@@ -136,30 +136,30 @@
       "allocation_policy": "maximum observed value for each metric, target OS, target architecture and pointer width; no padding; unknown targets require calibration",
       "reports": [
         {
-          "path": "benchmarks/nori/persistent-evidence/sqlite-native-baseline.json",
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/sqlite-native-baseline.json",
           "sha256": "f5ae8eb44dfdf5b0ee6db455d16b6e6d27b555ec565358190cf668ff8c326941"
         },
         {
-          "path": "benchmarks/nori/persistent-evidence/sqlite-native-repeat.json",
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/sqlite-native-repeat.json",
           "sha256": "254fb769cbea1910ebcc017a5c20576d887c6f5efbf580bbf26cec5779511eeb"
         },
         {
-          "path": "benchmarks/nori/persistent-evidence/sqlite-wasm-baseline.json",
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/sqlite-wasm-baseline.json",
           "sha256": "bb529e314694384f0e71dc6d27d954e325ea3668d6a01c0281a3d6cf040c37bc"
         },
         {
-          "path": "benchmarks/nori/persistent-evidence/sqlite-wasm-repeat.json",
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/sqlite-wasm-repeat.json",
           "sha256": "e655de5c375fca1c9cabe07a61b9c6237809a7ae4d6d840bb7a02c395bfa9c90"
         },
         {
-          "path": "benchmarks/nori/persistent-evidence/sqlite-linux-baseline.json",
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/sqlite-linux-baseline.json",
           "sha256": "568e4e45a4332cd3f98ec2735f577ad3fcdf205f43f39a2a7ae0e867c634afab",
           "gate_passed_at_collection": true,
           "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/attempts/1",
           "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/artifacts/10314081635"
         },
         {
-          "path": "benchmarks/nori/persistent-evidence/sqlite-linux-repeat.json",
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/sqlite-linux-repeat.json",
           "sha256": "4b557c8a2cf6abd1ab679e2f64ab6b645c00c4a71eff516e3688e34931c1d106",
           "gate_passed_at_collection": true,
           "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/attempts/2",
@@ -271,33 +271,33 @@
       "allocation_policy": "maximum observed value for each metric, target OS, target architecture and pointer width; no padding; unknown targets require calibration; every commit workload must observe both table-update orders, differing by exactly three cumulative bytes with all other counters unchanged",
       "reports": [
         {
-          "path": "benchmarks/nori/persistent-evidence/redb-native-baseline.json",
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-native-baseline.json",
           "sha256": "50d6b1acda2cbdfd9ea59e7480165003e943ae745881ffc5160660471a8e0fa0"
         },
         {
-          "path": "benchmarks/nori/persistent-evidence/redb-native-repeat.json",
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-native-repeat.json",
           "sha256": "582230564b590f726c70179182081cd3753b1367708ac590644ab4233172f980"
         },
         {
-          "path": "benchmarks/nori/persistent-evidence/redb-native-check.json",
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-native-check.json",
           "sha256": "0bc354b034d7a8201d4c316503bc507ca41ad8c5940ae96e68a8b90ed6e16978"
         },
         {
-          "path": "benchmarks/nori/persistent-evidence/redb-linux-baseline.json",
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-linux-baseline.json",
           "sha256": "b970e09fd25e6b842ae9ce3b1cd0e6744c29d85a1ced83d9803763fd2df4f4dd",
           "gate_passed_at_collection": false,
           "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/attempts/1",
           "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/artifacts/10314081635"
         },
         {
-          "path": "benchmarks/nori/persistent-evidence/redb-linux-repeat.json",
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-linux-repeat.json",
           "sha256": "37a4d04b2032e812c9231c100a6d3eabce4efb023617c017a0afc9eb83a5bfe3",
           "gate_passed_at_collection": false,
           "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/attempts/2",
           "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/artifacts/10314024274"
         },
         {
-          "path": "benchmarks/nori/persistent-evidence/redb-linux-commit-order.json",
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-linux-commit-order.json",
           "sha256": "a20600183644479ef05f848d8c1f2c12a3ee9a603b12e9880b1f60a93be89c33",
           "gate_passed_at_collection": false,
           "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34749722780/attempts/1",
@@ -305,11 +305,11 @@
         }
       ],
       "allocation_reference": {
-        "path": "benchmarks/nori/persistent-evidence/redb-allocation-reference.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-allocation-reference.json",
         "sha256": "6792e89d46fdb8dfd4240c131d06a79df31dc0299d13806152bbfb98f358ca76"
       },
       "commit_allocation_probe": {
-        "path": "benchmarks/nori/persistent-evidence/redb-commit-allocation-probe.json",
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-commit-allocation-probe.json",
         "sha256": "8bd5e9979b725a8cad99490dcd270e1d3bc5fa3173b7dfeac7a78f85b090de27"
       }
     }
