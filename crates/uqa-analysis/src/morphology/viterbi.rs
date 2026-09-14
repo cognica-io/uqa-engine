@@ -61,6 +61,12 @@ pub(crate) trait Search<'a> {
     fn extend(&mut self, batch: &mut Self::Batch) -> AnalysisResult<()>;
     fn backtrace(&mut self, position: usize, index: usize) -> AnalysisResult<()>;
     fn eos_cost(&self, right: u16) -> i32;
+    fn backtrace_alternatives(&mut self, _position: usize, _eos: bool) -> AnalysisResult<()> {
+        Ok(())
+    }
+    fn finish_pending(&mut self) -> AnalysisResult<()> {
+        Ok(())
+    }
 }
 
 pub(crate) fn forward<'a, S: Search<'a>>(state: &mut S) -> AnalysisResult<bool> {
@@ -80,7 +86,9 @@ pub(crate) fn forward<'a, S: Search<'a>>(state: &mut S) -> AnalysisResult<bool> 
             && frontier
             && traversal.lattice.get(position).len() == 1
         {
+            state.backtrace_alternatives(position, false)?;
             state.backtrace(position, 0)?;
+            state.finish_pending()?;
             state.traversal_mut().lattice.rebase(position);
             if state.has_pending() {
                 return Ok(false);
@@ -116,7 +124,9 @@ fn finish<'a, S: Search<'a>>(state: &mut S) -> AnalysisResult<()> {
             }
         }
         let best = best.ok_or_else(|| state.traversal().lattice.invalid("no complete path"))?;
+        state.backtrace_alternatives(position, true)?;
         state.backtrace(position, best)?;
+        state.finish_pending()?;
     }
     Ok(())
 }
@@ -142,11 +152,13 @@ fn force_backtrace<'a, S: Search<'a>>(state: &mut S) -> AnalysisResult<()> {
             .lattice
             .invalid("no live path at forced backtrace")
     })?;
+    state.backtrace_alternatives(position, false)?;
     let traversal = state.traversal_mut();
     traversal
         .lattice
         .prune(traversal.position, position, index, traversal.poll)?;
     state.backtrace(position, 0)?;
+    state.finish_pending()?;
     let traversal = state.traversal_mut();
     traversal.lattice.rebase(position);
     traversal.position = position;

@@ -17,6 +17,7 @@ use crate::morphology::lattice::LatticeConfig;
 use crate::{AnalysisError, AnalysisResult};
 
 mod emission;
+mod nbest;
 mod resegment;
 mod viterbi;
 mod word;
@@ -36,6 +37,8 @@ pub struct KuromojiOptions {
     pub mode: KuromojiMode,
     pub discard_punctuation: bool,
     pub discard_compound_token: bool,
+    /// Signed extra path cost; non-positive values disable the alternative lattice.
+    pub n_best_cost: i32,
 }
 
 impl Default for KuromojiOptions {
@@ -44,6 +47,7 @@ impl Default for KuromojiOptions {
             mode: KuromojiMode::Search,
             discard_punctuation: true,
             discard_compound_token: true,
+            n_best_cost: 0,
         }
     }
 }
@@ -53,10 +57,17 @@ pub struct KuromojiLimits {
     pub max_input_utf16: usize,
     pub max_lattice_positions: usize,
     pub max_lattice_candidates: usize,
+    /// Cumulative emission candidates, including alternatives before span deduplication.
     pub max_tokens: usize,
     pub max_output_utf16: usize,
     pub max_resegmentation_arcs: usize,
     pub max_resegmentation_work: usize,
+    /// Alternative nodes per fragment, including its boundary nodes.
+    pub max_n_best_nodes: usize,
+    /// Additional graph/probe work per call, shared by all examples during preparation.
+    pub max_n_best_work: usize,
+    /// Nonempty slash-separated examples in one preparation call.
+    pub max_n_best_examples: usize,
 }
 
 impl Default for KuromojiLimits {
@@ -69,6 +80,9 @@ impl Default for KuromojiLimits {
             max_output_utf16: 64 * 1024 * 1024,
             max_resegmentation_arcs: 1_000_000,
             max_resegmentation_work: 16_000_000,
+            max_n_best_nodes: 1_000_000,
+            max_n_best_work: 16_000_000,
+            max_n_best_examples: 1024,
         }
     }
 }

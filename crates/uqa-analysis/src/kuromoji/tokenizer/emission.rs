@@ -21,6 +21,16 @@ struct Alternative {
     word: WordId,
 }
 
+/// Dictionary attributes are read only after alternatives have been deduplicated and emitted.
+#[derive(Clone, Copy)]
+pub(super) struct PendingToken {
+    pub word: TokenWord,
+    pub start: usize,
+    pub end: usize,
+    pub length: u32,
+    pub order: usize,
+}
+
 pub(super) fn backtrace(state: &mut State<'_>, end: usize, mut index: usize) -> AnalysisResult<()> {
     if end == state.traversal.last_backtrace {
         return Ok(());
@@ -89,11 +99,10 @@ pub(super) fn backtrace(state: &mut State<'_>, end: usize, mut index: usize) -> 
             let alt = alternative.take().expect("alternate backtrace joins here");
             if !state.options.discard_compound_token && back_count > 0 {
                 back_count += 1;
-                let (mut token, memory) =
-                    dictionary_token(state, alt.word, alt.start, alt.end)?.into_parts();
-                token.position_length = u32::try_from(back_count)
+                let mut token = dictionary_token(alt.word, alt.start, alt.end)?;
+                token.length = u32::try_from(back_count)
                     .map_err(|_| invalid("Kuromoji emission", "position length exceeds u32"))?;
-                state.push(Budgeted::new(token, memory))?;
+                state.push(token)?;
             }
         }
         back_count += emit_word(state, node, position)?;
@@ -125,11 +134,10 @@ fn emit_word(state: &mut State<'_>, node: Node, position: usize) -> AnalysisResu
                 state.tick()?;
                 let next = current + length;
                 let token = token(
-                    state,
                     TokenWord::UserSegment(entry.word_base() + segment as u32),
                     current,
                     next,
-                )?;
+                );
                 state.push(token)?;
                 current = next;
             }
@@ -153,14 +161,13 @@ fn emit_word(state: &mut State<'_>, node: Node, position: usize) -> AnalysisResu
                 }
                 if !state.options.discard_punctuation || !state.punctuation(state.input[start]) {
                     let token = token(
-                        state,
                         TokenWord::Dictionary(
                             state.ngram.expect("validated NGRAM word"),
                             KuromojiOrigin::Unknown,
                         ),
                         start,
                         cursor,
-                    )?;
+                    );
                     state.push(token)?;
                     emitted += 1;
                 }
@@ -172,7 +179,7 @@ fn emit_word(state: &mut State<'_>, node: Node, position: usize) -> AnalysisResu
                 || position == word_start
                 || !state.punctuation(state.input[word_start])
             {
-                let token = dictionary_token(state, word, word_start, position)?;
+                let token = dictionary_token(word, word_start, position)?;
                 state.push(token)?;
                 emitted += 1;
             }
@@ -181,12 +188,11 @@ fn emit_word(state: &mut State<'_>, node: Node, position: usize) -> AnalysisResu
     Ok(emitted)
 }
 
-fn dictionary_token(
-    state: &mut State<'_>,
+pub(super) fn dictionary_token(
     word: WordId,
     start: usize,
     end: usize,
-) -> AnalysisResult<Budgeted<KuromojiToken>> {
+) -> AnalysisResult<PendingToken> {
     let word = match word {
         WordId::Known(id) => TokenWord::Dictionary(id, KuromojiOrigin::Known),
         WordId::Unknown(id) => TokenWord::Dictionary(id, KuromojiOrigin::Unknown),
@@ -194,15 +200,30 @@ fn dictionary_token(
             return Err(invalid("Kuromoji emission", "user phrase requires segmentation").into())
         }
     };
-    token(state, word, start, end)
+    Ok(token(word, start, end))
 }
 
-fn token(
+pub(super) fn token(word: TokenWord, start: usize, end: usize) -> PendingToken {
+    PendingToken {
+        word,
+        start,
+        end,
+        length: 1,
+        order: 0,
+    }
+}
+
+pub(super) fn materialize(
     state: &mut State<'_>,
-    word: TokenWord,
-    start: usize,
-    end: usize,
+    pending: PendingToken,
 ) -> AnalysisResult<Budgeted<KuromojiToken>> {
+    let PendingToken {
+        word,
+        start,
+        end,
+        length,
+        ..
+    } = pending;
     let surface = state
         .input
         .get(start..end)
@@ -232,13 +253,14 @@ fn token(
     }
     let [part_of_speech, base_form, reading, pronunciation, inflection_type, inflection_form] =
         owned;
+    state.record_units(units)?;
     Ok(Budgeted::new(
         KuromojiToken {
             term_utf16,
             start_utf16: start,
             end_utf16: end,
             position_increment: 1,
-            position_length: 1,
+            position_length: length,
             keyword: false,
             part_of_speech,
             base_form,

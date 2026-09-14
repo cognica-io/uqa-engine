@@ -8,8 +8,8 @@
 
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryReservation};
 
-use super::word;
-use super::{KuromojiLimits, KuromojiMode, KuromojiOptions, KuromojiOutput, KuromojiToken};
+use super::{emission::PendingToken, word};
+use super::{JapaneseTokenizer, KuromojiLimits, KuromojiMode, KuromojiOptions, KuromojiOutput};
 use crate::kuromoji::error::{check_limit, invalid};
 use crate::kuromoji::{KuromojiDictionary, UserDictionary};
 use crate::morphology::lattice::{Node, WordId};
@@ -23,9 +23,13 @@ pub(super) struct State<'a> {
     pub options: KuromojiOptions,
     pub limits: KuromojiLimits,
     pub traversal: Traversal<'a, KuromojiLimits>,
-    pub pending: BudgetedVec<KuromojiToken>,
+    pub pending: BudgetedVec<PendingToken>,
     pub budget: &'a MemoryBudget,
     pub ngram: Option<u32>,
+    pub nbest: Option<super::nbest::Graph>,
+    pub n_best_work: usize,
+    required: Option<std::ops::Range<usize>>,
+    probe_delta: i32,
     total_tokens: usize,
     output_units: usize,
     resegmentation_work: usize,
@@ -41,56 +45,134 @@ pub(super) fn analyze(
     budget: &MemoryBudget,
     poll: &mut impl FnMut() -> AnalysisResult<()>,
 ) -> AnalysisResult<Budgeted<KuromojiOutput>> {
-    let mut ngram = None;
-    if options.mode == KuromojiMode::Extended {
-        for id in model.unknown_words(0).expect("validated NGRAM class") {
-            poll()?;
-            if model
-                .word(id)
-                .expect("validated unknown word")
-                .original_id()
-                == 0
-            {
-                ngram = Some(id);
-                break;
-            }
-        }
-        if ngram.is_none() {
-            return Err(invalid(
-                "Kuromoji tokenizer",
-                "unknown dictionary has no NGRAM word ID zero",
-            )
-            .into());
-        }
-    }
-    let mut state = State {
+    drive(
+        &mut State::new(input, model, user, options, limits, budget, poll)?,
+        true,
+    )
+}
+
+pub(super) fn probe(
+    input: &[u16],
+    tokenizer: &JapaneseTokenizer,
+    required: std::ops::Range<usize>,
+    limits: KuromojiLimits,
+    budget: &MemoryBudget,
+    poll: &mut dyn FnMut() -> AnalysisResult<()>,
+) -> AnalysisResult<(i32, usize)> {
+    let options = KuromojiOptions {
+        n_best_cost: 1,
+        ..tokenizer.options
+    };
+    let mut state = State::new(
         input,
-        model,
-        user,
+        &tokenizer.model,
+        tokenizer.user.as_deref(),
         options,
         limits,
-        traversal: Traversal::new(input.len(), limits, budget, poll)?,
-        pending: BudgetedVec::new(budget),
         budget,
-        ngram,
-        total_tokens: 0,
-        output_units: 0,
-        resegmentation_work: 0,
-        output_memory: budget.empty_reservation(),
-    };
-    let mut tokens = BudgetedVec::new(budget);
+        poll,
+    )?;
+    state.required = Some(required);
+    drive(&mut state, false)?;
+    Ok((
+        if state.probe_delta == i32::MAX {
+            -1
+        } else {
+            state.probe_delta
+        },
+        state.n_best_work,
+    ))
+}
+
+impl<'a> State<'a> {
+    fn new(
+        input: &'a [u16],
+        model: &'a KuromojiDictionary,
+        user: Option<&'a UserDictionary>,
+        options: KuromojiOptions,
+        limits: KuromojiLimits,
+        budget: &'a MemoryBudget,
+        poll: &'a mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Self> {
+        let mut ngram = None;
+        if options.mode == KuromojiMode::Extended {
+            for id in model.unknown_words(0).expect("validated NGRAM class") {
+                poll()?;
+                if model
+                    .word(id)
+                    .expect("validated unknown word")
+                    .original_id()
+                    == 0
+                {
+                    ngram = Some(id);
+                    break;
+                }
+            }
+            if ngram.is_none() {
+                return Err(invalid(
+                    "Kuromoji tokenizer",
+                    "unknown dictionary has no NGRAM word ID zero",
+                )
+                .into());
+            }
+        }
+        Ok(Self {
+            input,
+            model,
+            user,
+            options,
+            limits,
+            traversal: Traversal::new(input.len(), limits, budget, poll)?,
+            pending: BudgetedVec::new(budget),
+            budget,
+            ngram,
+            nbest: None,
+            n_best_work: 0,
+            required: None,
+            probe_delta: i32::MAX,
+            total_tokens: 0,
+            output_units: 0,
+            resegmentation_work: 0,
+            output_memory: budget.empty_reservation(),
+        })
+    }
+}
+
+fn drive(state: &mut State<'_>, collect: bool) -> AnalysisResult<Budgeted<KuromojiOutput>> {
+    let mut tokens = BudgetedVec::new(state.budget);
     let mut last_position = None;
+    let mut last_probe_base = None;
     loop {
-        let ended = crate::morphology::viterbi::forward(&mut state)?;
-        tokens.reserve(state.pending.len())?;
-        while let Some(mut token) = state.pending.pop() {
+        let ended = crate::morphology::viterbi::forward(state)?;
+        if collect {
+            tokens.reserve(state.pending.len())?;
+        }
+        while let Some(pending) = state.pending.pop() {
             state.tick()?;
+            if pending.length == 0 {
+                return Err(
+                    invalid("Kuromoji N-best", "token position length must be positive").into(),
+                );
+            }
+            if let Some(required) = state.required.clone() {
+                let base = state.nbest.as_ref().expect("N-best probe lattice").base();
+                if last_probe_base != Some(base) {
+                    last_probe_base = Some(base);
+                    let delta = super::nbest::probe_delta(state, required)?;
+                    state.probe_delta = state.probe_delta.min(delta);
+                }
+            }
+            if !collect {
+                continue;
+            }
+            let (mut token, memory) = super::emission::materialize(state, pending)?.into_parts();
             token.position_increment = u32::from(last_position != Some(token.start_utf16));
-            if token.position_increment != 0 {
+            if token.position_increment != 0 && state.options.n_best_cost <= 0 {
                 token.position_length = 1;
             }
             last_position = Some(token.start_utf16);
             tokens.push(token)?;
+            state.output_memory.absorb(memory);
         }
         if ended {
             break;
@@ -98,7 +180,10 @@ pub(super) fn analyze(
     }
     (state.traversal.poll)()?;
     let (tokens, mut memory) = tokens.into_parts();
-    memory.absorb(state.output_memory);
+    memory.absorb(std::mem::replace(
+        &mut state.output_memory,
+        state.budget.empty_reservation(),
+    ));
     Ok(Budgeted::new(
         KuromojiOutput {
             tokens,
@@ -128,6 +213,11 @@ impl State<'_> {
         Ok(())
     }
 
+    pub fn n_best_tick(&mut self) -> AnalysisResult<()> {
+        self.tick()?;
+        super::nbest::count_work(&mut self.n_best_work, self.limits.max_n_best_work)
+    }
+
     pub fn check_units(&self, additional: usize) -> AnalysisResult<()> {
         let total = self
             .output_units
@@ -141,7 +231,13 @@ impl State<'_> {
         Ok(())
     }
 
-    pub fn push(&mut self, token: Budgeted<KuromojiToken>) -> AnalysisResult<()> {
+    pub fn record_units(&mut self, units: usize) -> AnalysisResult<()> {
+        self.check_units(units)?;
+        self.output_units += units;
+        Ok(())
+    }
+
+    pub fn push(&mut self, mut token: PendingToken) -> AnalysisResult<()> {
         check_limit(
             "Kuromoji output tokens",
             self.total_tokens
@@ -149,30 +245,9 @@ impl State<'_> {
                 .ok_or_else(|| invalid("Kuromoji emission", "token count overflow"))?,
             self.limits.max_tokens,
         )?;
-        let mut units = token.term_utf16.len();
-        for attribute in [
-            &token.part_of_speech,
-            &token.base_form,
-            &token.reading,
-            &token.pronunciation,
-            &token.inflection_type,
-            &token.inflection_form,
-        ]
-        .into_iter()
-        .flatten()
-        {
-            let count =
-                crate::morphology::input::utf16_len(attribute, self.traversal.poll, |_| Ok(()))?;
-            units = units
-                .checked_add(count)
-                .ok_or_else(|| invalid("Kuromoji emission", "attribute size overflow"))?;
-        }
-        self.check_units(units)?;
-        let (token, memory) = token.into_parts();
+        token.order = self.total_tokens;
         self.pending.push(token)?;
-        self.output_memory.absorb(memory);
         self.total_tokens += 1;
-        self.output_units += units;
         Ok(())
     }
 
@@ -298,6 +373,20 @@ impl<'a> Search<'a> for State<'a> {
     }
     fn backtrace(&mut self, position: usize, index: usize) -> AnalysisResult<()> {
         super::emission::backtrace(self, position, index)
+    }
+
+    fn backtrace_alternatives(&mut self, position: usize, eos: bool) -> AnalysisResult<()> {
+        if self.options.n_best_cost > 0 {
+            super::nbest::backtrace(self, position, eos)?;
+        }
+        Ok(())
+    }
+
+    fn finish_pending(&mut self) -> AnalysisResult<()> {
+        if self.options.n_best_cost > 0 {
+            super::nbest::fixup(self)?;
+        }
+        Ok(())
     }
 
     fn extend(&mut self, unknown_end: &mut usize) -> AnalysisResult<()> {

@@ -11,7 +11,7 @@ use uqa_core::memory::MemoryError;
 use super::*;
 use crate::kuromoji::{DictionaryError, KuromojiResources, UserDictionaryLimits};
 
-fn model() -> Arc<KuromojiDictionary> {
+pub(super) fn model() -> Arc<KuromojiDictionary> {
     KuromojiResources::default()
         .load_default()
         .unwrap()
@@ -23,7 +23,7 @@ fn units(text: Option<&str>) -> Option<Vec<u16>> {
     text.map(|text| text.encode_utf16().collect())
 }
 
-fn raw_analysis(output: &KuromojiOutput) -> Value {
+pub(super) fn raw_analysis(output: &KuromojiOutput) -> Value {
     let tokens: Vec<_> = output.tokens.iter().map(|token| json!({
         "term_utf16": token.term_utf16, "start_utf16": token.start_utf16, "end_utf16": token.end_utf16,
         "position_increment": token.position_increment, "position_length": token.position_length, "keyword": token.keyword,
@@ -69,6 +69,7 @@ fn japanese_tokenizer_matches_pinned_modes_graphs_attributes_and_raw_units() {
             mode: serde_json::from_value(case["mode"].clone()).unwrap(),
             discard_punctuation: case["discard_punctuation"].as_bool().unwrap(),
             discard_compound_token: case["discard_compound_token"].as_bool().unwrap(),
+            n_best_cost: 0,
         };
         let input = if let Some(raw) = case.get("input_utf16") {
             serde_json::from_value(raw.clone()).unwrap()
@@ -176,7 +177,7 @@ fn japanese_user_failures_preserve_selected_models_and_release_partial_output() 
     drop(held);
 }
 
-fn retained_bytes(output: &KuromojiOutput) -> usize {
+pub(super) fn retained_bytes(output: &KuromojiOutput) -> usize {
     output.tokens.capacity() * size_of::<KuromojiToken>()
         + output
             .tokens
@@ -218,7 +219,6 @@ fn japanese_resegmentation_and_output_retain_exact_reservations() {
         1,
         input.encode_utf16().count() * 2 - 1,
         output.reserved_bytes() - 1,
-        peak - 1,
     ] {
         let budget = MemoryBudget::new(limit + 7);
         let held = budget.reserve(7).unwrap();
@@ -235,6 +235,17 @@ fn japanese_resegmentation_and_output_retain_exact_reservations() {
         drop(held);
         assert_eq!(budget.used(), 0);
     }
+    // Reserved vectors can choose exact growth when their preferred capacity exceeds the allowance.
+    let tighter = MemoryBudget::new(peak - 1);
+    match tokenizer.tokenize_budgeted(input, KuromojiLimits::default(), &tighter, &mut || Ok(())) {
+        Ok(actual) => {
+            assert_eq!(*output, *actual);
+            assert!(tighter.peak() < peak);
+        }
+        Err(AnalysisError::Memory(MemoryError::Limit { .. })) => {}
+        Err(error) => panic!("unexpected tighter-budget error: {error}"),
+    }
+    assert_eq!(tighter.used(), 0);
     let budget = MemoryBudget::new(peak);
     let actual = tokenizer
         .tokenize_budgeted(input, KuromojiLimits::default(), &budget, &mut || Ok(()))

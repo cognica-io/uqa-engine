@@ -1,0 +1,860 @@
+[
+  {
+    "id": "compound_normal_-1",
+    "input": "関西国際空港に行きました。",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": -1
+  },
+  {
+    "id": "compound_normal_0",
+    "input": "関西国際空港に行きました。",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0
+  },
+  {
+    "id": "compound_normal_1",
+    "input": "関西国際空港に行きました。",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 1
+  },
+  {
+    "id": "compound_normal_1000",
+    "input": "関西国際空港に行きました。",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 1000
+  },
+  {
+    "id": "compound_normal_5000",
+    "input": "関西国際空港に行きました。",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "compound_normal_100000",
+    "input": "関西国際空港に行きました。",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 100000
+  },
+  {
+    "id": "compound_normal_2147483647",
+    "input": "関西国際空港に行きました。",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 2147483647
+  },
+  {
+    "id": "punctuation_normal_0_0",
+    "input": "関西国際空港、UQA すもももももももものうち。",
+    "mode": "normal",
+    "discard_punctuation": false,
+    "discard_compound_token": false,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "punctuation_normal_0_1",
+    "input": "関西国際空港、UQA すもももももももものうち。",
+    "mode": "normal",
+    "discard_punctuation": false,
+    "discard_compound_token": true,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "punctuation_normal_1_0",
+    "input": "関西国際空港、UQA すもももももももものうち。",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": false,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "empty_normal",
+    "input": "",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "punctuation_only_normal",
+    "input": " 。! ",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "homographs_normal",
+    "input": "はし はし はし",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "unknown_normal",
+    "input": "abcdef🙂𠮷z",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "forced_normal",
+    "input": "すもも",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 5000,
+    "repeat": 380
+  },
+  {
+    "id": "unknown_boundary_normal",
+    "input": "z",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 1,
+    "repeat": 1025
+  },
+  {
+    "id": "user_segments_normal",
+    "input": "東京大学に行く",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 100000,
+    "user_dictionary": "東京大学,東京 大学,トウキョウ ダイガク,名詞"
+  },
+  {
+    "id": "user_prefixes_normal",
+    "input": "東京大学東京",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 100000,
+    "user_dictionary": "東京,東京,トウキョウ,地名\n東京大学,東京 大学,トウキョウ ダイガク,名詞"
+  },
+  {
+    "id": "user_punctuation_normal",
+    "input": "。!。!",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 100000,
+    "user_dictionary": "。!,。 !,マル ビックリ,記号"
+  },
+  {
+    "id": "user_zero_segment_normal",
+    "input": "東京",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 100000,
+    "user_dictionary": "東京, 東京, カナ,名詞"
+  },
+  {
+    "id": "raw_units_normal",
+    "input": "",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 1000,
+    "input_utf16": [
+      55296,
+      26481,
+      20140,
+      56320,
+      55357,
+      56898
+    ]
+  },
+  {
+    "id": "compound_search_-1",
+    "input": "関西国際空港に行きました。",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": -1
+  },
+  {
+    "id": "compound_search_0",
+    "input": "関西国際空港に行きました。",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0
+  },
+  {
+    "id": "compound_search_1",
+    "input": "関西国際空港に行きました。",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 1
+  },
+  {
+    "id": "compound_search_1000",
+    "input": "関西国際空港に行きました。",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 1000
+  },
+  {
+    "id": "compound_search_5000",
+    "input": "関西国際空港に行きました。",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "compound_search_100000",
+    "input": "関西国際空港に行きました。",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 100000
+  },
+  {
+    "id": "compound_search_2147483647",
+    "input": "関西国際空港に行きました。",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 2147483647
+  },
+  {
+    "id": "punctuation_search_0_0",
+    "input": "関西国際空港、UQA すもももももももものうち。",
+    "mode": "search",
+    "discard_punctuation": false,
+    "discard_compound_token": false,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "punctuation_search_0_1",
+    "input": "関西国際空港、UQA すもももももももものうち。",
+    "mode": "search",
+    "discard_punctuation": false,
+    "discard_compound_token": true,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "punctuation_search_1_0",
+    "input": "関西国際空港、UQA すもももももももものうち。",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": false,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "empty_search",
+    "input": "",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "punctuation_only_search",
+    "input": " 。! ",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "homographs_search",
+    "input": "はし はし はし",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "unknown_search",
+    "input": "abcdef🙂𠮷z",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "forced_search",
+    "input": "すもも",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 5000,
+    "repeat": 380
+  },
+  {
+    "id": "unknown_boundary_search",
+    "input": "z",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 1,
+    "repeat": 1025
+  },
+  {
+    "id": "user_segments_search",
+    "input": "東京大学に行く",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 100000,
+    "user_dictionary": "東京大学,東京 大学,トウキョウ ダイガク,名詞"
+  },
+  {
+    "id": "user_prefixes_search",
+    "input": "東京大学東京",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 100000,
+    "user_dictionary": "東京,東京,トウキョウ,地名\n東京大学,東京 大学,トウキョウ ダイガク,名詞"
+  },
+  {
+    "id": "user_punctuation_search",
+    "input": "。!。!",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 100000,
+    "user_dictionary": "。!,。 !,マル ビックリ,記号"
+  },
+  {
+    "id": "user_zero_segment_search",
+    "input": "東京",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 100000,
+    "user_dictionary": "東京, 東京, カナ,名詞"
+  },
+  {
+    "id": "raw_units_search",
+    "input": "",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 1000,
+    "input_utf16": [
+      55296,
+      26481,
+      20140,
+      56320,
+      55357,
+      56898
+    ]
+  },
+  {
+    "id": "compound_extended_-1",
+    "input": "関西国際空港に行きました。",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": -1
+  },
+  {
+    "id": "compound_extended_0",
+    "input": "関西国際空港に行きました。",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0
+  },
+  {
+    "id": "compound_extended_1",
+    "input": "関西国際空港に行きました。",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 1
+  },
+  {
+    "id": "compound_extended_1000",
+    "input": "関西国際空港に行きました。",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 1000
+  },
+  {
+    "id": "compound_extended_5000",
+    "input": "関西国際空港に行きました。",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "compound_extended_100000",
+    "input": "関西国際空港に行きました。",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 100000
+  },
+  {
+    "id": "compound_extended_2147483647",
+    "input": "関西国際空港に行きました。",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 2147483647
+  },
+  {
+    "id": "punctuation_extended_0_0",
+    "input": "関西国際空港、UQA すもももももももものうち。",
+    "mode": "extended",
+    "discard_punctuation": false,
+    "discard_compound_token": false,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "punctuation_extended_0_1",
+    "input": "関西国際空港、UQA すもももももももものうち。",
+    "mode": "extended",
+    "discard_punctuation": false,
+    "discard_compound_token": true,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "punctuation_extended_1_0",
+    "input": "関西国際空港、UQA すもももももももものうち。",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": false,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "empty_extended",
+    "input": "",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "punctuation_only_extended",
+    "input": " 。! ",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "homographs_extended",
+    "input": "はし はし はし",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "unknown_extended",
+    "input": "abcdef🙂𠮷z",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 5000
+  },
+  {
+    "id": "forced_extended",
+    "input": "すもも",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 5000,
+    "repeat": 380
+  },
+  {
+    "id": "unknown_boundary_extended",
+    "input": "z",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 1,
+    "repeat": 1025
+  },
+  {
+    "id": "user_segments_extended",
+    "input": "東京大学に行く",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 100000,
+    "user_dictionary": "東京大学,東京 大学,トウキョウ ダイガク,名詞"
+  },
+  {
+    "id": "user_prefixes_extended",
+    "input": "東京大学東京",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 100000,
+    "user_dictionary": "東京,東京,トウキョウ,地名\n東京大学,東京 大学,トウキョウ ダイガク,名詞"
+  },
+  {
+    "id": "user_punctuation_extended",
+    "input": "。!。!",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 100000,
+    "user_dictionary": "。!,。 !,マル ビックリ,記号"
+  },
+  {
+    "id": "user_zero_segment_extended",
+    "input": "東京",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 100000,
+    "user_dictionary": "東京, 東京, カナ,名詞"
+  },
+  {
+    "id": "raw_units_extended",
+    "input": "",
+    "mode": "extended",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 1000,
+    "input_utf16": [
+      55296,
+      26481,
+      20140,
+      56320,
+      55357,
+      56898
+    ]
+  },
+  {
+    "id": "examples_compound",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "関西国際空港-関西/関西国際空港-空港"
+  },
+  {
+    "id": "examples_maximum",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "東京大学-東京/関西国際空港-関西"
+  },
+  {
+    "id": "examples_missing",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "日本語-英語"
+  },
+  {
+    "id": "examples_empty",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": ""
+  },
+  {
+    "id": "examples_separators",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "///"
+  },
+  {
+    "id": "examples_trailing_hyphens",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "関西国際空港-関西---/"
+  },
+  {
+    "id": "examples_missing_right",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "東京-"
+  },
+  {
+    "id": "examples_missing_left",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "-東京"
+  },
+  {
+    "id": "examples_three_parts",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "東京-東京-大学"
+  },
+  {
+    "id": "examples_hyphens",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "--"
+  },
+  {
+    "id": "examples_no_separator",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "東京"
+  },
+  {
+    "id": "examples_partial_error",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "東京-東京/invalid"
+  },
+  {
+    "id": "examples_trailing_slash",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "東京-東京/"
+  },
+  {
+    "id": "examples_space_example",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "東京-東京/ /"
+  },
+  {
+    "id": "examples_empty_middle",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "a--b"
+  },
+  {
+    "id": "examples_spaces",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": " - "
+  },
+  {
+    "id": "examples_hyphen",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "-"
+  },
+  {
+    "id": "examples_repeated_token",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "東京都東京都-京都"
+  },
+  {
+    "id": "examples_frontiers",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "東京 大阪-大阪"
+  },
+  {
+    "id": "examples_stopped_probe",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "。-。"
+  },
+  {
+    "id": "examples_long_probe",
+    "input": "関西国際空港 東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "すももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすももすもも-もも"
+  },
+  {
+    "id": "examples_explicit_-1",
+    "input": "関西国際空港",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": -1,
+    "n_best_examples": "関西国際空港-関西"
+  },
+  {
+    "id": "examples_explicit_1",
+    "input": "関西国際空港",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 1,
+    "n_best_examples": "関西国際空港-関西"
+  },
+  {
+    "id": "examples_explicit_100000",
+    "input": "関西国際空港",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 100000,
+    "n_best_examples": "関西国際空港-関西"
+  },
+  {
+    "id": "example_user",
+    "input": "東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "user_dictionary": "東京大学,東京 大学,トウキョウ ダイガク,名詞",
+    "n_best_examples": "東京大学-東京"
+  },
+  {
+    "id": "threshold_normal_9324",
+    "input": "関西国際空港",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 9324
+  },
+  {
+    "id": "threshold_normal_9325",
+    "input": "関西国際空港",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 9325
+  },
+  {
+    "id": "threshold_normal_9326",
+    "input": "関西国際空港",
+    "mode": "normal",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 9326
+  },
+  {
+    "id": "threshold_search_9324",
+    "input": "関西国際空港",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 9324
+  },
+  {
+    "id": "threshold_search_9325",
+    "input": "関西国際空港",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 9325
+  },
+  {
+    "id": "threshold_search_9326",
+    "input": "関西国際空港",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 9326
+  },
+  {
+    "id": "examples_supplementary",
+    "input": "𠮷野家𠮷野家",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "𠮷野家𠮷野家-野家"
+  },
+  {
+    "id": "examples_lazy_attributes",
+    "input": "東京",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 1,
+    "n_best_examples": "東京-東京",
+    "user_dictionary": "東京,東京,トウキョウ,"
+  },
+  {
+    "id": "examples_unrepresented",
+    "input": "abcdefgh",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "abcdefgh-cd"
+  },
+  {
+    "id": "examples_user_unrepresented",
+    "input": "東京大学",
+    "mode": "search",
+    "discard_punctuation": true,
+    "discard_compound_token": true,
+    "n_best_cost": 0,
+    "n_best_examples": "東京大学-京大",
+    "user_dictionary": "東京大学,東京 大学,トウキョウ ダイガク,名詞"
+  }
+]
