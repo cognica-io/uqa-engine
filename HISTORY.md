@@ -6,8 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-14
+
+See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.3.0/docs/manual/reference/10-upgrading.md) for Rust API and SQLite provider changes, feature selection, and persistent analyzer/index migration.
+
 ### Added
 
+- Added native Korean Nori analysis with the embedded dictionary, user-rule compilation, decompound modes, morphological attributes, POS and reading filters, simple lowercase normalization, and optional exact-decimal Korean number composition. Rust exposes the optional `nori` feature; official Python, Node.js, and browser WASM packages include the dictionary and upstream notices without a JVM runtime dependency.
+- Added lossless token graphs, canonical term keys, original source offsets, and independent normalization lengths across memory, SQLite, and redb indexes. Quoted full-text phrases follow connected graph paths; analyzer-aware highlighting renders matches at original source spans. SQLite schema 48 and legacy key-value positional indexes rebuild from original documents under restored analyzer revisions in the initial catalog transaction.
+- Added rich token inspection and normalization across SQL and language bindings, with explicit resource limits and cancellation through analysis, graph matching, highlighting, and result materialization.
 - Persisted exact named analyzer descriptors and independent index/search bindings, including resolved synonym files, owner validation, transactional source migration, and restoration across sessions and reopen.
 
 - Added a versioned pre-commit hook that validates staged crate dependencies and transitive ownership boundaries, with the same policy enforced in CI.
@@ -21,6 +28,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserved copy-on-write memory index snapshots and durable analyzer/occurrence state through transaction rollback, savepoints, concurrent sessions, backups, and reopen. Analysis and retrieval failures release their retained allowance and publish no partial index replacement.
 - Preserved both analyzer revisions before rewriting documents during a column rename, preventing existing rows from being reindexed with the table default. Dropping the last explicit GIN analyzer owner now rebuilds with the default when another GIN retains the field.
 
 - Moved Cypher default-label requirement analysis and diagnostics from Engine into graph, preserving catalog reads, vertex-before-edge errors, and the existing graph transaction boundaries.
@@ -69,6 +77,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Low-level Rust lexical query terms now use `TokenTermKey`; existing string constructors remain available. Native lexical scoring belongs to `uqa-scoring`, and analysis, storage, planning, and execution retain their owning crate interfaces.
 - Operator-tree planning accepts immutable index candidates and no longer retains storage index managers; low-level Rust callers migrate from `with_index_manager` to `with_index_candidates`.
 
 - Moved concrete SQLite catalogs, connections, indexes, transactions, compressed storage, and graph persistence into `uqa-storage-sqlite`. Rust imports of `uqa_storage::SQLite*`, `uqa_storage::sqlite::*`, and `uqa_graph::SQLiteGraphStore` now use `uqa_storage_sqlite`; shared storage errors preserve the typed provider error through `StorageBackendError::Backend`. Database formats and engine SQL behavior are unchanged.

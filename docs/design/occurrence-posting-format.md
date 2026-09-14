@@ -10,7 +10,7 @@ Each `(field, term, document)` occurrence list preserves emission order, equal s
 
 `uqa-storage::inverted_index::analyze_index_field(&CompiledAnalyzer, text)` stages a complete source field before mutation. It accumulates the analyzer's increments, preserves source spans, groups occurrences under canonical term keys, and retains final source offsets and the final skipped-position increment. Its length follows the compiled descriptor: `EmittedTokens` counts all tokens; `DiscountOverlaps` counts tokens whose increment is positive, without counting removed-position holes. The returned `AnalyzedField` does not itself persist a field binding or mutate an index.
 
-A provider must associate the positional format with the exact analyzer descriptor and length policy in field metadata, and preserve the staged field/document end state in its document metadata. Rebuilds must publish that metadata, occurrences, reverse terms, document lengths, and dependent statistics together. Memory and Key/Value implement this association using `IndexedFieldMetadata` and the exact index-side compiled revision; SQLite still requires this integration. The binary occurrence payload alone cannot identify an analyzer revision.
+A provider must associate the positional format with the exact analyzer descriptor and length policy in field metadata, and preserve the staged field/document end state in its document metadata. Rebuilds must publish that metadata, occurrences, reverse terms, document lengths, and dependent statistics together. Memory, Key/Value, and SQLite implement this association using `IndexedFieldMetadata` and the exact index-side compiled revision. The binary occurrence payload alone cannot identify an analyzer revision.
 
 ## Memory provider access and publication
 
