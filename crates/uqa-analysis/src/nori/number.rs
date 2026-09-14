@@ -12,7 +12,6 @@ use super::NoriLimits;
 use crate::AnalysisResult;
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget};
 
-mod decimal;
 mod parse;
 mod stream;
 
@@ -28,6 +27,21 @@ impl Context<'_, '_> {
     fn check_digits(&self, digits: usize) -> AnalysisResult<()> {
         check_limit("Nori numeric units", digits, self.maximum)?;
         Ok(())
+    }
+}
+
+impl crate::morphology::decimal::Context for Context<'_, '_> {
+    fn tick(&mut self) -> AnalysisResult<()> {
+        self.work.tick()
+    }
+    fn budget(&self) -> &MemoryBudget {
+        self.budget
+    }
+    fn check_digits(&self, digits: usize) -> AnalysisResult<()> {
+        Self::check_digits(self, digits)
+    }
+    fn invalid(&self, reason: &'static str) -> crate::AnalysisError {
+        invalid("Nori number", reason).into()
     }
 }
 

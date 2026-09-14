@@ -37,3 +37,6 @@ pub(crate) mod viterbi;
 
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
 pub(crate) mod filter;
+
+#[cfg(feature = "nori")]
+pub(crate) mod decimal;

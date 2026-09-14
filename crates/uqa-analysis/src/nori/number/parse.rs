@@ -6,8 +6,8 @@
 
 //! Reference prefix parsing, with malformed decimals distinct from resource errors.
 
-use super::decimal::Decimal;
 use super::{digit, exponent, Context};
+use crate::morphology::decimal::Decimal;
 use crate::AnalysisError;
 use uqa_core::memory::BudgetedDeque;
 
