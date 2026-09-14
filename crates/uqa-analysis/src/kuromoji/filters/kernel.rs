@@ -86,7 +86,7 @@ impl CompiledFilter {
                     if let Some(base) = token.base_form() {
                         length = text_units(base, &mut work)?;
                         units(token, length, output_units, limits, &mut work)?;
-                        let term = crate::morphology::input::encode(
+                        let term = crate::allocation::input::encode(
                             base,
                             memory.budget(),
                             work.poll,
@@ -177,7 +177,7 @@ impl CompiledFilter {
             Self::PartOfSpeech(words) => {
                 if let Some(pos) = token.part_of_speech()? {
                     let term =
-                        crate::morphology::input::encode(pos, budget, work.poll, |_| Ok(()))?;
+                        crate::allocation::input::encode(pos, budget, work.poll, |_| Ok(()))?;
                     !words.contains(&term, work.poll)?
                 } else {
                     true

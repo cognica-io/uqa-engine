@@ -12,7 +12,7 @@ use super::error::{check_limit, invalid};
 use super::{NoriDictionary, NoriLimits, NoriOutput, POSTag};
 use crate::AnalysisResult;
 
-mod lowercase;
+pub(super) mod lowercase;
 pub(crate) mod stream;
 #[cfg(test)]
 mod tests;
@@ -455,12 +455,5 @@ pub(super) fn normalize_text_budgeted(
     budget: &MemoryBudget,
     poll: &mut impl FnMut() -> AnalysisResult<()>,
 ) -> AnalysisResult<Budgeted<String>> {
-    let input = super::tokenizer::allocation::encode(input, limits.max_input_utf16, budget, poll)?;
-    let output = normalize_budgeted(&input, model, limits, budget, poll)?;
-    drop(input);
-    let (term, memory) = crate::TokenTerm::from_utf16_budgeted(output, &mut *poll)?.into_parts();
-    let text = term
-        .into_string()
-        .map_err(|_| invalid("Nori normalization", "invalid scalar result"))?;
-    Ok(Budgeted::new(text, memory))
+    super::normalization::normalize_budgeted(input, false, model, limits, budget, poll)
 }

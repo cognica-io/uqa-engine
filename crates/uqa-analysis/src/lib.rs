@@ -22,6 +22,10 @@ pub mod kuromoji;
 mod morphology;
 #[cfg(feature = "nori")]
 pub mod nori;
+pub mod normalization;
+pub use normalization::NormalizationConfig;
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+pub use normalization::UnicodeProfile;
 pub mod porter;
 pub mod registry;
 pub mod resources;

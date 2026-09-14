@@ -10,8 +10,7 @@ use super::{
     error::check_limit, filters::CompiledFilter, CompletionMode, JapaneseFilter, JapaneseTokenizer,
     KuromojiDictionary, KuromojiLimits, KuromojiMode, KuromojiOptions, UserDictionary,
 };
-use crate::morphology::filter::Work;
-use crate::{AnalysisResult, AnalyzedText, CharFilter, FilteredText, TokenTerm};
+use crate::{AnalysisResult, AnalyzedText, CharFilter, FilteredText};
 use std::sync::Arc;
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget};
 
@@ -240,29 +239,15 @@ impl JapaneseAnalyzer {
         budget: &MemoryBudget,
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<Budgeted<String>> {
-        input_length(input, limits, poll)?;
-        let filtered = CharFilter::CJKWidth.filter_with_offsets_budgeted(input, budget, poll)?;
-        let (mut units, memory) =
-            crate::morphology::input::encode(filtered.as_str(), budget, poll, |length| {
-                check_limit(
-                    "Kuromoji normalization output UTF-16 units",
-                    length,
-                    limits.max_output_utf16,
-                )
-                .map_err(Into::into)
-            })?
-            .into_parts();
-        if matches!(self.normalization, Normalization::WidthAndLowercase) {
-            super::filters::lowercase(&mut units, &self.model, &mut Work::new(poll)?)?;
-        }
-        drop(filtered);
-        let (term, memory) =
-            TokenTerm::from_utf16_budgeted(Budgeted::new(units, memory), &mut *poll)?.into_parts();
-        let text = term.into_string().map_err(|_| {
-            super::error::invalid("Kuromoji normalization", "invalid scalar result")
-        })?;
-        poll()?;
-        Ok(Budgeted::new(text, memory))
+        super::normalization::normalize_budgeted(
+            input,
+            true,
+            matches!(self.normalization, Normalization::WidthAndLowercase)
+                .then_some(self.model.as_ref()),
+            limits,
+            budget,
+            poll,
+        )
     }
 }
 fn input_length(
@@ -270,7 +255,7 @@ fn input_length(
     limits: KuromojiLimits,
     poll: &mut dyn FnMut() -> AnalysisResult<()>,
 ) -> AnalysisResult<usize> {
-    crate::morphology::input::utf16_len(input, poll, |length| {
+    crate::allocation::input::utf16_len(input, poll, |length| {
         check_limit(
             "Kuromoji input UTF-16 units",
             length,

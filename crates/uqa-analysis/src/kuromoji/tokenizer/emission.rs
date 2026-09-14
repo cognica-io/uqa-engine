@@ -235,7 +235,7 @@ pub(super) fn materialize(
     let mut units = surface.len();
     for attribute in attributes.into_iter().flatten() {
         let count =
-            crate::morphology::input::utf16_len(attribute, state.traversal.poll, |_| Ok(()))?;
+            crate::allocation::input::utf16_len(attribute, state.traversal.poll, |_| Ok(()))?;
         units = units
             .checked_add(count)
             .ok_or_else(|| invalid("Kuromoji emission", "attribute size overflow"))?;

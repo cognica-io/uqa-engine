@@ -93,6 +93,9 @@ mod compiled;
 #[path = "analysis/descriptor.rs"]
 mod descriptor;
 
+#[path = "analysis/normalization.rs"]
+mod normalization;
+
 #[cfg(feature = "nori")]
 #[path = "analysis/nori_compiled.rs"]
 mod nori_compiled;

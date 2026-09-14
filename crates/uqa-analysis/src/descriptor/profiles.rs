@@ -68,7 +68,11 @@ impl RuntimeProfiles {
             || config
                 .char_filters
                 .iter()
-                .any(|filter| matches!(filter, CharFilter::CJKWidth));
+                .any(|filter| matches!(filter, CharFilter::CJKWidth))
+            || config
+                .normalization
+                .as_ref()
+                .is_some_and(crate::NormalizationConfig::width);
         Ok(Self {
             rust_unicode: (rust_tokenizer || rust_lower).then_some(char::UNICODE_VERSION),
             normalization_unicode: normalization.then_some(unicode_normalization::UNICODE_VERSION),

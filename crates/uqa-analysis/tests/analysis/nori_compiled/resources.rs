@@ -23,6 +23,12 @@ fn artifact() -> DictionaryArtifact {
 
 #[test]
 fn name_resolution_is_reentrant_and_retained_handles_need_no_later_lookup() {
+    for explicit_normalization in [false, true] {
+        verify_named_resolution(explicit_normalization);
+    }
+}
+
+fn verify_named_resolution(explicit_normalization: bool) {
     let slot = Arc::new(Mutex::new(None::<AnalyzerResources>));
     let owner = Arc::downgrade(&slot);
     let available = Arc::new(AtomicBool::new(true));
@@ -63,6 +69,14 @@ fn name_resolution_is_reentrant_and_retained_handles_need_no_later_lookup() {
         .push(TokenFilter::UnicodeSimpleLowercase(SimpleLowercaseConfig {
             unicode_profile: "custom".into(),
         }));
+    config.normalization =
+        explicit_normalization.then(
+            || uqa_analysis::NormalizationConfig::UnicodeSimpleLowercase {
+                profile: uqa_analysis::UnicodeProfile::Nori {
+                    dictionary: "custom".into(),
+                },
+            },
+        );
     let compiled = resources.compile(&config).unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     available.store(false, Ordering::SeqCst);

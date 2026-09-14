@@ -297,7 +297,7 @@ impl JapaneseTokenizer {
         deferred: bool,
     ) -> AnalysisResult<Budgeted<KuromojiOutput>> {
         poll()?;
-        let units = crate::morphology::input::encode(input, budget, poll, |length| {
+        let units = crate::allocation::input::encode(input, budget, poll, |length| {
             check_limit(
                 "Kuromoji input UTF-16 units",
                 length,

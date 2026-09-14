@@ -69,6 +69,8 @@ pub(crate) struct ResolvedDescriptor {
     pub descriptor: Arc<AnalyzerDescriptor>,
     #[cfg(feature = "nori")]
     pub nori: crate::nori::pipeline::ResolvedNoriPipeline,
+    #[cfg(feature = "kuromoji")]
+    pub kuromoji: crate::kuromoji::pipeline::ResolvedKuromojiPipeline,
 }
 
 impl Serialize for AnalyzerDescriptor {
@@ -89,6 +91,8 @@ impl AnalyzerDescriptor {
             limits,
             #[cfg(feature = "nori")]
             &crate::nori::NoriResources::default(),
+            #[cfg(feature = "kuromoji")]
+            &crate::kuromoji::KuromojiResources::default(),
         )?
         .descriptor)
     }
@@ -98,18 +102,22 @@ impl AnalyzerDescriptor {
         length_policy: TokenLengthPolicy,
         limits: AnalyzerLimits,
         #[cfg(feature = "nori")] resources: &crate::nori::NoriResources,
+        #[cfg(feature = "kuromoji")] kuromoji_resources: &crate::kuromoji::KuromojiResources,
     ) -> AnalysisResult<ResolvedDescriptor> {
         config::check_config(config, limits)?;
         let profiles = RuntimeProfiles::resolve(config)?;
+        #[cfg(any(feature = "nori", feature = "kuromoji"))]
+        let mut resolved_config = config.clone();
         #[cfg(feature = "nori")]
-        let (config, nori) = {
-            let mut config = config.clone();
-            let nori =
-                crate::nori::pipeline::ResolvedNoriPipeline::resolve(&mut config, resources)?;
-            (config, nori)
-        };
-        #[cfg(feature = "nori")]
-        let config = &config;
+        let nori =
+            crate::nori::pipeline::ResolvedNoriPipeline::resolve(&mut resolved_config, resources)?;
+        #[cfg(feature = "kuromoji")]
+        let kuromoji = crate::kuromoji::pipeline::ResolvedKuromojiPipeline::resolve(
+            &mut resolved_config,
+            kuromoji_resources,
+        )?;
+        #[cfg(any(feature = "nori", feature = "kuromoji"))]
+        let config = &resolved_config;
         let pipeline = config::snapshot(config, limits)?;
         let descriptor = Self::finish(
             DescriptorData {
@@ -127,6 +135,8 @@ impl AnalyzerDescriptor {
             descriptor,
             #[cfg(feature = "nori")]
             nori,
+            #[cfg(feature = "kuromoji")]
+            kuromoji,
         })
     }
 

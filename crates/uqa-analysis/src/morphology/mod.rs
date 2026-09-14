@@ -10,7 +10,6 @@
 
 pub(crate) mod error;
 pub(crate) mod frame;
-pub(crate) mod input;
 pub(crate) mod io;
 pub(crate) mod lexicon;
 pub(crate) mod limits;

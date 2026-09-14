@@ -42,7 +42,7 @@ impl PreparedWords {
         let mut total = 0_usize;
         for word in words {
             poll()?;
-            let count = crate::morphology::input::utf16_len(word, poll, |count| {
+            let count = crate::allocation::input::utf16_len(word, poll, |count| {
                 let needed = total
                     .checked_add(count)
                     .ok_or_else(|| invalid("Kuromoji filter", "prepared UTF-16 count overflow"))?;
@@ -55,7 +55,7 @@ impl PreparedWords {
             })?;
             total += count;
             let (mut value, allocation) =
-                crate::morphology::input::encode(word, budget, poll, |_| Ok(()))?.into_parts();
+                crate::allocation::input::encode(word, budget, poll, |_| Ok(()))?.into_parts();
             if ignore_case {
                 lowercase(&mut value, model, &mut Work::new(poll)?)?;
             }

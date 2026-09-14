@@ -15,8 +15,7 @@ use crate::token_filter::SynonymFileError;
 pub enum AnalysisError {
     #[error(transparent)]
     Memory(#[from] uqa_core::memory::MemoryError),
-    #[cfg(feature = "nori")]
-    #[error("this pipeline has no Korean normalization profile")]
+    #[error("this pipeline has no normalization plan")]
     NormalizationUnavailable,
     #[error("invalid analyzer descriptor: {0}")]
     Descriptor(&'static str),

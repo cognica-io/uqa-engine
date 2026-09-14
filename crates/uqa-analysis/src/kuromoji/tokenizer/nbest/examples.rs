@@ -73,7 +73,7 @@ impl JapaneseTokenizer {
         budget: &MemoryBudget,
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<i32> {
-        crate::morphology::input::utf16_len(examples, poll, |length| input_limit(length, limits))?;
+        crate::allocation::input::utf16_len(examples, poll, |length| input_limit(length, limits))?;
         let mut work = 0;
         let mut count = 0;
         let mut start = 0;
@@ -89,11 +89,11 @@ impl JapaneseTokenizer {
                         limits.max_n_best_examples,
                     )?;
                     let (input, required) = pair(&examples[start..end], &mut work, limits, poll)?;
-                    let input = crate::morphology::input::encode(input, budget, poll, |length| {
+                    let input = crate::allocation::input::encode(input, budget, poll, |length| {
                         input_limit(length, limits)
                     })?;
                     let required =
-                        crate::morphology::input::encode(required, budget, poll, |length| {
+                        crate::allocation::input::encode(required, budget, poll, |length| {
                             input_limit(length, limits)
                         })?;
                     if let Some(start) = find(&input, &required, &mut work, limits, budget, poll)? {

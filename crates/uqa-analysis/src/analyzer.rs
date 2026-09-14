@@ -29,6 +29,8 @@ pub struct Analyzer {
     pub token_filters: Vec<TokenFilter>,
     #[serde(default)]
     pub char_filters: Vec<CharFilter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalization: Option<crate::NormalizationConfig>,
 }
 
 fn default_tokenizer() -> Tokenizer {
@@ -41,6 +43,7 @@ impl Default for Analyzer {
             tokenizer: default_tokenizer(),
             token_filters: Vec::new(),
             char_filters: Vec::new(),
+            normalization: None,
         }
     }
 }
@@ -76,7 +79,14 @@ impl Analyzer {
             tokenizer,
             token_filters,
             char_filters,
+            normalization: None,
         }
+    }
+
+    /// Select normalization independently of tokenization and analysis filters.
+    pub fn with_normalization(mut self, normalization: crate::NormalizationConfig) -> Self {
+        self.normalization = Some(normalization);
+        self
     }
 
     pub fn analyze(&self, text: &str) -> AnalysisResult<Vec<String>> {
@@ -143,6 +153,10 @@ impl Analyzer {
     /// can come from legacy persisted data and external synonym files can
     /// become unreadable after validation.
     pub fn validate(&self) -> AnalysisResult<()> {
+        #[cfg(any(feature = "nori", feature = "kuromoji"))]
+        if let Some(normalization) = &self.normalization {
+            normalization.validate()?;
+        }
         for char_filter in &self.char_filters {
             char_filter.validate()?;
         }

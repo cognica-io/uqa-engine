@@ -105,6 +105,39 @@ pub(crate) struct Artifact {
     pub bytes: DictionaryBytes,
 }
 
+/// Resolve each name once per pipeline and reuse a verified artifact for its exact hash.
+pub(crate) struct Snapshot<K, V> {
+    entries: Vec<(K, Arc<V>)>,
+}
+
+impl<K, V> Default for Snapshot<K, V> {
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+}
+
+impl<K: PartialEq, V> Snapshot<K, V> {
+    pub(crate) fn load<E>(
+        &mut self,
+        request: K,
+        same_artifact: impl Fn(&K, &V) -> bool,
+        resolve: impl FnOnce(&K) -> Result<Arc<V>, E>,
+    ) -> Result<Arc<V>, E> {
+        if let Some((_, value)) = self
+            .entries
+            .iter()
+            .find(|(prior, value)| prior == &request || same_artifact(&request, value))
+        {
+            return Ok(value.clone());
+        }
+        let value = resolve(&request)?;
+        self.entries.push((request, value.clone()));
+        Ok(value)
+    }
+}
+
 struct State<D, U, I> {
     dictionaries: Cache<[u8; 32], D>,
     users: Cache<(I, [u8; 32]), U>,

@@ -83,7 +83,7 @@ pub fn normalize_number_budgeted(
     budget: &MemoryBudget,
     poll: &mut impl FnMut() -> AnalysisResult<()>,
 ) -> AnalysisResult<Budgeted<String>> {
-    let units = crate::morphology::input::encode(input, budget, poll, |required| {
+    let units = crate::allocation::input::encode(input, budget, poll, |required| {
         check_limit(
             "Kuromoji input UTF-16 units",
             required,

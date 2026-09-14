@@ -23,6 +23,14 @@ pub(super) fn check_config(config: &Analyzer, limits: AnalyzerLimits) -> Analysi
         .len()
         .checked_add(config.token_filters.len())
         .and_then(|count| count.checked_add(1))
+        .and_then(|count| {
+            count.checked_add(
+                config
+                    .normalization
+                    .as_ref()
+                    .map_or(0, crate::NormalizationConfig::stage_count),
+            )
+        })
         .ok_or_else(|| invalid("stage count overflow"))?;
     check_limit("analyzer stages", count, limits.max_stages)?;
     encode(config, limits.max_descriptor_bytes, false)?;
@@ -104,6 +112,8 @@ pub(super) fn restore(value: &Value, limits: AnalyzerLimits) -> AnalysisResult<A
     check_config(&config, limits)?;
     #[cfg(feature = "nori")]
     crate::nori::pipeline::check_resolved(&config)?;
+    #[cfg(feature = "kuromoji")]
+    crate::kuromoji::pipeline::check_resolved(&config)?;
     for filter in &config.token_filters {
         if matches!(
             filter,

@@ -23,8 +23,7 @@ pub struct CompiledAnalyzer {
     char_filters: Vec<PreparedCharFilter<'static>>,
     tokenizer: PreparedTokenizer,
     token_filters: Vec<PreparedTokenFilter<'static>>,
-    #[cfg(feature = "nori")]
-    normalizer: Option<Arc<crate::nori::ResolvedDictionary>>,
+    normalization: crate::normalization::PreparedNormalization,
 }
 
 impl Analyzer {
@@ -60,6 +59,7 @@ impl CompiledAnalyzer {
     pub(crate) fn prepare(
         descriptor: Arc<AnalyzerDescriptor>,
         #[cfg(feature = "nori")] nori: crate::nori::pipeline::ResolvedNoriPipeline,
+        #[cfg(feature = "kuromoji")] kuromoji: crate::kuromoji::pipeline::ResolvedKuromojiPipeline,
     ) -> AnalysisResult<Self> {
         let config = descriptor.configuration()?;
         let char_filters = config
@@ -90,8 +90,13 @@ impl CompiledAnalyzer {
             char_filters,
             tokenizer,
             token_filters,
-            #[cfg(feature = "nori")]
-            normalizer: nori.normalizer,
+            normalization: crate::normalization::PreparedNormalization::new(
+                config.normalization.as_ref(),
+                #[cfg(feature = "nori")]
+                nori.normalizer,
+                #[cfg(feature = "kuromoji")]
+                kuromoji.normalizer,
+            )?,
         })
     }
 
@@ -149,8 +154,7 @@ impl CompiledAnalyzer {
         self.analyze_tokens(text)?.into_terms()
     }
 
-    /// Normalize complete input with the Korean tokenizer's fixed Unicode profile, independently of analysis stages.
-    #[cfg(feature = "nori")]
+    /// Normalize complete input with its retained plan, independently of analysis stages.
     pub fn normalize(&self, text: &str) -> AnalysisResult<String> {
         Ok(self
             .normalize_budgeted(text, &MemoryBudget::new(usize::MAX), || Ok(()))?
@@ -158,18 +162,14 @@ impl CompiledAnalyzer {
             .0)
     }
 
-    /// Normalize complete text with the fixed Korean profile and a retained output reservation.
-    #[cfg(feature = "nori")]
+    /// Normalize complete text with one retained output allowance and cancellation callback.
     pub fn normalize_budgeted(
         &self,
         text: &str,
         budget: &MemoryBudget,
         mut poll: impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<Budgeted<String>> {
-        let model = self
-            .normalizer
-            .as_ref()
-            .ok_or(crate::AnalysisError::NormalizationUnavailable)?;
-        crate::nori::pipeline::normalize_budgeted(text, model, budget, &mut poll)
+        self.normalization
+            .normalize_budgeted(text, budget, &mut poll)
     }
 }

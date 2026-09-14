@@ -304,6 +304,30 @@ assert_eq!(restored.analyze("The cats and")?, ["cat"]);
 
 This example executes as a Rust doctest. Saving descriptor JSON and restoring it through a fresh resource owner preserves its resolved inputs without requiring the original synonym files.
 
+### Explicit normalization plans
+
+`Analyzer::with_normalization(plan)` sets the optional analyzer-level `normalization` field. `CompiledAnalyzer::normalize` and `normalize_budgeted` execute that retained plan independently of character filters, tokenization, stopwords and other analysis stages. The methods are available without either language feature. `normalize_budgeted` retains its output reservation and releases partial output and scratch on cancellation or byte-limit failure.
+
+| Normalization JSON | Behavior | Required feature |
+| --- | --- | --- |
+| Omitted | Existing Nori tokenizer profile performs simple lowercase; other pipelines return `NormalizationUnavailable` | Existing Nori inference requires `nori` |
+| `{"type":"unavailable"}` | Explicitly disables normalization, including Nori inference | None |
+| `{"type":"cjk_width"}` | Restricted CJK width conversion, preserving case | None |
+| `{"type":"unicode_simple_lowercase","profile":{"provider":"kuromoji","dictionary":"lucene-10.5.1"}}` | Pinned Java simple lowercase over the complete input | `kuromoji` |
+| `{"type":"cjk_width_simple_lowercase","profile":{"provider":"kuromoji","dictionary":"lucene-10.5.1"}}` | CJK width conversion followed by pinned Java simple lowercase | `kuromoji` |
+
+Both lowercase plans also accept `provider: "nori"` when `nori` is enabled. The dictionary value is a required name or `sha256:<artifact hash>`. Compilation freezes the typed provider and exact artifact hash; restoration accepts only canonical exact hashes and validates the bytes. Profiles and width tables contribute to the descriptor identity, and normalization stages count toward `AnalyzerLimits::max_stages`. Unavailable providers, missing profiles and unknown normalization properties are errors.
+
+An omitted field serializes without a null or default entry, preserving existing generic and Nori descriptor bytes, revisions and fingerprints. An explicit plan creates a distinct revision even when its output happens to equal the inferred behavior. Resolving a shared dictionary alias once per language within a pipeline keeps tokenizer, filter and normalization snapshots consistent. Retained compiled handles preserve their profile after alias changes or cache eviction. This configuration is part of the unreleased Kuromoji work; the public Japanese tokenizer and filter catalog integration remains in progress.
+
+```rust
+use uqa_analysis::{Analyzer, NormalizationConfig};
+let compiled = Analyzer::default()
+    .with_normalization(NormalizationConfig::CJKWidth)
+    .compile()?;
+assert_eq!(compiled.normalize("ＵＱＡ ｶﾞ")?, "UQA ガ");
+```
+
 ### Structured tokens
 
 `Analyzer::analyze_tokens(input)` returns `AnalyzedText`. Its `tokens()` slice contains ordered `AnalysisToken` values with `term()`, `offsets()`, `position_increment()`, `position_length()`, and `is_keyword()`. Tokens emitted by the built-in tokenizers carry `Some(SourceOffsets)` in both original UTF-8 bytes and UTF-16 code units. Start the absolute position at `-1` and add each increment; the token's graph edge ends at that position plus its length. The first increment is positive, later increments may be zero, and lengths are positive. `final_offsets()` identifies the original input end, and `final_position_increment()` counts positions removed after the last emitted token.

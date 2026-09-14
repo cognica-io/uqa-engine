@@ -154,11 +154,15 @@ impl AnalyzerResources {
             self.0.limits,
             #[cfg(feature = "nori")]
             &self.0.nori,
+            #[cfg(feature = "kuromoji")]
+            &self.0.kuromoji,
         )?;
         self.publish(
             resolved.descriptor,
             #[cfg(feature = "nori")]
             resolved.nori,
+            #[cfg(feature = "kuromoji")]
+            resolved.kuromoji,
         )
     }
 
@@ -171,16 +175,27 @@ impl AnalyzerResources {
         if let Some(compiled) = self.0.cache.lock().get(&descriptor.fingerprint()) {
             return Ok(compiled);
         }
+        #[cfg(any(feature = "nori", feature = "kuromoji"))]
+        let mut config = descriptor.configuration()?;
         #[cfg(feature = "nori")]
         let nori = {
-            let mut config = descriptor.configuration()?;
             crate::nori::pipeline::check_resolved(&config)?;
             crate::nori::pipeline::ResolvedNoriPipeline::resolve(&mut config, &self.0.nori)?
+        };
+        #[cfg(feature = "kuromoji")]
+        let kuromoji = {
+            crate::kuromoji::pipeline::check_resolved(&config)?;
+            crate::kuromoji::pipeline::ResolvedKuromojiPipeline::resolve(
+                &mut config,
+                &self.0.kuromoji,
+            )?
         };
         self.publish(
             descriptor,
             #[cfg(feature = "nori")]
             nori,
+            #[cfg(feature = "kuromoji")]
+            kuromoji,
         )
     }
 
@@ -188,6 +203,7 @@ impl AnalyzerResources {
         &self,
         descriptor: Arc<AnalyzerDescriptor>,
         #[cfg(feature = "nori")] nori: crate::nori::pipeline::ResolvedNoriPipeline,
+        #[cfg(feature = "kuromoji")] kuromoji: crate::kuromoji::pipeline::ResolvedKuromojiPipeline,
     ) -> AnalysisResult<Arc<CompiledAnalyzer>> {
         descriptor.validate_limits(self.0.limits)?;
         let fingerprint = descriptor.fingerprint();
@@ -201,6 +217,8 @@ impl AnalyzerResources {
             descriptor,
             #[cfg(feature = "nori")]
             nori,
+            #[cfg(feature = "kuromoji")]
+            kuromoji,
         )?);
         cache.insert(
             fingerprint,

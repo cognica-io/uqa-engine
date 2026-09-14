@@ -7,7 +7,7 @@ Analyzer behavior crosses analysis, storage, engine catalog, SQL execution, and 
 | Concern | Owner | Primary representation |
 | --- | --- | --- |
 | Shared byte allowances and allocation leases | `uqa-core::memory` | `MemoryBudget`, `MemoryReservation`, `Budgeted`, `BudgetedVec`, `BudgetedDeque`, `BudgetedString` |
-| Pipeline stages and validation | `uqa-analysis` | `Analyzer`, `CharFilter`, `Tokenizer`, `TokenFilter` |
+| Pipeline stages and validation | `uqa-analysis` | `Analyzer`, `CharFilter`, `Tokenizer`, `TokenFilter`, `NormalizationConfig` |
 | Source mapping and token graph | `uqa-analysis` | `FilteredText`, `TextCoordinates`, `AnalysisToken`, `AnalyzedText` |
 | Built-in and process-global registry | `uqa-analysis::registry` | Immutable built-ins plus a process-global custom map |
 | Persistent named definitions | `uqa-engine` and `CatalogFacade` | Analyzer name to canonical descriptor and resolved diagnostic configuration |
@@ -38,6 +38,12 @@ Source highlighting keeps matching and rendering in `uqa-analysis`. Query-term c
 The legacy word scanner classifies scalars through the pinned regex-syntax Unicode word ranges without a regex search workspace and polls within long words. Its per-word analyzer still reloads uncompiled resources. SQL argument validation remains in `uqa-sql`; execution reads the live `QueryRuntimeView`, retains the selected revision, and shares one allowance through candidate splitting, analysis and rendering. Allocation failures become SQLSTATE `53200`, and cancellation becomes `57014`. The completed string transfers to the scalar result owner after rendering. Engine supplies its existing runtime/resource adapters.
 
 Analysis diagnostics are encoded in `uqa-analysis::CompiledAnalyzer::analyze_diagnostic_budgeted`. The encoder borrows the complete token stream, retains its reservation, and writes JSON directly into a reserved output buffer with cancellation checks. It does not build an intermediate JSON value tree. `uqa-execution` resolves the existing `AnalyzerRevisions` interface, applies live query controls, preserves `53200` and `57014`, and transfers completed JSON to the result owner. Engine's public method only refreshes retained catalog state and supplies those adapters.
+
+## Normalization ownership
+
+`uqa-analysis::normalization` owns the explicit normalization configuration and executable plan independently of the tokenizer. The private scalar conversion owner in `normalization/text.rs` shares reserved UTF-16 encoding, optional CJK width filtering, final scalar conversion and cancellation between native Nori, native Japanese and compiled generic pipelines. `allocation/input.rs` owns the language-independent input conversion; language adapters supply their existing limits, errors and immutable simple-lowercase tables. Shared code imports neither language module. Typed plan dispatch retains exact resolved resource handles at the analysis boundary.
+
+`morphology::resources::Snapshot` reuses each named request and its verified artifact within one language pipeline. Language pipeline resolution freezes the normalization provider and hash before compiled-cache publication. Omitted normalization retains the legacy Nori inference and original canonical bytes; an explicit unavailable plan overrides inference. Descriptor restoration requires exact hashes and strict normalization properties, includes only used width/profile identities, and cannot substitute a mutable alias. Neither Engine nor storage owns a normalization algorithm.
 
 ## Analysis execution
 

@@ -11,7 +11,7 @@ use crate::nori::error::invalid;
 use crate::nori::NoriDictionary;
 use crate::AnalysisResult;
 
-pub(super) fn apply(
+pub(in crate::nori) fn apply(
     input: &mut [u16],
     model: Option<&NoriDictionary>,
     work: &mut Work<'_>,

@@ -56,6 +56,7 @@ mod error;
 pub(crate) mod filters;
 mod frame;
 mod morphology;
+pub(crate) mod normalization;
 mod number;
 pub(crate) mod pipeline;
 mod resources;
