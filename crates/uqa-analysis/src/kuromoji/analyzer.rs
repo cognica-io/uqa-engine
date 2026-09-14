@@ -7,7 +7,7 @@
 //! Standalone Japanese analysis applies width once and keeps normalization independent of filters.
 
 use super::{
-    error::check_limit, filters::CompiledFilter, JapaneseFilter, JapaneseTokenizer,
+    error::check_limit, filters::CompiledFilter, CompletionMode, JapaneseFilter, JapaneseTokenizer,
     KuromojiDictionary, KuromojiLimits, KuromojiMode, KuromojiOptions, UserDictionary,
 };
 use crate::morphology::filter::Work;
@@ -20,7 +20,14 @@ pub struct JapaneseAnalyzer {
     model: Arc<KuromojiDictionary>,
     tokenizer: JapaneseTokenizer,
     filters: Budgeted<Vec<CompiledFilter>>,
+    normalization: Normalization,
 }
+#[derive(Debug)]
+enum Normalization {
+    WidthAndLowercase,
+    Width,
+}
+
 impl JapaneseAnalyzer {
     /// Apply width and the selected tokenizer mode, then base form, POS/word stops, Katakana stem and simple lowercase.
     ///
@@ -57,6 +64,61 @@ impl JapaneseAnalyzer {
                 JapaneseFilter::SimpleLowercase,
             ],
         )
+    }
+
+    /// Apply width, NORMAL tokenization, completion alternatives and lowercase. Normalization for this analyzer performs width conversion only.
+    ///
+    /// ```
+    /// use uqa_analysis::kuromoji::{CompletionMode, JapaneseAnalyzer, KuromojiResources};
+    /// let dictionary = KuromojiResources::default().load_default()?;
+    /// let analyzer = JapaneseAnalyzer::completion(dictionary.model().clone(), None, CompletionMode::Query)?;
+    /// let output = analyzer.analyze("ｻｯk")?;
+    /// let terms: Vec<_> = output.tokens().iter().map(|token| token.term().as_str().unwrap()).collect();
+    /// assert!(terms.contains(&"sakk"));
+    /// assert_eq!(analyzer.normalize("ＵＱＡ" )?, "UQA");
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn completion(
+        model: Arc<KuromojiDictionary>,
+        user: Option<Arc<UserDictionary>>,
+        mode: CompletionMode,
+    ) -> AnalysisResult<Self> {
+        Self::completion_budgeted(
+            model,
+            user,
+            mode,
+            KuromojiLimits::default(),
+            &MemoryBudget::new(usize::MAX),
+            &mut || Ok(()),
+        )
+    }
+
+    /// Retain the completion chain under its preparation allowance, independently of runtime output.
+    pub fn completion_budgeted(
+        model: Arc<KuromojiDictionary>,
+        user: Option<Arc<UserDictionary>>,
+        mode: CompletionMode,
+        limits: KuromojiLimits,
+        budget: &MemoryBudget,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Self> {
+        let mut analyzer = Self::with_filters_budgeted(
+            model,
+            user,
+            KuromojiOptions {
+                mode: KuromojiMode::Normal,
+                ..KuromojiOptions::default()
+            },
+            &[
+                JapaneseFilter::Completion { mode },
+                JapaneseFilter::SimpleLowercase,
+            ],
+            limits,
+            budget,
+            poll,
+        )?;
+        analyzer.normalization = Normalization::Width;
+        Ok(analyzer)
     }
 
     /// Compile an explicit native chain; normalization remains width plus simple lowercase.
@@ -109,6 +171,7 @@ impl JapaneseAnalyzer {
             model,
             tokenizer,
             filters: Budgeted::new(filters, memory),
+            normalization: Normalization::WidthAndLowercase,
         })
     }
 
@@ -158,7 +221,7 @@ impl JapaneseAnalyzer {
         Ok(output)
     }
 
-    /// Normalize the entire input with width and pinned simple lowercase; no tokenization or stop removal.
+    /// Normalize the entire input with width; ordinary analyzers also apply pinned simple lowercase.
     pub fn normalize(&self, input: &str) -> AnalysisResult<String> {
         Ok(self
             .normalize_budgeted(
@@ -189,7 +252,9 @@ impl JapaneseAnalyzer {
                 .map_err(Into::into)
             })?
             .into_parts();
-        super::filters::lowercase(&mut units, &self.model, &mut Work::new(poll)?)?;
+        if matches!(self.normalization, Normalization::WidthAndLowercase) {
+            super::filters::lowercase(&mut units, &self.model, &mut Work::new(poll)?)?;
+        }
         drop(filtered);
         let (term, memory) =
             TokenTerm::from_utf16_budgeted(Budgeted::new(units, memory), &mut *poll)?.into_parts();

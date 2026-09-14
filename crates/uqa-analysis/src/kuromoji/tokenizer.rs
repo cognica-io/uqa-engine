@@ -142,14 +142,19 @@ pub struct KuromojiToken {
     pub pronunciation: Option<String>,
     pub inflection_type: Option<String>,
     pub inflection_form: Option<String>,
-    pub origin: KuromojiOrigin,
+    /// Absent on generated tokens with no dictionary provenance.
+    pub origin: Option<KuromojiOrigin>,
     #[serde(skip)]
     pub(crate) errors: super::AttributeErrors,
 }
 
 impl KuromojiToken {
     /// Construct a token without dictionary attributes; public fields may then be populated explicitly.
-    pub fn new(term_utf16: Vec<u16>, span: std::ops::Range<usize>, origin: KuromojiOrigin) -> Self {
+    pub fn new(
+        term_utf16: Vec<u16>,
+        span: std::ops::Range<usize>,
+        origin: impl Into<Option<KuromojiOrigin>>,
+    ) -> Self {
         Self {
             term_utf16,
             start_utf16: span.start,
@@ -163,7 +168,7 @@ impl KuromojiToken {
             pronunciation: None,
             inflection_type: None,
             inflection_form: None,
-            origin,
+            origin: origin.into(),
             errors: crate::kuromoji::AttributeErrors::default(),
         }
     }

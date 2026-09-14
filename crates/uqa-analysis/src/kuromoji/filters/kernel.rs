@@ -23,6 +23,9 @@ impl CompiledFilter {
         if matches!(self, Self::Number) {
             return super::super::number::filter(input, limits, poll);
         }
+        if let Self::Completion(mode) = self {
+            return super::super::completion::stream::filter(input, *mode, model, limits, poll);
+        }
         poll()?;
         check_limit(
             "Kuromoji output tokens",
@@ -154,7 +157,7 @@ impl CompiledFilter {
                 Self::BaseForm | Self::KatakanaStem(_) => {
                     token.refresh_context(&input.context, &mut work)?;
                 }
-                Self::PartOfSpeech(_) | Self::Stop(_, _) | Self::Number => {
+                Self::PartOfSpeech(_) | Self::Stop(_, _) | Self::Number | Self::Completion(_) => {
                     unreachable!("term mapping filter")
                 }
             }

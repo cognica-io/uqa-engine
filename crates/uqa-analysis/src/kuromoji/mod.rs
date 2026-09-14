@@ -48,10 +48,12 @@ pub use analyzer::JapaneseAnalyzer;
 mod attributes;
 pub(crate) use attributes::AttributeErrors;
 mod completion;
-pub use completion::{romanize_completion_utf16, romanize_completion_utf16_budgeted};
+pub use completion::{
+    romanize_completion_utf16, romanize_completion_utf16_budgeted, CompletionMode,
+};
 mod dictionary;
 mod error;
-mod filters;
+pub(crate) mod filters;
 mod frame;
 pub use filters::JapaneseFilter;
 mod morphology;

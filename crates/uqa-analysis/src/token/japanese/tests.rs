@@ -43,7 +43,7 @@ fn attributes() -> KuromojiOutput {
             pronunciation: Some("ヨミ".into()),
             inflection_type: Some("型".into()),
             inflection_form: Some("形".into()),
-            origin: KuromojiOrigin::User,
+            origin: Some(KuromojiOrigin::User),
         }],
         terminal: None,
         final_offset_utf16: 3,
@@ -427,6 +427,41 @@ fn korean_filters_treat_japanese_attributes_as_absent() {
                 .unwrap(),
             input
         );
+    }
+}
+
+#[cfg(feature = "nori")]
+#[test]
+fn japanese_completion_clears_foreign_morphology_and_retains_corrected_source() {
+    use crate::kuromoji::{CompletionMode, JapaneseFilter};
+    use crate::nori::{KoreanMorphology, NoriOrigin, POSTag, POSType};
+    let model = KuromojiResources::default().load_default().unwrap();
+    let mut source = crate::Tokenizer::Keyword
+        .tokenize_with_offsets("ア")
+        .unwrap();
+    source.batch.tokens[0].morphology = Some(Morphology::Korean(KoreanMorphology {
+        pos_type: POSType::Morpheme,
+        left_pos: POSTag::NNG,
+        right_pos: POSTag::NNG,
+        reading: Some("foreign reading".into()),
+        morphemes: None,
+        origin: NoriOrigin::Known,
+    }));
+    let filter = JapaneseFilter::Completion {
+        mode: CompletionMode::Index,
+    };
+    let output = filter.filter_analyzed(source, model.model()).unwrap();
+    assert_eq!(
+        output
+            .tokens()
+            .iter()
+            .map(|token| token.term().as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["ア", "a"]
+    );
+    for token in output.tokens() {
+        assert!(token.morphology.is_none());
+        assert_eq!(token.offsets().unwrap().utf16, 0..1);
     }
 }
 

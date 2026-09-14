@@ -169,6 +169,7 @@ public class KuromojiFilterReference {
         case "katakana_uppercase" -> new JapaneseKatakanaUppercaseFilter(input);
         case "reading" -> new JapaneseReadingFormFilter(input, Boolean.parseBoolean(part[1]));
         case "number" -> new JapaneseNumberFilter(input);
+        case "completion" -> new JapaneseCompletionFilter(input, JapaneseCompletionFilter.Mode.valueOf(part[1]));
         default -> throw new IllegalArgumentException("unknown filter");
       };
     }
@@ -237,6 +238,13 @@ public class KuromojiFilterReference {
         return result;
       }
       UserDictionary user = fields[7].equals("-") ? null : UserDictionary.open(new StringReader(new String(Base64.getDecoder().decode(fields[7]), StandardCharsets.UTF_8)));
+      if (fields[1].equals("completion_analyzer") || fields[1].equals("completion_normalize")) {
+        try (var analyzer = new JapaneseCompletionAnalyzer(user, JapaneseCompletionFilter.Mode.valueOf(fields[3]))) {
+          if (fields[1].equals("completion_normalize")) { result.put("normalized_utf16", units(analyzer.normalize("body", input).utf8ToString())); return result; }
+          try (var stream = analyzer.tokenStream("body", input)) { record(result, analyze(stream)); }
+        }
+        return result;
+      }
       var mode = JapaneseTokenizer.Mode.valueOf(fields[3]);
       if (fields[1].equals("normalize") || fields[1].equals("analyzer")) {
         try (var analyzer = new JapaneseAnalyzer(user, mode, JapaneseAnalyzer.getDefaultStopSet(), JapaneseAnalyzer.getDefaultStopTags())) {

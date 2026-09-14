@@ -8,10 +8,13 @@
 
 use uqa_core::memory::{Budgeted, MemoryBudget};
 
-use super::{native, Morphology, TokenBatch};
+use super::{native, AnalysisToken, Morphology, TokenBatch};
+use crate::kuromoji::filters::stream::JapaneseToken;
 use crate::kuromoji::{
     JapaneseMorphology, JapaneseTokenizer, KuromojiLimits, KuromojiOutput, KuromojiToken,
 };
+use crate::morphology::filter::{ComposingToken, Work};
+use crate::TokenTerm;
 use crate::{AnalysisResult, AnalyzedText, FilteredText};
 
 impl native::NativeToken for KuromojiToken {
@@ -20,12 +23,13 @@ impl native::NativeToken for KuromojiToken {
     }
 
     fn into_fields(self) -> native::NativeFields {
+        let has_morphology = self.origin.is_some() || self.fields().iter().any(Option::is_some);
         native::NativeFields {
             span: self.start_utf16..self.end_utf16,
             increment: self.position_increment,
             length: self.position_length,
             keyword: self.keyword,
-            morphology: Morphology::Japanese(JapaneseMorphology {
+            morphology: has_morphology.then_some(Morphology::Japanese(JapaneseMorphology {
                 part_of_speech: self.part_of_speech,
                 base_form: self.base_form,
                 reading: self.reading,
@@ -34,7 +38,7 @@ impl native::NativeToken for KuromojiToken {
                 inflection_form: self.inflection_form,
                 origin: self.origin,
                 errors: self.errors,
-            }),
+            })),
         }
     }
 }
@@ -148,5 +152,50 @@ impl AnalyzedText {
             }
         }
         Ok(())
+    }
+}
+
+impl JapaneseToken for AnalysisToken {
+    fn generated(
+        term: Budgeted<Vec<u16>>,
+        first: &Self::Span,
+        last: &Self::Span,
+        increment: u32,
+        context: &Self::Context,
+        work: &mut Work<'_>,
+    ) -> AnalysisResult<Budgeted<Self>> {
+        let (term, memory) = TokenTerm::from_utf16_budgeted(term, &mut *work.poll)?.into_parts();
+        let mut token = Self {
+            term,
+            offsets: None,
+            position_increment: increment,
+            position_length: 1,
+            keyword: false,
+            filtered_utf16: None,
+            morphology: None,
+            verbatim: false,
+        };
+        token.cover(first, last, context, work)?;
+        Ok(Budgeted::new(token, memory))
+    }
+
+    fn reading(&self) -> AnalysisResult<Option<&str>> {
+        let Some(value) = self.japanese_morphology() else {
+            return Ok(None);
+        };
+        value.errors.check(2)?;
+        Ok(value.reading.as_deref())
+    }
+    fn part_of_speech(&self) -> AnalysisResult<Option<&str>> {
+        let Some(value) = self.japanese_morphology() else {
+            return Ok(None);
+        };
+        value.errors.check(0)?;
+        Ok(value.part_of_speech.as_deref())
+    }
+    fn attributes(&self) -> [Option<&str>; 6] {
+        self.japanese_morphology().map_or([None; 6], |value| {
+            value.fields().map(|field| field.map(String::as_str))
+        })
     }
 }

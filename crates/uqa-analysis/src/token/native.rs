@@ -18,7 +18,7 @@ pub(super) struct NativeFields {
     pub increment: u32,
     pub length: u32,
     pub keyword: bool,
-    pub morphology: Morphology,
+    pub morphology: Option<Morphology>,
 }
 
 pub(super) trait NativeToken {
@@ -44,7 +44,7 @@ fn attach_source(
         position_length: fields.length,
         keyword: fields.keyword,
         filtered_utf16: Some(fields.span),
-        morphology: Some(fields.morphology),
+        morphology: fields.morphology,
         verbatim,
     })
 }

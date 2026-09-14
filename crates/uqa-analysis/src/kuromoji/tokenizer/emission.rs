@@ -271,7 +271,7 @@ pub(super) fn materialize(
             pronunciation,
             inflection_type,
             inflection_form,
-            origin: word.origin(),
+            origin: Some(word.origin()),
             errors,
         },
         memory,

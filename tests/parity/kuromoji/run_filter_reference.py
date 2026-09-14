@@ -58,6 +58,8 @@ def fields(case):
             chain.append('stop:' + str(stage.get('ignore_case', True)).lower() + ':' + strings(stage.get('words')))
         elif kind == 'kuromoji_stemmer':
             chain.append('stem:' + str(stage.get('minimum_length', 4)))
+        elif kind == 'kuromoji_completion':
+            chain.append('completion:' + stage.get('mode', 'index').upper())
         elif kind == 'kuromoji_readingform':
             chain.append('reading:' + str(stage.get('use_romaji', False)).lower())
         else:
@@ -72,7 +74,7 @@ def fields(case):
         term = struct.pack('>i', len(units)) + b''.join(struct.pack('>H', unit) for unit in units)
         data += term + struct.pack('>iiii?', token['start_utf16'], token['end_utf16'], token.get('position_increment', 1), token.get('position_length', 1), token.get('keyword', False))
         data += b''.join(text_bytes(token.get(field)) for field in ['part_of_speech', 'base_form', 'reading', 'pronunciation', 'inflection_type', 'inflection_form'])
-    return [case['kind'], base64.b64encode(raw).decode('ascii'), case.get('mode', 'search').upper(),
+    return [case['kind'], base64.b64encode(raw).decode('ascii'), case.get('completion_mode', case.get('mode', 'search')).upper(),
             str(case.get('discard_punctuation', True)).lower(), str(case.get('discard_compound_token', True)).lower(),
             str(case.get('n_best_cost', 0)), '-' if case.get('user_dictionary') is None else encoded(case['user_dictionary']),
             ','.join(chain), base64.b64encode(data).decode('ascii'),

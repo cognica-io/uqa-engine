@@ -6,7 +6,7 @@
 
 //! Japanese attribute filters share native/common token ownership and preserve terminal state.
 
-use super::{KuromojiDictionary, KuromojiLimits, KuromojiOutput};
+use super::{CompletionMode, KuromojiDictionary, KuromojiLimits, KuromojiOutput};
 use crate::morphology::filter::{AllocatedStream, FilterStream};
 use crate::{AnalysisResult, AnalyzedText};
 use serde::{Deserialize, Serialize};
@@ -15,7 +15,7 @@ use uqa_core::memory::{Budgeted, MemoryBudget};
 mod kana;
 mod kernel;
 mod reading;
-pub(super) mod stream;
+pub(crate) mod stream;
 mod words;
 use kana::Kana;
 pub(super) use words::lowercase;
@@ -45,6 +45,8 @@ pub enum JapaneseFilter {
     ReadingForm { use_romaji: bool },
     #[serde(rename = "kuromoji_number")]
     Number,
+    #[serde(rename = "kuromoji_completion")]
+    Completion { mode: CompletionMode },
 }
 
 #[derive(Deserialize)]
@@ -82,6 +84,11 @@ enum FilterConfig {
     },
     #[serde(rename = "kuromoji_number")]
     Number {},
+    #[serde(rename = "kuromoji_completion")]
+    Completion {
+        #[serde(default)]
+        mode: CompletionMode,
+    },
 }
 fn default_ignore_case() -> bool {
     true
@@ -101,6 +108,7 @@ impl<'de> Deserialize<'de> for JapaneseFilter {
             FilterConfig::KatakanaUppercase {} => Self::KatakanaUppercase,
             FilterConfig::ReadingForm { use_romaji } => Self::ReadingForm { use_romaji },
             FilterConfig::Number {} => Self::Number,
+            FilterConfig::Completion { mode } => Self::Completion { mode },
         })
     }
 }
@@ -115,6 +123,7 @@ pub(super) enum CompiledFilter {
     SmallKana(Kana),
     ReadingForm(bool),
     Number,
+    Completion(CompletionMode),
 }
 
 impl JapaneseFilter {
@@ -134,6 +143,7 @@ impl JapaneseFilter {
             Self::KatakanaUppercase => CompiledFilter::SmallKana(Kana::Katakana),
             Self::ReadingForm { use_romaji } => CompiledFilter::ReadingForm(*use_romaji),
             Self::Number => CompiledFilter::Number,
+            Self::Completion { mode } => CompiledFilter::Completion(*mode),
             Self::KatakanaStem { minimum_length } => {
                 if *minimum_length < 1 {
                     return Err(super::error::invalid(

@@ -20,7 +20,8 @@ pub struct JapaneseMorphology {
     pub pronunciation: Option<String>,
     pub inflection_type: Option<String>,
     pub inflection_form: Option<String>,
-    pub origin: KuromojiOrigin,
+    /// Absent on generated tokens with no dictionary provenance.
+    pub origin: Option<KuromojiOrigin>,
     #[serde(skip)]
     pub(crate) errors: AttributeErrors,
 }

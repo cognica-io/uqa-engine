@@ -172,7 +172,7 @@ fn japanese_user_failures_preserve_selected_models_and_release_partial_output() 
     ));
     assert_eq!(budget.used(), 7);
     let output = valid.tokenize("東京").unwrap();
-    assert_eq!(output.tokens[0].origin, KuromojiOrigin::User);
+    assert_eq!(output.tokens[0].origin, Some(KuromojiOrigin::User));
     assert_eq!(output.tokens[0].reading.as_deref(), Some("トウキョウ"));
     drop(held);
 }

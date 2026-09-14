@@ -117,10 +117,12 @@ cargo test -p uqa-analysis --no-default-features --features kuromoji-tools --loc
 
 ## Completion romanization
 
-`run_completion_reference.py` invokes the pinned `KatakanaRomanizer` directly. Its 396 cases cover all 329 map keys, longest-prefix choices, exact candidate product order, partial input suffixes, initial mismatches, long strings, 32 deterministic combinations with seed `0x105013006`, and all 65,536 UTF-16 units alone and between `シ` and `カ` (131,072 inputs). Larger outputs retain complete hashes and counts instead of expanded snapshots; input/output/provenance total 90,432 bytes. Rust verifies complete result identities, retained output allocations, bounded work, candidate/output limits and cancellation. The existing 195 filter and 220 number outputs remain byte-identical after extending their shared reference driver.
+`run_completion_reference.py` invokes the pinned `KatakanaRomanizer` directly. Its 396 romanizer cases cover all 329 map keys, longest-prefix choices, exact candidate product order, partial input suffixes, initial mismatches, long strings, 32 deterministic combinations with seed `0x105013006`, and all 65,536 UTF-16 units alone and between `シ` and `カ` (131,072 inputs). Larger outputs retain complete hashes and counts instead of expanded snapshots; the complete corpus including stream/analyzer cases is described below. Rust verifies complete result identities, retained output allocations, bounded work, candidate/output limits and cancellation. The existing 195 filter and 220 number outputs remain byte-identical after extending their shared reference driver.
 
 ```sh
 python3 tests/parity/kuromoji/run_completion_reference.py --offline
 python3 tests/parity/kuromoji/run_completion_reference.py --offline --platform linux/amd64
 cargo test -p uqa-analysis --no-default-features --features kuromoji-tools --locked completion
 ```
+
+The completion corpus now also includes INDEX/QUERY filter streams, the dedicated analyzer and independent normalization, for 522 total cases and 248,221 bytes. Added cases exercise kana/IME concatenation, fullwidth/uppercase suffixes, absent/empty/invalid readings, graph and keyword reset, all six cleared attributes, hidden terminal propagation through later numeric/reading/POS filters, lazy user errors, N-best input and width-only normalization. The original 396 romanizer observations remain byte-identical. Repeated long token joins are verified by bounded owner tests instead of storing expanded token lists.

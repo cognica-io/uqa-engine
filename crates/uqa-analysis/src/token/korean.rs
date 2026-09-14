@@ -24,14 +24,14 @@ impl super::native::NativeToken for NoriToken {
             increment: self.position_increment,
             length: self.position_length,
             keyword: self.keyword,
-            morphology: Morphology::Korean(KoreanMorphology {
+            morphology: Some(Morphology::Korean(KoreanMorphology {
                 pos_type: self.pos_type,
                 left_pos: self.left_pos,
                 right_pos: self.right_pos,
                 reading: self.reading,
                 morphemes: self.morphemes,
                 origin: self.origin,
-            }),
+            })),
         }
     }
 }

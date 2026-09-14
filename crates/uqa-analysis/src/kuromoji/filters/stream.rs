@@ -10,11 +10,19 @@ use super::super::{KuromojiOutput, KuromojiToken};
 use crate::morphology::filter::{
     covering_range, text_units, ComposingToken, FilterStream, FilterToken, Work,
 };
-use crate::{AnalysisResult, AnalysisToken};
+use crate::AnalysisResult;
 use std::ops::Range;
 use uqa_core::memory::{Budgeted, MemoryBudget, MemoryReservation};
 
-pub(in crate::kuromoji) trait JapaneseToken: ComposingToken {
+pub(crate) trait JapaneseToken: ComposingToken {
+    fn generated(
+        term: Budgeted<Vec<u16>>,
+        first: &Self::Span,
+        last: &Self::Span,
+        increment: u32,
+        context: &Self::Context,
+        work: &mut Work<'_>,
+    ) -> AnalysisResult<Budgeted<Self>>;
     fn attributes(&self) -> [Option<&str>; 6];
     fn part_of_speech(&self) -> AnalysisResult<Option<&str>>;
     fn reading(&self) -> AnalysisResult<Option<&str>>;
@@ -23,6 +31,20 @@ pub(in crate::kuromoji) trait JapaneseToken: ComposingToken {
     }
 }
 impl JapaneseToken for KuromojiToken {
+    fn generated(
+        term: Budgeted<Vec<u16>>,
+        first: &Self::Span,
+        last: &Self::Span,
+        increment: u32,
+        (): &(),
+        _work: &mut Work<'_>,
+    ) -> AnalysisResult<Budgeted<Self>> {
+        let (term, memory) = term.into_parts();
+        let mut token = Self::new(term, covering_range(first, last)?, None);
+        token.position_increment = increment;
+        Ok(Budgeted::new(token, memory))
+    }
+
     fn reading(&self) -> AnalysisResult<Option<&str>> {
         self.errors.check(2)?;
         Ok(self.reading.as_deref())
@@ -33,27 +55,6 @@ impl JapaneseToken for KuromojiToken {
     }
     fn attributes(&self) -> [Option<&str>; 6] {
         self.fields().map(|field| field.map(String::as_str))
-    }
-}
-impl JapaneseToken for AnalysisToken {
-    fn reading(&self) -> AnalysisResult<Option<&str>> {
-        let Some(value) = self.japanese_morphology() else {
-            return Ok(None);
-        };
-        value.errors.check(2)?;
-        Ok(value.reading.as_deref())
-    }
-    fn part_of_speech(&self) -> AnalysisResult<Option<&str>> {
-        let Some(value) = self.japanese_morphology() else {
-            return Ok(None);
-        };
-        value.errors.check(0)?;
-        Ok(value.part_of_speech.as_deref())
-    }
-    fn attributes(&self) -> [Option<&str>; 6] {
-        self.japanese_morphology().map_or([None; 6], |value| {
-            value.fields().map(|field| field.map(String::as_str))
-        })
     }
 }
 impl From<KuromojiOutput> for FilterStream<KuromojiToken> {

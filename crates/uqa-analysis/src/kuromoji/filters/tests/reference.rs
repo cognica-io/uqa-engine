@@ -34,7 +34,7 @@ fn japanese_number_prefixes_and_composition_match_complete_docker_outputs() {
 }
 
 #[test]
-fn japanese_completion_romanization_matches_complete_docker_outputs() {
+fn japanese_completion_components_match_complete_docker_outputs() {
     verify(
         include_bytes!("../../../../../../tests/parity/kuromoji/completion_cases.json"),
         include_bytes!("../../../../../../tests/parity/kuromoji/completion_expected.jsonl"),
@@ -86,7 +86,7 @@ fn verify(cases_bytes: &[u8], expected_bytes: &[u8], manifest: &str) {
             );
             continue;
         }
-        if case["kind"] == "normalize" {
+        if case["kind"] == "normalize" || case["kind"] == "completion_normalize" {
             assert_eq!(result, expected["normalized_utf16"], "{id}");
             continue;
         }
@@ -152,6 +152,9 @@ fn run_case(case: &Value, model: &Arc<KuromojiDictionary>) -> AnalysisResult<Val
         .map(|source| UserDictionary::compile(source, model, UserDictionaryLimits::default()))
         .transpose()?
         .flatten();
+    if case["kind"] == "completion_analyzer" || case["kind"] == "completion_normalize" {
+        return completion_analysis(case, &input, model, user);
+    }
     let options = KuromojiOptions {
         mode: serde_json::from_value(case.get("mode").cloned().unwrap_or(json!("search"))).unwrap(),
         discard_punctuation: case["discard_punctuation"].as_bool().unwrap_or(true),
@@ -293,7 +296,7 @@ fn token(value: &Value) -> KuromojiToken {
         position_increment: value["position_increment"].as_u64().unwrap_or(1) as u32,
         position_length: value["position_length"].as_u64().unwrap_or(1) as u32,
         keyword: value["keyword"].as_bool().unwrap_or(false),
-        origin: KuromojiOrigin::Unknown,
+        origin: Some(KuromojiOrigin::Unknown),
         part_of_speech: optional(&value["part_of_speech"]),
         base_form: optional(&value["base_form"]),
         reading: optional(&value["reading"]),
@@ -332,4 +335,28 @@ fn completion(case: &Value, input: &[u16], model: &KuromojiDictionary) -> Analys
         results.push(romanize(&[0x30b7, unit, 0x30ab])?);
     }
     Ok(json!(results))
+}
+
+fn completion_analysis(
+    case: &Value,
+    input: &[u16],
+    model: &Arc<KuromojiDictionary>,
+    user: Option<Arc<UserDictionary>>,
+) -> AnalysisResult<Value> {
+    let mode = serde_json::from_value(
+        case.get("completion_mode")
+            .cloned()
+            .unwrap_or(json!("index")),
+    )
+    .unwrap();
+    let analyzer = JapaneseAnalyzer::completion(model.clone(), user, mode)?;
+    let text = String::from_utf16(input).unwrap();
+    if case["kind"] == "completion_normalize" {
+        Ok(json!(analyzer
+            .normalize(&text)?
+            .encode_utf16()
+            .collect::<Vec<_>>()))
+    } else {
+        Ok(common_raw(&analyzer.analyze(&text)?))
+    }
 }

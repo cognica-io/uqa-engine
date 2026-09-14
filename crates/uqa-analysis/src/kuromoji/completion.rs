@@ -13,8 +13,7 @@ use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget};
 
 /// Convert raw UTF-16 using the dictionary's completion mappings, keeping ordered alternatives.
 ///
-/// The longest key wins at each position. An unmatched suffix is appended to every candidate;
-/// an unmatched initial unit produces no candidates. This is separate from reading-form Hepburn.
+/// The longest key wins at each position. An unmatched suffix is appended to every candidate; an unmatched initial unit produces no candidates. This is separate from reading-form Hepburn.
 ///
 /// ```
 /// use uqa_analysis::kuromoji::{romanize_completion_utf16, KuromojiLimits, KuromojiResources};
@@ -73,10 +72,21 @@ pub fn romanize_completion_utf16_budgeted(
     Ok(Budgeted::new(output, memory))
 }
 
+pub(super) mod stream;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CompletionMode {
+    #[default]
+    Index,
+    Query,
+}
+
 struct Plan<'a> {
     mappings: BudgetedVec<&'a CompletionMapping>,
     suffix: &'a [u16],
     count: usize,
+    units: usize,
 }
 
 impl<'a> Plan<'a> {
@@ -139,6 +149,7 @@ impl<'a> Plan<'a> {
             mappings,
             suffix,
             count,
+            units,
         })
     }
 
