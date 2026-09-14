@@ -6,7 +6,7 @@
 
 //! Token-owned strings and code units are reserved before materialization.
 
-use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget};
+use uqa_core::memory::{Budgeted, MemoryBudget};
 
 use crate::nori::error::check_limit;
 use crate::AnalysisResult;
@@ -19,18 +19,9 @@ pub(in crate::nori) fn encode(
     budget: &MemoryBudget,
     poll: &mut dyn FnMut() -> AnalysisResult<()>,
 ) -> AnalysisResult<Budgeted<Vec<u16>>> {
-    let length = utf16_len(input, limit, poll)?;
-    poll()?;
-    let mut output = BudgetedVec::new(budget);
-    output.reserve(length)?;
-    for (index, unit) in input.encode_utf16().enumerate() {
-        if index % 1024 == 0 {
-            poll()?;
-        }
-        output.push(unit)?;
-    }
-    let (output, memory) = output.into_parts();
-    Ok(Budgeted::new(output, memory))
+    crate::morphology::input::encode(input, budget, poll, |length| {
+        check_limit("Nori input UTF-16 units", length, limit).map_err(Into::into)
+    })
 }
 
 pub(super) fn utf16_len(
@@ -38,13 +29,7 @@ pub(super) fn utf16_len(
     limit: usize,
     poll: &mut dyn FnMut() -> AnalysisResult<()>,
 ) -> AnalysisResult<usize> {
-    let mut length = 0;
-    for (index, unit) in input.chars().enumerate() {
-        if index % 1024 == 0 {
-            poll()?;
-        }
-        length += unit.len_utf16();
-        check_limit("Nori input UTF-16 units", length, limit)?;
-    }
-    Ok(length)
+    crate::morphology::input::utf16_len(input, poll, |length| {
+        check_limit("Nori input UTF-16 units", length, limit).map_err(Into::into)
+    })
 }

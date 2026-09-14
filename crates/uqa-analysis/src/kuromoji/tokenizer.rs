@@ -1,0 +1,249 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Japanese morphology over lossless UTF-16 coordinates and the shared rolling search.
+
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+use uqa_core::memory::{Budgeted, MemoryBudget};
+
+use super::error::{check_limit, invalid};
+use super::{KuromojiDictionary, UserDictionary};
+use crate::morphology::lattice::LatticeConfig;
+use crate::{AnalysisError, AnalysisResult};
+
+mod emission;
+mod resegment;
+mod viterbi;
+mod word;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum KuromojiMode {
+    Normal,
+    #[default]
+    Search,
+    Extended,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct KuromojiOptions {
+    pub mode: KuromojiMode,
+    pub discard_punctuation: bool,
+    pub discard_compound_token: bool,
+}
+
+impl Default for KuromojiOptions {
+    fn default() -> Self {
+        Self {
+            mode: KuromojiMode::Search,
+            discard_punctuation: true,
+            discard_compound_token: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct KuromojiLimits {
+    pub max_input_utf16: usize,
+    pub max_lattice_positions: usize,
+    pub max_lattice_candidates: usize,
+    pub max_tokens: usize,
+    pub max_output_utf16: usize,
+    pub max_resegmentation_arcs: usize,
+    pub max_resegmentation_work: usize,
+}
+
+impl Default for KuromojiLimits {
+    fn default() -> Self {
+        Self {
+            max_input_utf16: 16 * 1024 * 1024,
+            max_lattice_positions: 128 * 1024,
+            max_lattice_candidates: 1_000_000,
+            max_tokens: 4_000_000,
+            max_output_utf16: 64 * 1024 * 1024,
+            max_resegmentation_arcs: 1_000_000,
+            max_resegmentation_work: 16_000_000,
+        }
+    }
+}
+
+impl LatticeConfig for KuromojiLimits {
+    fn check_positions(self, required: usize) -> AnalysisResult<()> {
+        check_limit(
+            "Kuromoji lattice positions",
+            required,
+            self.max_lattice_positions,
+        )?;
+        Ok(())
+    }
+
+    fn check_candidates(self, required: usize) -> AnalysisResult<()> {
+        check_limit(
+            "Kuromoji lattice candidates",
+            required,
+            self.max_lattice_candidates,
+        )?;
+        Ok(())
+    }
+
+    fn invalid(self, reason: &'static str) -> AnalysisError {
+        invalid("Kuromoji lattice", reason).into()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum KuromojiOrigin {
+    Known,
+    Unknown,
+    User,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct KuromojiToken {
+    pub term_utf16: Vec<u16>,
+    pub start_utf16: usize,
+    pub end_utf16: usize,
+    pub position_increment: u32,
+    pub position_length: u32,
+    pub keyword: bool,
+    pub part_of_speech: Option<String>,
+    pub base_form: Option<String>,
+    pub reading: Option<String>,
+    pub pronunciation: Option<String>,
+    pub inflection_type: Option<String>,
+    pub inflection_form: Option<String>,
+    pub origin: KuromojiOrigin,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct KuromojiOutput {
+    pub tokens: Vec<KuromojiToken>,
+    pub final_offset_utf16: usize,
+    pub final_position_increment: u32,
+}
+
+/// Immutable models and configuration; each call owns its lattice, resegmentation and output.
+///
+/// ```
+/// use uqa_analysis::kuromoji::{JapaneseTokenizer, KuromojiOptions, KuromojiResources};
+/// let dictionary = KuromojiResources::default().load_default()?;
+/// let tokenizer = JapaneseTokenizer::new(dictionary.model().clone(), None, KuromojiOptions::default())?;
+/// let output = tokenizer.tokenize("関西国際空港")?;
+/// let terms: Vec<_> = output.tokens.iter().map(|token| String::from_utf16(&token.term_utf16).unwrap()).collect();
+/// assert_eq!(terms, ["関西", "国際", "空港"]);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug, Clone)]
+pub struct JapaneseTokenizer {
+    model: Arc<KuromojiDictionary>,
+    user: Option<Arc<UserDictionary>>,
+    options: KuromojiOptions,
+}
+
+impl JapaneseTokenizer {
+    pub fn new(
+        model: Arc<KuromojiDictionary>,
+        user: Option<Arc<UserDictionary>>,
+        options: KuromojiOptions,
+    ) -> AnalysisResult<Self> {
+        if user
+            .as_ref()
+            .is_some_and(|user| user.model_id() != model.id())
+        {
+            return Err(invalid(
+                "Kuromoji tokenizer",
+                "user rules were compiled against another model",
+            )
+            .into());
+        }
+        Ok(Self {
+            model,
+            user,
+            options,
+        })
+    }
+
+    pub fn tokenize(&self, input: &str) -> AnalysisResult<KuromojiOutput> {
+        self.tokenize_controlled(input, KuromojiLimits::default(), &mut || Ok(()))
+    }
+
+    pub fn tokenize_controlled(
+        &self,
+        input: &str,
+        limits: KuromojiLimits,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<KuromojiOutput> {
+        let budget = MemoryBudget::new(usize::MAX);
+        Ok(self
+            .tokenize_budgeted(input, limits, &budget, poll)?
+            .into_parts()
+            .0)
+    }
+
+    pub fn tokenize_budgeted(
+        &self,
+        input: &str,
+        limits: KuromojiLimits,
+        budget: &MemoryBudget,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<KuromojiOutput>> {
+        poll()?;
+        let units = crate::morphology::input::encode(input, budget, poll, |length| {
+            check_limit(
+                "Kuromoji input UTF-16 units",
+                length,
+                limits.max_input_utf16,
+            )
+            .map_err(Into::into)
+        })?;
+        self.tokenize_utf16_budgeted(&units, limits, budget, poll)
+    }
+
+    pub fn tokenize_utf16(
+        &self,
+        input: &[u16],
+        limits: KuromojiLimits,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<KuromojiOutput> {
+        let budget = MemoryBudget::new(usize::MAX);
+        Ok(self
+            .tokenize_utf16_budgeted(input, limits, &budget, poll)?
+            .into_parts()
+            .0)
+    }
+
+    /// Borrowed input remains caller-owned; every tokenizer allocation shares the retained allowance.
+    pub fn tokenize_utf16_budgeted(
+        &self,
+        input: &[u16],
+        limits: KuromojiLimits,
+        budget: &MemoryBudget,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<KuromojiOutput>> {
+        poll()?;
+        check_limit(
+            "Kuromoji input UTF-16 units",
+            input.len(),
+            limits.max_input_utf16,
+        )?;
+        viterbi::analyze(
+            input,
+            &self.model,
+            self.user.as_deref(),
+            self.options,
+            limits,
+            budget,
+            poll,
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests;

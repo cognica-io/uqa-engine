@@ -51,6 +51,9 @@ pub enum AnalysisError {
     #[cfg(feature = "nori")]
     #[error(transparent)]
     Dictionary(#[from] crate::nori::DictionaryError),
+    #[cfg(feature = "kuromoji")]
+    #[error(transparent)]
+    KuromojiDictionary(#[from] crate::kuromoji::DictionaryError),
     #[error("{coordinate} offset {offset} is not a Unicode scalar boundary within text of length {length}")]
     InvalidTextOffset {
         coordinate: &'static str,

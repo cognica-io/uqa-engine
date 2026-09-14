@@ -10,6 +10,7 @@
 
 pub(crate) mod error;
 pub(crate) mod frame;
+pub(crate) mod input;
 pub(crate) mod io;
 pub(crate) mod lexicon;
 pub(crate) mod limits;
@@ -28,8 +29,8 @@ pub(crate) mod neutral;
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
 pub(crate) mod resources;
 
-#[cfg(feature = "nori")]
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
 pub(crate) mod lattice;
 
-#[cfg(feature = "nori")]
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
 pub(crate) mod viterbi;

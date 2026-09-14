@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Validated immutable Japanese dictionaries and their complete pinned morphology.
+//! Native Japanese tokenization over validated immutable dictionaries and pinned morphology.
 //!
 //! The `kuromoji` feature supplies the portable dictionary and its checked loader:
 //!
@@ -23,8 +23,7 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! Loading publishes one immutable model after validation and does not resolve external resources.
-//! Japanese tokenization and analyzer registration are separate from this dictionary API.
+//! Loading publishes one immutable model after validation and does not resolve external resources. [`JapaneseTokenizer`] consumes that model with optional user rules and explicit modes and limits. Common analyzer registration and filtering are separate from the standalone tokenizer API.
 //!
 //! Japanese user rules compile against the selected model with explicit preparation bounds:
 //!
@@ -51,6 +50,7 @@ mod morphology;
 mod provenance;
 mod resources;
 mod tables;
+mod tokenizer;
 mod user_dictionary;
 
 #[cfg(feature = "kuromoji-tools")]
@@ -67,6 +67,10 @@ pub use dictionary::KuromojiDictionary;
 pub use error::{DictionaryError, DictionaryResult};
 pub use frame::DictionaryId;
 pub use morphology::DictionaryWord;
+pub use tokenizer::{
+    JapaneseTokenizer, KuromojiLimits, KuromojiMode, KuromojiOptions, KuromojiOrigin,
+    KuromojiOutput, KuromojiToken,
+};
 pub use user_dictionary::{UserDictionary, UserDictionaryLimits, UserEntry, UserMatch, UserWord};
 
 pub use resources::{

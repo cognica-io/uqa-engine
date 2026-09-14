@@ -203,6 +203,10 @@ impl UserDictionary {
             pos: &entry.pos,
         })
     }
+    pub(super) fn cursor(&self) -> crate::morphology::lexicon::Cursor<'_> {
+        self.lexicon.cursor()
+    }
+
     pub fn prefixes<'a>(&'a self, text: &'a [u16]) -> impl Iterator<Item = (usize, u32)> + 'a {
         self.lexicon.prefixes(text)
     }

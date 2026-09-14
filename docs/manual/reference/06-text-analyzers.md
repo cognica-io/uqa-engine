@@ -700,6 +700,35 @@ assert_eq!(terms?, ["3200", "원", "157"]);
 
 `normalize_number_budgeted(input, limits, &budget, poll)` and `normalize_number_utf16_budgeted(units, limits, &budget, poll)` return reserved scalar/raw results with the same numeric-prefix behavior. Decimal coefficients, formatting, encoding conversion, and malformed-input fallback copies reserve their buffers before allocation. Allocation and callback failures propagate as errors instead of triggering a successful fallback.
 
+## Standalone Japanese tokenization
+
+The independent `uqa-analysis/kuromoji` feature exposes `JapaneseTokenizer`, `KuromojiOptions`, `KuromojiMode`, `KuromojiLimits`, `KuromojiToken` and `KuromojiOutput`. It includes the immutable dictionary from `uqa-kuromoji-data`. The standalone API is implemented; Japanese common-pipeline configuration, N-best, filters, built-in registration and binding integration remain in development. The [implementation plan](../../plans/0007-kuromoji-analyzer.md) tracks those remaining contracts.
+
+`JapaneseTokenizer::new(model, user, options)` retains the selected immutable dictionary and optional compiled Japanese user rules. Rules compiled against another semantic model return a typed analysis error. `KuromojiResources::default().load_default()` returns the bundled resource handle; explicit resolvers and `compile_user` retain the same artifact/model/source identities described in the [bundle specification](../../design/kuromoji-bundle-format.md). Later resource alias changes do not mutate a constructed tokenizer.
+
+`KuromojiOptions::default()` selects `KuromojiMode::Search` with `discard_punctuation` and `discard_compound_token` both true. NORMAL selects the least-cost segmentation; SEARCH applies Japanese compound resegmentation, and EXTENDED additionally emits unknown unigrams. Turning compound discard off preserves alternate compound edges in the search graph. The standalone tokenizer processes its supplied text directly; apply the `cjk_width` character filter explicitly when width conversion is required.
+
+```rust
+use uqa_analysis::kuromoji::{JapaneseTokenizer, KuromojiOptions, KuromojiResources};
+
+let dictionary = KuromojiResources::default().load_default()?;
+let tokenizer = JapaneseTokenizer::new(
+    dictionary.model().clone(), None, KuromojiOptions::default(),
+)?;
+let output = tokenizer.tokenize("関西国際空港")?;
+let terms: Vec<_> = output.tokens.iter()
+    .map(|token| String::from_utf16(&token.term_utf16).unwrap())
+    .collect();
+assert_eq!(terms, ["関西", "国際", "空港"]);
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The same example runs as a tokenizer doctest. `KuromojiToken` retains lossless `term_utf16`, `start_utf16`, `end_utf16`, `position_increment`, `position_length`, `keyword` and `origin` (`Known`, `Unknown` or `User`). Its six independent optional strings are `part_of_speech`, `base_form`, `reading`, `pronunciation`, `inflection_type` and `inflection_form`. `KuromojiOutput` owns the ordered tokens, `final_offset_utf16` and `final_position_increment`. Positions describe the graph without flattening compound alternatives; offsets refer to the supplied input in UTF-16 units. Raw unpaired input and token units remain representable through `tokenize_utf16` and the raw term vectors.
+
+`tokenize_controlled(input, limits, poll)` adds count limits and cancellation to string input. `tokenize_utf16(units, limits, poll)` accepts borrowed raw units. `tokenize_budgeted(input, limits, &budget, poll)` and `tokenize_utf16_budgeted(units, limits, &budget, poll)` return `Budgeted<KuromojiOutput>` and reserve all call-owned input, lattice, resegmentation, token and attribute capacity through one `uqa_core::memory::MemoryBudget`; borrowed UTF-16 input remains caller-owned. Returned reservations retain the output buffers until destruction or explicit transfer. Errors publish no partial stream, release that call's allocations and preserve other owners sharing the allowance.
+
+Default limits are 16,777,216 input UTF-16 units, 131,072 retained lattice positions, 1,000,000 retained candidates, 4,000,000 output tokens, 67,108,864 output UTF-16 units including attributes, 1,000,000 arcs per resegmentation and 16,000,000 total resegmentation work steps. Callers can supply tighter `KuromojiLimits`. Immutable dictionary and user-rule preparation use their own separate limits. The [209-case Docker tokenizer corpus](../../../tests/parity/kuromoji/README.md) verifies ordered terms, all six attributes, graph/keyword values, offsets, terminal state and expected errors across all modes and discard choices; native owner tests cover retained memory, cancellation and recovery after failure.
+
 ## Python, Node.js, and browser WASM
 
 Every binding can create, bind, inspect, search with, and drop analyzers by executing the SQL functions in this chapter. Python exposes `list_named_analyzers()`. Node.js and browser WASM expose `listNamedAnalyzers()`; these direct methods list custom engine-catalog names, while SQL `list_analyzers()` also includes built-ins. Direct construction from `CharFilter`, `Tokenizer`, and `TokenFilter` is a Rust API, so other bindings define the pipeline as JSON passed to SQL.

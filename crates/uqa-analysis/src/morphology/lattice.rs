@@ -129,6 +129,13 @@ impl<C: LatticeConfig> Lattice<C> {
         self.positions[position - self.base][0].cost = 0;
     }
 
+    #[cfg(feature = "kuromoji")]
+    pub fn clear_position(&mut self, position: usize) {
+        let nodes = &mut self.positions[position - self.base];
+        self.candidates -= nodes.len();
+        nodes.clear();
+    }
+
     pub fn prune(
         &mut self,
         from: usize,
