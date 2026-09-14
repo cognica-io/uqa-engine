@@ -9,85 +9,29 @@
 
 import argparse
 import json
-from pathlib import Path, PurePosixPath
-import shutil
+from pathlib import Path
 import subprocess
 import sys
 import tarfile
 import tempfile
-from urllib.request import urlopen
 
 from reference_runtime import ROOT, docker_command, prepare_jars, sha256, verify_dictionary_resources
+
+sys.path.insert(0, str(ROOT.parent))
+try:
+    import lucene_dictionary
+    from lucene_dictionary import DEFINITIONS, prepare_source, extract_inputs, inventory, check_resources
+finally:
+    sys.path.pop(0)
 
 
 MANIFEST_PATH = ROOT / "csv_manifest.json"
 ENTRYPOINT = "NoriDictionary.java"
-DEFINITIONS = {"char.def", "unk.def", "matrix.def"}
 RUNTIME_FIELDS = ("java_version", "java_runtime_version", "java_vendor")
 
 
 def canonical(value):
     return json.dumps(value, ensure_ascii=False, indent=2) + "\n"
-
-
-def prepare_source(manifest, cache, offline):
-    source = manifest["dictionary_source"]
-    archive = cache / (source["name"] + ".tar.gz")
-    if not archive.exists():
-        if offline:
-            raise RuntimeError(f"Missing cached dictionary source: {archive}")
-        with tempfile.TemporaryDirectory(prefix="nori-source-", dir=cache) as temporary:
-            staged = Path(temporary) / archive.name
-            with urlopen(source["url"], timeout=60) as download, staged.open("wb") as output:
-                shutil.copyfileobj(download, output)
-            if sha256(staged) != source["sha256"]:
-                raise RuntimeError("Downloaded dictionary source checksum mismatch")
-            staged.replace(archive)
-    if sha256(archive) != source["sha256"]:
-        raise RuntimeError(f"Cached dictionary source checksum mismatch: {archive}")
-    return archive
-
-
-def extract_inputs(archive, source_name, directory):
-    """Copy only the top-level inputs read by DictionaryBuilder; never unpack executable archive content."""
-    names = set()
-    with tarfile.open(archive, "r:gz") as source:
-        for entry in source:
-            path = PurePosixPath(entry.name)
-            if path.is_absolute() or ".." in path.parts:
-                raise RuntimeError(f"Invalid dictionary archive path: {entry.name}")
-            if len(path.parts) != 2 or path.parts[0] != source_name:
-                continue
-            name = path.name
-            if not name.endswith(".csv") and name not in DEFINITIONS:
-                continue
-            if not entry.isfile() or name in names:
-                raise RuntimeError(f"Invalid or duplicate dictionary input: {entry.name}")
-            names.add(name)
-            with source.extractfile(entry) as stream, (directory / name).open("wb") as output:
-                shutil.copyfileobj(stream, output)
-    if not DEFINITIONS.issubset(names) or not any(name.endswith(".csv") for name in names):
-        raise RuntimeError("Dictionary archive is missing CSV or definition inputs")
-    return inventory(directory)
-
-
-def inventory(directory):
-    return [
-        {"path": path.relative_to(directory).as_posix(), "bytes": path.stat().st_size, "sha256": sha256(path)}
-        for path in sorted(directory.rglob("*")) if path.is_file()
-    ]
-
-
-def check_resources(directory, expected):
-    actual = inventory(directory)
-    expected = sorted(expected, key=lambda item: item["path"])
-    if actual != expected:
-        actual_by_path = {item["path"]: item for item in actual}
-        expected_by_path = {item["path"]: item for item in expected}
-        changed = [name for name in sorted(actual_by_path.keys() | expected_by_path.keys())
-                   if actual_by_path.get(name) != expected_by_path.get(name)]
-        raise RuntimeError("Regenerated resources differ from the pinned jar: " + ", ".join(changed))
-    return actual
 
 
 def provenance(manifest, source, inputs):

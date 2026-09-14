@@ -72,17 +72,17 @@ class NoriModelExportTest(unittest.TestCase):
             root = pathlib.Path(temporary)
             for name in export.FILES:
                 (root / name).write_bytes(b"abcd")
-            expected = {"files": export.file_inventory(root)}
-            (root / "model_manifest.json").write_text(export.manifest_text(expected), encoding="utf-8")
-            export.check_files(root, expected)
+            expected = {"files": export.EXPORTER.file_inventory(root)}
+            (root / "model_manifest.json").write_text(json.dumps(expected), encoding="utf-8")
+            export.EXPORTER.check_files(root, expected)
             (root / "unicode.bin").write_bytes(b"abce")
             with self.assertRaisesRegex(RuntimeError, "Exported model checksum mismatch"):
-                export.check_files(root, expected)
+                export.EXPORTER.check_files(root, expected)
 
     def test_manifest_cannot_refer_to_unexpected_files(self):
         expected = {"files": [{"path": "../outside.bin", "bytes": 0, "sha256": ""}]}
         with self.assertRaisesRegex(RuntimeError, "file inventory"):
-            export.check_files(pathlib.Path("/not-read"), expected)
+            export.EXPORTER.check_files(pathlib.Path("/not-read"), expected)
 
     def test_export_refuses_to_overwrite_existing_output(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -90,15 +90,15 @@ class NoriModelExportTest(unittest.TestCase):
             marker = root / "existing"
             marker.write_text("retain", encoding="utf-8")
             with mock.patch.object(sys, "argv", ["export_model.py", "--output", temporary, "--write-manifest"]):
-                with mock.patch.object(export, "prepare_jars") as prepare:
+                with mock.patch.object(runtime, "prepare_jars") as prepare:
                     with self.assertRaisesRegex(RuntimeError, "Output already exists"):
-                        export.main()
+                        export.EXPORTER.main()
                     prepare.assert_not_called()
             self.assertEqual(marker.read_text(encoding="utf-8"), "retain")
 
     def test_changed_model_vocabulary_requires_manifest_review(self):
         with self.assertRaisesRegex(RuntimeError, "reviewed manifest"):
-            export.compare_manifest({"model": {"pos_tags": ["NNG"]}}, {"model": {"pos_tags": ["NNP"]}})
+            sys.modules["lucene_model"].compare_manifest({"model": {"pos_tags": ["NNG"]}}, {"model": {"pos_tags": ["NNP"]}})
 
 
 if __name__ == "__main__":

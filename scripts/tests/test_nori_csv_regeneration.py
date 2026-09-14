@@ -89,12 +89,12 @@ class NoriCsvRegenerationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             target = root / "source.tar.gz"
-            with mock.patch.object(regenerate, "urlopen", return_value=io.BytesIO(b"abd")):
+            with mock.patch.object(regenerate.lucene_dictionary, "urlopen", return_value=io.BytesIO(b"abd")):
                 with self.assertRaisesRegex(RuntimeError, "Downloaded dictionary source checksum"):
                     regenerate.prepare_source(manifest, root, False)
             self.assertEqual(list(root.iterdir()), [])
             target.write_bytes(b"abd")
-            with mock.patch.object(regenerate, "urlopen") as download:
+            with mock.patch.object(regenerate.lucene_dictionary, "urlopen") as download:
                 with self.assertRaisesRegex(RuntimeError, "Cached dictionary source checksum"):
                     regenerate.prepare_source(manifest, root, False)
                 download.assert_not_called()
