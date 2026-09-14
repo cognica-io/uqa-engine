@@ -35,10 +35,10 @@ impl AnalysisToken {
     ) -> AnalysisResult<usize> {
         poll()?;
         let bytes = self.term.allocation_bytes();
-        #[cfg(feature = "nori")]
+        #[cfg(any(feature = "nori", feature = "kuromoji"))]
         let bytes = bytes
             .checked_add(
-                self.korean_morphology
+                self.morphology
                     .as_ref()
                     .map_or(Ok(0), |morphology| morphology.allocation_bytes(poll))?,
             )

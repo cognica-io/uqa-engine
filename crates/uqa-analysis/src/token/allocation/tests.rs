@@ -62,18 +62,37 @@ fn token_bytes(token: AnalysisToken) -> usize {
     } else {
         token.term.into_utf16().capacity() * size_of::<u16>()
     };
-    #[cfg(feature = "nori")]
-    if let Some(morphology) = token.korean_morphology {
-        bytes += morphology.reading.as_ref().map_or(0, String::capacity);
-        if let Some(morphemes) = morphology.morphemes {
-            bytes += morphemes.capacity() * size_of::<crate::nori::NoriMorpheme>();
-            bytes += morphemes
-                .iter()
-                .map(|value| value.surface_utf16.capacity() * size_of::<u16>())
-                .sum::<usize>();
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
+    match token.morphology {
+        #[cfg(feature = "nori")]
+        Some(crate::token::Morphology::Korean(morphology)) => {
+            bytes += morphology.reading.as_ref().map_or(0, String::capacity);
+            if let Some(morphemes) = morphology.morphemes {
+                bytes += morphemes.capacity() * size_of::<crate::nori::NoriMorpheme>();
+                bytes += morphemes
+                    .iter()
+                    .map(|value| value.surface_utf16.capacity() * size_of::<u16>())
+                    .sum::<usize>();
+            }
         }
+        #[cfg(feature = "kuromoji")]
+        Some(crate::token::Morphology::Japanese(morphology)) => {
+            bytes += [
+                morphology.part_of_speech,
+                morphology.base_form,
+                morphology.reading,
+                morphology.pronunciation,
+                morphology.inflection_type,
+                morphology.inflection_form,
+            ]
+            .into_iter()
+            .flatten()
+            .map(|value| value.capacity())
+            .sum::<usize>();
+        }
+        None => {}
     }
-    #[cfg(not(feature = "nori"))]
+    #[cfg(not(any(feature = "nori", feature = "kuromoji")))]
     let _ = &mut bytes;
     bytes
 }
@@ -102,7 +121,7 @@ fn attributes() -> AnalyzedText {
     #[cfg(feature = "nori")]
     {
         use crate::nori::{KoreanMorphology, NoriMorpheme, NoriOrigin, POSTag, POSType};
-        first.korean_morphology = Some(KoreanMorphology {
+        first.morphology = Some(crate::token::Morphology::Korean(KoreanMorphology {
             pos_type: POSType::Compound,
             left_pos: POSTag::NNG,
             right_pos: POSTag::NNP,
@@ -118,15 +137,16 @@ fn attributes() -> AnalyzedText {
                 },
             ]),
             origin: NoriOrigin::User,
-        });
-        input.batch.tokens[1].korean_morphology = Some(KoreanMorphology {
-            pos_type: POSType::Morpheme,
-            left_pos: POSTag::NNG,
-            right_pos: POSTag::NNG,
-            reading: Some(String::new()),
-            morphemes: Some(Vec::new()),
-            origin: NoriOrigin::Known,
-        });
+        }));
+        input.batch.tokens[1].morphology =
+            Some(crate::token::Morphology::Korean(KoreanMorphology {
+                pos_type: POSType::Morpheme,
+                left_pos: POSTag::NNG,
+                right_pos: POSTag::NNG,
+                reading: Some(String::new()),
+                morphemes: Some(Vec::new()),
+                origin: NoriOrigin::Known,
+            }));
     }
     input.batch.terminal = Some(Box::new(input.batch.tokens[0].clone()));
     input.batch.final_position_increment = 7;
@@ -156,7 +176,7 @@ fn independent_token_copies_reserve_all_owned_buffers_and_share_source_lifetime(
         copied.tokens()[0].term().as_str().unwrap().as_ptr(),
         original.tokens()[0].term().as_str().unwrap().as_ptr()
     ));
-    #[cfg(feature = "nori")]
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
     assert!(std::sync::Arc::ptr_eq(
         &copied.projection,
         &original.projection

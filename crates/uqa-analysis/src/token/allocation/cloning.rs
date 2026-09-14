@@ -41,17 +41,17 @@ impl AnalysisToken {
         poll: &mut dyn FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<Budgeted<Self>> {
         poll()?;
-        #[cfg(feature = "nori")]
+        #[cfg(any(feature = "nori", feature = "kuromoji"))]
         let morphology = self
-            .korean_morphology
+            .morphology
             .as_ref()
             .map(|value| value.clone_budgeted(budget, poll))
             .transpose()?;
-        #[cfg(not(feature = "nori"))]
+        #[cfg(not(any(feature = "nori", feature = "kuromoji")))]
         let _ = budget;
         let (term, memory) = term.into_parts();
-        #[cfg(feature = "nori")]
-        let (korean_morphology, memory) = match morphology {
+        #[cfg(any(feature = "nori", feature = "kuromoji"))]
+        let (morphology, memory) = match morphology {
             Some(morphology) => {
                 let (morphology, allocation) = morphology.into_parts();
                 let mut memory = memory;
@@ -68,8 +68,8 @@ impl AnalysisToken {
                 position_length: self.position_length,
                 keyword: self.keyword,
                 filtered_utf16: self.filtered_utf16.clone(),
-                #[cfg(feature = "nori")]
-                korean_morphology,
+                #[cfg(any(feature = "nori", feature = "kuromoji"))]
+                morphology,
                 verbatim,
             },
             memory,
@@ -150,7 +150,7 @@ impl AnalyzedText {
         output.finish_retained(
             self.final_offsets.clone(),
             self.batch.final_position_increment,
-            #[cfg(feature = "nori")]
+            #[cfg(any(feature = "nori", feature = "kuromoji"))]
             self.projection.clone(),
             &mut poll,
         )

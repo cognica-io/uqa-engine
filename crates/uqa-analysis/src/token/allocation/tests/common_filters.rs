@@ -59,9 +59,9 @@ fn input() -> AnalyzedText {
     input.batch.tokens[4].keyword = true;
     #[cfg(feature = "nori")]
     {
-        let morphology = input.batch.tokens.last().unwrap().korean_morphology.clone();
+        let morphology = input.batch.tokens.last().unwrap().morphology.clone();
         for token in &mut input.batch.tokens[..6] {
-            token.korean_morphology = morphology.clone();
+            token.morphology = morphology.clone();
         }
     }
     input.batch.final_position_increment = 4;

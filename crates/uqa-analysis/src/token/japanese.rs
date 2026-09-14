@@ -1,0 +1,111 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Japanese morphology enters common graph and source owners without copying dictionary attributes.
+
+use uqa_core::memory::{Budgeted, MemoryBudget};
+
+use super::{native, Morphology, TokenBatch};
+use crate::kuromoji::{
+    JapaneseMorphology, JapaneseTokenizer, KuromojiLimits, KuromojiOutput, KuromojiToken,
+};
+use crate::{AnalysisResult, AnalyzedText, FilteredText};
+
+impl native::NativeToken for KuromojiToken {
+    fn take_term(&mut self) -> Vec<u16> {
+        std::mem::take(&mut self.term_utf16)
+    }
+
+    fn into_fields(self) -> native::NativeFields {
+        native::NativeFields {
+            span: self.start_utf16..self.end_utf16,
+            increment: self.position_increment,
+            length: self.position_length,
+            keyword: self.keyword,
+            morphology: Morphology::Japanese(JapaneseMorphology {
+                part_of_speech: self.part_of_speech,
+                base_form: self.base_form,
+                reading: self.reading,
+                pronunciation: self.pronunciation,
+                inflection_type: self.inflection_type,
+                inflection_form: self.inflection_form,
+                origin: self.origin,
+            }),
+        }
+    }
+}
+
+impl KuromojiOutput {
+    /// Convert tokens over `input.as_str()` into common tokens with corrected original offsets.
+    pub fn into_analyzed(self, input: &FilteredText<'_>) -> AnalysisResult<AnalyzedText> {
+        native::output(
+            TokenBatch {
+                tokens: self.tokens,
+                final_position_increment: self.final_position_increment,
+                terminal: None,
+            },
+            self.final_offset_utf16,
+            input,
+        )
+    }
+}
+
+impl JapaneseTokenizer {
+    /// Tokenize character-filter output and retain its original source spans and Japanese attributes.
+    ///
+    /// ```
+    /// use uqa_analysis::CharFilter;
+    /// use uqa_analysis::kuromoji::{JapaneseTokenizer, KuromojiOptions, KuromojiResources};
+    /// let dictionary = KuromojiResources::default().load_default()?;
+    /// let tokenizer = JapaneseTokenizer::new(dictionary.model().clone(), None, KuromojiOptions::default())?;
+    /// let input = CharFilter::CJKWidth.filter_with_offsets("ｶﾞ")?;
+    /// let output = tokenizer.tokenize_mapped(&input)?;
+    /// assert_eq!(output.tokens()[0].term().as_str(), Some("ガ"));
+    /// assert_eq!(output.tokens()[0].offsets().unwrap().utf16, 0..2);
+    /// assert!(output.tokens()[0].japanese_morphology().is_some());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn tokenize_mapped(&self, input: &FilteredText<'_>) -> AnalysisResult<AnalyzedText> {
+        Ok(self
+            .tokenize_mapped_budgeted(
+                input,
+                KuromojiLimits::default(),
+                &MemoryBudget::new(usize::MAX),
+                &mut || Ok(()),
+            )?
+            .into_parts()
+            .0)
+    }
+
+    /// Reserve native/common tokens and retained source through one allowance without changing borrowed coordinate caches on failure.
+    pub fn tokenize_mapped_budgeted(
+        &self,
+        input: &FilteredText<'_>,
+        limits: KuromojiLimits,
+        budget: &MemoryBudget,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<AnalyzedText>> {
+        let input = input.clone();
+        input.prepare_coordinates(budget, poll)?;
+        let (output, memory) = self
+            .tokenize_budgeted(input.as_str(), limits, budget, poll)?
+            .into_parts();
+        native::output_budgeted(
+            TokenBatch {
+                tokens: output.tokens,
+                final_position_increment: output.final_position_increment,
+                terminal: None,
+            },
+            output.final_offset_utf16,
+            memory,
+            &input,
+            poll,
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests;

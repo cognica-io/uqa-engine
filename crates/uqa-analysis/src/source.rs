@@ -343,14 +343,14 @@ impl<'a> FilteredText<'a> {
         Ok(self.filtered_coordinates().offsets(range)?.utf16)
     }
 
-    #[cfg(feature = "nori")]
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
     pub(crate) fn projection(&self) -> Arc<Budgeted<SourceProjection>> {
         let budget = MemoryBudget::new(usize::MAX);
         self.projection_budgeted(&budget, &mut || Ok(()))
             .expect("unbounded source retention")
     }
 
-    #[cfg(feature = "nori")]
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
     pub(crate) fn projection_budgeted(
         &self,
         budget: &MemoryBudget,
@@ -390,7 +390,7 @@ impl<'a> FilteredText<'a> {
 }
 
 /// Shared source provenance for tokens composed after the original input borrow ends.
-#[cfg(feature = "nori")]
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SourceProjection {
     source: Arc<Budgeted<String>>,
@@ -399,12 +399,14 @@ pub(crate) struct SourceProjection {
     filtered: Arc<Budgeted<TextCoordinates>>,
 }
 
-#[cfg(feature = "nori")]
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
 impl SourceProjection {
+    #[cfg(feature = "nori")]
     pub fn filtered_len(&self) -> usize {
         self.filtered.utf16_len()
     }
 
+    #[cfg(feature = "nori")]
     pub(crate) fn project_with_control(
         &self,
         mut range: Range<usize>,
@@ -421,6 +423,7 @@ impl SourceProjection {
         self.original.covering_offsets_utf16(range)
     }
 
+    #[cfg(feature = "nori")]
     pub(crate) fn is_verbatim_with_control(
         &self,
         term: &crate::TokenTerm,

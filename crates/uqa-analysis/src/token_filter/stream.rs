@@ -50,7 +50,7 @@ impl PreparedCommonFilter<'_> {
             AnalyzedText {
                 batch,
                 final_offsets: input.final_offsets,
-                #[cfg(feature = "nori")]
+                #[cfg(any(feature = "nori", feature = "kuromoji"))]
                 projection: input.projection,
             },
             memory,

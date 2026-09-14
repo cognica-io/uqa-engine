@@ -43,6 +43,7 @@
 //! ```
 
 mod analysis;
+mod attributes;
 mod dictionary;
 mod error;
 mod frame;
@@ -63,6 +64,7 @@ pub use crate::morphology::unicode::UnicodeProperties;
 #[cfg(test)]
 mod tests;
 pub use analysis::CompletionMapping;
+pub use attributes::JapaneseMorphology;
 pub use dictionary::KuromojiDictionary;
 pub use error::{DictionaryError, DictionaryResult};
 pub use frame::DictionaryId;

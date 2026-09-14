@@ -7,11 +7,11 @@
 //! Structured analysis tokens and end-of-stream position state.
 
 use std::ops::Range;
-#[cfg(feature = "nori")]
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
 use std::sync::Arc;
 
 use serde::Serialize;
-#[cfg(feature = "nori")]
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
 use uqa_core::memory::Budgeted;
 
 #[cfg(test)]
@@ -29,9 +29,9 @@ pub struct AnalysisToken {
     pub(crate) keyword: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     filtered_utf16: Option<Range<usize>>,
-    #[cfg(feature = "nori")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    korean_morphology: Option<crate::nori::KoreanMorphology>,
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    morphology: Option<Morphology>,
     #[serde(skip)]
     verbatim: bool,
 }
@@ -64,7 +64,18 @@ impl AnalysisToken {
 
     #[cfg(feature = "nori")]
     pub fn korean_morphology(&self) -> Option<&crate::nori::KoreanMorphology> {
-        self.korean_morphology.as_ref()
+        match self.morphology.as_ref() {
+            Some(Morphology::Korean(value)) => Some(value),
+            _ => None,
+        }
+    }
+
+    #[cfg(feature = "kuromoji")]
+    pub fn japanese_morphology(&self) -> Option<&crate::kuromoji::JapaneseMorphology> {
+        match self.morphology.as_ref() {
+            Some(Morphology::Japanese(value)) => Some(value),
+            _ => None,
+        }
     }
 
     #[cfg(test)]
@@ -89,8 +100,8 @@ impl AnalysisToken {
             position_length: 1,
             keyword: false,
             filtered_utf16: None,
-            #[cfg(feature = "nori")]
-            korean_morphology: None,
+            #[cfg(any(feature = "nori", feature = "kuromoji"))]
+            morphology: None,
             verbatim: false,
         }
     }
@@ -112,8 +123,8 @@ impl AnalysisToken {
             position_length: self.position_length,
             keyword: self.keyword,
             filtered_utf16: self.filtered_utf16.clone(),
-            #[cfg(feature = "nori")]
-            korean_morphology: self.korean_morphology.clone(),
+            #[cfg(any(feature = "nori", feature = "kuromoji"))]
+            morphology: self.morphology.clone(),
             verbatim: self.verbatim,
         };
         if self.verbatim {
@@ -146,7 +157,7 @@ pub struct AnalyzedText {
     #[serde(flatten)]
     pub(crate) batch: TokenBatch,
     pub(crate) final_offsets: SourceOffsets,
-    #[cfg(feature = "nori")]
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
     #[serde(skip)]
     pub(crate) projection: Arc<Budgeted<crate::source::SourceProjection>>,
 }
@@ -186,7 +197,7 @@ impl AnalyzedText {
         Ok(Self {
             batch,
             final_offsets: input.final_offsets(),
-            #[cfg(feature = "nori")]
+            #[cfg(any(feature = "nori", feature = "kuromoji"))]
             projection: input.projection(),
         })
     }
@@ -216,7 +227,7 @@ impl TokenBatch {
             .collect()
     }
 
-    #[cfg(any(test, feature = "nori"))]
+    #[cfg(any(test, feature = "nori", feature = "kuromoji"))]
     pub fn validate_positions(&self) -> AnalysisResult<()> {
         self.validate_positions_with_control(&mut || Ok(()))
     }
@@ -257,3 +268,14 @@ mod tests;
 
 #[cfg(feature = "nori")]
 mod korean;
+
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+mod morphology;
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+use morphology::Morphology;
+
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+mod native;
+
+#[cfg(feature = "kuromoji")]
+mod japanese;

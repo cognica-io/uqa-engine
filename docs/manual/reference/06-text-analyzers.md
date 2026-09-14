@@ -729,6 +729,27 @@ The same example runs as a tokenizer doctest. `KuromojiToken` retains lossless `
 
 Default limits are 16,777,216 input UTF-16 units, 131,072 retained lattice positions, 1,000,000 retained candidates, 4,000,000 output tokens, 67,108,864 output UTF-16 units including attributes, 1,000,000 arcs per resegmentation and 16,000,000 total resegmentation work steps. Callers can supply tighter `KuromojiLimits`. Immutable dictionary and user-rule preparation use their own separate limits. The [209-case Docker tokenizer corpus](../../../tests/parity/kuromoji/README.md) verifies ordered terms, all six attributes, graph/keyword values, offsets, terminal state and expected errors across all modes and discard choices; native owner tests cover retained memory, cancellation and recovery after failure.
 
+### Japanese tokens in the common representation
+
+`JapaneseTokenizer::tokenize_mapped(&filtered)` returns `AnalyzedText` over a `FilteredText` view. `tokenize_mapped_budgeted(&filtered, limits, &budget, poll)` preserves one allowance through native tokenization and common conversion; existing shared source allocations retain their original leases. `KuromojiOutput::into_analyzed(&filtered)` converts an already materialized native stream and rejects mismatched input length or invalid graph/source coordinates.
+
+```rust
+use uqa_analysis::CharFilter;
+use uqa_analysis::kuromoji::{JapaneseTokenizer, KuromojiOptions, KuromojiResources};
+let dictionary = KuromojiResources::default().load_default()?;
+let tokenizer = JapaneseTokenizer::new(dictionary.model().clone(), None, KuromojiOptions::default())?;
+let input = CharFilter::CJKWidth.filter_with_offsets("ｶﾞ")?;
+let output = tokenizer.tokenize_mapped(&input)?;
+assert_eq!(output.tokens()[0].term().as_str(), Some("ガ"));
+assert_eq!(output.tokens()[0].offsets().unwrap().utf16, 0..2);
+assert!(output.tokens()[0].japanese_morphology().is_some());
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+This example also runs as a mapped-tokenizer doctest. Common tokens retain filtered UTF-16 ranges, corrected original UTF-16 ranges and covering UTF-8 spans, including a raw token that splits a surrogate pair. `japanese_morphology()` exposes `JapaneseMorphology` with the same six optional strings and origin; absent and empty values remain distinct. Its serialized field is `japanese_morphology`. The existing `korean_morphology` field and accessor retain their original format, and a token carries at most one language's morphology. Ordinary tokens omit both fields.
+
+The returned stream can pass through common `TokenFilter` operations, including synonyms, grams and stop removal, while preserving Japanese attributes, graph/end state and retained source ownership. Korean POS and reading filters see Japanese tokens as lacking Korean attributes and leave them unchanged. Mapped calls initialize private coordinate caches, so a cancellation or allocation failure returns no partial result and does not mutate the borrowed character-filter view.
+
 ## Python, Node.js, and browser WASM
 
 Every binding can create, bind, inspect, search with, and drop analyzers by executing the SQL functions in this chapter. Python exposes `list_named_analyzers()`. Node.js and browser WASM expose `listNamedAnalyzers()`; these direct methods list custom engine-catalog names, while SQL `list_analyzers()` also includes built-ins. Direct construction from `CharFilter`, `Tokenizer`, and `TokenFilter` is a Rust API, so other bindings define the pipeline as JSON passed to SQL.

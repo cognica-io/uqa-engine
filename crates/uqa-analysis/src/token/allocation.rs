@@ -110,7 +110,7 @@ impl<T> TokenBuffer<T> {
 }
 
 impl TokenBuffer {
-    #[cfg(feature = "nori")]
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
     pub(super) fn set_terminal(&mut self, token: AnalysisToken) -> AnalysisResult<()> {
         self.memory.grow(std::mem::size_of::<AnalysisToken>())?;
         self.terminal = Some(Box::new(token));
@@ -124,12 +124,12 @@ impl TokenBuffer {
         poll: &mut dyn FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<Budgeted<AnalyzedText>> {
         poll()?;
-        #[cfg(feature = "nori")]
+        #[cfg(any(feature = "nori", feature = "kuromoji"))]
         let projection = input.projection_budgeted(self.memory.budget(), poll)?;
         self.finish_retained(
             input.final_offsets(),
             final_position_increment,
-            #[cfg(feature = "nori")]
+            #[cfg(any(feature = "nori", feature = "kuromoji"))]
             projection,
             poll,
         )
@@ -139,7 +139,7 @@ impl TokenBuffer {
         self,
         final_offsets: SourceOffsets,
         final_position_increment: u32,
-        #[cfg(feature = "nori")] projection: std::sync::Arc<
+        #[cfg(any(feature = "nori", feature = "kuromoji"))] projection: std::sync::Arc<
             Budgeted<crate::source::SourceProjection>,
         >,
         poll: &mut dyn FnMut() -> AnalysisResult<()>,
@@ -151,7 +151,7 @@ impl TokenBuffer {
             AnalyzedText {
                 batch,
                 final_offsets,
-                #[cfg(feature = "nori")]
+                #[cfg(any(feature = "nori", feature = "kuromoji"))]
                 projection,
             },
             memory,
@@ -192,8 +192,8 @@ impl AnalysisToken {
                 position_length: 1,
                 keyword: false,
                 filtered_utf16,
-                #[cfg(feature = "nori")]
-                korean_morphology: None,
+                #[cfg(any(feature = "nori", feature = "kuromoji"))]
+                morphology: None,
                 verbatim,
             },
             memory,
