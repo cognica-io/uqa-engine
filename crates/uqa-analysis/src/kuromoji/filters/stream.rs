@@ -14,11 +14,16 @@ use uqa_core::memory::{Budgeted, MemoryReservation};
 pub(super) trait JapaneseToken: FilterToken {
     fn attributes(&self) -> [Option<&str>; 6];
     fn part_of_speech(&self) -> AnalysisResult<Option<&str>>;
+    fn reading(&self) -> AnalysisResult<Option<&str>>;
     fn base_form(&self) -> Option<&str> {
         self.attributes()[1]
     }
 }
 impl JapaneseToken for KuromojiToken {
+    fn reading(&self) -> AnalysisResult<Option<&str>> {
+        self.errors.check(2)?;
+        Ok(self.reading.as_deref())
+    }
     fn part_of_speech(&self) -> AnalysisResult<Option<&str>> {
         self.errors.check(0)?;
         Ok(self.part_of_speech.as_deref())
@@ -28,6 +33,13 @@ impl JapaneseToken for KuromojiToken {
     }
 }
 impl JapaneseToken for AnalysisToken {
+    fn reading(&self) -> AnalysisResult<Option<&str>> {
+        let Some(value) = self.japanese_morphology() else {
+            return Ok(None);
+        };
+        value.errors.check(2)?;
+        Ok(value.reading.as_deref())
+    }
     fn part_of_speech(&self) -> AnalysisResult<Option<&str>> {
         let Some(value) = self.japanese_morphology() else {
             return Ok(None);

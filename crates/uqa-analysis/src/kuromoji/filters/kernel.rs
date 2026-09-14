@@ -136,6 +136,21 @@ impl CompiledFilter {
                         &mut work,
                     )?;
                 }
+                Self::ReadingForm(use_romaji) => {
+                    let retained = units(token, 0, output_units, limits, &mut work)?;
+                    if let Some(term) = super::reading::replacement(
+                        token,
+                        *use_romaji,
+                        limits.max_output_utf16 - retained,
+                        memory.budget(),
+                        &mut work,
+                    )? {
+                        length = term.len();
+                        token.replace_term(term, memory, &input.context, &mut work)?;
+                    } else {
+                        token.refresh_context(&input.context, &mut work)?;
+                    }
+                }
                 Self::BaseForm | Self::KatakanaStem(_) => {
                     token.refresh_context(&input.context, &mut work)?;
                 }

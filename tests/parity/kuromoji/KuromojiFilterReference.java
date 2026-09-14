@@ -167,6 +167,7 @@ public class KuromojiFilterReference {
         case "lower" -> new LowerCaseFilter(input);
         case "hiragana_uppercase" -> new JapaneseHiraganaUppercaseFilter(input);
         case "katakana_uppercase" -> new JapaneseKatakanaUppercaseFilter(input);
+        case "reading" -> new JapaneseReadingFormFilter(input, Boolean.parseBoolean(part[1]));
         default -> throw new IllegalArgumentException("unknown filter");
       };
     }

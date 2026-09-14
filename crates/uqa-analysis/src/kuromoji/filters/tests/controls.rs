@@ -69,6 +69,8 @@ fn japanese_filter_memory_and_cancellation_preserve_other_reservations() {
     for filter in filters().into_iter().chain([
         JapaneseFilter::HiraganaUppercase,
         JapaneseFilter::KatakanaUppercase,
+        JapaneseFilter::ReadingForm { use_romaji: false },
+        JapaneseFilter::ReadingForm { use_romaji: true },
     ]) {
         let baseline = MemoryBudget::new(usize::MAX);
         let mut polls = 0;
@@ -152,6 +154,9 @@ fn japanese_filter_configuration_bounds_and_absent_attributes_are_explicit() {
         .all(|token| token.japanese_morphology().is_none()));
     for invalid in [
         r#"{"type":"kuromoji_baseform","unknown":true}"#,
+        r#"{"type":"kuromoji_readingform","unknown":true}"#,
+        r#"{"type":"kuromoji_readingform","use_romaji":null}"#,
+        r#"{"type":"kuromoji_readingform","use_romaji":"true"}"#,
         r#"{"type":"kuromoji_hiragana_uppercase","unknown":true}"#,
         r#"{"type":"kuromoji_katakana_uppercase","unknown":true}"#,
         r#"{"type":"kuromoji_stop","ignore_case":"yes"}"#,

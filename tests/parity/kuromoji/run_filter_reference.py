@@ -27,6 +27,20 @@ def strings(values):
     return base64.b64encode(struct.pack('>i', len(values)) + b''.join(map(text_bytes, values))).decode('ascii')
 
 
+def term_units(token):
+    if 'term_utf16_pairs' in token:
+        suffix = token.get('term_suffix_utf16', [])
+        return [unit for first in range(*token['term_utf16_pairs'])
+                for second in range(*token['term_utf16_pairs']) for unit in [first, second, *suffix, 0]]
+    if 'term_utf16_range' in token:
+        return [unit for first in range(*token['term_utf16_range'])
+                for unit in [first, *token.get('term_separator_utf16', [])]]
+    if 'term_utf16' in token:
+        return token['term_utf16']
+    raw = token['term'].encode('utf-16-be', errors='surrogatepass')
+    return [value[0] for value in struct.iter_unpack('>H', raw)]
+
+
 def fields(case):
     raw = (b''.join(struct.pack('>H', unit) for unit in case['input_utf16'])
            if 'input_utf16' in case else (case.get('input', '') * case.get('repeat', 1)).encode('utf-16-be'))
@@ -39,6 +53,8 @@ def fields(case):
             chain.append('stop:' + str(stage.get('ignore_case', True)).lower() + ':' + strings(stage.get('words')))
         elif kind == 'kuromoji_stemmer':
             chain.append('stem:' + str(stage.get('minimum_length', 4)))
+        elif kind == 'kuromoji_readingform':
+            chain.append('reading:' + str(stage.get('use_romaji', False)).lower())
         else:
             chain.append({'kuromoji_baseform': 'base', 'unicode_simple_lowercase': 'lower',
                           'kuromoji_hiragana_uppercase': 'hiragana_uppercase',
@@ -46,11 +62,8 @@ def fields(case):
     tokens = case.get('tokens', [])
     data = struct.pack('>i', len(tokens))
     for token in tokens:
-        if 'term_utf16' in token or 'term_utf16_range' in token:
-            units = token['term_utf16'] if 'term_utf16' in token else range(*token['term_utf16_range'])
-            term = struct.pack('>i', len(units)) + b''.join(struct.pack('>H', unit) for unit in units)
-        else:
-            term = text_bytes(token['term'])
+        units = term_units(token)
+        term = struct.pack('>i', len(units)) + b''.join(struct.pack('>H', unit) for unit in units)
         data += term + struct.pack('>iiii?', token['start_utf16'], token['end_utf16'], token.get('position_increment', 1), token.get('position_length', 1), token.get('keyword', False))
         data += b''.join(text_bytes(token.get(field)) for field in ['part_of_speech', 'base_form', 'reading', 'pronunciation', 'inflection_type', 'inflection_form'])
     return [case['kind'], base64.b64encode(raw).decode('ascii'), case.get('mode', 'search').upper(),

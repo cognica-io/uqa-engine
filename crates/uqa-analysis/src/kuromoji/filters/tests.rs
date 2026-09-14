@@ -5,6 +5,7 @@
 //
 
 mod controls;
+mod reading;
 mod reference;
 
 mod runtime;

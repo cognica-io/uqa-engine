@@ -157,19 +157,47 @@ fn input(case: &Value) -> Vec<u16> {
 fn optional(value: &Value) -> Option<String> {
     value.as_str().map(str::to_owned)
 }
+fn term_units(value: &Value) -> Vec<u16> {
+    let range = |field: &str| {
+        let range = &value[field];
+        (range[0].as_u64().unwrap()..range[1].as_u64().unwrap())
+            .map(|unit| u16::try_from(unit).unwrap())
+    };
+    if value.get("term_utf16_pairs").is_some() {
+        let suffix: Vec<u16> =
+            serde_json::from_value(value.get("term_suffix_utf16").cloned().unwrap_or(json!([])))
+                .unwrap();
+        let mut units = Vec::new();
+        for first in range("term_utf16_pairs") {
+            for second in range("term_utf16_pairs") {
+                units.extend([first, second]);
+                units.extend_from_slice(&suffix);
+                units.push(0);
+            }
+        }
+        units
+    } else if value.get("term_utf16_range").is_some() {
+        let separator: Vec<u16> = serde_json::from_value(
+            value
+                .get("term_separator_utf16")
+                .cloned()
+                .unwrap_or(json!([])),
+        )
+        .unwrap();
+        range("term_utf16_range")
+            .flat_map(|unit| std::iter::once(unit).chain(separator.iter().copied()))
+            .collect()
+    } else {
+        value.get("term_utf16").map_or_else(
+            || value["term"].as_str().unwrap().encode_utf16().collect(),
+            |raw| serde_json::from_value(raw.clone()).unwrap(),
+        )
+    }
+}
 fn token(value: &Value) -> KuromojiToken {
     KuromojiToken {
         errors: crate::kuromoji::attributes::AttributeErrors::default(),
-        term_utf16: if let Some(range) = value.get("term_utf16_range") {
-            (range[0].as_u64().unwrap()..range[1].as_u64().unwrap())
-                .map(|unit| u16::try_from(unit).unwrap())
-                .collect()
-        } else {
-            value.get("term_utf16").map_or_else(
-                || value["term"].as_str().unwrap().encode_utf16().collect(),
-                |raw| serde_json::from_value(raw.clone()).unwrap(),
-            )
-        },
+        term_utf16: term_units(value),
         start_utf16: value["start_utf16"].as_u64().unwrap() as usize,
         end_utf16: value["end_utf16"].as_u64().unwrap() as usize,
         position_increment: value["position_increment"].as_u64().unwrap_or(1) as u32,

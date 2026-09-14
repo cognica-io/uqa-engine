@@ -2869,5 +2869,1174 @@
         "type": "kuromoji_katakana_uppercase"
       }
     ]
+  },
+  {
+    "id": "reading_0_false",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u6771\u4eac",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62",
+        "reading": "\u30c8\u30a6\u30ad\u30e7\u30a6"
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_1_false",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u3072\u3089\u304c\u306a\u6f22\u5b57\u30ab\u30bf\u30ab\u30ca\ud83d\ude42",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62"
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_2_false",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u30ab\u30caABC",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62"
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_3_false",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u3072\u3089\u304c\u306a",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62",
+        "reading": ""
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_4_false",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u7121\u8996",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62",
+        "reading": "\u3072\u3089\u304c\u306a\u30ab\u30ca"
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_5_false",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u7121\u8996",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62",
+        "reading": "\u30a6\u30a3\u30ad\u30e7\u30a6\u30ad\u30e5\u30a6\u30d5\u30e5\u30a6\u30d5\u30a4\u30a7\u30f4\u30a4\u30a7\u30c5\u30a3\u30f3\u30e4\u30f3\u30d0\u30e9\u30f3\u30d7\u30e9\u309c\u30fc\u30c3"
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_6_false",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u3061\u3087\u3063\u3068",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": false,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62"
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_7_false",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      }
+    ],
+    "tokens": [
+      {
+        "term": "",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62"
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_8_false",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u539f\u6587",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62",
+        "reading": "\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2"
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_9_false",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u3041\u3096\u3097\u309f\u3099\u309c\ud82c\udd64",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62"
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_all_units_false",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      }
+    ],
+    "tokens": [
+      {
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62",
+        "term_utf16_range": [
+          0,
+          65536
+        ],
+        "term_separator_utf16": [
+          0
+        ]
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_raw_false",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      }
+    ],
+    "tokens": [
+      {
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62",
+        "term_utf16": [
+          55296,
+          12353,
+          56320,
+          12531,
+          12516,
+          12483,
+          12461,
+          55357,
+          56832
+        ]
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_pipeline_normal_false",
+    "kind": "pipeline",
+    "input": "\u6771\u4eac\u3067\u8d70\u308a\u307e\u3057\u305f \u30ab\u30bf\u30ab\u30ca \u3072\u3089\u304c\u306a \u30b7\u30e3\u30ef\u30fc \ud842\udfb7\u91ce\u5bb6",
+    "mode": "normal",
+    "n_best_cost": 10000,
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      }
+    ]
+  },
+  {
+    "id": "reading_pipeline_search_false",
+    "kind": "pipeline",
+    "input": "\u6771\u4eac\u3067\u8d70\u308a\u307e\u3057\u305f \u30ab\u30bf\u30ab\u30ca \u3072\u3089\u304c\u306a \u30b7\u30e3\u30ef\u30fc \ud842\udfb7\u91ce\u5bb6",
+    "mode": "search",
+    "n_best_cost": 10000,
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      }
+    ]
+  },
+  {
+    "id": "reading_pipeline_extended_false",
+    "kind": "pipeline",
+    "input": "\u6771\u4eac\u3067\u8d70\u308a\u307e\u3057\u305f \u30ab\u30bf\u30ab\u30ca \u3072\u3089\u304c\u306a \u30b7\u30e3\u30ef\u30fc \ud842\udfb7\u91ce\u5bb6",
+    "mode": "extended",
+    "n_best_cost": 10000,
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      }
+    ]
+  },
+  {
+    "id": "reading_lazy_false_false_true",
+    "kind": "pipeline",
+    "input": "\u6771\u4eac",
+    "user_dictionary": "\u6771\u4eac,\u6771\u4eac,\u30c8\u30a6\u30ad\u30e7\u30a6,",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      },
+      {
+        "type": "kuromoji_stop",
+        "words": [
+          "\u30c8\u30a6\u30ad\u30e7\u30a6",
+          "t\u014dky\u014d"
+        ],
+        "ignore_case": false
+      }
+    ]
+  },
+  {
+    "id": "reading_lazy_false_true_true",
+    "kind": "pipeline",
+    "input": "\u6771\u4eac",
+    "user_dictionary": "\u6771\u4eac,\u6771\u4eac,\u30c8\u30a6\u30ad\u30e7\u30a6,",
+    "filters": [
+      {
+        "type": "kuromoji_stop",
+        "words": [
+          "\u6771\u4eac"
+        ],
+        "ignore_case": false
+      },
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      }
+    ]
+  },
+  {
+    "id": "reading_lazy_false_false_false",
+    "kind": "pipeline",
+    "input": "\u6771\u4eac",
+    "user_dictionary": "\u6771\u4eac,\u6771\u4eac,,",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      },
+      {
+        "type": "kuromoji_stop",
+        "words": [
+          "\u30c8\u30a6\u30ad\u30e7\u30a6",
+          "t\u014dky\u014d"
+        ],
+        "ignore_case": false
+      }
+    ]
+  },
+  {
+    "id": "reading_lazy_false_true_false",
+    "kind": "pipeline",
+    "input": "\u6771\u4eac",
+    "user_dictionary": "\u6771\u4eac,\u6771\u4eac,,",
+    "filters": [
+      {
+        "type": "kuromoji_stop",
+        "words": [
+          "\u6771\u4eac"
+        ],
+        "ignore_case": false
+      },
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      }
+    ]
+  },
+  {
+    "id": "reading_stack_and_terminal_false",
+    "kind": "tokens",
+    "input": "XYZ",
+    "tokens": [
+      {
+        "term": "\u3057\u3093\u3076\u3093",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 2,
+        "position_length": 2,
+        "keyword": true
+      },
+      {
+        "term": "\u4ee3\u66ff",
+        "reading": "\u30c8\u30a6\u30ad\u30e7\u30a6",
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 0,
+        "position_length": 1
+      },
+      {
+        "term": "drop",
+        "reading": "\u7d42\u7aef",
+        "start_utf16": 2,
+        "end_utf16": 3,
+        "position_increment": 3
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_stop",
+        "words": [
+          "drop"
+        ],
+        "ignore_case": false
+      },
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": false
+      }
+    ],
+    "final_position_increment": 5
+  },
+  {
+    "id": "reading_0_true",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u6771\u4eac",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62",
+        "reading": "\u30c8\u30a6\u30ad\u30e7\u30a6"
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_1_true",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u3072\u3089\u304c\u306a\u6f22\u5b57\u30ab\u30bf\u30ab\u30ca\ud83d\ude42",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62"
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_2_true",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u30ab\u30caABC",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62"
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_3_true",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u3072\u3089\u304c\u306a",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62",
+        "reading": ""
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_4_true",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u7121\u8996",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62",
+        "reading": "\u3072\u3089\u304c\u306a\u30ab\u30ca"
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_5_true",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u7121\u8996",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62",
+        "reading": "\u30a6\u30a3\u30ad\u30e7\u30a6\u30ad\u30e5\u30a6\u30d5\u30e5\u30a6\u30d5\u30a4\u30a7\u30f4\u30a4\u30a7\u30c5\u30a3\u30f3\u30e4\u30f3\u30d0\u30e9\u30f3\u30d7\u30e9\u309c\u30fc\u30c3"
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_6_true",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u3061\u3087\u3063\u3068",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": false,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62"
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_7_true",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ],
+    "tokens": [
+      {
+        "term": "",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62"
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_8_true",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u539f\u6587",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62",
+        "reading": "\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2\u30a2"
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_9_true",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u3041\u3096\u3097\u309f\u3099\u309c\ud82c\udd64",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62"
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_all_units_true",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ],
+    "tokens": [
+      {
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62",
+        "term_utf16_range": [
+          0,
+          65536
+        ],
+        "term_separator_utf16": [
+          0
+        ]
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_raw_true",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ],
+    "tokens": [
+      {
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62",
+        "term_utf16": [
+          55296,
+          12353,
+          56320,
+          12531,
+          12516,
+          12483,
+          12461,
+          55357,
+          56832
+        ]
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_pipeline_normal_true",
+    "kind": "pipeline",
+    "input": "\u6771\u4eac\u3067\u8d70\u308a\u307e\u3057\u305f \u30ab\u30bf\u30ab\u30ca \u3072\u3089\u304c\u306a \u30b7\u30e3\u30ef\u30fc \ud842\udfb7\u91ce\u5bb6",
+    "mode": "normal",
+    "n_best_cost": 10000,
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ]
+  },
+  {
+    "id": "reading_pipeline_search_true",
+    "kind": "pipeline",
+    "input": "\u6771\u4eac\u3067\u8d70\u308a\u307e\u3057\u305f \u30ab\u30bf\u30ab\u30ca \u3072\u3089\u304c\u306a \u30b7\u30e3\u30ef\u30fc \ud842\udfb7\u91ce\u5bb6",
+    "mode": "search",
+    "n_best_cost": 10000,
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ]
+  },
+  {
+    "id": "reading_pipeline_extended_true",
+    "kind": "pipeline",
+    "input": "\u6771\u4eac\u3067\u8d70\u308a\u307e\u3057\u305f \u30ab\u30bf\u30ab\u30ca \u3072\u3089\u304c\u306a \u30b7\u30e3\u30ef\u30fc \ud842\udfb7\u91ce\u5bb6",
+    "mode": "extended",
+    "n_best_cost": 10000,
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ]
+  },
+  {
+    "id": "reading_lazy_true_false_true",
+    "kind": "pipeline",
+    "input": "\u6771\u4eac",
+    "user_dictionary": "\u6771\u4eac,\u6771\u4eac,\u30c8\u30a6\u30ad\u30e7\u30a6,",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      },
+      {
+        "type": "kuromoji_stop",
+        "words": [
+          "\u30c8\u30a6\u30ad\u30e7\u30a6",
+          "t\u014dky\u014d"
+        ],
+        "ignore_case": false
+      }
+    ]
+  },
+  {
+    "id": "reading_lazy_true_true_true",
+    "kind": "pipeline",
+    "input": "\u6771\u4eac",
+    "user_dictionary": "\u6771\u4eac,\u6771\u4eac,\u30c8\u30a6\u30ad\u30e7\u30a6,",
+    "filters": [
+      {
+        "type": "kuromoji_stop",
+        "words": [
+          "\u6771\u4eac"
+        ],
+        "ignore_case": false
+      },
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ]
+  },
+  {
+    "id": "reading_lazy_true_false_false",
+    "kind": "pipeline",
+    "input": "\u6771\u4eac",
+    "user_dictionary": "\u6771\u4eac,\u6771\u4eac,,",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      },
+      {
+        "type": "kuromoji_stop",
+        "words": [
+          "\u30c8\u30a6\u30ad\u30e7\u30a6",
+          "t\u014dky\u014d"
+        ],
+        "ignore_case": false
+      }
+    ]
+  },
+  {
+    "id": "reading_lazy_true_true_false",
+    "kind": "pipeline",
+    "input": "\u6771\u4eac",
+    "user_dictionary": "\u6771\u4eac,\u6771\u4eac,,",
+    "filters": [
+      {
+        "type": "kuromoji_stop",
+        "words": [
+          "\u6771\u4eac"
+        ],
+        "ignore_case": false
+      },
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ]
+  },
+  {
+    "id": "reading_stack_and_terminal_true",
+    "kind": "tokens",
+    "input": "XYZ",
+    "tokens": [
+      {
+        "term": "\u3057\u3093\u3076\u3093",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 2,
+        "position_length": 2,
+        "keyword": true
+      },
+      {
+        "term": "\u4ee3\u66ff",
+        "reading": "\u30c8\u30a6\u30ad\u30e7\u30a6",
+        "start_utf16": 0,
+        "end_utf16": 2,
+        "position_increment": 0,
+        "position_length": 1
+      },
+      {
+        "term": "drop",
+        "reading": "\u7d42\u7aef",
+        "start_utf16": 2,
+        "end_utf16": 3,
+        "position_increment": 3
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_stop",
+        "words": [
+          "drop"
+        ],
+        "ignore_case": false
+      },
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ],
+    "final_position_increment": 5
+  },
+  {
+    "id": "reading_contexts_0_true",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ],
+    "tokens": [
+      {
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62",
+        "term_utf16_pairs": [
+          12448,
+          12544
+        ],
+        "term_suffix_utf16": []
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_contexts_1_true",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ],
+    "tokens": [
+      {
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62",
+        "term_utf16_pairs": [
+          12448,
+          12544
+        ],
+        "term_suffix_utf16": [
+          12454
+        ]
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_contexts_2_true",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ],
+    "tokens": [
+      {
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62",
+        "term_utf16_pairs": [
+          12448,
+          12544
+        ],
+        "term_suffix_utf16": [
+          12455
+        ]
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_contexts_3_true",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ],
+    "tokens": [
+      {
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62",
+        "term_utf16_pairs": [
+          12448,
+          12544
+        ],
+        "term_suffix_utf16": [
+          0
+        ]
+      }
+    ],
+    "final_position_increment": 4
+  },
+  {
+    "id": "reading_spacing_handakuten_true",
+    "kind": "tokens",
+    "input": "X",
+    "filters": [
+      {
+        "type": "kuromoji_readingform",
+        "use_romaji": true
+      }
+    ],
+    "tokens": [
+      {
+        "term": "\u30e9\u309c\u30ea\u309c\u30eb\u309c\u30ec\u309c\u30ed\u309c\u30e9\u309a\u30ea\u309a\u30eb\u309a\u30ec\u309a\u30ed\u309a",
+        "start_utf16": 0,
+        "end_utf16": 1,
+        "position_increment": 3,
+        "position_length": 2,
+        "keyword": true,
+        "part_of_speech": "\u540d\u8a5e",
+        "base_form": "\u539f\u5f62",
+        "pronunciation": "\u5225\u8aad\u307f",
+        "inflection_type": "\u578b",
+        "inflection_form": "\u5f62"
+      }
+    ],
+    "final_position_increment": 4
   }
 ]
