@@ -4,13 +4,14 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use crate::kuromoji::tests::analysis::common_raw;
 use crate::kuromoji::tokenizer::tests::{model, raw_analysis};
 use crate::kuromoji::{
     JapaneseAnalyzer, JapaneseFilter, JapaneseTokenizer, KuromojiDictionary, KuromojiLimits,
     KuromojiOptions, KuromojiOrigin, KuromojiOutput, KuromojiToken, UserDictionary,
     UserDictionaryLimits,
 };
-use crate::{AnalysisResult, AnalyzedText, FilteredText};
+use crate::{AnalysisResult, FilteredText};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -304,17 +305,6 @@ fn token(value: &Value) -> KuromojiToken {
         inflection_type: optional(&value["inflection_type"]),
         inflection_form: optional(&value["inflection_form"]),
     }
-}
-pub(super) fn common_raw(output: &AnalyzedText) -> Value {
-    let units = |text: Option<&str>| text.map(|text| text.encode_utf16().collect::<Vec<_>>());
-    let tokens: Vec<_> = output.tokens().iter().map(|token| {
-        let fields = token.japanese_morphology().map_or([None;6], |value| value.fields().map(|field| field.map(String::as_str)));
-        let offsets = token.offsets().unwrap();
-        json!({"term_utf16":token.term().utf16(),"start_utf16":offsets.utf16.start,"end_utf16":offsets.utf16.end,
-            "position_increment":token.position_increment(),"position_length":token.position_length(),"keyword":token.is_keyword(),
-            "part_of_speech_utf16":units(fields[0]),"base_form_utf16":units(fields[1]),"reading_utf16":units(fields[2]),"pronunciation_utf16":units(fields[3]),"inflection_type_utf16":units(fields[4]),"inflection_form_utf16":units(fields[5])})
-    }).collect();
-    json!({"tokens":tokens,"final_offset_utf16":output.final_offsets().utf16.end,"final_position_increment":output.final_position_increment()})
 }
 
 fn completion(case: &Value, input: &[u16], model: &KuromojiDictionary) -> AnalysisResult<Value> {

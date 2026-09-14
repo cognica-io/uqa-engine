@@ -42,10 +42,13 @@ pub use bindings::AnalyzerBindings;
 pub use contract::{AnalyzerPhase, InvertedIndex};
 pub use metadata::IndexedFieldRevision;
 
-/// Linear term/position stores cannot install Korean analysis without immutable graph revisions.
+/// Linear term/position stores cannot install morphology without immutable graph revisions.
 pub fn validate_linear_analyzer(analyzer: &Analyzer) -> StorageBackendResult<()> {
     if analyzer.uses_korean_stages() {
         return Err(StorageBackendError::Other("Korean analyzers require immutable analyzer revisions and lossless token-graph storage".into()));
+    }
+    if analyzer.uses_japanese_stages() {
+        return Err(StorageBackendError::Other("Japanese analyzers require immutable analyzer revisions and lossless token-graph storage".into()));
     }
     Ok(())
 }

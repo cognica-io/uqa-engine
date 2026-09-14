@@ -37,6 +37,9 @@ pub enum Tokenizer {
     #[cfg(feature = "nori")]
     #[serde(rename = "nori_tokenizer")]
     Nori(crate::nori::NoriTokenizerConfig),
+    #[cfg(feature = "kuromoji")]
+    #[serde(rename = "kuromoji_tokenizer")]
+    Kuromoji(crate::kuromoji::KuromojiTokenizerConfig),
 }
 
 impl Tokenizer {
@@ -47,6 +50,8 @@ impl Tokenizer {
         match self {
             #[cfg(feature = "nori")]
             Tokenizer::Nori(_) => self.prepare().map(|_| ()),
+            #[cfg(feature = "kuromoji")]
+            Tokenizer::Kuromoji(_) => self.prepare().map(|_| ()),
             Tokenizer::NGram { .. } | Tokenizer::Pattern { .. } => self.prepare().map(|_| ()),
             _ => Ok(()),
         }

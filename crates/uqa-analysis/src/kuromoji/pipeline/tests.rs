@@ -9,6 +9,9 @@ use crate::kuromoji::{DictionaryArtifact, DictionaryBytes, ResourceHash, Resourc
 use crate::{AnalyzerLimits, AnalyzerResources, NormalizationConfig, Tokenizer};
 use parking_lot::Mutex;
 
+mod corpus;
+mod tokenizer;
+
 #[test]
 fn normalization_profiles_snapshot_alias_changes_and_restore_only_exact_artifacts() {
     let current = Arc::new(Mutex::new(Some(DictionaryBytes::Static(
@@ -38,13 +41,19 @@ fn normalization_profiles_snapshot_alias_changes_and_restore_only_exact_artifact
             .build()
     };
     let resources = owner();
-    let config = Analyzer::new(Tokenizer::Keyword, Vec::new(), Vec::new()).with_normalization(
-        NormalizationConfig::UnicodeSimpleLowercase {
-            profile: UnicodeProfile::Kuromoji {
-                dictionary: "current".into(),
-            },
+    let config = Analyzer::new(
+        Tokenizer::Kuromoji(KuromojiTokenizerConfig {
+            dictionary: "current".into(),
+            ..Default::default()
+        }),
+        Vec::new(),
+        Vec::new(),
+    )
+    .with_normalization(NormalizationConfig::UnicodeSimpleLowercase {
+        profile: UnicodeProfile::Kuromoji {
+            dictionary: "current".into(),
         },
-    );
+    });
     let retained = resources.compile(&config).unwrap();
     assert_eq!(
         requests.lock().as_slice(),

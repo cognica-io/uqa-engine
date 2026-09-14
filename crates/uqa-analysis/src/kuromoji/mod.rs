@@ -48,9 +48,11 @@ pub use analyzer::JapaneseAnalyzer;
 mod attributes;
 pub(crate) use attributes::AttributeErrors;
 mod completion;
+mod config;
 pub use completion::{
     romanize_completion_utf16, romanize_completion_utf16_budgeted, CompletionMode,
 };
+pub use config::KuromojiTokenizerConfig;
 mod dictionary;
 mod error;
 pub(crate) mod filters;

@@ -318,7 +318,7 @@ This example executes as a Rust doctest. Saving descriptor JSON and restoring it
 
 Both lowercase plans also accept `provider: "nori"` when `nori` is enabled. The dictionary value is a required name or `sha256:<artifact hash>`. Compilation freezes the typed provider and exact artifact hash; restoration accepts only canonical exact hashes and validates the bytes. Profiles and width tables contribute to the descriptor identity, and normalization stages count toward `AnalyzerLimits::max_stages`. Unavailable providers, missing profiles and unknown normalization properties are errors.
 
-An omitted field serializes without a null or default entry, preserving existing generic and Nori descriptor bytes, revisions and fingerprints. An explicit plan creates a distinct revision even when its output happens to equal the inferred behavior. Resolving a shared dictionary alias once per language within a pipeline keeps tokenizer, filter and normalization snapshots consistent. Retained compiled handles preserve their profile after alias changes or cache eviction. This configuration is part of the unreleased Kuromoji work; the public Japanese tokenizer and filter catalog integration remains in progress.
+An omitted field serializes without a null or default entry, preserving existing generic and Nori descriptor bytes, revisions and fingerprints. An explicit plan creates a distinct revision even when its output happens to equal the inferred behavior. Resolving a shared dictionary alias once per language within a pipeline keeps tokenizer, filter and normalization snapshots consistent. Retained compiled handles preserve their profile after alias changes or cache eviction. This configuration is part of the unreleased Kuromoji work; Japanese tokenizer configuration is available through the common pipeline; Japanese token-filter configuration and built-ins remain in progress.
 
 ```rust
 use uqa_analysis::{Analyzer, NormalizationConfig};
@@ -774,6 +774,28 @@ assert_eq!(tokenizer.n_best_cost(), 2000);
 ```
 
 This example runs as a tokenizer doctest. `calc_n_best_cost_budgeted` and `with_n_best_examples_budgeted` take `(examples, limits, &budget, poll)`. The input-unit limit also bounds the entire examples string, and all probes share one additional-work allowance. Preparation reserves encodings, substring-search storage, lattices and fixups before allocation, retains no scratch on completion, and preserves existing owners on cancellation or error. Probes observe costs without reading dictionary attributes; malformed user attributes can therefore remain valid during estimation and fail only when actual tokenization accesses them. The separate [98-case N-best corpus](../../../tests/parity/kuromoji/README.md) verifies complete ordered attributes, graphs, terminal state, cost boundaries, examples and errors.
+
+### Japanese tokenizers in compiled pipelines
+
+With `uqa-analysis/kuromoji`, `Tokenizer::Kuromoji(KuromojiTokenizerConfig)` and JSON `kuromoji_tokenizer` execute the native tokenizer through the common analyzer pipeline. Defaults are dictionary `lucene-10.5.1`, `mode: "search"`, both discard flags `true`, no user dictionary, signed `n_best_cost: 0`, and no `n_best_examples`. These match the pinned [JapaneseTokenizerFactory](https://github.com/apache/lucene/blob/64ce863a2bea79c69c19c4d56268c26710ff0ff9/lucene/analysis/kuromoji/src/java/org/apache/lucene/analysis/ja/JapaneseTokenizerFactory.java). Unknown properties, invalid modes and out-of-range costs fail during configuration decoding. Tokenizer selection adds no width filter, stop set, stemming or normalization; configure those independently.
+
+Compilation resolves the selected immutable dictionary and exact UTF-8 user source, estimates optional N-best examples with the native preparation limits, and stores the effective signed cost. Canonical descriptors contain an exact dictionary hash and `n_best_examples: null`; reopening never repeats example probes. Unresolved examples, aliases and missing defaults are rejected during restoration. Different user-source bytes remain distinct revisions, including absent, empty and comment-only sources. The tokenizer and an explicit normalization profile share one resolution of the same dictionary alias within a pipeline.
+
+```rust
+use uqa_analysis::{Analyzer, AnalyzerLimits, AnalyzerResources, Tokenizer};
+use uqa_analysis::kuromoji::KuromojiTokenizerConfig;
+let config = Analyzer::new(Tokenizer::Kuromoji(KuromojiTokenizerConfig {
+    user_dictionary: Some("東京大学,東京 大学,トウキョウ ダイガク,名詞".into()),
+    ..Default::default()
+}), Vec::new(), Vec::new());
+let compiled = config.compile()?;
+assert_eq!(compiled.analyze("東京大学")?, ["東京", "大学"]);
+let restored = AnalyzerResources::new(AnalyzerLimits::default())
+    .restore_json(compiled.descriptor().canonical_json())?;
+assert_eq!(restored.analyze_tokens("東京大学")?, compiled.analyze_tokens("東京大学")?);
+```
+
+The native bridge retains all Japanese attributes, raw token terms, token graphs, terminal state and corrected source spans. Both compiled and uncompiled analyzer chains defer user-attribute failures until a filter actually accesses the field or the completed stream is returned; a later generic stop filter can remove an otherwise invalid token. Standalone tokenizer and token-filter calls still validate their public output. Compiled Japanese tokenizers default to overlap-discounted field lengths. Linear term/position adapters reject them because they require immutable revisions and complete occurrence storage. Native/common memory ownership and every-callback cancellation are tested after HTML/width edits and N-best graph expansion. This is unreleased analysis support; Japanese token-filter configuration, built-ins and full provider/SQL/binding delivery remain in progress.
 
 ### Japanese tokens in the common representation
 

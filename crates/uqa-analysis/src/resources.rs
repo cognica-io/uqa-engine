@@ -134,7 +134,7 @@ impl AnalyzerResources {
     }
 
     pub fn compile(&self, config: &Analyzer) -> AnalysisResult<Arc<CompiledAnalyzer>> {
-        let policy = if config.uses_korean_stages() {
+        let policy = if config.uses_morphology_stages() {
             TokenLengthPolicy::DiscountOverlaps
         } else {
             TokenLengthPolicy::EmittedTokens

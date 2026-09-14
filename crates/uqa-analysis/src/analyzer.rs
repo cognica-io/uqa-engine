@@ -49,6 +49,23 @@ impl Default for Analyzer {
 }
 
 impl Analyzer {
+    /// Identify components requiring immutable morphology and token-graph revisions.
+    pub fn uses_morphology_stages(&self) -> bool {
+        self.uses_korean_stages() || self.uses_japanese_stages()
+    }
+
+    /// Identify Japanese token stages independently of optional normalization profiles.
+    pub fn uses_japanese_stages(&self) -> bool {
+        #[cfg(feature = "kuromoji")]
+        {
+            matches!(self.tokenizer, Tokenizer::Kuromoji(_))
+        }
+        #[cfg(not(feature = "kuromoji"))]
+        {
+            false
+        }
+    }
+
     /// Identify Korean components for storage-format and catalog capability preflight.
     pub fn uses_korean_stages(&self) -> bool {
         #[cfg(feature = "nori")]
@@ -137,10 +154,17 @@ impl Analyzer {
         let mut tokens = self
             .tokenizer
             .prepare()?
-            .tokenize_mapped_budgeted(&filtered, budget, &mut poll)?;
+            .tokenize_mapped_for_filters_budgeted(&filtered, budget, &mut poll)?;
         drop(filtered);
         for filter in &self.token_filters {
-            tokens = filter.filter_analyzed_budgeted(tokens, &mut poll)?;
+            poll()?;
+            tokens = filter
+                .prepare()?
+                .filter_analyzed_budgeted(tokens, &mut poll)?;
+        }
+        #[cfg(feature = "kuromoji")]
+        if self.uses_japanese_stages() {
+            tokens.validate_japanese_attributes(&mut poll)?;
         }
         poll()?;
         Ok(tokens)

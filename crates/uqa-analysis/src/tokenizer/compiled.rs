@@ -28,11 +28,24 @@ pub(crate) enum PreparedTokenizer {
     Keyword,
     #[cfg(feature = "nori")]
     Nori(crate::nori::KoreanTokenizer),
+    #[cfg(feature = "kuromoji")]
+    Kuromoji(crate::kuromoji::JapaneseTokenizer),
 }
 
 impl Tokenizer {
     pub(crate) fn prepare(&self) -> AnalysisResult<PreparedTokenizer> {
         Ok(match self {
+            #[cfg(feature = "kuromoji")]
+            Self::Kuromoji(config) => {
+                let resources = crate::kuromoji::KuromojiResources::default();
+                let dictionary =
+                    resources.load(&crate::kuromoji::pipeline::request(&config.dictionary)?)?;
+                PreparedTokenizer::Kuromoji(crate::kuromoji::pipeline::prepare_tokenizer(
+                    config,
+                    &dictionary,
+                    &resources,
+                )?)
+            }
             #[cfg(feature = "nori")]
             Self::Nori(config) => {
                 let resources = crate::nori::NoriResources::default();
@@ -77,6 +90,24 @@ impl Tokenizer {
 }
 
 impl PreparedTokenizer {
+    pub(crate) fn tokenize_mapped_for_filters_budgeted(
+        &self,
+        text: &FilteredText<'_>,
+        budget: &MemoryBudget,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<AnalyzedText>> {
+        #[cfg(feature = "kuromoji")]
+        if let Self::Kuromoji(tokenizer) = self {
+            return tokenizer.tokenize_mapped_for_filters_budgeted(
+                text,
+                crate::kuromoji::KuromojiLimits::default(),
+                budget,
+                &mut || poll(),
+            );
+        }
+        self.tokenize_mapped_budgeted(text, budget, poll)
+    }
+
     pub(crate) fn tokenize_mapped(&self, text: &FilteredText<'_>) -> AnalysisResult<AnalyzedText> {
         stream::tokenize(self, text)
     }

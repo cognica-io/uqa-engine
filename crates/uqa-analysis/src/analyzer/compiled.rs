@@ -67,13 +67,19 @@ impl CompiledAnalyzer {
             .iter()
             .map(|filter| filter.prepare().map(PreparedCharFilter::into_owned))
             .collect::<AnalysisResult<_>>()?;
-        #[cfg(feature = "nori")]
-        let tokenizer = match &nori.tokenizer {
-            Some(tokenizer) => PreparedTokenizer::Nori(tokenizer.clone()),
-            None => config.tokenizer.prepare()?,
+        let tokenizer = match &config.tokenizer {
+            #[cfg(feature = "nori")]
+            crate::Tokenizer::Nori(_) => PreparedTokenizer::Nori(nori.tokenizer.clone().ok_or(
+                crate::AnalysisError::Descriptor("missing resolved Korean tokenizer"),
+            )?),
+            #[cfg(feature = "kuromoji")]
+            crate::Tokenizer::Kuromoji(_) => {
+                PreparedTokenizer::Kuromoji(kuromoji.tokenizer.clone().ok_or(
+                    crate::AnalysisError::Descriptor("missing resolved Japanese tokenizer"),
+                )?)
+            }
+            _ => config.tokenizer.prepare()?,
         };
-        #[cfg(not(feature = "nori"))]
-        let tokenizer = config.tokenizer.prepare()?;
         let token_filters = config
             .token_filters
             .iter()
@@ -141,10 +147,14 @@ impl CompiledAnalyzer {
         }
         let mut tokens = self
             .tokenizer
-            .tokenize_mapped_budgeted(&filtered, budget, &mut poll)?;
+            .tokenize_mapped_for_filters_budgeted(&filtered, budget, &mut poll)?;
         drop(filtered);
         for filter in &self.token_filters {
             tokens = filter.filter_analyzed_budgeted(tokens, &mut poll)?;
+        }
+        #[cfg(feature = "kuromoji")]
+        if matches!(self.tokenizer, PreparedTokenizer::Kuromoji(_)) {
+            tokens.validate_japanese_attributes(&mut poll)?;
         }
         poll()?;
         Ok(tokens)
