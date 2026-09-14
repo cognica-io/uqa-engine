@@ -12,7 +12,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("nori_browser", ROOT / "scripts/verify-nori-browser.py")
+SPEC = importlib.util.spec_from_file_location("nori_browser", ROOT / "scripts/verify-morphology-browser.py")
 browser = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(browser)
 FIXTURE = ROOT / "scripts/tests/fixtures/nori_browser.json"
@@ -60,6 +60,32 @@ class NoriBrowserTest(unittest.TestCase):
     def test_requested_feature_must_match(self):
         with self.assertRaisesRegex(RuntimeError, "feature"):
             browser.verify_run(self.report, "disabled")
+
+    def test_functional_reports_validate_both_languages_without_memory_sampling(self):
+        for language in ("nori", "kuromoji"):
+            fixture = json.loads((ROOT / f"tests/parity/{language}/bindings.json").read_text())
+            for feature in ("enabled", "disabled"):
+                report = self.fixture(feature)
+                steps = fixture[feature]
+                report.update(language=language, observe_memory=False, memory=[],
+                              completed_steps=[step["name"] for step in steps])
+                if language == "kuromoji":
+                    report["analyses"] = []
+                checkpoints = [index + 1 for index, step in enumerate(steps) if step.get("reopen")]
+                sample = report["checkpoints"][0]
+                report["checkpoints"] = [dict(sample, next_step=index) for index in checkpoints]
+                report["pages"] = [f"page-{index}" for index in range(len(checkpoints) + 1)]
+                report["status"] = f"Passed: {len(steps)} steps across {len(report['pages'])} page loads"
+                with self.subTest(language=language, feature=feature):
+                    browser.verify_run(report, feature, language, False)
+                    for mutation in (lambda r: r["memory"].append({"bytes": 1}),
+                                     lambda r: r["completed_steps"].pop(),
+                                     lambda r: r["checkpoints"].pop(),
+                                     lambda r: r.update(language="wrong")):
+                        changed = copy.deepcopy(report)
+                        mutation(changed)
+                        with self.assertRaises(RuntimeError):
+                            browser.verify_run(changed, feature, language, False)
 
     def test_cli_errors_cannot_be_read_as_results(self):
         with self.assertRaisesRegex(RuntimeError, "no result"):

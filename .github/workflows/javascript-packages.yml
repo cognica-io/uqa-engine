@@ -65,9 +65,9 @@ jobs:
       # split into .dSYM/.pdb but Linux leaves inside the binary: the published
       # Linux addons came out at 1.2 GB against 60-90 MB elsewhere. The
       # workspace already defines a stripped profile for exactly this.
-      - name: Build native addon with native Nori
+      - name: Build native addon with native Nori and Kuromoji
         working-directory: crates/uqa-node
-        run: npx napi build --platform --no-js --profile release-stripped --features nori --target ${{ matrix.target }}
+        run: npx napi build --platform --no-js --profile release-stripped --features nori,kuromoji --target ${{ matrix.target }}
 
       - name: Test the addon
         working-directory: crates/uqa-node
@@ -111,7 +111,7 @@ jobs:
           --artifacts-dir native-addons
           --output-dir dist
       - name: Check npm package license contents
-        run: python3 scripts/check-release-licenses.py --require-nori dist/*.tgz
+        run: python3 scripts/check-release-licenses.py --require-nori --require-kuromoji dist/*.tgz
       - uses: actions/upload-artifact@v4
         with:
           name: node-packages
@@ -173,7 +173,7 @@ jobs:
         run: npm pack --pack-destination .
 
       - name: Check package license contents
-        run: python3 scripts/check-release-licenses.py --require-nori crates/uqa-wasm/js/*.tgz
+        run: python3 scripts/check-release-licenses.py --require-nori --require-kuromoji crates/uqa-wasm/js/*.tgz
 
       - uses: actions/upload-artifact@v4
         with:

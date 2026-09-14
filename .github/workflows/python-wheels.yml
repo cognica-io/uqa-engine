@@ -52,8 +52,11 @@ jobs:
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/python -m pip install maturin==1.11.5 pytest
-      - name: Build and install the development extension with native Nori
-        run: maturin develop --locked --features nori
+      - name: Build and install the wheel with native Nori and Kuromoji
+        run: |
+          maturin build --locked --features nori,kuromoji --out target/morphology-binding-enabled/python
+          python -m pip install --force-reinstall target/morphology-binding-enabled/python/*.whl
+          python tests/python/retained_analyzers.py create target/morphology-retained-catalogs
       - name: Check the stable ABI contract
         run: |
           python - <<'PY'
@@ -89,17 +92,20 @@ jobs:
           path: nori-browser-native-diagnostics.json
           if-no-files-found: error
 
-      - name: Build and test the Python wheel without Nori
+      - name: Build and test the Python wheel without morphology dictionaries
         run: |
           set -euo pipefail
-          maturin build --locked --no-default-features --out target/nori-binding-disabled/python
-          python -m pip install --force-reinstall target/nori-binding-disabled/python/*.whl
-          cargo tree --locked -p uqa-python --no-default-features --edges normal > target/nori-binding-disabled/python-dependencies.txt
-          if grep -q uqa-nori-data target/nori-binding-disabled/python-dependencies.txt; then
-            echo "Nori dictionary present in a feature-disabled Python wheel" >&2
+          maturin build --locked --no-default-features --out target/morphology-binding-disabled/python
+          python -m pip install --force-reinstall target/morphology-binding-disabled/python/*.whl
+          cargo tree --locked -p uqa-python --no-default-features --edges normal > target/morphology-binding-disabled/python-dependencies.txt
+          if grep -Eq 'uqa-(nori|kuromoji)-data' target/morphology-binding-disabled/python-dependencies.txt; then
+            echo "Morphology dictionary present in a feature-disabled Python wheel" >&2
             exit 1
           fi
-          UQA_TEST_NORI=disabled python -m pytest -q tests/python
+          UQA_TEST_NORI=disabled UQA_TEST_KUROMOJI=disabled python -m pytest -q tests/python
+          python tests/python/retained_analyzers.py reject target/morphology-retained-catalogs
+          python -m pip install --force-reinstall target/morphology-binding-enabled/python/*.whl
+          python tests/python/retained_analyzers.py verify target/morphology-retained-catalogs
 
   build-wheels:
     name: ${{ matrix.label }}
@@ -160,11 +166,11 @@ jobs:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux }}
           before-script-linux: source .github/scripts/install-manylinux-build-deps.sh
-          args: --release --locked --features nori --compatibility pypi --out dist
+          args: --release --locked --features nori,kuromoji --compatibility pypi --out dist
 
       - name: Check wheel license contents
         shell: bash
-        run: python scripts/check-release-licenses.py --require-nori dist/*.whl
+        run: python scripts/check-release-licenses.py --require-nori --require-kuromoji dist/*.whl
 
       # `requires-python = ">=3.8"` only holds because pyo3 is built against
       # the CPython stable ABI. Dropping the abi3 feature would silently
@@ -245,7 +251,7 @@ jobs:
           args: --out dist
 
       - name: Check sdist license contents
-        run: python scripts/check-release-licenses.py --require-nori dist/*.tar.gz
+        run: python scripts/check-release-licenses.py --require-nori --require-kuromoji dist/*.tar.gz
 
       - name: Validate the sdist Cargo workspace
         shell: bash

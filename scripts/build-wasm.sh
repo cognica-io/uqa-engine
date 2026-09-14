@@ -11,7 +11,7 @@
 #   brew install emscripten          # or emsdk
 #   rustup target add wasm32-unknown-emscripten
 #
-# Usage: scripts/build-wasm.sh [--debug] [--no-default-features] [--output-dir DIR]
+# Usage: scripts/build-wasm.sh [--debug] [--no-default-features] [--features NAMES] [--output-dir DIR]
 
 set -euo pipefail
 
@@ -28,7 +28,15 @@ while (($#)); do
             wasm_build_args=()
             ;;
         --no-default-features)
-            wasm_feature_args=(--no-default-features)
+            wasm_feature_args+=(--no-default-features)
+            ;;
+        --features)
+            if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+                echo "error: --features requires Cargo feature names" >&2
+                exit 2
+            fi
+            wasm_feature_args+=(--features "$2")
+            shift
             ;;
         --output-dir)
             if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
@@ -39,7 +47,7 @@ while (($#)); do
             shift
             ;;
         -h|--help)
-            echo "usage: scripts/build-wasm.sh [--debug] [--no-default-features] [--output-dir DIR]"
+            echo "usage: scripts/build-wasm.sh [--debug] [--no-default-features] [--features NAMES] [--output-dir DIR]"
             exit 0
             ;;
         *)

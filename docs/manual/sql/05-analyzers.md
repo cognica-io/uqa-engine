@@ -40,7 +40,7 @@ SELECT * FROM set_table_analyzer(
 
 The field must already belong to a physical GIN index. Assigning `both` rebuilds its postings and uses the same analyzer for queries.
 
-The unreleased `kuromoji` feature is available through `uqa`, `uqa-engine` and the CLI. Both Japanese built-ins are protected catalog names, and custom Japanese pipelines use the [compiled component configuration](../reference/06-text-analyzers.md#japanese-tokenizers-in-compiled-pipelines). Analysis and the Rust Engine/facade have no default dictionary feature. CLI and binding defaults still include only Nori while actual Japanese Python/Node.js/WASM delivery is being verified.
+The unreleased `kuromoji` feature is available through `uqa`, `uqa-engine` and the CLI. Both Japanese built-ins are protected catalog names, and custom Japanese pipelines use the [compiled component configuration](../reference/06-text-analyzers.md#japanese-tokenizers-in-compiled-pipelines). Analysis and the Rust Engine/facade have no default dictionary feature. CLI, Python, Node.js and WASM development builds default to both language features. The already published 0.3.0 packages are unchanged.
 
 ## Analyzer JSON
 

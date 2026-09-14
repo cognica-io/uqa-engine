@@ -12,7 +12,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { noriEnabled, runNoriBindings } from "../parity/nori/bindings.mjs";
+import { bindingFeatures, noriEnabled, runBindings } from "../parity/bindings.mjs";
 
 const require = createRequire(import.meta.url);
 const packagePath = require.resolve(process.env.UQA_TEST_PACKAGE ? resolve(process.env.UQA_TEST_PACKAGE) : "../../crates/uqa-node");
@@ -330,14 +330,16 @@ test("Node Nori diagnostics match the requested feature configuration", async ()
   await engine.close();
 });
 
-test("Nori user dictionaries and retained graph revisions survive Node reopen", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "uqa-node-nori-"));
-  try {
-    await runNoriBindings((path) => uqa.open(path), join(dir, "nori.db"), noriEnabled);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+for (const [language, enabled] of bindingFeatures) {
+  test(`${language} user dictionaries and retained graph revisions survive Node reopen`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), `uqa-node-${language}-`));
+    try {
+      await runBindings(language, (path) => uqa.open(path), join(dir, `${language}.db`), enabled);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
 
 test("async errors reject the promise", async () => {
   const engine = new uqa.Engine();

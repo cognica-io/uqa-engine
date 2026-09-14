@@ -5,11 +5,15 @@
 //
 
 import { assertEqual } from "../../examples/javascript/common.mjs";
-import { checkBindingStep } from "../parity/nori/bindings.core.mjs";
+import { checkBindingStep } from "../parity/bindings.core.mjs";
 
 const parameters = new URLSearchParams(location.search);
-const feature = parameters.get("nori") ?? "enabled";
-assertEqual(["enabled", "disabled"].includes(feature), true, "explicit Nori feature configuration");
+const language = parameters.get("language") ?? "nori";
+assertEqual(["nori", "kuromoji"].includes(language), true, "explicit morphology language");
+const feature = parameters.get("feature") ?? "enabled";
+const observeMemory = parameters.get("observe_memory") === "true";
+assertEqual(!observeMemory || language === "nori", true, "Nori memory corpus");
+assertEqual(["enabled", "disabled"].includes(feature), true, "explicit morphology feature configuration");
 const bundle = parameters.get("bundle") ?? "../../crates/uqa-wasm/js/index.mjs";
 const { Engine, UQA } = await import(bundle);
 const status = document.querySelector("#status");
@@ -20,11 +24,13 @@ document.querySelector("#restart").addEventListener("click", () => {
   parameters.set("run", crypto.randomUUID());
   location.search = parameters;
 });
-const key = `uqa-nori-browser-verification/${parameters.get("run") ?? "default"}/${feature}`;
+const key = `uqa-morphology-browser-verification/${parameters.get("run") ?? "default"}/${language}/${feature}/${observeMemory}`;
 const saved = sessionStorage.getItem(key);
 const report = saved ? JSON.parse(saved) : {
   schema_version: 1,
   feature,
+  language,
+  observe_memory: observeMemory,
   run_id: crypto.randomUUID(),
   next_step: 0,
   pages: [],
@@ -42,6 +48,7 @@ function publish(message) {
 }
 
 async function measureMemory(label) {
+  if (!observeMemory) return;
   status.textContent = `Measuring browser memory: ${label}`;
   if (typeof performance.measureUserAgentSpecificMemory !== "function") {
     throw new Error("This browser does not expose measureUserAgentSpecificMemory");
@@ -110,11 +117,11 @@ async function run() {
   assertEqual(report.pages.includes(pageId), false, "fresh page identity");
   report.pages.push(pageId);
   report.user_agent = navigator.userAgent;
-  const fixture = JSON.parse(await fetchText("../parity/nori/bindings.json"));
+  const fixture = JSON.parse(await fetchText(`../parity/${language}/bindings.json`));
   const steps = fixture[feature];
   assertEqual(fixture.schema_version, 1, "fixture schema");
   await measureMemory("before_load");
-  const path = `${UQA.persistDir}/nori-${report.run_id}.db`;
+  const path = `${UQA.persistDir}/${language}-${report.run_id}.db`;
   let engine = await Engine.open(path);
   try {
     await measureMemory("opened");
@@ -139,7 +146,7 @@ async function run() {
       report.completed_steps.push(step.name);
       if (index === 1 || index === 35 || index === 43) await measureMemory(`after_${step.name}`);
     }
-    if (feature === "enabled") await measureCorpora(engine);
+    if (language === "nori" && feature === "enabled") await measureCorpora(engine);
   } finally {
     await engine?.close();
   }

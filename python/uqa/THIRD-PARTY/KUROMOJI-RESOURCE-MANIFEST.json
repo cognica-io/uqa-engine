@@ -1,0 +1,40 @@
+{
+  "format": "uqa-kuromoji-bundled-resource",
+  "format_version": 1,
+  "bundle_format_version": 1,
+  "dictionary_id": "dd2691ffee7f5a0d2c29c1a6e66dee249116767208a8cd8e783a6aa479100c8f",
+  "packer": "uqa-analysis pack_kuromoji; bundle format 1",
+  "compression": "miniz_oxide 0.8.9; zlib level 9",
+  "files": [
+    {
+      "path": "data/kuromoji.uqak",
+      "bytes": 6654306,
+      "sha256": "bd3dd53f609006e72d0aa6e94ec6067400ac2be328ca0c39263ab36c3197aa97"
+    },
+    {
+      "path": "data/model_manifest.json",
+      "bytes": 9984,
+      "sha256": "c3fb9ad9f0abf62f13ee508224a70fcdcd367768b916963f11b8861435078609"
+    },
+    {
+      "path": "THIRD-PARTY/JDK-UNICODE.md",
+      "bytes": 9078,
+      "sha256": "6f72f10d166b2c2e8a395e03e734c5afc852b59aeca73ced124f6b9c96268d53"
+    },
+    {
+      "path": "THIRD-PARTY/LUCENE-LICENSE.txt",
+      "bytes": 26085,
+      "sha256": "a2521407b3209df7dcebfc12cd6d732b24bfa2fe44982ef613e269666482521d"
+    },
+    {
+      "path": "THIRD-PARTY/LUCENE-NOTICE.txt",
+      "bytes": 9782,
+      "sha256": "d3b82734d5e181509c4b6b832f5d3a90c8c6a34fc195272fc8957ccb9e8e20a8"
+    },
+    {
+      "path": "THIRD-PARTY/MECAB-IPADIC-COPYING.txt",
+      "bytes": 3795,
+      "sha256": "fca02d9adb601d101eccdf3131119abfff2d9c825ef5c759d7a89ebbaa972099"
+    }
+  ]
+}

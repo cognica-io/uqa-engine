@@ -175,7 +175,7 @@ def main() -> int:
         licenses.check_binding_sources()
     else:
         for directory in licenses.BINDING_PACKAGES:
-            for relative, payload in licenses.binding_nori_payloads().items():
+            for relative, payload in licenses.binding_dictionary_payloads().items():
                 path = directory / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(payload)

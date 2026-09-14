@@ -45,7 +45,7 @@ LEGAL_FILES = (
     "LICENSING.md",
     "LICENSES/UQA-FOSS-EXCEPTION-1.0.txt",
     "LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt",
-    *licenses.binding_nori_payloads(),
+    *licenses.binding_dictionary_payloads(),
 )
 ROOT_RUNTIME_FILES = (
     "api.js", "index.js", "index.d.ts",
@@ -111,7 +111,7 @@ def write_json(path: pathlib.Path, payload: dict[str, object]) -> None:
 
 
 def canonical_legal_payloads() -> dict[str, bytes]:
-    payloads = licenses.binding_nori_payloads()
+    payloads = licenses.binding_dictionary_payloads()
     for relative in LEGAL_FILES:
         if relative in payloads:
             continue

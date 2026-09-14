@@ -17,7 +17,7 @@ keywords = ["database", "sql", "postgresql", "repl"]
 categories = ["command-line-utilities", "database"]
 
 [features]
-default = ["nori"]
+default = ["nori", "kuromoji"]
 nori = ["uqa-engine/nori"]
 kuromoji = ["uqa-engine/kuromoji"]
 

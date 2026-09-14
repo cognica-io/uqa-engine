@@ -406,10 +406,12 @@ class PremergeCITest(unittest.TestCase):
                 self.assertTrue(any("ci.yml" in item and "run_rust=true" in item for item in invocations))
                 self.assertTrue(any("javascript-bindings.yml" in item for item in invocations))
 
-    def test_nori_resource_and_binding_inputs_select_all_runtime_bindings(self) -> None:
+    def test_morphology_resource_and_binding_inputs_select_all_runtime_bindings(self) -> None:
         for path in (".gitattributes", "crates/uqa-nori-data/data/nori.uqan", "crates/uqa-nori-data/data/resource_manifest.json",
-                     "tests/parity/nori/bindings.json", "tests/parity/nori/bindings.mjs",
-                     "tests/parity/nori/bindings.core.mjs"):
+                     "crates/uqa-kuromoji-data/data/kuromoji.uqak", "crates/uqa-kuromoji-data/data/resource_manifest.json",
+                     "tests/parity/nori/bindings.json", "tests/parity/kuromoji/bindings.json",
+                     "tests/parity/bindings.mjs", "tests/parity/bindings.core.mjs",
+                     "scripts/check-release-licenses.py", "scripts/wasm_data.py", "scripts/sync-crate-legal-files.py"):
             result, invocations, _ = self.run_script(changed_files=(path,))
             with self.subTest(path=path):
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -418,7 +420,7 @@ class PremergeCITest(unittest.TestCase):
 
     def test_browser_driver_and_shared_examples_select_javascript(self) -> None:
         for path in ("examples/javascript/common.mjs", "scripts/serve-wasm-tests.py",
-                     "scripts/verify-nori-browser.py", ".github/workflows/javascript-packages.yml"):
+                     "scripts/verify-morphology-browser.py", ".github/workflows/javascript-packages.yml"):
             result, invocations, _ = self.run_script(changed_files=(path,))
             with self.subTest(path=path):
                 self.assertEqual(result.returncode, 0, result.stderr)
