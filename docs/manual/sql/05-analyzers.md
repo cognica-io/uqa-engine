@@ -13,7 +13,7 @@ UQA Engine exposes analyzer catalog operations as row-producing SQL functions an
 | `drop_analyzer(name)` | One string | One status row | Yes |
 | `fts_index_stats([table])` | Zero or one table-name string | One diagnostics row per indexed field | No |
 
-These functions are used in `FROM` like other table functions. `SELECT * FROM function(...)` is the direct lifecycle form.
+These functions are used in `FROM` like other table functions. `SELECT * FROM function(...)` is the direct lifecycle form. Their string arguments supply `TEXT` context for untyped parameters during preparation, including analyzer calls in an `INSERT ... SELECT` source; callers do not need casts to make those parameters inferable.
 
 ## Built-in analyzers
 

@@ -13,6 +13,8 @@ mod expressions;
 mod parameters;
 mod queries;
 mod sources;
+#[cfg(test)]
+mod tests;
 
 use super::{BindingContext, RowSchema, SchemaScope};
 use crate::plan::{QueryPlan, UnifiedPlan};
