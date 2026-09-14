@@ -150,7 +150,7 @@ impl UnicodeTable {
     }
 }
 
-#[cfg(any(test, feature = "nori-tools", feature = "kuromoji-tools"))]
+#[cfg(any(feature = "nori-tools", feature = "kuromoji-tools"))]
 pub(crate) fn read_neutral(
     mut reader: Reader<'_>,
     script_count: usize,

@@ -106,3 +106,17 @@ impl From<crate::morphology::neutral::Error> for DictionaryError {
         }
     }
 }
+
+impl From<crate::morphology::resources::Error> for DictionaryError {
+    fn from(error: crate::morphology::resources::Error) -> Self {
+        use crate::morphology::resources::Error;
+        match error {
+            Error::Dictionary(error) => error.into(),
+            Error::Missing(request) => Self::ResourceMissing(request),
+            Error::HashMismatch { expected, actual } => Self::ResourceHashMismatch {
+                expected: super::ResourceHash::from_bytes(expected),
+                actual: super::ResourceHash::from_bytes(actual),
+            },
+        }
+    }
+}

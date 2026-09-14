@@ -25,7 +25,7 @@ def main():
         actual = {language for language in ("nori", "kuromoji") if f"uqa-{language}-data" in packages}
         if actual != set(features):
             raise RuntimeError(f"Analysis features {features} select unexpected data crates: {sorted(actual)}")
-        check = ["cargo", "clippy", "-p", "uqa-analysis", "--no-default-features", "--lib", "--locked"]
+        check = ["cargo", "clippy", "-p", "uqa-analysis", "--no-default-features", "--all-targets", "--locked"]
         if features:
             check += ["--features", ",".join(features)]
         subprocess.run(check + ["--", "-D", "warnings"], cwd=ROOT, check=True)
