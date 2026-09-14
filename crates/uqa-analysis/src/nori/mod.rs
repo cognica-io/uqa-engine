@@ -55,24 +55,22 @@ mod dictionary;
 mod error;
 pub(crate) mod filters;
 mod frame;
-mod io;
-mod lexicon;
 mod morphology;
+pub(crate) mod normalization;
 mod number;
 pub(crate) mod pipeline;
 mod resources;
 mod tokenizer;
-mod unicode;
 mod user_dictionary;
 
 #[cfg(feature = "nori-tools")]
 pub mod pack;
 
+pub use crate::morphology::unicode::UnicodeProperties;
+pub use crate::token_filter::{EmptyFilterConfig, SimpleLowercaseConfig};
 pub use analyzer::KoreanAnalyzer;
 pub use attributes::KoreanMorphology;
-pub use config::{
-    nori_analyzer, EmptyFilterConfig, NoriPOSConfig, NoriTokenizerConfig, SimpleLowercaseConfig,
-};
+pub use config::{nori_analyzer, NoriPOSConfig, NoriTokenizerConfig};
 pub use dictionary::{DictionaryLimits, NoriDictionary, SurfaceWords};
 pub use error::{DictionaryError, DictionaryResult};
 pub use filters::{KoreanFilter, DEFAULT_STOP_TAGS};
@@ -87,7 +85,6 @@ pub use resources::{
     ResolvedDictionary, ResolvedUserDictionary, ResourceCacheStats, ResourceHash, ResourceLimits,
     DEFAULT_NORI_DICTIONARY,
 };
-pub use unicode::UnicodeProperties;
 
 #[cfg(test)]
 mod tests;

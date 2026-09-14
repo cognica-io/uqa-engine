@@ -22,3 +22,6 @@ mod key_value_occurrences;
 
 #[path = "cases/field_metadata.rs"]
 mod field_metadata;
+
+#[path = "cases/japanese.rs"]
+mod japanese;

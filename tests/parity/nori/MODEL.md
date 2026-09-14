@@ -1,6 +1,6 @@
 # Neutral Nori model export
 
-`export_model.py` exports the complete model from the pinned official Lucene jars through `NoriModel.java`, using the Docker runtime and checked resources in `manifest.json`. This is the offline input for the Rust dictionary packer. It is not the production UQA bundle, and no Cargo build or query invokes this tool.
+`export_model.py` exports the complete model from the pinned official Lucene jars through `NoriModel.java`, using the Docker runtime and checked resources in `manifest.json`. The Python file-inventory, staging and Docker verification implementation is shared with the Japanese exporter in `../lucene_model.py`; the Nori Java oracle and pinned model identities are unchanged. This is the offline input for the Rust dictionary packer. It is not the production UQA bundle, and no Cargo build or query invokes this tool.
 
 The recorded export contains 774,582 distinct surfaces, 816,283 ordered system word entries, 14 unknown classes and entries, a 3,822-forward by 2,693-backward connection matrix with 10,292,646 costs, 65,536 character-definition entries, and 1,114,112 Java Unicode entries. The five neutral files total 82,581,342 bytes. This size measures the uncompressed neutral export; it does not establish a runtime bundle size or memory requirement.
 

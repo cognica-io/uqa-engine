@@ -15,8 +15,11 @@ use crate::FilteredText;
 use uqa_core::memory::MemoryBudget;
 
 mod compiled;
+#[cfg(feature = "kuromoji")]
+mod iteration;
 mod replacement;
 mod stream;
+mod width;
 pub(crate) use compiled::PreparedCharFilter;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +29,33 @@ pub enum CharFilter {
     // deserializable: releases up to 0.1.2 wrote the derived spelling.
     #[serde(rename = "html_strip", alias = "h_t_m_l_strip")]
     HTMLStrip,
+    /// Fold fullwidth ASCII and halfwidth Katakana, preserving original source spans.
+    ///
+    /// ```
+    /// use uqa_analysis::CharFilter;
+    /// let filtered = CharFilter::CJKWidth.filter_with_offsets("ｶﾞＡ①")?;
+    /// assert_eq!(filtered.as_str(), "ガA①");
+    /// assert_eq!(filtered.source_offsets(0..3)?.utf16, 0..2);
+    /// # Ok::<(), uqa_analysis::AnalysisError>(())
+    /// ```
+    #[serde(rename = "cjk_width")]
+    CJKWidth,
+    /// Expand Japanese horizontal iteration marks while retaining original source coordinates.
+    ///
+    /// ```
+    /// use uqa_analysis::CharFilter;
+    /// let filter = CharFilter::KuromojiIterationMark { normalize_kanji: true, normalize_kana: true };
+    /// assert_eq!(filter.filter("時々 なゝ 🙂々")?, "時時 など 🙂々");
+    /// # Ok::<(), uqa_analysis::AnalysisError>(())
+    /// ```
+    #[cfg(feature = "kuromoji")]
+    #[serde(rename = "kuromoji_iteration_mark")]
+    KuromojiIterationMark {
+        #[serde(default = "default_iteration_normalization")]
+        normalize_kanji: bool,
+        #[serde(default = "default_iteration_normalization")]
+        normalize_kana: bool,
+    },
     Mapping {
         mapping: BTreeMap<String, String>,
     },
@@ -34,6 +64,11 @@ pub enum CharFilter {
         #[serde(default)]
         replacement: String,
     },
+}
+
+#[cfg(feature = "kuromoji")]
+fn default_iteration_normalization() -> bool {
+    true
 }
 
 impl CharFilter {
@@ -120,6 +155,14 @@ fn mapping_longest_first(m: &BTreeMap<String, String>) -> Vec<(String, String)> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(feature = "kuromoji"))]
+    #[test]
+    fn japanese_iteration_marks_require_the_kuromoji_feature() {
+        assert!(
+            serde_json::from_str::<CharFilter>(r#"{"type":"kuromoji_iteration_mark"}"#).is_err()
+        );
+    }
 
     #[test]
     fn html_strip_removes_tags_and_decodes_entities() {

@@ -126,3 +126,5 @@ Approximate vector quality uses exact brute-force identities as the ground truth
 | Operator algebra | [`crates/uqa-operators/src/lib.rs`](../../../crates/uqa-operators/src/lib.rs) |
 | Engine search | [`crates/uqa-engine/src/search`](../../../crates/uqa-engine/src/search) |
 | Retrieval lowering | [`crates/uqa-engine/src/operator_tree_bridge`](../../../crates/uqa-engine/src/operator_tree_bridge) |
+
+Japanese graph retrieval uses the existing scoring and phrase owners. Golden occurrence frequencies and overlap-discounted lengths agree with the BM25 formula through exhaustive, materialized WAND/block-max and cursor WAND/block-max execution. SQLite rebuilds real persisted bounds and executes block-max search after backup restoration; the test checks the selected algorithm as well as complete scores. Phrase tests retain independent search revisions and verify N-best alternatives, stop holes, reversed order and completion romanizations against their existing pinned reference spellings. SQL lifecycle and binding verification remain separate integration work.

@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Added Japanese user dictionaries with pinned Lucene CSV, segmentation, morphology and lookup semantics under explicit preparation limits.
+- Added the optional Rust `kuromoji` dictionary loader and independent `uqa-kuromoji-data` package, preserving the complete pinned Lucene Japanese model and original upstream notices. `kuromoji-tools` adds offline packing and exhaustive model verification; Japanese tokenizer and analyzer integration remain in development.
+- Added the `cjk_width` character filter for fullwidth ASCII, halfwidth Katakana and compatible voiced-mark composition, with original source offsets, memory-budget and cancellation support, and pinned Lucene text/offset verification. It is available independently of dictionary features.
+
 ## [0.3.0] - 2026-09-14
 
 See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.3.0/docs/manual/reference/10-upgrading.md) for Rust API and SQLite provider changes, feature selection, and persistent analyzer/index migration.

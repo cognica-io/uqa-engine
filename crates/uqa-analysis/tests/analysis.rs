@@ -28,6 +28,15 @@ mod term_memory;
 #[path = "analysis/token_filters.rs"]
 mod token_filters;
 
+#[path = "analysis/unicode_lowercase.rs"]
+mod unicode_lowercase;
+
+#[path = "analysis/kuromoji_filters.rs"]
+mod kuromoji_filters;
+
+#[path = "analysis/kuromoji_compiled.rs"]
+mod kuromoji_compiled;
+
 #[path = "analysis/char_filters.rs"]
 mod char_filters;
 
@@ -92,6 +101,9 @@ mod compiled;
 
 #[path = "analysis/descriptor.rs"]
 mod descriptor;
+
+#[path = "analysis/normalization.rs"]
+mod normalization;
 
 #[cfg(feature = "nori")]
 #[path = "analysis/nori_compiled.rs"]

@@ -4,10 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Named [`Analyzer`] registry. Built-in entries (`whitespace`, `standard`,
-//! `standard_cjk`, `keyword`, and feature-enabled `nori`) are immutable. Users
-//! register custom analyzers under any other name; built-in names cannot be
-//! overwritten or dropped.
+//! Named [`Analyzer`] registry. Generic and feature-enabled language built-ins are immutable; custom analyzers use other names.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -50,6 +47,14 @@ fn builtins() -> &'static BTreeMap<&'static str, Analyzer> {
         m.insert("keyword", keyword_analyzer());
         #[cfg(feature = "nori")]
         m.insert("nori", nori_analyzer());
+        #[cfg(feature = "kuromoji")]
+        {
+            m.insert("kuromoji", crate::kuromoji::kuromoji_analyzer());
+            m.insert(
+                "kuromoji_completion",
+                crate::kuromoji::kuromoji_completion_analyzer(),
+            );
+        }
         m
     })
 }

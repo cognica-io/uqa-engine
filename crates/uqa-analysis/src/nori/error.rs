@@ -46,6 +46,38 @@ pub enum DictionaryError {
 
 pub type DictionaryResult<T> = Result<T, DictionaryError>;
 
+impl From<crate::morphology::error::DictionaryError> for DictionaryError {
+    fn from(error: crate::morphology::error::DictionaryError) -> Self {
+        use crate::morphology::error::DictionaryError as Shared;
+
+        match error {
+            Shared::Manifest(error) => Self::Manifest(error),
+            Shared::Version(version) => Self::Version(version),
+            Shared::Checksum(section) => Self::Checksum(section),
+            Shared::Invalid {
+                section,
+                offset,
+                reason,
+            } => Self::Invalid {
+                section,
+                offset,
+                reason,
+            },
+            Shared::Limit {
+                resource,
+                required,
+                limit,
+            } => Self::Limit {
+                resource,
+                required,
+                limit,
+            },
+            Shared::Allocation(error) => Self::Allocation(error),
+            Shared::Utf8(error) => Self::Utf8(error),
+        }
+    }
+}
+
 pub(super) fn invalid(section: &'static str, reason: &'static str) -> DictionaryError {
     DictionaryError::Invalid {
         section,
@@ -59,12 +91,32 @@ pub(super) fn check_limit(
     required: usize,
     limit: usize,
 ) -> DictionaryResult<()> {
-    if required > limit {
-        return Err(DictionaryError::Limit {
-            resource,
-            required,
-            limit,
-        });
+    crate::morphology::error::check_limit(resource, required, limit).map_err(Into::into)
+}
+
+#[cfg(feature = "nori-tools")]
+impl From<crate::morphology::neutral::Error> for DictionaryError {
+    fn from(error: crate::morphology::neutral::Error) -> Self {
+        use crate::morphology::neutral::Error;
+        match error {
+            Error::Dictionary(error) => error.into(),
+            Error::Io(error) => Self::Io(error),
+            Error::Utf16(error) => Self::Utf16(error),
+            Error::Manifest(error) => Self::Manifest(error),
+        }
     }
-    Ok(())
+}
+
+impl From<crate::morphology::resources::Error> for DictionaryError {
+    fn from(error: crate::morphology::resources::Error) -> Self {
+        use crate::morphology::resources::Error;
+        match error {
+            Error::Dictionary(error) => error.into(),
+            Error::Missing(request) => Self::ResourceMissing(request),
+            Error::HashMismatch { expected, actual } => Self::ResourceHashMismatch {
+                expected: super::ResourceHash::from_bytes(expected),
+                actual: super::ResourceHash::from_bytes(actual),
+            },
+        }
+    }
 }

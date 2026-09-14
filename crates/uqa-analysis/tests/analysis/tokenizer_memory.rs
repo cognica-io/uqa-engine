@@ -183,9 +183,9 @@ fn mapped_tokens_retain_source_owners_and_budgeted_result_sharing_retains_all_le
     assert_eq!(output.tokens()[0].term(), "韓🙂");
     assert_eq!(output.tokens()[0].offsets().unwrap().utf8, 3..10);
     drop(filtered);
-    #[cfg(feature = "nori")]
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
     assert!(source_budget.used() > 0);
-    #[cfg(not(feature = "nori"))]
+    #[cfg(not(any(feature = "nori", feature = "kuromoji")))]
     assert_eq!(source_budget.used(), 0);
     let shared = output.into_shared().unwrap();
     let retained = token_budget.used();

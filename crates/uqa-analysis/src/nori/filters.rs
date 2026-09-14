@@ -12,11 +12,13 @@ use super::error::{check_limit, invalid};
 use super::{NoriDictionary, NoriLimits, NoriOutput, POSTag};
 use crate::AnalysisResult;
 
-mod lowercase;
+pub(super) mod lowercase;
 pub(crate) mod stream;
 #[cfg(test)]
 mod tests;
 
+use crate::morphology::filter::text_units;
+pub(crate) use crate::morphology::filter::Work;
 use stream::{AllocatedStream, FilterStream, FilterToken};
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget};
 
@@ -201,8 +203,12 @@ impl KoreanFilter {
         limits: NoriLimits,
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<Budgeted<crate::AnalyzedText>> {
-        self.compile()
-            .filter_analyzed_budgeted(input, Some(model), limits, poll)
+        let output = self
+            .compile()
+            .filter_analyzed_budgeted(input, Some(model), limits, poll)?;
+        #[cfg(feature = "kuromoji")]
+        output.validate_japanese_attributes(poll)?;
+        Ok(output)
     }
 }
 
@@ -392,15 +398,6 @@ fn filter_units<T: FilterToken>(
     Ok(units)
 }
 
-fn text_units(text: &str, work: &mut Work<'_>) -> AnalysisResult<usize> {
-    let mut length = 0;
-    for character in text.chars() {
-        work.tick()?;
-        length += character.len_utf16();
-    }
-    Ok(length)
-}
-
 pub(super) fn token_units<T: FilterToken>(
     token: &T,
     term_units: usize,
@@ -419,28 +416,6 @@ pub(super) fn token_units<T: FilterToken>(
             .ok_or_else(|| invalid("Nori filter", "morpheme size overflow"))?;
     }
     Ok(units)
-}
-
-pub(crate) struct Work<'a> {
-    counter: usize,
-    pub(crate) poll: &'a mut dyn FnMut() -> AnalysisResult<()>,
-}
-
-impl<'a> Work<'a> {
-    pub fn new(poll: &'a mut dyn FnMut() -> AnalysisResult<()>) -> AnalysisResult<Self> {
-        poll()?;
-        Ok(Self { counter: 0, poll })
-    }
-    pub fn tick(&mut self) -> AnalysisResult<()> {
-        self.counter = (self.counter + 1) % 1024;
-        if self.counter == 0 {
-            (self.poll)()?;
-        }
-        Ok(())
-    }
-    pub fn finish(&mut self) -> AnalysisResult<()> {
-        (self.poll)()
-    }
 }
 
 pub(super) fn normalize_budgeted(
@@ -480,12 +455,5 @@ pub(super) fn normalize_text_budgeted(
     budget: &MemoryBudget,
     poll: &mut impl FnMut() -> AnalysisResult<()>,
 ) -> AnalysisResult<Budgeted<String>> {
-    let input = super::tokenizer::allocation::encode(input, limits.max_input_utf16, budget, poll)?;
-    let output = normalize_budgeted(&input, model, limits, budget, poll)?;
-    drop(input);
-    let (term, memory) = crate::TokenTerm::from_utf16_budgeted(output, &mut *poll)?.into_parts();
-    let text = term
-        .into_string()
-        .map_err(|_| invalid("Nori normalization", "invalid scalar result"))?;
-    Ok(Budgeted::new(text, memory))
+    super::normalization::normalize_budgeted(input, false, model, limits, budget, poll)
 }

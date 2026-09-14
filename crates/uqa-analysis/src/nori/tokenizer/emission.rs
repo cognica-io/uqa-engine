@@ -18,13 +18,13 @@ use crate::nori::POSType;
 use crate::AnalysisResult;
 
 pub(super) fn backtrace(state: &mut State<'_>, end: usize, mut index: usize) -> AnalysisResult<()> {
-    if end == state.last_backtrace {
+    if end == state.traversal.last_backtrace {
         return Ok(());
     }
     let mut position = end;
-    while position > state.last_backtrace {
+    while position > state.traversal.last_backtrace {
         state.tick()?;
-        let node = state.lattice.get(position)[index];
+        let node = state.traversal.lattice.get(position)[index];
         if state.options.output_unknown_unigrams && matches!(node.word, WordId::Unknown(_)) {
             let mut cursor = position;
             while cursor > node.word_pos {
@@ -58,8 +58,11 @@ pub(super) fn backtrace(state: &mut State<'_>, end: usize, mut index: usize) -> 
         position = node.back_pos;
         index = node.back_index;
     }
-    state.last_backtrace = end;
-    state.lattice.release_before(end, state.poll)?;
+    state.traversal.last_backtrace = end;
+    state
+        .traversal
+        .lattice
+        .release_before(end, state.traversal.poll)?;
     Ok(())
 }
 
@@ -74,7 +77,11 @@ fn token(
     let mut units = surface.len();
     if let Some(reading) = word.reading() {
         units = units
-            .checked_add(allocation::utf16_len(reading, usize::MAX, state.poll)?)
+            .checked_add(allocation::utf16_len(
+                reading,
+                usize::MAX,
+                state.traversal.poll,
+            )?)
             .ok_or_else(|| invalid("Nori emission", "reading size overflow"))?;
     }
     match &word {
@@ -82,7 +89,11 @@ fn token(
             for part in word.morphemes().into_iter().flatten() {
                 state.tick()?;
                 units = units
-                    .checked_add(allocation::utf16_len(part.surface, usize::MAX, state.poll)?)
+                    .checked_add(allocation::utf16_len(
+                        part.surface,
+                        usize::MAX,
+                        state.traversal.poll,
+                    )?)
                     .ok_or_else(|| invalid("Nori emission", "morpheme size overflow"))?;
                 state.check_units(units)?;
             }
@@ -99,11 +110,11 @@ fn token(
     state.check_units(units)?;
     let mut memory = state.budget.empty_reservation();
     let (term_utf16, term_memory) =
-        allocation::copy_units(surface, state.budget, state.poll)?.into_parts();
+        allocation::copy_units(surface, state.budget, state.traversal.poll)?.into_parts();
     memory.absorb(term_memory);
     let reading = word
         .reading()
-        .map(|text| allocation::copy_string(text, state.budget, state.poll))
+        .map(|text| allocation::copy_string(text, state.budget, state.traversal.poll))
         .transpose()?;
     let reading = reading.map(|reading| {
         let (text, reading_memory) = reading.into_parts();
@@ -111,7 +122,7 @@ fn token(
         text
     });
     let (morphemes, morpheme_memory) = word
-        .morphemes(surface, state.budget, state.poll)?
+        .morphemes(surface, state.budget, state.traversal.poll)?
         .into_parts();
     memory.absorb(morpheme_memory);
     Ok(Budgeted::new(
@@ -164,7 +175,8 @@ fn emit_word(state: &mut State<'_>, original: Budgeted<NoriToken>) -> AnalysisRe
             (original.start_utf16, original.end_utf16)
         };
         let (term_utf16, memory) =
-            allocation::copy_units(&part.surface_utf16, state.budget, state.poll)?.into_parts();
+            allocation::copy_units(&part.surface_utf16, state.budget, state.traversal.poll)?
+                .into_parts();
         state.push(Budgeted::new(
             NoriToken {
                 term_utf16,

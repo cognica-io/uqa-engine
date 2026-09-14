@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import ast
 import hashlib
+import importlib.util
 import json
 import pathlib
 import re
@@ -23,6 +24,9 @@ from typing import Callable
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+WASM_SPEC = importlib.util.spec_from_file_location("uqa_wasm_data", ROOT / "scripts/wasm_data.py")
+wasm_data = importlib.util.module_from_spec(WASM_SPEC)
+WASM_SPEC.loader.exec_module(wasm_data)
 LEGAL_FILES = (
     "LICENSE",
     "LICENSING.md",
@@ -157,7 +161,7 @@ def canonical_payloads() -> dict[str, bytes]:
 
 
 def check_npm_sources(payloads: dict[str, bytes]) -> None:
-    required_files = {"LICENSE-NOTICE.md", *LEGAL_FILES, *binding_nori_payloads()}
+    required_files = {"LICENSE-NOTICE.md", *LEGAL_FILES, *binding_dictionary_payloads()}
     for package_root in NPM_PACKAGES:
         manifest_path = package_root / "package.json"
         try:
@@ -178,22 +182,29 @@ def check_npm_sources(payloads: dict[str, bytes]) -> None:
                 raise RuntimeError(f"npm legal copy differs from canonical file: {package_path}")
 
 
-def binding_nori_payloads() -> dict[str, bytes]:
+def binding_dictionary_payloads() -> dict[str, bytes]:
     """The same complete attribution and source-resource identity in every binding."""
-    data = ROOT / "crates/uqa-nori-data"
-    payloads = {relative: (data / relative).read_bytes() for relative in NORI_FILES if relative.startswith("THIRD-PARTY/")}
+    payloads = {}
+    for language, files in (("nori", NORI_FILES), ("kuromoji", KUROMOJI_FILES)):
+        data = ROOT / f"crates/uqa-{language}-data"
+        for relative in files:
+            if relative.startswith("THIRD-PARTY/"):
+                value = (data / relative).read_bytes()
+                if relative in payloads and payloads[relative] != value:
+                    raise RuntimeError(f"conflicting shared dictionary attribution: {relative}")
+                payloads[relative] = value
+        for kind in ("resource", "model"):
+            payloads[f"THIRD-PARTY/{language.upper()}-{kind.upper()}-MANIFEST.json"] = (data / f"data/{kind}_manifest.json").read_bytes()
     payloads["THIRD-PARTY/LUCENE-SOURCE.md"] = (ROOT / "crates/uqa-analysis/THIRD-PARTY/LUCENE-SOURCE.md").read_bytes()
-    payloads["THIRD-PARTY/NORI-RESOURCE-MANIFEST.json"] = (data / "data/resource_manifest.json").read_bytes()
-    payloads["THIRD-PARTY/NORI-MODEL-MANIFEST.json"] = (data / "data/model_manifest.json").read_bytes()
     return payloads
 
 
 def check_binding_sources() -> None:
     for directory in BINDING_PACKAGES:
-        for relative, expected in binding_nori_payloads().items():
+        for relative, expected in binding_dictionary_payloads().items():
             path = directory / relative
             if not path.is_file() or path.read_bytes() != expected:
-                raise RuntimeError(f"binding Nori attribution or source-resource identity differs: {path}")
+                raise RuntimeError(f"binding morphology attribution or source-resource identity differs: {path}")
 
 
 def workspace_packages() -> list[dict[str, object]]:
@@ -229,6 +240,15 @@ NORI_FILES = (
     "THIRD-PARTY/MECAB-COPYING.txt",
 )
 
+KUROMOJI_FILES = (
+    "data/kuromoji.uqak",
+    "data/model_manifest.json",
+    "THIRD-PARTY/JDK-UNICODE.md",
+    "THIRD-PARTY/LUCENE-LICENSE.txt",
+    "THIRD-PARTY/LUCENE-NOTICE.txt",
+    "THIRD-PARTY/MECAB-IPADIC-COPYING.txt",
+)
+
 
 LUCENE_FILES = ("THIRD-PARTY/LUCENE-LICENSE.txt", "THIRD-PARTY/LUCENE-NOTICE.txt")
 
@@ -237,23 +257,31 @@ def check_lucene_payloads(read: Callable[[str], bytes]) -> None:
     for relative in LUCENE_FILES:
         expected = (ROOT / "crates/uqa-nori-data" / relative).read_bytes()
         if read(relative) != expected:
-            raise RuntimeError(f"ported Nori code requires the complete pinned {relative}")
+            raise RuntimeError(f"ported Lucene code requires the complete pinned {relative}")
 
 
 def check_nori_payloads(manifest_bytes: bytes, read: Callable[[str], bytes]) -> None:
+    check_dictionary_payloads("Nori", NORI_FILES, manifest_bytes, read)
+
+
+def check_kuromoji_payloads(manifest_bytes: bytes, read: Callable[[str], bytes]) -> None:
+    check_dictionary_payloads("Kuromoji", KUROMOJI_FILES, manifest_bytes, read)
+
+
+def check_dictionary_payloads(language: str, files: tuple[str, ...], manifest_bytes: bytes, read: Callable[[str], bytes]) -> None:
     try:
         manifest = json.loads(manifest_bytes)
-        if manifest["format"] != "uqa-nori-bundled-resource" or manifest["format_version"] != 1:
+        if manifest["format"] != f"uqa-{language.lower()}-bundled-resource" or manifest["format_version"] != 1:
             raise ValueError("unsupported resource manifest")
         entries = manifest["files"]
-        if sorted(entry["path"] for entry in entries) != sorted(NORI_FILES):
+        if sorted(entry["path"] for entry in entries) != sorted(files):
             raise ValueError("incomplete or duplicate resource inventory")
         for entry in entries:
             actual = read(entry["path"])
             if len(actual) != entry["bytes"] or hashlib.sha256(actual).hexdigest() != entry["sha256"]:
                 raise ValueError(f"size or hash differs: {entry['path']}")
     except (OSError, ValueError, KeyError, TypeError) as error:
-        raise RuntimeError(f"invalid Nori resources: {error}") from error
+        raise RuntimeError(f"invalid {language} resources: {error}") from error
 
 
 def check_cargo_sources(payloads: dict[str, bytes]) -> None:
@@ -294,6 +322,11 @@ def check_cargo_sources(payloads: dict[str, bytes]) -> None:
             check_lucene_payloads(lambda relative: (crate_root / relative).read_bytes())
         if name == "uqa-nori-data":
             check_nori_payloads(
+                (crate_root / "data/resource_manifest.json").read_bytes(),
+                lambda relative: (crate_root / relative).read_bytes(),
+            )
+        if name == "uqa-kuromoji-data":
+            check_kuromoji_payloads(
                 (crate_root / "data/resource_manifest.json").read_bytes(),
                 lambda relative: (crate_root / relative).read_bytes(),
             )
@@ -356,7 +389,7 @@ def matching_members(members: dict[str, bytes], relative: str) -> list[tuple[str
     ]
 
 
-def check_archive(path: pathlib.Path, payloads: dict[str, bytes], require_nori: bool = False) -> None:
+def check_archive(path: pathlib.Path, payloads: dict[str, bytes], require_nori: bool = False, require_kuromoji: bool = False) -> None:
     members = archive_members(path)
     if path.name.startswith(f"{MIT_PARSER_CRATE}-") and path.name.endswith(".crate"):
         for relative in MIT_PARSER_FILES:
@@ -377,41 +410,47 @@ def check_archive(path: pathlib.Path, payloads: dict[str, bytes], require_nori: 
     ):
         raise RuntimeError(f"{path} omits {AGPL_NOTICE}")
     if path.name.endswith((".whl", ".tgz", ".tar.gz")):
-        for relative, expected in binding_nori_payloads().items():
+        for relative, expected in binding_dictionary_payloads().items():
             matches = matching_members(members, relative)
             if not matches or any(payload != expected for _, payload in matches):
-                raise RuntimeError(f"{path} omits or changes Nori attribution or source-resource identity: {relative}")
-    if require_nori:
-        check_embedded_nori(path, members)
-    if path.name.startswith(("uqa-analysis-", "uqa-nori-data-")) and path.name.endswith(".crate"):
-        def read_nori(relative: str) -> bytes:
+                raise RuntimeError(f"{path} omits or changes morphology attribution or source-resource identity: {relative}")
+    for language, required in (("nori", require_nori), ("kuromoji", require_kuromoji)):
+        if required:
+            check_embedded_dictionary(path, members, language)
+    if path.name.startswith(("uqa-analysis-", "uqa-nori-data-", "uqa-kuromoji-data-")) and path.name.endswith(".crate"):
+        def read_resource(relative: str) -> bytes:
             matches = matching_members(members, relative)
             if len(matches) != 1:
                 raise RuntimeError(f"{path} requires exactly one {relative}")
             return matches[0][1]
 
         if path.name.startswith("uqa-analysis-"):
-            check_lucene_payloads(read_nori)
+            check_lucene_payloads(read_resource)
             source = "THIRD-PARTY/LUCENE-SOURCE.md"
-            if read_nori(source) != (ROOT / "crates/uqa-analysis" / source).read_bytes():
+            if read_resource(source) != (ROOT / "crates/uqa-analysis" / source).read_bytes():
                 raise RuntimeError(f"{path} contains different Lucene source attribution")
             return
-        manifest = read_nori("data/resource_manifest.json")
-        expected = (ROOT / "crates/uqa-nori-data/data/resource_manifest.json").read_bytes()
+        manifest = read_resource("data/resource_manifest.json")
+        language = "kuromoji" if path.name.startswith("uqa-kuromoji-data-") else "nori"
+        expected = (ROOT / f"crates/uqa-{language}-data/data/resource_manifest.json").read_bytes()
         if manifest != expected:
-            raise RuntimeError(f"{path} contains a different Nori resource manifest")
-        check_nori_payloads(manifest, read_nori)
+            raise RuntimeError(f"{path} contains a different {language} resource manifest")
+        check = check_kuromoji_payloads if language == "kuromoji" else check_nori_payloads
+        check(manifest, read_resource)
         if path.stat().st_size > 10_000_000:
-            raise RuntimeError(f"{path} exceeds the Nori crate's 10 MB archive budget")
+            raise RuntimeError(f"{path} exceeds the {language} crate's 10 MB archive budget")
 
 
-def check_embedded_nori(path: pathlib.Path, members: dict[str, bytes]) -> None:
-    bundle = (ROOT / "crates/uqa-nori-data/data/nori.uqan").read_bytes()
+def check_embedded_dictionary(path: pathlib.Path, members: dict[str, bytes], language: str) -> None:
+    files = {"nori": NORI_FILES, "kuromoji": KUROMOJI_FILES}[language]
+    data_root = ROOT / f"crates/uqa-{language}-data"
+    bundle = (data_root / files[0]).read_bytes()
     binaries = {name: data for name, data in members.items() if name.endswith((".node", ".wasm", ".so", ".pyd"))}
     if binaries:
-        matching = [name for name, data in binaries.items() if bundle in data]
+        matching = [name for name, data in binaries.items()
+                    if bundle in (wasm_data.initialized_data(data) if name.endswith(".wasm") else data)]
         if len(matching) != 1:
-            raise RuntimeError(f"{path} must embed the complete pinned Nori bundle in exactly one runtime artifact")
+            raise RuntimeError(f"{path} must embed the complete pinned {language} bundle in exactly one runtime artifact")
         return
     manifests = matching_members(members, "package.json")
     if len(manifests) == 1 and json.loads(manifests[0][1]).get("name") == "@cognica-io/uqa":
@@ -419,19 +458,19 @@ def check_embedded_nori(path: pathlib.Path, members: dict[str, bytes]) -> None:
         return
     if path.name.endswith(".tar.gz"):
         def read_resource(relative: str) -> bytes:
-            matches = matching_members(members, f"crates/uqa-nori-data/{relative}")
+            matches = matching_members(members, f"crates/uqa-{language}-data/{relative}")
             if len(matches) != 1:
-                raise RuntimeError(f"{path} omits the Nori source resource {relative}")
+                raise RuntimeError(f"{path} omits the {language} source resource {relative}")
             return matches[0][1]
         manifest = read_resource("data/resource_manifest.json")
-        if manifest != (ROOT / "crates/uqa-nori-data/data/resource_manifest.json").read_bytes():
-            raise RuntimeError(f"{path} contains a different Nori source-resource identity")
-        check_nori_payloads(manifest, read_resource)
-        if read_resource("data/nori.uqan") != bundle:
-            raise RuntimeError(f"{path} contains a different Nori source bundle")
+        if manifest != (data_root / "data/resource_manifest.json").read_bytes():
+            raise RuntimeError(f"{path} contains a different {language} source-resource identity")
+        check_dictionary_payloads(language.capitalize(), files, manifest, read_resource)
+        if read_resource(files[0]) != bundle:
+            raise RuntimeError(f"{path} contains a different {language} source bundle")
         check_benchmark_sources(path, members)
         return
-    raise RuntimeError(f"{path} has no Nori runtime or source bundle")
+    raise RuntimeError(f"{path} has no {language} runtime or source bundle")
 
 
 def benchmark_inputs() -> set[str]:
@@ -465,7 +504,8 @@ def check_benchmark_sources(path: pathlib.Path, members: dict[str, bytes]) -> No
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("archives", nargs="*", type=pathlib.Path)
-    parser.add_argument("--require-nori", action="store_true", help="require the exact embedded bundle in binding release artifacts")
+    parser.add_argument("--require-nori", action="store_true", help="require the exact embedded Nori bundle in binding release artifacts")
+    parser.add_argument("--require-kuromoji", action="store_true", help="require the exact embedded Kuromoji bundle in binding release artifacts")
     return parser.parse_args()
 
 
@@ -477,7 +517,7 @@ def main() -> int:
     check_cargo_sources(payloads)
     check_binding_sources()
     for archive in args.archives:
-        check_archive(archive.resolve(), payloads, args.require_nori)
+        check_archive(archive.resolve(), payloads, args.require_nori, args.require_kuromoji)
     archive_suffix = f" and {len(args.archives)} archive(s)" if args.archives else ""
     print(f"Release license contract OK: canonical sources{archive_suffix}")
     return 0

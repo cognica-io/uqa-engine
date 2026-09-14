@@ -10,6 +10,8 @@ use uqa_core::memory::{Budgeted, BudgetedString, BudgetedVec, MemoryBudget};
 
 use crate::AnalysisResult;
 
+pub(crate) mod input;
+
 pub(crate) fn copy_text(
     input: &str,
     budget: &MemoryBudget,

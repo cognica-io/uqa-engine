@@ -48,7 +48,7 @@ fn analyzers() -> (Analyzer, Arc<CompiledAnalyzer>, KoreanAnalyzer) {
             TokenFilter::NoriNumber(EmptyFilterConfig::default()),
             TokenFilter::NoriReadingForm(EmptyFilterConfig::default()),
             TokenFilter::UnicodeSimpleLowercase(SimpleLowercaseConfig {
-                unicode_profile: exact_dictionary(),
+                unicode_profile: exact_dictionary().into(),
             }),
         ],
         vec![CharFilter::HTMLStrip],

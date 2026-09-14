@@ -54,14 +54,22 @@ jobs:
         run: cargo test -p uqa-engine --test integration --locked queries::manual_sql_examples::manual_sql_examples_compile_or_execute -- --exact
       - name: Test workspace
         run: cargo test --workspace --exclude uqa-fdw --locked -- --skip manual_sql_examples::manual_sql_examples_compile_or_execute
-      - name: Test Nori bundle tools and embedded model
-        run: cargo test -p uqa-analysis -p uqa-nori-data --features uqa-analysis/nori-tools --locked
-      - name: Verify the standalone CLI without Nori
+      - name: Test morphology bundle tools and embedded models
+        run: cargo test -p uqa-analysis -p uqa-nori-data -p uqa-kuromoji-data --features uqa-analysis/nori-tools,uqa-analysis/kuromoji-tools --locked
+      - name: Verify independent analyzer features
+        run: |
+          cargo test -p uqa-analysis --features kuromoji-tools --no-default-features --locked
+          cargo test -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb -p uqa-scoring -p uqa-operators --features uqa-analysis/kuromoji --locked japanese_
+          cargo test -p uqa-engine --features kuromoji --test integration --locked kuromoji_
+          cargo test -p uqa-engine --no-default-features --test integration --locked kuromoji_
+          cargo test -p uqa-cli --features kuromoji --test integration --locked builtin_
+          python3 scripts/check-analyzer-feature-isolation.py
+      - name: Verify the standalone CLI without morphology dictionaries
         run: |
           cargo test -p uqa-cli --locked --no-default-features --test integration
-          cargo tree --locked -p uqa-cli --no-default-features --edges normal > target/cli-without-nori.txt
-          if grep -q uqa-nori-data target/cli-without-nori.txt; then
-            echo "Nori dictionary present in the feature-disabled CLI" >&2
+          cargo tree --locked -p uqa-cli --no-default-features --edges normal > target/cli-without-morphology.txt
+          if grep -Eq 'uqa-(nori|kuromoji)-data' target/cli-without-morphology.txt; then
+            echo "Morphology dictionary present in the feature-disabled CLI" >&2
             exit 1
           fi
 
@@ -98,8 +106,8 @@ jobs:
           cache-targets: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo test --workspace --locked
-      - name: Test Nori bundle tools and embedded model
-        run: cargo test -p uqa-analysis -p uqa-nori-data --features uqa-analysis/nori-tools --locked
+      - name: Test morphology bundle tools and embedded models
+        run: cargo test -p uqa-analysis -p uqa-nori-data -p uqa-kuromoji-data --features uqa-analysis/nori-tools,uqa-analysis/kuromoji-tools --locked
 
   clippy:
     name: clippy ${{ matrix.label }}
@@ -129,8 +137,8 @@ jobs:
           cache-targets: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Lint Nori bundle tools and data
-        run: cargo clippy -p uqa-analysis -p uqa-nori-data --features uqa-analysis/nori-tools --all-targets --locked -- -D warnings
+      - name: Lint morphology bundle tools and data
+        run: cargo clippy -p uqa-analysis -p uqa-nori-data -p uqa-kuromoji-data --features uqa-analysis/nori-tools,uqa-analysis/kuromoji-tools --all-targets --locked -- -D warnings
 
   msrv:
     name: check Rust 1.90
@@ -149,6 +157,7 @@ jobs:
           cache-targets: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo check --workspace --locked
+      - run: cargo check -p uqa-analysis --features nori-tools,kuromoji-tools --all-targets --locked
 
   doc:
     name: doc
@@ -211,7 +220,7 @@ jobs:
           path: target/pg18-upstream/reference/
 
   nori-reference:
-    name: Nori dictionary and reference regeneration
+    name: Lucene dictionaries and reference regeneration
     if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -225,7 +234,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: target/nori-reference-cache
-          key: nori-reference-${{ hashFiles('tests/parity/nori/manifest.json', 'tests/parity/nori/csv_manifest.json') }}
+          key: nori-reference-${{ hashFiles('tests/parity/nori/manifest.json', 'tests/parity/nori/csv_manifest.json', 'tests/parity/cjk_width/manifest.json', 'tests/parity/kuromoji/manifest.json', 'tests/parity/kuromoji/csv_manifest.json') }}
       - name: Rebuild exact dictionary resources from the pinned CSV source
         run: python3 tests/parity/nori/regenerate_dictionary.py --platform linux/amd64 --cache-dir target/nori-reference-cache --output target/nori-csv-regeneration
       - name: Reproduce every neutral model value and reference fixture with Docker
@@ -235,12 +244,29 @@ jobs:
           for driver in run_reference.py run_user_reference.py run_tokenizer_reference.py run_analysis_reference.py run_number_reference.py run_generic_reference.py; do
             python3 "tests/parity/nori/$driver" --platform linux/amd64 --offline --cache-dir target/nori-reference-cache
           done
+      - name: Verify complete CJK width text and offset identities with Docker
+        run: python3 tests/parity/cjk_width/run_reference.py --platform linux/amd64 --cache-dir target/nori-reference-cache
+      - name: Rebuild patched IPADIC and reproduce every Japanese model value with Docker
+        run: |
+          set -euo pipefail
+          python3 tests/parity/kuromoji/regenerate_dictionary.py --platform linux/amd64 --cache-dir target/nori-reference-cache --output target/kuromoji-csv-regeneration
+          python3 tests/parity/kuromoji/export_model.py --platform linux/amd64 --offline --cache-dir target/nori-reference-cache --output target/kuromoji-reference-model
+          python3 tests/parity/kuromoji/export_model.py --platform linux/amd64 --offline --cache-dir target/nori-reference-cache --output target/kuromoji-reference-model --verify-only
+          python3 tests/parity/kuromoji/run_user_reference.py --platform linux/amd64 --offline --cache-dir target/nori-reference-cache
+          python3 tests/parity/kuromoji/run_tokenizer_reference.py --platform linux/amd64 --offline --cache-dir target/nori-reference-cache
+          python3 tests/parity/kuromoji/run_nbest_reference.py --platform linux/amd64 --offline --cache-dir target/nori-reference-cache
+          python3 tests/parity/kuromoji/run_filter_reference.py --platform linux/amd64 --offline --cache-dir target/nori-reference-cache
+          python3 tests/parity/kuromoji/run_number_reference.py --platform linux/amd64 --offline --cache-dir target/nori-reference-cache
+          python3 tests/parity/kuromoji/run_completion_reference.py --platform linux/amd64 --offline --cache-dir target/nori-reference-cache
+          python3 tests/parity/kuromoji/run_iteration_reference.py --platform linux/amd64 --offline --cache-dir target/nori-reference-cache
       - uses: actions/upload-artifact@v4
         with:
           name: nori-reference-${{ github.sha }}
           path: |
             target/nori-csv-regeneration/regeneration_manifest.json
             target/nori-reference-model/model_manifest.json
+            target/kuromoji-csv-regeneration/regeneration_manifest.json
+            target/kuromoji-reference-model/model_manifest.json
 
   nori-benchmark:
     name: Nori native analysis and indexing gate

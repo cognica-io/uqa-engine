@@ -207,6 +207,22 @@ fn profiles_track_only_the_character_tables_used_by_the_pipeline() {
         profile(&config)["normalization_unicode"],
         json!(unicode_normalization::UNICODE_VERSION)
     );
+    config = Analyzer::new(Tokenizer::Keyword, Vec::new(), vec![CharFilter::CJKWidth]);
+    assert_eq!(
+        profile(&config),
+        json!({
+            "expressions": [],
+            "rust_unicode": null,
+            "normalization_unicode": unicode_normalization::UNICODE_VERSION,
+        })
+    );
+    let descriptor = resolve(&config);
+    let restored = descriptor.configuration().unwrap();
+    assert_eq!(restored.analyze("ｶﾞ Ａ①").unwrap(), ["ガ A①"]);
+    assert_eq!(
+        serde_json::to_value(&restored.char_filters).unwrap(),
+        json!([{"type": "cjk_width"}])
+    );
     for tokenizer in [
         Tokenizer::Whitespace,
         Tokenizer::NGram {

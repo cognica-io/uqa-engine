@@ -29,6 +29,8 @@ pub struct Analyzer {
     pub token_filters: Vec<TokenFilter>,
     #[serde(default)]
     pub char_filters: Vec<CharFilter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalization: Option<crate::NormalizationConfig>,
 }
 
 fn default_tokenizer() -> Tokenizer {
@@ -41,24 +43,46 @@ impl Default for Analyzer {
             tokenizer: default_tokenizer(),
             token_filters: Vec::new(),
             char_filters: Vec::new(),
+            normalization: None,
         }
     }
 }
 
 impl Analyzer {
+    /// Identify components requiring immutable morphology and token-graph revisions.
+    pub fn uses_morphology_stages(&self) -> bool {
+        self.uses_korean_stages() || self.uses_japanese_stages()
+    }
+
+    /// Identify Japanese token stages independently of optional normalization profiles.
+    pub fn uses_japanese_stages(&self) -> bool {
+        #[cfg(feature = "kuromoji")]
+        {
+            matches!(self.tokenizer, Tokenizer::Kuromoji(_))
+                || self
+                    .token_filters
+                    .iter()
+                    .any(crate::kuromoji::pipeline::is_japanese_filter)
+        }
+        #[cfg(not(feature = "kuromoji"))]
+        {
+            false
+        }
+    }
+
     /// Identify Korean components for storage-format and catalog capability preflight.
     pub fn uses_korean_stages(&self) -> bool {
         #[cfg(feature = "nori")]
         {
             matches!(self.tokenizer, Tokenizer::Nori(_))
-                || self.token_filters.iter().any(|filter| {
-                    matches!(
-                        filter,
-                        TokenFilter::NoriPartOfSpeech(_)
-                            | TokenFilter::NoriReadingForm(_)
-                            | TokenFilter::UnicodeSimpleLowercase(_)
-                            | TokenFilter::NoriNumber(_)
-                    )
+                || self.token_filters.iter().any(|filter| match filter {
+                    TokenFilter::NoriPartOfSpeech(_)
+                    | TokenFilter::NoriReadingForm(_)
+                    | TokenFilter::NoriNumber(_) => true,
+                    TokenFilter::UnicodeSimpleLowercase(config) => {
+                        config.unicode_profile.nori_dictionary().is_some()
+                    }
+                    _ => false,
                 })
         }
         #[cfg(not(feature = "nori"))]
@@ -76,7 +100,14 @@ impl Analyzer {
             tokenizer,
             token_filters,
             char_filters,
+            normalization: None,
         }
+    }
+
+    /// Select normalization independently of tokenization and analysis filters.
+    pub fn with_normalization(mut self, normalization: crate::NormalizationConfig) -> Self {
+        self.normalization = Some(normalization);
+        self
     }
 
     pub fn analyze(&self, text: &str) -> AnalysisResult<Vec<String>> {
@@ -127,10 +158,17 @@ impl Analyzer {
         let mut tokens = self
             .tokenizer
             .prepare()?
-            .tokenize_mapped_budgeted(&filtered, budget, &mut poll)?;
+            .tokenize_mapped_for_filters_budgeted(&filtered, budget, &mut poll)?;
         drop(filtered);
         for filter in &self.token_filters {
-            tokens = filter.filter_analyzed_budgeted(tokens, &mut poll)?;
+            poll()?;
+            tokens = filter
+                .prepare()?
+                .filter_analyzed_budgeted(tokens, &mut poll)?;
+        }
+        #[cfg(feature = "kuromoji")]
+        if self.uses_japanese_stages() {
+            tokens.validate_japanese_attributes(&mut poll)?;
         }
         poll()?;
         Ok(tokens)
@@ -143,6 +181,10 @@ impl Analyzer {
     /// can come from legacy persisted data and external synonym files can
     /// become unreadable after validation.
     pub fn validate(&self) -> AnalysisResult<()> {
+        #[cfg(any(feature = "nori", feature = "kuromoji"))]
+        if let Some(normalization) = &self.normalization {
+            normalization.validate()?;
+        }
         for char_filter in &self.char_filters {
             char_filter.validate()?;
         }

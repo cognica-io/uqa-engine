@@ -16,8 +16,16 @@ mod cooperative_regex;
 pub mod descriptor;
 pub mod error;
 pub mod highlight;
+#[cfg(feature = "kuromoji")]
+pub mod kuromoji;
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+mod morphology;
 #[cfg(feature = "nori")]
 pub mod nori;
+pub mod normalization;
+pub use normalization::NormalizationConfig;
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+pub use normalization::UnicodeProfile;
 pub mod porter;
 pub mod registry;
 pub mod resources;
@@ -42,9 +50,11 @@ pub use registry::{
     builtin_analyzer_names, drop_analyzer, get_analyzer, is_builtin_analyzer, list_analyzers,
     register_analyzer, DEFAULT_ANALYZER_NAME,
 };
-pub use resources::{AnalyzerCacheStats, AnalyzerResources};
+pub use resources::{AnalyzerCacheStats, AnalyzerResources, AnalyzerResourcesBuilder};
 pub use source::{FilteredText, SourceOffsets, TextCoordinates};
 pub use term::TokenTerm;
 pub use token::{AnalysisToken, AnalyzedText};
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+pub use token_filter::{EmptyFilterConfig, SimpleLowercaseConfig, UnicodeProfileSource};
 pub use token_filter::{SynonymFileError, TokenFilter};
 pub use tokenizer::Tokenizer;

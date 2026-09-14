@@ -9,6 +9,56 @@
 use uqa_analysis::{keyword_analyzer, whitespace_analyzer, AnalyzerLimits, AnalyzerResources};
 use uqa_storage::{AnalyzerBindingOwner, AnalyzerPhase, FieldAnalyzerBinding};
 
+#[test]
+fn japanese_analyzers_require_lossless_revision_storage_when_their_feature_is_available() {
+    use uqa_storage::inverted_index::{validate_linear_analyzer, validate_linear_revision};
+    let config = serde_json::from_value::<uqa_analysis::Analyzer>(serde_json::json!({
+        "tokenizer": {"type": "kuromoji_tokenizer"},
+    }));
+    let config = match config {
+        Ok(config) => config,
+        Err(error) => {
+            assert!(error
+                .to_string()
+                .contains("unknown variant `kuromoji_tokenizer`"));
+            return;
+        }
+    };
+    assert!(config.uses_japanese_stages());
+    assert!(validate_linear_analyzer(&config).is_err());
+    assert!(validate_linear_revision(&config.compile().unwrap()).is_err());
+    for component in [
+        "kuromoji_baseform",
+        "kuromoji_part_of_speech",
+        "kuromoji_stop",
+        "kuromoji_stemmer",
+        "kuromoji_hiragana_uppercase",
+        "kuromoji_katakana_uppercase",
+        "kuromoji_readingform",
+        "kuromoji_number",
+        "kuromoji_completion",
+    ] {
+        let config: uqa_analysis::Analyzer = serde_json::from_value(serde_json::json!({
+            "token_filters": [{"type": component}],
+        }))
+        .unwrap();
+        assert!(validate_linear_analyzer(&config).is_err(), "{component}");
+        assert!(
+            validate_linear_revision(&config.compile().unwrap()).is_err(),
+            "{component}"
+        );
+    }
+    for name in ["kuromoji", "kuromoji_completion"] {
+        let config = uqa_analysis::get_analyzer(name).unwrap();
+        assert!(validate_linear_analyzer(&config).is_err(), "{name}");
+        assert!(
+            validate_linear_revision(&config.compile().unwrap()).is_err(),
+            "{name}"
+        );
+    }
+    assert!(validate_linear_analyzer(&keyword_analyzer()).is_ok());
+}
+
 fn binding() -> FieldAnalyzerBinding {
     let index = whitespace_analyzer().compile().unwrap();
     FieldAnalyzerBinding::unassigned(index.clone(), index.clone())

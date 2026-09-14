@@ -1,0 +1,8 @@
+{
+  "format_version": 1,
+  "fixture_count": 98,
+  "reference_manifest_sha256": "c25f1d7125ac4bbccbb6d040a91f43947ef12c429f57280e17647c8ac78e127e",
+  "source_sha256": "2dfa5fa21ccda942997c3a379071ad3c51b24e1dbf083e01d1fbc025061a0df5",
+  "cases_sha256": "849f0390e09f3ed89ceecaea1c5c4ac5d5319420d064459f1c9d47f748584d77",
+  "expected_sha256": "95fe8bf2f0a1307e217803e35c4544efa54d9823d3d2cb78fa6668b932b90e15"
+}

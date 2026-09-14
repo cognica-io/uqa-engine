@@ -17,6 +17,7 @@ categories = ["database-implementations"]
 [features]
 default = []
 nori = ["uqa-engine/nori"]
+kuromoji = ["uqa-engine/kuromoji"]
 
 [dependencies]
 uqa-core = { workspace = true }

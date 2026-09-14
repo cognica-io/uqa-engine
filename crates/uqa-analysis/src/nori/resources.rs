@@ -8,18 +8,14 @@
 
 use std::sync::{Arc, OnceLock};
 
-use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
-use super::error::check_limit;
-use super::{
-    DictionaryError, DictionaryId, DictionaryLimits, DictionaryResult, NoriDictionary,
-    UserDictionary, UserDictionaryLimits,
-};
+use super::{DictionaryId, DictionaryResult, NoriDictionary, UserDictionary};
 
 mod hash;
 
-use crate::cache::Cache;
+use crate::morphology::resources::{Artifact, Request, Resources};
+pub use crate::morphology::resources::{DictionaryBytes, ResourceCacheStats, ResourceLimits};
 pub use hash::ResourceHash;
 
 pub const DEFAULT_NORI_DICTIONARY: &str = "lucene-10.5.1";
@@ -41,22 +37,6 @@ impl std::fmt::Display for DictionaryRequest {
     }
 }
 
-/// Static bundles need no copied byte buffer; host-provided buffers share their allocation.
-#[derive(Clone)]
-pub enum DictionaryBytes {
-    Static(&'static [u8]),
-    Shared(Arc<[u8]>),
-}
-
-impl AsRef<[u8]> for DictionaryBytes {
-    fn as_ref(&self) -> &[u8] {
-        match self {
-            Self::Static(bytes) => bytes,
-            Self::Shared(bytes) => bytes,
-        }
-    }
-}
-
 /// Untrusted resolver output: both the declared hash and the bundle are checked before caching.
 pub struct DictionaryArtifact {
     pub sha256: ResourceHash,
@@ -74,33 +54,6 @@ where
 {
     fn resolve(&self, request: &DictionaryRequest) -> DictionaryResult<Option<DictionaryArtifact>> {
         self(request)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ResourceLimits {
-    /// Maximum strong references retained by the dictionary cache; zero disables retention.
-    pub max_cached_dictionaries: usize,
-    /// Sum of encoded bundle sizes retained by the cache, including static bundle references.
-    pub max_cached_encoded_bytes: usize,
-    /// Maximum compiled user-rule snapshots retained; zero disables retention.
-    pub max_cached_user_dictionaries: usize,
-    /// Sum of exact UTF-8 rule source sizes retained by the cache.
-    pub max_cached_user_source_bytes: usize,
-    pub dictionary: DictionaryLimits,
-    pub user_dictionary: UserDictionaryLimits,
-}
-
-impl Default for ResourceLimits {
-    fn default() -> Self {
-        Self {
-            max_cached_dictionaries: 2,
-            max_cached_encoded_bytes: 32 * 1024 * 1024,
-            max_cached_user_dictionaries: 64,
-            max_cached_user_source_bytes: 8 * 1024 * 1024,
-            dictionary: DictionaryLimits::default(),
-            user_dictionary: UserDictionaryLimits::default(),
-        }
     }
 }
 
@@ -159,24 +112,9 @@ impl ResolvedUserDictionary {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ResourceCacheStats {
-    pub dictionaries: usize,
-    pub dictionary_encoded_bytes: usize,
-    pub user_dictionaries: usize,
-    pub user_source_bytes: usize,
-}
-
-#[derive(Default)]
-struct State {
-    dictionaries: Cache<ResourceHash, ResolvedDictionary>,
-    users: Cache<(DictionaryId, ResourceHash), ResolvedUserDictionary>,
-}
-
 struct Inner {
     resolver: Arc<dyn DictionaryResolver>,
-    limits: ResourceLimits,
-    state: Mutex<State>,
+    resources: Resources<ResolvedDictionary, ResolvedUserDictionary, DictionaryId>,
 }
 
 /// Cloneable resource ownership, independent of any analyzer name, session, or worker state.
@@ -212,23 +150,16 @@ impl NoriResources {
     pub fn with_resolver(resolver: Arc<dyn DictionaryResolver>, limits: ResourceLimits) -> Self {
         Self(Arc::new(Inner {
             resolver,
-            limits,
-            state: Mutex::new(State::default()),
+            resources: Resources::new(limits),
         }))
     }
 
     pub fn limits(&self) -> ResourceLimits {
-        self.0.limits
+        self.0.resources.limits()
     }
 
     pub fn cache_stats(&self) -> ResourceCacheStats {
-        let state = self.0.state.lock();
-        ResourceCacheStats {
-            dictionaries: state.dictionaries.len(),
-            dictionary_encoded_bytes: state.dictionaries.weight(),
-            user_dictionaries: state.users.len(),
-            user_source_bytes: state.users.weight(),
-        }
+        self.0.resources.stats()
     }
 
     pub fn load_default(&self) -> DictionaryResult<Arc<ResolvedDictionary>> {
@@ -239,46 +170,30 @@ impl NoriResources {
     ///
     /// A cached exact hash resolves without calling the host again. Names always consult the resolver so changing an alias cannot mutate an existing handle or disguise a new revision.
     pub fn load(&self, request: &DictionaryRequest) -> DictionaryResult<Arc<ResolvedDictionary>> {
-        if let DictionaryRequest::Sha256(hash) = request {
-            if let Some(cached) = self.0.state.lock().dictionaries.get(hash) {
-                return Ok(cached);
-            }
-        }
-        // Host callbacks run outside the cache lock and may resolve other resources themselves.
-        let artifact = self
-            .0
-            .resolver
-            .resolve(request)?
-            .ok_or_else(|| DictionaryError::ResourceMissing(request.to_string()))?;
-        check_limit(
-            "encoded bytes",
-            artifact.bytes.as_ref().len(),
-            self.0.limits.dictionary.max_encoded_bytes,
-        )?;
-        let hash = ResourceHash::of(artifact.bytes.as_ref());
-        verify_hash(artifact.sha256, hash)?;
-        if let DictionaryRequest::Sha256(expected) = request {
-            verify_hash(*expected, hash)?;
-        }
-        let mut state = self.0.state.lock();
-        if let Some(cached) = state.dictionaries.get(&hash) {
-            return Ok(cached);
-        }
-        // Serialize decoding/publication so simultaneous misses share one validated allocation.
-        let model = NoriDictionary::from_bytes(artifact.bytes.as_ref(), self.0.limits.dictionary)?;
-        let resolved = Arc::new(ResolvedDictionary {
-            sha256: hash,
-            bytes: artifact.bytes,
-            model,
-        });
-        state.dictionaries.insert(
-            hash,
-            resolved.clone(),
-            resolved.bytes().len(),
-            self.0.limits.max_cached_dictionaries,
-            self.0.limits.max_cached_encoded_bytes,
-        );
-        Ok(resolved)
+        let shared_request = match request {
+            DictionaryRequest::Name(name) => Request::Name(name),
+            DictionaryRequest::Sha256(hash) => Request::Sha256(hash.into_bytes()),
+        };
+        self.0.resources.load(
+            shared_request,
+            || {
+                self.0.resolver.resolve(request).map(|artifact| {
+                    artifact.map(|artifact| Artifact {
+                        sha256: artifact.sha256.into_bytes(),
+                        bytes: artifact.bytes,
+                    })
+                })
+            },
+            |artifact| {
+                let model =
+                    NoriDictionary::from_bytes(artifact.bytes.as_ref(), self.limits().dictionary)?;
+                Ok(ResolvedDictionary {
+                    sha256: ResourceHash::from_bytes(artifact.sha256),
+                    bytes: artifact.bytes,
+                    model,
+                })
+            },
+        )
     }
 
     /// Intern exact rule source against the model's semantic identity; failed compilation is not cached.
@@ -287,41 +202,17 @@ impl NoriResources {
         source: &str,
         model: &NoriDictionary,
     ) -> DictionaryResult<Arc<ResolvedUserDictionary>> {
-        check_limit(
-            "user dictionary bytes",
-            source.len(),
-            self.0.limits.user_dictionary.max_bytes,
-        )?;
-        let hash = ResourceHash::of(source.as_bytes());
-        let key = (model.id(), hash);
-        let mut state = self.0.state.lock();
-        if let Some(cached) = state.users.get(&key) {
-            return Ok(cached);
-        }
-        let dictionary = UserDictionary::compile(source, model, self.0.limits.user_dictionary)?;
-        let empty_source = dictionary.is_none().then(|| Arc::from(source));
-        let resolved = Arc::new(ResolvedUserDictionary {
-            sha256: hash,
-            model_id: model.id(),
-            dictionary,
-            empty_source,
-        });
-        state.users.insert(
-            key,
-            resolved.clone(),
-            source.len(),
-            self.0.limits.max_cached_user_dictionaries,
-            self.0.limits.max_cached_user_source_bytes,
-        );
-        Ok(resolved)
+        self.0.resources.compile_user(source, model.id(), |hash| {
+            let dictionary = UserDictionary::compile(source, model, self.limits().user_dictionary)?;
+            let empty_source = dictionary.is_none().then(|| Arc::from(source));
+            Ok(ResolvedUserDictionary {
+                sha256: ResourceHash::from_bytes(hash),
+                model_id: model.id(),
+                dictionary,
+                empty_source,
+            })
+        })
     }
-}
-
-fn verify_hash(expected: ResourceHash, actual: ResourceHash) -> DictionaryResult<()> {
-    if expected != actual {
-        return Err(DictionaryError::ResourceHashMismatch { expected, actual });
-    }
-    Ok(())
 }
 
 struct BundledResolver;

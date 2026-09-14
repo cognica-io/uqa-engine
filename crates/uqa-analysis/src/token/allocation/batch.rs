@@ -35,10 +35,10 @@ impl AnalysisToken {
     ) -> AnalysisResult<usize> {
         poll()?;
         let bytes = self.term.allocation_bytes();
-        #[cfg(feature = "nori")]
+        #[cfg(any(feature = "nori", feature = "kuromoji"))]
         let bytes = bytes
             .checked_add(
-                self.korean_morphology
+                self.morphology
                     .as_ref()
                     .map_or(Ok(0), |morphology| morphology.allocation_bytes(poll))?,
             )
@@ -127,7 +127,7 @@ impl<T: AllocatedToken> TokenBatchAllocation<T> {
         &self.batch.tokens
     }
 
-    #[cfg(feature = "nori")]
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
     pub(crate) fn terminal(&self) -> Option<&T> {
         self.batch.terminal.as_deref()
     }
@@ -136,7 +136,7 @@ impl<T: AllocatedToken> TokenBatchAllocation<T> {
         self.memory.budget()
     }
 
-    #[cfg(feature = "nori")]
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
     pub(crate) fn map_tokens(
         mut self,
         mut transform: impl FnMut(&mut T, &mut MemoryReservation) -> AnalysisResult<()>,

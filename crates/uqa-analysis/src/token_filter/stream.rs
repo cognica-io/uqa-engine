@@ -19,6 +19,8 @@ pub(super) fn filter(
     batch: TokenBatch,
 ) -> AnalysisResult<TokenBatch> {
     match filter {
+        #[cfg(feature = "kuromoji")]
+        PreparedTokenFilter::Kuromoji(filter) => filter.filter_batch(batch),
         #[cfg(feature = "nori")]
         PreparedTokenFilter::Nori(filter) => {
             filter.filter_batch(batch, crate::FilteredText::new("").projection())
@@ -50,7 +52,7 @@ impl PreparedCommonFilter<'_> {
             AnalyzedText {
                 batch,
                 final_offsets: input.final_offsets,
-                #[cfg(feature = "nori")]
+                #[cfg(any(feature = "nori", feature = "kuromoji"))]
                 projection: input.projection,
             },
             memory,

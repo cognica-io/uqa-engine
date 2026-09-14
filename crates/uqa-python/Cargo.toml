@@ -12,8 +12,9 @@ rust-version.workspace = true
 publish = false
 
 [features]
-default = ["nori"]
+default = ["nori", "kuromoji"]
 nori = ["uqa-engine/nori", "uqa-cli/nori"]
+kuromoji = ["uqa-engine/kuromoji", "uqa-cli/kuromoji"]
 
 [lib]
 name = "_uqa"

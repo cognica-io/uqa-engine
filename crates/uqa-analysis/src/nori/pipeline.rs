@@ -12,7 +12,11 @@ use super::{
     DictionaryRequest, KoreanFilter, KoreanTokenizer, NoriResources, NoriTokenizerConfig,
     ResolvedDictionary, ResourceHash, DEFAULT_STOP_TAGS,
 };
-use crate::{AnalysisError, AnalysisResult, Analyzer, TokenFilter, Tokenizer};
+use crate::morphology::resources::Snapshot;
+use crate::{
+    AnalysisError, AnalysisResult, Analyzer, TokenFilter, Tokenizer, UnicodeProfile,
+    UnicodeProfileSource,
+};
 
 mod stages;
 pub(crate) use stages::PreparedNoriFilter;
@@ -27,24 +31,42 @@ pub(crate) struct ResolvedNoriPipeline {
 impl ResolvedNoriPipeline {
     pub fn resolve(config: &mut Analyzer, resources: &NoriResources) -> AnalysisResult<Self> {
         let mut resolved = Self::default();
-        let mut snapshot = ResourceSnapshot {
-            resources,
-            entries: Vec::new(),
-        };
+        let mut snapshot = Snapshot::default();
         if let Tokenizer::Nori(tokenizer) = &mut config.tokenizer {
-            let dictionary = snapshot.load(request(&tokenizer.dictionary)?)?;
+            let dictionary = load(&mut snapshot, request(&tokenizer.dictionary)?, resources)?;
             resolved.tokenizer = Some(prepare_tokenizer(tokenizer, &dictionary, resources)?);
             tokenizer.dictionary = exact_name(dictionary.sha256());
-            resolved.normalizer = Some(dictionary);
+            if config.normalization.is_none() {
+                resolved.normalizer = Some(dictionary);
+            }
         }
         for filter in &mut config.token_filters {
             if let TokenFilter::UnicodeSimpleLowercase(config) = filter {
-                let profile = snapshot.load(profile_request(&config.unicode_profile)?)?;
-                config.unicode_profile = exact_name(profile.sha256());
-                resolved
-                    .profiles
-                    .insert(config.unicode_profile.clone(), profile);
+                if config.unicode_profile.nori_dictionary().is_none() {
+                    continue;
+                }
+                let profile = load(
+                    &mut snapshot,
+                    profile_request(&config.unicode_profile)?,
+                    resources,
+                )?;
+                let name = exact_name(profile.sha256());
+                config
+                    .unicode_profile
+                    .nori_dictionary_mut()
+                    .expect("Nori profile")
+                    .clone_from(&name);
+                resolved.profiles.insert(name, profile);
             }
+        }
+        if let Some(UnicodeProfile::Nori { dictionary }) = config
+            .normalization
+            .as_mut()
+            .and_then(|value| value.profile_mut())
+        {
+            let profile = load(&mut snapshot, request(dictionary)?, resources)?;
+            *dictionary = exact_name(profile.sha256());
+            resolved.normalizer = Some(profile);
         }
         canonicalize(config);
         Ok(resolved)
@@ -55,9 +77,19 @@ impl ResolvedNoriPipeline {
             return Ok(None);
         };
         let profile = if let TokenFilter::UnicodeSimpleLowercase(config) = filter {
-            Some(self.profiles.get(&config.unicode_profile).cloned().ok_or(
-                AnalysisError::Descriptor("missing resolved Unicode profile"),
-            )?)
+            Some(
+                self.profiles
+                    .get(
+                        config
+                            .unicode_profile
+                            .nori_dictionary()
+                            .expect("Nori profile"),
+                    )
+                    .cloned()
+                    .ok_or(AnalysisError::Descriptor(
+                        "missing resolved Unicode profile",
+                    ))?,
+            )
         } else {
             None
         };
@@ -77,35 +109,35 @@ fn exact_name(hash: ResourceHash) -> String {
 }
 
 pub(crate) fn load_profile(
-    name: &str,
+    profile: &UnicodeProfileSource,
     resources: &NoriResources,
 ) -> AnalysisResult<Arc<ResolvedDictionary>> {
-    Ok(resources.load(&profile_request(name)?)?)
+    Ok(resources.load(&profile_request(profile)?)?)
 }
 
-fn profile_request(name: &str) -> AnalysisResult<DictionaryRequest> {
-    Ok(if name == "jdk21" {
-        DictionaryRequest::Sha256(uqa_nori_data::BUNDLE_SHA256.parse()?)
+fn profile_request(profile: &UnicodeProfileSource) -> AnalysisResult<DictionaryRequest> {
+    if matches!(profile, UnicodeProfileSource::LegacyNori(name) if name == "jdk21") {
+        Ok(DictionaryRequest::Sha256(
+            uqa_nori_data::BUNDLE_SHA256.parse()?,
+        ))
     } else {
-        request(name)?
-    })
-}
-
-struct ResourceSnapshot<'a> {
-    resources: &'a NoriResources,
-    entries: Vec<(DictionaryRequest, Arc<ResolvedDictionary>)>,
-}
-
-impl ResourceSnapshot<'_> {
-    fn load(&mut self, request: DictionaryRequest) -> AnalysisResult<Arc<ResolvedDictionary>> {
-        // An alias resolves once within a pipeline, and an already verified artifact can satisfy its exact hash.
-        if let Some((_, dictionary)) = self.entries.iter().find(|(prior, dictionary)| {
-            prior == &request || matches!(&request, DictionaryRequest::Sha256(hash) if *hash == dictionary.sha256())
-        }) { return Ok(dictionary.clone()); }
-        let dictionary = self.resources.load(&request)?;
-        self.entries.push((request, dictionary.clone()));
-        Ok(dictionary)
+        request(
+            profile
+                .nori_dictionary()
+                .ok_or(AnalysisError::Descriptor("expected a Nori Unicode profile"))?,
+        )
     }
+}
+
+fn load(
+    snapshot: &mut Snapshot<DictionaryRequest, ResolvedDictionary>,
+    request: DictionaryRequest,
+    resources: &NoriResources,
+) -> AnalysisResult<Arc<ResolvedDictionary>> {
+    Ok(snapshot.load(request,
+        |request, dictionary| matches!(request, DictionaryRequest::Sha256(hash) if *hash == dictionary.sha256()),
+        |request| resources.load(request),
+    )?)
 }
 
 pub(crate) fn prepare_tokenizer(
@@ -131,7 +163,11 @@ pub(crate) fn korean_filter(filter: &TokenFilter) -> Option<KoreanFilter> {
             stop_tags: config.stop_tags.clone(),
         },
         TokenFilter::NoriReadingForm(_) => KoreanFilter::ReadingForm,
-        TokenFilter::UnicodeSimpleLowercase(_) => KoreanFilter::SimpleLowercase,
+        TokenFilter::UnicodeSimpleLowercase(config)
+            if config.unicode_profile.nori_dictionary().is_some() =>
+        {
+            KoreanFilter::SimpleLowercase
+        }
         TokenFilter::NoriNumber(_) => KoreanFilter::Number,
         _ => return None,
     })
@@ -163,28 +199,22 @@ pub(crate) fn check_resolved(config: &Analyzer) -> AnalysisResult<()> {
         }
         Ok(())
     }
+    if let Some(UnicodeProfile::Nori { dictionary }) = config
+        .normalization
+        .as_ref()
+        .and_then(|value| value.profile())
+    {
+        exact(dictionary)?;
+    }
     if let Tokenizer::Nori(config) = &config.tokenizer {
         exact(&config.dictionary)?;
     }
     for filter in &config.token_filters {
         if let TokenFilter::UnicodeSimpleLowercase(config) = filter {
-            exact(&config.unicode_profile)?;
+            if let Some(dictionary) = config.unicode_profile.nori_dictionary() {
+                exact(dictionary)?;
+            }
         }
     }
     Ok(())
-}
-
-pub(crate) fn normalize_budgeted(
-    text: &str,
-    profile: &ResolvedDictionary,
-    budget: &uqa_core::memory::MemoryBudget,
-    poll: &mut impl FnMut() -> AnalysisResult<()>,
-) -> AnalysisResult<uqa_core::memory::Budgeted<String>> {
-    super::filters::normalize_text_budgeted(
-        text,
-        profile.model(),
-        super::NoriLimits::default(),
-        budget,
-        poll,
-    )
 }

@@ -8,9 +8,8 @@
 
 use std::ops::Range;
 
-use super::error::{check_limit, invalid};
-use super::io::{vector, Reader};
 use super::DictionaryResult;
+use crate::morphology::io::{vector, Reader};
 
 mod pos;
 pub use pos::{POSTag, POSType};
@@ -116,28 +115,16 @@ impl Morphology {
         maximum_strings: usize,
         maximum_text: usize,
     ) -> DictionaryResult<Self> {
-        let count = reader.count(4)?;
-        check_limit("dictionary strings", count, maximum_strings)?;
-        let mut strings = vector(count)?;
-        for _ in 0..count {
-            let text = reader.text()?;
-            check_limit(
-                "UTF-16 units per dictionary string",
-                text.encode_utf16().count(),
-                maximum_text,
-            )?;
-            let mut owned = String::new();
-            owned.try_reserve_exact(text.len())?;
-            owned.push_str(text);
-            strings.push(owned);
-        }
+        let strings = crate::morphology::strings::decode(reader, maximum_strings, maximum_text)?;
         let count = reader.count(5)?;
         let mut morphemes = vector(count)?;
         for _ in 0..count {
             let surface = reader.u32()?;
             let pos = POSTag::from_ordinal(reader.u8()?)?;
             if surface as usize >= strings.len() {
-                return Err(reader.invalid("morpheme string reference is out of range"));
+                return Err(reader
+                    .invalid("morpheme string reference is out of range")
+                    .into());
             }
             morphemes.push(Morpheme { surface, pos });
         }
@@ -145,11 +132,8 @@ impl Morphology {
     }
 
     #[cfg(any(test, feature = "nori-tools"))]
-    pub fn encode(&self, output: &mut super::io::Writer) -> DictionaryResult<()> {
-        output.count(self.strings.len())?;
-        for string in &self.strings {
-            output.text(string)?;
-        }
+    pub fn encode(&self, output: &mut crate::morphology::io::Writer) -> DictionaryResult<()> {
+        crate::morphology::strings::encode(&self.strings, output)?;
         output.count(self.morphemes.len())?;
         for morpheme in &self.morphemes {
             output.u32(morpheme.surface)?;
@@ -168,7 +152,7 @@ pub(super) fn decode_words(
     let known = reader.u32()?;
     let count = reader.count(32)?;
     if known as usize > count {
-        return Err(reader.invalid("known word count exceeds word table"));
+        return Err(reader.invalid("known word count exceeds word table").into());
     }
     let mut words = vector(count)?;
     let mut previous_id = 0_i64;
@@ -184,23 +168,27 @@ pub(super) fn decode_words(
         let left_pos = POSTag::from_ordinal(reader.u8()?)?;
         let right_pos = POSTag::from_ordinal(reader.u8()?)?;
         if reader.take(3)? != [0, 0, 0] {
-            return Err(reader.invalid("nonzero reserved word bytes"));
+            return Err(reader.invalid("nonzero reserved word bytes").into());
         }
         let reading = reader.u32()?;
         let morphemes = reader.u32()?;
         let morpheme_count = reader.u32()?;
         if reader.u32()? != 0 {
-            return Err(reader.invalid("nonzero reserved word bytes"));
+            return Err(reader.invalid("nonzero reserved word bytes").into());
         }
         if original_id > i32::MAX as u32 || left as usize >= backward || right as usize >= forward {
-            return Err(reader.invalid("word ID or context is out of range"));
+            return Err(reader.invalid("word ID or context is out of range").into());
         }
         if reading != ABSENT && reading as usize >= morphology.strings.len() {
-            return Err(reader.invalid("reading string reference is out of range"));
+            return Err(reader
+                .invalid("reading string reference is out of range")
+                .into());
         }
         if morphemes == ABSENT {
             if morpheme_count != 0 {
-                return Err(reader.invalid("absent morphemes have a nonzero count"));
+                return Err(reader
+                    .invalid("absent morphemes have a nonzero count")
+                    .into());
             }
         } else {
             word_range(morphemes, morpheme_count, morphology.morphemes.len())?;
@@ -222,28 +210,23 @@ pub(super) fn decode_words(
 }
 
 pub(super) fn word_range(start: u32, count: u32, length: usize) -> DictionaryResult<Range<u32>> {
-    let end = start
-        .checked_add(count)
-        .ok_or_else(|| invalid("word entries", "range overflow"))?;
-    if end as usize > length {
-        return Err(invalid("word entries", "range exceeds table"));
-    }
-    Ok(start..end)
+    crate::morphology::surfaces::word_range(start, count, length).map_err(Into::into)
 }
 
 #[cfg(any(test, feature = "nori-tools"))]
 pub(super) fn encode_words(
     words: &[WordEntry],
     known: u32,
-    output: &mut super::io::Writer,
+    output: &mut crate::morphology::io::Writer,
 ) -> DictionaryResult<()> {
     output.u32(known)?;
     output.count(words.len())?;
     let mut previous_id = 0_i64;
     for word in words {
         let id = i64::from(word.original_id);
-        let delta = i32::try_from(id - previous_id)
-            .map_err(|_| invalid("word encoder", "original word ID delta exceeds i32"))?;
+        let delta = i32::try_from(id - previous_id).map_err(|_| {
+            super::error::invalid("word encoder", "original word ID delta exceeds i32")
+        })?;
         output.i32(delta)?;
         previous_id = id;
         output.u16(word.left)?;

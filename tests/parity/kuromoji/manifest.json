@@ -1,0 +1,116 @@
+{
+  "lucene_version": "10.5.1",
+  "lucene_commit": "64ce863a2bea79c69c19c4d56268c26710ff0ff9",
+  "docker_image": "eclipse-temurin@sha256:3b0a98dfbdf1067c20a7854cec159551777d2ee1381bc76cd4bd0719f543b148",
+  "runtime": {
+    "java_version": "21.0.10",
+    "java_runtime_version": "21.0.10+7-LTS",
+    "java_vendor": "Eclipse Adoptium"
+  },
+  "jars": [
+    {
+      "artifact": "lucene-core",
+      "url": "https://repo.maven.apache.org/maven2/org/apache/lucene/lucene-core/10.5.1/lucene-core-10.5.1.jar",
+      "bytes": 4744152,
+      "sha256": "2b4912cc792f462e8e7b350f7c958f538ee7ec42da4cf4b65902fb9d546bba53"
+    },
+    {
+      "artifact": "lucene-analysis-common",
+      "url": "https://repo.maven.apache.org/maven2/org/apache/lucene/lucene-analysis-common/10.5.1/lucene-analysis-common-10.5.1.jar",
+      "bytes": 1757025,
+      "sha256": "f710afd91a820987a48f3a215e076715b9237b324cf5458281109ef0d2a17b73"
+    },
+    {
+      "artifact": "lucene-analysis-kuromoji",
+      "url": "https://repo.maven.apache.org/maven2/org/apache/lucene/lucene-analysis-kuromoji/10.5.1/lucene-analysis-kuromoji-10.5.1.jar",
+      "bytes": 4720127,
+      "sha256": "bbe9a6d52d89d88c68e1c6db8cc2c829774ae5fcee8be1a1fdc3c6bec2ab9503"
+    }
+  ],
+  "dictionary_source": {
+    "name": "mecab-ipadic-2.7.0-20070801",
+    "url": "https://s3.amazonaws.com/lucene-testdata/mecab/mecab-ipadic-2.7.0-20070801.tar.gz",
+    "bytes": 12208105,
+    "sha256": "b62f527d881c504576baed9c6ef6561554658b175ce6ae0096a60307e49e3523",
+    "license_file": "COPYING",
+    "license": "LicenseRef-IPADIC",
+    "lucene_normalize_entries": false
+  },
+  "dictionary_patch": {
+    "url": "https://raw.githubusercontent.com/apache/lucene/64ce863a2bea79c69c19c4d56268c26710ff0ff9/lucene/analysis/kuromoji/src/tools/patches/Noun.proper.csv.patch",
+    "bytes": 1198,
+    "sha256": "771970de4df33f53bade6cfaace783bffa46ee41af8958dd7bac2758afd6216b",
+    "path": "Noun.proper.csv.patch",
+    "target": "Noun.proper.csv",
+    "git_blob": "1e0c8d30fca9c4915f66dc54d4cf2017724e79b3"
+  },
+  "generation_recipe": {
+    "url": "https://raw.githubusercontent.com/apache/lucene/64ce863a2bea79c69c19c4d56268c26710ff0ff9/gradle/generation/kuromoji.gradle",
+    "bytes": 4701,
+    "sha256": "5b59ab1f6a50df18924b2e580096620154949fb34735e45e736db9be8552a26e"
+  },
+  "dictionary_resources": [
+    {
+      "path": "org/apache/lucene/analysis/ja/dict/CharacterDefinition.dat",
+      "bytes": 65568,
+      "sha256": "16f6e8ff819ef4191a9396d994e0f42e7fa20f974966dace22cf9a0e33790af4"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ja/dict/ConnectionCosts.dat",
+      "bytes": 2624540,
+      "sha256": "eb936c575c80048542165518761689f085d829a1526683aebfb18c46ccfcef8c"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ja/dict/TokenInfoDictionary$buffer.dat",
+      "bytes": 4337224,
+      "sha256": "9b68b6e21e7a10f02d07e9157855a31017edc5c1e6a5bd61f4afb3585d51bdb9"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ja/dict/TokenInfoDictionary$fst.dat",
+      "bytes": 1686421,
+      "sha256": "9ef5cfddc264f755703cd4cd925383294ead43f1bc7aa7bf06f20d1e6d91fbad"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ja/dict/TokenInfoDictionary$posDict.dat",
+      "bytes": 54870,
+      "sha256": "d1296e3cf1a9d7ba6fe696dba91a96864be22ad4e7cb65bfd4218aa422b0d685"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ja/dict/TokenInfoDictionary$targetMap.dat",
+      "bytes": 392166,
+      "sha256": "206221f9bcea9b0a45f72492355e4822318cb42211734538840bf0a619c2ce79"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ja/dict/UnknownDictionary$buffer.dat",
+      "bytes": 311,
+      "sha256": "ffe47f1075e9fdeb3b38ba87b737d876558cdea90d2eecb5453e587c2689cbde"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ja/dict/UnknownDictionary$posDict.dat",
+      "bytes": 4111,
+      "sha256": "8f7aa665f5333b6ac38a656cf4995b516f023e6eaaccb46bcd7ab259c43f5542"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ja/dict/UnknownDictionary$targetMap.dat",
+      "bytes": 69,
+      "sha256": "f30d68324104cefd6a98337e315c0694f40171524aae00182df6d00a5effc661"
+    }
+  ],
+  "analysis_resources": [
+    {
+      "path": "org/apache/lucene/analysis/ja/completion/romaji_map.txt",
+      "bytes": 4885,
+      "sha256": "8f63fe9069055e8d59743aa8b166d10acaaa7b4271748ceb02fd59a2b6a4904a"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ja/stoptags.txt",
+      "bytes": 16724,
+      "sha256": "925c597ef52be9469f30d397b0bd3bc30b9c5b064eb0d02dd0adf8494d1d5437"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ja/stopwords.txt",
+      "bytes": 1810,
+      "sha256": "05ec2d60bc9a59578d1a233f61620d407c197b1ce659d8eed50bd476f2dea476"
+    }
+  ]
+}

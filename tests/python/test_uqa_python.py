@@ -19,8 +19,13 @@ import pytest
 
 import uqa
 
-NORI_FEATURE = os.environ.get("UQA_TEST_NORI", "enabled")
-assert NORI_FEATURE in {"enabled", "disabled"}, "UQA_TEST_NORI must be enabled or disabled"
+BINDING_FEATURES = {
+    language: os.environ.get(f"UQA_TEST_{language.upper()}", "enabled")
+    for language in ("nori", "kuromoji")
+}
+for language, feature in BINDING_FEATURES.items():
+    assert feature in {"enabled", "disabled"}, f"UQA_TEST_{language.upper()} must be enabled or disabled"
+NORI_FEATURE = BINDING_FEATURES["nori"]
 
 
 @pytest.mark.parametrize("input_mode", ["stdin", "script"])
@@ -267,15 +272,16 @@ def test_nori_diagnostics_match_the_requested_feature_configuration() -> None:
     engine.close()
 
 
-def test_nori_user_dictionary_and_retained_graph_revisions_survive_reopen(tmp_path):
+@pytest.mark.parametrize("language", BINDING_FEATURES)
+def test_morphology_user_dictionary_and_retained_graph_revisions_survive_reopen(tmp_path, language):
     fixture = json.loads(
-        (Path(__file__).parents[1] / "parity/nori/bindings.json").read_text(encoding="utf-8")
+        (Path(__file__).parents[1] / f"parity/{language}/bindings.json").read_text(encoding="utf-8")
     )
     assert fixture["schema_version"] == 1
-    path = tmp_path / "nori.db"
+    path = tmp_path / f"{language}.db"
     engine = uqa.open(path)
     try:
-        for step in fixture[NORI_FEATURE]:
+        for step in fixture[BINDING_FEATURES[language]]:
             if step.get("reopen"):
                 engine.close()
                 engine = None

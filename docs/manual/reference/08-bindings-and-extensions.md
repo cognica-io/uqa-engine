@@ -12,6 +12,7 @@ UQA Engine exposes the same durable embedded engine through Rust, Python, Node.j
 | Text, vector, and hybrid APIs | Yes | Yes | Yes | Yes |
 | Custom analyzer catalog through SQL | Yes | Yes | Yes | Yes |
 | Native Nori analyzer and `analyze_text` diagnostics | Feature-enabled | Bundled | Bundled | Bundled |
+| Native Kuromoji, completion and Japanese diagnostics (unreleased) | Feature-enabled | Development default | Development default | Development default |
 | Cypher | Yes | Yes | Yes | Yes |
 | Runtime scalar/table/aggregate callbacks | Yes | Yes | Yes | Yes |
 | Native DuckDB and Arrow FDWs | Yes | Build dependent | Build dependent | No |
@@ -20,6 +21,8 @@ UQA Engine exposes the same durable embedded engine through Rust, Python, Node.j
 | Project lookup through installed `uqa` CLI | Yes | Yes | Yes | No |
 
 Check the type declaration files in the target package for the exact release surface.
+
+The development CLI and language-binding builds enable both `nori` and `kuromoji`; the Rust Engine and facade retain empty defaults. Use `--no-default-features` and optional `--features nori` or `--features kuromoji` for a smaller custom artifact. Each process opening a persistent database must provide its retained analyzer features and exact resources. The [Japanese binding contract](../../../tests/parity/kuromoji/BINDINGS.md) describes shared SQL verification, and the [upgrade notes](10-upgrading.md#japanese-analysis-and-distribution-features-unreleased) distinguish this work from released 0.3.0 packages.
 
 The HTTP class is named `HttpEngine` in every package. Rust and Python reuse `uqa-client`; Node.js implements the same typed protocol in JavaScript using its built-in HTTP modules. All three can resolve local or Cloud projects through the installed CLI once during construction. Browsers use `fetch` and require explicit connection material. See the [HTTP Engine reference](09-http-engine.md) for construction, lifecycle, CORS, request metadata, and streaming contracts.
 
@@ -146,11 +149,11 @@ Persist after important application checkpoints. Browser callbacks use synchrono
 
 ## Analyzer pipelines across bindings
 
-All four bindings can execute `create_analyzer`, `list_analyzers`, `analyze_text`, `set_table_analyzer`, `fts_index_stats`, and `drop_analyzer` through SQL. The Python, Node.js, and browser WASM packages enable the `nori` Cargo feature by default. A build with that feature includes the native bundle: `list_analyzers` reports `nori`, and `analyze_text('nori', input)` returns the complete token and source-coordinate diagnostic. Python also exposes `list_named_analyzers()`, while Node.js and browser WASM expose `listNamedAnalyzers()` for custom engine-catalog names. Rust alone exposes direct `Analyzer`, `CharFilter`, `Tokenizer`, and `TokenFilter` construction. See [Text analyzer pipelines](06-text-analyzers.md) for the JSON schema and lifecycle.
+All four bindings can execute `create_analyzer`, `list_analyzers`, `analyze_text`, `set_table_analyzer`, `fts_index_stats`, and `drop_analyzer` through SQL. The released 0.3.0 Python, Node.js and browser WASM packages enable `nori` by default; development builds also enable `kuromoji`. A build with that feature includes the native bundle: `list_analyzers` reports `nori`, and `analyze_text('nori', input)` returns the complete token and source-coordinate diagnostic. Python also exposes `list_named_analyzers()`, while Node.js and browser WASM expose `listNamedAnalyzers()` for custom engine-catalog names. Rust alone exposes direct `Analyzer`, `CharFilter`, `Tokenizer`, and `TokenFilter` construction. See [Text analyzer pipelines](06-text-analyzers.md) for the JSON schema and lifecycle.
 
 The [persistent Nori binding contract](../../../tests/parity/nori/BINDINGS.md) exercises the same user dictionary, complete diagnostics, graph phrases, original-source highlighting, failed registration, rollback, and retained revisions through all four APIs. Actual custom builds without Nori also verify explicit missing-feature errors and generic analyzer persistence. Use `--no-default-features` with maturin, NAPI, or `scripts/build-wasm.sh` to produce those custom artifacts. The WASM build script accepts `--output-dir DIR` for a separate generated `uqa.js`/`uqa.wasm` pair; use the matching `index.mjs` wrapper with it. [Real-browser verification](../../../benchmarks/nori/BROWSER.md) additionally closes the Engine, synchronizes IndexedDB, reloads the whole page/WASM module, and verifies the restored catalog and index.
 
-The distributed Python, Node.js, and WASM artifacts retain the full upstream Nori notices, source modification attribution, and source-resource/model manifests in `THIRD-PARTY/`. Python wheels also list those files in their license metadata. The dictionary stays embedded in each runtime artifact; package verification compares its complete bytes with the pinned bundle and rejects missing or changed notices.
+Development Python, Node.js and WASM artifacts retain complete upstream Nori and Kuromoji notices, including IPADIC attribution, source modifications and both source-resource/model manifests in `THIRD-PARTY/`. Python wheels also list those files in their license metadata. Both dictionaries stay embedded in each runtime artifact; package verification compares their complete bytes with the pinned bundles and rejects missing or changed notices. WASM verification reconstructs active data segments and zero-filled gaps before comparison, because optimization may split a dictionary across file sections. The Japanese contract checks both built-ins, six attributes, custom pipelines and retained lifecycle through the same shared binding assertions as Nori.
 
 ## Runtime SQL callbacks
 

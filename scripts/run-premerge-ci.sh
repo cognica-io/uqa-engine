@@ -117,6 +117,10 @@ while IFS= read -r path; do
     crates/*/Cargo.toml | \
     crates/*/build.rs | \
     crates/uqa-nori-data/data/* | \
+    crates/uqa-kuromoji-data/data/* | \
+    scripts/check-release-licenses.py | \
+    scripts/wasm_data.py | \
+    scripts/sync-crate-legal-files.py | \
     crates/*.rs)
       run_rust=true
       run_javascript=true
@@ -147,6 +151,8 @@ while IFS= read -r path; do
     tests/node/* | \
     tests/wasm/* | \
     tests/parity/nori/bindings.* | \
+    tests/parity/kuromoji/bindings.* | \
+    tests/parity/bindings.* | \
     examples/node/* | \
     examples/javascript/* | \
     examples/browser/* | \
@@ -155,7 +161,7 @@ while IFS= read -r path; do
     scripts/run-nori-*benchmark.py | \
     scripts/build-wasm.sh | \
     scripts/serve-wasm-tests.py | \
-    scripts/verify-nori-browser.py | \
+    scripts/verify-morphology-browser.py | \
     scripts/npm-release.py | \
     .github/workflows/javascript-packages.yml | \
     .github/workflows/javascript-bindings.yml)
@@ -169,6 +175,8 @@ while IFS= read -r path; do
     crates/uqa-python/* | \
     tests/python/* | \
     tests/parity/nori/bindings.* | \
+    tests/parity/kuromoji/bindings.* | \
+    tests/parity/bindings.* | \
     tests/wasm/export_nori_diagnostics.py | \
     benchmarks/nori/browser-contract.json | \
     examples/python/* | \

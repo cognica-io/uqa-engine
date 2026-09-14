@@ -5,7 +5,7 @@
 # Copyright (c) 2023-2026 Cognica, Inc.
 #
 
-"""Serve browser tests on loopback with the isolation required by memory measurement."""
+"""Serve browser tests on loopback with cross-origin isolation."""
 
 import argparse
 from functools import partial
@@ -27,5 +27,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     with ThreadingHTTPServer(("127.0.0.1", args.port), partial(Handler, directory=root)) as server:
-        print(f"http://127.0.0.1:{args.port}/tests/wasm/browser_nori.html", flush=True)
+        print(f"http://127.0.0.1:{args.port}/tests/wasm/browser_morphology.html", flush=True)
         server.serve_forever()

@@ -38,6 +38,15 @@ pub(super) fn tokenize_budgeted(
     let text = input.as_str();
     let mut tokens = TokenBuffer::new(budget);
     match tokenizer {
+        #[cfg(feature = "kuromoji")]
+        PreparedTokenizer::Kuromoji(tokenizer) => {
+            return tokenizer.tokenize_mapped_budgeted(
+                input,
+                crate::kuromoji::KuromojiLimits::default(),
+                budget,
+                &mut || poll(),
+            );
+        }
         #[cfg(feature = "nori")]
         PreparedTokenizer::Nori(tokenizer) => {
             let output = tokenizer.tokenize_budgeted(

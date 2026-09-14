@@ -6,8 +6,11 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use parking_lot::Mutex;
+
 use super::*;
 use crate::nori::{frame, tests::fixtures};
+use crate::nori::{DictionaryError, DictionaryLimits, UserDictionaryLimits};
 
 fn bytes(cost: i16) -> Arc<[u8]> {
     let mut sections = fixtures::sections();

@@ -20,6 +20,8 @@ import tarfile
 import unittest
 from unittest import mock
 
+from scripts.tests.test_wasm_data import module as wasm_module
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -48,7 +50,7 @@ class RepositoryPolicyCheckerTest(unittest.TestCase):
                          if path.suffix in (".json", ".jsonl"))
         for directory in LICENSES.BINDING_PACKAGES:
             paths.update((directory / relative).relative_to(ROOT).as_posix()
-                         for relative in LICENSES.binding_nori_payloads())
+                         for relative in LICENSES.binding_dictionary_payloads())
         # Apply Git's actual checkout filter to current bytes without writing repository objects.
         with tempfile.TemporaryDirectory() as objects:
             environment = {**os.environ, "GIT_OBJECT_DIRECTORY": objects}
@@ -77,8 +79,8 @@ class RepositoryPolicyCheckerTest(unittest.TestCase):
                 with self.subTest(relative=relative, mode=mode), self.assertRaisesRegex(RuntimeError, "benchmark source input"):
                     LICENSES.check_benchmark_sources(path, changed)
 
-    def test_binding_archives_require_every_nori_notice_and_provenance_file(self) -> None:
-        canonical = LICENSES.binding_nori_payloads()
+    def test_binding_archives_require_every_morphology_notice_and_provenance_file(self) -> None:
+        canonical = LICENSES.binding_dictionary_payloads()
         files = {**canonical, "LICENSE": b"license", "LICENSE-NOTICE.md": b"notice"}
         for suffix in (".whl", ".tgz"):
             path = pathlib.Path(f"uqa-0.0.0{suffix}")
@@ -93,26 +95,31 @@ class RepositoryPolicyCheckerTest(unittest.TestCase):
                     else: changed[f"licenses/{relative}"] = b"changed"
                     with self.subTest(suffix=suffix, relative=relative, mode=mode), \
                          mock.patch.object(LICENSES, "archive_members", return_value=changed), \
-                         self.assertRaisesRegex(RuntimeError, "Nori attribution or source-resource identity"):
+                         self.assertRaisesRegex(RuntimeError, "morphology attribution or source-resource identity"):
                         LICENSES.check_archive(path, {"LICENSE": b"license"})
 
     def test_release_bundle_check_rejects_partial_missing_and_duplicate_runtimes(self) -> None:
-        bundle = (ROOT / "crates/uqa-nori-data/data/nori.uqan").read_bytes()
-        for extension in ("node", "so", "pyd", "wasm"):
-            name = f"package/uqa.{extension}"
-            valid = {name: b"header" + bundle + b"footer"}
-            LICENSES.check_embedded_nori(pathlib.Path("release.tgz"), valid)
-            for changed in ({name: bundle[:-1]}, {name: b"without feature"}, {**valid, f"copy/{name}": bundle}):
-                with self.subTest(extension=extension), self.assertRaisesRegex(RuntimeError, "exactly one runtime"):
-                    LICENSES.check_embedded_nori(pathlib.Path("release.tgz"), changed)
+        for language, extension in (("nori", "uqan"), ("kuromoji", "uqak")):
+            bundle = (ROOT / f"crates/uqa-{language}-data/data/{language}.{extension}").read_bytes()
+            for extension in ("node", "so", "pyd", "wasm"):
+                name = f"package/uqa.{extension}"
+                binary = wasm_module([(0, bundle)], pages=(len(bundle) + 65535) // 65536) if extension == "wasm" else b"header" + bundle + b"footer"
+                valid = {name: binary}
+                LICENSES.check_embedded_dictionary(pathlib.Path("release.tgz"), valid, language)
+                changed_payloads = [bundle[:-1], b"without feature"]
+                if extension == "wasm":
+                    changed_payloads = [wasm_module([(0, payload)], pages=(len(bundle) + 65535) // 65536) for payload in changed_payloads]
+                for changed in ({name: changed_payloads[0]}, {name: changed_payloads[1]}, {**valid, f"copy/{name}": binary}):
+                    with self.subTest(language=language, extension=extension), self.assertRaisesRegex(RuntimeError, "exactly one runtime"):
+                        LICENSES.check_embedded_dictionary(pathlib.Path("release.tgz"), changed, language)
 
-    def test_npm_platform_packages_include_the_complete_nori_attribution(self) -> None:
+    def test_npm_platform_packages_include_the_complete_morphology_attribution(self) -> None:
         release = load_script("uqa_npm_nori_licenses", "npm-release.py")
         root = json.loads((ROOT / "crates/uqa-node/package.json").read_text())
         for platform in release.PLATFORMS:
             manifest = release.platform_manifest(root, platform)
-            self.assertTrue(set(LICENSES.binding_nori_payloads()) <= set(manifest["files"]))
-        self.assertTrue(set(LICENSES.binding_nori_payloads()) <= set(release.canonical_legal_payloads()))
+            self.assertTrue(set(LICENSES.binding_dictionary_payloads()) <= set(manifest["files"]))
+        self.assertTrue(set(LICENSES.binding_dictionary_payloads()) <= set(release.canonical_legal_payloads()))
 
     def test_analysis_archive_retains_ported_lucene_notices_and_modification_attribution(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -148,54 +155,59 @@ class RepositoryPolicyCheckerTest(unittest.TestCase):
                         with self.subTest(mode=mode), self.assertRaises(RuntimeError):
                             LICENSES.check_archive(archive_path, {"LICENSE": b"license"})
 
-    def test_nori_resources_require_every_notice_and_exact_artifact_hashes(self) -> None:
-        payloads = {name: name.encode() for name in LICENSES.NORI_FILES}
-        manifest = {
-            "format": "uqa-nori-bundled-resource", "format_version": 1,
-            "files": [{"path": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
-                      for name, data in payloads.items()],
-        }
-        LICENSES.check_nori_payloads(json.dumps(manifest).encode(), payloads.__getitem__)
-        for name in LICENSES.NORI_FILES:
-            damaged = dict(payloads)
-            damaged[name] = b"changed"
-            with self.subTest(name=name), self.assertRaisesRegex(RuntimeError, "size or hash differs"):
-                LICENSES.check_nori_payloads(json.dumps(manifest).encode(), damaged.__getitem__)
-        manifest["files"].pop()
-        with self.assertRaisesRegex(RuntimeError, "incomplete or duplicate"):
-            LICENSES.check_nori_payloads(json.dumps(manifest).encode(), payloads.__getitem__)
+    def test_dictionary_resources_require_every_notice_and_exact_artifact_hashes(self) -> None:
+        for language, files, check in (
+            ("nori", LICENSES.NORI_FILES, LICENSES.check_nori_payloads),
+            ("kuromoji", LICENSES.KUROMOJI_FILES, LICENSES.check_kuromoji_payloads),
+        ):
+            payloads = {name: name.encode() for name in files}
+            manifest = {
+                "format": f"uqa-{language}-bundled-resource", "format_version": 1,
+                "files": [{"path": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+                          for name, data in payloads.items()],
+            }
+            check(json.dumps(manifest).encode(), payloads.__getitem__)
+            for name in files:
+                damaged = dict(payloads)
+                damaged[name] = b"changed"
+                with self.subTest(name=name), self.assertRaisesRegex(RuntimeError, "size or hash differs"):
+                    check(json.dumps(manifest).encode(), damaged.__getitem__)
+            manifest["files"].pop()
+            with self.assertRaisesRegex(RuntimeError, "incomplete or duplicate"):
+                check(json.dumps(manifest).encode(), payloads.__getitem__)
 
-    def test_nori_archive_rejects_missing_and_changed_attribution_files(self) -> None:
-        payloads = {name: name.encode() for name in LICENSES.NORI_FILES}
-        manifest = json.dumps({
-            "format": "uqa-nori-bundled-resource", "format_version": 1,
-            "files": [{"path": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
-                      for name, data in payloads.items()],
-        }).encode()
-        with tempfile.TemporaryDirectory() as temporary:
-            root = pathlib.Path(temporary)
-            path = root / "crates/uqa-nori-data/data/resource_manifest.json"
-            path.parent.mkdir(parents=True)
-            path.write_bytes(manifest)
-            archive_path = root / "uqa-nori-data-0.0.0.crate"
-            for mode in ("valid", "missing", "changed"):
-                files = {**payloads, "data/resource_manifest.json": manifest,
-                         "LICENSE": b"license", "LICENSE-NOTICE.md": b"notice"}
-                if mode == "missing":
-                    del files["THIRD-PARTY/LUCENE-NOTICE.txt"]
-                elif mode == "changed":
-                    files["THIRD-PARTY/LUCENE-NOTICE.txt"] = b"changed"
-                with tarfile.open(archive_path, "w:gz") as archive:
-                    for name, data in files.items():
-                        info = tarfile.TarInfo(f"uqa-nori-data-0.0.0/{name}")
-                        info.size = len(data)
-                        archive.addfile(info, io.BytesIO(data))
-                with mock.patch.object(LICENSES, "ROOT", root):
-                    if mode == "valid":
-                        LICENSES.check_archive(archive_path, {"LICENSE": b"license"})
-                    else:
-                        with self.subTest(mode=mode), self.assertRaises(RuntimeError):
+    def test_dictionary_archives_reject_missing_and_changed_attribution_files(self) -> None:
+        for language, resource_files in (("nori", LICENSES.NORI_FILES), ("kuromoji", LICENSES.KUROMOJI_FILES)):
+            payloads = {name: name.encode() for name in resource_files}
+            manifest = json.dumps({
+                "format": f"uqa-{language}-bundled-resource", "format_version": 1,
+                "files": [{"path": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+                          for name, data in payloads.items()],
+            }).encode()
+            with tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                path = root / f"crates/uqa-{language}-data/data/resource_manifest.json"
+                path.parent.mkdir(parents=True)
+                path.write_bytes(manifest)
+                archive_path = root / f"uqa-{language}-data-0.0.0.crate"
+                for mode in ("valid", "missing", "changed"):
+                    files = {**payloads, "data/resource_manifest.json": manifest,
+                             "LICENSE": b"license", "LICENSE-NOTICE.md": b"notice"}
+                    if mode == "missing":
+                        del files["THIRD-PARTY/LUCENE-NOTICE.txt"]
+                    elif mode == "changed":
+                        files["THIRD-PARTY/LUCENE-NOTICE.txt"] = b"changed"
+                    with tarfile.open(archive_path, "w:gz") as archive:
+                        for name, data in files.items():
+                            info = tarfile.TarInfo(f"uqa-{language}-data-0.0.0/{name}")
+                            info.size = len(data)
+                            archive.addfile(info, io.BytesIO(data))
+                    with mock.patch.object(LICENSES, "ROOT", root):
+                        if mode == "valid":
                             LICENSES.check_archive(archive_path, {"LICENSE": b"license"})
+                        else:
+                            with self.subTest(mode=mode), self.assertRaises(RuntimeError):
+                                LICENSES.check_archive(archive_path, {"LICENSE": b"license"})
 
     def test_checkers_import_without_tomllib(self) -> None:
         with mock.patch.dict(sys.modules, {"tomllib": None}):

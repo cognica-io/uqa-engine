@@ -6,58 +6,12 @@
 
 //! Required source identities; declared URLs are never resolved by the loader.
 
-use std::collections::BTreeSet;
-
 use serde_json::Value;
 
 use crate::nori::error::invalid;
 use crate::nori::DictionaryResult;
 
-fn text(value: &Value) -> DictionaryResult<&str> {
-    value
-        .as_str()
-        .filter(|text| !text.is_empty())
-        .ok_or_else(|| invalid("provenance", "missing nonempty identity string"))
-}
-
-fn hex(value: &Value, length: usize) -> DictionaryResult<()> {
-    let value = text(value)?;
-    if value.len() != length
-        || !value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    {
-        return Err(invalid(
-            "provenance",
-            "invalid hexadecimal digest or commit",
-        ));
-    }
-    Ok(())
-}
-
-fn inventory(value: &Value, key: &str, expected: &[&str]) -> DictionaryResult<()> {
-    let entries = value
-        .as_array()
-        .ok_or_else(|| invalid("provenance", "missing inventory"))?;
-    let mut names = BTreeSet::new();
-    for entry in entries {
-        let name = text(&entry[key])?;
-        if !names.insert(name) || entry["bytes"].as_u64().is_none_or(|bytes| bytes == 0) {
-            return Err(invalid(
-                "provenance",
-                "duplicate identity or invalid byte count",
-            ));
-        }
-        hex(&entry["sha256"], 64)?;
-    }
-    if names != expected.iter().copied().collect() {
-        return Err(invalid(
-            "provenance",
-            "inventory differs from expected resources",
-        ));
-    }
-    Ok(())
-}
+use crate::morphology::manifest::{hex, inventory, text};
 
 pub(super) fn validate(json: &Value) -> DictionaryResult<()> {
     hex(&json["exporter_sha256"], 64)?;

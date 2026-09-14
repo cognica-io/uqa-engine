@@ -11,45 +11,22 @@ use std::sync::Arc;
 
 use super::error::invalid;
 use super::frame::{self, Section};
-use super::io::{vector, Reader};
-use super::lexicon::Lexicon;
 use super::morphology::{self, DictionaryWord, Morphology, WordEntry};
-use super::unicode::{UnicodeProperties, UnicodeTable};
 use super::{DictionaryId, DictionaryResult};
+use crate::morphology::io::Reader;
+use crate::morphology::lexicon::Lexicon;
+use crate::morphology::unicode::{UnicodeProperties, UnicodeTable};
 
 pub(super) mod provenance;
 pub(super) mod tables;
 
+use crate::morphology::matrix::Matrix;
 use provenance::Provenance;
-use tables::{Characters, Matrix};
+use tables::Characters;
 
-/// Bounds for input bytes, decompressed section bytes, and decoded string metadata.
-#[derive(Debug, Clone, Copy)]
-pub struct DictionaryLimits {
-    pub max_encoded_bytes: usize,
-    pub max_decoded_bytes: usize,
-    pub max_manifest_bytes: usize,
-    pub max_text_utf16: usize,
-    pub max_strings: usize,
-}
+pub use crate::morphology::limits::DictionaryLimits;
 
-impl Default for DictionaryLimits {
-    fn default() -> Self {
-        Self {
-            max_encoded_bytes: 128 * 1024 * 1024,
-            max_decoded_bytes: 256 * 1024 * 1024,
-            max_manifest_bytes: 1024 * 1024,
-            max_text_utf16: u16::MAX as usize,
-            max_strings: 1_000_000,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SurfaceWords {
-    pub source_id: u32,
-    pub word_ids: Range<u32>,
-}
+pub use crate::morphology::surfaces::SurfaceWords;
 
 pub struct NoriDictionary {
     id: DictionaryId,
@@ -104,43 +81,8 @@ impl NoriDictionary {
             Ok((words, count))
         })?;
         let (lexicon, surfaces) = take_section(&mut sections, 1, |reader| {
-            let lexicon = Lexicon::decode(reader, limits.max_text_utf16)?;
-            let count = reader.count(2)?;
-            if count != lexicon.len() {
-                return Err(reader.invalid("surface table and lexicon lengths differ"));
-            }
-            let mut seen = vector(count)?;
-            seen.resize(count, false);
-            let mut surfaces = vector(count)?;
-            let mut next_word = 0;
-            let mut previous_id = 0_i64;
-            for _ in 0..count {
-                let delta = reader.var_u32()?;
-                let delta = ((delta >> 1) as i32) ^ -((delta & 1) as i32);
-                let id = previous_id + i64::from(delta);
-                let source_id = u32::try_from(id)
-                    .map_err(|_| reader.invalid("source ID delta is out of range"))?;
-                previous_id = id;
-                let start = next_word;
-                let count = reader.var_u32()?;
-                if source_id as usize >= seen.len()
-                    || seen[source_id as usize]
-                    || start != next_word
-                    || count == 0
-                {
-                    return Err(reader.invalid("invalid source identity or word range"));
-                }
-                seen[source_id as usize] = true;
-                let word_ids = morphology::word_range(start, count, known_words as usize)?;
-                next_word = word_ids.end;
-                surfaces.push(SurfaceWords {
-                    source_id,
-                    word_ids,
-                });
-            }
-            if next_word != known_words {
-                return Err(reader.invalid("known words are not fully covered"));
-            }
+            let (lexicon, surfaces) =
+                crate::morphology::surfaces::decode(reader, limits.max_text_utf16, known_words)?;
             let count = surfaces.len();
             Ok(((lexicon, surfaces), count))
         })?;
@@ -151,7 +93,7 @@ impl NoriDictionary {
         })?;
         let unicode = take_section(&mut sections, 6, |reader| {
             let unicode = UnicodeTable::decode(reader, provenance.scripts.len())?;
-            Ok((unicode, super::unicode::CODE_POINTS as usize))
+            Ok((unicode, crate::morphology::unicode::CODE_POINTS as usize))
         })?;
         let dictionary = Self {
             id,
@@ -199,26 +141,9 @@ impl NoriDictionary {
         &'a self,
         text: &'a [u16],
     ) -> impl Iterator<Item = (usize, SurfaceWords)> + 'a {
-        let mut cursor = self.lexicon.cursor();
-        let mut index = 0;
-        let mut ended = false;
-        std::iter::from_fn(move || {
-            if ended {
-                return None;
-            }
-            while let Some(&label) = text.get(index) {
-                index += 1;
-                if cursor.advance(label).is_none() {
-                    ended = true;
-                    return None;
-                }
-                if let Some(rank) = cursor.rank() {
-                    return Some((index, self.surfaces[rank as usize].clone()));
-                }
-            }
-            ended = true;
-            None
-        })
+        self.lexicon
+            .prefixes(text)
+            .map(|(length, rank)| (length, self.surfaces[rank as usize].clone()))
     }
 
     pub fn word(&self, id: u32) -> Option<DictionaryWord<'_>> {
@@ -264,23 +189,12 @@ fn take_section<T>(
     kind: u32,
     decode: impl FnOnce(&mut Reader<'_>) -> DictionaryResult<(T, usize)>,
 ) -> DictionaryResult<T> {
-    let index = sections
-        .iter()
-        .position(|section| section.kind == kind)
-        .ok_or_else(|| invalid("bundle", "missing section"))?;
-    read_section(sections.remove(index), decode)
+    crate::morphology::frame::take_section(sections, kind, decode)
 }
 
 fn read_section<T>(
     section: Section,
     decode: impl FnOnce(&mut Reader<'_>) -> DictionaryResult<(T, usize)>,
 ) -> DictionaryResult<T> {
-    let mut reader = Reader::new(&section.bytes, "dictionary section", false);
-    let (value, count) = decode(&mut reader)?;
-    if count as u64 != section.records {
-        return Err(reader.invalid("directory and decoded record counts differ"));
-    }
-    reader.finish()?;
-    drop(section);
-    Ok(value)
+    crate::morphology::frame::read_section(section, decode)
 }

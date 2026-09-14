@@ -177,7 +177,7 @@ jobs:
             echo "no archives to verify (native addons only)"
             exit 0
           fi
-          python3 scripts/check-release-licenses.py --require-nori "${archives[@]}"
+          python3 scripts/check-release-licenses.py --require-nori --require-kuromoji "${archives[@]}"
 
       - name: Build release notes from HISTORY.md
         shell: bash

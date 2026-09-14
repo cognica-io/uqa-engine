@@ -13,7 +13,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { noriEnabled, runNoriBindings } from "../parity/nori/bindings.mjs";
+import { bindingFeatures, noriEnabled, runBindings } from "../parity/bindings.mjs";
 
 const {
   Engine,
@@ -324,9 +324,11 @@ test("WASM Nori diagnostics match the requested feature configuration", async ()
   await engine.close();
 });
 
-test("Nori user dictionaries and retained graph revisions survive WASM reopen", async () => {
-  await runNoriBindings((path) => Engine.open(path), `${UQA.persistDir}/nori-bindings.db`, noriEnabled);
-});
+for (const [language, enabled] of bindingFeatures) {
+  test(`${language} user dictionaries and retained graph revisions survive WASM reopen`, async () => {
+    await runBindings(language, (path) => Engine.open(path), `${UQA.persistDir}/${language}-bindings.db`, enabled);
+  });
+}
 
 test("value round-trip through documents", async () => {
   const engine = await Engine.inMemory();

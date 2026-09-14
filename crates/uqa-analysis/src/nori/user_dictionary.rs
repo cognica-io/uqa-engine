@@ -9,30 +9,15 @@
 use std::sync::Arc;
 
 use super::error::{check_limit, invalid};
-use super::lexicon::{Builder, Lexicon};
 use super::{DictionaryId, DictionaryResult, NoriDictionary, POSTag, POSType};
+use crate::morphology::lexicon::{Builder, Lexicon};
 
 mod parse;
 
 pub(super) const LEFT_CONTEXT: u16 = 1781;
 pub(super) const WORD_COST: i32 = -100_000;
 
-#[derive(Debug, Clone, Copy)]
-pub struct UserDictionaryLimits {
-    pub max_bytes: usize,
-    pub max_entries: usize,
-    pub max_surface_utf16: usize,
-}
-
-impl Default for UserDictionaryLimits {
-    fn default() -> Self {
-        Self {
-            max_bytes: 4 * 1024 * 1024,
-            max_entries: 100_000,
-            max_surface_utf16: 65_535,
-        }
-    }
-}
+pub use crate::morphology::limits::UserDictionaryLimits;
 
 #[derive(Debug)]
 pub struct UserEntry {
@@ -108,7 +93,7 @@ impl UserDictionary {
                 .encode_utf16()
                 .cmp(right.surface().encode_utf16())
         });
-        let mut entries = super::io::vector(lines.len())?;
+        let mut entries = crate::morphology::io::vector(lines.len())?;
         let mut builder = Builder::new();
         let mut previous = None;
         for line in &lines {
@@ -124,7 +109,7 @@ impl UserDictionary {
             let segments = if line.labels().len() == 0 {
                 None
             } else {
-                let mut lengths = super::io::vector(line.labels().len())?;
+                let mut lengths = crate::morphology::io::vector(line.labels().len())?;
                 let mut total = 0_usize;
                 for label in line.labels() {
                     let length = label.encode_utf16().count();
@@ -194,30 +179,11 @@ impl UserDictionary {
         self.lexicon.lookup(text.encode_utf16())
     }
 
-    pub(super) fn cursor(&self) -> super::lexicon::Cursor<'_> {
+    pub(super) fn cursor(&self) -> crate::morphology::lexicon::Cursor<'_> {
         self.lexicon.cursor()
     }
 
     pub fn prefixes<'a>(&'a self, text: &'a [u16]) -> impl Iterator<Item = (usize, u32)> + 'a {
-        let mut cursor = self.lexicon.cursor();
-        let mut index = 0;
-        let mut ended = false;
-        std::iter::from_fn(move || {
-            if ended {
-                return None;
-            }
-            while let Some(&unit) = text.get(index) {
-                index += 1;
-                if cursor.advance(unit).is_none() {
-                    ended = true;
-                    return None;
-                }
-                if let Some(id) = cursor.rank() {
-                    return Some((index, id));
-                }
-            }
-            ended = true;
-            None
-        })
+        self.lexicon.prefixes(text)
     }
 }

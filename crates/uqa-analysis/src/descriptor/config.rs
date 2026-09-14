@@ -17,12 +17,26 @@ use super::{
 };
 use crate::{AnalysisResult, Analyzer, SynonymFileError, TokenFilter};
 
-pub(super) fn check_config(config: &Analyzer, limits: AnalyzerLimits) -> AnalysisResult<()> {
+pub(crate) fn check_config(config: &Analyzer, limits: AnalyzerLimits) -> AnalysisResult<()> {
+    #[cfg(all(feature = "kuromoji", not(feature = "nori")))]
+    for filter in &config.token_filters {
+        if let TokenFilter::UnicodeSimpleLowercase(config) = filter {
+            config.unicode_profile.validate_features()?;
+        }
+    }
     let count = config
         .char_filters
         .len()
         .checked_add(config.token_filters.len())
         .and_then(|count| count.checked_add(1))
+        .and_then(|count| {
+            count.checked_add(
+                config
+                    .normalization
+                    .as_ref()
+                    .map_or(0, crate::NormalizationConfig::stage_count),
+            )
+        })
         .ok_or_else(|| invalid("stage count overflow"))?;
     check_limit("analyzer stages", count, limits.max_stages)?;
     encode(config, limits.max_descriptor_bytes, false)?;
@@ -33,13 +47,20 @@ pub(super) fn snapshot(config: &Analyzer, limits: AnalyzerLimits) -> AnalysisRes
     let mut resolved = config.clone();
     #[cfg(feature = "nori")]
     crate::nori::pipeline::canonicalize(&mut resolved);
+    #[cfg(feature = "kuromoji")]
+    crate::kuromoji::pipeline::canonicalize(&mut resolved);
     for filter in &mut resolved.token_filters {
         match filter {
+            #[cfg(feature = "kuromoji")]
+            TokenFilter::KuromojiPartOfSpeech(_)
+            | TokenFilter::KuromojiStop(_)
+            | TokenFilter::KuromojiCompletion(_) => {}
             #[cfg(feature = "nori")]
             TokenFilter::NoriPartOfSpeech(_)
             | TokenFilter::NoriReadingForm(_)
-            | TokenFilter::UnicodeSimpleLowercase(_)
             | TokenFilter::NoriNumber(_) => {}
+            #[cfg(any(feature = "nori", feature = "kuromoji"))]
+            TokenFilter::UnicodeSimpleLowercase(_) => {}
             TokenFilter::Stop {
                 language,
                 custom_words,
@@ -104,6 +125,8 @@ pub(super) fn restore(value: &Value, limits: AnalyzerLimits) -> AnalysisResult<A
     check_config(&config, limits)?;
     #[cfg(feature = "nori")]
     crate::nori::pipeline::check_resolved(&config)?;
+    #[cfg(feature = "kuromoji")]
+    crate::kuromoji::pipeline::check_resolved(&config)?;
     for filter in &config.token_filters {
         if matches!(
             filter,

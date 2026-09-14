@@ -15,8 +15,7 @@ use crate::token_filter::SynonymFileError;
 pub enum AnalysisError {
     #[error(transparent)]
     Memory(#[from] uqa_core::memory::MemoryError),
-    #[cfg(feature = "nori")]
-    #[error("this pipeline has no Korean normalization profile")]
+    #[error("this pipeline has no normalization plan")]
     NormalizationUnavailable,
     #[error("invalid analyzer descriptor: {0}")]
     Descriptor(&'static str),
@@ -51,6 +50,9 @@ pub enum AnalysisError {
     #[cfg(feature = "nori")]
     #[error(transparent)]
     Dictionary(#[from] crate::nori::DictionaryError),
+    #[cfg(feature = "kuromoji")]
+    #[error(transparent)]
+    KuromojiDictionary(#[from] crate::kuromoji::DictionaryError),
     #[error("{coordinate} offset {offset} is not a Unicode scalar boundary within text of length {length}")]
     InvalidTextOffset {
         coordinate: &'static str,

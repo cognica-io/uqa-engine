@@ -23,8 +23,7 @@ pub struct CompiledAnalyzer {
     char_filters: Vec<PreparedCharFilter<'static>>,
     tokenizer: PreparedTokenizer,
     token_filters: Vec<PreparedTokenFilter<'static>>,
-    #[cfg(feature = "nori")]
-    normalizer: Option<Arc<crate::nori::ResolvedDictionary>>,
+    normalization: crate::normalization::PreparedNormalization,
 }
 
 impl Analyzer {
@@ -60,6 +59,7 @@ impl CompiledAnalyzer {
     pub(crate) fn prepare(
         descriptor: Arc<AnalyzerDescriptor>,
         #[cfg(feature = "nori")] nori: crate::nori::pipeline::ResolvedNoriPipeline,
+        #[cfg(feature = "kuromoji")] kuromoji: crate::kuromoji::pipeline::ResolvedKuromojiPipeline,
     ) -> AnalysisResult<Self> {
         let config = descriptor.configuration()?;
         let char_filters = config
@@ -67,20 +67,33 @@ impl CompiledAnalyzer {
             .iter()
             .map(|filter| filter.prepare().map(PreparedCharFilter::into_owned))
             .collect::<AnalysisResult<_>>()?;
-        #[cfg(feature = "nori")]
-        let tokenizer = match &nori.tokenizer {
-            Some(tokenizer) => PreparedTokenizer::Nori(tokenizer.clone()),
-            None => config.tokenizer.prepare()?,
+        let tokenizer = match &config.tokenizer {
+            #[cfg(feature = "nori")]
+            crate::Tokenizer::Nori(_) => PreparedTokenizer::Nori(nori.tokenizer.clone().ok_or(
+                crate::AnalysisError::Descriptor("missing resolved Korean tokenizer"),
+            )?),
+            #[cfg(feature = "kuromoji")]
+            crate::Tokenizer::Kuromoji(_) => {
+                PreparedTokenizer::Kuromoji(kuromoji.tokenizer.clone().ok_or(
+                    crate::AnalysisError::Descriptor("missing resolved Japanese tokenizer"),
+                )?)
+            }
+            _ => config.tokenizer.prepare()?,
         };
-        #[cfg(not(feature = "nori"))]
-        let tokenizer = config.tokenizer.prepare()?;
         let token_filters = config
             .token_filters
             .iter()
-            .map(|filter| {
+            .enumerate()
+            .map(|(index, filter)| {
+                #[cfg(not(feature = "kuromoji"))]
+                let _ = index;
                 #[cfg(feature = "nori")]
                 if let Some(filter) = nori.filter(filter)? {
                     return Ok(PreparedTokenFilter::Nori(filter));
+                }
+                #[cfg(feature = "kuromoji")]
+                if let Some(filter) = kuromoji.filter(index, filter)? {
+                    return Ok(PreparedTokenFilter::Kuromoji(filter));
                 }
                 filter.prepare().map(PreparedTokenFilter::into_owned)
             })
@@ -90,8 +103,13 @@ impl CompiledAnalyzer {
             char_filters,
             tokenizer,
             token_filters,
-            #[cfg(feature = "nori")]
-            normalizer: nori.normalizer,
+            normalization: crate::normalization::PreparedNormalization::new(
+                config.normalization.as_ref(),
+                #[cfg(feature = "nori")]
+                nori.normalizer,
+                #[cfg(feature = "kuromoji")]
+                kuromoji.normalizer,
+            )?,
         })
     }
 
@@ -136,10 +154,14 @@ impl CompiledAnalyzer {
         }
         let mut tokens = self
             .tokenizer
-            .tokenize_mapped_budgeted(&filtered, budget, &mut poll)?;
+            .tokenize_mapped_for_filters_budgeted(&filtered, budget, &mut poll)?;
         drop(filtered);
         for filter in &self.token_filters {
             tokens = filter.filter_analyzed_budgeted(tokens, &mut poll)?;
+        }
+        #[cfg(feature = "kuromoji")]
+        if matches!(self.tokenizer, PreparedTokenizer::Kuromoji(_)) {
+            tokens.validate_japanese_attributes(&mut poll)?;
         }
         poll()?;
         Ok(tokens)
@@ -149,8 +171,7 @@ impl CompiledAnalyzer {
         self.analyze_tokens(text)?.into_terms()
     }
 
-    /// Normalize complete input with the Korean tokenizer's fixed Unicode profile, independently of analysis stages.
-    #[cfg(feature = "nori")]
+    /// Normalize complete input with its retained plan, independently of analysis stages.
     pub fn normalize(&self, text: &str) -> AnalysisResult<String> {
         Ok(self
             .normalize_budgeted(text, &MemoryBudget::new(usize::MAX), || Ok(()))?
@@ -158,18 +179,14 @@ impl CompiledAnalyzer {
             .0)
     }
 
-    /// Normalize complete text with the fixed Korean profile and a retained output reservation.
-    #[cfg(feature = "nori")]
+    /// Normalize complete text with one retained output allowance and cancellation callback.
     pub fn normalize_budgeted(
         &self,
         text: &str,
         budget: &MemoryBudget,
         mut poll: impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<Budgeted<String>> {
-        let model = self
-            .normalizer
-            .as_ref()
-            .ok_or(crate::AnalysisError::NormalizationUnavailable)?;
-        crate::nori::pipeline::normalize_budgeted(text, model, budget, &mut poll)
+        self.normalization
+            .normalize_budgeted(text, budget, &mut poll)
     }
 }

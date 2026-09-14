@@ -15,6 +15,8 @@ cargo run -p uqa-analysis --release --locked --features nori-tools --example pac
 
 Packing builds the UTF-16 transducer, pools strings, compacts Unicode into intervals, serializes the sections below, and decodes the result through the production loader. The verifier reconstructs every byte of all five original big-endian streams and compares their recorded lengths and hashes. It also enumerates every accepted surface and verifies its exact lookup rank. Only a completely verified bundle is atomically published; the command refuses an existing output. Runtime loading validates the bundle itself; exhaustive neutral reconstruction belongs to the offline tool.
 
+The framing, UTF-16 surface ranges, string-pool codec, Unicode intervals, canonical provenance and offline reconstruction mechanisms live in private `uqa-analysis::morphology`. Nori supplies its exact schema, semantic hash domain and word/character interpretation, and translates shared structural/tool failures into its existing public dictionary errors. This ownership change leaves the seven-section format and packaged artifact below unchanged.
+
 ## Framing and identity
 
 All bundle integers use little-endian fixed widths unless explicitly marked variable. There are no native-layout structs, pointers, platform-sized integers, or implicit alignment bytes. A variable `u32` uses shortest-form unsigned LEB128 and occupies at most five bytes. A signed source-ID delta is transformed with signed 32-bit Zigzag before variable encoding; negative original-word-ID deltas use fixed signed `i32` instead.

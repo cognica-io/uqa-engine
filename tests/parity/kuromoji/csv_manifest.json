@@ -1,0 +1,381 @@
+{
+  "format": "uqa-kuromoji-csv-regeneration",
+  "format_version": 1,
+  "reference_manifest_sha256": "c25f1d7125ac4bbccbb6d040a91f43947ef12c429f57280e17647c8ac78e127e",
+  "builder_source_sha256": "d56d2eea1c62b8e2489d75670465ce66910c3236567005ea74f35272873430c0",
+  "source_archive": {
+    "name": "mecab-ipadic-2.7.0-20070801",
+    "url": "https://s3.amazonaws.com/lucene-testdata/mecab/mecab-ipadic-2.7.0-20070801.tar.gz",
+    "bytes": 12208105,
+    "sha256": "b62f527d881c504576baed9c6ef6561554658b175ce6ae0096a60307e49e3523",
+    "license_file": "COPYING",
+    "license": "LicenseRef-IPADIC",
+    "lucene_normalize_entries": false
+  },
+  "patch": {
+    "url": "https://raw.githubusercontent.com/apache/lucene/64ce863a2bea79c69c19c4d56268c26710ff0ff9/lucene/analysis/kuromoji/src/tools/patches/Noun.proper.csv.patch",
+    "bytes": 1198,
+    "sha256": "771970de4df33f53bade6cfaace783bffa46ee41af8958dd7bac2758afd6216b",
+    "path": "Noun.proper.csv.patch",
+    "target": "Noun.proper.csv",
+    "git_blob": "1e0c8d30fca9c4915f66dc54d4cf2017724e79b3"
+  },
+  "generation_recipe": {
+    "url": "https://raw.githubusercontent.com/apache/lucene/64ce863a2bea79c69c19c4d56268c26710ff0ff9/gradle/generation/kuromoji.gradle",
+    "bytes": 4701,
+    "sha256": "5b59ab1f6a50df18924b2e580096620154949fb34735e45e736db9be8552a26e"
+  },
+  "builder": {
+    "class": "org.apache.lucene.analysis.ja.dict.DictionaryBuilder",
+    "format": "ipadic",
+    "encoding": "euc-jp",
+    "normalize_entries": false,
+    "java_heap": "1g"
+  },
+  "runtime": {
+    "java_version": "21.0.10",
+    "java_runtime_version": "21.0.10+7-LTS",
+    "java_vendor": "Eclipse Adoptium"
+  },
+  "original_inputs": [
+    {
+      "path": "Adj.csv",
+      "bytes": 2644701,
+      "sha256": "5a654779dd6e5eb8e4c1309779bc4b344298a6418c982a357cf49ea7ae425f36"
+    },
+    {
+      "path": "Adnominal.csv",
+      "bytes": 9211,
+      "sha256": "ae284933f4d4f9b1b402e595620bcf98cac65d3f82821f432782267b59d46fdc"
+    },
+    {
+      "path": "Adverb.csv",
+      "bytes": 210274,
+      "sha256": "c534ec1095e298bc681c281084bd5e398c54fcf26c97a897e9ac198333ce1f3c"
+    },
+    {
+      "path": "Auxil.csv",
+      "bytes": 13562,
+      "sha256": "076f1efe2f1981a6172dba931e10b8d2e514a2d2814dd64c74e347a62dac462a"
+    },
+    {
+      "path": "Conjunction.csv",
+      "bytes": 10751,
+      "sha256": "cdb4a095d2d191a79f1da769bc34f42aa4b8e61113f71bc68d2205287f389556"
+    },
+    {
+      "path": "Filler.csv",
+      "bytes": 968,
+      "sha256": "e034d918f3880d2c04844030bd1857c9fd9a2ce32726618dc91d618782b28970"
+    },
+    {
+      "path": "Interjection.csv",
+      "bytes": 14298,
+      "sha256": "58faea7cb83deda9f04d3a9db93082ea4afc7af8cd8f2513f9a030b415a38fa3"
+    },
+    {
+      "path": "Noun.adjv.csv",
+      "bytes": 243211,
+      "sha256": "e1be88858408754f45f4f322b15c20c4030e8f60e76af4ad98567bd374a70b4b"
+    },
+    {
+      "path": "Noun.adverbal.csv",
+      "bytes": 52508,
+      "sha256": "34df6bed9e23839c9c0ef64271c76d9f94236426cd36e00221d7f5e41cc37c61"
+    },
+    {
+      "path": "Noun.csv",
+      "bytes": 3966125,
+      "sha256": "2b3079bc7e30bbd0072d30b0ca859477cc9ca63ab2306f153491ffb97ea13c6e"
+    },
+    {
+      "path": "Noun.demonst.csv",
+      "bytes": 7633,
+      "sha256": "eb4743b16020cf9af4c55e97e29e8aac1e504dc8ab1a0b207bea763022c2f615"
+    },
+    {
+      "path": "Noun.nai.csv",
+      "bytes": 3078,
+      "sha256": "36c90a2cc394fdce0bbc8c744630136561bd91473d32258a627f0acb9c70be3e"
+    },
+    {
+      "path": "Noun.name.csv",
+      "bytes": 2379384,
+      "sha256": "792040c47410b60235af15ba84eb2771f035434e18bd3e22e84fa0968fbf2084"
+    },
+    {
+      "path": "Noun.number.csv",
+      "bytes": 1984,
+      "sha256": "5004ee2fd5f5fecaee7b8b4c541ba08b7cb94ae2f5db1008b51a11a940ee4347"
+    },
+    {
+      "path": "Noun.org.csv",
+      "bytes": 1731974,
+      "sha256": "1225cb1b02b374885ba12b3f2023dc1fb65c63bd0a249a9833b24fdda8d29cc5"
+    },
+    {
+      "path": "Noun.others.csv",
+      "bytes": 9115,
+      "sha256": "07d6dcd1084dafab81fb4d81dda33e938f2a973f0d744f6a55979aa9a437fc90"
+    },
+    {
+      "path": "Noun.place.csv",
+      "bytes": 5946437,
+      "sha256": "42f2dcd0c4aff0a3499ebe78a52b7d40bf5199d377c3bf9e8168838e61985db1"
+    },
+    {
+      "path": "Noun.proper.csv",
+      "bytes": 2186802,
+      "sha256": "ef2c9f64fbc13988f2ade0eb626c9acb539da833b74a23fef473e4146c49cea3"
+    },
+    {
+      "path": "Noun.verbal.csv",
+      "bytes": 819625,
+      "sha256": "8cef570bf12a83b8adf569d55921cfd3fa27c769b4e3ed7a3c52d60af28cc2d0"
+    },
+    {
+      "path": "Others.csv",
+      "bytes": 82,
+      "sha256": "8e7cfcee3c441c13c1b615af4a02a505b1c14e7a77da1f02cedc25ed83378bff"
+    },
+    {
+      "path": "Postp-col.csv",
+      "bytes": 7025,
+      "sha256": "475a194354489fe94006265f6c6eb33518d87699a0cefd8b7c6ca2cf6e121d12"
+    },
+    {
+      "path": "Postp.csv",
+      "bytes": 7726,
+      "sha256": "09d6c1873321edd52421735302eb800f66ae2d5e5bbcb24d7d88fe4a4ffbbf2e"
+    },
+    {
+      "path": "Prefix.csv",
+      "bytes": 11947,
+      "sha256": "137f976c93d6de387c283a1d587df9ee4f406e36e39322c2024866af52823168"
+    },
+    {
+      "path": "Suffix.csv",
+      "bytes": 81516,
+      "sha256": "abf4adea49c49e9007c85b9b06fa18c4b030e1c3adf235463acc58ac34e980b5"
+    },
+    {
+      "path": "Symbol.csv",
+      "bytes": 10049,
+      "sha256": "193a138437edf447f499506e9edcdfd189663ce11253b4312608d7d366922ca2"
+    },
+    {
+      "path": "Verb.csv",
+      "bytes": 10797561,
+      "sha256": "c61a0174fa0081eff979eda28fc74ba4ff3563b723f435d77ea2b378bc1e494f"
+    },
+    {
+      "path": "char.def",
+      "bytes": 4093,
+      "sha256": "dd0733bf57e3d9f918a4e4c63ff946913ee3f47155967a55e8c7ba8c0a640c97"
+    },
+    {
+      "path": "matrix.def",
+      "bytes": 23008378,
+      "sha256": "49b0c1cd5a30ef70a61b9b5ba3e0a333fe1030346f6dae45e88dba325e28251d"
+    },
+    {
+      "path": "unk.def",
+      "bytes": 1917,
+      "sha256": "236d9cdd13df8931f68d86bcea0d521d08974fcc9115e02368d36a9d42e3a210"
+    }
+  ],
+  "patched_inputs": [
+    {
+      "path": "Adj.csv",
+      "bytes": 2644701,
+      "sha256": "5a654779dd6e5eb8e4c1309779bc4b344298a6418c982a357cf49ea7ae425f36"
+    },
+    {
+      "path": "Adnominal.csv",
+      "bytes": 9211,
+      "sha256": "ae284933f4d4f9b1b402e595620bcf98cac65d3f82821f432782267b59d46fdc"
+    },
+    {
+      "path": "Adverb.csv",
+      "bytes": 210274,
+      "sha256": "c534ec1095e298bc681c281084bd5e398c54fcf26c97a897e9ac198333ce1f3c"
+    },
+    {
+      "path": "Auxil.csv",
+      "bytes": 13562,
+      "sha256": "076f1efe2f1981a6172dba931e10b8d2e514a2d2814dd64c74e347a62dac462a"
+    },
+    {
+      "path": "Conjunction.csv",
+      "bytes": 10751,
+      "sha256": "cdb4a095d2d191a79f1da769bc34f42aa4b8e61113f71bc68d2205287f389556"
+    },
+    {
+      "path": "Filler.csv",
+      "bytes": 968,
+      "sha256": "e034d918f3880d2c04844030bd1857c9fd9a2ce32726618dc91d618782b28970"
+    },
+    {
+      "path": "Interjection.csv",
+      "bytes": 14298,
+      "sha256": "58faea7cb83deda9f04d3a9db93082ea4afc7af8cd8f2513f9a030b415a38fa3"
+    },
+    {
+      "path": "Noun.adjv.csv",
+      "bytes": 243211,
+      "sha256": "e1be88858408754f45f4f322b15c20c4030e8f60e76af4ad98567bd374a70b4b"
+    },
+    {
+      "path": "Noun.adverbal.csv",
+      "bytes": 52508,
+      "sha256": "34df6bed9e23839c9c0ef64271c76d9f94236426cd36e00221d7f5e41cc37c61"
+    },
+    {
+      "path": "Noun.csv",
+      "bytes": 3966125,
+      "sha256": "2b3079bc7e30bbd0072d30b0ca859477cc9ca63ab2306f153491ffb97ea13c6e"
+    },
+    {
+      "path": "Noun.demonst.csv",
+      "bytes": 7633,
+      "sha256": "eb4743b16020cf9af4c55e97e29e8aac1e504dc8ab1a0b207bea763022c2f615"
+    },
+    {
+      "path": "Noun.nai.csv",
+      "bytes": 3078,
+      "sha256": "36c90a2cc394fdce0bbc8c744630136561bd91473d32258a627f0acb9c70be3e"
+    },
+    {
+      "path": "Noun.name.csv",
+      "bytes": 2379384,
+      "sha256": "792040c47410b60235af15ba84eb2771f035434e18bd3e22e84fa0968fbf2084"
+    },
+    {
+      "path": "Noun.number.csv",
+      "bytes": 1984,
+      "sha256": "5004ee2fd5f5fecaee7b8b4c541ba08b7cb94ae2f5db1008b51a11a940ee4347"
+    },
+    {
+      "path": "Noun.org.csv",
+      "bytes": 1731974,
+      "sha256": "1225cb1b02b374885ba12b3f2023dc1fb65c63bd0a249a9833b24fdda8d29cc5"
+    },
+    {
+      "path": "Noun.others.csv",
+      "bytes": 9115,
+      "sha256": "07d6dcd1084dafab81fb4d81dda33e938f2a973f0d744f6a55979aa9a437fc90"
+    },
+    {
+      "path": "Noun.place.csv",
+      "bytes": 5946437,
+      "sha256": "42f2dcd0c4aff0a3499ebe78a52b7d40bf5199d377c3bf9e8168838e61985db1"
+    },
+    {
+      "path": "Noun.proper.csv",
+      "bytes": 2186866,
+      "sha256": "7f8809dac223f596800b9659ed1c7fdf3e7b0c4216b0a94b4d4cd71e0d871aa3"
+    },
+    {
+      "path": "Noun.verbal.csv",
+      "bytes": 819625,
+      "sha256": "8cef570bf12a83b8adf569d55921cfd3fa27c769b4e3ed7a3c52d60af28cc2d0"
+    },
+    {
+      "path": "Others.csv",
+      "bytes": 82,
+      "sha256": "8e7cfcee3c441c13c1b615af4a02a505b1c14e7a77da1f02cedc25ed83378bff"
+    },
+    {
+      "path": "Postp-col.csv",
+      "bytes": 7025,
+      "sha256": "475a194354489fe94006265f6c6eb33518d87699a0cefd8b7c6ca2cf6e121d12"
+    },
+    {
+      "path": "Postp.csv",
+      "bytes": 7726,
+      "sha256": "09d6c1873321edd52421735302eb800f66ae2d5e5bbcb24d7d88fe4a4ffbbf2e"
+    },
+    {
+      "path": "Prefix.csv",
+      "bytes": 11947,
+      "sha256": "137f976c93d6de387c283a1d587df9ee4f406e36e39322c2024866af52823168"
+    },
+    {
+      "path": "Suffix.csv",
+      "bytes": 81516,
+      "sha256": "abf4adea49c49e9007c85b9b06fa18c4b030e1c3adf235463acc58ac34e980b5"
+    },
+    {
+      "path": "Symbol.csv",
+      "bytes": 10049,
+      "sha256": "193a138437edf447f499506e9edcdfd189663ce11253b4312608d7d366922ca2"
+    },
+    {
+      "path": "Verb.csv",
+      "bytes": 10797561,
+      "sha256": "c61a0174fa0081eff979eda28fc74ba4ff3563b723f435d77ea2b378bc1e494f"
+    },
+    {
+      "path": "char.def",
+      "bytes": 4093,
+      "sha256": "dd0733bf57e3d9f918a4e4c63ff946913ee3f47155967a55e8c7ba8c0a640c97"
+    },
+    {
+      "path": "matrix.def",
+      "bytes": 23008378,
+      "sha256": "49b0c1cd5a30ef70a61b9b5ba3e0a333fe1030346f6dae45e88dba325e28251d"
+    },
+    {
+      "path": "unk.def",
+      "bytes": 1917,
+      "sha256": "236d9cdd13df8931f68d86bcea0d521d08974fcc9115e02368d36a9d42e3a210"
+    }
+  ],
+  "resources": [
+    {
+      "path": "org/apache/lucene/analysis/ja/dict/CharacterDefinition.dat",
+      "bytes": 65568,
+      "sha256": "16f6e8ff819ef4191a9396d994e0f42e7fa20f974966dace22cf9a0e33790af4"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ja/dict/ConnectionCosts.dat",
+      "bytes": 2624540,
+      "sha256": "eb936c575c80048542165518761689f085d829a1526683aebfb18c46ccfcef8c"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ja/dict/TokenInfoDictionary$buffer.dat",
+      "bytes": 4337224,
+      "sha256": "9b68b6e21e7a10f02d07e9157855a31017edc5c1e6a5bd61f4afb3585d51bdb9"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ja/dict/TokenInfoDictionary$fst.dat",
+      "bytes": 1686421,
+      "sha256": "9ef5cfddc264f755703cd4cd925383294ead43f1bc7aa7bf06f20d1e6d91fbad"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ja/dict/TokenInfoDictionary$posDict.dat",
+      "bytes": 54870,
+      "sha256": "d1296e3cf1a9d7ba6fe696dba91a96864be22ad4e7cb65bfd4218aa422b0d685"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ja/dict/TokenInfoDictionary$targetMap.dat",
+      "bytes": 392166,
+      "sha256": "206221f9bcea9b0a45f72492355e4822318cb42211734538840bf0a619c2ce79"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ja/dict/UnknownDictionary$buffer.dat",
+      "bytes": 311,
+      "sha256": "ffe47f1075e9fdeb3b38ba87b737d876558cdea90d2eecb5453e587c2689cbde"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ja/dict/UnknownDictionary$posDict.dat",
+      "bytes": 4111,
+      "sha256": "8f7aa665f5333b6ac38a656cf4995b516f023e6eaaccb46bcd7ab259c43f5542"
+    },
+    {
+      "path": "org/apache/lucene/analysis/ja/dict/UnknownDictionary$targetMap.dat",
+      "bytes": 69,
+      "sha256": "f30d68324104cefd6a98337e315c0694f40171524aae00182df6d00a5effc661"
+    }
+  ]
+}

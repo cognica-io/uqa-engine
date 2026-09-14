@@ -50,7 +50,8 @@ impl KoreanAnalyzer {
         filters: &[KoreanFilter],
     ) -> AnalysisResult<Self> {
         let tokenizer = KoreanTokenizer::new(model.clone(), user, options)?;
-        let mut compiled = super::io::vector(filters.len())?;
+        let mut compiled =
+            crate::morphology::io::vector(filters.len()).map_err(super::DictionaryError::from)?;
         compiled.extend(filters.iter().map(KoreanFilter::compile));
         Ok(Self {
             model,

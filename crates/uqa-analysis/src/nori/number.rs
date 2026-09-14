@@ -10,13 +10,11 @@ use super::error::{check_limit, invalid};
 use super::filters::Work;
 use super::NoriLimits;
 use crate::AnalysisResult;
-use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget};
+use uqa_core::memory::{Budgeted, MemoryBudget};
 
-mod decimal;
-mod parse;
-mod stream;
+mod policy;
 
-pub(super) use stream::filter;
+pub(super) use policy::filter;
 
 struct Context<'a, 'b> {
     work: &'a mut Work<'b>,
@@ -28,6 +26,21 @@ impl Context<'_, '_> {
     fn check_digits(&self, digits: usize) -> AnalysisResult<()> {
         check_limit("Nori numeric units", digits, self.maximum)?;
         Ok(())
+    }
+}
+
+impl crate::morphology::decimal::Context for Context<'_, '_> {
+    fn tick(&mut self) -> AnalysisResult<()> {
+        self.work.tick()
+    }
+    fn budget(&self) -> &MemoryBudget {
+        self.budget
+    }
+    fn check_digits(&self, digits: usize) -> AnalysisResult<()> {
+        Self::check_digits(self, digits)
+    }
+    fn invalid(&self, reason: &'static str) -> crate::AnalysisError {
+        invalid("Nori number", reason).into()
     }
 }
 
@@ -133,18 +146,7 @@ fn normalize_budgeted(
         budget,
         maximum,
     };
-    context.check_digits(input.len())?;
-    if let Some(decimal) = parse::parse(input, &mut context)? {
-        return decimal.format(&mut context);
-    }
-    let mut original = BudgetedVec::new(budget);
-    original.reserve(input.len())?;
-    for unit in input {
-        context.work.tick()?;
-        original.push(*unit)?;
-    }
-    let (original, memory) = original.into_parts();
-    Ok(Budgeted::new(original, memory))
+    crate::morphology::number::normalize::<policy::Symbols>(input, &mut context)
 }
 
 fn digit(unit: u16) -> Option<u8> {
@@ -177,24 +179,4 @@ fn exponent(unit: u16) -> usize {
         0xd574 => 20,
         _ => 0,
     }
-}
-
-fn numeral(input: impl Iterator<Item = u16>, work: &mut Work<'_>) -> AnalysisResult<bool> {
-    for unit in input {
-        work.tick()?;
-        if digit(unit).is_none() && exponent(unit) == 0 {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
-fn punctuation(input: impl Iterator<Item = u16>, work: &mut Work<'_>) -> AnalysisResult<bool> {
-    for unit in input {
-        work.tick()?;
-        if !matches!(unit, 0x002e | 0xff0e | 0x002c | 0xff0c) {
-            return Ok(false);
-        }
-    }
-    Ok(true)
 }

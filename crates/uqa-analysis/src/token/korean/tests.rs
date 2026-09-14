@@ -17,12 +17,62 @@ use crate::nori::{
     DictionaryLimits, KoreanFilter, KoreanTokenizer, NoriDictionary, NoriLimits, NoriOptions,
     NoriOrigin, UserDictionary, UserDictionaryLimits,
 };
+use crate::TokenTerm;
+use uqa_core::memory::Budgeted;
 
 fn model() -> &'static Arc<NoriDictionary> {
     static MODEL: OnceLock<Arc<NoriDictionary>> = OnceLock::new();
     MODEL.get_or_init(|| {
         NoriDictionary::from_bytes(uqa_nori_data::BUNDLE, DictionaryLimits::default()).unwrap()
     })
+}
+
+#[test]
+fn tagged_morphology_preserves_korean_serialization_and_absent_common_attributes() {
+    use crate::nori::{POSTag, POSType};
+    let output = NoriOutput::from_tokens(
+        vec![NoriToken {
+            term_utf16: "韓".encode_utf16().collect(),
+            start_utf16: 0,
+            end_utf16: 1,
+            position_increment: 1,
+            position_length: 1,
+            keyword: false,
+            pos_type: POSType::Morpheme,
+            left_pos: POSTag::NNG,
+            right_pos: POSTag::NNG,
+            reading: Some("한".into()),
+            morphemes: None,
+            origin: NoriOrigin::Known,
+        }],
+        1,
+        0,
+    )
+    .into_analyzed(&FilteredText::new("韓"))
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(&output).unwrap(),
+        json!({
+            "tokens": [{
+                "term": "韓", "offsets": {"utf8": {"start": 0, "end": 3}, "utf16": {"start": 0, "end": 1}},
+                "position_increment": 1, "position_length": 1, "keyword": false,
+                "filtered_utf16": {"start": 0, "end": 1},
+                "korean_morphology": {"pos_type": "MORPHEME", "left_pos": "NNG", "right_pos": "NNG",
+                    "reading": "한", "morphemes": null, "origin": "known"}
+            }],
+            "final_offsets": {"utf8": {"start": 3, "end": 3}, "utf16": {"start": 1, "end": 1}},
+            "final_position_increment": 0
+        })
+    );
+    assert!(output.tokens()[0].korean_morphology().is_some());
+    #[cfg(feature = "kuromoji")]
+    assert!(output.tokens()[0].japanese_morphology().is_none());
+    let common = crate::Tokenizer::Whitespace
+        .tokenize_with_offsets("韓")
+        .unwrap();
+    let wire = serde_json::to_value(common.tokens()).unwrap();
+    assert!(wire[0].get("korean_morphology").is_none());
+    assert!(wire[0].get("japanese_morphology").is_none());
 }
 
 #[test]
@@ -95,7 +145,7 @@ fn attributes(value: &Value, input: &FilteredText<'_>) -> AnalysisToken {
         position_length: serde_json::from_value(value["position_length"].clone()).unwrap(),
         keyword: value["keyword"].as_bool().unwrap_or(false),
         filtered_utf16: Some(range),
-        korean_morphology: morphology,
+        morphology: morphology.map(crate::token::Morphology::Korean),
         verbatim: false,
     }
 }
@@ -176,7 +226,7 @@ fn input_stream(
             (
                 raw.tokens
                     .into_iter()
-                    .map(|token| AnalysisToken::from_nori(token, &input))
+                    .map(|token| crate::token::native::token(token, &input))
                     .collect::<AnalysisResult<_>>()?,
                 raw.final_offset_utf16,
                 raw.final_position_increment,

@@ -18,6 +18,8 @@ pub(super) use lookup::{find_word, PreparedSynonyms};
 pub(crate) enum PreparedTokenFilter<'a> {
     #[cfg(feature = "nori")]
     Nori(crate::nori::pipeline::PreparedNoriFilter),
+    #[cfg(feature = "kuromoji")]
+    Kuromoji(std::sync::Arc<crate::kuromoji::pipeline::PreparedKuromojiFilter>),
     Common(PreparedCommonFilter<'a>),
 }
 
@@ -46,16 +48,53 @@ pub(crate) enum PreparedCommonFilter<'a> {
 impl TokenFilter {
     pub(crate) fn prepare(&self) -> AnalysisResult<PreparedTokenFilter<'_>> {
         let filter = match self {
+            #[cfg(feature = "kuromoji")]
+            Self::KuromojiBaseForm(_)
+            | Self::KuromojiPartOfSpeech(_)
+            | Self::KuromojiStop(_)
+            | Self::KuromojiCompletion(_)
+            | Self::KuromojiStem(_)
+            | Self::KuromojiHiraganaUppercase(_)
+            | Self::KuromojiKatakanaUppercase(_)
+            | Self::KuromojiReadingForm(_)
+            | Self::KuromojiNumber(_) => {
+                return crate::kuromoji::pipeline::prepare_filter(
+                    self,
+                    &crate::kuromoji::KuromojiResources::default(),
+                )
+                .map(PreparedTokenFilter::Kuromoji);
+            }
             #[cfg(feature = "nori")]
-            Self::NoriPartOfSpeech(_)
-            | Self::NoriReadingForm(_)
-            | Self::UnicodeSimpleLowercase(_)
-            | Self::NoriNumber(_) => {
-                return Ok(PreparedTokenFilter::Nori(
-                    crate::nori::pipeline::PreparedNoriFilter::resolve(
+            Self::NoriPartOfSpeech(_) | Self::NoriReadingForm(_) | Self::NoriNumber(_) => {
+                return crate::nori::pipeline::PreparedNoriFilter::resolve(
+                    self,
+                    &crate::nori::NoriResources::default(),
+                )
+                .map(PreparedTokenFilter::Nori);
+            }
+            #[cfg(any(feature = "nori", feature = "kuromoji"))]
+            Self::UnicodeSimpleLowercase(config) => {
+                #[cfg(not(feature = "kuromoji"))]
+                let _ = config;
+                #[cfg(not(feature = "nori"))]
+                config.unicode_profile.validate_features()?;
+                #[cfg(feature = "kuromoji")]
+                if config.unicode_profile.kuromoji_dictionary().is_some() {
+                    return crate::kuromoji::pipeline::prepare_filter(
                         self,
-                        &crate::nori::NoriResources::default(),
-                    )?,
+                        &crate::kuromoji::KuromojiResources::default(),
+                    )
+                    .map(PreparedTokenFilter::Kuromoji);
+                }
+                #[cfg(feature = "nori")]
+                return crate::nori::pipeline::PreparedNoriFilter::resolve(
+                    self,
+                    &crate::nori::NoriResources::default(),
+                )
+                .map(PreparedTokenFilter::Nori);
+                #[cfg(not(feature = "nori"))]
+                return Err(crate::AnalysisError::Descriptor(
+                    "missing Unicode profile provider",
                 ));
             }
             Self::Lowercase => PreparedCommonFilter::Lowercase(super::lowercase::prepare()?),
@@ -115,6 +154,8 @@ impl PreparedTokenFilter<'_> {
         match self {
             #[cfg(feature = "nori")]
             Self::Nori(filter) => PreparedTokenFilter::Nori(filter),
+            #[cfg(feature = "kuromoji")]
+            Self::Kuromoji(filter) => PreparedTokenFilter::Kuromoji(filter),
             Self::Common(filter) => PreparedTokenFilter::Common(filter.into_owned()),
         }
     }
@@ -134,6 +175,8 @@ impl PreparedTokenFilter<'_> {
         match self {
             #[cfg(feature = "nori")]
             Self::Nori(filter) => filter.filter_analyzed_budgeted(input, poll),
+            #[cfg(feature = "kuromoji")]
+            Self::Kuromoji(filter) => filter.filter_analyzed_budgeted(input, poll),
             Self::Common(filter) => filter.filter_analyzed_budgeted(input, poll),
         }
     }

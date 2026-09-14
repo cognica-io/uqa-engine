@@ -18,6 +18,12 @@ use crate::{AnalysisError, AnalysisResult, FilteredText};
 #[derive(Debug)]
 pub(crate) enum PreparedCharFilter<'a> {
     HTMLStrip,
+    CJKWidth,
+    #[cfg(feature = "kuromoji")]
+    KuromojiIterationMark {
+        normalize_kanji: bool,
+        normalize_kana: bool,
+    },
     Mapping(Vec<(String, String)>),
     PatternReplace {
         expression: Box<CooperativeRegex>,
@@ -29,6 +35,15 @@ impl CharFilter {
     pub(crate) fn prepare(&self) -> AnalysisResult<PreparedCharFilter<'_>> {
         Ok(match self {
             Self::HTMLStrip => PreparedCharFilter::HTMLStrip,
+            Self::CJKWidth => PreparedCharFilter::CJKWidth,
+            #[cfg(feature = "kuromoji")]
+            Self::KuromojiIterationMark {
+                normalize_kanji,
+                normalize_kana,
+            } => PreparedCharFilter::KuromojiIterationMark {
+                normalize_kanji: *normalize_kanji,
+                normalize_kana: *normalize_kana,
+            },
             Self::Mapping { mapping } => {
                 PreparedCharFilter::Mapping(mapping_longest_first(mapping))
             }
@@ -63,6 +78,15 @@ impl PreparedCharFilter<'_> {
     pub(crate) fn into_owned(self) -> PreparedCharFilter<'static> {
         match self {
             Self::HTMLStrip => PreparedCharFilter::HTMLStrip,
+            Self::CJKWidth => PreparedCharFilter::CJKWidth,
+            #[cfg(feature = "kuromoji")]
+            Self::KuromojiIterationMark {
+                normalize_kanji,
+                normalize_kana,
+            } => PreparedCharFilter::KuromojiIterationMark {
+                normalize_kanji,
+                normalize_kana,
+            },
             Self::Mapping(mapping) => PreparedCharFilter::Mapping(mapping),
             Self::PatternReplace {
                 expression,
@@ -90,6 +114,18 @@ impl PreparedCharFilter<'_> {
     ) -> AnalysisResult<FilteredText<'a>> {
         poll()?;
         match self {
+            Self::CJKWidth => super::width::replace_width(&mut text, budget, poll)?,
+            #[cfg(feature = "kuromoji")]
+            Self::KuromojiIterationMark {
+                normalize_kanji,
+                normalize_kana,
+            } => super::iteration::replace(
+                &mut text,
+                *normalize_kanji,
+                *normalize_kana,
+                budget,
+                poll,
+            )?,
             Self::HTMLStrip => {
                 replace_html(&mut text, budget, poll)?;
                 for (entity, replacement) in HTML_ENTITIES {

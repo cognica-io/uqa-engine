@@ -19,6 +19,7 @@ categories = ["database-implementations"]
 [features]
 default = []
 nori = ["uqa-analysis/nori"]
+kuromoji = ["uqa-analysis/kuromoji"]
 
 [dependencies]
 uqa-storage-sqlite = { workspace = true }

@@ -40,7 +40,8 @@ pub fn builtin_function_argument_targets(
     }
     let mut targets = argument_types.to_vec();
     match name {
-        "upper" | "lower" | "initcap" | "trim" | "btrim" | "ltrim" | "rtrim" => {
+        "upper" | "lower" | "initcap" | "trim" | "btrim" | "ltrim" | "rtrim" | "analyze_text"
+        | "create_analyzer" | "drop_analyzer" | "set_table_analyzer" | "fts_index_stats" => {
             targets.fill(Some(ColumnType::Text));
         }
         "array_sort" if matches!(targets.len(), 2 | 3) => {

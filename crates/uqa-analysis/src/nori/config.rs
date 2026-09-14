@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{DecompoundMode, NoriOptions, POSTag, DEFAULT_NORI_DICTIONARY};
-use crate::{Analyzer, TokenFilter, Tokenizer};
+use crate::{Analyzer, EmptyFilterConfig, SimpleLowercaseConfig, TokenFilter, Tokenizer};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -47,25 +47,6 @@ impl NoriTokenizerConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct NoriPOSConfig {
     pub stop_tags: Option<Vec<POSTag>>,
-}
-
-/// Parameterless stages reject unknown properties while preserving their tagged JSON shape.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EmptyFilterConfig {}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct SimpleLowercaseConfig {
-    pub unicode_profile: String,
-}
-
-impl Default for SimpleLowercaseConfig {
-    fn default() -> Self {
-        Self {
-            unicode_profile: "jdk21".into(),
-        }
-    }
 }
 
 /// Default Korean analysis configuration; constructing it changes no named registry or catalog.

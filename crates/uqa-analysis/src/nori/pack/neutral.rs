@@ -6,22 +6,19 @@
 
 //! Strict neutral-model input, retaining entry order and absent metadata.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fs::File;
-use std::io::Read;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
+use crate::morphology::io::{vector, Reader};
+use crate::morphology::lexicon::{Builder, Lexicon};
+use crate::morphology::matrix::Matrix;
+use crate::morphology::unicode::UnicodeTable;
 use crate::nori::dictionary::provenance::Provenance;
 use crate::nori::dictionary::provenance::FILES;
-use crate::nori::dictionary::tables::{Characters, Matrix, CLASSES};
-use crate::nori::error::{check_limit, invalid};
-use crate::nori::io::{vector, Reader};
-use crate::nori::lexicon::{Builder, Lexicon};
+use crate::nori::dictionary::tables::{Characters, CLASSES};
 use crate::nori::morphology::{Morpheme, Morphology, WordEntry, ABSENT};
-use crate::nori::unicode::{Properties, UnicodeRange, UnicodeTable, CODE_POINTS};
 use crate::nori::{DictionaryLimits, DictionaryResult, POSTag, POSType, SurfaceWords};
 
 pub(super) struct Model {
@@ -37,56 +34,10 @@ pub(super) struct Model {
 }
 
 pub(super) fn read_file(path: &Path, limit: usize) -> DictionaryResult<Vec<u8>> {
-    let file = File::open(path)?;
-    let length = usize::try_from(file.metadata()?.len())
-        .map_err(|_| invalid("input file", "length exceeds address space"))?;
-    check_limit("input bytes", length, limit)?;
-    let mut bytes = vector(length)?;
-    let maximum = u64::try_from(limit)
-        .ok()
-        .and_then(|limit| limit.checked_add(1))
-        .ok_or_else(|| invalid("input file", "read limit overflow"))?;
-    file.take(maximum).read_to_end(&mut bytes)?;
-    check_limit("input bytes", bytes.len(), limit)?;
-    Ok(bytes)
+    crate::morphology::neutral::read_file(path, limit).map_err(Into::into)
 }
 
-fn header<'a>(bytes: &'a [u8], magic: &[u8]) -> DictionaryResult<Reader<'a>> {
-    let mut reader = Reader::new(bytes, "neutral model", true);
-    if reader.take(8)? != magic {
-        return Err(reader.invalid("invalid neutral file magic"));
-    }
-    Ok(reader)
-}
-
-fn text(reader: &mut Reader<'_>, limits: DictionaryLimits) -> DictionaryResult<Option<String>> {
-    let count = reader.i32()?;
-    if count == -1 {
-        return Ok(None);
-    }
-    let count = usize::try_from(count).map_err(|_| reader.invalid("negative string length"))?;
-    check_limit(
-        "UTF-16 units per dictionary string",
-        count,
-        limits.max_text_utf16,
-    )?;
-    if count > reader.remaining() / 2 {
-        return Err(reader.invalid("truncated UTF-16 string"));
-    }
-    let mut units = vector(count)?;
-    for _ in 0..count {
-        units.push(reader.u16()?);
-    }
-    Ok(Some(String::from_utf16(&units)?))
-}
-
-fn required_text(reader: &mut Reader<'_>, limits: DictionaryLimits) -> DictionaryResult<String> {
-    text(reader, limits)?.ok_or_else(|| reader.invalid("required string is absent"))
-}
-
-fn count32(count: usize) -> DictionaryResult<u32> {
-    u32::try_from(count).map_err(|_| invalid("neutral model", "count exceeds u32"))
-}
+use crate::morphology::neutral::{count32, header, required_text, text};
 
 struct Metadata {
     value: Morphology,
@@ -96,20 +47,13 @@ struct Metadata {
 
 impl Metadata {
     fn string(&mut self, text: String) -> DictionaryResult<u32> {
-        if let Some(id) = self.interned.get(&text) {
-            return Ok(*id);
-        }
-        check_limit(
-            "dictionary strings",
-            self.value.strings.len() + 1,
+        crate::morphology::strings::intern(
+            &mut self.value.strings,
+            &mut self.interned,
+            text,
             self.limits.max_strings,
-        )?;
-        let id = count32(self.value.strings.len())?;
-        self.interned.try_reserve(1)?;
-        self.value.strings.try_reserve(1)?;
-        self.interned.insert(text.clone(), id);
-        self.value.strings.push(text);
-        Ok(id)
+        )
+        .map_err(Into::into)
     }
 
     fn tag(reader: &mut Reader<'_>) -> DictionaryResult<POSTag> {
@@ -142,7 +86,7 @@ impl Metadata {
             let count =
                 usize::try_from(count).map_err(|_| reader.invalid("negative morpheme count"))?;
             if count > reader.remaining() / 8 {
-                return Err(reader.invalid("morpheme count exceeds input"));
+                return Err(reader.invalid("morpheme count exceeds input").into());
             }
             let start = count32(self.value.morphemes.len())?;
             self.value.morphemes.try_reserve(count)?;
@@ -179,51 +123,7 @@ fn read_inputs(
     )?;
     let manifest: Value = serde_json::from_slice(&manifest_bytes)?;
     Provenance::from_value(manifest.clone())?;
-    let listed = manifest["files"]
-        .as_array()
-        .ok_or_else(|| invalid("neutral model", "missing file inventory"))?;
-    let expected: BTreeSet<_> = FILES.iter().copied().collect();
-    let mut names = BTreeSet::new();
-    let mut inputs = BTreeMap::new();
-    let mut total = 0_usize;
-    for file in listed {
-        let name = file["path"]
-            .as_str()
-            .ok_or_else(|| invalid("neutral model", "invalid file path"))?;
-        if !expected.contains(name) || !names.insert(name) {
-            return Err(invalid(
-                "neutral model",
-                "duplicate or unexpected input file",
-            ));
-        }
-        let bytes = read_file(&directory.join(name), limits.max_decoded_bytes)?;
-        total = total
-            .checked_add(bytes.len())
-            .ok_or_else(|| invalid("neutral model", "size overflow"))?;
-        check_limit("neutral model bytes", total, limits.max_decoded_bytes)?;
-        let hash = format!("{:x}", Sha256::digest(&bytes));
-        if file["bytes"].as_u64() != Some(bytes.len() as u64) || file["sha256"] != hash {
-            return Err(invalid(
-                "neutral model",
-                "input file size or checksum differs",
-            ));
-        }
-        inputs.insert(name.to_owned(), bytes);
-    }
-    if names != expected {
-        return Err(invalid("neutral model", "incomplete input inventory"));
-    }
-    let actual: BTreeSet<_> = std::fs::read_dir(directory)?
-        .map(|entry| entry.map(|entry| entry.file_name()))
-        .collect::<Result<_, _>>()?;
-    let mut allowed: BTreeSet<_> = FILES.iter().map(std::ffi::OsString::from).collect();
-    allowed.insert("model_manifest.json".into());
-    if actual != allowed {
-        return Err(invalid(
-            "neutral model",
-            "unexpected files in input directory",
-        ));
-    }
+    let inputs = crate::morphology::neutral::read_inputs(directory, &manifest, FILES, limits)?;
 
     Ok((manifest, inputs))
 }
@@ -246,7 +146,7 @@ pub(super) fn read(directory: &Path, limits: DictionaryLimits) -> DictionaryResu
     let surface_count = reader.count(12)?;
     let known = reader.u32()?;
     if known as usize > reader.remaining() / 36 {
-        return Err(reader.invalid("word count exceeds input"));
+        return Err(reader.invalid("word count exceeds input").into());
     }
     let mut words = vector(known as usize)?;
     let mut surfaces = vector(surface_count)?;
@@ -258,7 +158,9 @@ pub(super) fn read(directory: &Path, limits: DictionaryLimits) -> DictionaryResu
         let count = reader.count(36)?;
         let start = count32(words.len())?;
         if count > known as usize - words.len() {
-            return Err(reader.invalid("surface entries exceed declared known words"));
+            return Err(reader
+                .invalid("surface entries exceed declared known words")
+                .into());
         }
         for _ in 0..count {
             words.push(metadata.word(&mut reader)?);
@@ -269,26 +171,30 @@ pub(super) fn read(directory: &Path, limits: DictionaryLimits) -> DictionaryResu
         });
     }
     if words.len() != known as usize {
-        return Err(reader.invalid("system word count differs"));
+        return Err(reader.invalid("system word count differs").into());
     }
     reader.finish()?;
     let lexicon = builder.finish(limits.max_text_utf16)?;
 
     let mut reader = header(&inputs["unknown.bin"], b"UQANUNK1")?;
     if reader.u32()? as usize != CLASSES.len() {
-        return Err(reader.invalid("unknown class count differs"));
+        return Err(reader.invalid("unknown class count differs").into());
     }
     let unknown_count = reader.count(36)?;
     words.try_reserve(unknown_count)?;
     let mut unknown = vector(CLASSES.len())?;
     for (index, name) in CLASSES.iter().enumerate() {
         if reader.u32()? as usize != index || required_text(&mut reader, limits)? != *name {
-            return Err(reader.invalid("unknown classes are not in canonical order"));
+            return Err(reader
+                .invalid("unknown classes are not in canonical order")
+                .into());
         }
         let count = reader.count(36)?;
         let start = count32(words.len())?;
         if count > unknown_count - (words.len() - known as usize) {
-            return Err(reader.invalid("class entries exceed declared unknown words"));
+            return Err(reader
+                .invalid("class entries exceed declared unknown words")
+                .into());
         }
         for _ in 0..count {
             words.push(metadata.word(&mut reader)?);
@@ -296,28 +202,11 @@ pub(super) fn read(directory: &Path, limits: DictionaryLimits) -> DictionaryResu
         unknown.push(start..count32(words.len())?);
     }
     if words.len() - known as usize != unknown_count {
-        return Err(reader.invalid("unknown word count differs"));
+        return Err(reader.invalid("unknown word count differs").into());
     }
     reader.finish()?;
 
-    let mut reader = header(&inputs["characters.bin"], b"UQANCHR1")?;
-    if reader.u32()? as usize != CLASSES.len() {
-        return Err(reader.invalid("character class count differs"));
-    }
-    let flags = reader.take(CLASSES.len())?.to_vec();
-    if reader.u32()? != 0x1_0000 {
-        return Err(reader.invalid("incomplete character table"));
-    }
-    let mut values = vector(0x1_0000)?;
-    for _ in 0..0x1_0000 {
-        values.push(reader.array()?);
-    }
-    reader.finish()?;
-    let characters = Characters {
-        flags,
-        words: unknown,
-        values,
-    };
+    let characters = read_characters(&inputs["characters.bin"], unknown)?;
 
     let unicode = read_unicode(&inputs["unicode.bin"], provenance.scripts.len())?;
     Ok(Model {
@@ -333,50 +222,37 @@ pub(super) fn read(directory: &Path, limits: DictionaryLimits) -> DictionaryResu
     })
 }
 
-fn read_unicode(bytes: &[u8], script_count: usize) -> DictionaryResult<UnicodeTable> {
-    let mut reader = header(bytes, b"UQANUNI1")?;
-    if reader.u32()? != CODE_POINTS {
-        return Err(reader.invalid("incomplete Unicode profile"));
+fn read_characters(bytes: &[u8], words: Vec<std::ops::Range<u32>>) -> DictionaryResult<Characters> {
+    let mut reader = header(bytes, b"UQANCHR1")?;
+    if reader.u32()? as usize != CLASSES.len() {
+        return Err(reader.invalid("character class count differs").into());
     }
-    let mut ranges: Vec<UnicodeRange> = Vec::new();
-    for code_point in 0..CODE_POINTS {
-        let category = reader.u8()?;
-        let script = reader.u16()?;
-        let flags = reader.u8()?;
-        let lowercase = reader.u32()?;
-        if lowercase >= CODE_POINTS {
-            return Err(reader.invalid("invalid lowercase code point"));
-        }
-        let properties = Properties {
-            category,
-            script,
-            flags,
-            lowercase_delta: lowercase as i32 - code_point as i32,
-        };
-        if let Some(previous) = ranges
-            .last_mut()
-            .filter(|range| range.properties == properties)
-        {
-            previous.end = code_point + 1;
-        } else {
-            ranges.try_reserve(1)?;
-            ranges.push(UnicodeRange {
-                end: code_point + 1,
-                properties,
-            });
-        }
+    let flags = reader.take(CLASSES.len())?.to_vec();
+    if reader.u32()? != 0x1_0000 {
+        return Err(reader.invalid("incomplete character table").into());
+    }
+    let mut values = vector(0x1_0000)?;
+    for _ in 0..0x1_0000 {
+        values.push(reader.array()?);
     }
     reader.finish()?;
-    let unicode = UnicodeTable { ranges };
-    unicode.validate(script_count)?;
-    Ok(unicode)
+    Ok(Characters {
+        flags,
+        words,
+        values,
+    })
+}
+
+fn read_unicode(bytes: &[u8], script_count: usize) -> DictionaryResult<UnicodeTable> {
+    crate::morphology::unicode::read_neutral(header(bytes, b"UQANUNI1")?, script_count)
+        .map_err(Into::into)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{read_file, read_inputs, Metadata};
+    use crate::morphology::io::Reader;
     use crate::nori::dictionary::provenance::FILES;
-    use crate::nori::io::Reader;
     use crate::nori::morphology::Morphology;
     use crate::nori::{DictionaryError, DictionaryLimits};
     use sha2::{Digest, Sha256};
