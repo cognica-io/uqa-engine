@@ -49,6 +49,7 @@ mod error;
 mod frame;
 mod morphology;
 mod provenance;
+mod resources;
 mod tables;
 mod user_dictionary;
 
@@ -67,3 +68,9 @@ pub use error::{DictionaryError, DictionaryResult};
 pub use frame::DictionaryId;
 pub use morphology::DictionaryWord;
 pub use user_dictionary::{UserDictionary, UserDictionaryLimits, UserEntry, UserMatch, UserWord};
+
+pub use resources::{
+    DictionaryArtifact, DictionaryBytes, DictionaryRequest, DictionaryResolver, KuromojiResources,
+    ResolvedDictionary, ResolvedUserDictionary, ResourceCacheStats, ResourceHash, ResourceLimits,
+    DEFAULT_KUROMOJI_DICTIONARY,
+};

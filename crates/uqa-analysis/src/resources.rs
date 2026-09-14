@@ -20,6 +20,8 @@ struct Inner {
     cache: Mutex<Cache<AnalyzerFingerprint, CompiledAnalyzer>>,
     #[cfg(feature = "nori")]
     nori: crate::nori::NoriResources,
+    #[cfg(feature = "kuromoji")]
+    kuromoji: crate::kuromoji::KuromojiResources,
 }
 
 /// Retained descriptor sizes exclude compiled heap allocations and caller-owned handles.
@@ -44,6 +46,40 @@ pub struct AnalyzerCacheStats {
 #[derive(Clone)]
 pub struct AnalyzerResources(Arc<Inner>);
 
+/// Install independently typed language resolvers before creating an immutable analyzer owner.
+pub struct AnalyzerResourcesBuilder {
+    limits: AnalyzerLimits,
+    #[cfg(feature = "nori")]
+    nori: Option<crate::nori::NoriResources>,
+    #[cfg(feature = "kuromoji")]
+    kuromoji: Option<crate::kuromoji::KuromojiResources>,
+}
+
+impl AnalyzerResourcesBuilder {
+    #[cfg(feature = "nori")]
+    pub fn nori_resources(mut self, resources: crate::nori::NoriResources) -> Self {
+        self.nori = Some(resources);
+        self
+    }
+
+    #[cfg(feature = "kuromoji")]
+    pub fn kuromoji_resources(mut self, resources: crate::kuromoji::KuromojiResources) -> Self {
+        self.kuromoji = Some(resources);
+        self
+    }
+
+    pub fn build(self) -> AnalyzerResources {
+        AnalyzerResources(Arc::new(Inner {
+            limits: self.limits,
+            cache: Mutex::new(Cache::default()),
+            #[cfg(feature = "nori")]
+            nori: self.nori.unwrap_or_default(),
+            #[cfg(feature = "kuromoji")]
+            kuromoji: self.kuromoji.unwrap_or_default(),
+        }))
+    }
+}
+
 impl Default for AnalyzerResources {
     fn default() -> Self {
         static RESOURCES: OnceLock<AnalyzerResources> = OnceLock::new();
@@ -56,27 +92,33 @@ impl Default for AnalyzerResources {
 impl AnalyzerResources {
     /// Create an independent owner with fixed descriptor and retention limits.
     pub fn new(limits: AnalyzerLimits) -> Self {
-        Self(Arc::new(Inner {
+        Self::builder(limits).build()
+    }
+
+    pub fn builder(limits: AnalyzerLimits) -> AnalyzerResourcesBuilder {
+        AnalyzerResourcesBuilder {
             limits,
-            cache: Mutex::new(Cache::default()),
             #[cfg(feature = "nori")]
-            nori: crate::nori::NoriResources::default(),
-        }))
+            nori: None,
+            #[cfg(feature = "kuromoji")]
+            kuromoji: None,
+        }
     }
 
     /// Use explicit immutable Korean resources without introducing a fallback resolver.
     #[cfg(feature = "nori")]
     pub fn with_nori_resources(limits: AnalyzerLimits, nori: crate::nori::NoriResources) -> Self {
-        Self(Arc::new(Inner {
-            limits,
-            cache: Mutex::new(Cache::default()),
-            nori,
-        }))
+        Self::builder(limits).nori_resources(nori).build()
     }
 
     #[cfg(feature = "nori")]
     pub fn nori_resources(&self) -> &crate::nori::NoriResources {
         &self.0.nori
+    }
+
+    #[cfg(feature = "kuromoji")]
+    pub fn kuromoji_resources(&self) -> &crate::kuromoji::KuromojiResources {
+        &self.0.kuromoji
     }
 
     pub fn limits(&self) -> AnalyzerLimits {

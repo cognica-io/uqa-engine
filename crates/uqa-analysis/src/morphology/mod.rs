@@ -25,5 +25,5 @@ type DictionaryResult<T> = Result<T, DictionaryError>;
 #[cfg(any(feature = "nori-tools", feature = "kuromoji-tools"))]
 pub(crate) mod neutral;
 
-#[cfg(feature = "nori")]
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
 pub(crate) mod resources;

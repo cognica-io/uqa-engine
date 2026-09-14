@@ -46,7 +46,7 @@ pub use registry::{
     builtin_analyzer_names, drop_analyzer, get_analyzer, is_builtin_analyzer, list_analyzers,
     register_analyzer, DEFAULT_ANALYZER_NAME,
 };
-pub use resources::{AnalyzerCacheStats, AnalyzerResources};
+pub use resources::{AnalyzerCacheStats, AnalyzerResources, AnalyzerResourcesBuilder};
 pub use source::{FilteredText, SourceOffsets, TextCoordinates};
 pub use term::TokenTerm;
 pub use token::{AnalysisToken, AnalyzedText};

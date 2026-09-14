@@ -8,6 +8,13 @@
 
 #[derive(Debug, thiserror::Error)]
 pub enum DictionaryError {
+    #[error("Kuromoji dictionary resource is unavailable: {0}")]
+    ResourceMissing(String),
+    #[error("Kuromoji resource hash mismatch: expected {expected}, received {actual}")]
+    ResourceHashMismatch {
+        expected: super::ResourceHash,
+        actual: super::ResourceHash,
+    },
     #[error("invalid Kuromoji {section} at byte {offset}: {reason}")]
     Invalid {
         section: &'static str,
@@ -96,6 +103,20 @@ impl From<crate::morphology::neutral::Error> for DictionaryError {
             Error::Io(error) => Self::Io(error),
             Error::Utf16(error) => Self::Utf16(error),
             Error::Manifest(error) => Self::Manifest(error),
+        }
+    }
+}
+
+impl From<crate::morphology::resources::Error> for DictionaryError {
+    fn from(error: crate::morphology::resources::Error) -> Self {
+        use crate::morphology::resources::Error;
+        match error {
+            Error::Dictionary(error) => error.into(),
+            Error::Missing(request) => Self::ResourceMissing(request),
+            Error::HashMismatch { expected, actual } => Self::ResourceHashMismatch {
+                expected: super::ResourceHash::from_bytes(expected),
+                actual: super::ResourceHash::from_bytes(actual),
+            },
         }
     }
 }

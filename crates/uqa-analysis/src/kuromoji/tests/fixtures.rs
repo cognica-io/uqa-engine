@@ -32,7 +32,7 @@ fn section(
     }
 }
 
-pub(super) fn sections() -> Vec<Section> {
+pub(in crate::kuromoji) fn sections() -> Vec<Section> {
     let morphology = Morphology {
         strings: [
             "名詞-一般",
