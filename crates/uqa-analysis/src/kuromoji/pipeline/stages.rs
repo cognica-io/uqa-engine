@@ -29,6 +29,7 @@ impl PreparedKuromojiFilter {
             &MemoryBudget::new(usize::MAX),
             &mut || Ok(()),
         )?;
+        let profile = if filter.uses_model() { profile } else { None };
         Ok(Self { filter, profile })
     }
 

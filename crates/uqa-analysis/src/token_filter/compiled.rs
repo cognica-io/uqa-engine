@@ -50,26 +50,27 @@ impl TokenFilter {
         let filter = match self {
             #[cfg(feature = "kuromoji")]
             Self::KuromojiBaseForm(_)
+            | Self::KuromojiPartOfSpeech(_)
+            | Self::KuromojiStop(_)
+            | Self::KuromojiCompletion(_)
             | Self::KuromojiStem(_)
             | Self::KuromojiHiraganaUppercase(_)
             | Self::KuromojiKatakanaUppercase(_)
             | Self::KuromojiReadingForm(_)
             | Self::KuromojiNumber(_) => {
-                return Ok(PreparedTokenFilter::Kuromoji(
-                    crate::kuromoji::pipeline::prepare_filter(
-                        self,
-                        &crate::kuromoji::KuromojiResources::default(),
-                    )?,
-                ));
+                return crate::kuromoji::pipeline::prepare_filter(
+                    self,
+                    &crate::kuromoji::KuromojiResources::default(),
+                )
+                .map(PreparedTokenFilter::Kuromoji);
             }
             #[cfg(feature = "nori")]
             Self::NoriPartOfSpeech(_) | Self::NoriReadingForm(_) | Self::NoriNumber(_) => {
-                return Ok(PreparedTokenFilter::Nori(
-                    crate::nori::pipeline::PreparedNoriFilter::resolve(
-                        self,
-                        &crate::nori::NoriResources::default(),
-                    )?,
-                ));
+                return crate::nori::pipeline::PreparedNoriFilter::resolve(
+                    self,
+                    &crate::nori::NoriResources::default(),
+                )
+                .map(PreparedTokenFilter::Nori);
             }
             #[cfg(any(feature = "nori", feature = "kuromoji"))]
             Self::UnicodeSimpleLowercase(config) => {
@@ -79,20 +80,18 @@ impl TokenFilter {
                 config.unicode_profile.validate_features()?;
                 #[cfg(feature = "kuromoji")]
                 if config.unicode_profile.kuromoji_dictionary().is_some() {
-                    return Ok(PreparedTokenFilter::Kuromoji(
-                        crate::kuromoji::pipeline::prepare_filter(
-                            self,
-                            &crate::kuromoji::KuromojiResources::default(),
-                        )?,
-                    ));
+                    return crate::kuromoji::pipeline::prepare_filter(
+                        self,
+                        &crate::kuromoji::KuromojiResources::default(),
+                    )
+                    .map(PreparedTokenFilter::Kuromoji);
                 }
                 #[cfg(feature = "nori")]
-                return Ok(PreparedTokenFilter::Nori(
-                    crate::nori::pipeline::PreparedNoriFilter::resolve(
-                        self,
-                        &crate::nori::NoriResources::default(),
-                    )?,
-                ));
+                return crate::nori::pipeline::PreparedNoriFilter::resolve(
+                    self,
+                    &crate::nori::NoriResources::default(),
+                )
+                .map(PreparedTokenFilter::Nori);
                 #[cfg(not(feature = "nori"))]
                 return Err(crate::AnalysisError::Descriptor(
                     "missing Unicode profile provider",

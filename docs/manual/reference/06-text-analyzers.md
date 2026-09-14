@@ -320,7 +320,7 @@ This example executes as a Rust doctest. Saving descriptor JSON and restoring it
 
 Both lowercase plans also accept `provider: "nori"` when `nori` is enabled. The dictionary value is a required name or `sha256:<artifact hash>`. Compilation freezes the typed provider and exact artifact hash; restoration accepts only canonical exact hashes and validates the bytes. Profiles and width tables contribute to the descriptor identity, and normalization stages count toward `AnalyzerLimits::max_stages`. Unavailable providers, missing profiles and unknown normalization properties are errors.
 
-An omitted field serializes without a null or default entry, preserving existing generic and Nori descriptor bytes, revisions and fingerprints. An explicit plan creates a distinct revision even when its output happens to equal the inferred behavior. Resolving a shared dictionary alias once per language within a pipeline keeps tokenizer, filter and normalization snapshots consistent. Retained compiled handles preserve their profile after alias changes or cache eviction. This configuration is part of the unreleased Kuromoji work; Japanese tokenizer configuration is available through the common pipeline; Japanese token-filter configuration and built-ins remain in progress.
+An omitted field serializes without a null or default entry, preserving existing generic and Nori descriptor bytes, revisions and fingerprints. An explicit plan creates a distinct revision even when its output happens to equal the inferred behavior. Resolving a shared dictionary alias once per language within a pipeline keeps tokenizer, filter and normalization snapshots consistent. Retained compiled handles preserve their profile after alias changes or cache eviction. This configuration is part of the unreleased Kuromoji work; Japanese tokenizer/filter configuration and both built-ins are available through the common analysis pipeline; provider, SQL and binding integration remains in progress.
 
 ```rust
 use uqa_analysis::{Analyzer, NormalizationConfig};
@@ -739,7 +739,7 @@ assert_eq!(terms?, ["3200", "원", "157"]);
 
 ## Standalone Japanese tokenization
 
-The independent `uqa-analysis/kuromoji` feature exposes `JapaneseTokenizer`, `KuromojiOptions`, `KuromojiMode`, `KuromojiLimits`, `KuromojiToken` and `KuromojiOutput`. It includes the immutable dictionary from `uqa-kuromoji-data`. The standalone API is implemented; Japanese common-pipeline configuration, optional filters, built-in registration and binding integration remain in development. The standalone default analyzer and its filters are described below. The [implementation plan](../../plans/0007-kuromoji-analyzer.md) tracks those remaining contracts.
+The independent `uqa-analysis/kuromoji` feature exposes `JapaneseTokenizer`, `KuromojiOptions`, `KuromojiMode`, `KuromojiLimits`, `KuromojiToken` and `KuromojiOutput`. It includes the immutable dictionary from `uqa-kuromoji-data`. The standalone API, common-pipeline configuration, optional filters and built-in registration are implemented; provider, SQL and binding integration remains in development. The standalone default analyzer and its filters are described below. The [implementation plan](../../plans/0007-kuromoji-analyzer.md) tracks those remaining contracts.
 
 `JapaneseTokenizer::new(model, user, options)` retains the selected immutable dictionary and optional compiled Japanese user rules. Rules compiled against another semantic model return a typed analysis error. `KuromojiResources::default().load_default()` returns the bundled resource handle; explicit resolvers and `compile_user` retain the same artifact/model/source identities described in the [bundle specification](../../design/kuromoji-bundle-format.md). Later resource alias changes do not mutate a constructed tokenizer.
 
@@ -805,7 +805,7 @@ let restored = AnalyzerResources::new(AnalyzerLimits::default())
 assert_eq!(restored.analyze_tokens("東京大学")?, compiled.analyze_tokens("東京大学")?);
 ```
 
-The native bridge retains all Japanese attributes, raw token terms, token graphs, terminal state and corrected source spans. Both compiled and uncompiled analyzer chains defer user-attribute failures until a filter actually accesses the field or the completed stream is returned; a later generic stop filter can remove an otherwise invalid token. Standalone tokenizer and token-filter calls still validate their public output. Compiled Japanese tokenizers default to overlap-discounted field lengths. Linear term/position adapters reject them because they require immutable revisions and complete occurrence storage. Native/common memory ownership and every-callback cancellation are tested after HTML/width edits and N-best graph expansion. This is unreleased analysis support. The common simple-lowercase filter accepts an explicit Japanese profile, and the six dictionary-independent filters below also compile and restore. Japanese POS/word-stop/completion configuration, built-ins and full provider/SQL/binding delivery remain in progress.
+The native bridge retains all Japanese attributes, raw token terms, token graphs, terminal state and corrected source spans. Both compiled and uncompiled analyzer chains defer user-attribute failures until a filter actually accesses the field or the completed stream is returned; a later generic stop filter can remove an otherwise invalid token. Standalone tokenizer and token-filter calls still validate their public output. Compiled Japanese tokenizers default to overlap-discounted field lengths. Linear term/position adapters reject them because they require immutable revisions and complete occurrence storage. Native/common memory ownership and every-callback cancellation are tested after HTML/width edits and N-best graph expansion. This is unreleased analysis support. All Japanese filters and both built-ins below compile and restore. Full provider/SQL/binding delivery remains in progress.
 
 ### Japanese filters in compiled pipelines
 
@@ -822,7 +822,28 @@ With `uqa-analysis/kuromoji`, the common `TokenFilter` configuration accepts the
 
 All six configurations reject unknown fields, including unused dictionary properties. Compiled descriptors make stem and reading defaults explicit. The Rust configurations are `kuromoji::KuromojiStemConfig`, `kuromoji::KuromojiReadingFormConfig` and the common `EmptyFilterConfig`; Nori's existing empty-config import remains a re-export. A Japanese tokenizer may still require its own dictionary, while these filters use the attributes already carried by tokens. Bare term lists and generic tokenizer output also work according to the native missing-attribute rules. The compiled resource owner retains prepared filters by stage index, and runtime mutation shares the caller's byte allowance and cancellation callback.
 
-The profiled simple-lowercase stage is described [above](#simple-lowercase-profile-selection). Japanese POS stops, word stops and completion remain available through native `JapaneseFilter`, with their common configuration and the two built-ins still in progress. These are unreleased analysis APIs; full provider/SQL/binding delivery remains separate.
+The profiled simple-lowercase stage is described [above](#simple-lowercase-profile-selection). The remaining Japanese stages use resources only for default sets, Unicode mappings or completion:
+
+| JSON type | Settings and defaults | Resource requirement |
+| --- | --- | --- |
+| `kuromoji_part_of_speech` | `stop_tags: null`, `dictionary: null` | Omitted/null tags select the dictionary defaults; an explicit array, including an empty array, needs no dictionary |
+| `kuromoji_stop` | `words: null`, `ignore_case: true`, `dictionary: null` | Omitted/null words select the dictionary defaults; ignoring case requires its pinned simple-lowercase mapping, including for explicit words |
+| `kuromoji_completion` | `mode: "index"`, `dictionary: "lucene-10.5.1"` | Always requires the dictionary's completion and Unicode resources; mode also accepts `"query"` |
+
+For POS and stop filters, a null/omitted dictionary selects `lucene-10.5.1` only when a resource is required. An explicit dictionary on an explicit POS set or a case-sensitive explicit word set is rejected as unused. Unknown fields and unavailable resources fail before publication. The Rust types are `kuromoji::KuromojiPOSConfig`, `KuromojiStopConfig` and `KuromojiCompletionConfig`.
+
+Compilation expands default stop sets, then sorts and deduplicates their original strings in the descriptor. It preserves original case so restoration applies the selected Unicode mapping exactly once. A resolved POS filter and a resolved case-sensitive stop filter no longer reference or retain the dictionary used to supply defaults; they restore after that source is removed. Case-insensitive stops and completion retain an exact dictionary hash. Tokenizer, filters and normalization share one resolution of each alias per pipeline. Expansion is checked against descriptor limits before resolving later stages, and execution never calls a resolver.
+
+### Japanese built-in configurations
+
+With `uqa-analysis/kuromoji`, the registry reserves `kuromoji` and `kuromoji_completion`. `kuromoji::kuromoji_analyzer()` and `kuromoji::kuromoji_completion_analyzer()` construct the same configurations without I/O. Both apply CJK width filtering before tokenization and discard punctuation and original compound tokens. Their remaining stages and independent normalization follow the pinned [JapaneseAnalyzer](https://github.com/apache/lucene/blob/64ce863a2bea79c69c19c4d56268c26710ff0ff9/lucene/analysis/kuromoji/src/java/org/apache/lucene/analysis/ja/JapaneseAnalyzer.java) and [JapaneseCompletionAnalyzer](https://github.com/apache/lucene/blob/64ce863a2bea79c69c19c4d56268c26710ff0ff9/lucene/analysis/kuromoji/src/java/org/apache/lucene/analysis/ja/JapaneseCompletionAnalyzer.java).
+
+| Name | Tokenizer and ordered filters | Normalization |
+| --- | --- | --- |
+| `kuromoji` | SEARCH; base form, default POS stops, default word stops with `ignore_case: true`, Katakana stemmer with minimum length 4, pinned simple lowercase | Width followed by pinned simple lowercase |
+| `kuromoji_completion` | NORMAL; INDEX completion, pinned simple lowercase | Width only |
+
+For example, ordinary analysis of `ＵＱＡで走りました` produces `uqa` and `走る`; ordinary normalization produces `uqaで走りました`. Completion analysis of `ＵＱＡ` produces `uqa`, while its normalization produces `UQA`. These examples also execute as Rust doctests. Built-ins cannot be overwritten or dropped. These are unreleased analysis APIs; full provider/SQL/binding delivery remains separate.
 
 ### Japanese tokens in the common representation
 

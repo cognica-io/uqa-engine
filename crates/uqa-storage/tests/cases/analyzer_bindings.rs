@@ -29,11 +29,14 @@ fn japanese_analyzers_require_lossless_revision_storage_when_their_feature_is_av
     assert!(validate_linear_revision(&config.compile().unwrap()).is_err());
     for component in [
         "kuromoji_baseform",
+        "kuromoji_part_of_speech",
+        "kuromoji_stop",
         "kuromoji_stemmer",
         "kuromoji_hiragana_uppercase",
         "kuromoji_katakana_uppercase",
         "kuromoji_readingform",
         "kuromoji_number",
+        "kuromoji_completion",
     ] {
         let config: uqa_analysis::Analyzer = serde_json::from_value(serde_json::json!({
             "token_filters": [{"type": component}],
@@ -43,6 +46,14 @@ fn japanese_analyzers_require_lossless_revision_storage_when_their_feature_is_av
         assert!(
             validate_linear_revision(&config.compile().unwrap()).is_err(),
             "{component}"
+        );
+    }
+    for name in ["kuromoji", "kuromoji_completion"] {
+        let config = uqa_analysis::get_analyzer(name).unwrap();
+        assert!(validate_linear_analyzer(&config).is_err(), "{name}");
+        assert!(
+            validate_linear_revision(&config.compile().unwrap()).is_err(),
+            "{name}"
         );
     }
     assert!(validate_linear_analyzer(&keyword_analyzer()).is_ok());

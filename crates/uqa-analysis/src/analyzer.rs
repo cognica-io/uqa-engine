@@ -62,7 +62,7 @@ impl Analyzer {
                 || self
                     .token_filters
                     .iter()
-                    .any(|filter| crate::kuromoji::pipeline::japanese_filter(filter).is_some())
+                    .any(crate::kuromoji::pipeline::is_japanese_filter)
         }
         #[cfg(not(feature = "kuromoji"))]
         {

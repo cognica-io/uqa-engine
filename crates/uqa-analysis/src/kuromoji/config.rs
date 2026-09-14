@@ -8,7 +8,50 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{KuromojiMode, KuromojiOptions, DEFAULT_KUROMOJI_DICTIONARY};
+use super::{CompletionMode, KuromojiMode, KuromojiOptions, DEFAULT_KUROMOJI_DICTIONARY};
+
+/// An omitted set selects dictionary defaults; explicit sets do not use a dictionary.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct KuromojiPOSConfig {
+    pub stop_tags: Option<Vec<String>>,
+    pub dictionary: Option<String>,
+}
+
+/// A dictionary supplies omitted stopwords and the Unicode mapping when case is ignored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct KuromojiStopConfig {
+    pub words: Option<Vec<String>>,
+    pub ignore_case: bool,
+    pub dictionary: Option<String>,
+}
+
+impl Default for KuromojiStopConfig {
+    fn default() -> Self {
+        Self {
+            words: None,
+            ignore_case: super::filters::default_ignore_case(),
+            dictionary: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct KuromojiCompletionConfig {
+    pub dictionary: String,
+    pub mode: CompletionMode,
+}
+
+impl Default for KuromojiCompletionConfig {
+    fn default() -> Self {
+        Self {
+            dictionary: DEFAULT_KUROMOJI_DICTIONARY.into(),
+            mode: CompletionMode::default(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]

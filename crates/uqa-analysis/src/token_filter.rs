@@ -38,6 +38,15 @@ pub use unicode::{SimpleLowercaseConfig, UnicodeProfileSource};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TokenFilter {
     #[cfg(feature = "kuromoji")]
+    #[serde(rename = "kuromoji_part_of_speech")]
+    KuromojiPartOfSpeech(crate::kuromoji::KuromojiPOSConfig),
+    #[cfg(feature = "kuromoji")]
+    #[serde(rename = "kuromoji_stop")]
+    KuromojiStop(crate::kuromoji::KuromojiStopConfig),
+    #[cfg(feature = "kuromoji")]
+    #[serde(rename = "kuromoji_completion")]
+    KuromojiCompletion(crate::kuromoji::KuromojiCompletionConfig),
+    #[cfg(feature = "kuromoji")]
     #[serde(rename = "kuromoji_baseform")]
     KuromojiBaseForm(EmptyFilterConfig),
     #[cfg(feature = "kuromoji")]
@@ -130,7 +139,10 @@ impl TokenFilter {
     pub fn validate(&self) -> AnalysisResult<()> {
         match self {
             #[cfg(feature = "kuromoji")]
-            TokenFilter::KuromojiStem(_) => self.prepare().map(|_| ()),
+            TokenFilter::KuromojiStem(_)
+            | TokenFilter::KuromojiPartOfSpeech(_)
+            | TokenFilter::KuromojiStop(_)
+            | TokenFilter::KuromojiCompletion(_) => self.prepare().map(|_| ()),
             #[cfg(any(feature = "nori", feature = "kuromoji"))]
             TokenFilter::UnicodeSimpleLowercase(_) => self.prepare().map(|_| ()),
             TokenFilter::Synonym {

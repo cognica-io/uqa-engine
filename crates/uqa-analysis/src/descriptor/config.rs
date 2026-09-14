@@ -17,7 +17,7 @@ use super::{
 };
 use crate::{AnalysisResult, Analyzer, SynonymFileError, TokenFilter};
 
-pub(super) fn check_config(config: &Analyzer, limits: AnalyzerLimits) -> AnalysisResult<()> {
+pub(crate) fn check_config(config: &Analyzer, limits: AnalyzerLimits) -> AnalysisResult<()> {
     #[cfg(all(feature = "kuromoji", not(feature = "nori")))]
     for filter in &config.token_filters {
         if let TokenFilter::UnicodeSimpleLowercase(config) = filter {
@@ -47,8 +47,14 @@ pub(super) fn snapshot(config: &Analyzer, limits: AnalyzerLimits) -> AnalysisRes
     let mut resolved = config.clone();
     #[cfg(feature = "nori")]
     crate::nori::pipeline::canonicalize(&mut resolved);
+    #[cfg(feature = "kuromoji")]
+    crate::kuromoji::pipeline::canonicalize(&mut resolved);
     for filter in &mut resolved.token_filters {
         match filter {
+            #[cfg(feature = "kuromoji")]
+            TokenFilter::KuromojiPartOfSpeech(_)
+            | TokenFilter::KuromojiStop(_)
+            | TokenFilter::KuromojiCompletion(_) => {}
             #[cfg(feature = "nori")]
             TokenFilter::NoriPartOfSpeech(_)
             | TokenFilter::NoriReadingForm(_)

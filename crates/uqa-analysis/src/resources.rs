@@ -188,6 +188,7 @@ impl AnalyzerResources {
             crate::kuromoji::pipeline::ResolvedKuromojiPipeline::resolve(
                 &mut config,
                 &self.0.kuromoji,
+                self.0.limits,
             )?
         };
         self.publish(

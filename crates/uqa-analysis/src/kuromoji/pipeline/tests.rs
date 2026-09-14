@@ -10,6 +10,7 @@ use crate::{AnalyzerLimits, AnalyzerResources, NormalizationConfig, Tokenizer};
 use parking_lot::Mutex;
 
 mod corpus;
+mod resources;
 mod tokenizer;
 
 #[test]

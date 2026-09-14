@@ -34,6 +34,9 @@ mod unicode_lowercase;
 #[path = "analysis/kuromoji_filters.rs"]
 mod kuromoji_filters;
 
+#[path = "analysis/kuromoji_compiled.rs"]
+mod kuromoji_compiled;
+
 #[path = "analysis/char_filters.rs"]
 mod char_filters;
 

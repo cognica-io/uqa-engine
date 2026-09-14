@@ -90,7 +90,7 @@ enum FilterConfig {
         mode: CompletionMode,
     },
 }
-fn default_ignore_case() -> bool {
+pub(super) fn default_ignore_case() -> bool {
     true
 }
 pub(super) fn default_stem_length() -> i32 {
@@ -276,6 +276,13 @@ impl JapaneseFilter {
 }
 
 impl CompiledFilter {
+    pub(super) fn uses_model(&self) -> bool {
+        matches!(
+            self,
+            Self::SimpleLowercase | Self::Stop(_, true) | Self::Completion(_)
+        )
+    }
+
     pub(super) fn apply_budgeted(
         &self,
         input: Budgeted<KuromojiOutput>,

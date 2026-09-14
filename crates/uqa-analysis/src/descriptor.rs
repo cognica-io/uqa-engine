@@ -14,6 +14,8 @@ use serde_json::{value::RawValue, Value};
 use crate::{AnalysisError, AnalysisResult, Analyzer};
 
 mod config;
+#[cfg(feature = "kuromoji")]
+pub(crate) use config::check_config as check_configuration;
 mod hash;
 mod json;
 pub(crate) mod limits;
@@ -115,6 +117,7 @@ impl AnalyzerDescriptor {
         let kuromoji = crate::kuromoji::pipeline::ResolvedKuromojiPipeline::resolve(
             &mut resolved_config,
             kuromoji_resources,
+            limits,
         )?;
         #[cfg(any(feature = "nori", feature = "kuromoji"))]
         let config = &resolved_config;
