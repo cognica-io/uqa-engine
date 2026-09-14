@@ -28,6 +28,14 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
+  nori-sql-benchmarks:
+    name: Nori public SQL and session measurements
+    uses: ./.github/workflows/nori-sql-benchmarks.yml
+
+  nori-cancellation-benchmarks:
+    name: Nori cooperative cancellation measurements
+    uses: ./.github/workflows/nori-cancellation-benchmarks.yml
+
   release-package-licenses:
     name: release package licenses
     runs-on: ubuntu-24.04
