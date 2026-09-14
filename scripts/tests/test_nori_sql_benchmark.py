@@ -325,6 +325,21 @@ class NoriSQLBenchmarkTest(unittest.TestCase):
             self.assertTrue(result["allocation_and_rows_passed"])
             self.assertTrue(result["timing_compared"])
 
+    def test_negative_retention_requires_no_growth_instead_of_freeing_seed_allocations(self):
+        for wasm in (False, True):
+            for key in ("count_retained", "bytes_retained"):
+                for value in (-1, 0, 1):
+                    report, limits = fixture(wasm)
+                    row = report["measurements"][0]
+                    self.assertLess(limits["allocation_ceilings"][benchmark.target_key(report)][row["name"]][key], 0)
+                    row["allocation"][key] = value
+                    with self.subTest(wasm=wasm, counter=key, retained=value):
+                        if value > 0:
+                            with self.assertRaisesRegex(RuntimeError, "allocation regression"):
+                                benchmark.check(report, limits)
+                        else:
+                            self.assertTrue(benchmark.check(report, limits)["allocation_and_rows_passed"])
+
     def test_missing_providers_sessions_and_sampling_fail(self):
         for change in ("provider", "session", "duplicate", "samples", "verified", "owner", "allowance", "flags"):
             report, _ = fixture()
@@ -366,9 +381,14 @@ class NoriSQLBenchmarkTest(unittest.TestCase):
     def test_unreviewed_targets_and_one_unit_regressions_fail(self):
         report, limits = fixture()
         target = benchmark.target_key(report)
+        row = report["measurements"][0]
+        name = row["name"]
+        for key in ("count_retained", "bytes_retained"):
+            row["allocation"][key] = abs(row["allocation"][key])
+            limits["allocation_ceilings"][target][name][key] = row["allocation"][key]
+        self.assertTrue(benchmark.check(report, limits)["allocation_and_rows_passed"])
         for key in benchmark.common.ALLOCATION_KEYS:
             changed = copy.deepcopy(limits)
-            name = report["measurements"][0]["name"]
             changed["allocation_ceilings"][target][name][key] -= 1
             with self.subTest(key=key), self.assertRaisesRegex(RuntimeError, "allocation regression"):
                 benchmark.check(report, changed)

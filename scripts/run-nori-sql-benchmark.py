@@ -295,6 +295,10 @@ def check(report: dict, limits: dict, baseline: dict | None = None) -> dict:
             ceiling = ceilings[name][key]
             if type(ceiling) is not int:
                 raise RuntimeError(f"invalid SQL allocation ceiling: {name}/{key}")
+            # Signed retention includes freed seed allocations. Require no net
+            # growth when calibration retained nothing, not identical disposal.
+            if key in ("count_retained", "bytes_retained"):
+                ceiling = max(0, ceiling)
             if value > ceiling:
                 raise RuntimeError(f"SQL allocation regression: {name}/{key}: {value} > {ceiling}")
     maximum = limits["timing_max_ratio"]
