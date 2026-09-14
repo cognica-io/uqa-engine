@@ -48,6 +48,20 @@ pub(crate) enum PreparedCommonFilter<'a> {
 impl TokenFilter {
     pub(crate) fn prepare(&self) -> AnalysisResult<PreparedTokenFilter<'_>> {
         let filter = match self {
+            #[cfg(feature = "kuromoji")]
+            Self::KuromojiBaseForm(_)
+            | Self::KuromojiStem(_)
+            | Self::KuromojiHiraganaUppercase(_)
+            | Self::KuromojiKatakanaUppercase(_)
+            | Self::KuromojiReadingForm(_)
+            | Self::KuromojiNumber(_) => {
+                return Ok(PreparedTokenFilter::Kuromoji(
+                    crate::kuromoji::pipeline::prepare_filter(
+                        self,
+                        &crate::kuromoji::KuromojiResources::default(),
+                    )?,
+                ));
+            }
             #[cfg(feature = "nori")]
             Self::NoriPartOfSpeech(_) | Self::NoriReadingForm(_) | Self::NoriNumber(_) => {
                 return Ok(PreparedTokenFilter::Nori(
@@ -64,10 +78,10 @@ impl TokenFilter {
                 #[cfg(not(feature = "nori"))]
                 config.unicode_profile.validate_features()?;
                 #[cfg(feature = "kuromoji")]
-                if let Some(dictionary) = config.unicode_profile.kuromoji_dictionary() {
+                if config.unicode_profile.kuromoji_dictionary().is_some() {
                     return Ok(PreparedTokenFilter::Kuromoji(
                         crate::kuromoji::pipeline::prepare_filter(
-                            dictionary,
+                            self,
                             &crate::kuromoji::KuromojiResources::default(),
                         )?,
                     ));

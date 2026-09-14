@@ -52,7 +52,7 @@ mod config;
 pub use completion::{
     romanize_completion_utf16, romanize_completion_utf16_budgeted, CompletionMode,
 };
-pub use config::KuromojiTokenizerConfig;
+pub use config::{KuromojiReadingFormConfig, KuromojiStemConfig, KuromojiTokenizerConfig};
 mod dictionary;
 mod error;
 pub(crate) mod filters;

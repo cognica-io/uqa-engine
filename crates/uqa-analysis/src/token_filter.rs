@@ -25,12 +25,36 @@ mod unicode;
 pub(crate) use compiled::PreparedTokenFilter;
 use synonyms::parse_synonym_body;
 pub(crate) use synonyms::parse_synonym_body_bounded;
+
+/// Parameterless language stages reject unknown properties in their tagged JSON configuration.
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmptyFilterConfig {}
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
 pub use unicode::{SimpleLowercaseConfig, UnicodeProfileSource};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TokenFilter {
+    #[cfg(feature = "kuromoji")]
+    #[serde(rename = "kuromoji_baseform")]
+    KuromojiBaseForm(EmptyFilterConfig),
+    #[cfg(feature = "kuromoji")]
+    #[serde(rename = "kuromoji_stemmer")]
+    KuromojiStem(crate::kuromoji::KuromojiStemConfig),
+    #[cfg(feature = "kuromoji")]
+    #[serde(rename = "kuromoji_hiragana_uppercase")]
+    KuromojiHiraganaUppercase(EmptyFilterConfig),
+    #[cfg(feature = "kuromoji")]
+    #[serde(rename = "kuromoji_katakana_uppercase")]
+    KuromojiKatakanaUppercase(EmptyFilterConfig),
+    #[cfg(feature = "kuromoji")]
+    #[serde(rename = "kuromoji_readingform")]
+    KuromojiReadingForm(crate::kuromoji::KuromojiReadingFormConfig),
+    #[cfg(feature = "kuromoji")]
+    #[serde(rename = "kuromoji_number")]
+    KuromojiNumber(EmptyFilterConfig),
     #[cfg(feature = "nori")]
     #[serde(rename = "nori_part_of_speech")]
     NoriPartOfSpeech(crate::nori::NoriPOSConfig),
@@ -105,6 +129,8 @@ impl TokenFilter {
     /// deletion, permission changes, and edits.
     pub fn validate(&self) -> AnalysisResult<()> {
         match self {
+            #[cfg(feature = "kuromoji")]
+            TokenFilter::KuromojiStem(_) => self.prepare().map(|_| ()),
             #[cfg(any(feature = "nori", feature = "kuromoji"))]
             TokenFilter::UnicodeSimpleLowercase(_) => self.prepare().map(|_| ()),
             TokenFilter::Synonym {

@@ -99,6 +99,7 @@ N-gram bounds require `min_gram > 0` and `max_gram >= min_gram`. A pattern token
 | --- | --- | --- |
 | `lowercase` | None | Applies Unicode lowercase conversion |
 | `unicode_simple_lowercase` | Optional legacy Nori string `unicode_profile`, or an explicit provider/dictionary object | Applies the pinned Java simple mapping from that profile; see [profile selection](#simple-lowercase-profile-selection) |
+| Japanese base form, stem, kana, reading and number filters | See [Japanese filters in compiled pipelines](#japanese-filters-in-compiled-pipelines) | Reuses Japanese token attributes or term rules without loading a dictionary |
 | `stop` | Optional `language`, optional `custom_words` | Removes built-in English stop words plus exact custom words; the default language is `english` |
 | `porter_stem` | None | Applies the built-in Porter stemmer |
 | `ascii_folding` | None | Uses Unicode decomposition to fold characters with ASCII equivalents and preserves characters without one |
@@ -804,7 +805,24 @@ let restored = AnalyzerResources::new(AnalyzerLimits::default())
 assert_eq!(restored.analyze_tokens("東京大学")?, compiled.analyze_tokens("東京大学")?);
 ```
 
-The native bridge retains all Japanese attributes, raw token terms, token graphs, terminal state and corrected source spans. Both compiled and uncompiled analyzer chains defer user-attribute failures until a filter actually accesses the field or the completed stream is returned; a later generic stop filter can remove an otherwise invalid token. Standalone tokenizer and token-filter calls still validate their public output. Compiled Japanese tokenizers default to overlap-discounted field lengths. Linear term/position adapters reject them because they require immutable revisions and complete occurrence storage. Native/common memory ownership and every-callback cancellation are tested after HTML/width edits and N-best graph expansion. This is unreleased analysis support. The common simple-lowercase filter now accepts an explicit Japanese profile; the other Japanese token-filter configurations, built-ins and full provider/SQL/binding delivery remain in progress.
+The native bridge retains all Japanese attributes, raw token terms, token graphs, terminal state and corrected source spans. Both compiled and uncompiled analyzer chains defer user-attribute failures until a filter actually accesses the field or the completed stream is returned; a later generic stop filter can remove an otherwise invalid token. Standalone tokenizer and token-filter calls still validate their public output. Compiled Japanese tokenizers default to overlap-discounted field lengths. Linear term/position adapters reject them because they require immutable revisions and complete occurrence storage. Native/common memory ownership and every-callback cancellation are tested after HTML/width edits and N-best graph expansion. This is unreleased analysis support. The common simple-lowercase filter accepts an explicit Japanese profile, and the six dictionary-independent filters below also compile and restore. Japanese POS/word-stop/completion configuration, built-ins and full provider/SQL/binding delivery remain in progress.
+
+### Japanese filters in compiled pipelines
+
+With `uqa-analysis/kuromoji`, the common `TokenFilter` configuration accepts the following stages independently of the tokenizer. These filters need no dictionary lookup or retained model. They compile and restore even when the language resource resolver cannot provide any dictionary, and they retain the native filter's source, graph, keyword and attribute rules.
+
+| JSON type | Settings and defaults | Native implementation |
+| --- | --- | --- |
+| `kuromoji_baseform` | None | `JapaneseFilter::BaseForm` |
+| `kuromoji_stemmer` | `minimum_length: 4`; values below one fail validation | `JapaneseFilter::KatakanaStem` |
+| `kuromoji_hiragana_uppercase` | None | `JapaneseFilter::HiraganaUppercase` |
+| `kuromoji_katakana_uppercase` | None | `JapaneseFilter::KatakanaUppercase` |
+| `kuromoji_readingform` | `use_romaji: false` | `JapaneseFilter::ReadingForm` |
+| `kuromoji_number` | None | `JapaneseFilter::Number` |
+
+All six configurations reject unknown fields, including unused dictionary properties. Compiled descriptors make stem and reading defaults explicit. The Rust configurations are `kuromoji::KuromojiStemConfig`, `kuromoji::KuromojiReadingFormConfig` and the common `EmptyFilterConfig`; Nori's existing empty-config import remains a re-export. A Japanese tokenizer may still require its own dictionary, while these filters use the attributes already carried by tokens. Bare term lists and generic tokenizer output also work according to the native missing-attribute rules. The compiled resource owner retains prepared filters by stage index, and runtime mutation shares the caller's byte allowance and cancellation callback.
+
+The profiled simple-lowercase stage is described [above](#simple-lowercase-profile-selection). Japanese POS stops, word stops and completion remain available through native `JapaneseFilter`, with their common configuration and the two built-ins still in progress. These are unreleased analysis APIs; full provider/SQL/binding delivery remains separate.
 
 ### Japanese tokens in the common representation
 
@@ -886,7 +904,7 @@ The example runs as a doctest. `with_filters(model, user, options, filters)` com
 | `Completion { mode }` | Default `index` emits the original surface followed by ordered romanized alternatives. `query` also joins adjacent kana and recovers a following lowercase IME suffix. Width conversion must precede this filter. Generated tokens have increments 1/0, position length 1, keyword false, no dictionary origin and no morphology; source spans cover the joined input. |
 | `SimpleLowercase` | Apply the selected Java simple mapping, preserving raw unpaired UTF-16 units. Keyword marks do not disable lowercasing. |
 
-`JapaneseFilter` serializes with the respective tags `kuromoji_baseform`, `kuromoji_part_of_speech`, `kuromoji_stop`, `kuromoji_stemmer`, `kuromoji_hiragana_uppercase`, `kuromoji_katakana_uppercase`, `kuromoji_readingform`, `kuromoji_number` and `unicode_simple_lowercase`. Standalone deserialization rejects unknown properties; omitted stop-case and stem settings resolve to `true` and `4`, while `use_romaji` defaults to `false`. These tags describe standalone Rust filter configuration. Common `unicode_simple_lowercase` additionally carries the explicit profile described above; the other Japanese token-filter tags are not yet part of the common `TokenFilter` configuration.
+`JapaneseFilter` serializes with the respective tags `kuromoji_baseform`, `kuromoji_part_of_speech`, `kuromoji_stop`, `kuromoji_stemmer`, `kuromoji_hiragana_uppercase`, `kuromoji_katakana_uppercase`, `kuromoji_readingform`, `kuromoji_number` and `unicode_simple_lowercase`. Standalone deserialization rejects unknown properties; omitted stop-case and stem settings resolve to `true` and `4`, while `use_romaji` defaults to `false`. These tags describe standalone Rust filter configuration. The six dictionary-independent stages also use these tags in common `TokenFilter` configuration, while common `unicode_simple_lowercase` additionally carries an explicit profile. Japanese POS/word-stop/completion common configuration remains in progress.
 
 Each filter provides `apply`/`apply_controlled` for `KuromojiOutput` and `filter_analyzed`/`filter_analyzed_controlled` for `AnalyzedText`. Its `apply_budgeted` and `filter_analyzed_budgeted` forms take `(input, model, limits, poll)` and retain the input allowance through lookup preparation and mutation. Both representations share one algorithm. Removed tokens preserve skipped increments, trailing holes and opaque exhaustion attributes. Term-only transformations preserve independent morphology and graph fields. Number composition takes the keyword, position increment/length and all six morphology attributes from its lookahead or terminal state, as Lucene does; it replaces only the term and covering source span. A stacked lookahead aborts composition and preserves replay state, including any accumulated numeric prefix. Whitespace gaps and later keyword marks do not end an eligible numeric run.
 

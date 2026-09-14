@@ -159,7 +159,9 @@ impl JapaneseAnalyzer {
         output.reserve(filters.len())?;
         let mut memory = budget.empty_reservation();
         for filter in filters {
-            let (filter, allocation) = filter.compile(&model, limits, budget, poll)?.into_parts();
+            let (filter, allocation) = filter
+                .compile(Some(&model), limits, budget, poll)?
+                .into_parts();
             output.push(filter)?;
             memory.absorb(allocation);
         }
@@ -213,7 +215,7 @@ impl JapaneseAnalyzer {
             .tokenizer
             .tokenize_mapped_for_filters_budgeted(&input, limits, budget, poll)?;
         for filter in self.filters.iter() {
-            output = filter.filter_analyzed_budgeted(output, &self.model, limits, poll)?;
+            output = filter.filter_analyzed_budgeted(output, Some(&self.model), limits, poll)?;
         }
         output.validate_japanese_attributes(poll)?;
         poll()?;

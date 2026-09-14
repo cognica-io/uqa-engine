@@ -2,7 +2,7 @@
 
 Analyzer behavior crosses analysis, storage, engine catalog, SQL execution, and retrieval operator boundaries. This chapter identifies the owning representations and the invariants required to keep indexed and queried vocabularies compatible.
 
-Common simple-lowercase configuration belongs to `uqa-analysis::token_filter`; explicit profiles use the same typed provider/dictionary representation as normalization, while legacy strings retain Nori semantics. The Japanese pipeline resolves and prepares filters before analyzer cache publication and retains immutable handles by stage index. Execution delegates to the existing Japanese native/common filter owner. No language wrapper depends on another language wrapper.
+Common simple-lowercase configuration belongs to `uqa-analysis::token_filter`; explicit profiles use the same typed provider/dictionary representation as normalization, while legacy strings retain Nori semantics. The Japanese pipeline resolves and prepares filters before analyzer cache publication and retains immutable handles by stage index. Execution delegates to the existing Japanese native/common filter owner. No language wrapper depends on another language wrapper. Japanese base-form, stem, small-kana, reading and number stages prepare and execute without a retained model. The same private filter interface requires a model only for omitted stop defaults, Unicode mapping or completion; the native public APIs keep their existing model arguments. Shared empty filter configuration preserves the old Nori JSON and import path.
 
 ## Ownership map
 

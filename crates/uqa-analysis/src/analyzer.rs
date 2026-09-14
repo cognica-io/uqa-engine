@@ -59,10 +59,10 @@ impl Analyzer {
         #[cfg(feature = "kuromoji")]
         {
             matches!(self.tokenizer, Tokenizer::Kuromoji(_))
-                || self.token_filters.iter().any(|filter| {
-                    matches!(filter, TokenFilter::UnicodeSimpleLowercase(config)
-                        if config.unicode_profile.kuromoji_dictionary().is_some())
-                })
+                || self
+                    .token_filters
+                    .iter()
+                    .any(|filter| crate::kuromoji::pipeline::japanese_filter(filter).is_some())
         }
         #[cfg(not(feature = "kuromoji"))]
         {

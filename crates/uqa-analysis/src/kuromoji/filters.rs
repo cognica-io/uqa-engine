@@ -93,7 +93,7 @@ enum FilterConfig {
 fn default_ignore_case() -> bool {
     true
 }
-fn default_stem_length() -> i32 {
+pub(super) fn default_stem_length() -> i32 {
     4
 }
 impl<'de> Deserialize<'de> for JapaneseFilter {
@@ -129,7 +129,7 @@ pub(super) enum CompiledFilter {
 impl JapaneseFilter {
     pub(super) fn compile(
         &self,
-        model: &KuromojiDictionary,
+        model: Option<&KuromojiDictionary>,
         limits: KuromojiLimits,
         budget: &MemoryBudget,
         poll: &mut dyn FnMut() -> AnalysisResult<()>,
@@ -138,12 +138,18 @@ impl JapaneseFilter {
         let mut memory = budget.empty_reservation();
         let value = match self {
             Self::BaseForm => CompiledFilter::BaseForm,
-            Self::SimpleLowercase => CompiledFilter::SimpleLowercase,
+            Self::SimpleLowercase => {
+                dictionary(model)?;
+                CompiledFilter::SimpleLowercase
+            }
             Self::HiraganaUppercase => CompiledFilter::SmallKana(Kana::Hiragana),
             Self::KatakanaUppercase => CompiledFilter::SmallKana(Kana::Katakana),
             Self::ReadingForm { use_romaji } => CompiledFilter::ReadingForm(*use_romaji),
             Self::Number => CompiledFilter::Number,
-            Self::Completion { mode } => CompiledFilter::Completion(*mode),
+            Self::Completion { mode } => {
+                dictionary(model)?;
+                CompiledFilter::Completion(*mode)
+            }
             Self::KatakanaStem { minimum_length } => {
                 if *minimum_length < 1 {
                     return Err(super::error::invalid(
@@ -155,32 +161,26 @@ impl JapaneseFilter {
                 CompiledFilter::KatakanaStem(*minimum_length as usize)
             }
             Self::PartOfSpeech { stop_tags } => {
-                let (words, allocation) = PreparedWords::new(
-                    stop_tags
-                        .as_deref()
-                        .unwrap_or_else(|| model.default_stop_tags()),
-                    false,
-                    model,
-                    limits,
-                    budget,
-                    poll,
-                )?
-                .into_parts();
+                let words = match stop_tags.as_deref() {
+                    Some(words) => words,
+                    None => dictionary(model)?.default_stop_tags(),
+                };
+                let (words, allocation) =
+                    PreparedWords::new(words, false, model, limits, budget, poll)?.into_parts();
                 memory.absorb(allocation);
                 CompiledFilter::PartOfSpeech(words)
             }
             Self::Stop { words, ignore_case } => {
-                let (words, allocation) = PreparedWords::new(
-                    words
-                        .as_deref()
-                        .unwrap_or_else(|| model.default_stop_words()),
-                    *ignore_case,
-                    model,
-                    limits,
-                    budget,
-                    poll,
-                )?
-                .into_parts();
+                if *ignore_case {
+                    dictionary(model)?;
+                }
+                let words = match words.as_deref() {
+                    Some(words) => words,
+                    None => dictionary(model)?.default_stop_words(),
+                };
+                let (words, allocation) =
+                    PreparedWords::new(words, *ignore_case, model, limits, budget, poll)?
+                        .into_parts();
                 memory.absorb(allocation);
                 CompiledFilter::Stop(words, *ignore_case)
             }
@@ -221,7 +221,7 @@ impl JapaneseFilter {
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<Budgeted<KuromojiOutput>> {
         let (input, memory) = input.into_parts();
-        let compiled = self.compile(model, limits, memory.budget(), poll)?;
+        let compiled = self.compile(Some(model), limits, memory.budget(), poll)?;
         let output = compiled.apply_budgeted(Budgeted::new(input, memory), model, limits, poll)?;
         output.validate_attributes(poll)?;
         Ok(output)
@@ -263,9 +263,13 @@ impl JapaneseFilter {
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<Budgeted<AnalyzedText>> {
         let (input, memory) = input.into_parts();
-        let compiled = self.compile(model, limits, memory.budget(), poll)?;
-        let output =
-            compiled.filter_analyzed_budgeted(Budgeted::new(input, memory), model, limits, poll)?;
+        let compiled = self.compile(Some(model), limits, memory.budget(), poll)?;
+        let output = compiled.filter_analyzed_budgeted(
+            Budgeted::new(input, memory),
+            Some(model),
+            limits,
+            poll,
+        )?;
         output.validate_japanese_attributes(poll)?;
         Ok(output)
     }
@@ -282,7 +286,7 @@ impl CompiledFilter {
         let (input, memory) = input.into_parts();
         let stream = AllocatedStream::from_budgeted(Budgeted::new(input.into(), memory));
         let (output, memory) = self
-            .apply_owned(stream, model, limits, poll)?
+            .apply_owned(stream, Some(model), limits, poll)?
             .into_budgeted()
             .into_parts();
         Ok(Budgeted::new(output.into(), memory))
@@ -291,7 +295,7 @@ impl CompiledFilter {
     pub(super) fn filter_analyzed_budgeted(
         &self,
         input: Budgeted<AnalyzedText>,
-        model: &KuromojiDictionary,
+        model: Option<&KuromojiDictionary>,
         limits: KuromojiLimits,
         poll: &mut dyn FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<Budgeted<AnalyzedText>> {
@@ -328,6 +332,12 @@ impl CompiledFilter {
         poll()?;
         Ok(output)
     }
+}
+
+fn dictionary(model: Option<&KuromojiDictionary>) -> AnalysisResult<&KuromojiDictionary> {
+    model.ok_or(crate::AnalysisError::Descriptor(
+        "Japanese filter requires a dictionary profile",
+    ))
 }
 
 #[cfg(test)]

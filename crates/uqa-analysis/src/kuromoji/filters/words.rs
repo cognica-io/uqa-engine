@@ -26,7 +26,7 @@ impl PreparedWords {
     pub fn new(
         words: &[String],
         ignore_case: bool,
-        model: &KuromojiDictionary,
+        model: Option<&KuromojiDictionary>,
         limits: KuromojiLimits,
         budget: &MemoryBudget,
         poll: &mut dyn FnMut() -> AnalysisResult<()>,
@@ -57,7 +57,7 @@ impl PreparedWords {
             let (mut value, allocation) =
                 crate::allocation::input::encode(word, budget, poll, |_| Ok(()))?.into_parts();
             if ignore_case {
-                lowercase(&mut value, model, &mut Work::new(poll)?)?;
+                lowercase(&mut value, super::dictionary(model)?, &mut Work::new(poll)?)?;
             }
             output.push(value)?;
             memory.absorb(allocation);

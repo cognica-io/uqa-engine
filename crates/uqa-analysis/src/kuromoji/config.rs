@@ -4,11 +4,31 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Strict Japanese tokenizer inputs resolve examples once against the selected immutable model.
+//! Strict Japanese pipeline inputs preserve native defaults and resource ownership.
 
 use serde::{Deserialize, Serialize};
 
 use super::{KuromojiMode, KuromojiOptions, DEFAULT_KUROMOJI_DICTIONARY};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct KuromojiStemConfig {
+    pub minimum_length: i32,
+}
+
+impl Default for KuromojiStemConfig {
+    fn default() -> Self {
+        Self {
+            minimum_length: super::filters::default_stem_length(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct KuromojiReadingFormConfig {
+    pub use_romaji: bool,
+}
 
 /// Japanese tokenizer inputs for a common pipeline without implicit filters or normalization.
 ///

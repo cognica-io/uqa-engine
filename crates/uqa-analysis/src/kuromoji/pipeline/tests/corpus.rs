@@ -10,65 +10,104 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 #[test]
-fn compiled_japanese_lowercase_matches_pinned_native_and_n_best_streams() {
-    let cases: Vec<Value> = serde_json::from_str(include_str!(
-        "../../../../../../tests/parity/kuromoji/filter_cases.json"
-    ))
-    .unwrap();
-    let expected = include_str!("../../../../../../tests/parity/kuromoji/filter_expected.jsonl");
-    let mut verified = 0;
-    for (case, expected) in cases.iter().zip(expected.lines()) {
-        if !matches!(case["kind"].as_str(), Some("native" | "pipeline"))
-            || case["filters"] != json!([{"type": "unicode_simple_lowercase"}])
-        {
-            continue;
-        }
-        let expected: Value = serde_json::from_str(expected).unwrap();
-        assert_eq!(case["id"], expected["id"]);
-        let dictionary = format!("sha256:{}", uqa_kuromoji_data::BUNDLE_SHA256);
-        let config = Analyzer::new(
-            Tokenizer::Kuromoji(KuromojiTokenizerConfig {
-                dictionary: dictionary.clone(),
-                discard_compound_token: case["discard_compound_token"].as_bool().unwrap_or(true),
-                n_best_cost: case["n_best_cost"]
-                    .as_i64()
-                    .unwrap_or(0)
-                    .try_into()
+fn compiled_japanese_filters_match_pinned_native_number_and_n_best_streams() {
+    for (cases, expected, eligible) in [
+        (
+            include_str!("../../../../../../tests/parity/kuromoji/filter_cases.json"),
+            include_str!("../../../../../../tests/parity/kuromoji/filter_expected.jsonl"),
+            30,
+        ),
+        (
+            include_str!("../../../../../../tests/parity/kuromoji/number_cases.json"),
+            include_str!("../../../../../../tests/parity/kuromoji/number_expected.jsonl"),
+            11,
+        ),
+    ] {
+        let cases: Vec<Value> = serde_json::from_str(cases).unwrap();
+        assert_eq!(cases.len(), expected.lines().count());
+        let mut verified = 0;
+        for (case, expected) in cases.iter().zip(expected.lines()) {
+            if !matches!(case["kind"].as_str(), Some("native" | "pipeline")) {
+                continue;
+            }
+            let mut filters = case["filters"].as_array().unwrap().clone();
+            if !filters.iter().all(|filter| {
+                matches!(
+                    filter["type"].as_str(),
+                    Some(
+                        "unicode_simple_lowercase"
+                            | "kuromoji_baseform"
+                            | "kuromoji_stemmer"
+                            | "kuromoji_hiragana_uppercase"
+                            | "kuromoji_katakana_uppercase"
+                            | "kuromoji_readingform"
+                            | "kuromoji_number"
+                    )
+                )
+            }) {
+                continue;
+            }
+            let expected: Value = serde_json::from_str(expected).unwrap();
+            assert_eq!(case["id"], expected["id"]);
+            let dictionary = format!("sha256:{}", uqa_kuromoji_data::BUNDLE_SHA256);
+            for filter in &mut filters {
+                if filter["type"] == "unicode_simple_lowercase" {
+                    filter["unicode_profile"] =
+                        json!({"provider": "kuromoji", "dictionary": dictionary});
+                }
+            }
+            let config = Analyzer::new(
+                Tokenizer::Kuromoji(KuromojiTokenizerConfig {
+                    dictionary,
+                    mode: serde_json::from_value(
+                        case.get("mode").cloned().unwrap_or(json!("search")),
+                    )
                     .unwrap(),
-                ..Default::default()
-            }),
-            vec![crate::TokenFilter::UnicodeSimpleLowercase(
-                crate::SimpleLowercaseConfig {
-                    unicode_profile: UnicodeProfile::Kuromoji { dictionary }.into(),
+                    user_dictionary: case["user_dictionary"].as_str().map(str::to_owned),
+                    discard_punctuation: case["discard_punctuation"].as_bool().unwrap_or(true),
+                    discard_compound_token: case["discard_compound_token"]
+                        .as_bool()
+                        .unwrap_or(true),
+                    n_best_cost: case["n_best_cost"]
+                        .as_i64()
+                        .unwrap_or(0)
+                        .try_into()
+                        .unwrap(),
+                    ..Default::default()
+                }),
+                serde_json::from_value(json!(filters)).unwrap(),
+                if case["kind"] == "pipeline" {
+                    vec![crate::CharFilter::CJKWidth]
+                } else {
+                    Vec::new()
                 },
-            )],
-            if case["kind"] == "pipeline" {
-                vec![crate::CharFilter::CJKWidth]
-            } else {
-                Vec::new()
-            },
-        );
-        let input = case["input"].as_str().unwrap();
-        let compiled = config.compile().unwrap();
-        let restored = AnalyzerResources::new(AnalyzerLimits::default())
-            .restore_json(compiled.descriptor().canonical_json())
-            .unwrap();
-        for output in [
-            config.analyze_tokens(input),
-            compiled.analyze_tokens(input),
-            restored.analyze_tokens(input),
-        ] {
-            let actual = common_raw(&output.unwrap());
-            assert_eq!(
-                format!("{:x}", Sha256::digest(serde_json::to_vec(&actual).unwrap())),
-                expected["sha256"],
-                "{}",
-                case["id"]
             );
+            let input = case["input"].as_str().unwrap();
+            let compiled = config.compile().unwrap();
+            let restored = AnalyzerResources::new(AnalyzerLimits::default())
+                .restore_json(compiled.descriptor().canonical_json())
+                .unwrap();
+            for output in [
+                config.analyze_tokens(input),
+                compiled.analyze_tokens(input),
+                restored.analyze_tokens(input),
+            ] {
+                if expected.get("error").is_some() {
+                    assert!(output.is_err(), "{}", case["id"]);
+                    continue;
+                }
+                let actual = common_raw(&output.unwrap());
+                assert_eq!(
+                    format!("{:x}", Sha256::digest(serde_json::to_vec(&actual).unwrap())),
+                    expected["sha256"],
+                    "{}",
+                    case["id"]
+                );
+            }
+            verified += 1;
         }
-        verified += 1;
+        assert_eq!(verified, eligible);
     }
-    assert_eq!(verified, 7);
 }
 
 #[test]

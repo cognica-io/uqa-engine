@@ -16,7 +16,7 @@ impl CompiledFilter {
     pub(super) fn apply_owned<T: JapaneseToken>(
         &self,
         mut input: AllocatedStream<T>,
-        model: &KuromojiDictionary,
+        model: Option<&KuromojiDictionary>,
         limits: KuromojiLimits,
         poll: &mut dyn FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<AllocatedStream<T>> {
@@ -24,7 +24,13 @@ impl CompiledFilter {
             return super::super::number::filter(input, limits, poll);
         }
         if let Self::Completion(mode) = self {
-            return super::super::completion::stream::filter(input, *mode, model, limits, poll);
+            return super::super::completion::stream::filter(
+                input,
+                *mode,
+                super::dictionary(model)?,
+                limits,
+                poll,
+            );
         }
         poll()?;
         check_limit(
@@ -72,7 +78,7 @@ impl CompiledFilter {
     fn map_owned<T: JapaneseToken>(
         &self,
         mut input: AllocatedStream<T>,
-        model: &KuromojiDictionary,
+        model: Option<&KuromojiDictionary>,
         limits: KuromojiLimits,
         poll: &mut dyn FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<(AllocatedStream<T>, usize)> {
@@ -117,7 +123,7 @@ impl CompiledFilter {
                 Self::SimpleLowercase => {
                     units(token, length, output_units, limits, &mut work)?;
                     let mut term = token.copy_term(memory.budget(), &mut work)?;
-                    lowercase(&mut term, model, &mut work)?;
+                    lowercase(&mut term, super::dictionary(model)?, &mut work)?;
                     let (term, allocation) = term.into_parts();
                     token.replace_term(
                         Budgeted::new(term, allocation),
@@ -169,7 +175,7 @@ impl CompiledFilter {
     fn keep<T: JapaneseToken>(
         &self,
         token: &T,
-        model: &KuromojiDictionary,
+        model: Option<&KuromojiDictionary>,
         budget: &uqa_core::memory::MemoryBudget,
         work: &mut Work<'_>,
     ) -> AnalysisResult<bool> {
@@ -186,7 +192,7 @@ impl CompiledFilter {
             Self::Stop(words, ignore_case) => {
                 let mut term = token.copy_term(budget, work)?;
                 if *ignore_case {
-                    lowercase(&mut term, model, work)?;
+                    lowercase(&mut term, super::dictionary(model)?, work)?;
                 }
                 !words.contains(&term, work.poll)?
             }

@@ -43,9 +43,22 @@ impl ResolvedKuromojiPipeline {
             resolved.tokenizer = Some(prepared);
         }
         for filter in &mut config.token_filters {
-            let prepared = if let Some((stage, dictionary)) = japanese_filter_mut(filter) {
-                let profile = load(&mut snapshot, request(dictionary)?, resources)?;
-                *dictionary = format!("sha256:{}", profile.sha256());
+            let prepared = if let Some((stage, dictionary)) = japanese_filter(filter) {
+                let profile = dictionary
+                    .map(|name| load(&mut snapshot, request(name)?, resources))
+                    .transpose()?;
+                if let TokenFilter::UnicodeSimpleLowercase(config) = filter {
+                    *config
+                        .unicode_profile
+                        .kuromoji_dictionary_mut()
+                        .expect("Japanese profile") = format!(
+                        "sha256:{}",
+                        profile
+                            .as_ref()
+                            .expect("resolved Japanese profile")
+                            .sha256()
+                    );
+                }
                 Some(Arc::new(PreparedKuromojiFilter::new(&stage, profile)?))
             } else {
                 None
@@ -69,9 +82,7 @@ impl ResolvedKuromojiPipeline {
         index: usize,
         filter: &TokenFilter,
     ) -> AnalysisResult<Option<Arc<PreparedKuromojiFilter>>> {
-        if !matches!(filter, TokenFilter::UnicodeSimpleLowercase(config)
-            if config.unicode_profile.kuromoji_dictionary().is_some())
-        {
+        if japanese_filter(filter).is_none() {
             return Ok(None);
         }
         self.filters
@@ -84,24 +95,46 @@ impl ResolvedKuromojiPipeline {
     }
 }
 
-fn japanese_filter_mut(filter: &mut TokenFilter) -> Option<(JapaneseFilter, &mut String)> {
+pub(crate) fn japanese_filter(filter: &TokenFilter) -> Option<(JapaneseFilter, Option<&str>)> {
     match filter {
+        TokenFilter::KuromojiBaseForm(_) => Some((JapaneseFilter::BaseForm, None)),
+        TokenFilter::KuromojiStem(config) => Some((
+            JapaneseFilter::KatakanaStem {
+                minimum_length: config.minimum_length,
+            },
+            None,
+        )),
+        TokenFilter::KuromojiHiraganaUppercase(_) => {
+            Some((JapaneseFilter::HiraganaUppercase, None))
+        }
+        TokenFilter::KuromojiKatakanaUppercase(_) => {
+            Some((JapaneseFilter::KatakanaUppercase, None))
+        }
+        TokenFilter::KuromojiReadingForm(config) => Some((
+            JapaneseFilter::ReadingForm {
+                use_romaji: config.use_romaji,
+            },
+            None,
+        )),
+        TokenFilter::KuromojiNumber(_) => Some((JapaneseFilter::Number, None)),
         TokenFilter::UnicodeSimpleLowercase(config) => config
             .unicode_profile
-            .kuromoji_dictionary_mut()
-            .map(|dictionary| (JapaneseFilter::SimpleLowercase, dictionary)),
+            .kuromoji_dictionary()
+            .map(|dictionary| (JapaneseFilter::SimpleLowercase, Some(dictionary))),
         _ => None,
     }
 }
 
 pub(crate) fn prepare_filter(
-    dictionary: &str,
+    filter: &TokenFilter,
     resources: &KuromojiResources,
 ) -> AnalysisResult<Arc<PreparedKuromojiFilter>> {
-    Ok(Arc::new(PreparedKuromojiFilter::new(
-        &JapaneseFilter::SimpleLowercase,
-        resources.load(&request(dictionary)?)?,
-    )?))
+    let (stage, dictionary) =
+        japanese_filter(filter).ok_or(AnalysisError::Descriptor("expected a Japanese filter"))?;
+    let profile = dictionary
+        .map(|name| resources.load(&request(name)?).map_err(AnalysisError::from))
+        .transpose()?;
+    Ok(Arc::new(PreparedKuromojiFilter::new(&stage, profile)?))
 }
 
 pub(crate) fn request(name: &str) -> AnalysisResult<DictionaryRequest> {

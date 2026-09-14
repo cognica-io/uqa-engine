@@ -55,6 +55,6 @@ pub use source::{FilteredText, SourceOffsets, TextCoordinates};
 pub use term::TokenTerm;
 pub use token::{AnalysisToken, AnalyzedText};
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
-pub use token_filter::{SimpleLowercaseConfig, UnicodeProfileSource};
+pub use token_filter::{EmptyFilterConfig, SimpleLowercaseConfig, UnicodeProfileSource};
 pub use token_filter::{SynonymFileError, TokenFilter};
 pub use tokenizer::Tokenizer;

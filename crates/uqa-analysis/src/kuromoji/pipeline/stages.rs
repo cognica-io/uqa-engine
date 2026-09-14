@@ -15,16 +15,16 @@ use crate::{token::TokenBatch, AnalysisResult, AnalyzedText, FilteredText};
 #[derive(Debug)]
 pub(crate) struct PreparedKuromojiFilter {
     filter: Budgeted<CompiledFilter>,
-    profile: Arc<ResolvedDictionary>,
+    profile: Option<Arc<ResolvedDictionary>>,
 }
 
 impl PreparedKuromojiFilter {
     pub(super) fn new(
         filter: &JapaneseFilter,
-        profile: Arc<ResolvedDictionary>,
+        profile: Option<Arc<ResolvedDictionary>>,
     ) -> AnalysisResult<Self> {
         let filter = filter.compile(
-            profile.model(),
+            profile.as_ref().map(|profile| profile.model().as_ref()),
             KuromojiLimits::default(),
             &MemoryBudget::new(usize::MAX),
             &mut || Ok(()),
@@ -39,7 +39,9 @@ impl PreparedKuromojiFilter {
     ) -> AnalysisResult<Budgeted<AnalyzedText>> {
         self.filter.filter_analyzed_budgeted(
             input,
-            self.profile.model(),
+            self.profile
+                .as_ref()
+                .map(|profile| profile.model().as_ref()),
             KuromojiLimits::default(),
             poll,
         )

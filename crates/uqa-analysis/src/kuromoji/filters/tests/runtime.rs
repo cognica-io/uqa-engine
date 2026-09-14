@@ -6,10 +6,74 @@
 
 use crate::kuromoji::tokenizer::tests::model;
 use crate::kuromoji::{
-    JapaneseAnalyzer, JapaneseFilter, KuromojiLimits, KuromojiMode, KuromojiOptions,
+    CompletionMode, JapaneseAnalyzer, JapaneseFilter, KuromojiLimits, KuromojiMode, KuromojiOptions,
 };
 use crate::{AnalysisError, AnalysisResult};
 use uqa_core::memory::MemoryBudget;
+
+#[test]
+fn prepared_filters_require_models_only_for_defaults_unicode_and_completion() {
+    let model = model();
+    let input = || {
+        crate::Tokenizer::Whitespace
+            .tokenize_with_offsets("二百三 きゃ シャワー UQA")
+            .unwrap()
+    };
+    let budget = MemoryBudget::new(usize::MAX);
+    for filter in [
+        JapaneseFilter::BaseForm,
+        JapaneseFilter::KatakanaStem { minimum_length: 4 },
+        JapaneseFilter::HiraganaUppercase,
+        JapaneseFilter::KatakanaUppercase,
+        JapaneseFilter::ReadingForm { use_romaji: true },
+        JapaneseFilter::Number,
+        JapaneseFilter::PartOfSpeech {
+            stop_tags: Some(vec!["名詞".into()]),
+        },
+        JapaneseFilter::Stop {
+            words: Some(vec!["UQA".into()]),
+            ignore_case: false,
+        },
+    ] {
+        let compiled = filter
+            .compile(None, KuromojiLimits::default(), &budget, &mut || Ok(()))
+            .unwrap();
+        let output = compiled
+            .filter_analyzed_budgeted(
+                input().into_unlimited().unwrap(),
+                None,
+                KuromojiLimits::default(),
+                &mut || Ok(()),
+            )
+            .unwrap();
+        assert_eq!(*output, filter.filter_analyzed(input(), &model).unwrap());
+        drop(compiled);
+        assert_eq!(budget.used(), 0);
+    }
+    for filter in [
+        JapaneseFilter::SimpleLowercase,
+        JapaneseFilter::PartOfSpeech { stop_tags: None },
+        JapaneseFilter::Stop {
+            words: None,
+            ignore_case: false,
+        },
+        JapaneseFilter::Stop {
+            words: Some(Vec::new()),
+            ignore_case: true,
+        },
+        JapaneseFilter::Completion {
+            mode: CompletionMode::default(),
+        },
+    ] {
+        assert!(matches!(
+            filter.compile(None, KuromojiLimits::default(), &budget, &mut || Ok(())),
+            Err(AnalysisError::Descriptor(
+                "Japanese filter requires a dictionary profile"
+            ))
+        ));
+        assert_eq!(budget.used(), 0);
+    }
+}
 
 #[test]
 fn japanese_analysis_and_normalization_unwind_partial_buffers_and_remain_reusable() {

@@ -31,6 +31,9 @@ mod token_filters;
 #[path = "analysis/unicode_lowercase.rs"]
 mod unicode_lowercase;
 
+#[path = "analysis/kuromoji_filters.rs"]
+mod kuromoji_filters;
+
 #[path = "analysis/char_filters.rs"]
 mod char_filters;
 
