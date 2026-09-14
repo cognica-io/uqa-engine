@@ -1,0 +1,5 @@
+# uqa-kuromoji-data
+
+`uqa-kuromoji-data` contains the pinned portable Lucene 10.5.1 Japanese dictionary and its provenance. It exposes immutable bytes from a `no_std` crate with no runtime dependencies, build script, dictionary download or JVM requirement. Validate the bytes through `uqa_analysis::kuromoji::KuromojiDictionary::from_bytes` with the `kuromoji` feature.
+
+The Rust wrapper uses the workspace license. The converted dictionary retains its upstream notices in `THIRD-PARTY/`: complete Lucene LICENSE/NOTICE, original IPADIC COPYING including its unchanged terminal bytes, and the pinned JDK Unicode notice. Conversion changes storage layout and preserves every exported model value. `data/resource_manifest.json` records the exact bundle, model manifest and attribution hashes. The [reference tools](https://github.com/cognica-io/uqa-engine/tree/main/tests/parity/kuromoji) describe source reproduction and complete model verification; the [implementation plan](https://github.com/cognica-io/uqa-engine/blob/main/docs/plans/0007-kuromoji-analyzer.md) tracks tokenization, analyzer integration and binding delivery.

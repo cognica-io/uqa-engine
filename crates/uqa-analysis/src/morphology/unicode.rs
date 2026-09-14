@@ -135,7 +135,7 @@ impl UnicodeTable {
         Ok(())
     }
 
-    #[cfg(any(test, feature = "nori-tools"))]
+    #[cfg(any(test, feature = "nori-tools", feature = "kuromoji-tools"))]
     pub fn encode(&self, output: &mut crate::morphology::io::Writer) -> DictionaryResult<()> {
         output.u32(CODE_POINTS)?;
         output.count(self.ranges.len())?;
@@ -150,7 +150,7 @@ impl UnicodeTable {
     }
 }
 
-#[cfg(any(test, feature = "nori-tools"))]
+#[cfg(any(test, feature = "nori-tools", feature = "kuromoji-tools"))]
 pub(crate) fn read_neutral(
     mut reader: Reader<'_>,
     script_count: usize,

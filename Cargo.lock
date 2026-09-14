@@ -3694,6 +3694,7 @@ dependencies = [
  "thiserror 1.0.69",
  "unicode-normalization",
  "uqa-core",
+ "uqa-kuromoji-data",
  "uqa-nori-data",
 ]
 
@@ -3881,6 +3882,14 @@ dependencies = [
  "uqa-core",
  "uqa-graph",
  "uqa-sql",
+]
+
+[[package]]
+name = "uqa-kuromoji-data"
+version = "0.3.0"
+dependencies = [
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

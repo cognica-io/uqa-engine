@@ -16,6 +16,8 @@ exclude.workspace = true
 default = []
 nori = ["dep:miniz_oxide", "dep:uqa-nori-data"]
 nori-tools = ["nori"]
+kuromoji = ["dep:miniz_oxide", "dep:uqa-kuromoji-data"]
+kuromoji-tools = ["kuromoji"]
 
 [dependencies]
 uqa-core = { workspace = true }
@@ -30,6 +32,7 @@ thiserror = { workspace = true }
 sha2 = { workspace = true }
 miniz_oxide = { workspace = true, optional = true }
 uqa-nori-data = { workspace = true, optional = true }
+uqa-kuromoji-data = { workspace = true, optional = true }
 
 [dev-dependencies]
 allocation-counter = "=0.8.1"
@@ -44,6 +47,10 @@ required-features = ["nori"]
 [[example]]
 name = "pack_nori"
 required-features = ["nori-tools"]
+
+[[example]]
+name = "pack_kuromoji"
+required-features = ["kuromoji-tools"]
 
 [lints]
 workspace = true

@@ -73,7 +73,7 @@ pub(crate) fn word_range(start: u32, count: u32, length: usize) -> DictionaryRes
     Ok(start..end)
 }
 
-#[cfg(any(test, feature = "nori-tools"))]
+#[cfg(any(test, feature = "nori-tools", feature = "kuromoji-tools"))]
 pub(crate) fn encode(
     lexicon: &Lexicon,
     surfaces: &[SurfaceWords],

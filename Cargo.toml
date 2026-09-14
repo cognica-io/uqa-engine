@@ -4,6 +4,7 @@ members = [
     "crates/uqa-core",
     "crates/uqa-analysis",
     "crates/uqa-nori-data",
+    "crates/uqa-kuromoji-data",
     "crates/uqa-storage",
     "crates/uqa-storage-redb",
     "crates/uqa-storage-sqlite",
@@ -56,6 +57,7 @@ exclude = ["/tests", "/benches", "/examples"]
 uqa-core = { version = "0.3.0", path = "crates/uqa-core" }
 uqa-analysis = { version = "0.3.0", path = "crates/uqa-analysis" }
 uqa-nori-data = { version = "0.3.0", path = "crates/uqa-nori-data" }
+uqa-kuromoji-data = { version = "0.3.0", path = "crates/uqa-kuromoji-data" }
 uqa-storage = { version = "0.3.0", path = "crates/uqa-storage" }
 uqa-storage-redb = { version = "0.3.0", path = "crates/uqa-storage-redb" }
 uqa-storage-sqlite = { version = "0.3.0", path = "crates/uqa-storage-sqlite" }

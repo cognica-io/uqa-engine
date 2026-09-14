@@ -49,7 +49,7 @@ impl Matrix {
         })
     }
 
-    #[cfg(any(test, feature = "nori-tools"))]
+    #[cfg(any(test, feature = "nori-tools", feature = "kuromoji-tools"))]
     pub fn encode(&self, output: &mut crate::morphology::io::Writer) -> DictionaryResult<()> {
         output.count(self.forward)?;
         output.count(self.backward)?;

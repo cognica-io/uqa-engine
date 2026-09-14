@@ -22,5 +22,5 @@ pub(crate) mod unicode;
 use error::DictionaryError;
 type DictionaryResult<T> = Result<T, DictionaryError>;
 
-#[cfg(feature = "nori-tools")]
+#[cfg(any(feature = "nori-tools", feature = "kuromoji-tools"))]
 pub(crate) mod neutral;

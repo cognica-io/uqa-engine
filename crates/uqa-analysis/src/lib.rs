@@ -16,7 +16,9 @@ mod cooperative_regex;
 pub mod descriptor;
 pub mod error;
 pub mod highlight;
-#[cfg(feature = "nori")]
+#[cfg(feature = "kuromoji")]
+pub mod kuromoji;
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
 mod morphology;
 #[cfg(feature = "nori")]
 pub mod nori;

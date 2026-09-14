@@ -153,7 +153,7 @@ pub(crate) fn decode(
     Ok((id, sections))
 }
 
-#[cfg(any(test, feature = "nori-tools"))]
+#[cfg(any(test, feature = "nori-tools", feature = "kuromoji-tools"))]
 pub(crate) fn encode(
     format: &Format,
     sections: &[Section],
@@ -221,4 +221,38 @@ pub(crate) fn encode(
         output.bytes(&payload)?;
     }
     Ok(output.0)
+}
+
+pub(crate) fn take_section<T, E>(
+    sections: &mut Vec<Section>,
+    kind: u32,
+    decode: impl FnOnce(&mut Reader<'_>) -> Result<(T, usize), E>,
+) -> Result<T, E>
+where
+    E: From<DictionaryError>,
+{
+    let index = sections
+        .iter()
+        .position(|section| section.kind == kind)
+        .ok_or_else(|| invalid("bundle", "missing section"))?;
+    read_section(sections.remove(index), decode)
+}
+
+pub(crate) fn read_section<T, E>(
+    section: Section,
+    decode: impl FnOnce(&mut Reader<'_>) -> Result<(T, usize), E>,
+) -> Result<T, E>
+where
+    E: From<DictionaryError>,
+{
+    let mut reader = Reader::new(&section.bytes, "dictionary section", false);
+    let (value, count) = decode(&mut reader)?;
+    if count as u64 != section.records {
+        return Err(reader
+            .invalid("directory and decoded record counts differ")
+            .into());
+    }
+    reader.finish()?;
+    drop(section);
+    Ok(value)
 }

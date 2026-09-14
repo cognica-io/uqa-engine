@@ -141,26 +141,9 @@ impl NoriDictionary {
         &'a self,
         text: &'a [u16],
     ) -> impl Iterator<Item = (usize, SurfaceWords)> + 'a {
-        let mut cursor = self.lexicon.cursor();
-        let mut index = 0;
-        let mut ended = false;
-        std::iter::from_fn(move || {
-            if ended {
-                return None;
-            }
-            while let Some(&label) = text.get(index) {
-                index += 1;
-                if cursor.advance(label).is_none() {
-                    ended = true;
-                    return None;
-                }
-                if let Some(rank) = cursor.rank() {
-                    return Some((index, self.surfaces[rank as usize].clone()));
-                }
-            }
-            ended = true;
-            None
-        })
+        self.lexicon
+            .prefixes(text)
+            .map(|(length, rank)| (length, self.surfaces[rank as usize].clone()))
     }
 
     pub fn word(&self, id: u32) -> Option<DictionaryWord<'_>> {
@@ -206,25 +189,12 @@ fn take_section<T>(
     kind: u32,
     decode: impl FnOnce(&mut Reader<'_>) -> DictionaryResult<(T, usize)>,
 ) -> DictionaryResult<T> {
-    let index = sections
-        .iter()
-        .position(|section| section.kind == kind)
-        .ok_or_else(|| invalid("bundle", "missing section"))?;
-    read_section(sections.remove(index), decode)
+    crate::morphology::frame::take_section(sections, kind, decode)
 }
 
 fn read_section<T>(
     section: Section,
     decode: impl FnOnce(&mut Reader<'_>) -> DictionaryResult<(T, usize)>,
 ) -> DictionaryResult<T> {
-    let mut reader = Reader::new(&section.bytes, "dictionary section", false);
-    let (value, count) = decode(&mut reader)?;
-    if count as u64 != section.records {
-        return Err(reader
-            .invalid("directory and decoded record counts differ")
-            .into());
-    }
-    reader.finish()?;
-    drop(section);
-    Ok(value)
+    crate::morphology::frame::read_section(section, decode)
 }

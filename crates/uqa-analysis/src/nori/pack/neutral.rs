@@ -18,7 +18,6 @@ use crate::morphology::unicode::UnicodeTable;
 use crate::nori::dictionary::provenance::Provenance;
 use crate::nori::dictionary::provenance::FILES;
 use crate::nori::dictionary::tables::{Characters, CLASSES};
-use crate::nori::error::check_limit;
 use crate::nori::morphology::{Morpheme, Morphology, WordEntry, ABSENT};
 use crate::nori::{DictionaryLimits, DictionaryResult, POSTag, POSType, SurfaceWords};
 
@@ -48,20 +47,13 @@ struct Metadata {
 
 impl Metadata {
     fn string(&mut self, text: String) -> DictionaryResult<u32> {
-        if let Some(id) = self.interned.get(&text) {
-            return Ok(*id);
-        }
-        check_limit(
-            "dictionary strings",
-            self.value.strings.len() + 1,
+        crate::morphology::strings::intern(
+            &mut self.value.strings,
+            &mut self.interned,
+            text,
             self.limits.max_strings,
-        )?;
-        let id = count32(self.value.strings.len())?;
-        self.interned.try_reserve(1)?;
-        self.value.strings.try_reserve(1)?;
-        self.interned.insert(text.clone(), id);
-        self.value.strings.push(text);
-        Ok(id)
+        )
+        .map_err(Into::into)
     }
 
     fn tag(reader: &mut Reader<'_>) -> DictionaryResult<POSTag> {

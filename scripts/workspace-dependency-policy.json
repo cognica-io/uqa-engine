@@ -36,6 +36,7 @@
     ],
     "uqa-analysis": [
       "uqa-core",
+      "uqa-kuromoji-data",
       "uqa-nori-data"
     ],
     "uqa-api": [
@@ -104,6 +105,7 @@
       "uqa-graph",
       "uqa-sql"
     ],
+    "uqa-kuromoji-data": [],
     "uqa-ml": [
       "uqa-core",
       "uqa-operators",
@@ -190,6 +192,7 @@
       "uqa-fusion",
       "uqa-graph",
       "uqa-joins",
+      "uqa-kuromoji-data",
       "uqa-ml",
       "uqa-nori-data",
       "uqa-operators",
@@ -201,12 +204,14 @@
     "uqa-storage": [
       "uqa-analysis",
       "uqa-core",
+      "uqa-kuromoji-data",
       "uqa-nori-data"
     ],
     "uqa-planner": [
       "uqa-analysis",
       "uqa-core",
       "uqa-fusion",
+      "uqa-kuromoji-data",
       "uqa-nori-data",
       "uqa-operators",
       "uqa-pg-query",
@@ -218,6 +223,7 @@
       "uqa-analysis",
       "uqa-core",
       "uqa-fusion",
+      "uqa-kuromoji-data",
       "uqa-nori-data",
       "uqa-operators",
       "uqa-scoring",

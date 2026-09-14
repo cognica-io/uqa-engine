@@ -133,11 +133,11 @@ pub(crate) fn vector<T>(capacity: usize) -> DictionaryResult<Vec<T>> {
     Ok(values)
 }
 
-#[cfg(any(test, feature = "nori-tools"))]
+#[cfg(any(test, feature = "nori-tools", feature = "kuromoji-tools"))]
 #[derive(Default)]
 pub(crate) struct Writer(pub Vec<u8>);
 
-#[cfg(any(test, feature = "nori-tools"))]
+#[cfg(any(test, feature = "nori-tools", feature = "kuromoji-tools"))]
 impl Writer {
     pub fn bytes(&mut self, bytes: &[u8]) -> DictionaryResult<()> {
         self.0.try_reserve(bytes.len())?;

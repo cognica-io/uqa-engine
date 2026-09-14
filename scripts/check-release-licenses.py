@@ -229,6 +229,15 @@ NORI_FILES = (
     "THIRD-PARTY/MECAB-COPYING.txt",
 )
 
+KUROMOJI_FILES = (
+    "data/kuromoji.uqak",
+    "data/model_manifest.json",
+    "THIRD-PARTY/JDK-UNICODE.md",
+    "THIRD-PARTY/LUCENE-LICENSE.txt",
+    "THIRD-PARTY/LUCENE-NOTICE.txt",
+    "THIRD-PARTY/MECAB-IPADIC-COPYING.txt",
+)
+
 
 LUCENE_FILES = ("THIRD-PARTY/LUCENE-LICENSE.txt", "THIRD-PARTY/LUCENE-NOTICE.txt")
 
@@ -237,23 +246,31 @@ def check_lucene_payloads(read: Callable[[str], bytes]) -> None:
     for relative in LUCENE_FILES:
         expected = (ROOT / "crates/uqa-nori-data" / relative).read_bytes()
         if read(relative) != expected:
-            raise RuntimeError(f"ported Nori code requires the complete pinned {relative}")
+            raise RuntimeError(f"ported Lucene code requires the complete pinned {relative}")
 
 
 def check_nori_payloads(manifest_bytes: bytes, read: Callable[[str], bytes]) -> None:
+    check_dictionary_payloads("Nori", NORI_FILES, manifest_bytes, read)
+
+
+def check_kuromoji_payloads(manifest_bytes: bytes, read: Callable[[str], bytes]) -> None:
+    check_dictionary_payloads("Kuromoji", KUROMOJI_FILES, manifest_bytes, read)
+
+
+def check_dictionary_payloads(language: str, files: tuple[str, ...], manifest_bytes: bytes, read: Callable[[str], bytes]) -> None:
     try:
         manifest = json.loads(manifest_bytes)
-        if manifest["format"] != "uqa-nori-bundled-resource" or manifest["format_version"] != 1:
+        if manifest["format"] != f"uqa-{language.lower()}-bundled-resource" or manifest["format_version"] != 1:
             raise ValueError("unsupported resource manifest")
         entries = manifest["files"]
-        if sorted(entry["path"] for entry in entries) != sorted(NORI_FILES):
+        if sorted(entry["path"] for entry in entries) != sorted(files):
             raise ValueError("incomplete or duplicate resource inventory")
         for entry in entries:
             actual = read(entry["path"])
             if len(actual) != entry["bytes"] or hashlib.sha256(actual).hexdigest() != entry["sha256"]:
                 raise ValueError(f"size or hash differs: {entry['path']}")
     except (OSError, ValueError, KeyError, TypeError) as error:
-        raise RuntimeError(f"invalid Nori resources: {error}") from error
+        raise RuntimeError(f"invalid {language} resources: {error}") from error
 
 
 def check_cargo_sources(payloads: dict[str, bytes]) -> None:
@@ -294,6 +311,11 @@ def check_cargo_sources(payloads: dict[str, bytes]) -> None:
             check_lucene_payloads(lambda relative: (crate_root / relative).read_bytes())
         if name == "uqa-nori-data":
             check_nori_payloads(
+                (crate_root / "data/resource_manifest.json").read_bytes(),
+                lambda relative: (crate_root / relative).read_bytes(),
+            )
+        if name == "uqa-kuromoji-data":
+            check_kuromoji_payloads(
                 (crate_root / "data/resource_manifest.json").read_bytes(),
                 lambda relative: (crate_root / relative).read_bytes(),
             )
@@ -383,26 +405,28 @@ def check_archive(path: pathlib.Path, payloads: dict[str, bytes], require_nori: 
                 raise RuntimeError(f"{path} omits or changes Nori attribution or source-resource identity: {relative}")
     if require_nori:
         check_embedded_nori(path, members)
-    if path.name.startswith(("uqa-analysis-", "uqa-nori-data-")) and path.name.endswith(".crate"):
-        def read_nori(relative: str) -> bytes:
+    if path.name.startswith(("uqa-analysis-", "uqa-nori-data-", "uqa-kuromoji-data-")) and path.name.endswith(".crate"):
+        def read_resource(relative: str) -> bytes:
             matches = matching_members(members, relative)
             if len(matches) != 1:
                 raise RuntimeError(f"{path} requires exactly one {relative}")
             return matches[0][1]
 
         if path.name.startswith("uqa-analysis-"):
-            check_lucene_payloads(read_nori)
+            check_lucene_payloads(read_resource)
             source = "THIRD-PARTY/LUCENE-SOURCE.md"
-            if read_nori(source) != (ROOT / "crates/uqa-analysis" / source).read_bytes():
+            if read_resource(source) != (ROOT / "crates/uqa-analysis" / source).read_bytes():
                 raise RuntimeError(f"{path} contains different Lucene source attribution")
             return
-        manifest = read_nori("data/resource_manifest.json")
-        expected = (ROOT / "crates/uqa-nori-data/data/resource_manifest.json").read_bytes()
+        manifest = read_resource("data/resource_manifest.json")
+        language = "kuromoji" if path.name.startswith("uqa-kuromoji-data-") else "nori"
+        expected = (ROOT / f"crates/uqa-{language}-data/data/resource_manifest.json").read_bytes()
         if manifest != expected:
-            raise RuntimeError(f"{path} contains a different Nori resource manifest")
-        check_nori_payloads(manifest, read_nori)
+            raise RuntimeError(f"{path} contains a different {language} resource manifest")
+        check = check_kuromoji_payloads if language == "kuromoji" else check_nori_payloads
+        check(manifest, read_resource)
         if path.stat().st_size > 10_000_000:
-            raise RuntimeError(f"{path} exceeds the Nori crate's 10 MB archive budget")
+            raise RuntimeError(f"{path} exceeds the {language} crate's 10 MB archive budget")
 
 
 def check_embedded_nori(path: pathlib.Path, members: dict[str, bytes]) -> None:

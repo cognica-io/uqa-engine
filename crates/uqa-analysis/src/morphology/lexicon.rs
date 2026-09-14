@@ -12,7 +12,7 @@ use super::DictionaryResult;
 
 mod builder;
 pub(crate) use builder::Builder;
-#[cfg(any(test, feature = "nori-tools"))]
+#[cfg(any(test, feature = "nori-tools", feature = "kuromoji-tools"))]
 mod entries;
 
 #[derive(Debug)]
@@ -38,7 +38,7 @@ pub(crate) struct Lexicon {
 }
 
 impl Lexicon {
-    #[cfg(any(test, feature = "nori-tools"))]
+    #[cfg(any(test, feature = "nori-tools", feature = "kuromoji-tools"))]
     pub fn entries(&self) -> entries::Entries<'_> {
         entries::Entries::new(self)
     }
@@ -61,6 +61,29 @@ impl Lexicon {
             cursor.advance(label)?;
         }
         cursor.rank()
+    }
+
+    pub fn prefixes<'a>(&'a self, text: &'a [u16]) -> impl Iterator<Item = (usize, u32)> + 'a {
+        let mut cursor = self.cursor();
+        let mut index = 0;
+        let mut ended = false;
+        std::iter::from_fn(move || {
+            if ended {
+                return None;
+            }
+            while let Some(&label) = text.get(index) {
+                index += 1;
+                if cursor.advance(label).is_none() {
+                    ended = true;
+                    return None;
+                }
+                if let Some(rank) = cursor.rank() {
+                    return Some((index, rank));
+                }
+            }
+            ended = true;
+            None
+        })
     }
 
     pub fn decode(reader: &mut Reader<'_>, maximum_word_length: usize) -> DictionaryResult<Self> {
@@ -207,7 +230,7 @@ impl Lexicon {
         Ok(())
     }
 
-    #[cfg(any(test, feature = "nori-tools"))]
+    #[cfg(any(test, feature = "nori-tools", feature = "kuromoji-tools"))]
     pub fn encode(&self, output: &mut super::io::Writer) -> DictionaryResult<()> {
         output.u32(self.root)?;
         output.count(self.nodes.len())?;
