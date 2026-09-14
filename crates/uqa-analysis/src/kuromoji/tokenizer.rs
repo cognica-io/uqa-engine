@@ -72,6 +72,8 @@ pub struct KuromojiLimits {
     pub max_filter_entries: usize,
     /// Maximum UTF-16 units in each prepared lookup set.
     pub max_filter_utf16: usize,
+    /// Cumulative completion lookup, counting and emission work per call.
+    pub max_completion_work: usize,
 }
 
 impl Default for KuromojiLimits {
@@ -89,6 +91,7 @@ impl Default for KuromojiLimits {
             max_n_best_examples: 1024,
             max_filter_entries: 65536,
             max_filter_utf16: 16 * 1024 * 1024,
+            max_completion_work: 16_000_000,
         }
     }
 }

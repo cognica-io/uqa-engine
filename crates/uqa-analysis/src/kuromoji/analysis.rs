@@ -8,6 +8,7 @@
 
 use super::{DictionaryLimits, DictionaryResult};
 use crate::morphology::io::{vector, Reader};
+use crate::morphology::lexicon::{Builder, Lexicon};
 
 #[derive(Debug)]
 pub struct CompletionMapping {
@@ -29,6 +30,7 @@ pub(super) struct AnalysisData {
     pub stop_words: Vec<String>,
     pub stop_tags: Vec<String>,
     pub completion: Vec<CompletionMapping>,
+    pub completion_lexicon: Lexicon,
 }
 
 fn validate_order<'a>(values: impl IntoIterator<Item = &'a str>) -> DictionaryResult<()> {
@@ -78,20 +80,39 @@ impl AnalysisData {
             let alternatives =
                 crate::morphology::strings::decode(reader, remaining, limits.max_text_utf16)?;
             remaining -= alternatives.len();
-            if alternatives.is_empty() || alternatives.iter().any(String::is_empty) {
-                return Err(reader
-                    .invalid("completion mapping has no nonempty alternatives")
-                    .into());
-            }
             completion.push(CompletionMapping { key, alternatives });
         }
+        Self::new(stop_words, stop_tags, completion, limits.max_text_utf16)
+    }
+
+    pub fn new(
+        stop_words: Vec<String>,
+        stop_tags: Vec<String>,
+        completion: Vec<CompletionMapping>,
+        maximum_key_length: usize,
+    ) -> DictionaryResult<Self> {
         validate_order(stop_words.iter().map(String::as_str))?;
         validate_order(stop_tags.iter().map(String::as_str))?;
         validate_order(completion.iter().map(|mapping| mapping.key.as_str()))?;
+        let mut builder = Builder::new();
+        for mapping in &completion {
+            if mapping.alternatives.is_empty() || mapping.alternatives.iter().any(String::is_empty)
+            {
+                return Err(super::error::invalid(
+                    "analysis resources",
+                    "completion mapping has no nonempty alternatives",
+                ));
+            }
+            let mut key = vector(mapping.key.encode_utf16().count())?;
+            key.extend(mapping.key.encode_utf16());
+            builder.insert(key)?;
+        }
+        let completion_lexicon = builder.finish(maximum_key_length)?;
         Ok(Self {
             stop_words,
             stop_tags,
             completion,
+            completion_lexicon,
         })
     }
 

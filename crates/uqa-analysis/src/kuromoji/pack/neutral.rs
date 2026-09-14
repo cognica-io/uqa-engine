@@ -258,11 +258,7 @@ fn read_analysis(
         });
     }
     reader.finish()?;
-    Ok(AnalysisData {
-        stop_words,
-        stop_tags,
-        completion,
-    })
+    AnalysisData::new(stop_words, stop_tags, completion, limits.max_text_utf16)
 }
 
 #[cfg(test)]

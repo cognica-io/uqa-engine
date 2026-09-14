@@ -200,6 +200,22 @@ public class KuromojiFilterReference {
     var result = object("id", fields[0]);
     try {
       String input = rawInput(fields[2]);
+      if (fields[1].equals("completion_romanize") || fields[1].equals("completion_units")) {
+        List<Object> alternatives = new ArrayList<>();
+        if (fields[1].equals("completion_romanize")) alternatives.addAll(romanize(input));
+        else {
+          for (int i = 0; i < input.length(); i++) {
+            String value = String.valueOf(input.charAt(i));
+            alternatives.add(romanize(value));
+            alternatives.add(romanize("シ" + value + "カ"));
+          }
+        }
+        String complete = json(alternatives);
+        result.put("result_count", alternatives.size());
+        result.put("sha256", digest(complete));
+        if (alternatives.size() <= 12 && complete.length() <= 8192) result.put("results", alternatives);
+        return result;
+      }
       if (fields[1].equals("number_normalize") || fields[1].equals("number_units")) {
         try (var normalizer = new JapaneseNumberFilter(new Materialized(fields))) {
           if (fields[1].equals("number_normalize")) {
@@ -237,6 +253,12 @@ public class KuromojiFilterReference {
         try (var stream = chain(source, fields[8])) { record(result, analyze(stream)); }
       }
     } catch (Exception error) { result.put("error", error.getClass().getName()); }
+    return result;
+  }
+  static List<Object> romanize(String input) {
+    var romanizer = org.apache.lucene.analysis.ja.completion.KatakanaRomanizer.getInstance();
+    List<Object> result = new ArrayList<>();
+    for (var output : romanizer.romanize(new org.apache.lucene.util.CharsRef(input))) result.add(units(output.toString()));
     return result;
   }
   static void record(Map<String, Object> result, Map<String, Object> analysis) throws Exception {

@@ -47,6 +47,8 @@ mod analyzer;
 pub use analyzer::JapaneseAnalyzer;
 mod attributes;
 pub(crate) use attributes::AttributeErrors;
+mod completion;
+pub use completion::{romanize_completion_utf16, romanize_completion_utf16_budgeted};
 mod dictionary;
 mod error;
 mod filters;

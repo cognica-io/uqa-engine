@@ -33,6 +33,15 @@ fn japanese_number_prefixes_and_composition_match_complete_docker_outputs() {
     );
 }
 
+#[test]
+fn japanese_completion_romanization_matches_complete_docker_outputs() {
+    verify(
+        include_bytes!("../../../../../../tests/parity/kuromoji/completion_cases.json"),
+        include_bytes!("../../../../../../tests/parity/kuromoji/completion_expected.jsonl"),
+        include_str!("../../../../../../tests/parity/kuromoji/completion_manifest.json"),
+    );
+}
+
 fn verify(cases_bytes: &[u8], expected_bytes: &[u8], manifest: &str) {
     let manifest: Value = serde_json::from_str(manifest).unwrap();
     assert_eq!(
@@ -61,6 +70,22 @@ fn verify(cases_bytes: &[u8], expected_bytes: &[u8], manifest: &str) {
             continue;
         }
         let mut result = result.unwrap_or_else(|error| panic!("{id}: {error}"));
+        if case["kind"] == "completion_romanize" || case["kind"] == "completion_units" {
+            assert_eq!(
+                json!(result.as_array().unwrap().len()),
+                expected["result_count"],
+                "{id}"
+            );
+            if let Some(results) = expected.get("results") {
+                assert_eq!(&result, results, "{id}");
+            }
+            assert_eq!(
+                format!("{:x}", Sha256::digest(serde_json::to_vec(&result).unwrap())),
+                expected["sha256"],
+                "{id}"
+            );
+            continue;
+        }
         if case["kind"] == "normalize" {
             assert_eq!(result, expected["normalized_utf16"], "{id}");
             continue;
@@ -105,6 +130,9 @@ fn verify(cases_bytes: &[u8], expected_bytes: &[u8], manifest: &str) {
 
 fn run_case(case: &Value, model: &Arc<KuromojiDictionary>) -> AnalysisResult<Value> {
     let input = input(case);
+    if case["kind"] == "completion_romanize" || case["kind"] == "completion_units" {
+        return completion(case, &input, model);
+    }
     let normalize = |units: &[u16]| {
         crate::kuromoji::normalize_number_utf16(units, KuromojiLimits::default(), &mut || Ok(()))
     };
@@ -284,4 +312,24 @@ pub(super) fn common_raw(output: &AnalyzedText) -> Value {
             "part_of_speech_utf16":units(fields[0]),"base_form_utf16":units(fields[1]),"reading_utf16":units(fields[2]),"pronunciation_utf16":units(fields[3]),"inflection_type_utf16":units(fields[4]),"inflection_form_utf16":units(fields[5])})
     }).collect();
     json!({"tokens":tokens,"final_offset_utf16":output.final_offsets().utf16.end,"final_position_increment":output.final_position_increment()})
+}
+
+fn completion(case: &Value, input: &[u16], model: &KuromojiDictionary) -> AnalysisResult<Value> {
+    let romanize = |units: &[u16]| {
+        crate::kuromoji::romanize_completion_utf16(
+            units,
+            model,
+            KuromojiLimits::default(),
+            &mut || Ok(()),
+        )
+    };
+    if case["kind"] == "completion_romanize" {
+        return Ok(json!(romanize(input)?));
+    }
+    let mut results = Vec::new();
+    for &unit in input {
+        results.push(romanize(&[unit])?);
+        results.push(romanize(&[0x30b7, unit, 0x30ab])?);
+    }
+    Ok(json!(results))
 }

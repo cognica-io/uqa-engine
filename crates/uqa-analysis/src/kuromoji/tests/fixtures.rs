@@ -63,14 +63,15 @@ pub(in crate::kuromoji) fn sections() -> Vec<Section> {
         character_section(),
         unicode_section(),
         section(7, 1, |output| {
-            AnalysisData {
-                stop_words: vec!["は".into()],
-                stop_tags: vec!["助詞".into()],
-                completion: vec![CompletionMapping {
+            AnalysisData::new(
+                vec!["は".into()],
+                vec!["助詞".into()],
+                vec![CompletionMapping {
                     key: "レ".into(),
                     alternatives: vec!["re".into()],
                 }],
-            }
+                DictionaryLimits::default().max_text_utf16,
+            )?
             .encode(output)
         }),
         Section {

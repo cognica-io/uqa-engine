@@ -205,6 +205,9 @@ fn stop_resources_require_nonempty_unique_utf16_ordered_entries() {
             stop_words: words.map(str::to_owned).into(),
             stop_tags: vec![],
             completion: vec![],
+            completion_lexicon: crate::morphology::lexicon::Builder::new()
+                .finish(0)
+                .unwrap(),
         }
         .encode(&mut output)
         .unwrap();
