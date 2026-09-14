@@ -1,4 +1,4 @@
-# Pinned Lucene Kuromoji dictionary and model
+# Pinned Lucene Kuromoji dictionary, model and user rules
 
 These Docker tools reproduce the complete Japanese dictionary and export its public morphology model for the [native implementation plan](../../../docs/plans/0007-kuromoji-analyzer.md). They establish reference data and provenance. Native Japanese loading, tokenization and analyzer parity remain implementation work.
 
@@ -49,3 +49,15 @@ Each file begins with the eight ASCII magic bytes below. All integers are big-en
 | `analysis.bin` | `UQAJANA1` | Count and sorted texts for stopwords, count and sorted texts for stop tags, mapping count; each sorted mapping key has text, alternative count and ordered texts |
 
 Class flags use bit 0 for invoke and bit 1 for group. Unicode flags use bit 0 for digit, bit 1 for whitespace and bit 2 for space character; script ordinals index the manifest's full vocabulary. Connection lookup is `backward * forward_count + forward`; a predecessor's right context selects the column, and the next word's left context selects the row. Every exported context is checked against those dimensions. Sorting uses Java UTF-16 ordering; alternative order is never sorted.
+
+## Japanese user dictionaries
+
+`KuromojiUserReference.java` uses the public Japanese user dictionary, FST and morphology APIs to record 62 fixed cases. The corpus covers Java comment/line/whitespace rules, CSV quoting and its unchanged final field, duplicate rejection, segmentation/readings, source and word order, overlapping longest matches, supplementary characters, embedded NUL, empty entries and morphology-access errors. UTF-16 lengths and every available or absent morphology field are compared independently from tokenization. The original Nori drivers use the same language-independent fixture transport and retain their existing inputs, Java sources, manifests and expected bytes.
+
+```sh
+python3 tests/parity/kuromoji/run_user_reference.py --offline
+python3 tests/parity/kuromoji/run_user_reference.py --offline --platform linux/amd64
+cargo test -p uqa-analysis --features nori-tools,kuromoji-tools --locked user
+```
+
+The native `kuromoji::UserDictionary` compiles exact retained source against a selected dictionary identity under source/entry/surface limits. It shares lexical construction and prefix traversal with Nori, retains Japanese grammar and duplicate semantics separately, and stores POS once per phrase. Lookup preserves zero-length and whitespace-bearing segment lengths accepted by Lucene. The public reading/POS accessors return a checked error when Lucene's NUL-separated feature access fails; absent base/pronunciation/inflection attributes remain absent. This user-rule verification does not establish Japanese tokenizer or analyzer parity.

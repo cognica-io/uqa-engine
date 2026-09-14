@@ -1,6 +1,6 @@
 # Kuromoji runtime bundle format
 
-Status: The native dictionary loader, offline packer, complete model verifier and immutable data crate are implemented. Japanese user dictionaries, tokenization, analyzer chains, compiled resource caches and binding delivery remain in the [implementation plan](../plans/0007-kuromoji-analyzer.md).
+Status: The native dictionary loader, offline packer, complete model verifier and immutable data crate are implemented. Japanese user dictionaries are implemented separately; tokenization, analyzer chains, compiled resource caches and binding delivery remain in the [implementation plan](../plans/0007-kuromoji-analyzer.md).
 
 The independent `kuromoji` feature of `uqa-analysis` exposes `KuromojiDictionary::from_bytes` and enables the `uqa-kuromoji-data` dependency. `kuromoji-tools` adds offline conversion and exhaustive verification. Loading validates the full bundle before returning `Arc<KuromojiDictionary>` and performs no file, network or JVM operations. The public queries expose exact surfaces and prefixes, ordered words, all six Japanese morphology attributes, contexts/costs, unknown classes, Unicode properties and analyzer default resources. Loading a dictionary does not register a Japanese analyzer.
 

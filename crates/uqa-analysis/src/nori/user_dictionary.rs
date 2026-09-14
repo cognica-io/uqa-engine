@@ -17,22 +17,7 @@ mod parse;
 pub(super) const LEFT_CONTEXT: u16 = 1781;
 pub(super) const WORD_COST: i32 = -100_000;
 
-#[derive(Debug, Clone, Copy)]
-pub struct UserDictionaryLimits {
-    pub max_bytes: usize,
-    pub max_entries: usize,
-    pub max_surface_utf16: usize,
-}
-
-impl Default for UserDictionaryLimits {
-    fn default() -> Self {
-        Self {
-            max_bytes: 4 * 1024 * 1024,
-            max_entries: 100_000,
-            max_surface_utf16: 65_535,
-        }
-    }
-}
+pub use crate::morphology::limits::UserDictionaryLimits;
 
 #[derive(Debug)]
 pub struct UserEntry {
@@ -199,25 +184,6 @@ impl UserDictionary {
     }
 
     pub fn prefixes<'a>(&'a self, text: &'a [u16]) -> impl Iterator<Item = (usize, u32)> + 'a {
-        let mut cursor = self.lexicon.cursor();
-        let mut index = 0;
-        let mut ended = false;
-        std::iter::from_fn(move || {
-            if ended {
-                return None;
-            }
-            while let Some(&unit) = text.get(index) {
-                index += 1;
-                if cursor.advance(unit).is_none() {
-                    ended = true;
-                    return None;
-                }
-                if let Some(id) = cursor.rank() {
-                    return Some((index, id));
-                }
-            }
-            ended = true;
-            None
-        })
+        self.lexicon.prefixes(text)
     }
 }

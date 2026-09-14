@@ -32,6 +32,14 @@ class NoriReferenceCasesTest(unittest.TestCase):
             self.assertEqual(reference.provenance(stem, entrypoint, cases, output), expected)
             self.assertEqual(reference.inventory(cases), [json.loads(row)["id"] for row in output.split("\n") if row])
 
+    def test_japanese_user_case_inventory_matches_reviewed_hashes(self):
+        root = ROOT.parent / "kuromoji"
+        cases = json.loads((root / "user_cases.json").read_text(encoding="utf-8"))
+        output = (root / "user_expected.jsonl").read_text(encoding="utf-8")
+        expected = json.loads((root / "user_manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(reference.lucene_cases.provenance(root, "user", "KuromojiUserReference.java", cases, output), expected)
+        self.assertEqual(reference.inventory(cases), [json.loads(row)["id"] for row in output.split("\n") if row])
+
     def test_unicode_line_terminators_and_unpaired_surrogates_survive_json_transport(self):
         value = {"id": "raw", "text": "a\u0085b\u2028c\u2029d\ud800"}
         stdout = '{"runtime":{}}\n' + json.dumps(value, ensure_ascii=False) + "\n"

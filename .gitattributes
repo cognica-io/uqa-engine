@@ -53,3 +53,4 @@ benchmarks/nori/**/*.jsonl text eol=lf
 
 # Reference-oracle fixtures are generated from pinned inputs.
 tests/parity/nori/*_expected.jsonl linguist-generated
+tests/parity/kuromoji/*_expected.jsonl linguist-generated

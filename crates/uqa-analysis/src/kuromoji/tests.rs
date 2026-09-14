@@ -6,7 +6,7 @@
 
 use super::{DictionaryError, DictionaryLimits, KuromojiDictionary};
 
-mod fixtures;
+pub(super) mod fixtures;
 
 #[test]
 fn dictionary_preserves_japanese_attributes_and_surface_identity() {

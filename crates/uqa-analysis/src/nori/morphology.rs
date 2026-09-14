@@ -8,7 +8,6 @@
 
 use std::ops::Range;
 
-use super::error::invalid;
 use super::DictionaryResult;
 use crate::morphology::io::{vector, Reader};
 
@@ -225,8 +224,9 @@ pub(super) fn encode_words(
     let mut previous_id = 0_i64;
     for word in words {
         let id = i64::from(word.original_id);
-        let delta = i32::try_from(id - previous_id)
-            .map_err(|_| invalid("word encoder", "original word ID delta exceeds i32"))?;
+        let delta = i32::try_from(id - previous_id).map_err(|_| {
+            super::error::invalid("word encoder", "original word ID delta exceeds i32")
+        })?;
         output.i32(delta)?;
         previous_id = id;
         output.u16(word.left)?;

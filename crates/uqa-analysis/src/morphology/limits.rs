@@ -25,3 +25,21 @@ impl Default for DictionaryLimits {
         }
     }
 }
+
+/// Bounds for immutable user-rule source and lexical preparation.
+#[derive(Debug, Clone, Copy)]
+pub struct UserDictionaryLimits {
+    pub max_bytes: usize,
+    pub max_entries: usize,
+    pub max_surface_utf16: usize,
+}
+
+impl Default for UserDictionaryLimits {
+    fn default() -> Self {
+        Self {
+            max_bytes: 4 * 1024 * 1024,
+            max_entries: 100_000,
+            max_surface_utf16: 65_535,
+        }
+    }
+}

@@ -150,7 +150,7 @@ fn unicode_section() -> Section {
     })
 }
 
-pub(super) fn bundle() -> Vec<u8> {
+pub(in crate::kuromoji) fn bundle() -> Vec<u8> {
     frame::encode(&sections(), DictionaryLimits::default()).unwrap()
 }
 

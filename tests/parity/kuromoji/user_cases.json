@@ -1,0 +1,312 @@
+[
+  {
+    "id": "empty",
+    "rules": "",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "comments",
+    "rules": "#comment\r\n#second\n\t \u0000\n",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "basic",
+    "rules": "東京,東京,トウキョウ,名詞\n",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "compound",
+    "rules": "東京大学,東京 大学,トウキョウ ダイガク,名詞\n",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "longest_and_overlap",
+    "rules": "大学,大学,ダイガク,短\n東京大学,東京 大学,トウキョウ ダイガク,複合\n東京,東京,トウキョウ,短\n",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "stable_word_order",
+    "rules": "𠀀,𠀀,カンジ,補助\n,,ガイジ,私用\n東京,東京,トウキョウ,名詞",
+    "query": "𠀀東京"
+  },
+  {
+    "id": "duplicates",
+    "rules": "東京,東京,イチ,先\n東京,東京,ニ,後\n",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "duplicate_after_prefix",
+    "rules": "東,東,ヒガシ,先\n東京,東京,イチ,中\n東京,東京,ニ,後\n",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "duplicate_invalid_first",
+    "rules": "東京,東 京,トウキョウ,先\n東京,東京,トウキョウ,後\n",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "duplicate_invalid_later",
+    "rules": "東京,東京,トウキョウ,先\n東京,東 京,トウキョウ,後\n",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "missing_reading",
+    "rules": "東京,東京",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "missing_pos",
+    "rules": "東京,東京,トウキョウ",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "odd_quote",
+    "rules": "\"東京,東京,トウキョウ,名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "wrong_surface",
+    "rules": "東京,東 都,トウ キョウ,名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "reading_count",
+    "rules": "東京,東 京,トウキョウ,名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "too_many_readings",
+    "rules": "東京,東京,トウ キョウ,名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "leading_segment_space",
+    "rules": "東京, 東京, トウキョウ,名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "trailing_segment_spaces",
+    "rules": "東京,東京  ,トウキョウ  ,名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "repeated_spaces",
+    "rules": "東京大学,東京   大学,トウキョウ   ダイガク,名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "segmentation_tab",
+    "rules": "東京,東\t京,トウキョウ,名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "segmentation_form_feed",
+    "rules": "東京,東\f京,トウキョウ,名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "segmentation_vertical_tab",
+    "rules": "東京,東\u000b京,トウキョウ,名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "surface_spaces",
+    "rules": "東 京,東 京,トウ キョウ,名詞",
+    "query": "東 京 東京"
+  },
+  {
+    "id": "surface_tabs",
+    "rules": "東\t京,東\t京,トウキョウ,名詞",
+    "query": "東\t京東京"
+  },
+  {
+    "id": "surface_trailing_space",
+    "rules": "東京 ,東京,トウキョウ,名詞",
+    "query": "東京 東京"
+  },
+  {
+    "id": "segmentation_nbsp",
+    "rules": "東京,東 京,トウキョウ,名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "segmentation_ideographic_space",
+    "rules": "東京,東　京,トウキョウ,名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "reading_nbsp",
+    "rules": "東京,東京,トウ キョウ,名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "comment_after_indent",
+    "rules": " #comment\n東京,東京,トウキョウ,名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "inline_hash",
+    "rules": "東京,東京,トウキョウ,名詞#末尾",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "hash_inside_field",
+    "rules": "東#京,東#京,トウキョウ,名詞",
+    "query": "東#京"
+  },
+  {
+    "id": "nel_comment",
+    "rules": "#commentnot-comment",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "ls_comment",
+    "rules": "#comment not-comment",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "ps_comment",
+    "rules": "#comment not-comment",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "unicode_line_separator",
+    "rules": "東京,東京,トウキョウ,名詞 末尾",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "crlf",
+    "rules": "東京,東京,トウキョウ,名詞\r\n大学,大学,ダイガク,名詞\r\n",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "carriage_return",
+    "rules": "東京,東京,トウキョウ,名詞\r大学,大学,ダイガク,名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "empty_surface",
+    "rules": ",,ヨミ,名詞",
+    "query": "a"
+  },
+  {
+    "id": "space_only_surface",
+    "rules": " , , ,名詞",
+    "query": " a "
+  },
+  {
+    "id": "empty_reading",
+    "rules": "東京,東京,,名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "empty_pos_matched",
+    "rules": "東京,東京,トウキョウ,",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "empty_pos_unmatched",
+    "rules": "東京,東京,トウキョウ,",
+    "query": "大阪"
+  },
+  {
+    "id": "empty_attributes",
+    "rules": "東京,東京,,",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "quoted_fields",
+    "rules": "\"東京\",\"東京\",\"トウキョウ\",\"名詞\"",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "quoted_fields_extra",
+    "rules": "\"東京\",\"東京\",\"トウキョウ\",\"名詞\",ignored",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "empty_quoted_reading",
+    "rules": "東京,東京,\"\",名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "empty_quoted_pos",
+    "rules": "東京,東京,トウキョウ,\"\"",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "quoted_comma_surface",
+    "rules": "\"東,京\",\"東,京\",トウキョウ,名詞",
+    "query": "東,京"
+  },
+  {
+    "id": "quoted_comma_reading",
+    "rules": "東京,東京,\"トウ,キョウ\",名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "quoted_comma_pos",
+    "rules": "東京,東京,トウキョウ,\"名,詞\"",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "escaped_quote_reading",
+    "rules": "東京,東京,\"トウ\"\"キョウ\",名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "escaped_quote_pos",
+    "rules": "東京,東京,トウキョウ,\"名\"\"詞\"",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "extra_fields",
+    "rules": "東京,東京,トウキョウ,名詞,ignored,\"extra\"",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "nul_in_reading",
+    "rules": "東京,東京,トウ\u0000キョウ,名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "nul_in_pos",
+    "rules": "東京,東京,トウキョウ,名\u0000詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "nul_in_surface",
+    "rules": "東\u0000京,東\u0000京,トウキョウ,名詞",
+    "query": "東\u0000京"
+  },
+  {
+    "id": "supplementary_segment",
+    "rules": "😀東京,😀 東京,エモジ トウキョウ,名詞",
+    "query": "😀東京"
+  },
+  {
+    "id": "unmatched",
+    "rules": "東京,東京,トウキョウ,名詞",
+    "query": "大阪"
+  },
+  {
+    "id": "empty_query",
+    "rules": "東京,東京,トウキョウ,名詞",
+    "query": ""
+  },
+  {
+    "id": "quotes_inside_unquoted",
+    "rules": "東\"\"京,東\"\"京,トウキョウ,名詞",
+    "query": "東\"京"
+  },
+  {
+    "id": "segmentation_zero_lengths",
+    "rules": "東京,  東京,  トウキョウ,名詞",
+    "query": "東京大学東京"
+  },
+  {
+    "id": "only_segment_spaces",
+    "rules": "東京,   ,   ,名詞",
+    "query": "東京大学東京"
+  }
+]

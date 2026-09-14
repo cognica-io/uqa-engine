@@ -5,7 +5,7 @@
 # Copyright (c) 2023-2026 Cognica, Inc.
 #
 
-"""Require each optional morphology feature to select only its own runtime data crate."""
+"""Compile each runtime morphology configuration and verify its exact data dependencies."""
 
 from pathlib import Path
 import subprocess
@@ -25,6 +25,10 @@ def main():
         actual = {language for language in ("nori", "kuromoji") if f"uqa-{language}-data" in packages}
         if actual != set(features):
             raise RuntimeError(f"Analysis features {features} select unexpected data crates: {sorted(actual)}")
+        check = ["cargo", "clippy", "-p", "uqa-analysis", "--no-default-features", "--lib", "--locked"]
+        if features:
+            check += ["--features", ",".join(features)]
+        subprocess.run(check + ["--", "-D", "warnings"], cwd=ROOT, check=True)
         print(f"Analysis features {','.join(features) or 'none'}: runtime data {','.join(sorted(actual)) or 'none'}")
     return 0
 
