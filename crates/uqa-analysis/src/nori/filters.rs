@@ -17,6 +17,8 @@ pub(crate) mod stream;
 #[cfg(test)]
 mod tests;
 
+use crate::morphology::filter::text_units;
+pub(crate) use crate::morphology::filter::Work;
 use stream::{AllocatedStream, FilterStream, FilterToken};
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget};
 
@@ -392,15 +394,6 @@ fn filter_units<T: FilterToken>(
     Ok(units)
 }
 
-fn text_units(text: &str, work: &mut Work<'_>) -> AnalysisResult<usize> {
-    let mut length = 0;
-    for character in text.chars() {
-        work.tick()?;
-        length += character.len_utf16();
-    }
-    Ok(length)
-}
-
 pub(super) fn token_units<T: FilterToken>(
     token: &T,
     term_units: usize,
@@ -419,28 +412,6 @@ pub(super) fn token_units<T: FilterToken>(
             .ok_or_else(|| invalid("Nori filter", "morpheme size overflow"))?;
     }
     Ok(units)
-}
-
-pub(crate) struct Work<'a> {
-    counter: usize,
-    pub(crate) poll: &'a mut dyn FnMut() -> AnalysisResult<()>,
-}
-
-impl<'a> Work<'a> {
-    pub fn new(poll: &'a mut dyn FnMut() -> AnalysisResult<()>) -> AnalysisResult<Self> {
-        poll()?;
-        Ok(Self { counter: 0, poll })
-    }
-    pub fn tick(&mut self) -> AnalysisResult<()> {
-        self.counter = (self.counter + 1) % 1024;
-        if self.counter == 0 {
-            (self.poll)()?;
-        }
-        Ok(())
-    }
-    pub fn finish(&mut self) -> AnalysisResult<()> {
-        (self.poll)()
-    }
 }
 
 pub(super) fn normalize_budgeted(

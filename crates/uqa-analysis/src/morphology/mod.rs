@@ -34,3 +34,6 @@ pub(crate) mod lattice;
 
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
 pub(crate) mod viterbi;
+
+#[cfg(feature = "nori")]
+pub(crate) mod filter;

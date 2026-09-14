@@ -279,3 +279,6 @@ mod native;
 
 #[cfg(feature = "kuromoji")]
 mod japanese;
+
+#[cfg(feature = "nori")]
+mod filter;

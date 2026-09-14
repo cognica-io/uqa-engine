@@ -17,6 +17,8 @@ use crate::nori::{
     DictionaryLimits, KoreanFilter, KoreanTokenizer, NoriDictionary, NoriLimits, NoriOptions,
     NoriOrigin, UserDictionary, UserDictionaryLimits,
 };
+use crate::TokenTerm;
+use uqa_core::memory::Budgeted;
 
 fn model() -> &'static Arc<NoriDictionary> {
     static MODEL: OnceLock<Arc<NoriDictionary>> = OnceLock::new();
