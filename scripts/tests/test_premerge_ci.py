@@ -81,6 +81,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         self.assertIn("tests/parity/kuromoji/regenerate_dictionary.py --platform linux/amd64", job)
         self.assertIn("tests/parity/kuromoji/export_model.py --platform linux/amd64 --offline", job)
         self.assertIn("--output target/kuromoji-reference-model --verify-only", job)
+        self.assertIn("tests/parity/kuromoji/run_tokenizer_reference.py --platform linux/amd64 --offline", job)
         self.assertNotIn("--write", job)
 
     def test_temporary_tag_caches_are_restore_only(self) -> None:

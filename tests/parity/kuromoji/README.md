@@ -1,6 +1,6 @@
-# Pinned Lucene Kuromoji dictionary, model and user rules
+# Pinned Lucene Kuromoji dictionary and analysis references
 
-These Docker tools reproduce the complete Japanese dictionary and export its public morphology model for the [native implementation plan](../../../docs/plans/0007-kuromoji-analyzer.md). They establish reference data and provenance. Native Japanese loading, tokenization and analyzer parity remain implementation work.
+These Docker tools reproduce the complete Japanese dictionary and export its public morphology model for the [native implementation plan](../../../docs/plans/0007-kuromoji-analyzer.md). They establish reference data and provenance. Native dictionary loading and user-rule compilation are implemented and verified; tokenization and analyzer parity remain implementation work.
 
 [`manifest.json`](manifest.json) pins Lucene 10.5.1, source commit `64ce863a2bea79c69c19c4d56268c26710ff0ff9`, the core/common/Kuromoji jars, Temurin 21.0.10+7, nine dictionary resources and three analysis resources. Both Java compilation and execution run inside the pinned Docker image, with no container network and read-only source/jar mounts. Production builds and queries never run these tools or download dictionaries.
 
@@ -25,7 +25,7 @@ The [pinned upstream recipe](https://github.com/apache/lucene/blob/64ce863a2bea7
 
 [`csv_manifest.json`](csv_manifest.json) records all 29 builder inputs before and after the patch, the exact recipe and builder identities, runtime, and all generated resource hashes. Extraction copies only direct CSV and definition files, rejects traversal, links and duplicate inputs, and never executes archive scripts. The patch must target only `Noun.proper.csv`. Docker regeneration reproduced all nine `.dat` files byte for byte, including the FST, target maps, morphology buffers, character classes and connection costs. The stopword, stop-tag and completion mapping resources are independently validated against the jar inventory.
 
-IPADIC attribution is distinct from the Korean dictionary. The future packaged Japanese data must carry its original `COPYING`, relevant IPADIC/NAIST/ICOT notices, Lucene LICENSE/NOTICE and JDK table notices. The current tooling does not create or distribute a production Japanese data crate.
+IPADIC attribution is distinct from the Korean dictionary. The implemented `uqa-kuromoji-data` crate carries the original IPADIC `COPYING`, including its unchanged terminal bytes and IPADIC/NAIST/ICOT notices, Lucene LICENSE/NOTICE and JDK table notices. Its exact resource manifest and archive verification preserve those source identities.
 
 ## Exhaustive model coverage
 
@@ -63,3 +63,11 @@ cargo test -p uqa-analysis --features nori-tools,kuromoji-tools --locked user
 ```
 
 The native `kuromoji::UserDictionary` compiles exact retained source against a selected dictionary identity under source/entry/surface limits. It shares lexical construction and prefix traversal with Nori, retains Japanese grammar and duplicate semantics separately, and stores POS once per phrase. Lookup preserves zero-length and whitespace-bearing segment lengths accepted by Lucene. The public reading/POS accessors return a checked error when Lucene's NUL-separated feature access fails; absent base/pronunciation/inflection attributes remain absent. This user-rule verification does not establish Japanese tokenizer or analyzer parity.
+
+The standalone tokenizer oracle covers 209 fixed cases across NORMAL/SEARCH/EXTENDED, both discard options, compound ambiguity, inflection, unknown classes, raw surrogate units, user prefixes/overlaps/attribute failures, and 1,023/1,024/1,025/2,051-unit unknown boundaries. Thirty-two mixed cases use fixed inputs drawn with seed `0x10501`. UTF-16 transport retains unpaired units without replacement; no width filter is applied. Every successful stream includes a canonical hash over ordered terms, six independent morphology attributes, keyword/graph attributes and terminal offsets/positions. At most 12 tokens are expanded per case; longer streams retain only their complete hash and count. Inputs, results and provenance total less than 385 KiB. N-best configuration transport is available for the upcoming dedicated N-best cases; this corpus currently uses zero N-best cost.
+
+```sh
+python3 tests/parity/kuromoji/run_tokenizer_reference.py --offline
+```
+
+This is the pinned reference for native implementation, not a native tokenizer parity claim. Expected values are produced only by Lucene in Docker, and independent read-only replay verifies the committed source/input/output hashes. Reference CI also replays it on amd64.
