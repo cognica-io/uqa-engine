@@ -20,6 +20,7 @@ jobs:
     name: prepare uqa distributions
     runs-on: ubuntu-24.04
     outputs:
+      digests: ${{ steps.inventory.outputs.digests }}
       publish: ${{ steps.pypi.outputs.publish }}
     permissions:
       contents: read
@@ -61,6 +62,7 @@ jobs:
             --pattern 'uqa-*.tar.gz'
 
       - name: Verify the Python release inventory
+        id: inventory
         shell: bash
         run: |
           set -euo pipefail
@@ -106,6 +108,14 @@ jobs:
               exit 1
             fi
           done
+          {
+            echo 'digests<<UQA_RELEASE_DIGESTS'
+            (
+              cd dist
+              sha256sum "${expected[@]}"
+            )
+            echo UQA_RELEASE_DIGESTS
+          } >> "$GITHUB_OUTPUT"
           python3 scripts/check-release-licenses.py --require-nori "${actual[@]}"
 
       - name: Check whether PyPI already has this exact release
@@ -170,7 +180,7 @@ jobs:
               output.write("publish=false\n")
           PY
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ steps.pypi.outputs.publish == 'true' }}
         with:
           name: python-pypi-distributions
@@ -189,10 +199,41 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: python-pypi-distributions
           path: dist/
+
+      - name: Verify the transferred release files
+        shell: bash
+        working-directory: dist
+        env:
+          RELEASE_DIGESTS: ${{ needs.prepare.outputs.digests }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYTHON'
+          import hashlib
+          import os
+          from pathlib import Path
+
+          expected = {}
+          for line in os.environ["RELEASE_DIGESTS"].splitlines():
+              digest, filename = line.split("  ", 1)
+              expected[filename] = digest
+          actual = {path.name for path in Path(".").iterdir()}
+          if not expected or actual != set(expected):
+              raise SystemExit(
+                  "Transferred release inventory differs from verified files: "
+                  f"missing={sorted(set(expected) - actual)}, "
+                  f"unexpected={sorted(actual - set(expected))}"
+              )
+          for filename, digest in expected.items():
+              with Path(filename).open("rb") as stream:
+                  actual_digest = hashlib.file_digest(stream, "sha256").hexdigest()
+              if actual_digest != digest:
+                  raise SystemExit(f"Transferred release digest mismatch: {filename}")
+          print(f"Verified all {len(expected)} transferred release files")
+          PYTHON
 
       - name: Publish the Python distributions to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
