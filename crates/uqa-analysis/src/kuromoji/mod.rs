@@ -43,10 +43,15 @@
 //! ```
 
 mod analysis;
+mod analyzer;
+pub use analyzer::JapaneseAnalyzer;
 mod attributes;
+pub(crate) use attributes::AttributeErrors;
 mod dictionary;
 mod error;
+mod filters;
 mod frame;
+pub use filters::JapaneseFilter;
 mod morphology;
 mod provenance;
 mod resources;

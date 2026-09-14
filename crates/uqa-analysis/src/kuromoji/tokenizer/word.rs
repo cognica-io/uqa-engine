@@ -6,7 +6,7 @@
 
 //! Japanese lattice phrases and emitted segment morphology have separate lookup paths.
 
-use crate::kuromoji::{DictionaryResult, KuromojiDictionary, UserDictionary};
+use crate::kuromoji::{KuromojiDictionary, UserDictionary};
 use crate::morphology::lattice::WordId;
 
 use super::KuromojiOrigin;
@@ -63,32 +63,40 @@ impl TokenWord {
         self,
         model: &'a KuromojiDictionary,
         user: Option<&'a UserDictionary>,
-    ) -> DictionaryResult<[Option<&'a str>; 6]> {
+    ) -> (
+        [Option<&'a str>; 6],
+        crate::kuromoji::attributes::AttributeErrors,
+    ) {
         match self {
             Self::Dictionary(id, _) => {
                 let word = model.word(id).expect("validated emitted word");
-                Ok([
-                    Some(word.part_of_speech()),
-                    word.base_form(),
-                    word.reading(),
-                    word.pronunciation(),
-                    word.inflection_type(),
-                    word.inflection_form(),
-                ])
+                (
+                    [
+                        Some(word.part_of_speech()),
+                        word.base_form(),
+                        word.reading(),
+                        word.pronunciation(),
+                        word.inflection_type(),
+                        word.inflection_form(),
+                    ],
+                    crate::kuromoji::attributes::AttributeErrors::default(),
+                )
             }
             Self::UserSegment(id) => {
                 let word = user
                     .expect("selected user model")
                     .word(id)
                     .expect("validated emitted segment");
-                Ok([
-                    Some(word.part_of_speech()?),
-                    None,
-                    Some(word.reading()?),
-                    None,
-                    None,
-                    None,
-                ])
+                let mut errors = crate::kuromoji::attributes::AttributeErrors::default();
+                let pos = word.feature_value(1);
+                if pos.is_none() {
+                    errors.record(0);
+                }
+                let reading = word.feature_value(0);
+                if reading.is_none() {
+                    errors.record(2);
+                }
+                ([pos, None, reading, None, None, None], errors)
             }
         }
     }

@@ -16,7 +16,7 @@ use crate::{AnalysisResult, FilteredText, SourceOffsets};
 mod batch;
 mod cloning;
 
-#[cfg(feature = "nori")]
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
 pub(crate) use batch::AllocatedToken;
 pub(crate) use batch::{TokenBatchAllocation, TokenBatchInput};
 

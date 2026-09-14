@@ -7,14 +7,19 @@
 //! Common-token filter mutation retains exact source projection and replacement leases.
 
 use super::AnalysisToken;
-use crate::morphology::filter::{covering_range, FilterToken, Work};
+#[cfg(feature = "nori")]
+use crate::morphology::filter::{covering_range, ComposingToken};
+use crate::morphology::filter::{FilterToken, Work};
 use crate::source::SourceProjection;
 use crate::{AnalysisResult, TokenTerm};
-use std::{ops::Range, sync::Arc};
-use uqa_core::memory::{Budgeted, MemoryBudget, MemoryReservation};
+#[cfg(feature = "nori")]
+use std::ops::Range;
+use std::sync::Arc;
+#[cfg(feature = "nori")]
+use uqa_core::memory::MemoryBudget;
+use uqa_core::memory::{Budgeted, MemoryReservation};
 
 impl FilterToken for AnalysisToken {
-    type Span = Option<Range<usize>>;
     type Context = Arc<Budgeted<SourceProjection>>;
 
     fn term(&self) -> impl Iterator<Item = u16> + '_ {
@@ -30,13 +35,6 @@ impl FilterToken for AnalysisToken {
             length += 1;
         }
         Ok(length)
-    }
-    fn clone_reserved(
-        &self,
-        budget: &MemoryBudget,
-        work: &mut Work<'_>,
-    ) -> AnalysisResult<Budgeted<Self>> {
-        self.clone_budgeted(budget, &mut *work.poll)
     }
     fn replace_term(
         &mut self,
@@ -73,11 +71,23 @@ impl FilterToken for AnalysisToken {
         };
         Ok(())
     }
-    fn position_length(&self) -> u32 {
-        self.position_length
-    }
     fn keyword(&self) -> bool {
         self.keyword
+    }
+}
+
+#[cfg(feature = "nori")]
+impl ComposingToken for AnalysisToken {
+    type Span = Option<Range<usize>>;
+    fn clone_reserved(
+        &self,
+        budget: &MemoryBudget,
+        work: &mut Work<'_>,
+    ) -> AnalysisResult<Budgeted<Self>> {
+        self.clone_budgeted(budget, &mut *work.poll)
+    }
+    fn position_length(&self) -> u32 {
+        self.position_length
     }
     fn span(&self) -> Self::Span {
         self.filtered_utf16.clone()

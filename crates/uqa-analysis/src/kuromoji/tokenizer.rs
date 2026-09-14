@@ -68,6 +68,10 @@ pub struct KuromojiLimits {
     pub max_n_best_work: usize,
     /// Nonempty slash-separated examples in one preparation call.
     pub max_n_best_examples: usize,
+    /// Maximum stages per chain or entries per prepared lookup set.
+    pub max_filter_entries: usize,
+    /// Maximum UTF-16 units in each prepared lookup set.
+    pub max_filter_utf16: usize,
 }
 
 impl Default for KuromojiLimits {
@@ -83,6 +87,8 @@ impl Default for KuromojiLimits {
             max_n_best_nodes: 1_000_000,
             max_n_best_work: 16_000_000,
             max_n_best_examples: 1024,
+            max_filter_entries: 65536,
+            max_filter_utf16: 16 * 1024 * 1024,
         }
     }
 }
@@ -134,6 +140,30 @@ pub struct KuromojiToken {
     pub inflection_type: Option<String>,
     pub inflection_form: Option<String>,
     pub origin: KuromojiOrigin,
+    #[serde(skip)]
+    pub(crate) errors: super::AttributeErrors,
+}
+
+impl KuromojiToken {
+    /// Construct a token without dictionary attributes; public fields may then be populated explicitly.
+    pub fn new(term_utf16: Vec<u16>, span: std::ops::Range<usize>, origin: KuromojiOrigin) -> Self {
+        Self {
+            term_utf16,
+            start_utf16: span.start,
+            end_utf16: span.end,
+            position_increment: 1,
+            position_length: 1,
+            keyword: false,
+            part_of_speech: None,
+            base_form: None,
+            reading: None,
+            pronunciation: None,
+            inflection_type: None,
+            inflection_form: None,
+            origin,
+            errors: crate::kuromoji::AttributeErrors::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -141,6 +171,35 @@ pub struct KuromojiOutput {
     pub tokens: Vec<KuromojiToken>,
     pub final_offset_utf16: usize,
     pub final_position_increment: u32,
+    #[serde(skip)]
+    pub(crate) terminal: Option<Box<KuromojiToken>>,
+}
+
+impl KuromojiOutput {
+    pub(crate) fn validate_attributes(
+        &self,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<()> {
+        for token in &self.tokens {
+            poll()?;
+            token.errors.validate()?;
+        }
+        Ok(())
+    }
+
+    /// Materialize a source that leaves token attributes unchanged when exhausted.
+    pub fn from_tokens(
+        tokens: Vec<KuromojiToken>,
+        final_offset_utf16: usize,
+        final_position_increment: u32,
+    ) -> Self {
+        Self {
+            tokens,
+            final_offset_utf16,
+            final_position_increment,
+            terminal: None,
+        }
+    }
 }
 
 /// Immutable models and configuration; each call owns its lattice, resegmentation and output.
@@ -208,6 +267,27 @@ impl JapaneseTokenizer {
         budget: &MemoryBudget,
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<Budgeted<KuromojiOutput>> {
+        self.tokenize_text_budgeted(input, limits, budget, poll, false)
+    }
+
+    pub(crate) fn tokenize_for_filters_budgeted(
+        &self,
+        input: &str,
+        limits: KuromojiLimits,
+        budget: &MemoryBudget,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<KuromojiOutput>> {
+        self.tokenize_text_budgeted(input, limits, budget, poll, true)
+    }
+
+    fn tokenize_text_budgeted(
+        &self,
+        input: &str,
+        limits: KuromojiLimits,
+        budget: &MemoryBudget,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+        deferred: bool,
+    ) -> AnalysisResult<Budgeted<KuromojiOutput>> {
         poll()?;
         let units = crate::morphology::input::encode(input, budget, poll, |length| {
             check_limit(
@@ -217,7 +297,11 @@ impl JapaneseTokenizer {
             )
             .map_err(Into::into)
         })?;
-        self.tokenize_utf16_budgeted(&units, limits, budget, poll)
+        if deferred {
+            viterbi::analyze_filtering(&units, self, limits, budget, poll)
+        } else {
+            self.tokenize_utf16_budgeted(&units, limits, budget, poll)
+        }
     }
 
     pub fn tokenize_utf16(
@@ -260,4 +344,4 @@ impl JapaneseTokenizer {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

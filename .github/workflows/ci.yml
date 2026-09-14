@@ -251,6 +251,7 @@ jobs:
           python3 tests/parity/kuromoji/run_user_reference.py --platform linux/amd64 --offline --cache-dir target/nori-reference-cache
           python3 tests/parity/kuromoji/run_tokenizer_reference.py --platform linux/amd64 --offline --cache-dir target/nori-reference-cache
           python3 tests/parity/kuromoji/run_nbest_reference.py --platform linux/amd64 --offline --cache-dir target/nori-reference-cache
+          python3 tests/parity/kuromoji/run_filter_reference.py --platform linux/amd64 --offline --cache-dir target/nori-reference-cache
       - uses: actions/upload-artifact@v4
         with:
           name: nori-reference-${{ github.sha }}

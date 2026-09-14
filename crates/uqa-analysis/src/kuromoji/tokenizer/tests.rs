@@ -11,7 +11,7 @@ use uqa_core::memory::MemoryError;
 use super::*;
 use crate::kuromoji::{DictionaryError, KuromojiResources, UserDictionaryLimits};
 
-pub(super) fn model() -> Arc<KuromojiDictionary> {
+pub(in crate::kuromoji) fn model() -> Arc<KuromojiDictionary> {
     KuromojiResources::default()
         .load_default()
         .unwrap()
@@ -23,7 +23,7 @@ fn units(text: Option<&str>) -> Option<Vec<u16>> {
     text.map(|text| text.encode_utf16().collect())
 }
 
-pub(super) fn raw_analysis(output: &KuromojiOutput) -> Value {
+pub(in crate::kuromoji) fn raw_analysis(output: &KuromojiOutput) -> Value {
     let tokens: Vec<_> = output.tokens.iter().map(|token| json!({
         "term_utf16": token.term_utf16, "start_utf16": token.start_utf16, "end_utf16": token.end_utf16,
         "position_increment": token.position_increment, "position_length": token.position_length, "keyword": token.keyword,

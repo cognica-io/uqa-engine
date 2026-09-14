@@ -401,7 +401,7 @@ pub(crate) struct SourceProjection {
 
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
 impl SourceProjection {
-    #[cfg(feature = "nori")]
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
     pub fn filtered_len(&self) -> usize {
         self.filtered.utf16_len()
     }
@@ -423,7 +423,7 @@ impl SourceProjection {
         self.original.covering_offsets_utf16(range)
     }
 
-    #[cfg(feature = "nori")]
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
     pub(crate) fn is_verbatim_with_control(
         &self,
         term: &crate::TokenTerm,

@@ -33,6 +33,7 @@ impl native::NativeToken for KuromojiToken {
                 inflection_type: self.inflection_type,
                 inflection_form: self.inflection_form,
                 origin: self.origin,
+                errors: self.errors,
             }),
         }
     }
@@ -41,11 +42,12 @@ impl native::NativeToken for KuromojiToken {
 impl KuromojiOutput {
     /// Convert tokens over `input.as_str()` into common tokens with corrected original offsets.
     pub fn into_analyzed(self, input: &FilteredText<'_>) -> AnalysisResult<AnalyzedText> {
+        self.validate_attributes(&mut || Ok(()))?;
         native::output(
             TokenBatch {
                 tokens: self.tokens,
                 final_position_increment: self.final_position_increment,
-                terminal: None,
+                terminal: self.terminal,
             },
             self.final_offset_utf16,
             input,
@@ -88,16 +90,40 @@ impl JapaneseTokenizer {
         budget: &MemoryBudget,
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<Budgeted<AnalyzedText>> {
+        self.tokenize_mapped_impl(input, limits, budget, poll, false)
+    }
+
+    pub(crate) fn tokenize_mapped_for_filters_budgeted(
+        &self,
+        input: &FilteredText<'_>,
+        limits: KuromojiLimits,
+        budget: &MemoryBudget,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Budgeted<AnalyzedText>> {
+        self.tokenize_mapped_impl(input, limits, budget, poll, true)
+    }
+
+    fn tokenize_mapped_impl(
+        &self,
+        input: &FilteredText<'_>,
+        limits: KuromojiLimits,
+        budget: &MemoryBudget,
+        poll: &mut impl FnMut() -> AnalysisResult<()>,
+        deferred: bool,
+    ) -> AnalysisResult<Budgeted<AnalyzedText>> {
         let input = input.clone();
         input.prepare_coordinates(budget, poll)?;
-        let (output, memory) = self
-            .tokenize_budgeted(input.as_str(), limits, budget, poll)?
-            .into_parts();
+        let output = if deferred {
+            self.tokenize_for_filters_budgeted(input.as_str(), limits, budget, poll)?
+        } else {
+            self.tokenize_budgeted(input.as_str(), limits, budget, poll)?
+        };
+        let (output, memory) = output.into_parts();
         native::output_budgeted(
             TokenBatch {
                 tokens: output.tokens,
                 final_position_increment: output.final_position_increment,
-                terminal: None,
+                terminal: output.terminal,
             },
             output.final_offset_utf16,
             memory,
@@ -109,3 +135,18 @@ impl JapaneseTokenizer {
 
 #[cfg(test)]
 mod tests;
+
+impl AnalyzedText {
+    pub(crate) fn validate_japanese_attributes(
+        &self,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<()> {
+        for token in self.tokens() {
+            poll()?;
+            if let Some(value) = token.japanese_morphology() {
+                value.errors.validate()?;
+            }
+        }
+        Ok(())
+    }
+}

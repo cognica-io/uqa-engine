@@ -203,8 +203,12 @@ impl KoreanFilter {
         limits: NoriLimits,
         poll: &mut impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<Budgeted<crate::AnalyzedText>> {
-        self.compile()
-            .filter_analyzed_budgeted(input, Some(model), limits, poll)
+        let output = self
+            .compile()
+            .filter_analyzed_budgeted(input, Some(model), limits, poll)?;
+        #[cfg(feature = "kuromoji")]
+        output.validate_japanese_attributes(poll)?;
+        Ok(output)
     }
 }
 

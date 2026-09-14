@@ -1,0 +1,2252 @@
+[
+  {
+    "id": "analyzer_normal_0",
+    "kind": "analyzer",
+    "input": "",
+    "mode": "normal"
+  },
+  {
+    "id": "analyzer_search_0",
+    "kind": "analyzer",
+    "input": "",
+    "mode": "search"
+  },
+  {
+    "id": "analyzer_extended_0",
+    "kind": "analyzer",
+    "input": "",
+    "mode": "extended"
+  },
+  {
+    "id": "normalize_0",
+    "kind": "normalize",
+    "input": ""
+  },
+  {
+    "id": "analyzer_normal_1",
+    "kind": "analyzer",
+    "input": "\uff35\uff31\uff21\u3067\u8d70\u308a\u307e\u3057\u305f",
+    "mode": "normal"
+  },
+  {
+    "id": "analyzer_search_1",
+    "kind": "analyzer",
+    "input": "\uff35\uff31\uff21\u3067\u8d70\u308a\u307e\u3057\u305f",
+    "mode": "search"
+  },
+  {
+    "id": "analyzer_extended_1",
+    "kind": "analyzer",
+    "input": "\uff35\uff31\uff21\u3067\u8d70\u308a\u307e\u3057\u305f",
+    "mode": "extended"
+  },
+  {
+    "id": "normalize_1",
+    "kind": "normalize",
+    "input": "\uff35\uff31\uff21\u3067\u8d70\u308a\u307e\u3057\u305f"
+  },
+  {
+    "id": "analyzer_normal_2",
+    "kind": "analyzer",
+    "input": "\u95a2\u897f\u56fd\u969b\u7a7a\u6e2f\u306b\u884c\u304d\u307e\u3057\u305f\u3002",
+    "mode": "normal"
+  },
+  {
+    "id": "analyzer_search_2",
+    "kind": "analyzer",
+    "input": "\u95a2\u897f\u56fd\u969b\u7a7a\u6e2f\u306b\u884c\u304d\u307e\u3057\u305f\u3002",
+    "mode": "search"
+  },
+  {
+    "id": "analyzer_extended_2",
+    "kind": "analyzer",
+    "input": "\u95a2\u897f\u56fd\u969b\u7a7a\u6e2f\u306b\u884c\u304d\u307e\u3057\u305f\u3002",
+    "mode": "extended"
+  },
+  {
+    "id": "normalize_2",
+    "kind": "normalize",
+    "input": "\u95a2\u897f\u56fd\u969b\u7a7a\u6e2f\u306b\u884c\u304d\u307e\u3057\u305f\u3002"
+  },
+  {
+    "id": "analyzer_normal_3",
+    "kind": "analyzer",
+    "input": "\u79c1\u306f\u5b66\u751f\u3067\u3059\u3002",
+    "mode": "normal"
+  },
+  {
+    "id": "analyzer_search_3",
+    "kind": "analyzer",
+    "input": "\u79c1\u306f\u5b66\u751f\u3067\u3059\u3002",
+    "mode": "search"
+  },
+  {
+    "id": "analyzer_extended_3",
+    "kind": "analyzer",
+    "input": "\u79c1\u306f\u5b66\u751f\u3067\u3059\u3002",
+    "mode": "extended"
+  },
+  {
+    "id": "normalize_3",
+    "kind": "normalize",
+    "input": "\u79c1\u306f\u5b66\u751f\u3067\u3059\u3002"
+  },
+  {
+    "id": "analyzer_normal_4",
+    "kind": "analyzer",
+    "input": "\u5bff\u53f8\u304c\u304a\u3044\u3057\u304b\u3063\u305f\u3002",
+    "mode": "normal"
+  },
+  {
+    "id": "analyzer_search_4",
+    "kind": "analyzer",
+    "input": "\u5bff\u53f8\u304c\u304a\u3044\u3057\u304b\u3063\u305f\u3002",
+    "mode": "search"
+  },
+  {
+    "id": "analyzer_extended_4",
+    "kind": "analyzer",
+    "input": "\u5bff\u53f8\u304c\u304a\u3044\u3057\u304b\u3063\u305f\u3002",
+    "mode": "extended"
+  },
+  {
+    "id": "normalize_4",
+    "kind": "normalize",
+    "input": "\u5bff\u53f8\u304c\u304a\u3044\u3057\u304b\u3063\u305f\u3002"
+  },
+  {
+    "id": "analyzer_normal_5",
+    "kind": "analyzer",
+    "input": "\uff76\uff9e\uff6f\uff82\uff8e\uff9f\uff70\uff7d\uff9e\u3068\uff8a\uff9f\uff70\uff83\uff68\uff70",
+    "mode": "normal"
+  },
+  {
+    "id": "analyzer_search_5",
+    "kind": "analyzer",
+    "input": "\uff76\uff9e\uff6f\uff82\uff8e\uff9f\uff70\uff7d\uff9e\u3068\uff8a\uff9f\uff70\uff83\uff68\uff70",
+    "mode": "search"
+  },
+  {
+    "id": "analyzer_extended_5",
+    "kind": "analyzer",
+    "input": "\uff76\uff9e\uff6f\uff82\uff8e\uff9f\uff70\uff7d\uff9e\u3068\uff8a\uff9f\uff70\uff83\uff68\uff70",
+    "mode": "extended"
+  },
+  {
+    "id": "normalize_5",
+    "kind": "normalize",
+    "input": "\uff76\uff9e\uff6f\uff82\uff8e\uff9f\uff70\uff7d\uff9e\u3068\uff8a\uff9f\uff70\uff83\uff68\uff70"
+  },
+  {
+    "id": "analyzer_normal_6",
+    "kind": "analyzer",
+    "input": "\u30b7\u30e3\u30ef\u30fc \u30bf\u30af\u30b7\u30fc \u30b3\u30fc\u30d2\u30fc \u30fc",
+    "mode": "normal"
+  },
+  {
+    "id": "analyzer_search_6",
+    "kind": "analyzer",
+    "input": "\u30b7\u30e3\u30ef\u30fc \u30bf\u30af\u30b7\u30fc \u30b3\u30fc\u30d2\u30fc \u30fc",
+    "mode": "search"
+  },
+  {
+    "id": "analyzer_extended_6",
+    "kind": "analyzer",
+    "input": "\u30b7\u30e3\u30ef\u30fc \u30bf\u30af\u30b7\u30fc \u30b3\u30fc\u30d2\u30fc \u30fc",
+    "mode": "extended"
+  },
+  {
+    "id": "normalize_6",
+    "kind": "normalize",
+    "input": "\u30b7\u30e3\u30ef\u30fc \u30bf\u30af\u30b7\u30fc \u30b3\u30fc\u30d2\u30fc \u30fc"
+  },
+  {
+    "id": "analyzer_normal_7",
+    "kind": "analyzer",
+    "input": "UQA \u0130 I \u1e9e \u03a3 \u039f\u03a3 \ud801\udc00",
+    "mode": "normal"
+  },
+  {
+    "id": "analyzer_search_7",
+    "kind": "analyzer",
+    "input": "UQA \u0130 I \u1e9e \u03a3 \u039f\u03a3 \ud801\udc00",
+    "mode": "search"
+  },
+  {
+    "id": "analyzer_extended_7",
+    "kind": "analyzer",
+    "input": "UQA \u0130 I \u1e9e \u03a3 \u039f\u03a3 \ud801\udc00",
+    "mode": "extended"
+  },
+  {
+    "id": "normalize_7",
+    "kind": "normalize",
+    "input": "UQA \u0130 I \u1e9e \u03a3 \u039f\u03a3 \ud801\udc00"
+  },
+  {
+    "id": "analyzer_normal_8",
+    "kind": "analyzer",
+    "input": "\u6771\u4eac\u5927\u5b66 \u6771\u4eac\u90fd",
+    "mode": "normal"
+  },
+  {
+    "id": "analyzer_search_8",
+    "kind": "analyzer",
+    "input": "\u6771\u4eac\u5927\u5b66 \u6771\u4eac\u90fd",
+    "mode": "search"
+  },
+  {
+    "id": "analyzer_extended_8",
+    "kind": "analyzer",
+    "input": "\u6771\u4eac\u5927\u5b66 \u6771\u4eac\u90fd",
+    "mode": "extended"
+  },
+  {
+    "id": "normalize_8",
+    "kind": "normalize",
+    "input": "\u6771\u4eac\u5927\u5b66 \u6771\u4eac\u90fd"
+  },
+  {
+    "id": "analyzer_normal_9",
+    "kind": "analyzer",
+    "input": "\uff11\uff12\uff13\uff0e\uff14\uff15\u3068\u4e00\u3007\u3007\u3007\u5186",
+    "mode": "normal"
+  },
+  {
+    "id": "analyzer_search_9",
+    "kind": "analyzer",
+    "input": "\uff11\uff12\uff13\uff0e\uff14\uff15\u3068\u4e00\u3007\u3007\u3007\u5186",
+    "mode": "search"
+  },
+  {
+    "id": "analyzer_extended_9",
+    "kind": "analyzer",
+    "input": "\uff11\uff12\uff13\uff0e\uff14\uff15\u3068\u4e00\u3007\u3007\u3007\u5186",
+    "mode": "extended"
+  },
+  {
+    "id": "normalize_9",
+    "kind": "normalize",
+    "input": "\uff11\uff12\uff13\uff0e\uff14\uff15\u3068\u4e00\u3007\u3007\u3007\u5186"
+  },
+  {
+    "id": "analyzer_normal_10",
+    "kind": "analyzer",
+    "input": "Hello, world!\n\u3002\uff01\uff1f",
+    "mode": "normal"
+  },
+  {
+    "id": "analyzer_search_10",
+    "kind": "analyzer",
+    "input": "Hello, world!\n\u3002\uff01\uff1f",
+    "mode": "search"
+  },
+  {
+    "id": "analyzer_extended_10",
+    "kind": "analyzer",
+    "input": "Hello, world!\n\u3002\uff01\uff1f",
+    "mode": "extended"
+  },
+  {
+    "id": "normalize_10",
+    "kind": "normalize",
+    "input": "Hello, world!\n\u3002\uff01\uff1f"
+  },
+  {
+    "id": "analyzer_normal_11",
+    "kind": "analyzer",
+    "input": "\ud840\udc00\ud83d\ude42\u6771\u4eac",
+    "mode": "normal"
+  },
+  {
+    "id": "analyzer_search_11",
+    "kind": "analyzer",
+    "input": "\ud840\udc00\ud83d\ude42\u6771\u4eac",
+    "mode": "search"
+  },
+  {
+    "id": "analyzer_extended_11",
+    "kind": "analyzer",
+    "input": "\ud840\udc00\ud83d\ude42\u6771\u4eac",
+    "mode": "extended"
+  },
+  {
+    "id": "normalize_11",
+    "kind": "normalize",
+    "input": "\ud840\udc00\ud83d\ude42\u6771\u4eac"
+  },
+  {
+    "id": "analyzer_normal_12",
+    "kind": "analyzer",
+    "input": "\u3351\u2460\uff21\uff41\uff76\uff9e\u3099",
+    "mode": "normal"
+  },
+  {
+    "id": "analyzer_search_12",
+    "kind": "analyzer",
+    "input": "\u3351\u2460\uff21\uff41\uff76\uff9e\u3099",
+    "mode": "search"
+  },
+  {
+    "id": "analyzer_extended_12",
+    "kind": "analyzer",
+    "input": "\u3351\u2460\uff21\uff41\uff76\uff9e\u3099",
+    "mode": "extended"
+  },
+  {
+    "id": "normalize_12",
+    "kind": "normalize",
+    "input": "\u3351\u2460\uff21\uff41\uff76\uff9e\u3099"
+  },
+  {
+    "id": "analyzer_normal_13",
+    "kind": "analyzer",
+    "input": "\u3042\u308c \u305d\u308c \u3053\u308c \u3068 \u306e \u306f \u3067\u3059",
+    "mode": "normal"
+  },
+  {
+    "id": "analyzer_search_13",
+    "kind": "analyzer",
+    "input": "\u3042\u308c \u305d\u308c \u3053\u308c \u3068 \u306e \u306f \u3067\u3059",
+    "mode": "search"
+  },
+  {
+    "id": "analyzer_extended_13",
+    "kind": "analyzer",
+    "input": "\u3042\u308c \u305d\u308c \u3053\u308c \u3068 \u306e \u306f \u3067\u3059",
+    "mode": "extended"
+  },
+  {
+    "id": "normalize_13",
+    "kind": "normalize",
+    "input": "\u3042\u308c \u305d\u308c \u3053\u308c \u3068 \u306e \u306f \u3067\u3059"
+  },
+  {
+    "id": "native_base_0",
+    "kind": "native",
+    "input": "\uff35\uff31\uff21\u3067\u8d70\u308a\u307e\u3057\u305f",
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_pos_0",
+    "kind": "native",
+    "input": "\uff35\uff31\uff21\u3067\u8d70\u308a\u307e\u3057\u305f",
+    "filters": [
+      {
+        "type": "kuromoji_part_of_speech"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_stop_0",
+    "kind": "native",
+    "input": "\uff35\uff31\uff21\u3067\u8d70\u308a\u307e\u3057\u305f",
+    "filters": [
+      {
+        "type": "kuromoji_stop"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_stem_0",
+    "kind": "native",
+    "input": "\uff35\uff31\uff21\u3067\u8d70\u308a\u307e\u3057\u305f",
+    "filters": [
+      {
+        "type": "kuromoji_stemmer"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_lower_0",
+    "kind": "native",
+    "input": "\uff35\uff31\uff21\u3067\u8d70\u308a\u307e\u3057\u305f",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_chain_0",
+    "kind": "native",
+    "input": "\uff35\uff31\uff21\u3067\u8d70\u308a\u307e\u3057\u305f",
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      },
+      {
+        "type": "kuromoji_part_of_speech"
+      },
+      {
+        "type": "kuromoji_stop"
+      },
+      {
+        "type": "kuromoji_stemmer"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_base_1",
+    "kind": "native",
+    "input": "\u95a2\u897f\u56fd\u969b\u7a7a\u6e2f\u306b\u884c\u304d\u307e\u3057\u305f\u3002",
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_pos_1",
+    "kind": "native",
+    "input": "\u95a2\u897f\u56fd\u969b\u7a7a\u6e2f\u306b\u884c\u304d\u307e\u3057\u305f\u3002",
+    "filters": [
+      {
+        "type": "kuromoji_part_of_speech"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_stop_1",
+    "kind": "native",
+    "input": "\u95a2\u897f\u56fd\u969b\u7a7a\u6e2f\u306b\u884c\u304d\u307e\u3057\u305f\u3002",
+    "filters": [
+      {
+        "type": "kuromoji_stop"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_stem_1",
+    "kind": "native",
+    "input": "\u95a2\u897f\u56fd\u969b\u7a7a\u6e2f\u306b\u884c\u304d\u307e\u3057\u305f\u3002",
+    "filters": [
+      {
+        "type": "kuromoji_stemmer"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_lower_1",
+    "kind": "native",
+    "input": "\u95a2\u897f\u56fd\u969b\u7a7a\u6e2f\u306b\u884c\u304d\u307e\u3057\u305f\u3002",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_chain_1",
+    "kind": "native",
+    "input": "\u95a2\u897f\u56fd\u969b\u7a7a\u6e2f\u306b\u884c\u304d\u307e\u3057\u305f\u3002",
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      },
+      {
+        "type": "kuromoji_part_of_speech"
+      },
+      {
+        "type": "kuromoji_stop"
+      },
+      {
+        "type": "kuromoji_stemmer"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_base_2",
+    "kind": "native",
+    "input": "\u79c1\u306f\u5b66\u751f\u3067\u3059\u3002",
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_pos_2",
+    "kind": "native",
+    "input": "\u79c1\u306f\u5b66\u751f\u3067\u3059\u3002",
+    "filters": [
+      {
+        "type": "kuromoji_part_of_speech"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_stop_2",
+    "kind": "native",
+    "input": "\u79c1\u306f\u5b66\u751f\u3067\u3059\u3002",
+    "filters": [
+      {
+        "type": "kuromoji_stop"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_stem_2",
+    "kind": "native",
+    "input": "\u79c1\u306f\u5b66\u751f\u3067\u3059\u3002",
+    "filters": [
+      {
+        "type": "kuromoji_stemmer"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_lower_2",
+    "kind": "native",
+    "input": "\u79c1\u306f\u5b66\u751f\u3067\u3059\u3002",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_chain_2",
+    "kind": "native",
+    "input": "\u79c1\u306f\u5b66\u751f\u3067\u3059\u3002",
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      },
+      {
+        "type": "kuromoji_part_of_speech"
+      },
+      {
+        "type": "kuromoji_stop"
+      },
+      {
+        "type": "kuromoji_stemmer"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_base_3",
+    "kind": "native",
+    "input": "\u5bff\u53f8\u304c\u304a\u3044\u3057\u304b\u3063\u305f\u3002",
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_pos_3",
+    "kind": "native",
+    "input": "\u5bff\u53f8\u304c\u304a\u3044\u3057\u304b\u3063\u305f\u3002",
+    "filters": [
+      {
+        "type": "kuromoji_part_of_speech"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_stop_3",
+    "kind": "native",
+    "input": "\u5bff\u53f8\u304c\u304a\u3044\u3057\u304b\u3063\u305f\u3002",
+    "filters": [
+      {
+        "type": "kuromoji_stop"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_stem_3",
+    "kind": "native",
+    "input": "\u5bff\u53f8\u304c\u304a\u3044\u3057\u304b\u3063\u305f\u3002",
+    "filters": [
+      {
+        "type": "kuromoji_stemmer"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_lower_3",
+    "kind": "native",
+    "input": "\u5bff\u53f8\u304c\u304a\u3044\u3057\u304b\u3063\u305f\u3002",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_chain_3",
+    "kind": "native",
+    "input": "\u5bff\u53f8\u304c\u304a\u3044\u3057\u304b\u3063\u305f\u3002",
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      },
+      {
+        "type": "kuromoji_part_of_speech"
+      },
+      {
+        "type": "kuromoji_stop"
+      },
+      {
+        "type": "kuromoji_stemmer"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_base_4",
+    "kind": "native",
+    "input": "\uff76\uff9e\uff6f\uff82\uff8e\uff9f\uff70\uff7d\uff9e\u3068\uff8a\uff9f\uff70\uff83\uff68\uff70",
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_pos_4",
+    "kind": "native",
+    "input": "\uff76\uff9e\uff6f\uff82\uff8e\uff9f\uff70\uff7d\uff9e\u3068\uff8a\uff9f\uff70\uff83\uff68\uff70",
+    "filters": [
+      {
+        "type": "kuromoji_part_of_speech"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_stop_4",
+    "kind": "native",
+    "input": "\uff76\uff9e\uff6f\uff82\uff8e\uff9f\uff70\uff7d\uff9e\u3068\uff8a\uff9f\uff70\uff83\uff68\uff70",
+    "filters": [
+      {
+        "type": "kuromoji_stop"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_stem_4",
+    "kind": "native",
+    "input": "\uff76\uff9e\uff6f\uff82\uff8e\uff9f\uff70\uff7d\uff9e\u3068\uff8a\uff9f\uff70\uff83\uff68\uff70",
+    "filters": [
+      {
+        "type": "kuromoji_stemmer"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_lower_4",
+    "kind": "native",
+    "input": "\uff76\uff9e\uff6f\uff82\uff8e\uff9f\uff70\uff7d\uff9e\u3068\uff8a\uff9f\uff70\uff83\uff68\uff70",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_chain_4",
+    "kind": "native",
+    "input": "\uff76\uff9e\uff6f\uff82\uff8e\uff9f\uff70\uff7d\uff9e\u3068\uff8a\uff9f\uff70\uff83\uff68\uff70",
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      },
+      {
+        "type": "kuromoji_part_of_speech"
+      },
+      {
+        "type": "kuromoji_stop"
+      },
+      {
+        "type": "kuromoji_stemmer"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_base_5",
+    "kind": "native",
+    "input": "\u30b7\u30e3\u30ef\u30fc \u30bf\u30af\u30b7\u30fc \u30b3\u30fc\u30d2\u30fc \u30fc",
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_pos_5",
+    "kind": "native",
+    "input": "\u30b7\u30e3\u30ef\u30fc \u30bf\u30af\u30b7\u30fc \u30b3\u30fc\u30d2\u30fc \u30fc",
+    "filters": [
+      {
+        "type": "kuromoji_part_of_speech"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_stop_5",
+    "kind": "native",
+    "input": "\u30b7\u30e3\u30ef\u30fc \u30bf\u30af\u30b7\u30fc \u30b3\u30fc\u30d2\u30fc \u30fc",
+    "filters": [
+      {
+        "type": "kuromoji_stop"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_stem_5",
+    "kind": "native",
+    "input": "\u30b7\u30e3\u30ef\u30fc \u30bf\u30af\u30b7\u30fc \u30b3\u30fc\u30d2\u30fc \u30fc",
+    "filters": [
+      {
+        "type": "kuromoji_stemmer"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_lower_5",
+    "kind": "native",
+    "input": "\u30b7\u30e3\u30ef\u30fc \u30bf\u30af\u30b7\u30fc \u30b3\u30fc\u30d2\u30fc \u30fc",
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_chain_5",
+    "kind": "native",
+    "input": "\u30b7\u30e3\u30ef\u30fc \u30bf\u30af\u30b7\u30fc \u30b3\u30fc\u30d2\u30fc \u30fc",
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      },
+      {
+        "type": "kuromoji_part_of_speech"
+      },
+      {
+        "type": "kuromoji_stop"
+      },
+      {
+        "type": "kuromoji_stemmer"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ],
+    "discard_compound_token": false
+  },
+  {
+    "id": "native_nbest_chain",
+    "kind": "native",
+    "input": "\u95a2\u897f\u56fd\u969b\u7a7a\u6e2f\u3068\u6771\u4eac\u5927\u5b66\u306b\u884c\u304d\u307e\u3057\u305f",
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      },
+      {
+        "type": "kuromoji_part_of_speech"
+      },
+      {
+        "type": "kuromoji_stop"
+      },
+      {
+        "type": "kuromoji_stemmer"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ],
+    "n_best_cost": 10000,
+    "discard_compound_token": false
+  },
+  {
+    "id": "analyzer_user",
+    "kind": "analyzer",
+    "input": "\u6771\u4eac\u5927\u5b66\u306b\u901a\u3044\u307e\u3057\u305f",
+    "user_dictionary": "\u6771\u4eac\u5927\u5b66,\u6771\u4eac \u5927\u5b66,\u30c8\u30a6\u30ad\u30e7\u30a6 \u30c0\u30a4\u30ac\u30af,\u540d\u8a5e"
+  },
+  {
+    "id": "analyzer_forced",
+    "kind": "analyzer",
+    "input": "\u3042\u3044\u3046\u3048\u304a\u304b\u304d\u304f\u3051\u3053",
+    "repeat": 110
+  },
+  {
+    "id": "synthetic_base",
+    "kind": "tokens",
+    "input": "\u8d70\u3063\u305f UQA \u30b7\u30e3\u30ef\u30fc \u3067\u3059",
+    "tokens": [
+      {
+        "term": "\u8d70\u3063\u305f",
+        "start_utf16": 0,
+        "end_utf16": 3,
+        "base_form": "\u8d70\u308b",
+        "part_of_speech": "\u52d5\u8a5e-\u81ea\u7acb",
+        "reading": "\u30cf\u30b7\u30c3\u30bf",
+        "pronunciation": "\u30cf\u30b7\u30c3\u30bf",
+        "inflection_type": "\u4e94\u6bb5\u30fb\u30e9\u884c",
+        "inflection_form": "\u9023\u7528\u30bf\u63a5\u7d9a"
+      },
+      {
+        "term": "UQA",
+        "start_utf16": 4,
+        "end_utf16": 7,
+        "base_form": "preserved",
+        "keyword": true,
+        "part_of_speech": "\u52a9\u8a5e-\u4fc2\u52a9\u8a5e",
+        "position_increment": 0,
+        "position_length": 3
+      },
+      {
+        "term": "\u30b7\u30e3\u30ef\u30fc",
+        "start_utf16": 8,
+        "end_utf16": 12,
+        "reading": "\u30b7\u30e3\u30ef\u30fc",
+        "pronunciation": "\u30b7\u30e3\u30ef\u30fc",
+        "position_increment": 2
+      },
+      {
+        "term": "\u3067\u3059",
+        "start_utf16": 13,
+        "end_utf16": 15,
+        "base_form": "\u3067\u3059",
+        "part_of_speech": "\u52a9\u52d5\u8a5e"
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      }
+    ],
+    "final_position_increment": 3
+  },
+  {
+    "id": "synthetic_pos",
+    "kind": "tokens",
+    "input": "\u8d70\u3063\u305f UQA \u30b7\u30e3\u30ef\u30fc \u3067\u3059",
+    "tokens": [
+      {
+        "term": "\u8d70\u3063\u305f",
+        "start_utf16": 0,
+        "end_utf16": 3,
+        "base_form": "\u8d70\u308b",
+        "part_of_speech": "\u52d5\u8a5e-\u81ea\u7acb",
+        "reading": "\u30cf\u30b7\u30c3\u30bf",
+        "pronunciation": "\u30cf\u30b7\u30c3\u30bf",
+        "inflection_type": "\u4e94\u6bb5\u30fb\u30e9\u884c",
+        "inflection_form": "\u9023\u7528\u30bf\u63a5\u7d9a"
+      },
+      {
+        "term": "UQA",
+        "start_utf16": 4,
+        "end_utf16": 7,
+        "base_form": "preserved",
+        "keyword": true,
+        "part_of_speech": "\u52a9\u8a5e-\u4fc2\u52a9\u8a5e",
+        "position_increment": 0,
+        "position_length": 3
+      },
+      {
+        "term": "\u30b7\u30e3\u30ef\u30fc",
+        "start_utf16": 8,
+        "end_utf16": 12,
+        "reading": "\u30b7\u30e3\u30ef\u30fc",
+        "pronunciation": "\u30b7\u30e3\u30ef\u30fc",
+        "position_increment": 2
+      },
+      {
+        "term": "\u3067\u3059",
+        "start_utf16": 13,
+        "end_utf16": 15,
+        "base_form": "\u3067\u3059",
+        "part_of_speech": "\u52a9\u52d5\u8a5e"
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_part_of_speech"
+      }
+    ],
+    "final_position_increment": 3
+  },
+  {
+    "id": "synthetic_stop",
+    "kind": "tokens",
+    "input": "\u8d70\u3063\u305f UQA \u30b7\u30e3\u30ef\u30fc \u3067\u3059",
+    "tokens": [
+      {
+        "term": "\u8d70\u3063\u305f",
+        "start_utf16": 0,
+        "end_utf16": 3,
+        "base_form": "\u8d70\u308b",
+        "part_of_speech": "\u52d5\u8a5e-\u81ea\u7acb",
+        "reading": "\u30cf\u30b7\u30c3\u30bf",
+        "pronunciation": "\u30cf\u30b7\u30c3\u30bf",
+        "inflection_type": "\u4e94\u6bb5\u30fb\u30e9\u884c",
+        "inflection_form": "\u9023\u7528\u30bf\u63a5\u7d9a"
+      },
+      {
+        "term": "UQA",
+        "start_utf16": 4,
+        "end_utf16": 7,
+        "base_form": "preserved",
+        "keyword": true,
+        "part_of_speech": "\u52a9\u8a5e-\u4fc2\u52a9\u8a5e",
+        "position_increment": 0,
+        "position_length": 3
+      },
+      {
+        "term": "\u30b7\u30e3\u30ef\u30fc",
+        "start_utf16": 8,
+        "end_utf16": 12,
+        "reading": "\u30b7\u30e3\u30ef\u30fc",
+        "pronunciation": "\u30b7\u30e3\u30ef\u30fc",
+        "position_increment": 2
+      },
+      {
+        "term": "\u3067\u3059",
+        "start_utf16": 13,
+        "end_utf16": 15,
+        "base_form": "\u3067\u3059",
+        "part_of_speech": "\u52a9\u52d5\u8a5e"
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_stop"
+      }
+    ],
+    "final_position_increment": 3
+  },
+  {
+    "id": "synthetic_stem",
+    "kind": "tokens",
+    "input": "\u8d70\u3063\u305f UQA \u30b7\u30e3\u30ef\u30fc \u3067\u3059",
+    "tokens": [
+      {
+        "term": "\u8d70\u3063\u305f",
+        "start_utf16": 0,
+        "end_utf16": 3,
+        "base_form": "\u8d70\u308b",
+        "part_of_speech": "\u52d5\u8a5e-\u81ea\u7acb",
+        "reading": "\u30cf\u30b7\u30c3\u30bf",
+        "pronunciation": "\u30cf\u30b7\u30c3\u30bf",
+        "inflection_type": "\u4e94\u6bb5\u30fb\u30e9\u884c",
+        "inflection_form": "\u9023\u7528\u30bf\u63a5\u7d9a"
+      },
+      {
+        "term": "UQA",
+        "start_utf16": 4,
+        "end_utf16": 7,
+        "base_form": "preserved",
+        "keyword": true,
+        "part_of_speech": "\u52a9\u8a5e-\u4fc2\u52a9\u8a5e",
+        "position_increment": 0,
+        "position_length": 3
+      },
+      {
+        "term": "\u30b7\u30e3\u30ef\u30fc",
+        "start_utf16": 8,
+        "end_utf16": 12,
+        "reading": "\u30b7\u30e3\u30ef\u30fc",
+        "pronunciation": "\u30b7\u30e3\u30ef\u30fc",
+        "position_increment": 2
+      },
+      {
+        "term": "\u3067\u3059",
+        "start_utf16": 13,
+        "end_utf16": 15,
+        "base_form": "\u3067\u3059",
+        "part_of_speech": "\u52a9\u52d5\u8a5e"
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_stemmer"
+      }
+    ],
+    "final_position_increment": 3
+  },
+  {
+    "id": "synthetic_lower",
+    "kind": "tokens",
+    "input": "\u8d70\u3063\u305f UQA \u30b7\u30e3\u30ef\u30fc \u3067\u3059",
+    "tokens": [
+      {
+        "term": "\u8d70\u3063\u305f",
+        "start_utf16": 0,
+        "end_utf16": 3,
+        "base_form": "\u8d70\u308b",
+        "part_of_speech": "\u52d5\u8a5e-\u81ea\u7acb",
+        "reading": "\u30cf\u30b7\u30c3\u30bf",
+        "pronunciation": "\u30cf\u30b7\u30c3\u30bf",
+        "inflection_type": "\u4e94\u6bb5\u30fb\u30e9\u884c",
+        "inflection_form": "\u9023\u7528\u30bf\u63a5\u7d9a"
+      },
+      {
+        "term": "UQA",
+        "start_utf16": 4,
+        "end_utf16": 7,
+        "base_form": "preserved",
+        "keyword": true,
+        "part_of_speech": "\u52a9\u8a5e-\u4fc2\u52a9\u8a5e",
+        "position_increment": 0,
+        "position_length": 3
+      },
+      {
+        "term": "\u30b7\u30e3\u30ef\u30fc",
+        "start_utf16": 8,
+        "end_utf16": 12,
+        "reading": "\u30b7\u30e3\u30ef\u30fc",
+        "pronunciation": "\u30b7\u30e3\u30ef\u30fc",
+        "position_increment": 2
+      },
+      {
+        "term": "\u3067\u3059",
+        "start_utf16": 13,
+        "end_utf16": 15,
+        "base_form": "\u3067\u3059",
+        "part_of_speech": "\u52a9\u52d5\u8a5e"
+      }
+    ],
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ],
+    "final_position_increment": 3
+  },
+  {
+    "id": "synthetic_default",
+    "kind": "tokens",
+    "input": "\u8d70\u3063\u305f UQA \u30b7\u30e3\u30ef\u30fc \u3067\u3059",
+    "tokens": [
+      {
+        "term": "\u8d70\u3063\u305f",
+        "start_utf16": 0,
+        "end_utf16": 3,
+        "base_form": "\u8d70\u308b",
+        "part_of_speech": "\u52d5\u8a5e-\u81ea\u7acb",
+        "reading": "\u30cf\u30b7\u30c3\u30bf",
+        "pronunciation": "\u30cf\u30b7\u30c3\u30bf",
+        "inflection_type": "\u4e94\u6bb5\u30fb\u30e9\u884c",
+        "inflection_form": "\u9023\u7528\u30bf\u63a5\u7d9a"
+      },
+      {
+        "term": "UQA",
+        "start_utf16": 4,
+        "end_utf16": 7,
+        "base_form": "preserved",
+        "keyword": true,
+        "part_of_speech": "\u52a9\u8a5e-\u4fc2\u52a9\u8a5e",
+        "position_increment": 0,
+        "position_length": 3
+      },
+      {
+        "term": "\u30b7\u30e3\u30ef\u30fc",
+        "start_utf16": 8,
+        "end_utf16": 12,
+        "reading": "\u30b7\u30e3\u30ef\u30fc",
+        "pronunciation": "\u30b7\u30e3\u30ef\u30fc",
+        "position_increment": 2
+      },
+      {
+        "term": "\u3067\u3059",
+        "start_utf16": 13,
+        "end_utf16": 15,
+        "base_form": "\u3067\u3059",
+        "part_of_speech": "\u52a9\u52d5\u8a5e"
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      },
+      {
+        "type": "kuromoji_part_of_speech"
+      },
+      {
+        "type": "kuromoji_stop"
+      },
+      {
+        "type": "kuromoji_stemmer"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ],
+    "final_position_increment": 3
+  },
+  {
+    "id": "synthetic_reverse",
+    "kind": "tokens",
+    "input": "\u8d70\u3063\u305f UQA \u30b7\u30e3\u30ef\u30fc \u3067\u3059",
+    "tokens": [
+      {
+        "term": "\u8d70\u3063\u305f",
+        "start_utf16": 0,
+        "end_utf16": 3,
+        "base_form": "\u8d70\u308b",
+        "part_of_speech": "\u52d5\u8a5e-\u81ea\u7acb",
+        "reading": "\u30cf\u30b7\u30c3\u30bf",
+        "pronunciation": "\u30cf\u30b7\u30c3\u30bf",
+        "inflection_type": "\u4e94\u6bb5\u30fb\u30e9\u884c",
+        "inflection_form": "\u9023\u7528\u30bf\u63a5\u7d9a"
+      },
+      {
+        "term": "UQA",
+        "start_utf16": 4,
+        "end_utf16": 7,
+        "base_form": "preserved",
+        "keyword": true,
+        "part_of_speech": "\u52a9\u8a5e-\u4fc2\u52a9\u8a5e",
+        "position_increment": 0,
+        "position_length": 3
+      },
+      {
+        "term": "\u30b7\u30e3\u30ef\u30fc",
+        "start_utf16": 8,
+        "end_utf16": 12,
+        "reading": "\u30b7\u30e3\u30ef\u30fc",
+        "pronunciation": "\u30b7\u30e3\u30ef\u30fc",
+        "position_increment": 2
+      },
+      {
+        "term": "\u3067\u3059",
+        "start_utf16": 13,
+        "end_utf16": 15,
+        "base_form": "\u3067\u3059",
+        "part_of_speech": "\u52a9\u52d5\u8a5e"
+      }
+    ],
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      },
+      {
+        "type": "kuromoji_stemmer"
+      },
+      {
+        "type": "kuromoji_stop"
+      },
+      {
+        "type": "kuromoji_part_of_speech"
+      },
+      {
+        "type": "kuromoji_baseform"
+      }
+    ],
+    "final_position_increment": 3
+  },
+  {
+    "id": "synthetic_stops_twice",
+    "kind": "tokens",
+    "input": "\u8d70\u3063\u305f UQA \u30b7\u30e3\u30ef\u30fc \u3067\u3059",
+    "tokens": [
+      {
+        "term": "\u8d70\u3063\u305f",
+        "start_utf16": 0,
+        "end_utf16": 3,
+        "base_form": "\u8d70\u308b",
+        "part_of_speech": "\u52d5\u8a5e-\u81ea\u7acb",
+        "reading": "\u30cf\u30b7\u30c3\u30bf",
+        "pronunciation": "\u30cf\u30b7\u30c3\u30bf",
+        "inflection_type": "\u4e94\u6bb5\u30fb\u30e9\u884c",
+        "inflection_form": "\u9023\u7528\u30bf\u63a5\u7d9a"
+      },
+      {
+        "term": "UQA",
+        "start_utf16": 4,
+        "end_utf16": 7,
+        "base_form": "preserved",
+        "keyword": true,
+        "part_of_speech": "\u52a9\u8a5e-\u4fc2\u52a9\u8a5e",
+        "position_increment": 0,
+        "position_length": 3
+      },
+      {
+        "term": "\u30b7\u30e3\u30ef\u30fc",
+        "start_utf16": 8,
+        "end_utf16": 12,
+        "reading": "\u30b7\u30e3\u30ef\u30fc",
+        "pronunciation": "\u30b7\u30e3\u30ef\u30fc",
+        "position_increment": 2
+      },
+      {
+        "term": "\u3067\u3059",
+        "start_utf16": 13,
+        "end_utf16": 15,
+        "base_form": "\u3067\u3059",
+        "part_of_speech": "\u52a9\u52d5\u8a5e"
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_part_of_speech"
+      },
+      {
+        "type": "kuromoji_stop"
+      },
+      {
+        "type": "kuromoji_part_of_speech"
+      },
+      {
+        "type": "kuromoji_stop"
+      }
+    ],
+    "final_position_increment": 3
+  },
+  {
+    "id": "base_absent_empty_keyword",
+    "kind": "tokens",
+    "input": "A B C D",
+    "tokens": [
+      {
+        "term": "A",
+        "start_utf16": 0,
+        "end_utf16": 1
+      },
+      {
+        "term": "B",
+        "start_utf16": 2,
+        "end_utf16": 3,
+        "base_form": ""
+      },
+      {
+        "term": "C",
+        "start_utf16": 4,
+        "end_utf16": 5,
+        "base_form": "",
+        "keyword": true
+      },
+      {
+        "term": "D",
+        "start_utf16": 6,
+        "end_utf16": 7,
+        "base_form": "\u8d70\u308b"
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      },
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "pos_exact_and_absent",
+    "kind": "tokens",
+    "input": "A B C D",
+    "tokens": [
+      {
+        "term": "A",
+        "start_utf16": 0,
+        "end_utf16": 1
+      },
+      {
+        "term": "B",
+        "start_utf16": 2,
+        "end_utf16": 3,
+        "part_of_speech": "\u52a9\u8a5e"
+      },
+      {
+        "term": "C",
+        "start_utf16": 4,
+        "end_utf16": 5,
+        "part_of_speech": "\u52a9\u8a5e-\u4fc2\u52a9\u8a5e"
+      },
+      {
+        "term": "D",
+        "start_utf16": 6,
+        "end_utf16": 7,
+        "part_of_speech": "\u540d\u8a5e",
+        "keyword": true
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_part_of_speech",
+        "stop_tags": [
+          "\u52a9\u8a5e",
+          "\u540d\u8a5e"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "pos_empty_set",
+    "kind": "tokens",
+    "input": "\u8d70\u3063\u305f UQA \u30b7\u30e3\u30ef\u30fc \u3067\u3059",
+    "tokens": [
+      {
+        "term": "\u8d70\u3063\u305f",
+        "start_utf16": 0,
+        "end_utf16": 3,
+        "base_form": "\u8d70\u308b",
+        "part_of_speech": "\u52d5\u8a5e-\u81ea\u7acb",
+        "reading": "\u30cf\u30b7\u30c3\u30bf",
+        "pronunciation": "\u30cf\u30b7\u30c3\u30bf",
+        "inflection_type": "\u4e94\u6bb5\u30fb\u30e9\u884c",
+        "inflection_form": "\u9023\u7528\u30bf\u63a5\u7d9a"
+      },
+      {
+        "term": "UQA",
+        "start_utf16": 4,
+        "end_utf16": 7,
+        "base_form": "preserved",
+        "keyword": true,
+        "part_of_speech": "\u52a9\u8a5e-\u4fc2\u52a9\u8a5e",
+        "position_increment": 0,
+        "position_length": 3
+      },
+      {
+        "term": "\u30b7\u30e3\u30ef\u30fc",
+        "start_utf16": 8,
+        "end_utf16": 12,
+        "reading": "\u30b7\u30e3\u30ef\u30fc",
+        "pronunciation": "\u30b7\u30e3\u30ef\u30fc",
+        "position_increment": 2
+      },
+      {
+        "term": "\u3067\u3059",
+        "start_utf16": 13,
+        "end_utf16": 15,
+        "base_form": "\u3067\u3059",
+        "part_of_speech": "\u52a9\u52d5\u8a5e"
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_part_of_speech",
+        "stop_tags": []
+      }
+    ]
+  },
+  {
+    "id": "stop_case_sensitive",
+    "kind": "tokens",
+    "input": "UQA uqa \u0130 I i \ud801\udc00",
+    "tokens": [
+      {
+        "term": "UQA",
+        "start_utf16": 0,
+        "end_utf16": 3
+      },
+      {
+        "term": "uqa",
+        "start_utf16": 4,
+        "end_utf16": 7
+      },
+      {
+        "term": "\u0130",
+        "start_utf16": 8,
+        "end_utf16": 9
+      },
+      {
+        "term": "I",
+        "start_utf16": 10,
+        "end_utf16": 11
+      },
+      {
+        "term": "i",
+        "start_utf16": 12,
+        "end_utf16": 13
+      },
+      {
+        "term": "\ud801\udc00",
+        "start_utf16": 14,
+        "end_utf16": 16
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_stop",
+        "words": [
+          "uqa",
+          "i",
+          "\ud801\udc28"
+        ],
+        "ignore_case": false
+      }
+    ]
+  },
+  {
+    "id": "stop_case_insensitive",
+    "kind": "tokens",
+    "input": "UQA uqa \u0130 I i \ud801\udc00",
+    "tokens": [
+      {
+        "term": "UQA",
+        "start_utf16": 0,
+        "end_utf16": 3,
+        "keyword": true
+      },
+      {
+        "term": "uqa",
+        "start_utf16": 4,
+        "end_utf16": 7
+      },
+      {
+        "term": "\u0130",
+        "start_utf16": 8,
+        "end_utf16": 9
+      },
+      {
+        "term": "I",
+        "start_utf16": 10,
+        "end_utf16": 11
+      },
+      {
+        "term": "i",
+        "start_utf16": 12,
+        "end_utf16": 13
+      },
+      {
+        "term": "\ud801\udc00",
+        "start_utf16": 14,
+        "end_utf16": 16
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_stop",
+        "words": [
+          "uqa",
+          "UQA",
+          "i",
+          "\ud801\udc28"
+        ],
+        "ignore_case": true
+      }
+    ]
+  },
+  {
+    "id": "stop_empty_set",
+    "kind": "tokens",
+    "input": "\u8d70\u3063\u305f UQA \u30b7\u30e3\u30ef\u30fc \u3067\u3059",
+    "tokens": [
+      {
+        "term": "\u8d70\u3063\u305f",
+        "start_utf16": 0,
+        "end_utf16": 3,
+        "base_form": "\u8d70\u308b",
+        "part_of_speech": "\u52d5\u8a5e-\u81ea\u7acb",
+        "reading": "\u30cf\u30b7\u30c3\u30bf",
+        "pronunciation": "\u30cf\u30b7\u30c3\u30bf",
+        "inflection_type": "\u4e94\u6bb5\u30fb\u30e9\u884c",
+        "inflection_form": "\u9023\u7528\u30bf\u63a5\u7d9a"
+      },
+      {
+        "term": "UQA",
+        "start_utf16": 4,
+        "end_utf16": 7,
+        "base_form": "preserved",
+        "keyword": true,
+        "part_of_speech": "\u52a9\u8a5e-\u4fc2\u52a9\u8a5e",
+        "position_increment": 0,
+        "position_length": 3
+      },
+      {
+        "term": "\u30b7\u30e3\u30ef\u30fc",
+        "start_utf16": 8,
+        "end_utf16": 12,
+        "reading": "\u30b7\u30e3\u30ef\u30fc",
+        "pronunciation": "\u30b7\u30e3\u30ef\u30fc",
+        "position_increment": 2
+      },
+      {
+        "term": "\u3067\u3059",
+        "start_utf16": 13,
+        "end_utf16": 15,
+        "base_form": "\u3067\u3059",
+        "part_of_speech": "\u52a9\u52d5\u8a5e"
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_stop",
+        "words": []
+      }
+    ]
+  },
+  {
+    "id": "stem_min_1",
+    "kind": "tokens",
+    "input": " \u30fc \u30ab\u30fc \u30bf\u30af\u30b7\u30fc \u30b3\u30fc\u30d2\u30fc \u30c6\u30b9\u30c8\u30fc\u30fc \u30a0\u30fc \u30ff\u30fc \u309f\u30fc \u3100\u30fc \uff7c\uff6c\uff9c\uff70 \u30b7\u30e3\u308f\u30fc",
+    "tokens": [
+      {
+        "term": "",
+        "start_utf16": 0,
+        "end_utf16": 0
+      },
+      {
+        "term": "\u30fc",
+        "start_utf16": 1,
+        "end_utf16": 2
+      },
+      {
+        "term": "\u30ab\u30fc",
+        "start_utf16": 3,
+        "end_utf16": 5
+      },
+      {
+        "term": "\u30bf\u30af\u30b7\u30fc",
+        "start_utf16": 6,
+        "end_utf16": 10
+      },
+      {
+        "term": "\u30b3\u30fc\u30d2\u30fc",
+        "start_utf16": 11,
+        "end_utf16": 15
+      },
+      {
+        "term": "\u30c6\u30b9\u30c8\u30fc\u30fc",
+        "start_utf16": 16,
+        "end_utf16": 21
+      },
+      {
+        "term": "\u30a0\u30fc",
+        "start_utf16": 22,
+        "end_utf16": 24
+      },
+      {
+        "term": "\u30ff\u30fc",
+        "start_utf16": 25,
+        "end_utf16": 27
+      },
+      {
+        "term": "\u309f\u30fc",
+        "start_utf16": 28,
+        "end_utf16": 30
+      },
+      {
+        "term": "\u3100\u30fc",
+        "start_utf16": 31,
+        "end_utf16": 33
+      },
+      {
+        "term": "\uff7c\uff6c\uff9c\uff70",
+        "start_utf16": 34,
+        "end_utf16": 38
+      },
+      {
+        "term": "\u30b7\u30e3\u308f\u30fc",
+        "start_utf16": 39,
+        "end_utf16": 43
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_stemmer",
+        "minimum_length": 1
+      }
+    ]
+  },
+  {
+    "id": "stem_min_2",
+    "kind": "tokens",
+    "input": " \u30fc \u30ab\u30fc \u30bf\u30af\u30b7\u30fc \u30b3\u30fc\u30d2\u30fc \u30c6\u30b9\u30c8\u30fc\u30fc \u30a0\u30fc \u30ff\u30fc \u309f\u30fc \u3100\u30fc \uff7c\uff6c\uff9c\uff70 \u30b7\u30e3\u308f\u30fc",
+    "tokens": [
+      {
+        "term": "",
+        "start_utf16": 0,
+        "end_utf16": 0
+      },
+      {
+        "term": "\u30fc",
+        "start_utf16": 1,
+        "end_utf16": 2
+      },
+      {
+        "term": "\u30ab\u30fc",
+        "start_utf16": 3,
+        "end_utf16": 5
+      },
+      {
+        "term": "\u30bf\u30af\u30b7\u30fc",
+        "start_utf16": 6,
+        "end_utf16": 10
+      },
+      {
+        "term": "\u30b3\u30fc\u30d2\u30fc",
+        "start_utf16": 11,
+        "end_utf16": 15
+      },
+      {
+        "term": "\u30c6\u30b9\u30c8\u30fc\u30fc",
+        "start_utf16": 16,
+        "end_utf16": 21
+      },
+      {
+        "term": "\u30a0\u30fc",
+        "start_utf16": 22,
+        "end_utf16": 24
+      },
+      {
+        "term": "\u30ff\u30fc",
+        "start_utf16": 25,
+        "end_utf16": 27
+      },
+      {
+        "term": "\u309f\u30fc",
+        "start_utf16": 28,
+        "end_utf16": 30
+      },
+      {
+        "term": "\u3100\u30fc",
+        "start_utf16": 31,
+        "end_utf16": 33
+      },
+      {
+        "term": "\uff7c\uff6c\uff9c\uff70",
+        "start_utf16": 34,
+        "end_utf16": 38
+      },
+      {
+        "term": "\u30b7\u30e3\u308f\u30fc",
+        "start_utf16": 39,
+        "end_utf16": 43
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_stemmer",
+        "minimum_length": 2
+      }
+    ]
+  },
+  {
+    "id": "stem_min_3",
+    "kind": "tokens",
+    "input": " \u30fc \u30ab\u30fc \u30bf\u30af\u30b7\u30fc \u30b3\u30fc\u30d2\u30fc \u30c6\u30b9\u30c8\u30fc\u30fc \u30a0\u30fc \u30ff\u30fc \u309f\u30fc \u3100\u30fc \uff7c\uff6c\uff9c\uff70 \u30b7\u30e3\u308f\u30fc",
+    "tokens": [
+      {
+        "term": "",
+        "start_utf16": 0,
+        "end_utf16": 0
+      },
+      {
+        "term": "\u30fc",
+        "start_utf16": 1,
+        "end_utf16": 2
+      },
+      {
+        "term": "\u30ab\u30fc",
+        "start_utf16": 3,
+        "end_utf16": 5
+      },
+      {
+        "term": "\u30bf\u30af\u30b7\u30fc",
+        "start_utf16": 6,
+        "end_utf16": 10
+      },
+      {
+        "term": "\u30b3\u30fc\u30d2\u30fc",
+        "start_utf16": 11,
+        "end_utf16": 15
+      },
+      {
+        "term": "\u30c6\u30b9\u30c8\u30fc\u30fc",
+        "start_utf16": 16,
+        "end_utf16": 21
+      },
+      {
+        "term": "\u30a0\u30fc",
+        "start_utf16": 22,
+        "end_utf16": 24
+      },
+      {
+        "term": "\u30ff\u30fc",
+        "start_utf16": 25,
+        "end_utf16": 27
+      },
+      {
+        "term": "\u309f\u30fc",
+        "start_utf16": 28,
+        "end_utf16": 30
+      },
+      {
+        "term": "\u3100\u30fc",
+        "start_utf16": 31,
+        "end_utf16": 33
+      },
+      {
+        "term": "\uff7c\uff6c\uff9c\uff70",
+        "start_utf16": 34,
+        "end_utf16": 38
+      },
+      {
+        "term": "\u30b7\u30e3\u308f\u30fc",
+        "start_utf16": 39,
+        "end_utf16": 43
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_stemmer",
+        "minimum_length": 3
+      }
+    ]
+  },
+  {
+    "id": "stem_min_4",
+    "kind": "tokens",
+    "input": " \u30fc \u30ab\u30fc \u30bf\u30af\u30b7\u30fc \u30b3\u30fc\u30d2\u30fc \u30c6\u30b9\u30c8\u30fc\u30fc \u30a0\u30fc \u30ff\u30fc \u309f\u30fc \u3100\u30fc \uff7c\uff6c\uff9c\uff70 \u30b7\u30e3\u308f\u30fc",
+    "tokens": [
+      {
+        "term": "",
+        "start_utf16": 0,
+        "end_utf16": 0
+      },
+      {
+        "term": "\u30fc",
+        "start_utf16": 1,
+        "end_utf16": 2
+      },
+      {
+        "term": "\u30ab\u30fc",
+        "start_utf16": 3,
+        "end_utf16": 5
+      },
+      {
+        "term": "\u30bf\u30af\u30b7\u30fc",
+        "start_utf16": 6,
+        "end_utf16": 10
+      },
+      {
+        "term": "\u30b3\u30fc\u30d2\u30fc",
+        "start_utf16": 11,
+        "end_utf16": 15
+      },
+      {
+        "term": "\u30c6\u30b9\u30c8\u30fc\u30fc",
+        "start_utf16": 16,
+        "end_utf16": 21
+      },
+      {
+        "term": "\u30a0\u30fc",
+        "start_utf16": 22,
+        "end_utf16": 24
+      },
+      {
+        "term": "\u30ff\u30fc",
+        "start_utf16": 25,
+        "end_utf16": 27
+      },
+      {
+        "term": "\u309f\u30fc",
+        "start_utf16": 28,
+        "end_utf16": 30
+      },
+      {
+        "term": "\u3100\u30fc",
+        "start_utf16": 31,
+        "end_utf16": 33
+      },
+      {
+        "term": "\uff7c\uff6c\uff9c\uff70",
+        "start_utf16": 34,
+        "end_utf16": 38
+      },
+      {
+        "term": "\u30b7\u30e3\u308f\u30fc",
+        "start_utf16": 39,
+        "end_utf16": 43
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_stemmer",
+        "minimum_length": 4
+      }
+    ]
+  },
+  {
+    "id": "stem_min_5",
+    "kind": "tokens",
+    "input": " \u30fc \u30ab\u30fc \u30bf\u30af\u30b7\u30fc \u30b3\u30fc\u30d2\u30fc \u30c6\u30b9\u30c8\u30fc\u30fc \u30a0\u30fc \u30ff\u30fc \u309f\u30fc \u3100\u30fc \uff7c\uff6c\uff9c\uff70 \u30b7\u30e3\u308f\u30fc",
+    "tokens": [
+      {
+        "term": "",
+        "start_utf16": 0,
+        "end_utf16": 0
+      },
+      {
+        "term": "\u30fc",
+        "start_utf16": 1,
+        "end_utf16": 2
+      },
+      {
+        "term": "\u30ab\u30fc",
+        "start_utf16": 3,
+        "end_utf16": 5
+      },
+      {
+        "term": "\u30bf\u30af\u30b7\u30fc",
+        "start_utf16": 6,
+        "end_utf16": 10
+      },
+      {
+        "term": "\u30b3\u30fc\u30d2\u30fc",
+        "start_utf16": 11,
+        "end_utf16": 15
+      },
+      {
+        "term": "\u30c6\u30b9\u30c8\u30fc\u30fc",
+        "start_utf16": 16,
+        "end_utf16": 21
+      },
+      {
+        "term": "\u30a0\u30fc",
+        "start_utf16": 22,
+        "end_utf16": 24
+      },
+      {
+        "term": "\u30ff\u30fc",
+        "start_utf16": 25,
+        "end_utf16": 27
+      },
+      {
+        "term": "\u309f\u30fc",
+        "start_utf16": 28,
+        "end_utf16": 30
+      },
+      {
+        "term": "\u3100\u30fc",
+        "start_utf16": 31,
+        "end_utf16": 33
+      },
+      {
+        "term": "\uff7c\uff6c\uff9c\uff70",
+        "start_utf16": 34,
+        "end_utf16": 38
+      },
+      {
+        "term": "\u30b7\u30e3\u308f\u30fc",
+        "start_utf16": 39,
+        "end_utf16": 43
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_stemmer",
+        "minimum_length": 5
+      }
+    ]
+  },
+  {
+    "id": "stem_min_0",
+    "kind": "tokens",
+    "input": " \u30fc \u30ab\u30fc \u30bf\u30af\u30b7\u30fc \u30b3\u30fc\u30d2\u30fc \u30c6\u30b9\u30c8\u30fc\u30fc \u30a0\u30fc \u30ff\u30fc \u309f\u30fc \u3100\u30fc \uff7c\uff6c\uff9c\uff70 \u30b7\u30e3\u308f\u30fc",
+    "tokens": [
+      {
+        "term": "",
+        "start_utf16": 0,
+        "end_utf16": 0
+      },
+      {
+        "term": "\u30fc",
+        "start_utf16": 1,
+        "end_utf16": 2
+      },
+      {
+        "term": "\u30ab\u30fc",
+        "start_utf16": 3,
+        "end_utf16": 5
+      },
+      {
+        "term": "\u30bf\u30af\u30b7\u30fc",
+        "start_utf16": 6,
+        "end_utf16": 10
+      },
+      {
+        "term": "\u30b3\u30fc\u30d2\u30fc",
+        "start_utf16": 11,
+        "end_utf16": 15
+      },
+      {
+        "term": "\u30c6\u30b9\u30c8\u30fc\u30fc",
+        "start_utf16": 16,
+        "end_utf16": 21
+      },
+      {
+        "term": "\u30a0\u30fc",
+        "start_utf16": 22,
+        "end_utf16": 24
+      },
+      {
+        "term": "\u30ff\u30fc",
+        "start_utf16": 25,
+        "end_utf16": 27
+      },
+      {
+        "term": "\u309f\u30fc",
+        "start_utf16": 28,
+        "end_utf16": 30
+      },
+      {
+        "term": "\u3100\u30fc",
+        "start_utf16": 31,
+        "end_utf16": 33
+      },
+      {
+        "term": "\uff7c\uff6c\uff9c\uff70",
+        "start_utf16": 34,
+        "end_utf16": 38
+      },
+      {
+        "term": "\u30b7\u30e3\u308f\u30fc",
+        "start_utf16": 39,
+        "end_utf16": 43
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_stemmer",
+        "minimum_length": 0
+      }
+    ]
+  },
+  {
+    "id": "stem_min_minus1",
+    "kind": "tokens",
+    "input": " \u30fc \u30ab\u30fc \u30bf\u30af\u30b7\u30fc \u30b3\u30fc\u30d2\u30fc \u30c6\u30b9\u30c8\u30fc\u30fc \u30a0\u30fc \u30ff\u30fc \u309f\u30fc \u3100\u30fc \uff7c\uff6c\uff9c\uff70 \u30b7\u30e3\u308f\u30fc",
+    "tokens": [
+      {
+        "term": "",
+        "start_utf16": 0,
+        "end_utf16": 0
+      },
+      {
+        "term": "\u30fc",
+        "start_utf16": 1,
+        "end_utf16": 2
+      },
+      {
+        "term": "\u30ab\u30fc",
+        "start_utf16": 3,
+        "end_utf16": 5
+      },
+      {
+        "term": "\u30bf\u30af\u30b7\u30fc",
+        "start_utf16": 6,
+        "end_utf16": 10
+      },
+      {
+        "term": "\u30b3\u30fc\u30d2\u30fc",
+        "start_utf16": 11,
+        "end_utf16": 15
+      },
+      {
+        "term": "\u30c6\u30b9\u30c8\u30fc\u30fc",
+        "start_utf16": 16,
+        "end_utf16": 21
+      },
+      {
+        "term": "\u30a0\u30fc",
+        "start_utf16": 22,
+        "end_utf16": 24
+      },
+      {
+        "term": "\u30ff\u30fc",
+        "start_utf16": 25,
+        "end_utf16": 27
+      },
+      {
+        "term": "\u309f\u30fc",
+        "start_utf16": 28,
+        "end_utf16": 30
+      },
+      {
+        "term": "\u3100\u30fc",
+        "start_utf16": 31,
+        "end_utf16": 33
+      },
+      {
+        "term": "\uff7c\uff6c\uff9c\uff70",
+        "start_utf16": 34,
+        "end_utf16": 38
+      },
+      {
+        "term": "\u30b7\u30e3\u308f\u30fc",
+        "start_utf16": 39,
+        "end_utf16": 43
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_stemmer",
+        "minimum_length": -1
+      }
+    ]
+  },
+  {
+    "id": "stem_keyword",
+    "kind": "tokens",
+    "input": "\u30b7\u30e3\u30ef\u30fc \u30c6\u30b9\u30c8\u30fc \u30c6\u30b9\u30c8\u30fc",
+    "tokens": [
+      {
+        "term": "\u30b7\u30e3\u30ef\u30fc",
+        "start_utf16": 0,
+        "end_utf16": 4,
+        "keyword": true
+      },
+      {
+        "term": "\u30c6\u30b9\u30c8\u30fc",
+        "start_utf16": 5,
+        "end_utf16": 9
+      },
+      {
+        "term": "\u30c6\u30b9\u30c8\u30fc",
+        "start_utf16": 10,
+        "end_utf16": 14,
+        "position_increment": 0,
+        "position_length": 3
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_stemmer"
+      }
+    ]
+  },
+  {
+    "id": "stop_empty_terms",
+    "kind": "tokens",
+    "input": " EMPTY \u30fc",
+    "tokens": [
+      {
+        "term": "",
+        "start_utf16": 0,
+        "end_utf16": 0,
+        "base_form": ""
+      },
+      {
+        "term": "EMPTY",
+        "start_utf16": 1,
+        "end_utf16": 6,
+        "base_form": ""
+      },
+      {
+        "term": "\u30fc",
+        "start_utf16": 7,
+        "end_utf16": 8
+      }
+    ],
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      },
+      {
+        "type": "kuromoji_stemmer",
+        "minimum_length": 1
+      },
+      {
+        "type": "kuromoji_stop",
+        "words": [
+          ""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "long_lowercase",
+    "kind": "tokens",
+    "input": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "tokens": [
+      {
+        "term": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "start_utf16": 0,
+        "end_utf16": 4097,
+        "keyword": true
+      }
+    ],
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  },
+  {
+    "id": "lowercase_raw_units",
+    "kind": "tokens",
+    "input": "A",
+    "tokens": [
+      {
+        "start_utf16": 0,
+        "end_utf16": 5,
+        "term_utf16": [
+          55296,
+          65,
+          56320,
+          55297,
+          56320
+        ]
+      }
+    ],
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ],
+    "input_utf16": [
+      55296,
+      65,
+      56320,
+      55297,
+      56320
+    ],
+    "final_offset_utf16": 5
+  },
+  {
+    "id": "user_empty_pos_removed",
+    "kind": "pipeline",
+    "input": "\u6771\u4eac",
+    "user_dictionary": "\u6771\u4eac,\u6771\u4eac,\u30c8\u30a6\u30ad\u30e7\u30a6,",
+    "filters": [
+      {
+        "type": "kuromoji_stop",
+        "words": [
+          "\u6771\u4eac"
+        ],
+        "ignore_case": false
+      }
+    ]
+  },
+  {
+    "id": "user_empty_pos_retained",
+    "kind": "pipeline",
+    "input": "\u6771\u4eac",
+    "user_dictionary": "\u6771\u4eac,\u6771\u4eac,\u30c8\u30a6\u30ad\u30e7\u30a6,",
+    "filters": [
+      {
+        "type": "kuromoji_stop",
+        "words": [],
+        "ignore_case": false
+      }
+    ]
+  },
+  {
+    "id": "user_empty_pos_accessed",
+    "kind": "pipeline",
+    "input": "\u6771\u4eac",
+    "user_dictionary": "\u6771\u4eac,\u6771\u4eac,\u30c8\u30a6\u30ad\u30e7\u30a6,",
+    "filters": [
+      {
+        "type": "kuromoji_part_of_speech",
+        "stop_tags": []
+      },
+      {
+        "type": "kuromoji_stop",
+        "words": [
+          "\u6771\u4eac"
+        ],
+        "ignore_case": false
+      }
+    ]
+  },
+  {
+    "id": "user_empty_pos_base_then_removed",
+    "kind": "pipeline",
+    "input": "\u6771\u4eac",
+    "user_dictionary": "\u6771\u4eac,\u6771\u4eac,\u30c8\u30a6\u30ad\u30e7\u30a6,",
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      },
+      {
+        "type": "kuromoji_stop",
+        "words": [
+          "\u6771\u4eac"
+        ],
+        "ignore_case": false
+      }
+    ]
+  },
+  {
+    "id": "pipeline_width_only",
+    "kind": "pipeline",
+    "input": "\uff35\uff31\uff21 \uff76\uff9e\uff6f\uff82 \u8d70\u308a\u307e\u3057\u305f",
+    "filters": []
+  },
+  {
+    "id": "pipeline_width_base_stem",
+    "kind": "pipeline",
+    "input": "\uff7c\uff6c\uff9c\uff70\u3067\u8d70\u308a\u307e\u3057\u305f \uff35\uff31\uff21",
+    "filters": [
+      {
+        "type": "kuromoji_baseform"
+      },
+      {
+        "type": "kuromoji_stemmer"
+      }
+    ]
+  },
+  {
+    "id": "pipeline_nbest_lower",
+    "kind": "pipeline",
+    "input": "\u95a2\u897f\u56fd\u969b\u7a7a\u6e2f\u3068\uff35\uff31\uff21",
+    "n_best_cost": 10000,
+    "filters": [
+      {
+        "type": "unicode_simple_lowercase"
+      }
+    ]
+  }
+]

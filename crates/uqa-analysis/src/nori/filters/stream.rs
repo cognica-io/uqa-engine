@@ -7,14 +7,14 @@
 //! Korean attribute policy over shared native and common filter ownership.
 
 use super::Work;
-use crate::morphology::filter::{covering_range, FilterToken as StreamToken};
+use crate::morphology::filter::{covering_range, ComposingToken, FilterToken as StreamToken};
 pub(crate) use crate::morphology::filter::{AllocatedStream, FilterStream};
 use crate::nori::{NoriMorpheme, NoriOutput, NoriToken, POSTag};
 use crate::AnalysisResult;
 use std::ops::Range;
 use uqa_core::memory::{Budgeted, MemoryBudget, MemoryReservation};
 
-pub(crate) trait FilterToken: StreamToken {
+pub(crate) trait FilterToken: ComposingToken {
     fn reading_form(
         &mut self,
         term_units: usize,
@@ -75,7 +75,6 @@ impl From<FilterStream<NoriToken>> for NoriOutput {
 }
 
 impl StreamToken for NoriToken {
-    type Span = Range<usize>;
     type Context = ();
 
     fn term(&self) -> impl Iterator<Item = u16> + '_ {
@@ -83,13 +82,6 @@ impl StreamToken for NoriToken {
     }
     fn term_len(&self, _work: &mut Work<'_>) -> AnalysisResult<usize> {
         Ok(self.term_utf16.len())
-    }
-    fn clone_reserved(
-        &self,
-        budget: &MemoryBudget,
-        work: &mut Work<'_>,
-    ) -> AnalysisResult<Budgeted<Self>> {
-        self.clone_budgeted(budget, work.poll)
     }
     fn replace_term(
         &mut self,
@@ -105,26 +97,8 @@ impl StreamToken for NoriToken {
         memory.absorb(allocation);
         Ok(())
     }
-    fn position_length(&self) -> u32 {
-        self.position_length
-    }
     fn keyword(&self) -> bool {
         self.keyword
-    }
-    fn span(&self) -> Self::Span {
-        self.start_utf16..self.end_utf16
-    }
-    fn cover(
-        &mut self,
-        first: &Self::Span,
-        last: &Self::Span,
-        (): &(),
-        _work: &mut Work<'_>,
-    ) -> AnalysisResult<()> {
-        let range = covering_range(first, last)?;
-        self.start_utf16 = range.start;
-        self.end_utf16 = range.end;
-        Ok(())
     }
 }
 
@@ -173,5 +147,34 @@ impl FilterToken for NoriToken {
     }
     fn morphemes(&self) -> Option<&[NoriMorpheme]> {
         self.morphemes.as_deref()
+    }
+}
+
+impl ComposingToken for NoriToken {
+    type Span = Range<usize>;
+    fn clone_reserved(
+        &self,
+        budget: &MemoryBudget,
+        work: &mut Work<'_>,
+    ) -> AnalysisResult<Budgeted<Self>> {
+        self.clone_budgeted(budget, work.poll)
+    }
+    fn position_length(&self) -> u32 {
+        self.position_length
+    }
+    fn span(&self) -> Self::Span {
+        self.start_utf16..self.end_utf16
+    }
+    fn cover(
+        &mut self,
+        first: &Self::Span,
+        last: &Self::Span,
+        (): &(),
+        _work: &mut Work<'_>,
+    ) -> AnalysisResult<()> {
+        let range = covering_range(first, last)?;
+        self.start_utf16 = range.start;
+        self.end_utf16 = range.end;
+        Ok(())
     }
 }

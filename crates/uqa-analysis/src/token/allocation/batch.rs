@@ -127,7 +127,7 @@ impl<T: AllocatedToken> TokenBatchAllocation<T> {
         &self.batch.tokens
     }
 
-    #[cfg(feature = "nori")]
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
     pub(crate) fn terminal(&self) -> Option<&T> {
         self.batch.terminal.as_deref()
     }
@@ -136,7 +136,7 @@ impl<T: AllocatedToken> TokenBatchAllocation<T> {
         self.memory.budget()
     }
 
-    #[cfg(feature = "nori")]
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
     pub(crate) fn map_tokens(
         mut self,
         mut transform: impl FnMut(&mut T, &mut MemoryReservation) -> AnalysisResult<()>,

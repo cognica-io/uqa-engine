@@ -10,23 +10,20 @@ use crate::token::{
     allocation::{AllocatedToken, TokenBatchAllocation},
     TokenBatch,
 };
-use crate::{AnalysisError, AnalysisResult};
+#[cfg(feature = "nori")]
+use crate::AnalysisError;
+use crate::AnalysisResult;
+#[cfg(feature = "nori")]
 use std::ops::Range;
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryReservation};
 
 pub(crate) mod lowercase;
 
 pub(crate) trait FilterToken: AllocatedToken + Sized {
-    type Span;
     type Context;
 
     fn term(&self) -> impl Iterator<Item = u16> + '_;
     fn term_len(&self, work: &mut Work<'_>) -> AnalysisResult<usize>;
-    fn clone_reserved(
-        &self,
-        budget: &MemoryBudget,
-        work: &mut Work<'_>,
-    ) -> AnalysisResult<Budgeted<Self>>;
     fn replace_term(
         &mut self,
         term: Budgeted<Vec<u16>>,
@@ -55,16 +52,7 @@ pub(crate) trait FilterToken: AllocatedToken + Sized {
         }
         Ok(output)
     }
-    fn position_length(&self) -> u32;
     fn keyword(&self) -> bool;
-    fn span(&self) -> Self::Span;
-    fn cover(
-        &mut self,
-        first: &Self::Span,
-        last: &Self::Span,
-        context: &Self::Context,
-        work: &mut Work<'_>,
-    ) -> AnalysisResult<()>;
 }
 
 pub(crate) struct FilterStream<T: FilterToken> {
@@ -131,6 +119,7 @@ impl<T: FilterToken> AllocatedStream<T> {
     }
 }
 
+#[cfg(feature = "nori")]
 pub(crate) fn covering_range(
     first: &Range<usize>,
     last: &Range<usize>,
@@ -173,4 +162,23 @@ pub(crate) fn text_units(text: &str, work: &mut Work<'_>) -> AnalysisResult<usiz
         length += character.len_utf16();
     }
     Ok(length)
+}
+
+#[cfg(feature = "nori")]
+pub(crate) trait ComposingToken: FilterToken {
+    type Span;
+    fn clone_reserved(
+        &self,
+        budget: &MemoryBudget,
+        work: &mut Work<'_>,
+    ) -> AnalysisResult<Budgeted<Self>>;
+    fn position_length(&self) -> u32;
+    fn span(&self) -> Self::Span;
+    fn cover(
+        &mut self,
+        first: &Self::Span,
+        last: &Self::Span,
+        context: &Self::Context,
+        work: &mut Work<'_>,
+    ) -> AnalysisResult<()>;
 }

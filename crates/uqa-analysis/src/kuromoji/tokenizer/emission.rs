@@ -228,7 +228,10 @@ pub(super) fn materialize(
         .input
         .get(start..end)
         .ok_or_else(|| invalid("Kuromoji emission", "token exceeds its source"))?;
-    let attributes = word.attributes(state.model, state.user)?;
+    let (attributes, errors) = word.attributes(state.model, state.user);
+    if !state.defer_attributes {
+        errors.validate()?;
+    }
     let mut units = surface.len();
     for attribute in attributes.into_iter().flatten() {
         let count =
@@ -269,6 +272,7 @@ pub(super) fn materialize(
             inflection_type,
             inflection_form,
             origin: word.origin(),
+            errors,
         },
         memory,
     ))

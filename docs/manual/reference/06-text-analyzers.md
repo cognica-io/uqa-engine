@@ -702,7 +702,7 @@ assert_eq!(terms?, ["3200", "원", "157"]);
 
 ## Standalone Japanese tokenization
 
-The independent `uqa-analysis/kuromoji` feature exposes `JapaneseTokenizer`, `KuromojiOptions`, `KuromojiMode`, `KuromojiLimits`, `KuromojiToken` and `KuromojiOutput`. It includes the immutable dictionary from `uqa-kuromoji-data`. The standalone API is implemented; Japanese common-pipeline configuration, filters, built-in registration and binding integration remain in development. The [implementation plan](../../plans/0007-kuromoji-analyzer.md) tracks those remaining contracts.
+The independent `uqa-analysis/kuromoji` feature exposes `JapaneseTokenizer`, `KuromojiOptions`, `KuromojiMode`, `KuromojiLimits`, `KuromojiToken` and `KuromojiOutput`. It includes the immutable dictionary from `uqa-kuromoji-data`. The standalone API is implemented; Japanese common-pipeline configuration, optional filters, built-in registration and binding integration remain in development. The standalone default analyzer and its filters are described below. The [implementation plan](../../plans/0007-kuromoji-analyzer.md) tracks those remaining contracts.
 
 `JapaneseTokenizer::new(model, user, options)` retains the selected immutable dictionary and optional compiled Japanese user rules. Rules compiled against another semantic model return a typed analysis error. `KuromojiResources::default().load_default()` returns the bundled resource handle; explicit resolvers and `compile_user` retain the same artifact/model/source identities described in the [bundle specification](../../design/kuromoji-bundle-format.md). Later resource alias changes do not mutate a constructed tokenizer.
 
@@ -723,7 +723,7 @@ assert_eq!(terms, ["関西", "国際", "空港"]);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-The same example runs as a tokenizer doctest. `KuromojiToken` retains lossless `term_utf16`, `start_utf16`, `end_utf16`, `position_increment`, `position_length`, `keyword` and `origin` (`Known`, `Unknown` or `User`). Its six independent optional strings are `part_of_speech`, `base_form`, `reading`, `pronunciation`, `inflection_type` and `inflection_form`. `KuromojiOutput` owns the ordered tokens, `final_offset_utf16` and `final_position_increment`. Positions describe the graph without flattening compound alternatives; offsets refer to the supplied input in UTF-16 units. Raw unpaired input and token units remain representable through `tokenize_utf16` and the raw term vectors.
+The same example runs as a tokenizer doctest. `KuromojiToken` retains lossless `term_utf16`, `start_utf16`, `end_utf16`, `position_increment`, `position_length`, `keyword` and `origin` (`Known`, `Unknown` or `User`). Its six independent optional strings are `part_of_speech`, `base_form`, `reading`, `pronunciation`, `inflection_type` and `inflection_form`. `KuromojiToken::new(term_utf16, span, origin)` constructs a token with unit increment/length, no keyword mark and absent optional attributes; callers can then populate its public fields. `KuromojiOutput::from_tokens(tokens, final_offset_utf16, final_position_increment)` constructs a materialized stream while keeping opaque exhaustion state private. `KuromojiOutput` owns the ordered tokens, `final_offset_utf16` and `final_position_increment`. Positions describe the graph without flattening compound alternatives; offsets refer to the supplied input in UTF-16 units. Raw unpaired input and token units remain representable through `tokenize_utf16` and the raw term vectors.
 
 `tokenize_controlled(input, limits, poll)` adds count limits and cancellation to string input. `tokenize_utf16(units, limits, poll)` accepts borrowed raw units. `tokenize_budgeted(input, limits, &budget, poll)` and `tokenize_utf16_budgeted(units, limits, &budget, poll)` return `Budgeted<KuromojiOutput>` and reserve all call-owned input, lattice, resegmentation, N-best graph/fixup, token and attribute capacity through one `uqa_core::memory::MemoryBudget`; borrowed UTF-16 input remains caller-owned. Returned reservations retain the output buffers until destruction or explicit transfer. Errors publish no partial stream, release that call's allocations and preserve other owners sharing the allowance.
 
@@ -795,6 +795,41 @@ fast, quick, rapid
 ```
 
 Uncompiled `Analyzer` and token-filter execution reload the file on each call, so edits become visible and later deletion or permission loss returns an error. Compilation resolves the file contents into an immutable descriptor. Engine registration and field binding retain that compiled revision, including its resolved synonym map, across file edits and reopen. Re-register the name to load changed contents, and rebind a field to install the new revision there. The typed `highlight` helper compiles its explicit analyzer once per call; `highlight_compiled` retains the caller-provided revision.
+
+## Standalone Japanese analysis and filters
+
+The `kuromoji` feature exposes `JapaneseAnalyzer` and `JapaneseFilter`. These standalone Rust APIs do not yet register Japanese analyzer names or component configurations in the common catalog, SQL or bindings.
+
+`JapaneseAnalyzer::new(model, user, mode)` applies CJK width character filtering, the selected tokenizer mode with both discard flags true, base-form replacement, the model's 27 exact POS stops and 109 Japanese stopwords, Katakana stemming with minimum length four, and the model's Java simple lowercase. Use `KuromojiMode::Search` for the Lucene default. Returned `AnalyzedText` preserves Japanese attributes, graph positions and corrected original UTF-16/UTF-8 source spans.
+
+```rust
+use uqa_analysis::kuromoji::{JapaneseAnalyzer, KuromojiMode, KuromojiResources};
+let dictionary = KuromojiResources::default().load_default()?;
+let analyzer = JapaneseAnalyzer::new(dictionary.model().clone(), None, KuromojiMode::Search)?;
+let output = analyzer.analyze("ＵＱＡで走りました")?;
+let terms: Vec<_> = output.tokens().iter().map(|token| token.term().as_str().unwrap()).collect();
+assert_eq!(terms, ["uqa", "走る"]);
+assert_eq!(analyzer.normalize("ＵＱＡで走りました")?, "uqaで走りました");
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The example runs as a doctest. `with_filters(model, user, options, filters)` compiles an explicit ordered chain while retaining width character filtering; its tokenizer options also support positive N-best costs. `normalize(input)` always applies width and simple lowercase to the complete string, independently of that chain. It does not tokenize, change base forms, stem Katakana or remove stops.
+
+| `JapaneseFilter` | Behavior |
+| --- | --- |
+| `BaseForm` | Replace a non-keyword term when its Japanese base form is present. An explicitly empty base form produces an empty term; absent morphology retains the original term. |
+| `PartOfSpeech { stop_tags }` | Omission uses model defaults, an empty list retains all tags, and custom tags match exactly. Absent Japanese POS is retained; keyword marks do not exempt stop tags. |
+| `Stop { words, ignore_case }` | Omission uses Japanese defaults; an empty list removes nothing. Case-insensitive lookup uses the selected Java simple-lowercase profile. Keyword marks do not exempt stopwords. |
+| `KatakanaStem { minimum_length }` | The minimum must be at least one. Non-keyword terms of at least that UTF-16 length lose one trailing `ー` only when every unit belongs to the Katakana block. Halfwidth, Hiragana and mixed terms remain unchanged unless an earlier stage converts them. |
+| `SimpleLowercase` | Apply the selected Java simple mapping, preserving raw unpaired UTF-16 units. Keyword marks do not disable lowercasing. |
+
+`JapaneseFilter` serializes with the respective tags `kuromoji_baseform`, `kuromoji_part_of_speech`, `kuromoji_stop`, `kuromoji_stemmer` and `unicode_simple_lowercase`. Standalone deserialization rejects unknown properties; omitted stop-case and stem settings resolve to `true` and `4`. These tags describe the standalone Rust filter configuration until common-pipeline compilation is implemented.
+
+Each filter provides `apply`/`apply_controlled` for `KuromojiOutput` and `filter_analyzed`/`filter_analyzed_controlled` for `AnalyzedText`. Its `apply_budgeted` and `filter_analyzed_budgeted` forms take `(input, model, limits, poll)` and retain the input allowance through lookup preparation and mutation. Both representations share one algorithm. Removed tokens preserve skipped increments, trailing holes and opaque exhaustion attributes; transformations preserve all independent morphology and graph fields.
+
+`JapaneseAnalyzer::analyze_budgeted` takes `(input, limits, budget, poll)`; `analyze_mapped_budgeted` takes a retained `FilteredText` view and composes existing edits with width conversion. `normalize_budgeted` uses the same argument shape as string analysis. Constructor `with_filters_budgeted` additionally takes `(limits, budget, poll)` after its ordinary arguments and retains prepared lookup buffers separately from runtime output. `max_filter_entries` defaults to 65,536 and bounds chain stage counts and individual lookup sets; `max_filter_utf16` defaults to 16,777,216 and bounds each prepared set. The output-unit limit includes retained terminal attributes. Cancellation and allocation errors publish no partial result and release only that operation's owners.
+
+Custom chains preserve lazy user-field errors: a stopword filter can remove a token whose POS accessor would fail, but reading that POS or publishing the token returns the checked dictionary error. Invalid access is distinct from an absent optional attribute and is not exposed as an empty string. The [127-case Docker corpus](../../../tests/parity/kuromoji/README.md) verifies default and custom chains, individual native/common filters, normalized strings, original offsets, complete attributes and these errors. Native owner tests additionally verify preparation/runtime limits, memory lifetime, cancellation and recovery.
 
 ## Validation and operational rules
 

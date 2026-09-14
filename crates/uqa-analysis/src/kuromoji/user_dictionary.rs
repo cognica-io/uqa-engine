@@ -88,15 +88,14 @@ impl<'a> UserWord<'a> {
     // Lucene splits reading + NUL + POS and discards trailing empty fields.
     // Retain that observable access failure without duplicating POS per segment.
     fn feature(self, index: usize) -> DictionaryResult<&'a str> {
+        self.feature_value(index)
+            .ok_or_else(|| invalid("user dictionary", "requested morphology field is absent"))
+    }
+
+    pub(super) fn feature_value(self, index: usize) -> Option<&'a str> {
         let mut fields = self.reading.split('\0').chain(self.pos.split('\0'));
-        let value = fields.nth(index);
-        match value {
-            Some(value) if !value.is_empty() || fields.any(|field| !field.is_empty()) => Ok(value),
-            _ => Err(invalid(
-                "user dictionary",
-                "requested morphology field is absent",
-            )),
-        }
+        let value = fields.nth(index)?;
+        (!value.is_empty() || fields.any(|field| !field.is_empty())).then_some(value)
     }
 }
 

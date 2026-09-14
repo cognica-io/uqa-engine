@@ -30,6 +30,7 @@ fn tokenizer() -> JapaneseTokenizer {
 fn attributes() -> KuromojiOutput {
     KuromojiOutput {
         tokens: vec![KuromojiToken {
+            errors: crate::kuromoji::AttributeErrors::default(),
             term_utf16: vec![0xd83d],
             start_utf16: 0,
             end_utf16: 1,
@@ -44,6 +45,7 @@ fn attributes() -> KuromojiOutput {
             inflection_form: Some("形".into()),
             origin: KuromojiOrigin::User,
         }],
+        terminal: None,
         final_offset_utf16: 3,
         final_position_increment: 4,
     }
@@ -426,4 +428,55 @@ fn korean_filters_treat_japanese_attributes_as_absent() {
             input
         );
     }
+}
+
+#[cfg(feature = "nori")]
+#[test]
+fn later_number_composition_cannot_publish_invalid_japanese_terminal_attributes() {
+    use crate::kuromoji::{JapaneseAnalyzer, JapaneseFilter};
+
+    let model = KuromojiResources::default()
+        .load_default()
+        .unwrap()
+        .model()
+        .clone();
+    let user = crate::kuromoji::UserDictionary::compile(
+        "東京,東京,トウキョウ,",
+        &model,
+        crate::kuromoji::UserDictionaryLimits::default(),
+    )
+    .unwrap();
+    let analyzer = JapaneseAnalyzer::with_filters(
+        model,
+        user,
+        KuromojiOptions::default(),
+        &[JapaneseFilter::Stop {
+            words: Some(vec!["東京".into()]),
+            ignore_case: false,
+        }],
+    )
+    .unwrap();
+    let input = analyzer.analyze("1 東京").unwrap();
+    assert_eq!(input.tokens().len(), 1);
+    let korean = crate::nori::NoriResources::default()
+        .load_default()
+        .unwrap();
+    assert!(matches!(
+        crate::nori::KoreanFilter::Number.filter_analyzed(input.clone(), korean.model()),
+        Err(AnalysisError::KuromojiDictionary(_))
+    ));
+    let filter: crate::TokenFilter = serde_json::from_str(r#"{"type":"nori_number"}"#).unwrap();
+    assert!(matches!(
+        filter.filter_analyzed(input.clone()),
+        Err(AnalysisError::KuromojiDictionary(_))
+    ));
+    let budget = MemoryBudget::new(1 << 20);
+    let held = budget.reserve(7).unwrap();
+    let reserved = input.clone_budgeted(&budget, || Ok(())).unwrap();
+    assert!(matches!(
+        filter.filter_analyzed_budgeted(reserved, || Ok(())),
+        Err(AnalysisError::KuromojiDictionary(_))
+    ));
+    assert_eq!(budget.used(), 7);
+    drop(held);
 }

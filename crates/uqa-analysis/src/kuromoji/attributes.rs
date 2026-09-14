@@ -21,10 +21,14 @@ pub struct JapaneseMorphology {
     pub inflection_type: Option<String>,
     pub inflection_form: Option<String>,
     pub origin: KuromojiOrigin,
+    #[serde(skip)]
+    pub(crate) errors: AttributeErrors,
 }
 
+mod allocation;
+
 impl JapaneseMorphology {
-    fn fields(&self) -> [Option<&String>; 6] {
+    pub(crate) fn fields(&self) -> [Option<&String>; 6] {
         [
             self.part_of_speech.as_ref(),
             self.base_form.as_ref(),
@@ -75,8 +79,38 @@ impl JapaneseMorphology {
                 inflection_type,
                 inflection_form,
                 origin: self.origin,
+                errors: self.errors,
             },
             memory,
         ))
+    }
+}
+
+/// Deferred Java user-field access failures remain private to unobserved stream attributes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct AttributeErrors(u8);
+impl AttributeErrors {
+    pub(crate) fn record(&mut self, index: usize) {
+        self.0 |= 1 << index;
+    }
+    pub(crate) fn check(self, index: usize) -> crate::AnalysisResult<()> {
+        if self.0 & (1 << index) != 0 {
+            return Err(super::error::invalid(
+                "user dictionary",
+                "requested morphology field is absent",
+            )
+            .into());
+        }
+        Ok(())
+    }
+    pub(crate) fn validate(self) -> crate::AnalysisResult<()> {
+        if self.0 != 0 {
+            return Err(super::error::invalid(
+                "user dictionary",
+                "requested morphology field is absent",
+            )
+            .into());
+        }
+        Ok(())
     }
 }

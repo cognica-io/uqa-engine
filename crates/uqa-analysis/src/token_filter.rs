@@ -161,7 +161,10 @@ impl TokenFilter {
         &self,
         input: crate::AnalyzedText,
     ) -> AnalysisResult<crate::AnalyzedText> {
-        self.prepare()?.filter_analyzed(input)
+        let output = self.prepare()?.filter_analyzed(input)?;
+        #[cfg(feature = "kuromoji")]
+        output.validate_japanese_attributes(&mut || Ok(()))?;
+        Ok(output)
     }
 
     /// Consume a reserved stream and retain its allowance through every common or Korean token filter.
@@ -187,7 +190,10 @@ impl TokenFilter {
         mut poll: impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<uqa_core::memory::Budgeted<crate::AnalyzedText>> {
         poll()?;
-        self.prepare()?.filter_analyzed_budgeted(input, &mut poll)
+        let output = self.prepare()?.filter_analyzed_budgeted(input, &mut poll)?;
+        #[cfg(feature = "kuromoji")]
+        output.validate_japanese_attributes(&mut poll)?;
+        Ok(output)
     }
 }
 

@@ -1,6 +1,6 @@
 # Pinned Lucene Kuromoji dictionary and analysis references
 
-These Docker tools reproduce the complete Japanese dictionary and export its public morphology model for the [native implementation plan](../../../docs/plans/0007-kuromoji-analyzer.md). They establish reference data and provenance. Native dictionary loading, user-rule compilation, standalone tokenization and N-best output are implemented and compared with these references; complete analyzer parity remains implementation work.
+These Docker tools reproduce the complete Japanese dictionary and export its public morphology model for the [native implementation plan](../../../docs/plans/0007-kuromoji-analyzer.md). They establish reference data and provenance. Native dictionary loading, user-rule compilation, standalone tokenization and N-best output are implemented and compared with these references; the default standalone analyzer and its basic filters are also verified, while optional components and common-pipeline integration remain implementation work.
 
 [`manifest.json`](manifest.json) pins Lucene 10.5.1, source commit `64ce863a2bea79c69c19c4d56268c26710ff0ff9`, the core/common/Kuromoji jars, Temurin 21.0.10+7, nine dictionary resources and three analysis resources. Both Java compilation and execution run inside the pinned Docker image, with no container network and read-only source/jar mounts. Production builds and queries never run these tools or download dictionaries.
 
@@ -79,3 +79,12 @@ python3 tests/parity/kuromoji/run_nbest_reference.py --offline
 python3 tests/parity/kuromoji/run_nbest_reference.py --offline --platform linux/amd64
 cargo test -p uqa-analysis --no-default-features --features kuromoji-tools --locked
 ```
+
+The independent filter/analyzer corpus contains 127 observations: 109 complete streams, 14 normalized strings and four errors. It covers all default tokenizer modes, standalone base-form/POS/stop/stem/simple-lowercase filters, native/common stream equality, custom chains with width and N-best, keyword marks, empty and absent attributes, case-sensitive and insensitive stops, trailing holes, raw term units, forced fragments and invalid stem settings. User-field cases verify that a stop can remove a token before its invalid POS is observed, whereas reading or emitting that attribute fails. Inputs, outputs and provenance total 226,506 bytes; long streams retain full hashes and counts.
+
+```sh
+python3 tests/parity/kuromoji/run_filter_reference.py --offline
+python3 tests/parity/kuromoji/run_filter_reference.py --offline --platform linux/amd64
+```
+
+Both default and custom analyzer results retain corrected original offsets. Normalization runs independently of tokenization and stop removal. Reference values come only from the pinned Docker JVM; Rust owner tests check those complete results as well as prepared/runtime byte and count limits, source lifetime, cancellation and immutable recovery.

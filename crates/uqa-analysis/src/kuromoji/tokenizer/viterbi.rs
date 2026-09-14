@@ -28,6 +28,7 @@ pub(super) struct State<'a> {
     pub ngram: Option<u32>,
     pub nbest: Option<super::nbest::Graph>,
     pub n_best_work: usize,
+    pub defer_attributes: bool,
     required: Option<std::ops::Range<usize>>,
     probe_delta: i32,
     total_tokens: usize,
@@ -49,6 +50,26 @@ pub(super) fn analyze(
         &mut State::new(input, model, user, options, limits, budget, poll)?,
         true,
     )
+}
+
+pub(super) fn analyze_filtering(
+    input: &[u16],
+    tokenizer: &JapaneseTokenizer,
+    limits: KuromojiLimits,
+    budget: &MemoryBudget,
+    poll: &mut impl FnMut() -> AnalysisResult<()>,
+) -> AnalysisResult<Budgeted<KuromojiOutput>> {
+    let mut state = State::new(
+        input,
+        &tokenizer.model,
+        tokenizer.user.as_deref(),
+        tokenizer.options,
+        limits,
+        budget,
+        poll,
+    )?;
+    state.defer_attributes = true;
+    drive(&mut state, true)
 }
 
 pub(super) fn probe(
@@ -128,6 +149,7 @@ impl<'a> State<'a> {
             ngram,
             nbest: None,
             n_best_work: 0,
+            defer_attributes: false,
             required: None,
             probe_delta: i32::MAX,
             total_tokens: 0,
@@ -189,6 +211,7 @@ fn drive(state: &mut State<'_>, collect: bool) -> AnalysisResult<Budgeted<Kuromo
             tokens,
             final_offset_utf16: state.traversal.position,
             final_position_increment: 0,
+            terminal: None,
         },
         memory,
     ))
