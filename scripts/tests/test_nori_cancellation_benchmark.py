@@ -157,7 +157,7 @@ class NoriCancellationBenchmarkTests(unittest.TestCase):
         self.assertIn("target: [native, wasm]", workflow)
         self.assertNotIn("--measure-only", workflow)
         self.assertIn('run-nori-cancellation-benchmark.py --target "$BENCHMARK_TARGET" --baseline', workflow)
-        parent = (ROOT / ".github/workflows/ci.yml").read_text()
+        parent = (ROOT / ".github/workflows/full-ci.yml").read_text()
         self.assertIn("uses: ./.github/workflows/nori-cancellation-benchmarks.yml", parent)
 
     def test_complete_corpus_modes_stages_and_points_are_checked(self):

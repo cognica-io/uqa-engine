@@ -51,7 +51,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             "(github.event_name == 'workflow_dispatch' && inputs.run_rust) }}"
         )
 
-        self.assertEqual(self.workflow.count(condition), 12)
+        self.assertEqual(self.workflow.count(condition), 10)
         self.assertNotIn("if: ${{ inputs.run_rust }}", self.workflow)
 
     def test_upstream_reference_is_required_by_the_merge_gate(self) -> None:
@@ -59,6 +59,14 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         needs = gate.split("    needs: [", 1)[1].split("]", 1)[0]
         self.assertIn("upstream-regression-oracle", [name.strip() for name in needs.split(",")])
         self.assertIn("harness.py run --output target/pg18-upstream/reference", self.workflow)
+
+    def test_paired_timing_runs_are_explicit_full_ci_jobs(self) -> None:
+        full = (ROOT / ".github/workflows/full-ci.yml").read_text(encoding="utf-8")
+        for job in ("nori-sql-benchmarks", "nori-cancellation-benchmarks"):
+            self.assertNotIn(job, self.workflow)
+            self.assertIn(f"  {job}:\n", full)
+            self.assertIn(f"uses: ./.github/workflows/{job}.yml", full)
+        self.assertIn("  nori-benchmark:\n", self.workflow)
 
     def test_nori_regeneration_and_all_reference_drivers_are_required_by_the_merge_gate(self) -> None:
         gate = self.workflow.split("  gate:\n", 1)[1]
