@@ -160,10 +160,16 @@ fn optional(value: &Value) -> Option<String> {
 fn token(value: &Value) -> KuromojiToken {
     KuromojiToken {
         errors: crate::kuromoji::attributes::AttributeErrors::default(),
-        term_utf16: value.get("term_utf16").map_or_else(
-            || value["term"].as_str().unwrap().encode_utf16().collect(),
-            |raw| serde_json::from_value(raw.clone()).unwrap(),
-        ),
+        term_utf16: if let Some(range) = value.get("term_utf16_range") {
+            (range[0].as_u64().unwrap()..range[1].as_u64().unwrap())
+                .map(|unit| u16::try_from(unit).unwrap())
+                .collect()
+        } else {
+            value.get("term_utf16").map_or_else(
+                || value["term"].as_str().unwrap().encode_utf16().collect(),
+                |raw| serde_json::from_value(raw.clone()).unwrap(),
+            )
+        },
         start_utf16: value["start_utf16"].as_u64().unwrap() as usize,
         end_utf16: value["end_utf16"].as_u64().unwrap() as usize,
         position_increment: value["position_increment"].as_u64().unwrap_or(1) as u32,

@@ -1,8 +1,8 @@
 {
   "format_version": 1,
-  "fixture_count": 127,
+  "fixture_count": 150,
   "reference_manifest_sha256": "c25f1d7125ac4bbccbb6d040a91f43947ef12c429f57280e17647c8ac78e127e",
-  "source_sha256": "981438e10299bf40e29b289aab20a5231af93d28775c770150c309ec21888c91",
-  "cases_sha256": "e490faadb8489be2f07c67c10f364af27b321eeebd06a1c57e375c976069cc02",
-  "expected_sha256": "5f05f699d42a0836a54df18bb389158364de64eab2b8203b29c3656c0e047541"
+  "source_sha256": "87bfc3f0ef41cd2d32b638293208ac2c4d126ef9e7eeb61fb0241137e4ff11b1",
+  "cases_sha256": "4e20b0c0f6a19b9dcc09071bee19443cc3c40748c2989a2cb9094e7f9ed20d78",
+  "expected_sha256": "fc9709e1e21dab5307d3eb578eef09e41c76ef57e2f38fe92c4a80536e62a5e1"
 }

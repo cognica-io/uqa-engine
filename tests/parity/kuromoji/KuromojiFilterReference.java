@@ -165,6 +165,8 @@ public class KuromojiFilterReference {
         case "stop" -> new StopFilter(input, part[2].equals("-") ? new CharArraySet(JapaneseAnalyzer.getDefaultStopSet(), Boolean.parseBoolean(part[1])) : new CharArraySet(strings(part[2]), Boolean.parseBoolean(part[1])));
         case "stem" -> new JapaneseKatakanaStemFilter(input, Integer.parseInt(part[1]));
         case "lower" -> new LowerCaseFilter(input);
+        case "hiragana_uppercase" -> new JapaneseHiraganaUppercaseFilter(input);
+        case "katakana_uppercase" -> new JapaneseKatakanaUppercaseFilter(input);
         default -> throw new IllegalArgumentException("unknown filter");
       };
     }
@@ -216,9 +218,10 @@ public class KuromojiFilterReference {
     return result;
   }
   static void record(Map<String, Object> result, Map<String, Object> analysis) throws Exception {
-    result.put("sha256", HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(json(analysis).getBytes(StandardCharsets.UTF_8))));
+    String complete = json(analysis);
+    result.put("sha256", HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(complete.getBytes(StandardCharsets.UTF_8))));
     int count = ((List<?>) analysis.get("tokens")).size(); result.put("token_count", count);
-    if (count <= 12) result.put("analysis", analysis);
+    if (count <= 12 && complete.length() <= 8192) result.put("analysis", analysis);
   }
   public static void main(String[] args) throws Exception {
     System.out.println(json(object("runtime", object("java_version", System.getProperty("java.version"), "java_runtime_version", System.getProperty("java.runtime.version"), "java_vendor", System.getProperty("java.vendor")))));

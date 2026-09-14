@@ -40,12 +40,15 @@ def fields(case):
         elif kind == 'kuromoji_stemmer':
             chain.append('stem:' + str(stage.get('minimum_length', 4)))
         else:
-            chain.append({'kuromoji_baseform': 'base', 'unicode_simple_lowercase': 'lower'}[kind])
+            chain.append({'kuromoji_baseform': 'base', 'unicode_simple_lowercase': 'lower',
+                          'kuromoji_hiragana_uppercase': 'hiragana_uppercase',
+                          'kuromoji_katakana_uppercase': 'katakana_uppercase'}[kind])
     tokens = case.get('tokens', [])
     data = struct.pack('>i', len(tokens))
     for token in tokens:
-        if 'term_utf16' in token:
-            term = struct.pack('>i', len(token['term_utf16'])) + b''.join(struct.pack('>H', unit) for unit in token['term_utf16'])
+        if 'term_utf16' in token or 'term_utf16_range' in token:
+            units = token['term_utf16'] if 'term_utf16' in token else range(*token['term_utf16_range'])
+            term = struct.pack('>i', len(units)) + b''.join(struct.pack('>H', unit) for unit in units)
         else:
             term = text_bytes(token['term'])
         data += term + struct.pack('>iiii?', token['start_utf16'], token['end_utf16'], token.get('position_increment', 1), token.get('position_length', 1), token.get('keyword', False))

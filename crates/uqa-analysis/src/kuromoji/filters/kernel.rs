@@ -36,8 +36,8 @@ impl CompiledFilter {
         )?;
         let budget = input.batch.budget().clone();
         let mut output_units = 0;
-        input.batch = if matches!(self, Self::PartOfSpeech(_) | Self::Stop(_, _)) {
-            input.batch.retain(
+        if matches!(self, Self::PartOfSpeech(_) | Self::Stop(_, _)) {
+            input.batch = input.batch.retain(
                 |token, poll| {
                     let mut work = Work::new(poll)?;
                     let keep = self.keep(token, model, &budget, &mut work)?;
@@ -49,66 +49,10 @@ impl CompiledFilter {
                     Ok(keep)
                 },
                 poll,
-            )?
+            )?;
         } else {
-            let mut work = Work::new(poll)?;
-            input.batch.map_tokens(|token, memory| {
-                work.tick()?;
-                let mut length = token.term_len(&mut work)?;
-                match self {
-                    Self::BaseForm if !token.keyword() => {
-                        if let Some(base) = token.base_form() {
-                            length = text_units(base, &mut work)?;
-                            units(token, length, output_units, limits, &mut work)?;
-                            let term = crate::morphology::input::encode(
-                                base,
-                                memory.budget(),
-                                work.poll,
-                                |_| Ok(()),
-                            )?;
-                            token.replace_term(term, memory, &input.context, &mut work)?;
-                        } else {
-                            token.refresh_context(&input.context, &mut work)?;
-                        }
-                    }
-                    Self::KatakanaStem(minimum) if !token.keyword() => {
-                        if katakana_stem(token, length, *minimum, &mut work)? {
-                            length -= 1;
-                            units(token, length, output_units, limits, &mut work)?;
-                            let mut term = token.copy_term(memory.budget(), &mut work)?;
-                            term.truncate(length);
-                            let (term, allocation) = term.into_parts();
-                            token.replace_term(
-                                Budgeted::new(term, allocation),
-                                memory,
-                                &input.context,
-                                &mut work,
-                            )?;
-                        } else {
-                            token.refresh_context(&input.context, &mut work)?;
-                        }
-                    }
-                    Self::SimpleLowercase => {
-                        units(token, length, output_units, limits, &mut work)?;
-                        let mut term = token.copy_term(memory.budget(), &mut work)?;
-                        lowercase(&mut term, model, &mut work)?;
-                        let (term, allocation) = term.into_parts();
-                        token.replace_term(
-                            Budgeted::new(term, allocation),
-                            memory,
-                            &input.context,
-                            &mut work,
-                        )?;
-                    }
-                    Self::BaseForm | Self::KatakanaStem(_) => {
-                        token.refresh_context(&input.context, &mut work)?;
-                    }
-                    Self::PartOfSpeech(_) | Self::Stop(_, _) => unreachable!("non-removing filter"),
-                }
-                output_units = units(token, length, output_units, limits, &mut work)?;
-                Ok(())
-            })?
-        };
+            (input, output_units) = self.map_owned(input, model, limits, poll)?;
+        }
         if let Some(terminal) = input.batch.terminal() {
             let mut work = Work::new(poll)?;
             units(
@@ -121,6 +65,86 @@ impl CompiledFilter {
         }
         poll()?;
         Ok(input)
+    }
+    fn map_owned<T: JapaneseToken>(
+        &self,
+        mut input: AllocatedStream<T>,
+        model: &KuromojiDictionary,
+        limits: KuromojiLimits,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<(AllocatedStream<T>, usize)> {
+        let mut output_units = 0;
+        let mut work = Work::new(poll)?;
+        input.batch = input.batch.map_tokens(|token, memory| {
+            work.tick()?;
+            let mut length = token.term_len(&mut work)?;
+            match self {
+                Self::BaseForm if !token.keyword() => {
+                    if let Some(base) = token.base_form() {
+                        length = text_units(base, &mut work)?;
+                        units(token, length, output_units, limits, &mut work)?;
+                        let term = crate::morphology::input::encode(
+                            base,
+                            memory.budget(),
+                            work.poll,
+                            |_| Ok(()),
+                        )?;
+                        token.replace_term(term, memory, &input.context, &mut work)?;
+                    } else {
+                        token.refresh_context(&input.context, &mut work)?;
+                    }
+                }
+                Self::KatakanaStem(minimum) if !token.keyword() => {
+                    if katakana_stem(token, length, *minimum, &mut work)? {
+                        length -= 1;
+                        units(token, length, output_units, limits, &mut work)?;
+                        let mut term = token.copy_term(memory.budget(), &mut work)?;
+                        term.truncate(length);
+                        let (term, allocation) = term.into_parts();
+                        token.replace_term(
+                            Budgeted::new(term, allocation),
+                            memory,
+                            &input.context,
+                            &mut work,
+                        )?;
+                    } else {
+                        token.refresh_context(&input.context, &mut work)?;
+                    }
+                }
+                Self::SimpleLowercase => {
+                    units(token, length, output_units, limits, &mut work)?;
+                    let mut term = token.copy_term(memory.budget(), &mut work)?;
+                    lowercase(&mut term, model, &mut work)?;
+                    let (term, allocation) = term.into_parts();
+                    token.replace_term(
+                        Budgeted::new(term, allocation),
+                        memory,
+                        &input.context,
+                        &mut work,
+                    )?;
+                }
+                Self::SmallKana(script) => {
+                    let mut term = token.copy_term(memory.budget(), &mut work)?;
+                    length = script.expand(&mut term, &mut work)?;
+                    term.truncate(length);
+                    units(token, length, output_units, limits, &mut work)?;
+                    let (term, allocation) = term.into_parts();
+                    token.replace_term(
+                        Budgeted::new(term, allocation),
+                        memory,
+                        &input.context,
+                        &mut work,
+                    )?;
+                }
+                Self::BaseForm | Self::KatakanaStem(_) => {
+                    token.refresh_context(&input.context, &mut work)?;
+                }
+                Self::PartOfSpeech(_) | Self::Stop(_, _) => unreachable!("non-removing filter"),
+            }
+            output_units = units(token, length, output_units, limits, &mut work)?;
+            Ok(())
+        })?;
+        Ok((input, output_units))
     }
     fn keep<T: JapaneseToken>(
         &self,

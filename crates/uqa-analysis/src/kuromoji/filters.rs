@@ -12,9 +12,11 @@ use crate::{AnalysisResult, AnalyzedText};
 use serde::{Deserialize, Serialize};
 use uqa_core::memory::{Budgeted, MemoryBudget};
 
+mod kana;
 mod kernel;
 mod stream;
 mod words;
+use kana::Kana;
 pub(super) use words::lowercase;
 use words::PreparedWords;
 
@@ -34,6 +36,10 @@ pub enum JapaneseFilter {
     KatakanaStem { minimum_length: i32 },
     #[serde(rename = "unicode_simple_lowercase")]
     SimpleLowercase,
+    #[serde(rename = "kuromoji_hiragana_uppercase")]
+    HiraganaUppercase,
+    #[serde(rename = "kuromoji_katakana_uppercase")]
+    KatakanaUppercase,
 }
 
 #[derive(Deserialize)]
@@ -60,6 +66,10 @@ enum FilterConfig {
     },
     #[serde(rename = "unicode_simple_lowercase")]
     SimpleLowercase {},
+    #[serde(rename = "kuromoji_hiragana_uppercase")]
+    HiraganaUppercase {},
+    #[serde(rename = "kuromoji_katakana_uppercase")]
+    KatakanaUppercase {},
 }
 fn default_ignore_case() -> bool {
     true
@@ -75,6 +85,8 @@ impl<'de> Deserialize<'de> for JapaneseFilter {
             FilterConfig::Stop { words, ignore_case } => Self::Stop { words, ignore_case },
             FilterConfig::KatakanaStem { minimum_length } => Self::KatakanaStem { minimum_length },
             FilterConfig::SimpleLowercase {} => Self::SimpleLowercase,
+            FilterConfig::HiraganaUppercase {} => Self::HiraganaUppercase,
+            FilterConfig::KatakanaUppercase {} => Self::KatakanaUppercase,
         })
     }
 }
@@ -86,6 +98,7 @@ pub(super) enum CompiledFilter {
     Stop(PreparedWords, bool),
     KatakanaStem(usize),
     SimpleLowercase,
+    SmallKana(Kana),
 }
 
 impl JapaneseFilter {
@@ -101,6 +114,8 @@ impl JapaneseFilter {
         let value = match self {
             Self::BaseForm => CompiledFilter::BaseForm,
             Self::SimpleLowercase => CompiledFilter::SimpleLowercase,
+            Self::HiraganaUppercase => CompiledFilter::SmallKana(Kana::Hiragana),
+            Self::KatakanaUppercase => CompiledFilter::SmallKana(Kana::Katakana),
             Self::KatakanaStem { minimum_length } => {
                 if *minimum_length < 1 {
                     return Err(super::error::invalid(
