@@ -22,7 +22,14 @@
     "LICENSES/UQA-FOSS-EXCEPTION-1.0.txt",
     "LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt",
     "uqa.js",
-    "uqa.wasm"
+    "uqa.wasm",
+    "THIRD-PARTY/JDK-UNICODE.md",
+    "THIRD-PARTY/LUCENE-LICENSE.txt",
+    "THIRD-PARTY/LUCENE-NOTICE.txt",
+    "THIRD-PARTY/MECAB-COPYING.txt",
+    "THIRD-PARTY/LUCENE-SOURCE.md",
+    "THIRD-PARTY/NORI-RESOURCE-MANIFEST.json",
+    "THIRD-PARTY/NORI-MODEL-MANIFEST.json"
   ],
   "engines": {
     "node": ">= 18"

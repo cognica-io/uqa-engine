@@ -7,8 +7,7 @@
 //! Persistent store rebinding and vector extraction.
 
 use super::{
-    AnalyzerPhase, BTreeMap, Document, Engine, FieldName, SQLError, StorageBackendError,
-    StorageBackendResult, TableState, Value,
+    BTreeMap, Document, Engine, FieldName, SQLError, StorageBackendResult, TableState, Value,
 };
 use crate::VectorIndexSpec;
 
@@ -29,30 +28,16 @@ impl Engine {
         Self::value_indexes_clear(table);
         *table.inverted_index.write() = backend.inverted_index(table_name, analyzer);
 
-        let analyzer_rows: Vec<(String, String, String)> = self
+        let analyzer_rows = self
             .durable
             .table_field_analyzers
             .read()
             .iter()
             .filter(|((table, _), _)| table == table_name)
-            .map(|((_, field), (analyzer, phase))| (field.clone(), analyzer.clone(), phase.clone()))
-            .collect();
-        for (field, analyzer_name, phase) in analyzer_rows {
-            let analyzer = self
-                .resolve_analyzer(&analyzer_name)
-                .map_err(StorageBackendError::Other)?;
-            let phase = if phase.eq_ignore_ascii_case("index") {
-                AnalyzerPhase::Index
-            } else if phase.eq_ignore_ascii_case("search") {
-                AnalyzerPhase::Search
-            } else {
-                AnalyzerPhase::Both
-            };
-            table
-                .inverted_index
-                .write()
-                .set_field_analyzer(&field, analyzer, phase)
-                .map_err(StorageBackendError::Other)?;
+            .map(|((_, field), binding)| (field.clone(), binding.clone()))
+            .collect::<Vec<_>>();
+        for (field, binding) in analyzer_rows {
+            binding.install(&field, table.inverted_index.write().as_mut())?;
         }
 
         let vector_fields: Vec<(String, u32)> = table

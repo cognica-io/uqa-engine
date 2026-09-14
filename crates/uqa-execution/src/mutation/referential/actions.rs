@@ -59,6 +59,7 @@ pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
                 .defer_foreign_key_parent_event(&ref_table, table, &fk)?;
         }
         if fk.period {
+            let snapshot = super::snapshots::ReferenceSnapshot::new(context)?;
             let ordinary_len = expected.len().saturating_sub(1);
             let parent = PhysicalDocumentIdentity {
                 table: table.to_string(),
@@ -69,12 +70,9 @@ pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
                 .catalog
                 .hierarchy_scan_tables(&ref_table, true)?
             {
-                for child_id in context.constraints.reads.table_doc_ids(&physical_table)? {
-                    let Some(child_doc) = context
-                        .constraints
-                        .reads
-                        .get_document(&physical_table, child_id)?
-                    else {
+                let rows = snapshot.table(&physical_table)?;
+                for child_id in rows.doc_ids()? {
+                    let Some(child_doc) = rows.document(child_id)? else {
                         continue;
                     };
                     let Some(child_lookup) = foreign_key_lookup_values(
@@ -147,6 +145,7 @@ pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
             &comparison,
             &expected,
             referential_actions,
+            fk.on_update,
         )?;
         for (child, _child_doc) in referencing {
             match fk.on_update {
@@ -302,6 +301,7 @@ pub fn prepare_referenced_key_delete_actions<S: Clone + 'static>(
                 .defer_foreign_key_parent_event(&ref_table, parent_table, &fk)?;
         }
         if fk.period {
+            let snapshot = super::snapshots::ReferenceSnapshot::new(context)?;
             let ordinary_len = expected.len().saturating_sub(1);
             let mut excluded_parents = root_deletes
                 .iter()
@@ -322,15 +322,12 @@ pub fn prepare_referenced_key_delete_actions<S: Clone + 'static>(
                 .catalog
                 .hierarchy_scan_tables(&ref_table, true)?
             {
-                for child_id in context.constraints.reads.table_doc_ids(&physical_table)? {
+                let rows = snapshot.table(&physical_table)?;
+                for child_id in rows.doc_ids()? {
                     if root_deletes.contains(&(physical_table.clone(), child_id)) {
                         continue;
                     }
-                    let Some(child_document) = context
-                        .constraints
-                        .reads
-                        .get_document(&physical_table, child_id)?
-                    else {
+                    let Some(child_document) = rows.document(child_id)? else {
                         continue;
                     };
                     let Some(child_lookup) = foreign_key_lookup_values(
@@ -412,6 +409,7 @@ pub fn prepare_referenced_key_delete_actions<S: Clone + 'static>(
             &comparison,
             &expected,
             referential_actions,
+            fk.on_delete,
         )?;
         for (child, _child_document) in referencing {
             if root_deletes.contains(&(child.table.clone(), child.doc_id)) {

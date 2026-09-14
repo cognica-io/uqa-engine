@@ -104,7 +104,7 @@ jobs:
               exit 1
             fi
           done
-          python3 scripts/check-release-licenses.py "${actual[@]}"
+          python3 scripts/check-release-licenses.py --require-nori "${actual[@]}"
           python3 scripts/npm-release.py check --version "$version" "${actual[@]}"
 
       - name: Check whether npm already has this exact release

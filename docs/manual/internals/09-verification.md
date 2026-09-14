@@ -40,6 +40,15 @@ cargo test --workspace --all-targets --locked
 
 The workspace declares `unsafe_code = "deny"` and `unused_must_use = "deny"`. Clippy enables `all` and `pedantic` with an explicit small allowlist in the root manifest.
 
+The manual Python Wheels and JavaScript Bindings workflows accept `full_matrix=true` to build every release binding package without publishing. Python builds six platform wheels, the source distribution, and its minimum-interpreter check; JavaScript builds six native addons, the seven native npm archives, and the WASM npm archive. These are the same reusable jobs called by the release workflow, with normal binding checks retained. The native Windows ARM64 runner executes its addon tests and examples as well. Build success and archive license checks are required; no placeholder binary establishes package acceptance.
+
+```sh
+gh workflow run python-wheels.yml --ref feature/verify-bindings -f full_matrix=true
+gh workflow run javascript-bindings.yml --ref feature/verify-bindings -f full_matrix=true
+```
+
+Select the intended commit's branch or immutable ref when dispatching and record the resulting run's head SHA. These build workflows have read-only repository permissions and do not create releases or upload to package registries.
+
 ## Focused tests
 
 Integration domains can be selected by test harness and module path:

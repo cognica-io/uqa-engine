@@ -9,69 +9,6 @@
 use super::super::{params, quote_sql_identifier, Catalog, Result};
 
 impl Catalog {
-    pub(super) fn ensure_fts_storage_shape(conn: &rusqlite::Connection) -> Result<bool> {
-        let doc_lengths = Self::table_columns(conn, "_doc_lengths")?;
-        let doc_lengths_ok = doc_lengths
-            .as_ref()
-            .is_some_and(|cols| cols.contains_key("field") && cols.contains_key("length"));
-        if doc_lengths_ok && super::steps::v22::clustered_posting_tables_have_current_shape(conn)? {
-            conn.execute_batch(
-                "CREATE TABLE IF NOT EXISTS _field_stats (
-                    table_name   TEXT NOT NULL,
-                    field        TEXT NOT NULL,
-                    total_length INTEGER NOT NULL DEFAULT 0,
-                    PRIMARY KEY (table_name, field)
-                );",
-            )?;
-            return Ok(false);
-        }
-
-        conn.execute_batch(
-            "
-            DROP TABLE IF EXISTS _postings;
-            DROP TABLE IF EXISTS _posting_clusters;
-            DROP TABLE IF EXISTS _posting_documents;
-            DROP TABLE IF EXISTS _doc_lengths;
-            DROP TABLE IF EXISTS _field_stats;
-
-            CREATE TABLE _posting_clusters (
-                table_name     TEXT NOT NULL,
-                field          TEXT NOT NULL,
-                term           TEXT NOT NULL,
-                cluster_id     INTEGER NOT NULL,
-                posting_count  INTEGER NOT NULL CHECK (posting_count > 0),
-                score_blob     BLOB NOT NULL,
-                positions_blob BLOB NOT NULL,
-                PRIMARY KEY (table_name, field, term, cluster_id)
-            ) WITHOUT ROWID;
-
-            CREATE TABLE _posting_documents (
-                table_name TEXT NOT NULL,
-                doc_id     INTEGER NOT NULL,
-                field      TEXT NOT NULL,
-                terms_blob BLOB NOT NULL,
-                PRIMARY KEY (table_name, doc_id, field)
-            ) WITHOUT ROWID;
-
-            CREATE TABLE IF NOT EXISTS _doc_lengths (
-                table_name TEXT NOT NULL,
-                doc_id     INTEGER NOT NULL,
-                field      TEXT NOT NULL,
-                length     INTEGER NOT NULL,
-                PRIMARY KEY (table_name, doc_id, field)
-            );
-
-            CREATE TABLE IF NOT EXISTS _field_stats (
-                table_name   TEXT NOT NULL,
-                field        TEXT NOT NULL,
-                total_length INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (table_name, field)
-            );
-            ",
-        )?;
-        Ok(true)
-    }
-
     pub(in crate::catalog) fn table_columns(
         conn: &rusqlite::Connection,
         table_name: &str,

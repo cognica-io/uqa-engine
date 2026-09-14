@@ -57,6 +57,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocation-counter"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "beb9e990c0a33699f1984d85a6abead615ccc72dd8130bf3e15dcabe2ca149c9"
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3661,22 +3667,34 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 name = "uqa"
 version = "0.2.3"
 dependencies = [
+ "allocation-counter",
+ "serde_json",
+ "sha2",
+ "tempfile",
  "uqa-core",
  "uqa-engine",
+ "uqa-storage-redb",
+ "uqa-storage-sqlite",
 ]
 
 [[package]]
 name = "uqa-analysis"
 version = "0.2.3"
 dependencies = [
+ "allocation-counter",
+ "miniz_oxide",
  "parking_lot",
  "regex",
+ "regex-automata",
+ "regex-syntax",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "unicode-normalization",
  "uqa-core",
+ "uqa-nori-data",
 ]
 
 [[package]]
@@ -3896,11 +3914,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "uqa-nori-data"
+version = "0.2.3"
+dependencies = [
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "uqa-operators"
 version = "0.2.3"
 dependencies = [
+ "allocation-counter",
  "criterion",
  "proptest",
+ "serde_json",
+ "sha2",
  "uqa-analysis",
  "uqa-core",
  "uqa-fusion",
@@ -4017,11 +4046,13 @@ dependencies = [
 name = "uqa-storage"
 version = "0.2.3"
 dependencies = [
+ "allocation-counter",
  "criterion",
  "parking_lot",
  "proptest",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "uqa-analysis",
@@ -4032,8 +4063,11 @@ dependencies = [
 name = "uqa-storage-redb"
 version = "0.2.3"
 dependencies = [
+ "allocation-counter",
  "parking_lot",
  "redb",
+ "serde_json",
+ "sha2",
  "tempfile",
  "uqa-analysis",
  "uqa-storage",
@@ -4043,6 +4077,7 @@ dependencies = [
 name = "uqa-storage-sqlite"
 version = "0.2.3"
 dependencies = [
+ "allocation-counter",
  "argon2",
  "chacha20poly1305",
  "crc32fast",
@@ -4061,6 +4096,7 @@ dependencies = [
  "uqa-analysis",
  "uqa-core",
  "uqa-graph",
+ "uqa-scoring",
  "uqa-storage",
  "zstd",
 ]

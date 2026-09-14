@@ -30,10 +30,11 @@ use super::codec::{
     vector_field_prefix, vector_key_prefix,
 };
 use super::{
-    KeyValueBatch, KeyValueStore, TAG_ANALYZER, TAG_CATALOG_INDEX, TAG_COLUMN_STATS, TAG_EDGE,
-    TAG_FOREIGN_SERVER, TAG_FOREIGN_TABLE, TAG_GRAPH_MEMBERSHIP, TAG_METADATA, TAG_MODEL,
-    TAG_NAMED_GRAPH, TAG_PATH_INDEX, TAG_RELATION, TAG_SCHEMA, TAG_SCORING_PARAMS, TAG_SEQUENCE,
-    TAG_TABLE, TAG_TABLE_FIELD_ANALYZER, TAG_VERTEX, TAG_VIEW,
+    KeyValueBatch, KeyValueStore, TAG_ANALYZER, TAG_ANALYZER_DESCRIPTOR, TAG_CATALOG_INDEX,
+    TAG_COLUMN_STATS, TAG_EDGE, TAG_FIELD_ANALYZER_BINDING, TAG_FOREIGN_SERVER, TAG_FOREIGN_TABLE,
+    TAG_GRAPH_MEMBERSHIP, TAG_METADATA, TAG_MODEL, TAG_NAMED_GRAPH, TAG_PATH_INDEX, TAG_RELATION,
+    TAG_SCHEMA, TAG_SCORING_PARAMS, TAG_SEQUENCE, TAG_TABLE, TAG_TABLE_FIELD_ANALYZER, TAG_VERTEX,
+    TAG_VIEW,
 };
 
 mod analyzers;
@@ -44,6 +45,7 @@ mod indexes;
 mod keys;
 mod migration;
 mod models;
+mod occurrence_lifecycle;
 mod path_index_data;
 mod physical_indexes;
 mod records;
@@ -461,6 +463,36 @@ impl CatalogFacade for KeyValueCatalog {
 
     fn load_analyzers(&self) -> StorageBackendResult<Vec<(String, String)>> {
         self.load_analyzers_impl()
+    }
+
+    fn save_analyzer_revision(
+        &self,
+        name: &str,
+        config_json: &str,
+        descriptor_json: &str,
+    ) -> StorageBackendResult<()> {
+        self.save_analyzer_revision_impl(name, config_json, descriptor_json)
+    }
+
+    fn load_analyzer_descriptors(&self) -> StorageBackendResult<Vec<(String, String)>> {
+        load_single_string_rows(self.store.as_ref(), TAG_ANALYZER_DESCRIPTOR)
+    }
+
+    fn replace_table_field_analyzer_binding(
+        &self,
+        table: &str,
+        field: &str,
+        phase: &str,
+        name: &str,
+        binding_json: &str,
+    ) -> StorageBackendResult<()> {
+        self.replace_table_field_analyzer_binding_impl(table, field, phase, name, binding_json)
+    }
+
+    fn load_table_field_analyzer_bindings(
+        &self,
+    ) -> StorageBackendResult<Vec<(String, String, String)>> {
+        self.load_table_field_analyzer_bindings_impl()
     }
 
     fn save_table_field_analyzer(

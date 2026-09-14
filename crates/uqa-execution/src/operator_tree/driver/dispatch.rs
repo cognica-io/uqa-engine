@@ -31,6 +31,11 @@ impl OperatorTreeDriver for PhysicalRetrievalDriver<'_> {
                 scoring,
                 top_k,
             } => self.execute_term(query, field.as_deref(), *scoring, *top_k),
+            OperatorTree::Phrase {
+                query,
+                field,
+                scoring,
+            } => self.execute_phrase(query, field.as_deref(), *scoring),
             OperatorTree::BayesianScore { source, field } => {
                 self.execute_bayesian_score(source, field.as_deref())
             }

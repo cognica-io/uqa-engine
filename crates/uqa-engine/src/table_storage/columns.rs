@@ -222,6 +222,27 @@ impl Engine {
         analyzers.extend(moved);
     }
 
+    fn rename_document_fields(
+        &self,
+        table_name: &str,
+        table: &super::TableState,
+        from: &str,
+        to: &str,
+    ) -> StorageBackendResult<()> {
+        let ids = table.document_store.read().doc_ids()?;
+        for doc_id in ids {
+            let Some(mut doc) = table.document_store.read().get(doc_id)? else {
+                continue;
+            };
+            if let Some(value) = doc.remove(from) {
+                doc.insert(to.to_string(), value);
+                self.rewrite_document_for_schema_change(table_name, doc_id, doc)
+                    .map_err(|err| StorageBackendError::Other(err.to_string()))?;
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn try_rename_column_inner(
         &self,
         table: &str,
@@ -244,6 +265,14 @@ impl Engine {
                 return Ok(false);
             }
         }
+        let analyzer_binding = if from != to && t.fts_fields().iter().any(|field| field == from) {
+            Some(
+                self.current_field_analyzer_binding(&table_name, &t, from)
+                    .map_err(StorageBackendError::Other)?,
+            )
+        } else {
+            None
+        };
         self.rewrite_column_rename_dependencies(&table_name, from, to)?;
         Self::value_indexes_clear(&t);
         {
@@ -270,6 +299,11 @@ impl Engine {
                 }
             }
         }
+        // Schema rewrites index the renamed source immediately, so its exact revisions must move before the first document write.
+        if let Some(binding) = &analyzer_binding {
+            binding.install(to, t.inverted_index.write().as_mut())?;
+        }
+        self.rename_column_analyzer_assignments(&table_name, from, to);
         let vector_dimensions = {
             let mut vs = t.vector_indexes.write();
             if let Some(mut idx) = vs.remove(from) {
@@ -280,22 +314,17 @@ impl Engine {
                 None
             }
         };
-        let ids = t.document_store.read().doc_ids()?;
-        for doc_id in ids {
-            let Some(mut doc) = t.document_store.read().get(doc_id)? else {
-                continue;
-            };
-            if let Some(value) = doc.remove(from) {
-                doc.insert(to.to_string(), value);
-                self.rewrite_document_for_schema_change(&table_name, doc_id, doc)
-                    .map_err(|err| StorageBackendError::Other(err.to_string()))?;
-            }
+        self.rename_document_fields(&table_name, &t, from, to)?;
+        if analyzer_binding.is_some() {
+            t.inverted_index
+                .write()
+                .remove_field_analyzers(from)
+                .map_err(StorageBackendError::Other)?;
         }
         if let Some(dimensions) = vector_dimensions {
             self.create_vector_field(&table_name, to, dimensions)?;
         }
         self.rename_catalog_index_column_refs(&table_name, from, to)?;
-        self.rename_column_analyzer_assignments(&table_name, from, to);
         if self.is_persistent() {
             if let Some(catalog) = self.storage.catalog.as_ref() {
                 catalog.rename_column_data(&table_name, from, to)?;

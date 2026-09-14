@@ -18,8 +18,20 @@ parking_lot = { workspace = true }
 redb = { workspace = true }
 
 [dev-dependencies]
+allocation-counter = "=0.8.1"
+serde_json = { workspace = true }
+sha2 = { workspace = true }
 tempfile = "3.13"
 uqa-analysis = { workspace = true }
+
+[[bench]]
+name = "nori_persistent"
+harness = false
+required-features = ["uqa-analysis/nori"]
+
+[[bench]]
+name = "commit_allocation_order"
+harness = false
 
 [lints]
 workspace = true

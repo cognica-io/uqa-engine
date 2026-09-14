@@ -82,6 +82,14 @@ impl RetrievalSnapshots for Engine {
 }
 
 impl RetrievalIndexes for Engine {
+    fn query_table_indexes(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Option<Box<dyn RetrievalIndexState>>> {
+        Ok(self
+            .try_query_table(table)?
+            .map(|state| Box::new(TableIndexState(state)) as Box<dyn RetrievalIndexState>))
+    }
     fn table_indexes(
         &self,
         table: &str,
@@ -161,6 +169,7 @@ impl RetrievalModels for Engine {
 impl Engine {
     pub(crate) fn physical_driver_context(&self) -> PhysicalDriverContext<'_> {
         PhysicalDriverContext {
+            runtime: self.query_runtime_view(),
             relations: self,
             snapshots: self,
             indexes: self,

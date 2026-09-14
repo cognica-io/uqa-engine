@@ -6,6 +6,8 @@
 
 //! Consolidated catalog, DDL, and mutation integration tests.
 
+#[path = "catalog/analyzer_revisions.rs"]
+mod analyzer_revisions;
 #[path = "catalog/capability_boundaries.rs"]
 mod capability_boundaries;
 #[path = "catalog/pg18_constraint_lifecycle.rs"]

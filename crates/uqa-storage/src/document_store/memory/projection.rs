@@ -26,6 +26,7 @@ impl MemoryDocumentStore {
             return 0;
         }
         let layout_projections = self
+            .state
             .layouts
             .iter()
             .map(|layout| ProjectedLayout::compile(layout, fields))
@@ -34,7 +35,7 @@ impl MemoryDocumentStore {
         let null = Value::Null;
         let mut values = Vec::with_capacity(fields.len());
         let mut visited = 0usize;
-        for (doc_id, stored) in self.documents.range((lower, Unbounded)).take(limit) {
+        for (doc_id, stored) in self.state.documents.range((lower, Unbounded)).take(limit) {
             visited += 1;
             layout_projections[stored.layout_id].project(stored, &null, &mut values);
             if !visitor(*doc_id, &values) {
@@ -56,12 +57,14 @@ impl MemoryDocumentStore {
             return Vec::new();
         }
         let layout_projections = self
+            .state
             .layouts
             .iter()
             .map(|layout| Arc::<[usize]>::from(ProjectedLayout::slots(layout, fields)))
             .collect::<Vec<_>>();
         let lower = after.map_or(Unbounded, Excluded);
-        self.documents
+        self.state
+            .documents
             .range((lower, Unbounded))
             .take(limit)
             .map(|(doc_id, stored)| {
@@ -85,12 +88,13 @@ impl MemoryDocumentStore {
         let null = Value::Null;
         let mut values = Vec::with_capacity(fields.len());
         let layout_projections = self
+            .state
             .layouts
             .iter()
             .map(|layout| ProjectedLayout::compile(layout, fields))
             .collect::<Vec<_>>();
 
-        if should_merge_projected_scan(doc_ids, self.documents.len()) {
+        if should_merge_projected_scan(doc_ids, self.state.documents.len()) {
             self.visit_merge_scan(
                 doc_ids,
                 &layout_projections,
@@ -103,7 +107,7 @@ impl MemoryDocumentStore {
         }
 
         for doc_id in doc_ids {
-            let stored = self.documents.get(doc_id);
+            let stored = self.state.documents.get(doc_id);
             project_stored(
                 stored,
                 stored.and_then(|stored| layout_projections.get(stored.layout_id)),
@@ -123,6 +127,7 @@ impl MemoryDocumentStore {
         fields: &[&str],
     ) -> Vec<Option<SharedDocumentRow>> {
         let layout_projections = self
+            .state
             .layouts
             .iter()
             .map(|layout| Arc::<[usize]>::from(ProjectedLayout::slots(layout, fields)))
@@ -130,7 +135,7 @@ impl MemoryDocumentStore {
         doc_ids
             .iter()
             .map(|doc_id| {
-                let stored = self.documents.get(doc_id)?;
+                let stored = self.state.documents.get(doc_id)?;
                 Some(SharedDocumentRow::new(
                     Arc::clone(&stored.values),
                     Arc::clone(&layout_projections[stored.layout_id]),
@@ -148,7 +153,7 @@ impl MemoryDocumentStore {
         values: &mut Vec<&'a Value>,
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) {
-        let mut documents = self.documents.range(doc_ids[0]..);
+        let mut documents = self.state.documents.range(doc_ids[0]..);
         let mut current = documents.next();
         for doc_id in doc_ids {
             while current.is_some_and(|(stored_id, _)| stored_id < doc_id) {

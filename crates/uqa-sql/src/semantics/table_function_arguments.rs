@@ -54,6 +54,25 @@ pub fn drop_analyzer_arguments(evaluated: &[Value]) -> Result<String, SQLError> 
     Ok(analyzer_name)
 }
 
+pub fn analyze_text_arguments(evaluated: &[Value]) -> Result<(String, String), SQLError> {
+    if evaluated.len() != 2 {
+        return Err(SQLError::BadArity {
+            name: "analyze_text".into(),
+            expected: "2".into(),
+            actual: evaluated.len(),
+        });
+    }
+    let name = match &evaluated[0] {
+        Value::Str(value) => value.clone(),
+        _ => return Err(SQLError::TypeMismatch("analyze_text arg 1".into())),
+    };
+    let input = match &evaluated[1] {
+        Value::Str(value) => value.clone(),
+        _ => return Err(SQLError::TypeMismatch("analyze_text arg 2".into())),
+    };
+    Ok((name, input))
+}
+
 pub fn set_table_analyzer_arguments(
     evaluated: &[Value],
 ) -> Result<(String, String, String, String), SQLError> {

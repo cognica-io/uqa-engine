@@ -11,6 +11,7 @@ use uqa_core::DocId;
 use uqa_execution::query::{
     model_training::{ModelTrainingContext, TrainedModels, TrainingTable, TrainingTables},
     scalar_functions::{ScalarFunctionContext, ScalarSession},
+    scalar_projection::AnalyzerRevisions,
 };
 use uqa_ml::DeepModel;
 use uqa_sql::SQLError;
@@ -26,6 +27,12 @@ impl ScalarSession for Engine {
         self.notification_queue_usage()
     }
 }
+impl AnalyzerRevisions for Engine {
+    fn analyzer_revision(&self, name: &str) -> Result<Arc<uqa_analysis::CompiledAnalyzer>, String> {
+        self.resolve_analyzer_revision(name)
+    }
+}
+
 struct TrainingTableState(Arc<TableState>);
 
 impl TrainingTable for TrainingTableState {
@@ -81,6 +88,8 @@ impl Engine {
             session: self,
             graphs: self,
             models: self.model_training_context(),
+            analyzers: self,
+            runtime: self.query_runtime_view(),
         }
     }
 }

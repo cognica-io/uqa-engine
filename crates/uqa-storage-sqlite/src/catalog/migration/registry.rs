@@ -15,20 +15,27 @@ use super::steps::{MigrationAction, MIGRATIONS};
 impl Catalog {
     /// Open (or create) the catalog and run any pending migrations.
     pub fn open(conn: ManagedConnection) -> Result<Self> {
-        let mut cat = Self {
-            conn,
-            fts_storage_was_reset: false,
-        };
-        cat.fts_storage_was_reset = cat.run_migrations()?;
+        let cat = Self::for_initial_restore(conn);
+        cat.initialize_storage()?;
         Ok(cat)
+    }
+
+    pub(crate) fn for_initial_restore(conn: ManagedConnection) -> Self {
+        Self { conn }
+    }
+
+    pub(in crate::catalog) fn initialize_storage(&self) -> Result<()> {
+        self.run_migrations()
     }
 
     pub fn connection(&self) -> ManagedConnection {
         self.conn.clone()
     }
 
-    pub(super) fn run_migrations(&self) -> Result<bool> {
+    pub(super) fn run_migrations(&self) -> Result<()> {
         self.conn.with_mut(|conn| {
+            // A savepoint joins Engine's initial restore or owns the entire standalone catalog open. Later migration failures must also restore the original schema and postings.
+            let mut conn = conn.savepoint()?;
             // Older catalogs (pre-v7) used the table name `_meta`. v7
             // renames it to `_metadata`; promote the legacy table before
             // any migration query touches it.
@@ -80,7 +87,7 @@ impl Catalog {
             );
             for migration in &MIGRATIONS {
                 if migration.version > current {
-                    let tx = conn.transaction()?;
+                    let tx = conn.savepoint()?;
                     match migration.action {
                         MigrationAction::Sql(sql) => tx.execute_batch(sql)?,
                         MigrationAction::Custom(migrate) => migrate(&tx)?,
@@ -97,14 +104,14 @@ impl Catalog {
             let schema_before_repair: i64 =
                 repair.pragma_query_value(None, "schema_version", |row| row.get(0))?;
             Self::ensure_column_stats_shape(&repair)?;
-            let fts_storage_was_reset = Self::ensure_fts_storage_shape(&repair)?;
             let schema_after_repair: i64 =
                 repair.pragma_query_value(None, "schema_version", |row| row.get(0))?;
             if schema_before_repair != schema_after_repair {
                 Self::install_cache_revision_tracking(&repair)?;
             }
             repair.commit()?;
-            Ok(fts_storage_was_reset)
+            conn.commit()?;
+            Ok(())
         })
     }
 }

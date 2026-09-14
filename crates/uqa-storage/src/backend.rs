@@ -25,6 +25,10 @@ use crate::CatalogFacade;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageBackendError {
+    #[error(transparent)]
+    Memory(#[from] uqa_core::memory::MemoryError),
+    #[error(transparent)]
+    Cancelled(#[from] uqa_core::QueryCancelled),
     #[error("text analysis failed: {0}")]
     Analysis(#[from] uqa_analysis::AnalysisError),
     #[error("payload serialization failed: {0}")]
@@ -181,6 +185,11 @@ impl PersistentStorageSession {
 /// `SQLite`, redb, and application-defined Key/Value stores.
 pub trait PersistentStorageProvider: Send + Sync {
     fn open_session(&self) -> StorageBackendResult<PersistentStorageSession>;
+
+    /// Open handles for initial Engine restoration. Providers may defer catalog schema preparation until `CatalogFacade::initialize_storage` runs inside the owning transaction; ordinary session factories must return an initialized catalog.
+    fn open_initial_session(&self) -> StorageBackendResult<PersistentStorageSession> {
+        self.open_session()
+    }
 
     /// Return the database identity shared by every session this provider opens. Custom providers that cannot expose a stable identity may keep the default; engines built from the same `Arc` provider still share an in-process coordinator.
     fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
@@ -360,8 +369,7 @@ pub trait PersistentStorageBackend: Send + Sync {
         Ok(None)
     }
 
-    /// Whether reading [`Self::change_version`] can proceed while this
-    /// session owns its write transaction.
+    /// Whether reading [`Self::change_version`] can proceed while this session owns its pinned transaction. An independent monitor can also be unsafe for a reader when a pending writer is waiting for that reader's lock.
     fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
         Ok(true)
     }

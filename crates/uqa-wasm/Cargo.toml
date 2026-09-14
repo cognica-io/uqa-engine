@@ -11,6 +11,10 @@ readme.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+default = ["nori"]
+nori = ["uqa-engine/nori"]
+
 [[bin]]
 name = "uqa"
 path = "src/main.rs"
@@ -23,7 +27,7 @@ base64 = "0.22"
 parking_lot = { workspace = true }
 serde_json = { workspace = true }
 uqa-core = { workspace = true }
-uqa-engine = { workspace = true }
+uqa-engine = { workspace = true, default-features = false }
 uqa-scoring = { workspace = true }
 uqa-sql = { workspace = true }
 

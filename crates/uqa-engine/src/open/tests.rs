@@ -454,7 +454,7 @@ fn legacy_fts_repair_is_one_time_and_reload_remains_read_only() {
     rusqlite::Connection::open(&path)
         .unwrap()
         .execute_batch(
-            "DROP TABLE _posting_clusters; \
+            "DELETE FROM _occurrence_clusters; DELETE FROM _occurrence_documents; DELETE FROM _occurrence_lengths; DELETE FROM _occurrence_fields; DELETE FROM _occurrence_formats; UPDATE _metadata SET value = '47' WHERE key = 'schema_version'; DROP TABLE _posting_clusters; \
              DROP TABLE _posting_documents; \
              DROP TABLE _doc_lengths; \
              DROP TABLE _field_stats;",
@@ -499,4 +499,10 @@ fn legacy_fts_repair_is_one_time_and_reload_remains_read_only() {
         external_commit,
         "external-commit refresh repeated the FTS repair"
     );
+    engine
+        .sql(
+            "ALTER TABLE docs RENAME COLUMN body TO caption; ALTER TABLE docs DROP COLUMN caption",
+            &[],
+        )
+        .unwrap();
 }

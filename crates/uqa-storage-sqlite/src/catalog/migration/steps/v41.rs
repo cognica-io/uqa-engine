@@ -8,7 +8,7 @@
 
 use super::super::super::{Catalog, Result};
 
-pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+pub(super) fn migrate(tx: &rusqlite::Connection) -> Result<()> {
     let columns = Catalog::table_columns(tx, "_foreign_tables")?.unwrap_or_default();
     if !columns.contains_key("acl_json") {
         tx.execute_batch("ALTER TABLE _foreign_tables ADD COLUMN acl_json TEXT;")?;

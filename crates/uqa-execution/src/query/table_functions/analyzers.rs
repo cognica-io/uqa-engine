@@ -7,6 +7,9 @@
 //! Analyzer command scheduling and full-text index result materialization.
 
 use super::{context::AnalyzerTableFunctions, TableFunctionRows};
+use crate::query::{runtime::QueryRuntimeView, scalar_projection::AnalyzerRevisions};
+use uqa_analysis::AnalysisError;
+use uqa_core::memory::MemoryBudget;
 use uqa_core::Value;
 use uqa_sql::{
     semantics::{
@@ -21,6 +24,7 @@ use uqa_sql::{
 
 pub(super) fn build_rows(
     runtime: &dyn AnalyzerTableFunctions,
+    query_runtime: QueryRuntimeView<'_>,
     lower: &str,
     evaluated: &[Value],
     column_aliases: &[String],
@@ -66,16 +70,13 @@ pub(super) fn build_rows(
         }
         "list_analyzers" => {
             require_no_arguments("list_analyzers", evaluated)?;
-            // Include the four built-in analyzers (`whitespace`, `standard`,
-            // `standard_cjk`, `keyword`) in addition to
-            // top of every user-registered named analyzer.
             let mut names: std::collections::BTreeSet<String> = runtime
                 .list_named_analyzers()
                 .map_err(SQLError::Unsupported)?
                 .into_iter()
                 .collect();
-            for builtin in ["whitespace", "standard", "standard_cjk", "keyword"] {
-                names.insert(builtin.to_string());
+            for builtin in uqa_analysis::builtin_analyzer_names() {
+                names.insert(builtin);
             }
             let key = column_aliases
                 .first()
@@ -86,13 +87,24 @@ pub(super) fn build_rows(
             }
             Ok(TableFunctionRows::materialized(vec![key], out))
         }
+        "analyze_text" => {
+            let (name, input) =
+                uqa_sql::semantics::table_function_arguments::analyze_text_arguments(evaluated)?;
+            let diagnostic = analyze_text(query_runtime, runtime, &name, &input)?;
+            let column = column_aliases
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "analysis".into());
+            Ok(TableFunctionRows::materialized(
+                vec![column],
+                vec![vec![diagnostic]],
+            ))
+        }
         "fts_index_stats" => index_stat_rows(runtime, evaluated),
         "set_table_analyzer" => {
             let (target_table, field, analyzer_name, phase) =
                 set_table_analyzer_arguments(evaluated)?;
-            runtime
-                .set_table_field_analyzer(&target_table, &field, &analyzer_name, &phase)
-                .map_err(SQLError::Unsupported)?;
+            runtime.set_table_field_analyzer(&target_table, &field, &analyzer_name, &phase)?;
             let mut msg = format!("analyzer '{analyzer_name}' assigned to {target_table}.{field}");
             if phase != "both" {
                 use std::fmt::Write as _;
@@ -110,6 +122,40 @@ pub(super) fn build_rows(
         _ => unreachable!("analyzer table function selected by the caller"),
     }
 }
+
+/// Execute a read-only diagnostic through retained analyzer resources and live query controls.
+pub fn analyze_text(
+    runtime: QueryRuntimeView<'_>,
+    analyzers: &dyn AnalyzerRevisions,
+    name: &str,
+    input: &str,
+) -> Result<Value, SQLError> {
+    runtime.check_cancelled()?;
+    let budget = MemoryBudget::new(runtime.work_mem_bytes()?);
+    let analyzer = analyzers
+        .analyzer_revision(name)
+        .map_err(SQLError::Unsupported)?;
+    let diagnostic = analyzer
+        .analyze_diagnostic_budgeted(input, &budget, || {
+            runtime
+                .cancellation
+                .check()
+                .map_err(|_| AnalysisError::Cancelled)
+        })
+        .map_err(|error| match error {
+            AnalysisError::Cancelled => SQLError::Cancelled(uqa_core::QueryCancelled),
+            AnalysisError::Memory(error) => SQLError::Routine {
+                sqlstate: "53200".into(),
+                message: format!("analysis diagnostic failed: {error}"),
+            },
+            error => SQLError::Unsupported(format!("analyze text with `{}`: {error}", name.trim())),
+        })?;
+    // The completed JSON transfers to the query result owner after encoding.
+    Ok(Value::JsonB(diagnostic.into_parts().0))
+}
+
+#[cfg(test)]
+mod tests;
 
 fn index_stat_rows(
     runtime: &dyn AnalyzerTableFunctions,

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import pathlib
 import re
@@ -18,6 +19,7 @@ import subprocess
 import sys
 import tarfile
 import zipfile
+from typing import Callable
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -36,6 +38,7 @@ NPM_PACKAGES = (
     ROOT / "crates" / "uqa-node",
     ROOT / "crates" / "uqa-wasm" / "js",
 )
+BINDING_PACKAGES = (*NPM_PACKAGES, ROOT / "python" / "uqa")
 MIT_PARSER_CRATE = "uqa-pg-query"
 PROJECT_TABLE = re.compile(
     r"^\[project\][ \t]*(?:#.*)?$(.*?)(?=^\[[^\n]+\][ \t]*(?:#.*)?$|\Z)",
@@ -154,7 +157,7 @@ def canonical_payloads() -> dict[str, bytes]:
 
 
 def check_npm_sources(payloads: dict[str, bytes]) -> None:
-    required_files = {"LICENSE-NOTICE.md", *LEGAL_FILES}
+    required_files = {"LICENSE-NOTICE.md", *LEGAL_FILES, *binding_nori_payloads()}
     for package_root in NPM_PACKAGES:
         manifest_path = package_root / "package.json"
         try:
@@ -173,6 +176,24 @@ def check_npm_sources(payloads: dict[str, bytes]) -> None:
                 raise RuntimeError(f"cannot read {package_path}: {error}") from error
             if actual != expected:
                 raise RuntimeError(f"npm legal copy differs from canonical file: {package_path}")
+
+
+def binding_nori_payloads() -> dict[str, bytes]:
+    """The same complete attribution and source-resource identity in every binding."""
+    data = ROOT / "crates/uqa-nori-data"
+    payloads = {relative: (data / relative).read_bytes() for relative in NORI_FILES if relative.startswith("THIRD-PARTY/")}
+    payloads["THIRD-PARTY/LUCENE-SOURCE.md"] = (ROOT / "crates/uqa-analysis/THIRD-PARTY/LUCENE-SOURCE.md").read_bytes()
+    payloads["THIRD-PARTY/NORI-RESOURCE-MANIFEST.json"] = (data / "data/resource_manifest.json").read_bytes()
+    payloads["THIRD-PARTY/NORI-MODEL-MANIFEST.json"] = (data / "data/model_manifest.json").read_bytes()
+    return payloads
+
+
+def check_binding_sources() -> None:
+    for directory in BINDING_PACKAGES:
+        for relative, expected in binding_nori_payloads().items():
+            path = directory / relative
+            if not path.is_file() or path.read_bytes() != expected:
+                raise RuntimeError(f"binding Nori attribution or source-resource identity differs: {path}")
 
 
 def workspace_packages() -> list[dict[str, object]]:
@@ -197,6 +218,42 @@ def is_publishable(package: dict[str, object]) -> bool:
     if isinstance(publish, list) and len(publish) == 0:
         return False
     return True
+
+
+NORI_FILES = (
+    "data/nori.uqan",
+    "data/model_manifest.json",
+    "THIRD-PARTY/JDK-UNICODE.md",
+    "THIRD-PARTY/LUCENE-LICENSE.txt",
+    "THIRD-PARTY/LUCENE-NOTICE.txt",
+    "THIRD-PARTY/MECAB-COPYING.txt",
+)
+
+
+LUCENE_FILES = ("THIRD-PARTY/LUCENE-LICENSE.txt", "THIRD-PARTY/LUCENE-NOTICE.txt")
+
+
+def check_lucene_payloads(read: Callable[[str], bytes]) -> None:
+    for relative in LUCENE_FILES:
+        expected = (ROOT / "crates/uqa-nori-data" / relative).read_bytes()
+        if read(relative) != expected:
+            raise RuntimeError(f"ported Nori code requires the complete pinned {relative}")
+
+
+def check_nori_payloads(manifest_bytes: bytes, read: Callable[[str], bytes]) -> None:
+    try:
+        manifest = json.loads(manifest_bytes)
+        if manifest["format"] != "uqa-nori-bundled-resource" or manifest["format_version"] != 1:
+            raise ValueError("unsupported resource manifest")
+        entries = manifest["files"]
+        if sorted(entry["path"] for entry in entries) != sorted(NORI_FILES):
+            raise ValueError("incomplete or duplicate resource inventory")
+        for entry in entries:
+            actual = read(entry["path"])
+            if len(actual) != entry["bytes"] or hashlib.sha256(actual).hexdigest() != entry["sha256"]:
+                raise ValueError(f"size or hash differs: {entry['path']}")
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise RuntimeError(f"invalid Nori resources: {error}") from error
 
 
 def check_cargo_sources(payloads: dict[str, bytes]) -> None:
@@ -233,6 +290,13 @@ def check_cargo_sources(payloads: dict[str, bytes]) -> None:
             raise RuntimeError(f"cannot read {notice_path}: {error}") from error
         if actual_notice != notice:
             raise RuntimeError(f"crate legal copy differs from canonical file: {notice_path}")
+        if name == "uqa-analysis":
+            check_lucene_payloads(lambda relative: (crate_root / relative).read_bytes())
+        if name == "uqa-nori-data":
+            check_nori_payloads(
+                (crate_root / "data/resource_manifest.json").read_bytes(),
+                lambda relative: (crate_root / relative).read_bytes(),
+            )
 
 
 def check_maturin_sources() -> None:
@@ -248,7 +312,7 @@ def check_maturin_sources() -> None:
     if project_assignment(project, "license") != "AGPL-3.0-only":
         raise RuntimeError("Python package must declare the AGPL-3.0-only SPDX license")
     declared = project_assignment(project, "license-files")
-    required = {"LICENSE", "LICENSING.md", "LICENSES/*.txt"}
+    required = {"LICENSE", "LICENSING.md", "LICENSES/*.txt", "python/uqa/THIRD-PARTY/*"}
     declared_paths = (
         {value for value in declared if isinstance(value, str)}
         if isinstance(declared, list)
@@ -292,7 +356,7 @@ def matching_members(members: dict[str, bytes], relative: str) -> list[tuple[str
     ]
 
 
-def check_archive(path: pathlib.Path, payloads: dict[str, bytes]) -> None:
+def check_archive(path: pathlib.Path, payloads: dict[str, bytes], require_nori: bool = False) -> None:
     members = archive_members(path)
     if path.name.startswith(f"{MIT_PARSER_CRATE}-") and path.name.endswith(".crate"):
         for relative in MIT_PARSER_FILES:
@@ -312,11 +376,96 @@ def check_archive(path: pathlib.Path, payloads: dict[str, bytes]) -> None:
         members, AGPL_NOTICE
     ):
         raise RuntimeError(f"{path} omits {AGPL_NOTICE}")
+    if path.name.endswith((".whl", ".tgz", ".tar.gz")):
+        for relative, expected in binding_nori_payloads().items():
+            matches = matching_members(members, relative)
+            if not matches or any(payload != expected for _, payload in matches):
+                raise RuntimeError(f"{path} omits or changes Nori attribution or source-resource identity: {relative}")
+    if require_nori:
+        check_embedded_nori(path, members)
+    if path.name.startswith(("uqa-analysis-", "uqa-nori-data-")) and path.name.endswith(".crate"):
+        def read_nori(relative: str) -> bytes:
+            matches = matching_members(members, relative)
+            if len(matches) != 1:
+                raise RuntimeError(f"{path} requires exactly one {relative}")
+            return matches[0][1]
+
+        if path.name.startswith("uqa-analysis-"):
+            check_lucene_payloads(read_nori)
+            source = "THIRD-PARTY/LUCENE-SOURCE.md"
+            if read_nori(source) != (ROOT / "crates/uqa-analysis" / source).read_bytes():
+                raise RuntimeError(f"{path} contains different Lucene source attribution")
+            return
+        manifest = read_nori("data/resource_manifest.json")
+        expected = (ROOT / "crates/uqa-nori-data/data/resource_manifest.json").read_bytes()
+        if manifest != expected:
+            raise RuntimeError(f"{path} contains a different Nori resource manifest")
+        check_nori_payloads(manifest, read_nori)
+        if path.stat().st_size > 10_000_000:
+            raise RuntimeError(f"{path} exceeds the Nori crate's 10 MB archive budget")
+
+
+def check_embedded_nori(path: pathlib.Path, members: dict[str, bytes]) -> None:
+    bundle = (ROOT / "crates/uqa-nori-data/data/nori.uqan").read_bytes()
+    binaries = {name: data for name, data in members.items() if name.endswith((".node", ".wasm", ".so", ".pyd"))}
+    if binaries:
+        matching = [name for name, data in binaries.items() if bundle in data]
+        if len(matching) != 1:
+            raise RuntimeError(f"{path} must embed the complete pinned Nori bundle in exactly one runtime artifact")
+        return
+    manifests = matching_members(members, "package.json")
+    if len(manifests) == 1 and json.loads(manifests[0][1]).get("name") == "@cognica-io/uqa":
+        # The root package dispatches to the separately checked native platform packages.
+        return
+    if path.name.endswith(".tar.gz"):
+        def read_resource(relative: str) -> bytes:
+            matches = matching_members(members, f"crates/uqa-nori-data/{relative}")
+            if len(matches) != 1:
+                raise RuntimeError(f"{path} omits the Nori source resource {relative}")
+            return matches[0][1]
+        manifest = read_resource("data/resource_manifest.json")
+        if manifest != (ROOT / "crates/uqa-nori-data/data/resource_manifest.json").read_bytes():
+            raise RuntimeError(f"{path} contains a different Nori source-resource identity")
+        check_nori_payloads(manifest, read_resource)
+        if read_resource("data/nori.uqan") != bundle:
+            raise RuntimeError(f"{path} contains a different Nori source bundle")
+        check_benchmark_sources(path, members)
+        return
+    raise RuntimeError(f"{path} has no Nori runtime or source bundle")
+
+
+def benchmark_inputs() -> set[str]:
+    """Follow literal Rust source/data references from every included benchmark."""
+    pending = list(ROOT.glob("crates/*/benches/**/*.rs"))
+    visited = set()
+    references = re.compile(r'(?:include(?:_str|_bytes)?!\s*\(\s*|#\[path\s*=\s*)"([^"\n]+)"')
+    while pending:
+        path = pending.pop().resolve()
+        try:
+            relative = path.relative_to(ROOT.resolve()).as_posix()
+        except ValueError as error:
+            raise RuntimeError("benchmark source inputs must stay inside the repository") from error
+        if relative in visited:
+            continue
+        if not path.is_file():
+            raise RuntimeError(f"missing benchmark source input: {relative}")
+        visited.add(relative)
+        if path.suffix == ".rs":
+            pending.extend(path.parent / item for item in references.findall(path.read_text()))
+    return visited
+
+
+def check_benchmark_sources(path: pathlib.Path, members: dict[str, bytes]) -> None:
+    for relative in benchmark_inputs():
+        matches = matching_members(members, relative)
+        if len(matches) != 1 or matches[0][1] != (ROOT / relative).read_bytes():
+            raise RuntimeError(f"{path} omits or changes a benchmark source input: {relative}")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("archives", nargs="*", type=pathlib.Path)
+    parser.add_argument("--require-nori", action="store_true", help="require the exact embedded bundle in binding release artifacts")
     return parser.parse_args()
 
 
@@ -326,8 +475,9 @@ def main() -> int:
     check_npm_sources(payloads)
     check_maturin_sources()
     check_cargo_sources(payloads)
+    check_binding_sources()
     for archive in args.archives:
-        check_archive(archive.resolve(), payloads)
+        check_archive(archive.resolve(), payloads, args.require_nori)
     archive_suffix = f" and {len(args.archives)} archive(s)" if args.archives else ""
     print(f"Release license contract OK: canonical sources{archive_suffix}")
     return 0

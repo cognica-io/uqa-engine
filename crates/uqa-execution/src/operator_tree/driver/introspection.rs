@@ -65,7 +65,7 @@ pub fn require_shared_vector_field(
 
 pub fn first_text_field(tree: &OperatorTree) -> Option<String> {
     match tree {
-        OperatorTree::Term { field, .. } => field.clone(),
+        OperatorTree::Term { field, .. } | OperatorTree::Phrase { field, .. } => field.clone(),
         OperatorTree::Score { field, .. }
         | OperatorTree::BayesianScore {
             field: Some(field), ..
@@ -189,7 +189,9 @@ pub fn first_text_signal(signals: &[OperatorTree]) -> Option<(String, String)> {
 
 pub fn find_text_in_tree(tree: &OperatorTree) -> Option<(String, String)> {
     match tree {
-        OperatorTree::Term { query, field, .. } => field.clone().map(|f| (f, query.clone())),
+        OperatorTree::Term { query, field, .. } | OperatorTree::Phrase { query, field, .. } => {
+            field.clone().map(|f| (f, query.clone()))
+        }
         OperatorTree::BayesianMatchWithPrior { field, query, .. } => {
             Some((field.clone(), query.clone()))
         }
@@ -222,7 +224,7 @@ pub fn find_text_in_tree(tree: &OperatorTree) -> Option<(String, String)> {
 /// Number of score-contributing text terms in a bound BM25 query tree. Set operations merge payloads by summing scores, so the raw query score scales with this count and the calibration must be translated to it. Complements filter without contributing score.
 pub fn scored_term_count(tree: &OperatorTree) -> usize {
     match tree {
-        OperatorTree::Term { .. } => 1,
+        OperatorTree::Term { .. } | OperatorTree::Phrase { .. } => 1,
         OperatorTree::Intersect(children)
         | OperatorTree::Union(children)
         | OperatorTree::Composed(children) => children.iter().map(scored_term_count).sum(),

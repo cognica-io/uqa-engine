@@ -143,7 +143,7 @@ fn for_each_fields_multi_ref_borrows_memory_values_and_reuses_nulls() {
     let mut s = MemoryDocumentStore::new();
     s.put(2, doc([("value", Value::Str("twenty".into()))]))
         .unwrap();
-    let stored = std::ptr::from_ref(s.field(&s.documents[&2], "value").unwrap());
+    let stored = std::ptr::from_ref(s.field(&s.state.documents[&2], "value").unwrap());
 
     let mut visited = Vec::new();
     s.for_each_fields_multi_ref(&[2, 99], &["value"], &mut |doc_id, values| {
@@ -288,7 +288,7 @@ fn shared_projection_reuses_the_stored_value_vector() {
         ]),
     )
     .unwrap();
-    let stored = Arc::clone(&s.documents[&1].values);
+    let stored = Arc::clone(&s.state.documents[&1].values);
 
     let mut rows = s
         .get_shared_fields(&[1], &["zulu", "missing", "alpha"])
@@ -411,6 +411,88 @@ fn shared_snapshot_remains_isolated_after_a_write() {
 
     assert_eq!(snapshot.get_field(1, "value").unwrap(), Some(Value::Int(1)));
     assert_eq!(s.get_field(1, "value").unwrap(), Some(Value::Int(2)));
+}
+
+#[test]
+fn snapshot_creation_does_not_scale_with_document_count() {
+    let allocations = [1, 1024].map(|count| {
+        let mut store = MemoryDocumentStore::new();
+        for id in 0..count {
+            store
+                .put(
+                    id,
+                    doc([("body", Value::Str("snapshot payload".repeat(16)))]),
+                )
+                .unwrap();
+        }
+        let mut snapshots = None;
+        let allocation = allocation_counter::measure(|| {
+            snapshots = Some((
+                store.snapshot().unwrap(),
+                store.writable_snapshot().unwrap(),
+            ));
+        });
+        let (read, writable) = snapshots.unwrap();
+        store.clear().unwrap();
+        assert_eq!(read.len().unwrap(), count as usize);
+        assert_eq!(writable.len().unwrap(), count as usize);
+        allocation
+    });
+    assert_eq!(allocations[0].bytes_total, allocations[1].bytes_total);
+    assert_eq!(allocations[0].count_total, allocations[1].count_total);
+}
+
+#[test]
+fn writable_snapshots_keep_rows_layouts_and_metadata_independent() {
+    let mut store = MemoryDocumentStore::new();
+    store
+        .put_stored(
+            1,
+            StoredDocument::with_metadata(
+                doc([("original", Value::Int(1))]),
+                DocumentMetadata::with_tuple_xmin(37),
+            ),
+        )
+        .unwrap();
+    store.put(2, doc([("other", Value::Int(2))])).unwrap();
+    let read = store.snapshot().unwrap();
+    let mut writable = store.writable_snapshot().unwrap();
+
+    // Mutate the snapshot first, while the original still shares its state.
+    writable
+        .patch_fields(1, &doc([("original", Value::Null), ("new", Value::Int(3))]))
+        .unwrap();
+    writable.delete(2).unwrap();
+    store.put(1, doc([("source", Value::Int(4))])).unwrap();
+    assert_eq!(
+        read.get(1).unwrap(),
+        Some(doc([("original", Value::Int(1))]))
+    );
+    assert_eq!(read.get(2).unwrap(), Some(doc([("other", Value::Int(2))])));
+    assert_eq!(
+        writable.get(1).unwrap(),
+        Some(doc([("new", Value::Int(3))]))
+    );
+    assert_eq!(
+        writable.get_metadata(1).unwrap().unwrap().tuple_xmin(),
+        Some(37)
+    );
+    assert_eq!(
+        store.get(1).unwrap(),
+        Some(doc([("source", Value::Int(4))]))
+    );
+    assert!(store.contains_doc_id(2).unwrap());
+
+    let second = writable.snapshot().unwrap();
+    writable.clear().unwrap();
+    writable.put(1, doc([("reused", Value::Int(5))])).unwrap();
+    store.clear().unwrap();
+    assert_eq!(second.get(1).unwrap(), Some(doc([("new", Value::Int(3))])));
+    assert_eq!(
+        writable.get(1).unwrap(),
+        Some(doc([("reused", Value::Int(5))]))
+    );
+    assert_eq!(read.len().unwrap(), 2);
 }
 
 #[test]

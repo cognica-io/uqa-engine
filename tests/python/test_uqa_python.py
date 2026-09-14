@@ -19,6 +19,9 @@ import pytest
 
 import uqa
 
+NORI_FEATURE = os.environ.get("UQA_TEST_NORI", "enabled")
+assert NORI_FEATURE in {"enabled", "disabled"}, "UQA_TEST_NORI must be enabled or disabled"
+
 
 @pytest.mark.parametrize("input_mode", ["stdin", "script"])
 def test_installed_usql_dispatches_python_arguments(tmp_path, input_mode):
@@ -243,6 +246,52 @@ def test_sql_text_vector_tensor_and_cypher_surfaces() -> None:
         {"name": "Ada"},
     )
     assert cypher.rows == [{"name": "Ada"}]
+
+
+def test_nori_diagnostics_match_the_requested_feature_configuration() -> None:
+    engine = uqa.Engine()
+    listed = engine.sql("SELECT analyzer_name FROM list_analyzers() ORDER BY analyzer_name")
+    assert ("nori" in [row["analyzer_name"] for row in listed.rows]) == (NORI_FEATURE == "enabled")
+    if NORI_FEATURE == "disabled":
+        with pytest.raises(RuntimeError, match="is not registered"):
+            engine.sql("SELECT * FROM analyze_text('nori', '나물은')")
+        engine.close()
+        return
+
+    result = engine.sql("SELECT analysis FROM analyze_text('nori', '나물은')")
+    assert result.columns == ["analysis"]
+    analysis = result.rows[0]["analysis"]
+    assert len(analysis["analyzer_fingerprint"]) == 64
+    assert analysis["final_offsets"]["utf16"]["end"] == 3
+    assert any("korean_morphology" in token for token in analysis["tokens"])
+    engine.close()
+
+
+def test_nori_user_dictionary_and_retained_graph_revisions_survive_reopen(tmp_path):
+    fixture = json.loads(
+        (Path(__file__).parents[1] / "parity/nori/bindings.json").read_text(encoding="utf-8")
+    )
+    assert fixture["schema_version"] == 1
+    path = tmp_path / "nori.db"
+    engine = uqa.open(path)
+    try:
+        for step in fixture[NORI_FEATURE]:
+            if step.get("reopen"):
+                engine.close()
+                engine = None
+                engine = uqa.open(path)
+            elif "error_contains" in step:
+                with pytest.raises(RuntimeError) as error:
+                    engine.sql(step["sql"], step.get("params", []))
+                assert step["error_contains"] in str(error.value), step["name"]
+            else:
+                result = engine.sql(step["sql"], step.get("params", []))
+                if "rows_ref" in step or "rows" in step:
+                    expected = fixture[step["rows_ref"]] if "rows_ref" in step else step["rows"]
+                    assert result.rows == expected, step["name"]
+    finally:
+        if engine is not None:
+            engine.close()
 
 
 def test_persistent_open_and_batch(tmp_path) -> None:

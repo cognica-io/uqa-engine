@@ -51,7 +51,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             "(github.event_name == 'workflow_dispatch' && inputs.run_rust) }}"
         )
 
-        self.assertEqual(self.workflow.count(condition), 8)
+        self.assertEqual(self.workflow.count(condition), 12)
         self.assertNotIn("if: ${{ inputs.run_rust }}", self.workflow)
 
     def test_upstream_reference_is_required_by_the_merge_gate(self) -> None:
@@ -59,6 +59,18 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         needs = gate.split("    needs: [", 1)[1].split("]", 1)[0]
         self.assertIn("upstream-regression-oracle", [name.strip() for name in needs.split(",")])
         self.assertIn("harness.py run --output target/pg18-upstream/reference", self.workflow)
+
+    def test_nori_regeneration_and_all_reference_drivers_are_required_by_the_merge_gate(self) -> None:
+        gate = self.workflow.split("  gate:\n", 1)[1]
+        needs = gate.split("    needs: [", 1)[1].split("]", 1)[0]
+        self.assertIn("nori-reference", [name.strip() for name in needs.split(",")])
+        job = self.workflow.split("  nori-reference:\n", 1)[1].split("  gate:\n", 1)[0]
+        self.assertIn("regenerate_dictionary.py --platform linux/amd64", job)
+        self.assertIn("export_model.py --platform linux/amd64 --offline", job)
+        for driver in ["run_reference.py", "run_user_reference.py", "run_tokenizer_reference.py",
+                       "run_analysis_reference.py", "run_number_reference.py", "run_generic_reference.py"]:
+            self.assertIn(driver, job)
+        self.assertNotIn("--write", job)
 
     def test_temporary_tag_caches_are_restore_only(self) -> None:
         cache_step = (
@@ -70,9 +82,9 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         )
 
         self.assertEqual(
-            self.workflow.count("      - uses: Swatinem/rust-cache@v2\n"), 6
+            self.workflow.count("      - uses: Swatinem/rust-cache@v2\n"), 7
         )
-        self.assertEqual(self.workflow.count(cache_step), 6)
+        self.assertEqual(self.workflow.count(cache_step), 7)
 
 
 class PremergeCITest(unittest.TestCase):
@@ -270,6 +282,8 @@ class PremergeCITest(unittest.TestCase):
                 "false",
             ),
             (".github/workflows/ci.yml", ("ci.yml",), "true"),
+            (".github/workflows/nori-sql-benchmarks.yml", ("ci.yml",), "true"),
+            (".github/workflows/nori-cancellation-benchmarks.yml", ("ci.yml",), "true"),
         )
 
         for changed_file, expected_workflows, run_rust in cases:
@@ -367,6 +381,44 @@ class PremergeCITest(unittest.TestCase):
         self.assertEqual(len(set(refs)), 1)
         self.assertNotEqual(refs[0], "fix/premerge-ci")
         self.assertEqual(len(git_invocations), 2)
+
+    def test_nori_measurement_inputs_select_native_and_wasm_gates(self) -> None:
+        for path in ("scripts/run-nori-benchmark.py", "scripts/run-nori-index-benchmark.py",
+                     "scripts/run-nori-sql-benchmark.py", "scripts/run-nori-cancellation-benchmark.py",
+                     "scripts/run-nori-persistent-benchmark.py", "benchmarks/nori/persistent.rs",
+                     "benchmarks/nori/persistent-limits.json", "crates/uqa-analysis/benches/nori/corpus.json"):
+            result, invocations, _ = self.run_script(changed_files=(path,))
+            with self.subTest(path=path):
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(invocations), 2)
+                self.assertTrue(any("ci.yml" in item and "run_rust=true" in item for item in invocations))
+                self.assertTrue(any("javascript-bindings.yml" in item for item in invocations))
+
+    def test_nori_resource_and_binding_inputs_select_all_runtime_bindings(self) -> None:
+        for path in (".gitattributes", "crates/uqa-nori-data/data/nori.uqan", "crates/uqa-nori-data/data/resource_manifest.json",
+                     "tests/parity/nori/bindings.json", "tests/parity/nori/bindings.mjs",
+                     "tests/parity/nori/bindings.core.mjs"):
+            result, invocations, _ = self.run_script(changed_files=(path,))
+            with self.subTest(path=path):
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(invocations), 3)
+                self.assertTrue(any("ci.yml" in item and "run_rust=true" in item for item in invocations))
+
+    def test_browser_driver_and_shared_examples_select_javascript(self) -> None:
+        for path in ("examples/javascript/common.mjs", "scripts/serve-wasm-tests.py",
+                     "scripts/verify-nori-browser.py", ".github/workflows/javascript-packages.yml"):
+            result, invocations, _ = self.run_script(changed_files=(path,))
+            with self.subTest(path=path):
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(any("javascript-bindings.yml" in item for item in invocations))
+
+    def test_browser_native_contract_selects_python(self) -> None:
+        for path in ("tests/wasm/export_nori_diagnostics.py", "benchmarks/nori/browser-contract.json"):
+            result, invocations, _ = self.run_script(changed_files=(path,))
+            with self.subTest(path=path):
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(any("python-wheels.yml" in item for item in invocations))
+                self.assertTrue(any("javascript-bindings.yml" in item for item in invocations))
 
     def test_dry_run_does_not_create_a_remote_tag(self) -> None:
         result, gh_invocations, git_invocations = self.run_script("--dry-run")

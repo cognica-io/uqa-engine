@@ -6,6 +6,9 @@
 
 //! Metadata, schema, table, column, and owned-data lifecycle.
 
+use super::super::occurrence_keys as occurrence;
+use super::analyzers::{field_binding_key, field_binding_prefix};
+use super::occurrence_lifecycle::{drop_occurrence_field, rename_occurrence_field};
 use super::physical_indexes::{
     drop_field_indexes, drop_table_indexes, rename_field_indexes, rename_table_indexes,
 };
@@ -212,6 +215,7 @@ impl KeyValueCatalog {
         for storage_name in &storage_names {
             batch.delete_prefix(&document_key_prefix(storage_name)?)?;
             batch.delete_prefix(&posting_key_prefix(storage_name)?)?;
+            batch.delete_prefix(&occurrence::table_prefix(storage_name)?)?;
             batch.delete_prefix(&posting_cluster_score_key_prefix(storage_name)?)?;
             batch.delete_prefix(&posting_cluster_positions_key_prefix(storage_name)?)?;
             batch.delete_prefix(&posting_document_key_prefix(storage_name)?)?;
@@ -221,6 +225,7 @@ impl KeyValueCatalog {
             batch.delete_prefix(&vector_key_prefix(storage_name)?)?;
             batch.delete_prefix(&column_stats_prefix(storage_name)?)?;
             batch.delete_prefix(&table_field_analyzer_prefix(storage_name)?)?;
+            batch.delete_prefix(&field_binding_prefix(storage_name)?)?;
             drop_table_indexes(batch.as_mut(), storage_name)?;
         }
         batch.commit()
@@ -233,6 +238,7 @@ impl KeyValueCatalog {
         for storage_name in relation.canonical_and_legacy_public_names() {
             batch.delete_prefix(&document_key_prefix(&storage_name)?)?;
             batch.delete_prefix(&posting_key_prefix(&storage_name)?)?;
+            batch.delete_prefix(&occurrence::table_prefix(&storage_name)?)?;
             batch.delete_prefix(&posting_cluster_score_key_prefix(&storage_name)?)?;
             batch.delete_prefix(&posting_cluster_positions_key_prefix(&storage_name)?)?;
             batch.delete_prefix(&posting_document_key_prefix(&storage_name)?)?;
@@ -293,6 +299,10 @@ impl KeyValueCatalog {
             (document_key_prefix(from)?, document_key_prefix(to)?),
             (posting_key_prefix(from)?, posting_key_prefix(to)?),
             (
+                occurrence::table_prefix(from)?,
+                occurrence::table_prefix(to)?,
+            ),
+            (
                 posting_cluster_score_key_prefix(from)?,
                 posting_cluster_score_key_prefix(to)?,
             ),
@@ -312,6 +322,7 @@ impl KeyValueCatalog {
             ),
             (vector_key_prefix(from)?, vector_key_prefix(to)?),
             (column_stats_prefix(from)?, column_stats_prefix(to)?),
+            (field_binding_prefix(from)?, field_binding_prefix(to)?),
             (
                 table_field_analyzer_prefix(from)?,
                 table_field_analyzer_prefix(to)?,
@@ -354,6 +365,7 @@ impl KeyValueCatalog {
                 batch.put(&key, &encode_stored_document_value(&document)?)?;
             }
         }
+        drop_occurrence_field(self.store.as_ref(), batch.as_mut(), table_name, column_name)?;
         batch.delete_prefix(&posting_field_prefix(table_name, column_name)?)?;
         batch.delete_prefix(&posting_cluster_score_field_prefix(
             table_name,
@@ -367,6 +379,7 @@ impl KeyValueCatalog {
         batch.delete_prefix(&vector_field_prefix(table_name, column_name)?)?;
         drop_field_indexes(batch.as_mut(), table_name, column_name)?;
         batch.delete_prefix(&table_field_analyzer_field_prefix(table_name, column_name)?)?;
+        batch.delete(&field_binding_key(table_name, column_name)?)?;
         batch.delete(&column_stats_key(table_name, column_name)?)?;
         for (key, _) in self
             .store
@@ -464,6 +477,15 @@ impl KeyValueCatalog {
             &table_field_analyzer_field_prefix(table_name, from)?,
             &table_field_analyzer_field_prefix(table_name, to)?,
         )?;
+        if let Some(value) = self.store.get(&field_binding_key(table_name, from)?)? {
+            batch_put_or_keep_existing(
+                self.store.as_ref(),
+                batch.as_mut(),
+                &field_binding_key(table_name, to)?,
+                &value,
+            )?;
+            batch.delete(&field_binding_key(table_name, from)?)?;
+        }
         if let Some(value) = self.store.get(&column_stats_key(table_name, from)?)? {
             batch_put_or_keep_existing(
                 self.store.as_ref(),
@@ -473,6 +495,7 @@ impl KeyValueCatalog {
             )?;
             batch.delete(&column_stats_key(table_name, from)?)?;
         }
+        rename_occurrence_field(self.store.as_ref(), batch.as_mut(), table_name, from, to)?;
         rename_document_scoped_fts_fields(self, batch.as_mut(), table_name, from, to)?;
         for row in self.load_catalog_indexes()? {
             if row.table_name != table_name {

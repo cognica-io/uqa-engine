@@ -1,0 +1,406 @@
+{
+  "_description": "Synthetic verifier inputs. Memory and IndexedDB byte counts are sentinel values, not measurements.",
+  "enabled": {
+    "schema_version": 1,
+    "feature": "enabled",
+    "status": "Passed: 47 steps across 3 page loads",
+    "error": null,
+    "completed_steps": [
+      "register_user_dictionary",
+      "complete_graph_and_original_offsets",
+      "missing_bundle",
+      "missing_bundle_preserves_revision",
+      "invalid_user_rule",
+      "invalid_user_rule_preserves_revision",
+      "missing_bundle_publishes_no_name",
+      "failed_name_absent",
+      "protect_builtin",
+      "create_documents",
+      "create_physical_index",
+      "bind_both_revisions",
+      "insert_graph_sources",
+      "hanja_reading_hits",
+      "compound_path_order_and_pos_holes",
+      "complete_source_query_mapping",
+      "reversed_phrase",
+      "original_source_highlighting",
+      "begin_write",
+      "insert_before_savepoint",
+      "savepoint",
+      "change_indexed_source",
+      "uncommitted_phrase_support",
+      "rollback_savepoint",
+      "release_savepoint",
+      "savepoint_restores_graph",
+      "rollback_transaction",
+      "rollback_restores_graph",
+      "replace_catalog_name",
+      "field_keeps_retained_revision",
+      "close_all_handles_and_reopen",
+      "reopen_restores_original_revision",
+      "insert_using_retained_revision",
+      "new_documents_use_retained_revision",
+      "restore_named_revision",
+      "recreated_descriptor_identity",
+      "begin_search_change",
+      "replace_search_only",
+      "search_revision_is_independent",
+      "rollback_search_change",
+      "rollback_restores_search_revision",
+      "reopen_after_new_write",
+      "diagnostic_survives_reopen",
+      "graphs_survive_second_reopen",
+      "drop_documents",
+      "release_named_revision",
+      "released_name_absent"
+    ],
+    "pages": [
+      "page-1",
+      "page-2",
+      "page-3"
+    ],
+    "checkpoints": [
+      {
+        "next_step": 31,
+        "databases": [
+          {
+            "name": "/uqa"
+          }
+        ],
+        "storage": {
+          "usageDetails": {
+            "indexedDB": 1
+          }
+        }
+      },
+      {
+        "next_step": 42,
+        "databases": [
+          {
+            "name": "/uqa"
+          }
+        ],
+        "storage": {
+          "usageDetails": {
+            "indexedDB": 1
+          }
+        }
+      }
+    ],
+    "memory": [
+      {
+        "page": 1,
+        "label": "before_load",
+        "bytes": 1
+      },
+      {
+        "page": 1,
+        "label": "opened",
+        "bytes": 1
+      },
+      {
+        "page": 1,
+        "label": "after_complete_graph_and_original_offsets",
+        "bytes": 1
+      },
+      {
+        "page": 1,
+        "label": "closed_and_persisted",
+        "bytes": 1
+      },
+      {
+        "page": 2,
+        "label": "before_load",
+        "bytes": 1
+      },
+      {
+        "page": 2,
+        "label": "opened",
+        "bytes": 1
+      },
+      {
+        "page": 2,
+        "label": "after_recreated_descriptor_identity",
+        "bytes": 1
+      },
+      {
+        "page": 2,
+        "label": "closed_and_persisted",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "before_load",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "opened",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "after_graphs_survive_second_reopen",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "retained/none/korean_prose",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "released/none/korean_prose",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "retained/none/short_query",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "released/none/short_query",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "retained/none/hanja",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "released/none/hanja",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "retained/none/mixed_script",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "released/none/mixed_script",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "retained/none/unknown",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "released/none/unknown",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "retained/none/ambiguous_long",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "released/none/ambiguous_long",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "retained/discard/korean_prose",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "released/discard/korean_prose",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "retained/discard/short_query",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "released/discard/short_query",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "retained/discard/hanja",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "released/discard/hanja",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "retained/discard/mixed_script",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "released/discard/mixed_script",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "retained/discard/unknown",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "released/discard/unknown",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "retained/discard/ambiguous_long",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "released/discard/ambiguous_long",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "retained/mixed/korean_prose",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "released/mixed/korean_prose",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "retained/mixed/short_query",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "released/mixed/short_query",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "retained/mixed/hanja",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "released/mixed/hanja",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "retained/mixed/mixed_script",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "released/mixed/mixed_script",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "retained/mixed/unknown",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "released/mixed/unknown",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "retained/mixed/ambiguous_long",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "released/mixed/ambiguous_long",
+        "bytes": 1
+      },
+      {
+        "page": 3,
+        "label": "finished_and_persisted",
+        "bytes": 1
+      }
+    ]
+  },
+  "disabled": {
+    "schema_version": 1,
+    "feature": "disabled",
+    "status": "Passed: 9 steps across 2 page loads",
+    "error": null,
+    "completed_steps": [
+      "builtin_is_absent",
+      "korean_tokenizer_fails",
+      "korean_filter_fails",
+      "failed_name_absent",
+      "diagnostics_do_not_fallback",
+      "generic_pipeline_remains_available",
+      "generic_source_highlight",
+      "generic_definition_reopens",
+      "generic_source_highlight_after_reopen"
+    ],
+    "pages": [
+      "page-1",
+      "page-2"
+    ],
+    "checkpoints": [
+      {
+        "next_step": 8,
+        "databases": [
+          {
+            "name": "/uqa"
+          }
+        ],
+        "storage": {
+          "usageDetails": {
+            "indexedDB": 1
+          }
+        }
+      }
+    ],
+    "memory": [
+      {
+        "page": 1,
+        "label": "before_load",
+        "bytes": 1
+      },
+      {
+        "page": 1,
+        "label": "opened",
+        "bytes": 1
+      },
+      {
+        "page": 1,
+        "label": "after_korean_tokenizer_fails",
+        "bytes": 1
+      },
+      {
+        "page": 1,
+        "label": "closed_and_persisted",
+        "bytes": 1
+      },
+      {
+        "page": 2,
+        "label": "before_load",
+        "bytes": 1
+      },
+      {
+        "page": 2,
+        "label": "opened",
+        "bytes": 1
+      },
+      {
+        "page": 2,
+        "label": "finished_and_persisted",
+        "bytes": 1
+      }
+    ]
+  }
+}

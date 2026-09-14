@@ -17,8 +17,23 @@ use super::{Document, DocumentMetadata, DocumentStore, SharedDocumentRow, Stored
 
 mod projection;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub struct MemoryDocumentStore {
+    /// Rows and their layout IDs advance together when a shared snapshot is changed.
+    state: Arc<MemoryDocumentState>,
+}
+
+/// Cloning retains independent row maps and layouts; snapshot APIs share them until a write.
+impl Clone for MemoryDocumentStore {
+    fn clone(&self) -> Self {
+        Self {
+            state: Arc::new((*self.state).clone()),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+struct MemoryDocumentState {
     documents: BTreeMap<DocId, MemoryDocumentRow>,
     layouts: Vec<Vec<String>>,
 }
@@ -35,14 +50,21 @@ impl MemoryDocumentStore {
         Self::default()
     }
 
+    fn shared_snapshot(&self) -> Self {
+        Self {
+            state: Arc::clone(&self.state),
+        }
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (DocId, Document)> + '_ {
-        self.documents
+        self.state
+            .documents
             .iter()
             .map(|(doc_id, stored)| (*doc_id, self.materialize_document(stored)))
     }
 
     fn materialize_document(&self, stored: &MemoryDocumentRow) -> Document {
-        self.layouts[stored.layout_id]
+        self.state.layouts[stored.layout_id]
             .iter()
             .cloned()
             .zip(stored.values.iter().cloned())
@@ -54,24 +76,25 @@ impl MemoryDocumentStore {
     }
 
     fn field<'a>(&'a self, stored: &'a MemoryDocumentRow, field: &str) -> Option<&'a Value> {
-        let slot = self.layouts[stored.layout_id]
+        let slot = self.state.layouts[stored.layout_id]
             .binary_search_by(|stored| stored.as_str().cmp(field))
             .ok()?;
         stored.values.get(slot)
     }
 
     fn put_stored_inner(&mut self, doc_id: DocId, document: StoredDocument) {
+        let state = Arc::make_mut(&mut self.state);
         let (document, metadata) = document.into_parts();
         let (layout_id, values) =
-            if let Some(layout_id) = document_layout_id(&self.layouts, &document) {
+            if let Some(layout_id) = document_layout_id(&state.layouts, &document) {
                 (layout_id, document.into_values().collect())
             } else {
                 let (layout, values): (Vec<_>, Vec<_>) = document.into_iter().unzip();
-                let layout_id = self.layouts.len();
-                self.layouts.push(layout);
+                let layout_id = state.layouts.len();
+                state.layouts.push(layout);
                 (layout_id, values)
             };
-        self.documents.insert(
+        state.documents.insert(
             doc_id,
             MemoryDocumentRow {
                 layout_id,
@@ -95,6 +118,7 @@ fn document_layout_id(layouts: &[Vec<String>], document: &Document) -> Option<us
 impl DocumentStore for MemoryDocumentStore {
     fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
         let metadata = self
+            .state
             .documents
             .get(&doc_id)
             .map_or_else(DocumentMetadata::default, |stored| stored.metadata);
@@ -104,6 +128,7 @@ impl DocumentStore for MemoryDocumentStore {
 
     fn get(&self, doc_id: DocId) -> StorageBackendResult<Option<Document>> {
         Ok(self
+            .state
             .documents
             .get(&doc_id)
             .map(|stored| self.materialize_document(stored)))
@@ -116,6 +141,7 @@ impl DocumentStore for MemoryDocumentStore {
 
     fn get_stored(&self, doc_id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
         Ok(self
+            .state
             .documents
             .get(&doc_id)
             .map(|stored| self.materialize_stored_document(stored)))
@@ -128,7 +154,8 @@ impl DocumentStore for MemoryDocumentStore {
         Ok(doc_ids
             .iter()
             .filter_map(|doc_id| {
-                self.documents
+                self.state
+                    .documents
                     .get(doc_id)
                     .map(|stored| (*doc_id, self.materialize_stored_document(stored)))
             })
@@ -136,15 +163,20 @@ impl DocumentStore for MemoryDocumentStore {
     }
 
     fn get_metadata(&self, doc_id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
-        Ok(self.documents.get(&doc_id).map(|stored| stored.metadata))
+        Ok(self
+            .state
+            .documents
+            .get(&doc_id)
+            .map(|stored| stored.metadata))
     }
 
     fn contains_doc_id(&self, doc_id: DocId) -> StorageBackendResult<bool> {
-        Ok(self.documents.contains_key(&doc_id))
+        Ok(self.state.documents.contains_key(&doc_id))
     }
 
     fn get_field(&self, doc_id: DocId, field: &str) -> StorageBackendResult<Option<Value>> {
         Ok(self
+            .state
             .documents
             .get(&doc_id)
             .and_then(|stored| self.field(stored, field).cloned()))
@@ -158,7 +190,7 @@ impl DocumentStore for MemoryDocumentStore {
         Ok(doc_ids
             .iter()
             .filter_map(|doc_id| {
-                let stored = self.documents.get(doc_id)?;
+                let stored = self.state.documents.get(doc_id)?;
                 let values = fields
                     .iter()
                     .map(|field| self.field(stored, field).cloned().unwrap_or(Value::Null))
@@ -175,7 +207,7 @@ impl DocumentStore for MemoryDocumentStore {
         visitor: &mut dyn FnMut(DocId, Vec<Value>) -> bool,
     ) -> StorageBackendResult<()> {
         for doc_id in doc_ids {
-            let values = self.documents.get(doc_id).map_or_else(
+            let values = self.state.documents.get(doc_id).map_or_else(
                 || vec![Value::Null; fields.len()],
                 |stored| {
                     fields
@@ -226,7 +258,7 @@ impl DocumentStore for MemoryDocumentStore {
         field: &str,
         value: &Value,
     ) -> StorageBackendResult<Option<DocId>> {
-        Ok(self.documents.iter().find_map(|(doc_id, stored)| {
+        Ok(self.state.documents.iter().find_map(|(doc_id, stored)| {
             (self.field(stored, field) == Some(value)).then_some(*doc_id)
         }))
     }
@@ -239,7 +271,7 @@ impl DocumentStore for MemoryDocumentStore {
         if fields.is_empty() || fields.len() != values.len() {
             return Ok(None);
         }
-        Ok(self.documents.iter().find_map(|(doc_id, stored)| {
+        Ok(self.state.documents.iter().find_map(|(doc_id, stored)| {
             fields
                 .iter()
                 .zip(values.iter())
@@ -254,6 +286,7 @@ impl DocumentStore for MemoryDocumentStore {
         updates: &BTreeMap<String, Value>,
     ) -> StorageBackendResult<bool> {
         let Some(mut document) = self
+            .state
             .documents
             .get(&doc_id)
             .map(|stored| self.materialize_stored_document(stored))
@@ -272,18 +305,23 @@ impl DocumentStore for MemoryDocumentStore {
     }
 
     fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
-        self.documents.remove(&doc_id);
+        if self.state.documents.contains_key(&doc_id) {
+            Arc::make_mut(&mut self.state).documents.remove(&doc_id);
+        }
         Ok(())
     }
 
     fn clear(&mut self) -> StorageBackendResult<()> {
-        self.documents.clear();
-        self.layouts.clear();
+        if let Some(state) = Arc::get_mut(&mut self.state) {
+            *state = MemoryDocumentState::default();
+        } else {
+            self.state = Arc::default();
+        }
         Ok(())
     }
 
     fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {
-        Ok(self.documents.keys().copied().collect())
+        Ok(self.state.documents.keys().copied().collect())
     }
 
     fn next_doc_id(&self, after: Option<DocId>) -> StorageBackendResult<Option<DocId>> {
@@ -291,11 +329,12 @@ impl DocumentStore for MemoryDocumentStore {
 
         Ok(match after {
             Some(after) => self
+                .state
                 .documents
                 .range((Excluded(after), Unbounded))
                 .next()
                 .map(|(doc_id, _)| *doc_id),
-            None => self.documents.keys().next().copied(),
+            None => self.state.documents.keys().next().copied(),
         })
     }
 
@@ -307,12 +346,13 @@ impl DocumentStore for MemoryDocumentStore {
         }
         Ok(match after {
             Some(after) => self
+                .state
                 .documents
                 .range((Excluded(after), Unbounded))
                 .take(limit)
                 .map(|(doc_id, _)| *doc_id)
                 .collect(),
-            None => self.documents.keys().take(limit).copied().collect(),
+            None => self.state.documents.keys().take(limit).copied().collect(),
         })
     }
 
@@ -336,15 +376,15 @@ impl DocumentStore for MemoryDocumentStore {
     }
 
     fn len(&self) -> StorageBackendResult<usize> {
-        Ok(self.documents.len())
+        Ok(self.state.documents.len())
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>> {
-        Ok(Arc::new(self.clone()))
+        Ok(Arc::new(self.shared_snapshot()))
     }
 
     fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn DocumentStore>> {
-        Ok(Box::new(self.clone()))
+        Ok(Box::new(self.shared_snapshot()))
     }
 }
 

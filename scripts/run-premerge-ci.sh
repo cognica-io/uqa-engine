@@ -111,10 +111,12 @@ while IFS= read -r path; do
   [[ -n "$path" ]] || continue
 
   case "$path" in
+    .gitattributes | \
     Cargo.toml | \
     Cargo.lock | \
     crates/*/Cargo.toml | \
     crates/*/build.rs | \
+    crates/uqa-nori-data/data/* | \
     crates/*.rs)
       run_rust=true
       run_javascript=true
@@ -126,11 +128,15 @@ while IFS= read -r path; do
     crates/uqa-pg-query/libpg_query/* | \
     examples/rust/* | \
     benchmarks/* | \
+    crates/uqa-analysis/benches/nori/* | \
+    scripts/run-nori-*benchmark.py | \
     tests/*.rs | \
     tests/parity/* | \
     docs/manual/* | \
     .github/scripts/* | \
-    .github/workflows/ci.yml)
+    .github/workflows/ci.yml | \
+    .github/workflows/nori-sql-benchmarks.yml | \
+    .github/workflows/nori-cancellation-benchmarks.yml)
       run_rust=true
       ;;
   esac
@@ -140,10 +146,18 @@ while IFS= read -r path; do
     crates/uqa-wasm/* | \
     tests/node/* | \
     tests/wasm/* | \
+    tests/parity/nori/bindings.* | \
     examples/node/* | \
+    examples/javascript/* | \
     examples/browser/* | \
+    benchmarks/nori/* | \
+    crates/uqa-analysis/benches/nori/* | \
+    scripts/run-nori-*benchmark.py | \
     scripts/build-wasm.sh | \
+    scripts/serve-wasm-tests.py | \
+    scripts/verify-nori-browser.py | \
     scripts/npm-release.py | \
+    .github/workflows/javascript-packages.yml | \
     .github/workflows/javascript-bindings.yml)
       run_javascript=true
       ;;
@@ -154,6 +168,9 @@ while IFS= read -r path; do
     python/* | \
     crates/uqa-python/* | \
     tests/python/* | \
+    tests/parity/nori/bindings.* | \
+    tests/wasm/export_nori_diagnostics.py | \
+    benchmarks/nori/browser-contract.json | \
     examples/python/* | \
     .github/workflows/python-wheels.yml)
       run_python=true

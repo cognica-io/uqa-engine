@@ -243,6 +243,7 @@ impl CardinalityEstimator {
             // Variants already handled in `estimate`.
             OperatorTree::Empty
             | OperatorTree::Term { .. }
+            | OperatorTree::Phrase { .. }
             | OperatorTree::Filter { .. }
             | OperatorTree::Score { .. }
             | OperatorTree::Intersect(_)

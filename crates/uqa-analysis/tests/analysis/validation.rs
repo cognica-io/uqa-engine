@@ -6,6 +6,24 @@
 
 use super::*;
 
+#[cfg(not(feature = "nori"))]
+#[test]
+fn korean_components_require_the_nori_feature() {
+    for config in [
+        serde_json::json!({"tokenizer":{"type":"nori_tokenizer"}}),
+        serde_json::json!({"token_filters":[{"type":"nori_part_of_speech"}]}),
+        serde_json::json!({"token_filters":[{"type":"nori_readingform"}]}),
+        serde_json::json!({"token_filters":[{"type":"nori_number"}]}),
+        serde_json::json!({"token_filters":[{"type":"unicode_simple_lowercase"}]}),
+    ] {
+        assert!(serde_json::from_value::<Analyzer>(config)
+            .unwrap_err()
+            .to_string()
+            .contains("unknown variant"));
+    }
+    assert!(!Analyzer::default().uses_korean_stages());
+}
+
 // =====================================================================
 // Validation surface (NGram requires_synonyms_or_path style errors)
 // =====================================================================

@@ -24,7 +24,7 @@ pub trait TableFunctionSession {
     fn sequence_parameters(&self, args: &[Value]) -> Result<Value, SQLError>;
 }
 
-pub trait AnalyzerTableFunctions {
+pub trait AnalyzerTableFunctions: crate::query::scalar_projection::AnalyzerRevisions {
     fn register_named_analyzer(&self, name: &str, config: &str) -> Result<(), String>;
     fn drop_named_analyzer(&self, name: &str) -> Result<bool, String>;
     fn list_named_analyzers(&self) -> Result<Vec<String>, String>;
@@ -34,7 +34,7 @@ pub trait AnalyzerTableFunctions {
         field: &str,
         analyzer: &str,
         phase: &str,
-    ) -> Result<(), String>;
+    ) -> Result<(), SQLError>;
     fn fts_index_stats(&self, table: Option<&str>) -> Result<Vec<FtsIndexStat>, SQLError>;
 }
 

@@ -92,7 +92,7 @@ fn test_skip_entries_for_large_posting_list() {
     conn.with(|c| {
         let mut stmt = c.prepare(
             "SELECT skip_doc_id, skip_offset FROM \"_skip_docs_body\"
-             WHERE term = 'alpha' ORDER BY skip_offset",
+             WHERE term = X'00616c706861' ORDER BY skip_offset",
         )?;
         let rows = stmt
             .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?
@@ -462,3 +462,37 @@ fn block_max_empty_posting_list_records_no_scores() {
 }
 
 use uqa_storage_sqlite::SQLiteBlockMaxPersistence;
+
+#[test]
+fn raw_block_max_keys_round_trip_without_scalar_aliases_or_partial_loads() {
+    use uqa_storage::TokenTermKey;
+    let connection = rusqlite::Connection::open_in_memory().unwrap();
+    let raw = TokenTermKey::from_term(&uqa_analysis::TokenTerm::from_utf16(vec![0xd83d]));
+    let mut source = BlockMaxIndex::default();
+    source
+        .set_block_maxes_key("docs", "body", &raw, vec![1.0, 2.0])
+        .unwrap();
+    source
+        .set_block_maxes("docs", "body", "�", vec![9.0])
+        .unwrap();
+    source.save_to_sqlite(&connection).unwrap();
+    let mut restored = BlockMaxIndex::default();
+    restored.load_from_sqlite(&connection).unwrap();
+    assert_eq!(
+        restored.block_maxes_key("docs", "body", &raw).unwrap(),
+        [1.0, 2.0]
+    );
+    assert_eq!(restored.block_maxes("docs", "body", "�").unwrap(), [9.0]);
+    connection
+        .execute(
+            "UPDATE _global_blockmax SET term = x'01' WHERE max_score = 9.0",
+            [],
+        )
+        .unwrap();
+    assert!(restored.load_from_sqlite(&connection).is_err());
+    assert_eq!(
+        restored.block_maxes_key("docs", "body", &raw).unwrap(),
+        [1.0, 2.0]
+    );
+    assert_eq!(restored.block_maxes("docs", "body", "�").unwrap(), [9.0]);
+}

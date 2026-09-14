@@ -312,8 +312,8 @@ impl Operator for MultiFieldSearchOperator {
         let mut per_field: Vec<BTreeMap<u64, f64>> = Vec::with_capacity(self.fields.len());
         let mut all_ids: BTreeSet<u64> = BTreeSet::new();
         for (field, query) in self.fields.iter().zip(&self.queries) {
-            let analyzer = idx.get_search_analyzer(field);
-            let terms = analyzer.analyze(query)?;
+            let analyzer = idx.search_analyzer_revision(field)?;
+            let terms = uqa_storage::inverted_index::analyze_query_terms(&analyzer, query)?;
             let term_op: Arc<dyn Operator> = Arc::new(TermOperator::new(query, field));
             let scorer: Arc<dyn Scorer> = Arc::new(
                 BayesianBM25Scorer::new(
@@ -324,7 +324,7 @@ impl Operator for MultiFieldSearchOperator {
                 )
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?,
             );
-            let score_op = ScoreOperator::new(scorer, term_op, terms, field);
+            let score_op = ScoreOperator::new_keys(scorer, term_op, terms, field);
             let pl = score_op.execute(ctx)?;
             let mut m: BTreeMap<u64, f64> = BTreeMap::new();
             for entry in pl.iter() {

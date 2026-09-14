@@ -497,3 +497,49 @@ fn relation_namespace_migration_rejects_alias_and_cross_kind_collisions() {
             .unwrap();
     }
 }
+
+#[test]
+fn standalone_catalog_open_rolls_back_prior_steps_after_a_later_migration_fails() {
+    let mc = ManagedConnection::open_in_memory().unwrap();
+    Catalog::open(mc.clone()).unwrap();
+    prepare_legacy_v21_postings(&mc, true);
+    mc.with(|conn| {
+        conn.execute_batch(
+            "ALTER TABLE _analyzers DROP COLUMN descriptor_json;
+            CREATE TRIGGER reject_late_migration BEFORE INSERT ON _metadata
+            WHEN NEW.key = 'schema_version' AND NEW.value = '47'
+            BEGIN SELECT RAISE(ABORT, 'forced later migration failure'); END;",
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let Err(error) = Catalog::open(mc.clone()) else {
+        panic!("later migration ignored a failing version publication");
+    };
+    assert!(
+        error.to_string().contains("forced later migration failure"),
+        "{error}"
+    );
+    mc.with(|conn| {
+        let version: String = conn.query_row(
+            "SELECT value FROM _metadata WHERE key = 'schema_version'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(version, "21");
+        let positions: Vec<u8> = conn.query_row(
+            "SELECT positions FROM _postings WHERE term = 'rust' AND doc_id = 1",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(positions, [0, 0, 0, 0, 2, 0, 0, 0]);
+        assert!(!table_exists(conn, "_posting_clusters")?);
+        assert!(!Catalog::table_columns(conn, "_analyzers")?
+            .unwrap()
+            .contains_key("descriptor_json"));
+        conn.execute("DROP TRIGGER reject_late_migration", [])?;
+        Ok(())
+    })
+    .unwrap();
+    Catalog::open(mc).unwrap();
+}

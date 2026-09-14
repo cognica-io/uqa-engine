@@ -1,0 +1,317 @@
+{
+  "sqlite": {
+    "schema_version": 2,
+    "corpus_sha256": "18a50905d26e3615d9db2a8b9565cbcdefcbcfdd1036a88292624154fc228e6b",
+    "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+    "allocation_ceilings": {
+      "macos/aarch64/64": {
+        "commit_batch_256/0": {
+          "bytes_net": 0,
+          "bytes_peak": 13142035,
+          "bytes_total": 468106703,
+          "count_net": 0,
+          "count_peak": 12420,
+          "count_total": 1892692
+        },
+        "commit_batch_16/256": {
+          "bytes_net": 0,
+          "bytes_peak": 1963072,
+          "bytes_total": 44328251,
+          "count_net": 0,
+          "count_peak": 3859,
+          "count_total": 137368
+        },
+        "commit_batch_16/2048": {
+          "bytes_net": 0,
+          "bytes_peak": 6958940,
+          "bytes_total": 127356392,
+          "count_net": 0,
+          "count_peak": 3930,
+          "count_total": 165081
+        },
+        "rollback_batch_16/2048": {
+          "bytes_net": 0,
+          "bytes_peak": 6958940,
+          "bytes_total": 127356392,
+          "count_net": 0,
+          "count_peak": 3930,
+          "count_total": 165081
+        }
+      },
+      "emscripten/wasm32/32": {
+        "commit_batch_256/0": {
+          "bytes_net": 0,
+          "bytes_peak": 12846787,
+          "bytes_total": 312076779,
+          "count_net": 0,
+          "count_peak": 12420,
+          "count_total": 1892692
+        },
+        "commit_batch_16/256": {
+          "bytes_net": 0,
+          "bytes_peak": 1626894,
+          "bytes_total": 33344131,
+          "count_net": 0,
+          "count_peak": 3859,
+          "count_total": 137368
+        },
+        "commit_batch_16/2048": {
+          "bytes_net": 0,
+          "bytes_peak": 6932556,
+          "bytes_total": 115896704,
+          "count_net": 0,
+          "count_peak": 3930,
+          "count_total": 165081
+        },
+        "rollback_batch_16/2048": {
+          "bytes_net": 0,
+          "bytes_peak": 6932556,
+          "bytes_total": 115896704,
+          "count_net": 0,
+          "count_peak": 3930,
+          "count_total": 165081
+        }
+      },
+      "linux/x86_64/64": {
+        "commit_batch_256/0": {
+          "bytes_net": 0,
+          "bytes_peak": 13142035,
+          "bytes_total": 468106703,
+          "count_net": 0,
+          "count_peak": 12420,
+          "count_total": 1892692
+        },
+        "commit_batch_16/256": {
+          "bytes_net": 0,
+          "bytes_peak": 1963072,
+          "bytes_total": 44328251,
+          "count_net": 0,
+          "count_peak": 3859,
+          "count_total": 137368
+        },
+        "commit_batch_16/2048": {
+          "bytes_net": 0,
+          "bytes_peak": 6958940,
+          "bytes_total": 127356392,
+          "count_net": 0,
+          "count_peak": 3930,
+          "count_total": 165081
+        },
+        "rollback_batch_16/2048": {
+          "bytes_net": 0,
+          "bytes_peak": 6958940,
+          "bytes_total": 127356392,
+          "count_net": 0,
+          "count_peak": 3930,
+          "count_total": 165081
+        }
+      }
+    },
+    "outputs": {
+      "commit_batch_256/0": {
+        "graph_sha256": "01bbc354e7415e5182f73b54982af1423e855cb4e727b945bd2a5f4029a8e0ea",
+        "field_length": 125079,
+        "posting_count": 3507
+      },
+      "commit_batch_16/256": {
+        "graph_sha256": "f2acfb805f20eda2e1f35ec4f4bfd094fd9c185d55f2df7e32df7b5a640d0d7e",
+        "field_length": 133622,
+        "posting_count": 3719
+      },
+      "commit_batch_16/2048": {
+        "graph_sha256": "ec6a006122f9822322876f9802a8c7c8a1d6bec2f3dac3cb1f92636c2be2dfa7",
+        "field_length": 1019960,
+        "posting_count": 28208
+      },
+      "rollback_batch_16/2048": {
+        "graph_sha256": "0f4cecb080517dfac5fba98cca752781954cf1c7cbafb7c9d47c71bcde4fc17e",
+        "field_length": 1011262,
+        "posting_count": 27991
+      }
+    },
+    "timing_max_ratio": 1.16,
+    "calibration": {
+      "maximum_bidirectional_repeat_ratio": 1.0541385755753816,
+      "timing_policy_margin": 1.1,
+      "allocation_policy": "maximum observed value for each metric, target OS, target architecture and pointer width; no padding; unknown targets require calibration",
+      "reports": [
+        {
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/sqlite-native-baseline.json",
+          "sha256": "f5ae8eb44dfdf5b0ee6db455d16b6e6d27b555ec565358190cf668ff8c326941"
+        },
+        {
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/sqlite-native-repeat.json",
+          "sha256": "254fb769cbea1910ebcc017a5c20576d887c6f5efbf580bbf26cec5779511eeb"
+        },
+        {
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/sqlite-wasm-baseline.json",
+          "sha256": "bb529e314694384f0e71dc6d27d954e325ea3668d6a01c0281a3d6cf040c37bc"
+        },
+        {
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/sqlite-wasm-repeat.json",
+          "sha256": "e655de5c375fca1c9cabe07a61b9c6237809a7ae4d6d840bb7a02c395bfa9c90"
+        },
+        {
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/sqlite-linux-baseline.json",
+          "sha256": "568e4e45a4332cd3f98ec2735f577ad3fcdf205f43f39a2a7ae0e867c634afab",
+          "gate_passed_at_collection": true,
+          "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/attempts/1",
+          "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/artifacts/10314081635"
+        },
+        {
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/sqlite-linux-repeat.json",
+          "sha256": "4b557c8a2cf6abd1ab679e2f64ab6b645c00c4a71eff516e3688e34931c1d106",
+          "gate_passed_at_collection": true,
+          "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/attempts/2",
+          "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/artifacts/10314024274"
+        }
+      ]
+    }
+  },
+  "redb": {
+    "schema_version": 2,
+    "corpus_sha256": "18a50905d26e3615d9db2a8b9565cbcdefcbcfdd1036a88292624154fc228e6b",
+    "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
+    "allocation_ceilings": {
+      "macos/aarch64/64": {
+        "commit_batch_256/0": {
+          "bytes_net": 1847524,
+          "bytes_peak": 13159918,
+          "bytes_total": 473580931,
+          "count_net": 319,
+          "count_peak": 12476,
+          "count_total": 1948666
+        },
+        "commit_batch_16/256": {
+          "bytes_net": 2800708,
+          "bytes_peak": 5659869,
+          "bytes_total": 51574012,
+          "count_net": 333,
+          "count_peak": 3870,
+          "count_total": 144927
+        },
+        "commit_batch_16/2048": {
+          "bytes_net": 20703496,
+          "bytes_peak": 39746417,
+          "bytes_total": 179452985,
+          "count_net": 445,
+          "count_peak": 3941,
+          "count_total": 172899
+        },
+        "rollback_batch_16/2048": {
+          "bytes_net": 8219824,
+          "bytes_peak": 39746417,
+          "bytes_total": 179349696,
+          "count_net": 247,
+          "count_peak": 3941,
+          "count_total": 172703
+        }
+      },
+      "linux/x86_64/64": {
+        "commit_batch_256/0": {
+          "bytes_net": 1848212,
+          "bytes_peak": 13159758,
+          "bytes_total": 473580963,
+          "count_net": 319,
+          "count_peak": 12474,
+          "count_total": 1948655
+        },
+        "commit_batch_16/256": {
+          "bytes_net": 2801452,
+          "bytes_peak": 5660165,
+          "bytes_total": 51574092,
+          "count_net": 333,
+          "count_peak": 3868,
+          "count_total": 144916
+        },
+        "commit_batch_16/2048": {
+          "bytes_net": 20704368,
+          "bytes_peak": 39746897,
+          "bytes_total": 179453281,
+          "count_net": 445,
+          "count_peak": 3939,
+          "count_total": 172888
+        },
+        "rollback_batch_16/2048": {
+          "bytes_net": 8220520,
+          "bytes_peak": 39746897,
+          "bytes_total": 179350144,
+          "count_net": 247,
+          "count_peak": 3939,
+          "count_total": 172698
+        }
+      }
+    },
+    "outputs": {
+      "commit_batch_256/0": {
+        "graph_sha256": "01bbc354e7415e5182f73b54982af1423e855cb4e727b945bd2a5f4029a8e0ea",
+        "field_length": 125079,
+        "posting_count": 3507
+      },
+      "commit_batch_16/256": {
+        "graph_sha256": "f2acfb805f20eda2e1f35ec4f4bfd094fd9c185d55f2df7e32df7b5a640d0d7e",
+        "field_length": 133622,
+        "posting_count": 3719
+      },
+      "commit_batch_16/2048": {
+        "graph_sha256": "ec6a006122f9822322876f9802a8c7c8a1d6bec2f3dac3cb1f92636c2be2dfa7",
+        "field_length": 1019960,
+        "posting_count": 28208
+      },
+      "rollback_batch_16/2048": {
+        "graph_sha256": "0f4cecb080517dfac5fba98cca752781954cf1c7cbafb7c9d47c71bcde4fc17e",
+        "field_length": 1011262,
+        "posting_count": 27991
+      }
+    },
+    "timing_max_ratio": 1.21,
+    "calibration": {
+      "maximum_bidirectional_repeat_ratio": 1.0985584434948636,
+      "timing_policy_margin": 1.1,
+      "allocation_policy": "maximum observed value for each metric, target OS, target architecture and pointer width; no padding; unknown targets require calibration; every commit workload must observe both table-update orders, differing by exactly three cumulative bytes with all other counters unchanged",
+      "reports": [
+        {
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-native-baseline.json",
+          "sha256": "50d6b1acda2cbdfd9ea59e7480165003e943ae745881ffc5160660471a8e0fa0"
+        },
+        {
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-native-repeat.json",
+          "sha256": "582230564b590f726c70179182081cd3753b1367708ac590644ab4233172f980"
+        },
+        {
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-native-check.json",
+          "sha256": "0bc354b034d7a8201d4c316503bc507ca41ad8c5940ae96e68a8b90ed6e16978"
+        },
+        {
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-linux-baseline.json",
+          "sha256": "b970e09fd25e6b842ae9ce3b1cd0e6744c29d85a1ced83d9803763fd2df4f4dd",
+          "gate_passed_at_collection": false,
+          "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/attempts/1",
+          "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/artifacts/10314081635"
+        },
+        {
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-linux-repeat.json",
+          "sha256": "37a4d04b2032e812c9231c100a6d3eabce4efb023617c017a0afc9eb83a5bfe3",
+          "gate_passed_at_collection": false,
+          "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/attempts/2",
+          "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/artifacts/10314024274"
+        },
+        {
+          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-linux-commit-order.json",
+          "sha256": "a20600183644479ef05f848d8c1f2c12a3ee9a603b12e9880b1f60a93be89c33",
+          "gate_passed_at_collection": false,
+          "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34749722780/attempts/1",
+          "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34749722780/artifacts/10314984155"
+        }
+      ],
+      "allocation_reference": {
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-allocation-reference.json",
+        "sha256": "6792e89d46fdb8dfd4240c131d06a79df31dc0299d13806152bbfb98f358ca76"
+      },
+      "commit_allocation_probe": {
+        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-commit-allocation-probe.json",
+        "sha256": "8bd5e9979b725a8cad99490dcd270e1d3bc5fa3173b7dfeac7a78f85b090de27"
+      }
+    }
+  }
+}

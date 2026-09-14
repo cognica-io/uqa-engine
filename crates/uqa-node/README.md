@@ -18,6 +18,8 @@ npm install --omit=optional @cognica-io/uqa@0.2.3
 
 `HttpEngine`, `HttpSQLStream`, `SQLParam`, `vector`, and `tensor` run in JavaScript on Node.js 16 or newer using Node's built-in HTTP modules. They require no Rust toolchain, native addon, or embedded database. The package loads the native addon only when embedded `Engine` functionality is used. Both CommonJS and ESM support the main package and the explicit `@cognica-io/uqa/http` entry point.
 
+Embedded native addons include the Lucene-compatible Nori dictionary and analyzer by default. Use `list_analyzers()` and `analyze_text('nori', input)` through `Engine.sql` to inspect Korean token graphs, morphology, offsets, and positions.
+
 Save this example in an `.mjs` file so it can use ESM and top-level `await`:
 
 ```javascript
@@ -46,5 +48,7 @@ See the [UQA Engine manual](https://github.com/cognica-io/uqa-engine/blob/v0.2.3
 For existing installations, read the [0.2.3 upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.3/docs/manual/reference/10-upgrading.md).
 
 ## License
+
+Official native packages embed the pinned Nori dictionary. `THIRD-PARTY/` contains the complete Lucene, MeCab-ko-dic, and JDK Unicode notices, modification attribution, and original resource/model manifests. The manifests describe source resources; the dictionary bytes are embedded in the native addon and require no separate download.
 
 UQA Engine is licensed under AGPL-3.0-only with optional FOSS and noncommercial application exceptions. See `LICENSING.md` in this package.

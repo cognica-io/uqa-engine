@@ -11,10 +11,13 @@ use tempfile::tempdir;
 use uqa_core::Value;
 use uqa_engine::{Engine, ScoringMode};
 use uqa_storage::{
-    HNSWIndexParams, IVFIndexParams, KeyValueStore, PersistentStorageProvider, VectorIndexOpenMode,
-    VectorIndexSpec,
+    HNSWIndexParams, IVFIndexParams, InvertedIndex, KeyValueStore, PersistentStorageProvider,
+    VectorIndexOpenMode, VectorIndexSpec,
 };
 use uqa_storage_redb::RedbStorage;
+
+#[path = "redb_backend/occurrences.rs"]
+mod occurrences;
 
 fn open_engine(path: &std::path::Path) -> Engine {
     let storage: Arc<dyn PersistentStorageProvider> =
@@ -152,10 +155,19 @@ fn engine_open_automatically_migrates_legacy_redb_postings() {
 
     let storage = RedbStorage::open(&path).unwrap();
     let store = storage.store();
-    for tag in [b'k', b'o', b'x'] {
+    for tag in [b'k', b'o', b'x', b'e'] {
         store.delete_prefix(&[tag]).unwrap();
     }
     store.delete(&inverted_index_format_key()).unwrap();
+    let mut length_key = vec![b'l'];
+    push_key_string(&mut length_key, "public.messages");
+    length_key.extend_from_slice(&1_u64.to_be_bytes());
+    push_key_string(&mut length_key, "content");
+    store.put(&length_key, &2_u64.to_le_bytes()).unwrap();
+    let mut stats_key = vec![b'f'];
+    push_key_string(&mut stats_key, "public.messages");
+    push_key_string(&mut stats_key, "content");
+    store.put(&stats_key, &2_u64.to_le_bytes()).unwrap();
     for (term, position) in [("alpha", 0_u32), ("token", 1_u32)] {
         store
             .put(
@@ -184,9 +196,27 @@ fn engine_open_automatically_migrates_legacy_redb_postings() {
     let store = storage.store();
     assert!(store.scan_prefix(b"p").unwrap().is_empty());
     assert!(store.scan_prefix(b"r").unwrap().is_empty());
-    assert_eq!(store.scan_prefix(b"k").unwrap().len(), 2);
-    assert_eq!(store.scan_prefix(b"o").unwrap().len(), 2);
-    assert_eq!(store.scan_prefix(b"x").unwrap().len(), 1);
+    for tag in [b'k', b'o', b'x', b'l', b'f'] {
+        assert!(store.scan_prefix(&[tag]).unwrap().is_empty());
+    }
+    let index = uqa_storage::KeyValueInvertedIndex::new(
+        Arc::new(store),
+        "public.messages",
+        uqa_analysis::whitespace_analyzer(),
+    );
+    let metadata = index.indexed_field_metadata(1, "content").unwrap().unwrap();
+    assert_eq!(metadata.final_offsets.end_utf8, 11);
+    assert_eq!(metadata.final_offsets.end_utf16, 11);
+    assert_eq!(metadata.occurrence_format_version, 2);
+    assert_eq!(
+        index
+            .get_occurrences(1, "content", &uqa_storage::TokenTermKey::from_text("token"))
+            .unwrap()[0]
+            .offsets
+            .unwrap()
+            .start_utf8,
+        6
+    );
 }
 
 #[test]

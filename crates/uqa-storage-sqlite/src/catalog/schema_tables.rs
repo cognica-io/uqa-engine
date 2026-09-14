@@ -269,10 +269,16 @@ impl Catalog {
                 for table in [
                     "_documents",
                     "_document_blobs",
+                    "_postings",
                     "_posting_clusters",
                     "_posting_documents",
                     "_doc_lengths",
                     "_field_stats",
+                    "_occurrence_clusters",
+                    "_occurrence_documents",
+                    "_occurrence_lengths",
+                    "_occurrence_fields",
+                    "_occurrence_formats",
                     "_vectors",
                     "_ivf_indexes",
                     "_ivf_centroids",
@@ -307,10 +313,16 @@ impl Catalog {
                 for table in [
                     "_documents",
                     "_document_blobs",
+                    "_postings",
                     "_posting_clusters",
                     "_posting_documents",
                     "_doc_lengths",
                     "_field_stats",
+                    "_occurrence_clusters",
+                    "_occurrence_documents",
+                    "_occurrence_lengths",
+                    "_occurrence_fields",
+                    "_occurrence_formats",
                     "_vectors",
                     "_ivf_indexes",
                     "_ivf_centroids",
@@ -369,10 +381,16 @@ impl Catalog {
             for table in [
                 "_documents",
                 "_document_blobs",
+                "_postings",
                 "_posting_clusters",
                 "_posting_documents",
                 "_doc_lengths",
                 "_field_stats",
+                "_occurrence_clusters",
+                "_occurrence_documents",
+                "_occurrence_lengths",
+                "_occurrence_fields",
+                "_occurrence_formats",
                 "_vectors",
                 "_ivf_indexes",
                 "_ivf_centroids",
@@ -404,10 +422,15 @@ impl Catalog {
                 )?;
             }
             for table in [
+                "_postings",
                 "_posting_clusters",
                 "_posting_documents",
                 "_doc_lengths",
                 "_field_stats",
+                "_occurrence_clusters",
+                "_occurrence_documents",
+                "_occurrence_lengths",
+                "_occurrence_fields",
                 "_vectors",
                 "_ivf_indexes",
                 "_ivf_centroids",
@@ -418,6 +441,18 @@ impl Catalog {
                 "_btree_index_entries",
                 "_btree_indexes",
             ] {
+                if matches!(
+                    table,
+                    "_postings"
+                        | "_posting_clusters"
+                        | "_posting_documents"
+                        | "_doc_lengths"
+                        | "_field_stats"
+                ) && !Self::table_columns(&tx, table)?
+                    .is_some_and(|columns| columns.contains_key("field"))
+                {
+                    continue;
+                }
                 tx.execute(
                     &format!("DELETE FROM {table} WHERE table_name = ?1 AND field = ?2"),
                     params![table_name, column_name],
@@ -458,10 +493,15 @@ impl Catalog {
                 to,
             )?;
             for table in [
+                "_postings",
                 "_posting_clusters",
                 "_posting_documents",
                 "_doc_lengths",
                 "_field_stats",
+                "_occurrence_clusters",
+                "_occurrence_documents",
+                "_occurrence_lengths",
+                "_occurrence_fields",
                 "_vectors",
                 "_ivf_indexes",
                 "_ivf_centroids",
@@ -470,6 +510,18 @@ impl Catalog {
                 "_hnsw_nodes",
                 "_hnsw_edges",
             ] {
+                if matches!(
+                    table,
+                    "_postings"
+                        | "_posting_clusters"
+                        | "_posting_documents"
+                        | "_doc_lengths"
+                        | "_field_stats"
+                ) && !Self::table_columns(&tx, table)?
+                    .is_some_and(|columns| columns.contains_key("field"))
+                {
+                    continue;
+                }
                 rename_field_rows_or_keep_existing(&tx, table, "field", table_name, from, to)?;
             }
             rename_btree_field_rows_or_keep_existing(&tx, table_name, from, to)?;

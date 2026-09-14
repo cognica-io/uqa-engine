@@ -40,6 +40,8 @@ const TAG_EDGE: u8 = b'E';
 const TAG_GRAPH_MEMBERSHIP: u8 = b'G';
 const TAG_GRAPH_LOOKUP: u8 = b'J';
 const TAG_ANALYZER: u8 = b'a';
+const TAG_ANALYZER_DESCRIPTOR: u8 = b'D';
+const TAG_FIELD_ANALYZER_BINDING: u8 = b'U';
 const TAG_TABLE_FIELD_ANALYZER: u8 = b'A';
 const TAG_FOREIGN_SERVER: u8 = b'F';
 const TAG_FOREIGN_TABLE: u8 = b'T';
@@ -53,6 +55,7 @@ const TAG_RELATION: u8 = b'R';
 const TAG_VIEW: u8 = b'w';
 const TAG_DOCUMENT: u8 = b'd';
 const TAG_POSTING: u8 = b'p';
+const TAG_OCCURRENCE_INDEX: u8 = b'e';
 const TAG_POSTING_CLUSTER_SCORE: u8 = b'k';
 const TAG_POSTING_CLUSTER_POSITIONS: u8 = b'o';
 const TAG_POSTING_DOCUMENT: u8 = b'x';
@@ -106,6 +109,47 @@ pub trait KeyValueStore: Send + Sync {
     }
 
     fn get(&self, key: &[u8]) -> StorageBackendResult<Option<Vec<u8>>>;
+    /// Visit one borrowed value under the retained read. Providers reserve any temporary encoded payload before fetching it; callbacks must not reenter the store.
+    fn visit_value(
+        &self,
+        _key: &[u8],
+        control: &crate::read_control::StorageReadControl,
+        _visit: &mut crate::read_control::ValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled value reads are not supported by this KeyValue store".into(),
+        ))
+    }
+    /// Visit at most `limit` entries in key order, strictly after `after` when supplied. Encoded values remain borrowed from their provider owner and callbacks must not reenter the store.
+    fn visit_prefix_after(
+        &self,
+        _prefix: &[u8],
+        _after: Option<&[u8]>,
+        _limit: usize,
+        control: &crate::read_control::StorageReadControl,
+        _visit: &mut crate::read_control::KeyValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled prefix reads are not supported by this KeyValue store".into(),
+        ))
+    }
+    /// Test prefix existence under the read allowance. Providers that materialize values should implement a key-only probe.
+    fn contains_prefix_budgeted(
+        &self,
+        prefix: &[u8],
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        let mut found = false;
+        self.visit_prefix_after(prefix, None, 1, control, &mut |_, _| {
+            found = true;
+            Ok(())
+        })?;
+        control.check()?;
+        Ok(found)
+    }
+
     fn contains_key(&self, key: &[u8]) -> StorageBackendResult<bool> {
         self.get(key).map(|value| value.is_some())
     }
@@ -237,6 +281,7 @@ mod inverted_index;
 mod ivf_index;
 mod ivf_persistence;
 mod memory_store;
+mod occurrence_keys;
 mod storage_backend;
 mod vector_index;
 

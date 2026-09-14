@@ -16,6 +16,37 @@ pub trait TextStatisticsRead {
     fn analyze(&self, field: &str, query: &str) -> Result<Vec<String>, String>;
     fn doc_freq(&self, field: &str, term: &str) -> Result<u64, String>;
     fn doc_freq_any_field(&self, term: &str) -> Result<u64, String>;
+    /// Field inventory for analyzed all-field queries. Legacy scalar adapters may omit it.
+    fn field_names(&self) -> Result<Option<Vec<String>>, String> {
+        Ok(None)
+    }
+    /// Estimate all-field query support using each field's retained search revision.
+    fn query_doc_freq_any_field(&self, query: &str) -> Result<u64, String> {
+        let Some(fields) = self.field_names()? else {
+            return self.doc_freq_any_field(query);
+        };
+        let mut frequency = 0_u64;
+        for field in fields {
+            for term in self.analyze_utf16(&field, query)? {
+                frequency = frequency.saturating_add(self.doc_freq_utf16(&field, &term)?);
+            }
+        }
+        Ok(frequency)
+    }
+
+    fn analyze_utf16(&self, field: &str, query: &str) -> Result<Vec<Vec<u16>>, String> {
+        Ok(self
+            .analyze(field, query)?
+            .into_iter()
+            .map(|term| term.encode_utf16().collect())
+            .collect())
+    }
+    fn doc_freq_utf16(&self, field: &str, term: &[u16]) -> Result<u64, String> {
+        self.doc_freq(
+            field,
+            &String::from_utf16(term).map_err(|error| error.to_string())?,
+        )
+    }
 }
 /// The implementation retains the actual vector-index registry read guard.
 pub trait VectorStatisticsRead {

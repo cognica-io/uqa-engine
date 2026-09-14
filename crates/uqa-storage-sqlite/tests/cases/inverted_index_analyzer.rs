@@ -34,6 +34,52 @@ fn fields(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         .collect()
 }
 
+#[test]
+fn sqlite_korean_assignments_store_the_complete_source_graph() {
+    let config = serde_json::from_str::<Analyzer>(r#"{"tokenizer":{"type":"nori_tokenizer"}}"#);
+    let analyzer = match config {
+        Ok(config) => config,
+        Err(error) => {
+            assert!(error
+                .to_string()
+                .contains("unknown variant `nori_tokenizer`"));
+            return;
+        }
+    };
+    let revision = analyzer.compile().unwrap();
+    let mut index =
+        SQLiteInvertedIndex::new(sqlite_with_catalog(), "korean", whitespace_analyzer());
+    index
+        .add_document(1, fields(&[("body", "old value")]))
+        .unwrap();
+    index
+        .set_field_analyzer_revision("body", revision.clone(), AnalyzerPhase::Search)
+        .unwrap();
+    assert!(index
+        .set_field_analyzer_revision("body", revision.clone(), AnalyzerPhase::Index)
+        .unwrap_err()
+        .contains("source rebuild"));
+    index
+        .rebuild_with_analyzer_revision(
+            "body",
+            revision.clone(),
+            AnalyzerPhase::Both,
+            vec![(2, fields(&[("body", "한국")]))],
+        )
+        .unwrap();
+    let stream = uqa_storage::inverted_index::analyze_index_field(&revision, "한국").unwrap();
+    for (term, occurrences) in stream.terms {
+        assert_eq!(
+            index.get_occurrences(2, "body", &term).unwrap(),
+            occurrences
+        );
+    }
+    assert_eq!(index.doc_freq("body", "old").unwrap(), 0);
+    let metadata = index.indexed_field_metadata(2, "body").unwrap().unwrap();
+    assert_eq!(metadata.final_offsets.end_utf8, 6);
+    assert_eq!(metadata.final_offsets.end_utf16, 2);
+}
+
 fn invalid_pattern_analyzer() -> Analyzer {
     Analyzer::new(
         Tokenizer::Pattern {
@@ -93,12 +139,12 @@ fn memory_get_field_analyzer_falls_back_to_default() {
 }
 
 #[test]
-fn memory_per_field_search_falls_back_to_index() {
+fn memory_index_assignment_preserves_default_search_revision() {
     let mut idx = MemoryInvertedIndex::new(standard_analyzer("english"));
-    let custom = standard_analyzer("english");
+    let custom = keyword_analyzer();
     idx.set_field_analyzer("body", custom, AnalyzerPhase::Index)
         .unwrap();
-    // No search analyzer set: search should fall back to index
+    // An index-only change preserves the previous default search revision.
     let search = idx.get_search_analyzer("body");
     assert!(search.analyze("the").unwrap().is_empty());
 }
@@ -195,16 +241,19 @@ fn memory_keyword_analyzer_for_title_field() {
 
 #[test]
 fn memory_indexing_propagates_analysis_error_without_replacing_document() {
-    let mut index = MemoryInvertedIndex::new(whitespace_analyzer());
+    let mut index = MemoryInvertedIndex::new(invalid_pattern_analyzer());
+    index
+        .set_field_analyzer("title", whitespace_analyzer(), AnalyzerPhase::Both)
+        .unwrap();
     index
         .add_document(1, fields(&[("title", "old value")]))
         .unwrap();
-    index
-        .set_field_analyzer("title", invalid_pattern_analyzer(), AnalyzerPhase::Index)
-        .unwrap();
 
     let error = index
-        .add_document(1, fields(&[("title", "new value")]))
+        .add_document(
+            1,
+            fields(&[("title", "new value"), ("invalid_default", "bad value")]),
+        )
         .unwrap_err();
     assert!(matches!(error, StorageBackendError::Analysis(_)));
     assert_eq!(index.get_posting_list("title", "old").unwrap().len(), 1);
@@ -315,16 +364,19 @@ fn sqlite_backward_compat_no_phase_arg_uses_both() {
 #[test]
 fn sqlite_indexing_propagates_analysis_error_and_rolls_back_replacement() {
     let conn = sqlite_with_catalog();
-    let mut index = SQLiteInvertedIndex::new(conn, "analysis_error", whitespace_analyzer());
+    let mut index = SQLiteInvertedIndex::new(conn, "analysis_error", invalid_pattern_analyzer());
+    index
+        .set_field_analyzer("title", whitespace_analyzer(), AnalyzerPhase::Both)
+        .unwrap();
     index
         .add_document(1, fields(&[("title", "old value")]))
         .unwrap();
-    index
-        .set_field_analyzer("title", invalid_pattern_analyzer(), AnalyzerPhase::Index)
-        .unwrap();
 
     let error = index
-        .add_document(1, fields(&[("title", "new value")]))
+        .add_document(
+            1,
+            fields(&[("title", "new value"), ("invalid_default", "bad value")]),
+        )
         .unwrap_err();
     assert!(matches!(
         error,
@@ -338,16 +390,19 @@ fn sqlite_indexing_propagates_analysis_error_and_rolls_back_replacement() {
 #[test]
 fn key_value_indexing_propagates_analysis_error_without_mutation() {
     let store = Arc::new(MemoryKeyValueStore::new());
-    let mut index = KeyValueInvertedIndex::new(store, "analysis_error", whitespace_analyzer());
+    let mut index = KeyValueInvertedIndex::new(store, "analysis_error", invalid_pattern_analyzer());
+    index
+        .set_field_analyzer("title", whitespace_analyzer(), AnalyzerPhase::Both)
+        .unwrap();
     index
         .add_document(1, fields(&[("title", "old value")]))
         .unwrap();
-    index
-        .set_field_analyzer("title", invalid_pattern_analyzer(), AnalyzerPhase::Index)
-        .unwrap();
 
     let error = index
-        .add_document(1, fields(&[("title", "new value")]))
+        .add_document(
+            1,
+            fields(&[("title", "new value"), ("invalid_default", "bad value")]),
+        )
         .unwrap_err();
     assert!(matches!(error, StorageBackendError::Analysis(_)));
     assert_eq!(index.get_posting_list("title", "old").unwrap().len(), 1);

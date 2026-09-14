@@ -15,6 +15,7 @@ pub struct IndexStats {
     pub avg_doc_length: f64,
     pub dimensions: u32,
     doc_freqs: BTreeMap<(FieldName, String), u64>,
+    unpaired_doc_freqs: BTreeMap<(FieldName, Vec<u16>), u64>,
 }
 
 impl IndexStats {
@@ -26,6 +27,7 @@ impl IndexStats {
             avg_doc_length: 0.0,
             dimensions: 0,
             doc_freqs: BTreeMap::new(),
+            unpaired_doc_freqs: BTreeMap::new(),
         }
     }
 
@@ -38,6 +40,28 @@ impl IndexStats {
 
     pub fn set_doc_freq(&mut self, field: impl Into<FieldName>, term: impl Into<String>, df: u64) {
         self.doc_freqs.insert((field.into(), term.into()), df);
+    }
+
+    /// Exact UTF-16 lookup, including isolated surrogates. Scalar terms share identity with the string API.
+    pub fn doc_freq_utf16(&self, field: &str, term: &[u16]) -> u64 {
+        match String::from_utf16(term) {
+            Ok(text) => self.doc_freq(field, &text),
+            Err(_) => self
+                .unpaired_doc_freqs
+                .get(&(field.to_owned(), term.to_vec()))
+                .copied()
+                .unwrap_or(0),
+        }
+    }
+
+    /// Retain raw term identity without replacing unpaired units or creating a second representation for scalar text.
+    pub fn set_doc_freq_utf16(&mut self, field: impl Into<FieldName>, term: Vec<u16>, df: u64) {
+        match String::from_utf16(&term) {
+            Ok(text) => self.set_doc_freq(field, text, df),
+            Err(_) => {
+                self.unpaired_doc_freqs.insert((field.into(), term), df);
+            }
+        }
     }
 
     /// Builder-style insert that returns the modified [`IndexStats`].

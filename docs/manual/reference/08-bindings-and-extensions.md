@@ -11,6 +11,7 @@ UQA Engine exposes the same durable embedded engine through Rust, Python, Node.j
 | SQLCipher | Yes | Yes | Yes | No |
 | Text, vector, and hybrid APIs | Yes | Yes | Yes | Yes |
 | Custom analyzer catalog through SQL | Yes | Yes | Yes | Yes |
+| Native Nori analyzer and `analyze_text` diagnostics | Feature-enabled | Bundled | Bundled | Bundled |
 | Cypher | Yes | Yes | Yes | Yes |
 | Runtime scalar/table/aggregate callbacks | Yes | Yes | Yes | Yes |
 | Native DuckDB and Arrow FDWs | Yes | Build dependent | Build dependent | No |
@@ -145,7 +146,11 @@ Persist after important application checkpoints. Browser callbacks use synchrono
 
 ## Analyzer pipelines across bindings
 
-All four bindings can execute `create_analyzer`, `list_analyzers`, `set_table_analyzer`, `fts_index_stats`, and `drop_analyzer` through SQL. Python also exposes `list_named_analyzers()`, while Node.js and browser WASM expose `listNamedAnalyzers()` for custom engine-catalog names. Rust alone exposes direct `Analyzer`, `CharFilter`, `Tokenizer`, and `TokenFilter` construction. See [Text analyzer pipelines](06-text-analyzers.md) for the JSON schema and lifecycle.
+All four bindings can execute `create_analyzer`, `list_analyzers`, `analyze_text`, `set_table_analyzer`, `fts_index_stats`, and `drop_analyzer` through SQL. The Python, Node.js, and browser WASM packages enable the `nori` Cargo feature by default. A build with that feature includes the native bundle: `list_analyzers` reports `nori`, and `analyze_text('nori', input)` returns the complete token and source-coordinate diagnostic. Python also exposes `list_named_analyzers()`, while Node.js and browser WASM expose `listNamedAnalyzers()` for custom engine-catalog names. Rust alone exposes direct `Analyzer`, `CharFilter`, `Tokenizer`, and `TokenFilter` construction. See [Text analyzer pipelines](06-text-analyzers.md) for the JSON schema and lifecycle.
+
+The [persistent Nori binding contract](../../../tests/parity/nori/BINDINGS.md) exercises the same user dictionary, complete diagnostics, graph phrases, original-source highlighting, failed registration, rollback, and retained revisions through all four APIs. Actual custom builds without Nori also verify explicit missing-feature errors and generic analyzer persistence. Use `--no-default-features` with maturin, NAPI, or `scripts/build-wasm.sh` to produce those custom artifacts. The WASM build script accepts `--output-dir DIR` for a separate generated `uqa.js`/`uqa.wasm` pair; use the matching `index.mjs` wrapper with it. [Real-browser verification](../../../benchmarks/nori/BROWSER.md) additionally closes the Engine, synchronizes IndexedDB, reloads the whole page/WASM module, and verifies the restored catalog and index.
+
+The distributed Python, Node.js, and WASM artifacts retain the full upstream Nori notices, source modification attribution, and source-resource/model manifests in `THIRD-PARTY/`. Python wheels also list those files in their license metadata. The dictionary stays embedded in each runtime artifact; package verification compares its complete bytes with the pinned bundle and rejects missing or changed notices.
 
 ## Runtime SQL callbacks
 

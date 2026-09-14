@@ -14,6 +14,8 @@ use uqa_storage::{
     StorageBackendResult,
 };
 
+use uqa_storage::read_control::{KeyValueReadVisitor, StorageReadControl, ValueReadVisitor};
+
 use crate::batch::{BatchOperation, RedbBatch};
 use crate::error::redb_error;
 use crate::transaction::{
@@ -94,6 +96,69 @@ impl KeyValueStore for RedbKeyValueStore {
             Arc::clone(&self.database),
             self.identity.clone(),
         )))
+    }
+
+    fn visit_value(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+        visit: &mut ValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        let state = self.state.lock();
+        match state.active.as_ref() {
+            Some(ActiveTransaction::Read(transaction)) => {
+                let table = transaction.open_table(DATA_TABLE).map_err(redb_error)?;
+                visit_value(&table, key, control, visit)
+            }
+            Some(ActiveTransaction::Write(write)) => {
+                let table = write
+                    .transaction
+                    .open_table(DATA_TABLE)
+                    .map_err(redb_error)?;
+                visit_value(&table, key, control, visit)
+            }
+            None => {
+                drop(state);
+                let transaction = self.database.begin_read().map_err(redb_error)?;
+                let table = transaction.open_table(DATA_TABLE).map_err(redb_error)?;
+                visit_value(&table, key, control, visit)
+            }
+        }
+    }
+
+    fn visit_prefix_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut KeyValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        if limit == 0 {
+            return Ok(());
+        }
+        let state = self.state.lock();
+        match state.active.as_ref() {
+            Some(ActiveTransaction::Read(transaction)) => {
+                let table = transaction.open_table(DATA_TABLE).map_err(redb_error)?;
+                visit_prefix(&table, prefix, after, limit, control, visit)
+            }
+            Some(ActiveTransaction::Write(write)) => {
+                let table = write
+                    .transaction
+                    .open_table(DATA_TABLE)
+                    .map_err(redb_error)?;
+                visit_prefix(&table, prefix, after, limit, control, visit)
+            }
+            None => {
+                drop(state);
+                let transaction = self.database.begin_read().map_err(redb_error)?;
+                let table = transaction.open_table(DATA_TABLE).map_err(redb_error)?;
+                visit_prefix(&table, prefix, after, limit, control, visit)
+            }
+        }
     }
 
     fn get(&self, key: &[u8]) -> StorageBackendResult<Option<Vec<u8>>> {
@@ -403,6 +468,58 @@ fn apply_operations(
         }
     }
     Ok(())
+}
+
+fn visit_value<T>(
+    table: &T,
+    key: &[u8],
+    control: &StorageReadControl,
+    visit: &mut ValueReadVisitor<'_>,
+) -> StorageBackendResult<()>
+where
+    T: ReadableTable<&'static [u8], &'static [u8]>,
+{
+    control.check()?;
+    let value = table.get(key).map_err(redb_error)?;
+    control.check()?;
+    visit(value.as_ref().map(redb::AccessGuard::value))?;
+    control.check()
+}
+
+fn visit_prefix<T>(
+    table: &T,
+    prefix: &[u8],
+    after: Option<&[u8]>,
+    limit: usize,
+    control: &StorageReadControl,
+    visit: &mut KeyValueReadVisitor<'_>,
+) -> StorageBackendResult<()>
+where
+    T: ReadableTable<&'static [u8], &'static [u8]>,
+{
+    control.check()?;
+    if limit == 0 {
+        return Ok(());
+    }
+    let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
+    let mut count = 0;
+    for entry in table.range(start..).map_err(redb_error)? {
+        control.check()?;
+        let (key, value) = entry.map_err(redb_error)?;
+        let key = key.value();
+        if !key.starts_with(prefix) {
+            break;
+        }
+        if after.is_some_and(|after| key <= after) {
+            continue;
+        }
+        visit(key, value.value())?;
+        count += 1;
+        if count == limit {
+            break;
+        }
+    }
+    control.check()
 }
 
 fn read_value<T>(table: &T, key: &[u8]) -> StorageBackendResult<Option<Vec<u8>>>

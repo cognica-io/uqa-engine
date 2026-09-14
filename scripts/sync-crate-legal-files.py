@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import pathlib
 import re
@@ -20,6 +21,9 @@ from urllib.parse import unquote, urlsplit
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+LICENSE_SPEC = importlib.util.spec_from_file_location("uqa_release_licenses", ROOT / "scripts/check-release-licenses.py")
+licenses = importlib.util.module_from_spec(LICENSE_SPEC)
+LICENSE_SPEC.loader.exec_module(licenses)
 LEGAL_FILES = (
     "LICENSE",
     "LICENSING.md",
@@ -30,6 +34,7 @@ LEGAL_FILES = (
 SKIP_PACKAGES = {"uqa-pg-query"}
 USER_FACING = {"uqa", "uqa-engine", "uqa-client", "uqa-cli", "uqa-api"}
 CRATE_ROLES = {
+    "uqa-nori-data": "the pinned portable Nori dictionary and its provenance",
     "uqa-core": "document sets, finite-support relations, posting storage, and value types",
     "uqa-analysis": "tokenizers, character filters, token filters, and analyzers",
     "uqa-storage": "provider-independent storage contracts, shared codecs, and in-memory data structures",
@@ -49,7 +54,9 @@ CRATE_ROLES = {
 }
 
 CRATE_NOTES = {
-    "uqa-storage": "Concrete SQLite implementations belong to `uqa-storage-sqlite`; the common storage crate has no runtime dependency on a database provider.",
+    "uqa-analysis": 'The optional `nori` feature exposes a validated immutable Korean dictionary, user-rule compiler, and native rolling Viterbi tokenizer with lossless UTF-16 morphology and graph attributes. `nori-tools` adds the offline packer and complete neutral-model verifier. The standalone tokenizer, default Korean analyzer, POS/reading/simple-lowercase filters, optional exact-decimal number composition, and separate normalization are verified against pinned Lucene fixtures. The native common-token bridge preserves raw terms, morphology, graph/end state, and corrected source spans through generic filters. Korean filters share one implementation across native and common tokens, including absent morphology, retained source provenance, and exact composed spans. `NoriResources` resolves immutable bundles by exact artifact hash, shares bounded dictionary and user-rule caches, and uses the bundled data through the optional `nori` feature without implicit I/O. `Analyzer::compile()` prepares immutable existing pipelines with fixed expressions, stop sets, and synonym maps while uncompiled APIs keep file reload behavior. `AnalyzerDescriptor` snapshots canonical resolved inputs and runtime profiles under a versioned fingerprint; `AnalyzerResources` restores those snapshots and shares compiled revisions under bounded cache ownership. Korean tokenizer/filter configurations now compile through the common pipeline with exact resource identities, user-rule snapshots, normalization, and bounded shared ownership. Memory, SQLite, and redb retain exact durable analyzer revisions and complete token graphs; public SQL and bindings execute graph phrases and highlight original source spans. Ported code retains the Lucene license, notice, and modification attribution in `THIRD-PARTY/`. See the [analyzer reference](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/reference/06-text-analyzers.md#standalone-korean-tokenization) and [bundle format](https://github.com/cognica-io/uqa-engine/blob/main/docs/design/nori-bundle-format.md).',
+    "uqa-nori-data": 'The Rust wrapper uses the workspace license. The converted dictionary retains its upstream notices in `THIRD-PARTY/`, including the complete Lucene license and notice, MeCab-ko-dic COPYING, and the pinned JDK Unicode notice. `data/resource_manifest.json` records hashes for the bundle, original export manifest, and attribution files. Conversion changes storage layout while preserving the exported model values. This crate exposes immutable bytes only; the optional analysis feature resolves them through `NoriResources`. The optional runtime and official Python, Node.js, and WASM packages use this exact embedded bundle; each binding carries its upstream notices and source-resource manifests. See the [bundle format and regeneration commands](https://github.com/cognica-io/uqa-engine/blob/main/docs/design/nori-bundle-format.md).',
+    "uqa-storage": "Concrete SQLite implementations belong to `uqa-storage-sqlite`; the common storage crate has no runtime dependency on a database provider.\n\nShared occurrence staging and versioned codecs preserve lossless term keys, token graph edges, source offsets, multiplicity, and independent normalization lengths. Memory indexes store these occurrences and original stream-end/revision metadata, expose exact-key lookups, and require an atomic source rebuild to change a populated field's index revision. SQLite and redb retain the same graph representation and migrate incompatible source-backed indexes on open; the [format contract](https://github.com/cognica-io/uqa-engine/blob/main/docs/design/occurrence-posting-format.md) describes the durable occurrence metadata.\n\nMemory and Key/Value analysis retains immutable compiled index/search revisions. Revision rebuilds publish the candidate binding with replacement postings only after successful staging and storage publication; durable descriptor restoration resolves exact bundle and user-rule identities.",
     "uqa-storage-sqlite": "Import concrete types such as `ManagedConnection`, `SQLiteStorageProvider`, `SQLiteCompressionOptions`, `SQLiteError`, and `SQLiteGraphStore` from `uqa_storage_sqlite`. This provider implements the backend-neutral contracts in `uqa-storage` and `uqa-graph`. See the [development Rust migration notes](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/reference/10-upgrading.md#sqlite-provider-ownership-in-development) for the previous import paths and error-handling changes.",
     "uqa-graph": "Memory graph stores and the backend-neutral persistent graph contract live here. The standalone `SQLiteGraphStore` adapter lives in `uqa-storage-sqlite`; graph algorithms do not depend on a SQLite driver or provider.",
 }
@@ -162,6 +169,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if args.check:
+        licenses.check_binding_sources()
+    else:
+        for directory in licenses.BINDING_PACKAGES:
+            for relative, payload in licenses.binding_nori_payloads().items():
+                path = directory / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(payload)
     checked = 0
     for package in workspace_packages():
         name = str(package["name"])

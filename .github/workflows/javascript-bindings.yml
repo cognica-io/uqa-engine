@@ -2,6 +2,12 @@ name: JavaScript Bindings
 
 on:
   workflow_dispatch:
+    inputs:
+      full_matrix:
+        description: Also build and verify every release package without publishing
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -16,6 +22,11 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  packages:
+    name: Release package matrix
+    if: ${{ inputs.full_matrix }}
+    uses: ./.github/workflows/javascript-packages.yml
+
   http:
     name: Node.js HTTP without native artifacts
     runs-on: ubuntu-24.04
@@ -48,9 +59,9 @@ jobs:
       - name: Install Node build dependencies
         working-directory: crates/uqa-node
         run: npm ci --ignore-scripts
-      - name: Build native addon
+      - name: Build native addon with native Nori
         working-directory: crates/uqa-node
-        run: npx napi build --platform --no-js --profile release-stripped
+        run: npx napi build --platform --no-js --profile release-stripped --features nori
       - name: Test native addon
         run: node --test tests/node/test_uqa_node.mjs tests/node/test_http_engine.mjs
       - name: Run Node.js examples
@@ -59,6 +70,17 @@ jobs:
           for example in examples/node/*.mjs; do
             node "$example"
           done
+      - name: Build and test the native addon without Nori
+        run: |
+          set -euo pipefail
+          (cd crates/uqa-node && npx napi build --platform --no-js --profile release-stripped --no-default-features --output-dir ../../target/nori-binding-disabled/node)
+          cp crates/uqa-node/*.js crates/uqa-node/package.json target/nori-binding-disabled/node/
+          cargo tree --locked -p uqa-node --no-default-features --edges normal > target/nori-binding-disabled/node-dependencies.txt
+          if grep -q uqa-nori-data target/nori-binding-disabled/node-dependencies.txt; then
+            echo "Nori dictionary present in a feature-disabled native addon" >&2
+            exit 1
+          fi
+          UQA_TEST_NORI=disabled UQA_TEST_PACKAGE=target/nori-binding-disabled/node node --test tests/node/test_uqa_node.mjs
 
   wasm:
     name: Browser WASM callbacks
@@ -86,9 +108,49 @@ jobs:
         run: bash scripts/build-wasm.sh
       - name: Test browser WASM bundle
         run: node --test tests/wasm/test_uqa_wasm.mjs
+      - name: Verify real Chrome persistence and host memory
+        run: python3 scripts/verify-nori-browser.py --output output/playwright/nori-enabled/report.json
+      - name: Measure WASM analysis and indexing with reviewed allocation ceilings
+        env:
+          RUSTFLAGS: ""
+          CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS: "-D warnings"
+        run: |
+          python3 scripts/run-nori-benchmark.py --target wasm --output target/benchmark-runs/nori-wasm.json
+          python3 scripts/run-nori-index-benchmark.py --target wasm --output target/benchmark-runs/nori-index-wasm.json
+          python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --target wasm --output target/benchmark-runs/nori-sqlite-wasm.json
+          python3 scripts/run-nori-phrase-benchmark.py --target wasm --output target/benchmark-runs/nori-phrase-wasm.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nori-wasm-${{ github.sha }}
+          path: |
+            target/benchmark-runs/nori-wasm.json
+            target/benchmark-runs/nori-index-wasm.json
+            target/benchmark-runs/nori-sqlite-wasm.json
+            target/benchmark-runs/nori-phrase-wasm.json
       - name: Run Browser WASM examples
         run: |
           set -euo pipefail
           for name in unified-search vector-knn graph-cypher storage-transactions extensibility; do
             node "examples/browser/${name}.mjs"
           done
+      - name: Build and test the WASM package without Nori
+        run: |
+          set -euo pipefail
+          bash scripts/build-wasm.sh --no-default-features --output-dir target/nori-binding-disabled/wasm
+          cp crates/uqa-wasm/js/index.mjs crates/uqa-wasm/js/package.json target/nori-binding-disabled/wasm/
+          cargo tree --locked -p uqa-wasm --target wasm32-unknown-emscripten --no-default-features --edges normal > target/nori-binding-disabled/wasm-dependencies.txt
+          if grep -q uqa-nori-data target/nori-binding-disabled/wasm-dependencies.txt; then
+            echo "Nori dictionary present in a feature-disabled WASM package" >&2
+            exit 1
+          fi
+          UQA_TEST_NORI=disabled UQA_TEST_PACKAGE=target/nori-binding-disabled/wasm/index.mjs node --test tests/wasm/test_uqa_wasm.mjs
+      - name: Verify real Chrome without Nori
+        run: python3 scripts/verify-nori-browser.py --nori disabled --bundle target/nori-binding-disabled/wasm/index.mjs --output output/playwright/nori-disabled/report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nori-browser-${{ github.sha }}
+          path: |
+            output/playwright/nori-enabled/report.json
+            output/playwright/nori-disabled/report.json

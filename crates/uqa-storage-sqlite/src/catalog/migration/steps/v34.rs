@@ -18,7 +18,7 @@ struct IndexMigration {
     parameters: String,
 }
 
-pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+pub(super) fn migrate(tx: &rusqlite::Connection) -> Result<()> {
     let index_columns = Catalog::table_columns(tx, "_catalog_indexes")?;
     if index_columns
         .as_ref()
@@ -36,7 +36,7 @@ pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<()> {
 }
 
 fn load_indexes(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     columns: Option<&std::collections::BTreeMap<String, String>>,
 ) -> Result<Vec<IndexMigration>> {
     let Some(columns) = columns else {
@@ -93,10 +93,7 @@ fn load_indexes(
     Ok(indexes)
 }
 
-fn validate_index_migrations(
-    tx: &rusqlite::Transaction<'_>,
-    indexes: &[IndexMigration],
-) -> Result<()> {
+fn validate_index_migrations(tx: &rusqlite::Connection, indexes: &[IndexMigration]) -> Result<()> {
     let mut seen = std::collections::BTreeSet::new();
     for index in indexes {
         if index.table.schema.starts_with("pg_temp_") {
@@ -147,7 +144,7 @@ fn validate_index_migrations(
     Ok(())
 }
 
-fn create_structural_tables(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+fn create_structural_tables(tx: &rusqlite::Connection) -> Result<()> {
     tx.execute_batch(
         "CREATE TABLE _relations_v34 (
             schema_name   TEXT NOT NULL,
@@ -246,7 +243,7 @@ fn create_structural_tables(tx: &rusqlite::Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
-fn copy_existing_relations(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+fn copy_existing_relations(tx: &rusqlite::Connection) -> Result<()> {
     tx.execute_batch(
         "INSERT INTO _relations_v34(schema_name, relation_name, kind)
              SELECT schema_name, relation_name, kind FROM _relations;
@@ -279,7 +276,7 @@ fn copy_existing_relations(tx: &rusqlite::Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
-fn insert_indexes(tx: &rusqlite::Transaction<'_>, indexes: Vec<IndexMigration>) -> Result<()> {
+fn insert_indexes(tx: &rusqlite::Connection, indexes: Vec<IndexMigration>) -> Result<()> {
     for index in indexes {
         if index.table.schema.starts_with("pg_temp_") {
             continue;
@@ -308,7 +305,7 @@ fn insert_indexes(tx: &rusqlite::Transaction<'_>, indexes: Vec<IndexMigration>) 
     Ok(())
 }
 
-fn replace_relation_tables(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+fn replace_relation_tables(tx: &rusqlite::Connection) -> Result<()> {
     tx.execute_batch(
         "DROP TABLE IF EXISTS _catalog_indexes;
          DROP TABLE _views;
@@ -326,7 +323,7 @@ fn replace_relation_tables(tx: &rusqlite::Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
-fn validate_structural_indexes(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+fn validate_structural_indexes(tx: &rusqlite::Connection) -> Result<()> {
     let invalid: Option<(String, String)> = tx
         .query_row(
             "SELECT i.schema_name, i.relation_name

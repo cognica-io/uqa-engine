@@ -22,4 +22,6 @@ pub use positive_evidence::{
     AdaptivePositiveEvidencePool, LogitGating, PositiveEvidencePoolError,
     RobustPositiveEvidencePool, SignalQuality,
 };
-pub use query_features::{extract_query_features, QueryFeatureExtractor, N_QUERY_FEATURES};
+pub use query_features::{
+    extract_query_features, extract_query_features_utf16, QueryFeatureExtractor, N_QUERY_FEATURES,
+};

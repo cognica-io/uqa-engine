@@ -1,0 +1,58 @@
+{
+  "files": [
+    {
+      "bytes": 446464,
+      "file": "sqlite-empty.db",
+      "provider": "sqlite",
+      "sha256": "7f94281af818799b629c0cd15d00aae4a2640650d9a9e98bff6c714a4b834fab"
+    },
+    {
+      "bytes": 552960,
+      "file": "redb-empty.db",
+      "provider": "redb",
+      "sha256": "59d191b6ac38b0a8a41f600b86787fb0ec42138bdb4513a05649ac47d8181512"
+    }
+  ],
+  "owner": "uqa",
+  "purpose": "empty_sql_seed_capture",
+  "schema_version": 1,
+  "table_sql": "CREATE TABLE docs (id BIGINT PRIMARY KEY, body TEXT)",
+  "provenance": {
+    "measured_at_utc": "2026-09-13T13:43:31.808944+00:00",
+    "revision": "39df0bd8d5d267bf98385aa65b4af265e17fa05d",
+    "worktree_dirty": true,
+    "cpu": "Apple M1 Ultra",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "rustc": "rustc 1.90.0 (1159e78c4 2025-09-14)\nbinary: rustc\ncommit-hash: 1159e78c4747b02ef996e55082b704c09b970588\ncommit-date: 2025-09-14\nhost: aarch64-apple-darwin\nrelease: 1.90.0\nLLVM version: 20.1.8",
+    "flags": {
+      "CFLAGS": "-isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk -I${HOME}/app/include -I/opt/homebrew/include",
+      "CXXFLAGS": "-isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk -I${HOME}/app/include -I/opt/homebrew/include",
+      "LDFLAGS": " -L${HOME}/app/lib -L/opt/homebrew/lib -L/opt/homebrew/opt/icu4c@77/lib -Wl,-cache_path_lto,${HOME}/.cache/llvm -L${HOME}/app/lib -L/opt/homebrew/lib -L/opt/homebrew/opt/icu4c@77/lib -Wl,-cache_path_lto,${HOME}/.cache/llvm -L${HOME}/app/lib -L/opt/homebrew/lib -L/opt/homebrew/opt/icu4c@77/lib -Wl,-cache_path_lto,${HOME}/.cache/llvm"
+    },
+    "flags_sha256": "1647b6537e50c7f2c41a549356805c798a60d8a7a5cb84434429d5d347ac84ce",
+    "node": null,
+    "emcc": null,
+    "benchmark_sha256": "9f8cadb82c7df9d83335a096317c0decb61829b9aa8f45c3228f0da1ed386295",
+    "cargo_lock_sha256": "888ba09b36bfdae1252ebc5838c700f4e3800060df09e081197f7fbd66ec198e",
+    "runtime_sources_sha256": "ccd5cb826db5f3dc70625b826e9a7f47f631dd17c8e36f60f425828d60bd59fe",
+    "profile": "bench (workspace release, thin LTO, one codegen unit, debug information)",
+    "container": null,
+    "jvm": null,
+    "artifacts": [
+      {
+        "name": "nori_sql-c6dd9d016872bf52",
+        "bytes": 125565144,
+        "sha256": "125cd56b457d9433dd6ba071ba8730e16d0d24f0baa8783e87a1649da3d57472"
+      }
+    ],
+    "benchmark_sources": {
+      "crates/uqa/benches/nori_sql.rs": "9f698223ec3bfc43949c113e73f0b7e2f6db2b688f7226c98d81a656ade21bab",
+      "crates/uqa/benches/nori_sql/fixture.rs": "93be0eddd8947f4ea0ee6007621b33cb9f51c87a201432cb04ae21035197a7e7",
+      "crates/uqa/benches/nori_sql/seeds.rs": "7d5997231264e2bd006a26a47b7e0e7c0aad9916a16cf01e25e18aed54049526"
+    },
+    "arguments": [
+      "--capture-empty-seeds",
+      "/private/tmp/uqa-nori-sql-empty-seeds"
+    ]
+  }
+}

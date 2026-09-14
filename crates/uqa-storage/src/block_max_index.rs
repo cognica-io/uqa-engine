@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use uqa_core::PostingList;
 
-use crate::{StorageBackendError, StorageBackendResult};
+use crate::{StorageBackendError, StorageBackendResult, TokenTermKey};
 
 pub const DEFAULT_BLOCK_SIZE: usize = 128;
 
@@ -30,7 +30,7 @@ pub trait BlockMaxScorer {
 #[derive(Debug, Clone)]
 pub struct BlockMaxIndex {
     block_size: usize,
-    block_maxes: BTreeMap<(String, String, String), Vec<f64>>,
+    block_maxes: BTreeMap<(String, String, TokenTermKey), Vec<f64>>,
 }
 
 impl Default for BlockMaxIndex {
@@ -66,11 +66,19 @@ impl BlockMaxIndex {
         term: &str,
         scores: Vec<f64>,
     ) -> StorageBackendResult<()> {
+        self.set_block_maxes_key(table, field, &TokenTermKey::from_text(term), scores)
+    }
+
+    pub fn set_block_maxes_key(
+        &mut self,
+        table: &str,
+        field: &str,
+        term: &TokenTermKey,
+        scores: Vec<f64>,
+    ) -> StorageBackendResult<()> {
         validate_scores(&scores)?;
-        self.block_maxes.insert(
-            (table.to_string(), field.to_string(), term.to_string()),
-            scores,
-        );
+        self.block_maxes
+            .insert((table.to_string(), field.to_string(), term.clone()), scores);
         Ok(())
     }
 
@@ -91,7 +99,11 @@ impl BlockMaxIndex {
             ));
         }
         let entries = posting_list.entries();
-        let key = (table.to_string(), field.to_string(), term.to_string());
+        let key = (
+            table.to_string(),
+            field.to_string(),
+            TokenTermKey::from_text(term),
+        );
         if entries.is_empty() {
             self.block_maxes.insert(key, Vec::new());
             return Ok(());
@@ -124,7 +136,11 @@ impl BlockMaxIndex {
     }
 
     pub fn block_max(&self, table: &str, field: &str, term: &str, block_idx: usize) -> f64 {
-        let key = (table.to_string(), field.to_string(), term.to_string());
+        let key = (
+            table.to_string(),
+            field.to_string(),
+            TokenTermKey::from_text(term),
+        );
         self.block_maxes
             .get(&key)
             .and_then(|v| v.get(block_idx).copied())
@@ -132,14 +148,22 @@ impl BlockMaxIndex {
     }
 
     pub fn num_blocks(&self, table: &str, field: &str, term: &str) -> usize {
-        let key = (table.to_string(), field.to_string(), term.to_string());
+        let key = (
+            table.to_string(),
+            field.to_string(),
+            TokenTermKey::from_text(term),
+        );
         self.block_maxes.get(&key).map_or(0, Vec::len)
     }
 
     /// Borrow all block scores for one posting without repeated key
     /// construction. BMW uses this to precompute suffix bounds once per query.
     pub fn block_maxes(&self, table: &str, field: &str, term: &str) -> Option<&[f64]> {
-        let key = (table.to_string(), field.to_string(), term.to_string());
+        self.block_maxes_key(table, field, &TokenTermKey::from_text(term))
+    }
+
+    pub fn block_maxes_key(&self, table: &str, field: &str, term: &TokenTermKey) -> Option<&[f64]> {
+        let key = (table.to_string(), field.to_string(), term.clone());
         self.block_maxes.get(&key).map(Vec::as_slice)
     }
 
@@ -158,14 +182,11 @@ impl BlockMaxIndex {
     }
 
     /// Iterate validated block maxima for persistence without mutable storage access.
-    pub fn entries(&self) -> impl Iterator<Item = ((&str, &str, &str), &[f64])> {
+    pub fn entries(&self) -> impl Iterator<Item = ((&str, &str, &TokenTermKey), &[f64])> {
         self.block_maxes
             .iter()
             .map(|((table, field, term), scores)| {
-                (
-                    (table.as_str(), field.as_str(), term.as_str()),
-                    scores.as_slice(),
-                )
+                ((table.as_str(), field.as_str(), term), scores.as_slice())
             })
     }
 }

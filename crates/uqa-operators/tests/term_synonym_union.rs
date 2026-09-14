@@ -79,22 +79,22 @@ fn no_synonym_single_token() {
 
 #[test]
 fn invalid_search_analyzer_is_returned_as_operator_error() {
-    let mut index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
-    index
-        .add_document(1, fields(&[("body", "searchable text")]))
-        .unwrap();
+    let mut index = MemoryInvertedIndex::new(Analyzer::new(
+        Tokenizer::Pattern {
+            pattern: "[".into(),
+        },
+        Vec::new(),
+        Vec::new(),
+    ));
     index
         .set_field_analyzer(
-            "body",
-            Analyzer::new(
-                Tokenizer::Pattern {
-                    pattern: "[".into(),
-                },
-                Vec::new(),
-                Vec::new(),
-            ),
-            AnalyzerPhase::Search,
+            "indexed",
+            uqa_analysis::whitespace_analyzer(),
+            AnalyzerPhase::Both,
         )
+        .unwrap();
+    index
+        .add_document(1, fields(&[("indexed", "searchable text")]))
         .unwrap();
 
     let context = ExecutionContext::new().with_inverted_index(index.snapshot().unwrap());

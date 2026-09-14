@@ -1,0 +1,182 @@
+name: JavaScript Packages
+
+# Shared by release publication and the read-only manual package build.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  node:
+    name: node ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux x86_64
+            os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - label: linux aarch64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - label: macos x86_64
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+          - label: macos aarch64
+            os: macos-14
+            target: aarch64-apple-darwin
+          - label: windows x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - label: windows aarch64
+            os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Free Linux runner disk
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/free-linux-runner-disk.sh
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: false
+
+      - name: Install Node build dependencies
+        working-directory: crates/uqa-node
+        run: npm ci --ignore-scripts
+
+      # `release` keeps line tables for profiling, which macOS and Windows
+      # split into .dSYM/.pdb but Linux leaves inside the binary: the published
+      # Linux addons came out at 1.2 GB against 60-90 MB elsewhere. The
+      # workspace already defines a stripped profile for exactly this.
+      - name: Build native addon with native Nori
+        working-directory: crates/uqa-node
+        run: npx napi build --platform --no-js --profile release-stripped --features nori --target ${{ matrix.target }}
+
+      - name: Test the addon
+        working-directory: crates/uqa-node
+        shell: bash
+        run: node --test ../../tests/node/test_uqa_node.mjs ../../tests/node/test_http_engine.mjs
+
+      - name: Run Node.js examples
+        shell: bash
+        run: |
+          set -euo pipefail
+          for example in examples/node/*.mjs; do
+            node "$example"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: node-addon-${{ matrix.target }}
+          path: crates/uqa-node/*.node
+          if-no-files-found: error
+
+  node-package:
+    name: node npm packages
+    needs: node
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install Node package tooling
+        working-directory: crates/uqa-node
+        run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: node-addon-*
+          path: native-addons
+          merge-multiple: true
+      - name: Assemble the root and platform npm packages
+        run: >-
+          python3 scripts/npm-release.py build-node
+          --artifacts-dir native-addons
+          --output-dir dist
+      - name: Check npm package license contents
+        run: python3 scripts/check-release-licenses.py --require-nori dist/*.tgz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: node-packages
+          path: dist/*.tgz
+          if-no-files-found: error
+
+  wasm:
+    name: wasm package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The build asserts its own exception/longjmp contract (see
+      # scripts/build-wasm.sh), so it does not depend on a specific emscripten
+      # release. Pinning an old one instead risks a toolchain that predates the
+      # Rust standard library shipped for wasm32-unknown-emscripten.
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-emscripten
+
+      # Belt and braces: the build cross-compiles every dependency, so a
+      # missing rust-std for this target surfaces as a confusing
+      # "can't find crate for `core`" on the first dependency rather than as a
+      # toolchain error.
+      - name: Ensure the emscripten target is installed
+        run: rustup target add wasm32-unknown-emscripten
+
+      - name: Free Linux runner disk
+        run: bash .github/scripts/free-linux-runner-disk.sh
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: false
+
+      - name: Build the browser WASM bundle
+        run: bash scripts/build-wasm.sh
+
+      - name: Test the browser WASM bundle
+        run: node --test tests/wasm/test_uqa_wasm.mjs
+
+      - name: Run Browser WASM examples
+        run: |
+          set -euo pipefail
+          for name in unified-search vector-knn graph-cypher storage-transactions extensibility; do
+            node "examples/browser/${name}.mjs"
+          done
+
+      - name: Pack the WASM package
+        working-directory: crates/uqa-wasm/js
+        run: npm pack --pack-destination .
+
+      - name: Check package license contents
+        run: python3 scripts/check-release-licenses.py --require-nori crates/uqa-wasm/js/*.tgz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm-package
+          path: crates/uqa-wasm/js/*.tgz
+          if-no-files-found: error

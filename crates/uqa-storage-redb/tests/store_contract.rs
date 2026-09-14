@@ -183,7 +183,7 @@ fn provider_returns_catalog_and_backend_bound_to_one_session() {
 }
 
 #[test]
-fn redb_migrates_legacy_postings_and_persists_clustered_values() {
+fn redb_migrates_legacy_postings_and_rebuilds_lossless_occurrences() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("posting-migration.redb");
     let storage = RedbStorage::open(&path).unwrap();
@@ -207,9 +207,18 @@ fn redb_migrates_legacy_postings_and_persists_clustered_values() {
 
     let session = storage.open_session().unwrap();
     session.backend.migrate_inverted_index_storage().unwrap();
-    let index = session
+    let mut index = session
         .backend
         .inverted_index("articles", uqa_analysis::standard_analyzer("english"));
+    assert!(index.source_rebuild_required().unwrap());
+    assert!(index.get_posting_list("title", "rust").is_err());
+    index
+        .try_rebuild_documents(vec![(
+            7,
+            std::collections::BTreeMap::from([("title".into(), "rust language rust".into())]),
+        )])
+        .unwrap();
+    assert!(!index.source_rebuild_required().unwrap());
     assert_eq!(index.doc_freq("title", "rust").unwrap(), 1);
     let posting = index.get_posting_list("title", "rust").unwrap();
     assert_eq!(posting.entries()[0].doc_id, 7);
@@ -223,9 +232,18 @@ fn redb_migrates_legacy_postings_and_persists_clustered_values() {
     let store = reopened.store();
     assert!(store.scan_prefix(b"p").unwrap().is_empty());
     assert!(store.scan_prefix(b"r").unwrap().is_empty());
-    assert_eq!(store.scan_prefix(b"k").unwrap().len(), 1);
-    assert_eq!(store.scan_prefix(b"o").unwrap().len(), 1);
-    assert_eq!(store.scan_prefix(b"x").unwrap().len(), 1);
+    for prefix in [b"k", b"o", b"x", b"l", b"f"] {
+        assert!(store.scan_prefix(prefix).unwrap().is_empty());
+    }
+    assert!(!store.scan_prefix(b"e").unwrap().is_empty());
+    let reopened_index = reopened
+        .open_session()
+        .unwrap()
+        .backend
+        .inverted_index("articles", uqa_analysis::standard_analyzer("english"));
+    let posting = reopened_index.get_posting_list("title", "rust").unwrap();
+    assert_eq!(posting.entries()[0].doc_id, 7);
+    assert_eq!(posting.entries()[0].payload.positions, vec![0, 2]);
 }
 
 #[test]
@@ -261,3 +279,5 @@ fn redb_rolls_back_legacy_posting_migration_after_staged_writes() {
     assert!(store.scan_prefix(b"o").unwrap().is_empty());
     assert!(store.scan_prefix(b"x").unwrap().is_empty());
 }
+#[path = "store_contract/controlled.rs"]
+mod controlled;

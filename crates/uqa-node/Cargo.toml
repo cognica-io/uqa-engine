@@ -11,6 +11,10 @@ readme.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+default = ["nori"]
+nori = ["uqa-engine/nori"]
+
 [lib]
 name = "uqa_node"
 crate-type = ["cdylib"]
@@ -23,7 +27,7 @@ serde_json = { workspace = true }
 tokio.workspace = true
 uqa-client.workspace = true
 uqa-core = { workspace = true }
-uqa-engine = { workspace = true }
+uqa-engine = { workspace = true, default-features = false }
 uqa-scoring = { workspace = true }
 uqa-sql = { workspace = true }
 

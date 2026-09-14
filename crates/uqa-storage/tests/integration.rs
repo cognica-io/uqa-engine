@@ -6,5 +6,19 @@
 
 //! Consolidated storage integration tests.
 
+#[path = "cases/analyzer_bindings.rs"]
+mod analyzer_bindings;
 #[path = "btree_index.rs"]
 mod btree_index;
+
+#[path = "cases/occurrences.rs"]
+mod occurrences;
+
+#[path = "cases/memory_occurrences.rs"]
+mod memory_occurrences;
+
+#[path = "cases/key_value_occurrences.rs"]
+mod key_value_occurrences;
+
+#[path = "cases/field_metadata.rs"]
+mod field_metadata;

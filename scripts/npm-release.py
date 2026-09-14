@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -28,6 +29,9 @@ from dataclasses import dataclass
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+LICENSE_SPEC = importlib.util.spec_from_file_location("uqa_release_licenses", ROOT / "scripts/check-release-licenses.py")
+licenses = importlib.util.module_from_spec(LICENSE_SPEC)
+LICENSE_SPEC.loader.exec_module(licenses)
 NODE_ROOT = ROOT / "crates" / "uqa-node"
 WASM_ROOT = ROOT / "crates" / "uqa-wasm" / "js"
 ROOT_PACKAGE = "@cognica-io/uqa"
@@ -41,6 +45,7 @@ LEGAL_FILES = (
     "LICENSING.md",
     "LICENSES/UQA-FOSS-EXCEPTION-1.0.txt",
     "LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt",
+    *licenses.binding_nori_payloads(),
 )
 ROOT_RUNTIME_FILES = (
     "api.js", "index.js", "index.d.ts",
@@ -106,8 +111,10 @@ def write_json(path: pathlib.Path, payload: dict[str, object]) -> None:
 
 
 def canonical_legal_payloads() -> dict[str, bytes]:
-    payloads: dict[str, bytes] = {}
+    payloads = licenses.binding_nori_payloads()
     for relative in LEGAL_FILES:
+        if relative in payloads:
+            continue
         source = (
             NODE_ROOT / relative if relative == "LICENSE-NOTICE.md" else ROOT / relative
         )

@@ -2,8 +2,14 @@ name: Python Wheels
 
 on:
   workflow_dispatch:
+    inputs:
+      full_matrix:
+        description: Also build and verify every release package without publishing
+        required: false
+        type: boolean
+        default: false
   # release.yml calls this workflow and attaches its full matrix to the release.
-  # A manual dispatch runs only the representative Python binding smoke test.
+  # Manual dispatch can verify the same full matrix without publishing.
   workflow_call:
     inputs:
       full_matrix:
@@ -26,7 +32,6 @@ env:
 jobs:
   smoke:
     name: Python bindings
-    if: ${{ !inputs.full_matrix }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -47,8 +52,8 @@ jobs:
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/python -m pip install maturin==1.11.5 pytest
-      - name: Build and install the development extension
-        run: maturin develop --locked
+      - name: Build and install the development extension with native Nori
+        run: maturin develop --locked --features nori
       - name: Check the stable ABI contract
         run: |
           python - <<'PY'
@@ -74,6 +79,27 @@ jobs:
           for example in examples/python/*.py; do
             python "$example"
           done
+          python tests/wasm/export_nori_diagnostics.py --check benchmarks/nori/browser-contract.json > nori-browser-native-diagnostics.json
+
+      - name: Retain native Nori diagnostic evidence
+        if: ${{ always() && hashFiles('nori-browser-native-diagnostics.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nori-python-smoke-${{ github.sha }}
+          path: nori-browser-native-diagnostics.json
+          if-no-files-found: error
+
+      - name: Build and test the Python wheel without Nori
+        run: |
+          set -euo pipefail
+          maturin build --locked --no-default-features --out target/nori-binding-disabled/python
+          python -m pip install --force-reinstall target/nori-binding-disabled/python/*.whl
+          cargo tree --locked -p uqa-python --no-default-features --edges normal > target/nori-binding-disabled/python-dependencies.txt
+          if grep -q uqa-nori-data target/nori-binding-disabled/python-dependencies.txt; then
+            echo "Nori dictionary present in a feature-disabled Python wheel" >&2
+            exit 1
+          fi
+          UQA_TEST_NORI=disabled python -m pytest -q tests/python
 
   build-wheels:
     name: ${{ matrix.label }}
@@ -134,11 +160,11 @@ jobs:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux }}
           before-script-linux: source .github/scripts/install-manylinux-build-deps.sh
-          args: --release --locked --compatibility pypi --out dist
+          args: --release --locked --features nori --compatibility pypi --out dist
 
       - name: Check wheel license contents
         shell: bash
-        run: python scripts/check-release-licenses.py dist/*.whl
+        run: python scripts/check-release-licenses.py --require-nori dist/*.whl
 
       # `requires-python = ">=3.8"` only holds because pyo3 is built against
       # the CPython stable ABI. Dropping the abi3 feature would silently
@@ -182,6 +208,15 @@ jobs:
           for example in examples/python/*.py; do
             python "$example"
           done
+          python tests/wasm/export_nori_diagnostics.py --check benchmarks/nori/browser-contract.json > nori-browser-native-diagnostics.json
+
+      - name: Retain native Nori diagnostic evidence
+        if: ${{ always() && hashFiles('nori-browser-native-diagnostics.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nori-python-${{ matrix.target }}-${{ github.sha }}
+          path: nori-browser-native-diagnostics.json
+          if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
         with:
@@ -210,7 +245,7 @@ jobs:
           args: --out dist
 
       - name: Check sdist license contents
-        run: python scripts/check-release-licenses.py dist/*.tar.gz
+        run: python scripts/check-release-licenses.py --require-nori dist/*.tar.gz
 
       - name: Validate the sdist Cargo workspace
         shell: bash

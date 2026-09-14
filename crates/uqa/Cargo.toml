@@ -14,9 +14,28 @@ exclude.workspace = true
 keywords = ["database", "sql", "full-text-search", "vector-search", "graph"]
 categories = ["database-implementations"]
 
+[features]
+default = []
+nori = ["uqa-engine/nori"]
+
 [dependencies]
 uqa-core = { workspace = true }
-uqa-engine = { workspace = true }
+uqa-engine = { workspace = true, default-features = false }
+
+[dev-dependencies]
+allocation-counter = "=0.8.1"
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tempfile = "3.13"
+uqa-storage-sqlite = { workspace = true }
+
+[target.'cfg(not(target_os = "emscripten"))'.dev-dependencies]
+uqa-storage-redb = { workspace = true }
+
+[[bench]]
+name = "nori_sql"
+harness = false
+required-features = ["nori"]
 
 [lints]
 workspace = true

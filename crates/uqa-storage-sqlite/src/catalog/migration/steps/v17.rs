@@ -78,7 +78,7 @@ struct SqliteRelationMigrations {
     views: Vec<(RelationIdentity, String)>,
 }
 
-fn load_legacy_tables(tx: &rusqlite::Transaction<'_>) -> Result<Vec<SqliteTableMigration>> {
+fn load_legacy_tables(tx: &rusqlite::Connection) -> Result<Vec<SqliteTableMigration>> {
     let mut stmt = tx.prepare(
         "SELECT name, analyzer, fts_fields, vector_fields, columns, constraints
            FROM _tables ORDER BY name",
@@ -110,7 +110,7 @@ fn load_legacy_tables(tx: &rusqlite::Transaction<'_>) -> Result<Vec<SqliteTableM
 }
 
 fn load_legacy_sequences(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
 ) -> Result<Vec<(String, SqliteSequenceMigration)>> {
     let mut stmt =
         tx.prepare("SELECT name, start, increment, current FROM _sequences ORDER BY name")?;
@@ -139,7 +139,7 @@ fn load_legacy_sequences(
 }
 
 fn load_legacy_foreign_tables(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
 ) -> Result<Vec<(String, SqliteForeignMigration)>> {
     let mut stmt = tx.prepare(
         "SELECT name, server_name, columns_json, options
@@ -169,7 +169,7 @@ fn load_legacy_foreign_tables(
     Ok(foreign_tables)
 }
 
-fn load_legacy_metadata<T>(tx: &rusqlite::Transaction<'_>, key: &str) -> Result<T>
+fn load_legacy_metadata<T>(tx: &rusqlite::Connection, key: &str) -> Result<T>
 where
     T: serde::de::DeserializeOwned + Default,
 {
@@ -186,7 +186,7 @@ where
 }
 
 fn collect_sqlite_relation_migrations(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
 ) -> Result<SqliteRelationMigrations> {
     let tables = load_legacy_tables(tx)?;
     let mut sequences = load_legacy_sequences(tx)?;
@@ -261,7 +261,7 @@ fn collect_sqlite_relation_migrations(
     })
 }
 
-fn create_structural_relation_tables(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+fn create_structural_relation_tables(tx: &rusqlite::Connection) -> Result<()> {
     tx.execute_batch(
         "CREATE TABLE _relations (
             schema_name   TEXT NOT NULL,
@@ -325,10 +325,7 @@ fn create_structural_relation_tables(tx: &rusqlite::Transaction<'_>) -> Result<(
     Ok(())
 }
 
-fn insert_relation_parents(
-    tx: &rusqlite::Transaction<'_>,
-    seen: &SqliteSeenRelations,
-) -> Result<()> {
+fn insert_relation_parents(tx: &rusqlite::Connection, seen: &SqliteSeenRelations) -> Result<()> {
     for (relation, (kind, _)) in seen {
         tx.execute(
             "INSERT OR IGNORE INTO _schemas(name) VALUES (?1)",
@@ -343,7 +340,7 @@ fn insert_relation_parents(
 }
 
 fn migrate_sqlite_table_name(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     table: &SqliteTableMigration,
 ) -> Result<()> {
     let canonical = table.relation.qualified_name();
@@ -409,10 +406,7 @@ fn migrate_sqlite_table_name(
     drop_fts_aux_tables_for_table(tx, &table.old_name)
 }
 
-fn insert_table_migration(
-    tx: &rusqlite::Transaction<'_>,
-    table: &SqliteTableMigration,
-) -> Result<()> {
+fn insert_table_migration(tx: &rusqlite::Connection, table: &SqliteTableMigration) -> Result<()> {
     migrate_sqlite_table_name(tx, table)?;
     tx.execute(
         "INSERT INTO _tables_v17
@@ -433,7 +427,7 @@ fn insert_table_migration(
 }
 
 fn insert_relation_children(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     migrations: &SqliteRelationMigrations,
 ) -> Result<()> {
     for table in &migrations.tables {
@@ -478,7 +472,7 @@ fn insert_relation_children(
     Ok(())
 }
 
-fn finish_sqlite_relation_migration(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+fn finish_sqlite_relation_migration(tx: &rusqlite::Connection) -> Result<()> {
     tx.execute_batch(
         "DROP TABLE _tables;
          ALTER TABLE _tables_v17 RENAME TO _tables;
@@ -496,7 +490,7 @@ fn finish_sqlite_relation_migration(tx: &rusqlite::Transaction<'_>) -> Result<()
     Ok(())
 }
 
-pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+pub(super) fn migrate(tx: &rusqlite::Connection) -> Result<()> {
     let relation_namespace_already_present = Catalog::table_columns(tx, "_tables")?
         .is_some_and(|columns| columns.contains_key("schema_name"))
         && Catalog::table_columns(tx, "_relations")?.is_some()

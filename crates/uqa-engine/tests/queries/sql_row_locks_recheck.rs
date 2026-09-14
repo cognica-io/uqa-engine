@@ -503,3 +503,6 @@ fn separate_processes_detect_cycles_that_include_a_local_wait_edge() {
         "every mixed-process deadlock participant must either be granted or chosen as a victim; outcomes: {outcomes:?}"
     );
 }
+
+#[path = "sql_row_locks_recheck/foreign_key_snapshot.rs"]
+mod foreign_key_snapshot;

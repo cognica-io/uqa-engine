@@ -86,7 +86,7 @@ The executable dependency policy is stored in [`scripts/workspace-dependency-pol
 
 | Crate | Ownership |
 | --- | --- |
-| `uqa-core` | Canonical relation identities, index catalog rows, values, exact decimal representation and operations, document sets, relations, posting lists, ranked views, generalized postings, predicates, and shared graph value types including agtype envelopes, ordering, and rendering |
+| `uqa-core` | Shared cancellation and byte-reservation primitives, canonical relation identities, index catalog rows, values, exact decimal representation and operations, document sets, relations, posting lists, ranked views, generalized postings, predicates, and shared graph value types including agtype envelopes, ordering, and rendering |
 | `uqa-analysis` | Character filters, tokenizers, token filters, analyzers, stemming, and highlighting primitives |
 | `uqa-storage` | Backend-neutral document, inverted, vector, tensor, B-tree, block-max, spatial, catalog, ordered catalog-version migration, and Key/Value contracts |
 | `uqa-storage-sqlite` | SQLite connections, catalog migrations, document and retrieval indexes, transactions, graph persistence, Key/Value storage, encryption, and compressed VFS |

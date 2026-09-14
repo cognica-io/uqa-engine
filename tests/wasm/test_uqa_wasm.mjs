@@ -11,8 +11,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { noriEnabled, runNoriBindings } from "../parity/nori/bindings.mjs";
 
-import {
+const {
   Engine,
   HttpEngine,
   HttpEngineError,
@@ -20,7 +23,9 @@ import {
   UQA,
   vector,
   tensor,
-} from "../../crates/uqa-wasm/js/index.mjs";
+} = await import(process.env.UQA_TEST_PACKAGE
+  ? pathToFileURL(resolve(process.env.UQA_TEST_PACKAGE)).href
+  : "../../crates/uqa-wasm/js/index.mjs");
 
 test("HTTP engine executes SQL, atomic batches, and streams", async (context) => {
   const originalFetch = globalThis.fetch;
@@ -296,6 +301,31 @@ test("sql, params, vector, tensor, and cypher surfaces", async () => {
   assert.deepEqual(cypher.rows, [{ name: "Ada" }]);
 
   await assert.rejects(engine.sql("SELECT FROM FROM"), /error|syntax/i);
+});
+
+test("WASM Nori diagnostics match the requested feature configuration", async () => {
+  const engine = await Engine.inMemory();
+  const listed = await engine.sql(
+    "SELECT analyzer_name FROM list_analyzers() ORDER BY analyzer_name",
+  );
+  assert.equal(listed.rows.some((row) => row.analyzer_name === "nori"), noriEnabled);
+  if (!noriEnabled) {
+    await assert.rejects(engine.sql("SELECT * FROM analyze_text('nori', '나물은')"), /is not registered/);
+    await engine.close();
+    return;
+  }
+
+  const result = await engine.sql("SELECT analysis FROM analyze_text('nori', '나물은')");
+  assert.deepEqual(result.columns, ["analysis"]);
+  const analysis = result.rows[0].analysis;
+  assert.equal(analysis.analyzer_fingerprint.length, 64);
+  assert.equal(analysis.final_offsets.utf16.end, 3);
+  assert.ok(analysis.tokens.some((token) => "korean_morphology" in token));
+  await engine.close();
+});
+
+test("Nori user dictionaries and retained graph revisions survive WASM reopen", async () => {
+  await runNoriBindings((path) => Engine.open(path), `${UQA.persistDir}/nori-bindings.db`, noriEnabled);
 });
 
 test("value round-trip through documents", async () => {

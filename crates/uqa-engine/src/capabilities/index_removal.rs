@@ -79,8 +79,21 @@ impl IndexRemovalPublication for Engine {
     ) -> StorageBackendResult<Option<CatalogIndexRow>> {
         self.try_drop_catalog_index_relation(relation)
     }
-    fn drop_fts_field(&self, table: &str, field: &str) -> Result<(), String> {
-        Engine::drop_fts_field(self, table, field)
+    fn drop_fts_field(&self, table: &str, field: &str) -> Result<(), SQLError> {
+        Engine::drop_fts_field(self, table, field).map_err(|error| {
+            match self.runtime.cancellation.check() {
+                Err(cancelled) => SQLError::Cancelled(cancelled),
+                Ok(()) => SQLError::Internal(error),
+            }
+        })
+    }
+    fn release_fts_analyzer_owner(&self, table: &str, field: &str) -> Result<(), SQLError> {
+        Engine::release_fts_analyzer_owner(self, table, field).map_err(|error| {
+            match self.runtime.cancellation.check() {
+                Err(cancelled) => SQLError::Cancelled(cancelled),
+                Ok(()) => SQLError::Internal(error),
+            }
+        })
     }
     fn drop_vector_field_index(
         &self,

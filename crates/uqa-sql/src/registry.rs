@@ -60,8 +60,7 @@ pub enum FunctionKind {
     StagedRetrieval,
     /// `deep_predict(model_name)` - runs the saved deep-fusion model.
     DeepPredict,
-    /// `uqa_highlight(field, query [, start_tag, end_tag, max_fragments,
-    /// fragment_size])` - markup search results around matched terms.
+    /// `uqa_highlight(field, query [, start_tag, end_tag, max_fragments, fragment_size, analyzer])` - markup search results around matched terms.
     UQAHighlight,
     /// `uqa_facets(field [, field2, ...])` - facet counts over the
     /// posting list, computed against the current row context.

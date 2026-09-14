@@ -6,6 +6,8 @@
 
 //! Legacy catalog namespace discovery and atomic relation migration.
 
+use super::analyzers::field_binding_prefix;
+
 use super::physical_indexes::table_index_prefixes;
 use super::records::{
     LegacySequenceState, LegacyStoredForeignTable, LegacyStoredView, LegacyTableSchema,
@@ -450,6 +452,7 @@ pub(super) fn table_data_prefixes(table_name: &str) -> StorageBackendResult<Vec<
     let mut prefixes = vec![
         document_key_prefix(table_name)?,
         posting_key_prefix(table_name)?,
+        super::super::occurrence_keys::table_prefix(table_name)?,
         posting_cluster_score_key_prefix(table_name)?,
         posting_cluster_positions_key_prefix(table_name)?,
         posting_document_key_prefix(table_name)?,
@@ -459,6 +462,7 @@ pub(super) fn table_data_prefixes(table_name: &str) -> StorageBackendResult<Vec<
         vector_key_prefix(table_name)?,
         column_stats_prefix(table_name)?,
         table_field_analyzer_prefix(table_name)?,
+        field_binding_prefix(table_name)?,
     ];
     prefixes.extend(table_index_prefixes(table_name)?);
     Ok(prefixes)

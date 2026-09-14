@@ -1,0 +1,761 @@
+{
+  "schema_version": 1,
+  "status": "The source, archive, and report identities below record verified checkpoints. Merge acceptance requires successful checks at the final PR head and complete native/WASM/macOS SQL timing results under the unchanged gates; final run IDs and outcomes are recorded in PR 106.",
+  "python": {
+    "revision": "b824bb1ca54e75af464086fba7b19a32f7455d45",
+    "run": "https://github.com/cognica-io/uqa-engine/actions/runs/34783363431",
+    "full_matrix_passed": true,
+    "six_wheels_and_source_archive_verified": true,
+    "archives": [
+      {
+        "filename": "uqa-0.2.3-cp38-abi3-macosx_10_12_x86_64.whl",
+        "artifact_id": 10325619706,
+        "bytes": 47064029,
+        "sha256": "94ece078924c199efb2041a2d75705846231cfaa63a5e2d7f4ce8f9340fa93ad"
+      },
+      {
+        "filename": "uqa-0.2.3-cp38-abi3-macosx_11_0_arm64.whl",
+        "artifact_id": 10326830893,
+        "bytes": 44047764,
+        "sha256": "e0c4801d8d8634a534314995a4ea1dbd83022239f77fe5c5ed53836be8d6fddb"
+      },
+      {
+        "filename": "uqa-0.2.3-cp38-abi3-manylinux_2_28_aarch64.whl",
+        "artifact_id": 10325419965,
+        "bytes": 47029000,
+        "sha256": "9aed9de02aa23f6176e40f62943a4f081fe5d7b3a590602dde9f34676190f63b"
+      },
+      {
+        "filename": "uqa-0.2.3-cp38-abi3-manylinux_2_28_x86_64.whl",
+        "artifact_id": 10326118166,
+        "bytes": 50434343,
+        "sha256": "06a3cabaab03205b8cab4008f75637b3d7728a4e88699ba867e757cb88f69bc6"
+      },
+      {
+        "filename": "uqa-0.2.3-cp38-abi3-win_amd64.whl",
+        "artifact_id": 10325659809,
+        "bytes": 46000699,
+        "sha256": "437793e85d334797ec9bf4cf0002d97b328e6b52040fba0a5c49a60afc242394"
+      },
+      {
+        "filename": "uqa-0.2.3-cp38-abi3-win_arm64.whl",
+        "artifact_id": 10325644361,
+        "bytes": 44158241,
+        "sha256": "163989c60add0783ae6de0eaa156b7ccc3636b1efb9c1220f2fb10f8d17bda5a"
+      },
+      {
+        "filename": "uqa-0.2.3.tar.gz",
+        "artifact_id": 10324474794,
+        "bytes": 15683673,
+        "sha256": "45eb633e1dd384be77004e61fa8342128f314bccfb44c5bcb46fce26a7ab4d4d"
+      }
+    ],
+    "diagnostics": [
+      {
+        "id": 10325708927,
+        "name": "nori-python-aarch64-apple-darwin-b824bb1ca54e75af464086fba7b19a32f7455d45",
+        "sha256": "3f0a4158d383450598461b46c0edebd0d34d311f03eed216c963faef2d9d246a",
+        "full_contract_equal": true
+      },
+      {
+        "id": 10325783897,
+        "name": "nori-python-aarch64-pc-windows-msvc-b824bb1ca54e75af464086fba7b19a32f7455d45",
+        "sha256": "e2e7bb9ee9baa7e8b837c8a5b89b7d7e6af712516cc83a9343fa7c7140704a1a",
+        "full_contract_equal": true
+      },
+      {
+        "id": 10326381046,
+        "name": "nori-python-aarch64-unknown-linux-gnu-b824bb1ca54e75af464086fba7b19a32f7455d45",
+        "sha256": "3f0a4158d383450598461b46c0edebd0d34d311f03eed216c963faef2d9d246a",
+        "full_contract_equal": true
+      },
+      {
+        "id": 10325912236,
+        "name": "nori-python-smoke-b824bb1ca54e75af464086fba7b19a32f7455d45",
+        "sha256": "3f0a4158d383450598461b46c0edebd0d34d311f03eed216c963faef2d9d246a",
+        "full_contract_equal": true
+      },
+      {
+        "id": 10326492202,
+        "name": "nori-python-x86_64-apple-darwin-b824bb1ca54e75af464086fba7b19a32f7455d45",
+        "sha256": "3f0a4158d383450598461b46c0edebd0d34d311f03eed216c963faef2d9d246a",
+        "full_contract_equal": true
+      },
+      {
+        "id": 10325759130,
+        "name": "nori-python-x86_64-pc-windows-msvc-b824bb1ca54e75af464086fba7b19a32f7455d45",
+        "sha256": "e2e7bb9ee9baa7e8b837c8a5b89b7d7e6af712516cc83a9343fa7c7140704a1a",
+        "full_contract_equal": true
+      },
+      {
+        "id": 10325908707,
+        "name": "nori-python-x86_64-unknown-linux-gnu-b824bb1ca54e75af464086fba7b19a32f7455d45",
+        "sha256": "3f0a4158d383450598461b46c0edebd0d34d311f03eed216c963faef2d9d246a",
+        "full_contract_equal": true
+      }
+    ],
+    "executed_scope": "All six installed wheels pass the Python package tests, Python examples, CLI checks, and full Nori diagnostic export in their CI jobs. Enabled/disabled smoke and minimum supported Python also pass in the same workflow."
+  },
+  "javascript": {
+    "revision": "b824bb1ca54e75af464086fba7b19a32f7455d45",
+    "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34783366108",
+    "full_matrix_passed": true,
+    "node_artifact_id": 10327330068,
+    "wasm_artifact_id": 10325628192,
+    "complete_npm_inventory_passed": true,
+    "exact_notices_and_embedded_bundle_passed": true,
+    "archives": [
+      {
+        "package": "@cognica-io/uqa",
+        "filename": "cognica-io-uqa-0.2.3.tgz",
+        "artifact_id": 10327330068,
+        "bytes": 56262,
+        "sha256": "c5580b273ec24fa8e5c57011c3414b63c82ca46ce1ea8e88f5c5c9e4713e7391"
+      },
+      {
+        "package": "@cognica-io/uqa-darwin-arm64",
+        "filename": "cognica-io-uqa-darwin-arm64-0.2.3.tgz",
+        "artifact_id": 10327330068,
+        "bytes": 43140776,
+        "sha256": "0bc0d6f553e74aa08a3230965a10e2c986b9667b591c6b28ad72129847d6ed2f"
+      },
+      {
+        "package": "@cognica-io/uqa-darwin-x64",
+        "filename": "cognica-io-uqa-darwin-x64-0.2.3.tgz",
+        "artifact_id": 10327330068,
+        "bytes": 45539058,
+        "sha256": "7c481e0837ccfd675fb7e194e6b43a44602aa023f2921627ff5f88c4d4e61769"
+      },
+      {
+        "package": "@cognica-io/uqa-linux-arm64-gnu",
+        "filename": "cognica-io-uqa-linux-arm64-gnu-0.2.3.tgz",
+        "artifact_id": 10327330068,
+        "bytes": 46567709,
+        "sha256": "fef5e17d496c93487f674012023ca4d0c171d2a59fcea917fab3971d21c0d95f"
+      },
+      {
+        "package": "@cognica-io/uqa-linux-x64-gnu",
+        "filename": "cognica-io-uqa-linux-x64-gnu-0.2.3.tgz",
+        "artifact_id": 10327330068,
+        "bytes": 49160900,
+        "sha256": "95559ab0ea698e58c0269e1d3bc0323fe5571a85ae0ab5c692a784046277f9a0"
+      },
+      {
+        "package": "@cognica-io/uqa-wasm",
+        "filename": "cognica-io-uqa-wasm-0.2.3.tgz",
+        "artifact_id": 10325628192,
+        "bytes": 22280771,
+        "sha256": "313f3350ceb659fdadd6a02ddd3b85ce184deaf6584d01f096c171f036a55c6b"
+      },
+      {
+        "package": "@cognica-io/uqa-win32-arm64-msvc",
+        "filename": "cognica-io-uqa-win32-arm64-msvc-0.2.3.tgz",
+        "artifact_id": 10327330068,
+        "bytes": 43894361,
+        "sha256": "f06aa6c8310315301f040b62e7564260b79d1f126cc1b5c1db56eb6fd763e5f0"
+      },
+      {
+        "package": "@cognica-io/uqa-win32-x64-msvc",
+        "filename": "cognica-io-uqa-win32-x64-msvc-0.2.3.tgz",
+        "artifact_id": 10327330068,
+        "bytes": 44843155,
+        "sha256": "df75276656109c4935d239680aedd9c6d1ced636de3c82896ecabc215874be29"
+      }
+    ],
+    "executed_ci_scope": "All six native addons pass package tests and examples in their platform jobs; the assembled root/platform inventory and WASM archive pass the release contract checks.",
+    "installed_package_test": {
+      "revision": "b824bb1ca54e75af464086fba7b19a32f7455d45",
+      "artifact_id": 10327330068,
+      "command": "UQA_TEST_PACKAGE=<extracted root npm package> node --test tests/node/test_uqa_node.mjs",
+      "passed": 17,
+      "failed": 0,
+      "skipped": 0,
+      "scope": "The extracted root package loads the extracted macOS arm64 platform package through its published loader and passes the SQL, callback, HTTP, complete persistent Nori, and reopen tests.",
+      "log_sha256": "cd568405d4683306f6188d8f79c7a4946889e0a665acbead4cbfd10a58221940"
+    }
+  },
+  "installed_package_tests": {
+    "wasm": {
+      "revision": "b824bb1ca54e75af464086fba7b19a32f7455d45",
+      "artifact_id": 10325628192,
+      "archive_sha256": "313f3350ceb659fdadd6a02ddd3b85ce184deaf6584d01f096c171f036a55c6b",
+      "command": "UQA_TEST_PACKAGE=<extracted CI package>/index.mjs node --test tests/wasm/test_uqa_wasm.mjs",
+      "passed": 11,
+      "failed": 0,
+      "log_sha256": "efd1f4118d929e0d5fe14c38fafbb9a3544adf937164fad6b500759eb52cc2ff",
+      "scope": "Existing wrapper, HTTP, SQL, callbacks, full persistent Nori binding contract, and virtual-filesystem reopen tests through the extracted npm archive; real IndexedDB browser verification is recorded by CI separately."
+    },
+    "python": {
+      "revision": "b824bb1ca54e75af464086fba7b19a32f7455d45",
+      "run": "https://github.com/cognica-io/uqa-engine/actions/runs/34783363431",
+      "platforms": 6,
+      "scope": "All six installed wheels pass the Python package tests, Python examples, CLI checks, and full Nori diagnostic export in their CI jobs. Enabled/disabled smoke and minimum supported Python also pass in the same workflow."
+    },
+    "node": {
+      "revision": "b824bb1ca54e75af464086fba7b19a32f7455d45",
+      "artifact_id": 10327330068,
+      "command": "UQA_TEST_PACKAGE=<extracted root npm package> node --test tests/node/test_uqa_node.mjs",
+      "passed": 17,
+      "failed": 0,
+      "skipped": 0,
+      "scope": "The extracted root package loads the extracted macOS arm64 platform package through its published loader and passes the SQL, callback, HTTP, complete persistent Nori, and reopen tests.",
+      "log_sha256": "cd568405d4683306f6188d8f79c7a4946889e0a665acbead4cbfd10a58221940"
+    }
+  },
+  "rust": {
+    "revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+    "all_23_archives_and_licenses_verified": true,
+    "all_normalized_manifests_dependencies_and_features_verified": true,
+    "compilation_claim": "cargo package --no-verify, byte-exact current source inspection, and extracted offline Cargo metadata; does not claim compilation of every archive",
+    "archives": [
+      {
+        "name": "uqa",
+        "filename": "uqa-0.2.3.crate",
+        "bytes": 47913,
+        "sha256": "92937e249474b254aa154a3ad8fae759add3f89e8eb3f8f5889ec4d52794c9d8",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 1,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 18
+      },
+      {
+        "name": "uqa-analysis",
+        "filename": "uqa-analysis-0.2.3.crate",
+        "bytes": 195131,
+        "sha256": "cbb25786d75b795fb65c23de322e945863e61830c14c1dff36026641c24a774f",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 123,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 2
+      },
+      {
+        "name": "uqa-api",
+        "filename": "uqa-api-0.2.3.crate",
+        "bytes": 59325,
+        "sha256": "ff20204c720f543a687878dfbd1fecc14896678b4591fbe0a8f485ed0991ef19",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 5,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 16
+      },
+      {
+        "name": "uqa-cli",
+        "filename": "uqa-cli-0.2.3.crate",
+        "bytes": 74620,
+        "sha256": "f725263f53870e280d331734872287247df2e1e2d48476d8ab69e31f4373b672",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 10,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 17
+      },
+      {
+        "name": "uqa-client",
+        "filename": "uqa-client-0.2.3.crate",
+        "bytes": 55533,
+        "sha256": "beef3bdfa794173f342bdf673f7a94ba8af25e759f7d8de45067f175367b9bb5",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 11,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 3
+      },
+      {
+        "name": "uqa-core",
+        "filename": "uqa-core-0.2.3.crate",
+        "bytes": 94534,
+        "sha256": "f2e4f8edadc6342a4f5d33f73ef1711af804b181dcac73bc020f9a587a0ac6e7",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 45,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 0
+      },
+      {
+        "name": "uqa-engine",
+        "filename": "uqa-engine-0.2.3.crate",
+        "bytes": 403465,
+        "sha256": "6424f4b68a86179be1a75f90359dec7668483a908bc26ea56fc69c6fccd4af76",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 270,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 17
+      },
+      {
+        "name": "uqa-execution",
+        "filename": "uqa-execution-0.2.3.crate",
+        "bytes": 850017,
+        "sha256": "e703bb3fa48e7fcfb402bc5fd8a58e03e40fb44f17838b45ee23b6036b6197fd",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 617,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 12
+      },
+      {
+        "name": "uqa-fdw",
+        "filename": "uqa-fdw-0.2.3.crate",
+        "bytes": 47502,
+        "sha256": "e2a26f79a89b5689ed6877758c24e2e777861fe8154054b248312bdb1cd0c03d",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 6,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 1
+      },
+      {
+        "name": "uqa-fusion",
+        "filename": "uqa-fusion-0.2.3.crate",
+        "bytes": 41063,
+        "sha256": "f7406151d01f99cc057b99db613b61f2cfdced70b72843a29b66f43d7065d9fd",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 7,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 4
+      },
+      {
+        "name": "uqa-graph",
+        "filename": "uqa-graph-0.2.3.crate",
+        "bytes": 144321,
+        "sha256": "89047d7ff430d2d98aa1a4bd390353215dc323aad51bae8b233458b3eec93df9",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 62,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 6
+      },
+      {
+        "name": "uqa-joins",
+        "filename": "uqa-joins-0.2.3.crate",
+        "bytes": 38180,
+        "sha256": "e75d3be992690b16bd0ae565efadd680a62649558978bea84a4b38d7fb99683d",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 3,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 9
+      },
+      {
+        "name": "uqa-ml",
+        "filename": "uqa-ml-0.2.3.crate",
+        "bytes": 52085,
+        "sha256": "e5e1012c818f846b0805200093718225d238018f956fe709673c9b8ce9817944",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 17,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 6
+      },
+      {
+        "name": "uqa-nori-data",
+        "filename": "uqa-nori-data-0.2.3.crate",
+        "bytes": 9682095,
+        "sha256": "f6a44dc1a8e06d470a587b036a918a92dd6c108e0e43257d5f0866ef859e1102",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 1,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 0
+      },
+      {
+        "name": "uqa-operators",
+        "filename": "uqa-operators-0.2.3.crate",
+        "bytes": 74061,
+        "sha256": "c2fa37b7e932dd38b496e105e6dae3318c6967ae498971630665a55ff8be1d15",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 21,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 5
+      },
+      {
+        "name": "uqa-pg-query",
+        "filename": "uqa-pg-query-0.2.3.crate",
+        "bytes": 2314693,
+        "sha256": "d35f9330f3cb915640cc124dbe4f22e0a396cfa4a9625e691125d509283482d4",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 14,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 0
+      },
+      {
+        "name": "uqa-pg-wire",
+        "filename": "uqa-pg-wire-0.2.3.crate",
+        "bytes": 31362,
+        "sha256": "828470ea82d4c61d5449c3c2635ad104058d212d402e11803257d85670daef4b",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 6,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 0
+      },
+      {
+        "name": "uqa-planner",
+        "filename": "uqa-planner-0.2.3.crate",
+        "bytes": 146468,
+        "sha256": "0e7002de55f5b730db1f3f4577ba8a7ec80812b99aa68f361a24e8afb4a24cab",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 76,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 13
+      },
+      {
+        "name": "uqa-scoring",
+        "filename": "uqa-scoring-0.2.3.crate",
+        "bytes": 83695,
+        "sha256": "cfb9901f5486e70be4319efbba81b518989821693e6c56ca43522de31e597d46",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 35,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 3
+      },
+      {
+        "name": "uqa-sql",
+        "filename": "uqa-sql-0.2.3.crate",
+        "bytes": 893668,
+        "sha256": "c1dd1f1a6b3ac07716f12052a51c8dc16f21fc5954f8baf38981695022c8cb5b",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 549,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 2
+      },
+      {
+        "name": "uqa-storage",
+        "filename": "uqa-storage-0.2.3.crate",
+        "bytes": 198317,
+        "sha256": "7f3f4a3262e13355c398f4e1bd4fdf8cd21b87b6a4ca904b76b54133ed030658",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 131,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 2
+      },
+      {
+        "name": "uqa-storage-redb",
+        "filename": "uqa-storage-redb-0.2.3.crate",
+        "bytes": 29934,
+        "sha256": "657ddc0beecb94445fa5173f5ca71285f6faac8bae7512b8ec5710fe26bcc4ab",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 5,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 3
+      },
+      {
+        "name": "uqa-storage-sqlite",
+        "filename": "uqa-storage-sqlite-0.2.3.crate",
+        "bytes": 208671,
+        "sha256": "7112b794790743b1fb2ef1773ed086333093593428ed07c6fd335baffe437cba",
+        "vcs_revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+        "source_files_verified": 154,
+        "normalized_manifest_parsed": true,
+        "dependencies_and_features_match": true,
+        "benchmarks_excluded": true,
+        "internal_archive_checksums_verified": 7
+      }
+    ],
+    "updated_bootstrap_preflight": {
+      "crate": "uqa-core",
+      "revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+      "command": "cargo publish --dry-run -p uqa-core --locked",
+      "verified_archive_sha256": "f2e4f8edadc6342a4f5d33f73ef1711af804b181dcac73bc020f9a587a0ac6e7",
+      "compilation_verified": true,
+      "upload_suppressed": true,
+      "log_sha256": "d5dabc49b59a63cec84e6161d12272ca2035d94dc87f45eac6d374e23e914aca",
+      "unchanged_previously_compiled_bootstrap_crates": [
+        "uqa-pg-query",
+        "uqa-nori-data",
+        "uqa-pg-wire"
+      ],
+      "previous_bootstrap_revision": "fe36f0af",
+      "previous_compiled_archives": [
+        {
+          "crate": "uqa-pg-query",
+          "filename": "uqa-pg-query-0.2.3.crate",
+          "bytes": 2314689,
+          "sha256": "a24fe95634f55f2db2ccf4f2496cf4c4b57e25d1735ccd0cea743253efc972df"
+        },
+        {
+          "crate": "uqa-nori-data",
+          "filename": "uqa-nori-data-0.2.3.crate",
+          "bytes": 9682094,
+          "sha256": "ef28033a7417f4483323cd047c9a0912aa8fbeebe615a7a4e87bb817442b1940"
+        },
+        {
+          "crate": "uqa-core",
+          "filename": "uqa-core-0.2.3.crate",
+          "bytes": 94332,
+          "sha256": "54663d6dc05e935a54e93b00e1e77d3624ba6ecc101c5f324339cc5404a9ff79"
+        },
+        {
+          "crate": "uqa-pg-wire",
+          "filename": "uqa-pg-wire-0.2.3.crate",
+          "bytes": 31360,
+          "sha256": "71f34ae78003ad852d008167f69e95b8cc403929d0ad74f9ccca15478304ad9c"
+        }
+      ],
+      "unchanged_input_scope": "uqa-pg-query, uqa-nori-data, uqa-pg-wire, and the workspace Cargo.toml/Cargo.lock are byte-identical to fe36f0af. The changed uqa-core archive was compiled separately at bbef474a."
+    }
+  },
+  "current_ci_report_verification": {
+    "revision": "bbef474a71ca07031b5422c6ce06a885831152da",
+    "reports": [
+      {
+        "artifact_id": 10326296360,
+        "artifact_path": "nori-index-native.json",
+        "sha256": "8bee7fdf9c73cb69ad3b14a49a685bc6c94aa017029c34cb115cd6cd499ee7a2",
+        "gate": {
+          "allocation_and_graph_passed": true,
+          "timing_compared": false,
+          "timing_ratios": {}
+        },
+        "source_and_lock_identities_verified": true,
+        "workloads": 5
+      },
+      {
+        "artifact_id": 10326296360,
+        "artifact_path": "nori-native.json",
+        "sha256": "58d7cc23439d1a56006d39d9912e5a7a4bd7fa6509e0bb545fdcc320b37755d7",
+        "gate": {
+          "allocation_and_output_passed": true,
+          "timing_compared": false,
+          "timing_ratios": {}
+        },
+        "source_and_lock_identities_verified": true,
+        "workloads": 39
+      },
+      {
+        "artifact_id": 10326296360,
+        "artifact_path": "nori-phrase-native.json",
+        "sha256": "9fa2b0e1604efcf62b590ebb911fc6e93e17e1ceb7df39f3acae4d5a738a1c53",
+        "gate": {
+          "allocation_and_rows_passed": true,
+          "timing_compared": false,
+          "timing_ratios": {}
+        },
+        "source_and_lock_identities_verified": true,
+        "workloads": 36
+      },
+      {
+        "artifact_id": 10326296360,
+        "artifact_path": "nori-redb-native.json",
+        "sha256": "f3cf4d871485e05e2035a5add7281ea57d2fd6a7538666c9a2f9869bc7e27a80",
+        "gate": {
+          "allocation_and_graph_passed": true,
+          "timing_compared": false,
+          "timing_ratios": {}
+        },
+        "source_and_lock_identities_verified": true,
+        "workloads": 4
+      },
+      {
+        "artifact_id": 10326296360,
+        "artifact_path": "nori-sqlite-native.json",
+        "sha256": "70a85e9eeb4b1af3f388557be193c2f331c2134babbd28efbff658ed7abd813e",
+        "gate": {
+          "allocation_and_graph_passed": true,
+          "timing_compared": false,
+          "timing_ratios": {}
+        },
+        "source_and_lock_identities_verified": true,
+        "workloads": 4
+      },
+      {
+        "artifact_id": 10326435155,
+        "artifact_path": "nori-cancellation-native-baseline.json",
+        "sha256": "fccbb331eb28f2773e6193d477ae08ce1b7e7120b6124feecbb7e83b893ec9b6",
+        "allocation_and_recovery_passed": true,
+        "source_and_lock_identities_verified": true,
+        "workloads": 108
+      },
+      {
+        "artifact_id": 10326435155,
+        "artifact_path": "nori-cancellation-native-repeat.json",
+        "sha256": "709f7957abaa2371b856c5a1573e607d6f47c8a04800fb5fe7c3306bf8efc66f",
+        "allocation_and_recovery_passed": true,
+        "source_and_lock_identities_verified": true,
+        "workloads": 108,
+        "bidirectional_timing_passed": true,
+        "maximum_bidirectional_timing_ratio": 1.0609028921879657
+      },
+      {
+        "artifact_id": 10326321990,
+        "artifact_path": "nori-index-wasm.json",
+        "sha256": "01ca3874a09d100bbada9f71b0c5585eaa73c8bd71f3a3c59af73f364db81e50",
+        "gate": {
+          "allocation_and_graph_passed": true,
+          "timing_compared": false,
+          "timing_ratios": {}
+        },
+        "source_and_lock_identities_verified": true,
+        "workloads": 5
+      },
+      {
+        "artifact_id": 10326321990,
+        "artifact_path": "nori-phrase-wasm.json",
+        "sha256": "6fb448e7d3f7f612a21c067bf97346b47c3be1563cca413fcdec8a57e60a4d9d",
+        "gate": {
+          "allocation_and_rows_passed": true,
+          "timing_compared": false,
+          "timing_ratios": {}
+        },
+        "source_and_lock_identities_verified": true,
+        "workloads": 36
+      },
+      {
+        "artifact_id": 10326321990,
+        "artifact_path": "nori-sqlite-wasm.json",
+        "sha256": "1a5d9e84187f5a23959c7ec5061858367e1c1e82938d3353dd59952a1f063057",
+        "gate": {
+          "allocation_and_graph_passed": true,
+          "timing_compared": false,
+          "timing_ratios": {}
+        },
+        "source_and_lock_identities_verified": true,
+        "workloads": 4
+      },
+      {
+        "artifact_id": 10326321990,
+        "artifact_path": "nori-wasm.json",
+        "sha256": "891f51880c1d837665c9e70e9c0240235a8c388cec610658cf299aa399950973",
+        "gate": {
+          "allocation_and_output_passed": true,
+          "timing_compared": false,
+          "timing_ratios": {}
+        },
+        "source_and_lock_identities_verified": true,
+        "workloads": 39
+      },
+      {
+        "artifact_id": 10326266311,
+        "artifact_path": "nori-cancellation-wasm-baseline.json",
+        "sha256": "30fb5f532684aefcd44caa2803d103049182028332f04d9791ea891421933da9",
+        "allocation_and_recovery_passed": true,
+        "source_and_lock_identities_verified": true,
+        "workloads": 108
+      },
+      {
+        "artifact_id": 10326266311,
+        "artifact_path": "nori-cancellation-wasm-repeat.json",
+        "sha256": "fd94cc521c1f0affcd5851217c522826b416654f4ceccba8cfd9700e8f2879bc",
+        "allocation_and_recovery_passed": true,
+        "source_and_lock_identities_verified": true,
+        "workloads": 108,
+        "bidirectional_timing_passed": true,
+        "maximum_bidirectional_timing_ratio": 1.1035505357898847
+      },
+      {
+        "artifact_id": 10325823911,
+        "artifact_path": "nori-enabled/report.json",
+        "sha256": "fab6d6a715eb99e0d4aa30e05d37e83fb8828829902cc4c009c520a8ccc60b75",
+        "source_and_lock_identities_verified": true,
+        "verified_runs": 3,
+        "page_loads": 9,
+        "persistent_reopens": 6,
+        "diagnostic_comparisons": 54,
+        "memory_observations": 144,
+        "max_observed_bytes": 143762330
+      },
+      {
+        "artifact_id": 10325823911,
+        "artifact_path": "nori-disabled/report.json",
+        "sha256": "cf0472c57852cc2d6763bcc680490fab7e16ca967747ff98fde1fd7309d9e3ce",
+        "source_and_lock_identities_verified": true,
+        "verified_runs": 3,
+        "page_loads": 6,
+        "persistent_reopens": 3,
+        "diagnostic_comparisons": 0,
+        "memory_observations": 21,
+        "max_observed_bytes": 29526667
+      },
+      {
+        "artifact_id": 10326310922,
+        "artifact_path": "nori-browser-native-diagnostics.json",
+        "sha256": "3f0a4158d383450598461b46c0edebd0d34d311f03eed216c963faef2d9d246a",
+        "complete_contract_equal": true,
+        "checks": 18
+      },
+      {
+        "artifact_id": 10325807052,
+        "artifact_path": "nori-reference-model/model_manifest.json",
+        "sha256": "4dcc735ed00862d2558d08af39256e933c6c59dd0b4fc13dd5f0a7d27977b699",
+        "complete_pinned_manifest_equal": true,
+        "pinned_manifest": "tests/parity/nori/model_manifest.json"
+      },
+      {
+        "artifact_id": 10325807052,
+        "artifact_path": "nori-csv-regeneration/regeneration_manifest.json",
+        "sha256": "a0071883c66114403493f7438817594270c36f529996dc4d7d486bc219a54ca1",
+        "complete_pinned_manifest_equal": true,
+        "pinned_manifest": "tests/parity/nori/csv_manifest.json"
+      }
+    ],
+    "scope": "Downloaded CI reports were checked against bbef474a sources, complete output contracts, original allocation gates, and both cancellation timing directions. This checkpoint predates the storage snapshot fix. Binary hashes reported by CI were not independently rehashed by this report audit.",
+    "rust_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34783732405",
+    "javascript_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34783734980",
+    "python_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34783737460"
+  },
+  "current_source_distribution": {
+    "revision": "b824bb1ca54e75af464086fba7b19a32f7455d45",
+    "artifact_id": 10324474794,
+    "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34783363431",
+    "filename": "uqa-0.2.3.tar.gz",
+    "bytes": 15683673,
+    "sha256": "45eb633e1dd384be77004e61fa8342128f314bccfb44c5bcb46fce26a7ab4d4d",
+    "all_benchmark_inputs_verified": true,
+    "benchmark_input_files": 53,
+    "runtime_sources_and_manifests_verified": 2816,
+    "packaged_crates": 21,
+    "manifest_normalization": "Only crates/uqa-python/Cargo.toml resolves the inherited README to its byte-identical packaged copy; every other original crate manifest matches.",
+    "both_embedded_catalogs_identical": true,
+    "canonical_licenses_and_exact_nori_resources": true,
+    "extracted_workspace_metadata_verified": true,
+    "removed_foreground_launcher_absent": true,
+    "scope": "CI source archive is byte-identical to the independently inspected local b824bb1c archive. All runtime sources, crate manifests, and 53 packaged benchmark inputs match bbef474a; locked offline metadata resolves from the extracted workspace."
+  },
+  "required_ci": {
+    "pull_request": "https://github.com/cognica-io/uqa-engine/pull/106",
+    "required_head_checks": [
+      "cargo fmt",
+      "pre-merge CI"
+    ],
+    "sql_contract": "benchmarks/nori/SQL.md",
+    "sql_timing_ceiling": 1.44,
+    "native_and_wasm": "Both complete SQL pairs must pass output, allocation, and timing checks in both directions.",
+    "isolated_macos_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34783983872",
+    "isolated_macos_revision": "d71ae449ea19fd0a858f7698a3251d7fa3fee0bc",
+    "isolated_macos_source_equivalence": "This pre-fix run differs from bbef474a only in workflow runner selection. It passes all 102 output/allocation checks but fails timing at 1.513. Subsequent source acceptance requires a successful complete macOS pair under the unchanged gates; PR 106 records that verification.",
+    "results_location": "PR 106 records final CI outcomes without creating another source revision merely to update status."
+  }
+}

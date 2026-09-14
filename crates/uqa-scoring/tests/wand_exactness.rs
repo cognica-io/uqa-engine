@@ -80,7 +80,7 @@ fn exhaustive_top_k(
                 continue;
             }
             let df = idx.doc_freq(&fields[i], term).unwrap();
-            let dl = idx.get_doc_length(doc_id, &fields[i]).unwrap().max(tf);
+            let dl = idx.get_doc_length(doc_id, &fields[i]).unwrap();
             term_scores.push(scorers[i].term_score(tf, dl, df));
         }
         let total = scorers[0].finalize_score(&term_scores);

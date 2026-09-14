@@ -26,6 +26,8 @@ use uqa_storage::{
 
 const KEY_VALUE_TABLE: &str = "_key_value";
 
+mod controlled;
+
 #[derive(Debug, Clone)]
 enum SQLiteKeyValueBatchOperation {
     Put(Vec<u8>, Vec<u8>),
@@ -92,6 +94,57 @@ impl SQLiteKeyValueStore {
 }
 
 impl KeyValueStore for SQLiteKeyValueStore {
+    fn contains_prefix_budgeted(
+        &self,
+        prefix: &[u8],
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        control.check()?;
+        self.ensure_table()?;
+        Ok(self
+            .conn
+            .with(|connection| controlled::contains_prefix(connection, prefix, control))?)
+    }
+
+    fn visit_value(
+        &self,
+        key: &[u8],
+        control: &uqa_storage::read_control::StorageReadControl,
+        visit: &mut uqa_storage::read_control::ValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        self.ensure_table()?;
+        self.conn
+            .with(|connection| {
+                crate::read_control::read_snapshot(connection, |connection| {
+                    controlled::value(connection, key, control, visit)
+                })
+            })
+            .map_err(Into::into)
+    }
+
+    fn visit_prefix_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &uqa_storage::read_control::StorageReadControl,
+        visit: &mut uqa_storage::read_control::KeyValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        if limit == 0 {
+            return Ok(());
+        }
+        self.ensure_table()?;
+        self.conn
+            .with(|connection| {
+                crate::read_control::read_snapshot(connection, |connection| {
+                    controlled::prefix(connection, prefix, after, limit, control, visit)
+                })
+            })
+            .map_err(Into::into)
+    }
+
     fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
         let Some(path) = self.conn.database_path() else {
             return Ok(None);

@@ -1,0 +1,615 @@
+{
+  "schema_version": 1,
+  "diagnostic": [
+    {
+      "analysis": {
+        "analyzer_fingerprint": "004e71dfc59fbfa9b12e54ae1d93707d7ef3cbe96710494668746a14033f8cad",
+        "final_offsets": {
+          "utf16": {
+            "end": 5,
+            "start": 5
+          },
+          "utf8": {
+            "end": 13,
+            "start": 13
+          }
+        },
+        "final_position_increment": 0,
+        "tokens": [
+          {
+            "filtered_utf16": {
+              "end": 3,
+              "start": 0
+            },
+            "keyword": false,
+            "korean_morphology": {
+              "left_pos": "NNG",
+              "morphemes": [
+                {
+                  "pos": "NNG",
+                  "surface_utf16": [
+                    49464,
+                    51333
+                  ]
+                },
+                {
+                  "pos": "NNG",
+                  "surface_utf16": [
+                    49884
+                  ]
+                }
+              ],
+              "origin": "user",
+              "pos_type": "COMPOUND",
+              "reading": null,
+              "right_pos": "NNG"
+            },
+            "offsets": {
+              "utf16": {
+                "end": 2,
+                "start": 0
+              },
+              "utf8": {
+                "end": 6,
+                "start": 0
+              }
+            },
+            "position_increment": 1,
+            "position_length": 2,
+            "term": "세종시"
+          },
+          {
+            "filtered_utf16": {
+              "end": 2,
+              "start": 0
+            },
+            "keyword": false,
+            "korean_morphology": {
+              "left_pos": "NNG",
+              "morphemes": null,
+              "origin": "user",
+              "pos_type": "MORPHEME",
+              "reading": null,
+              "right_pos": "NNG"
+            },
+            "offsets": {
+              "utf16": {
+                "end": 2,
+                "start": 0
+              },
+              "utf8": {
+                "end": 6,
+                "start": 0
+              }
+            },
+            "position_increment": 0,
+            "position_length": 1,
+            "term": "세종"
+          },
+          {
+            "filtered_utf16": {
+              "end": 3,
+              "start": 2
+            },
+            "keyword": false,
+            "korean_morphology": {
+              "left_pos": "NNG",
+              "morphemes": null,
+              "origin": "user",
+              "pos_type": "MORPHEME",
+              "reading": null,
+              "right_pos": "NNG"
+            },
+            "offsets": {
+              "utf16": {
+                "end": 2,
+                "start": 0
+              },
+              "utf8": {
+                "end": 6,
+                "start": 0
+              }
+            },
+            "position_increment": 1,
+            "position_length": 1,
+            "term": "시"
+          },
+          {
+            "filtered_utf16": {
+              "end": 6,
+              "start": 4
+            },
+            "keyword": false,
+            "korean_morphology": {
+              "left_pos": "NNG",
+              "morphemes": null,
+              "origin": "known",
+              "pos_type": "MORPHEME",
+              "reading": "학교",
+              "right_pos": "NNG"
+            },
+            "offsets": {
+              "utf16": {
+                "end": 5,
+                "start": 3
+              },
+              "utf8": {
+                "end": 13,
+                "start": 7
+              }
+            },
+            "position_increment": 1,
+            "position_length": 1,
+            "term": "학교"
+          }
+        ]
+      }
+    }
+  ],
+  "enabled": [
+    {
+      "name": "register_user_dictionary",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "binding_nori",
+        "{\"char_filters\":[{\"type\":\"mapping\",\"mapping\":{\"首都\":\"세종시\"}}],\"tokenizer\":{\"type\":\"nori_tokenizer\",\"decompound_mode\":\"mixed\",\"user_dictionary\":\"세종시 세종 시\\n\"},\"token_filters\":[{\"type\":\"nori_part_of_speech\"},{\"type\":\"nori_readingform\"},{\"type\":\"unicode_simple_lowercase\"}]}"
+      ]
+    },
+    {
+      "name": "complete_graph_and_original_offsets",
+      "sql": "SELECT analysis FROM analyze_text($1, $2)",
+      "params": [
+        "binding_nori",
+        "首都 學校"
+      ],
+      "rows_ref": "diagnostic"
+    },
+    {
+      "name": "missing_bundle",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "binding_nori",
+        "{\"char_filters\": [{\"type\": \"mapping\", \"mapping\": {\"首都\": \"세종시\"}}], \"tokenizer\": {\"type\": \"nori_tokenizer\", \"decompound_mode\": \"mixed\", \"user_dictionary\": \"세종시 세종 시\\n\", \"dictionary\": \"unavailable-nori-bundle\"}, \"token_filters\": [{\"type\": \"nori_part_of_speech\"}, {\"type\": \"nori_readingform\"}, {\"type\": \"unicode_simple_lowercase\"}]}"
+      ],
+      "error_contains": "Nori dictionary resource is unavailable"
+    },
+    {
+      "name": "missing_bundle_preserves_revision",
+      "sql": "SELECT analysis FROM analyze_text($1, $2)",
+      "params": [
+        "binding_nori",
+        "首都 學校"
+      ],
+      "rows_ref": "diagnostic"
+    },
+    {
+      "name": "invalid_user_rule",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "binding_nori",
+        "{\"char_filters\": [{\"type\": \"mapping\", \"mapping\": {\"首都\": \"세종시\"}}], \"tokenizer\": {\"type\": \"nori_tokenizer\", \"decompound_mode\": \"mixed\", \"user_dictionary\": \"세종시 세종 시청\"}, \"token_filters\": [{\"type\": \"nori_part_of_speech\"}, {\"type\": \"nori_readingform\"}, {\"type\": \"unicode_simple_lowercase\"}]}"
+      ],
+      "error_contains": "segmentation is bigger than the surface form"
+    },
+    {
+      "name": "invalid_user_rule_preserves_revision",
+      "sql": "SELECT analysis FROM analyze_text($1, $2)",
+      "params": [
+        "binding_nori",
+        "首都 學校"
+      ],
+      "rows_ref": "diagnostic"
+    },
+    {
+      "name": "missing_bundle_publishes_no_name",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "unpublished_nori",
+        "{\"char_filters\": [{\"type\": \"mapping\", \"mapping\": {\"首都\": \"세종시\"}}], \"tokenizer\": {\"type\": \"nori_tokenizer\", \"decompound_mode\": \"mixed\", \"user_dictionary\": \"세종시 세종 시\\n\", \"dictionary\": \"unavailable-nori-bundle\"}, \"token_filters\": [{\"type\": \"nori_part_of_speech\"}, {\"type\": \"nori_readingform\"}, {\"type\": \"unicode_simple_lowercase\"}]}"
+      ],
+      "error_contains": "Nori dictionary resource is unavailable"
+    },
+    {
+      "name": "failed_name_absent",
+      "sql": "SELECT analyzer_name FROM list_analyzers() WHERE analyzer_name = $1",
+      "params": [
+        "unpublished_nori"
+      ],
+      "rows": []
+    },
+    {
+      "name": "protect_builtin",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "nori",
+        "{\"char_filters\":[{\"type\":\"mapping\",\"mapping\":{\"首都\":\"세종시\"}}],\"tokenizer\":{\"type\":\"nori_tokenizer\",\"decompound_mode\":\"mixed\",\"user_dictionary\":\"세종시 세종 시\\n\"},\"token_filters\":[{\"type\":\"nori_part_of_speech\"},{\"type\":\"nori_readingform\"},{\"type\":\"unicode_simple_lowercase\"}]}"
+      ],
+      "error_contains": "built-in"
+    },
+    {
+      "name": "create_documents",
+      "sql": "CREATE TABLE docs (id INTEGER PRIMARY KEY, body TEXT)"
+    },
+    {
+      "name": "create_physical_index",
+      "sql": "CREATE INDEX docs_fts ON docs USING gin (body)"
+    },
+    {
+      "name": "bind_both_revisions",
+      "sql": "SELECT * FROM set_table_analyzer('docs', 'body', 'binding_nori', 'both')"
+    },
+    {
+      "name": "insert_graph_sources",
+      "sql": "INSERT INTO docs VALUES (1, $1), (2, $2), (3, $3), (4, $4)",
+      "params": [
+        "首都 學校",
+        "세종시 圖書館",
+        "학교 세종시",
+        "세종시와 學校"
+      ]
+    },
+    {
+      "name": "hanja_reading_hits",
+      "sql": "SELECT id FROM docs WHERE text_match(body, $1) ORDER BY id",
+      "params": [
+        "학교"
+      ],
+      "rows": [
+        {
+          "id": 1
+        },
+        {
+          "id": 3
+        },
+        {
+          "id": 4
+        }
+      ]
+    },
+    {
+      "name": "compound_path_order_and_pos_holes",
+      "sql": "SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id",
+      "params": [
+        "\"세종시 학교\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        }
+      ]
+    },
+    {
+      "name": "complete_source_query_mapping",
+      "sql": "SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id",
+      "params": [
+        "\"首都 學校\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        }
+      ]
+    },
+    {
+      "name": "reversed_phrase",
+      "sql": "SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id",
+      "params": [
+        "\"학교 세종시\""
+      ],
+      "rows": [
+        {
+          "id": 3
+        }
+      ]
+    },
+    {
+      "name": "original_source_highlighting",
+      "sql": "SELECT uqa_highlight($1, $2, NULL, NULL, NULL, NULL, $3) AS snippet",
+      "params": [
+        "首都 學校",
+        "세종시 학교",
+        "binding_nori"
+      ],
+      "rows": [
+        {
+          "snippet": "<b>首都</b> <b>學校</b>"
+        }
+      ]
+    },
+    {
+      "name": "begin_write",
+      "sql": "BEGIN"
+    },
+    {
+      "name": "insert_before_savepoint",
+      "sql": "INSERT INTO docs VALUES (5, $1)",
+      "params": [
+        "首都 學校"
+      ]
+    },
+    {
+      "name": "savepoint",
+      "sql": "SAVEPOINT keep_insert"
+    },
+    {
+      "name": "change_indexed_source",
+      "sql": "UPDATE docs SET body = $1 WHERE id = 1",
+      "params": [
+        "세종시 圖書館"
+      ]
+    },
+    {
+      "name": "uncommitted_phrase_support",
+      "sql": "SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id",
+      "params": [
+        "\"세종시 학교\""
+      ],
+      "rows": [
+        {
+          "id": 5
+        }
+      ]
+    },
+    {
+      "name": "rollback_savepoint",
+      "sql": "ROLLBACK TO SAVEPOINT keep_insert"
+    },
+    {
+      "name": "release_savepoint",
+      "sql": "RELEASE SAVEPOINT keep_insert"
+    },
+    {
+      "name": "savepoint_restores_graph",
+      "sql": "SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id",
+      "params": [
+        "\"세종시 학교\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        },
+        {
+          "id": 5
+        }
+      ]
+    },
+    {
+      "name": "rollback_transaction",
+      "sql": "ROLLBACK"
+    },
+    {
+      "name": "rollback_restores_graph",
+      "sql": "SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id",
+      "params": [
+        "\"세종시 학교\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        }
+      ]
+    },
+    {
+      "name": "replace_catalog_name",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "binding_nori",
+        "{\"tokenizer\":{\"type\":\"keyword\"}}"
+      ]
+    },
+    {
+      "name": "field_keeps_retained_revision",
+      "sql": "SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id",
+      "params": [
+        "\"세종시 학교\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        }
+      ]
+    },
+    {
+      "name": "close_all_handles_and_reopen",
+      "reopen": true
+    },
+    {
+      "name": "reopen_restores_original_revision",
+      "sql": "SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id",
+      "params": [
+        "\"세종시 학교\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        }
+      ]
+    },
+    {
+      "name": "insert_using_retained_revision",
+      "sql": "INSERT INTO docs VALUES (5, $1)",
+      "params": [
+        "首都 學校"
+      ]
+    },
+    {
+      "name": "new_documents_use_retained_revision",
+      "sql": "SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id",
+      "params": [
+        "\"세종시 학교\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        },
+        {
+          "id": 5
+        }
+      ]
+    },
+    {
+      "name": "restore_named_revision",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "binding_nori",
+        "{\"char_filters\":[{\"type\":\"mapping\",\"mapping\":{\"首都\":\"세종시\"}}],\"tokenizer\":{\"type\":\"nori_tokenizer\",\"decompound_mode\":\"mixed\",\"user_dictionary\":\"세종시 세종 시\\n\"},\"token_filters\":[{\"type\":\"nori_part_of_speech\"},{\"type\":\"nori_readingform\"},{\"type\":\"unicode_simple_lowercase\"}]}"
+      ]
+    },
+    {
+      "name": "recreated_descriptor_identity",
+      "sql": "SELECT analysis FROM analyze_text($1, $2)",
+      "params": [
+        "binding_nori",
+        "首都 學校"
+      ],
+      "rows_ref": "diagnostic"
+    },
+    {
+      "name": "begin_search_change",
+      "sql": "BEGIN"
+    },
+    {
+      "name": "replace_search_only",
+      "sql": "SELECT * FROM set_table_analyzer('docs', 'body', 'keyword', 'search')"
+    },
+    {
+      "name": "search_revision_is_independent",
+      "sql": "SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id",
+      "params": [
+        "\"세종시 학교\""
+      ],
+      "rows": []
+    },
+    {
+      "name": "rollback_search_change",
+      "sql": "ROLLBACK"
+    },
+    {
+      "name": "rollback_restores_search_revision",
+      "sql": "SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id",
+      "params": [
+        "\"세종시 학교\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        },
+        {
+          "id": 5
+        }
+      ]
+    },
+    {
+      "name": "reopen_after_new_write",
+      "reopen": true
+    },
+    {
+      "name": "diagnostic_survives_reopen",
+      "sql": "SELECT analysis FROM analyze_text($1, $2)",
+      "params": [
+        "binding_nori",
+        "首都 學校"
+      ],
+      "rows_ref": "diagnostic"
+    },
+    {
+      "name": "graphs_survive_second_reopen",
+      "sql": "SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id",
+      "params": [
+        "\"세종시 학교\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        },
+        {
+          "id": 5
+        }
+      ]
+    },
+    {
+      "name": "drop_documents",
+      "sql": "DROP TABLE docs"
+    },
+    {
+      "name": "release_named_revision",
+      "sql": "SELECT * FROM drop_analyzer($1)",
+      "params": [
+        "binding_nori"
+      ]
+    },
+    {
+      "name": "released_name_absent",
+      "sql": "SELECT analyzer_name FROM list_analyzers() WHERE analyzer_name = $1",
+      "params": [
+        "binding_nori"
+      ],
+      "rows": []
+    }
+  ],
+  "disabled": [
+    {
+      "name": "builtin_is_absent",
+      "sql": "SELECT analyzer_name FROM list_analyzers() WHERE analyzer_name = 'nori'",
+      "rows": []
+    },
+    {
+      "name": "korean_tokenizer_fails",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "binding_nori",
+        "{\"char_filters\":[{\"type\":\"mapping\",\"mapping\":{\"首都\":\"세종시\"}}],\"tokenizer\":{\"type\":\"nori_tokenizer\",\"decompound_mode\":\"mixed\",\"user_dictionary\":\"세종시 세종 시\\n\"},\"token_filters\":[]}"
+      ],
+      "error_contains": "unknown variant `nori_tokenizer`"
+    },
+    {
+      "name": "korean_filter_fails",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "binding_nori",
+        "{\"tokenizer\":{\"type\":\"keyword\"},\"token_filters\":[{\"type\":\"nori_part_of_speech\"}]}"
+      ],
+      "error_contains": "unknown variant `nori_part_of_speech`"
+    },
+    {
+      "name": "failed_name_absent",
+      "sql": "SELECT analyzer_name FROM list_analyzers() WHERE analyzer_name = 'binding_nori'",
+      "rows": []
+    },
+    {
+      "name": "diagnostics_do_not_fallback",
+      "sql": "SELECT * FROM analyze_text('nori', '首都 學校')",
+      "error_contains": "is not registered"
+    },
+    {
+      "name": "generic_pipeline_remains_available",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "binding_nori",
+        "{\"tokenizer\":{\"type\":\"keyword\"}}"
+      ]
+    },
+    {
+      "name": "generic_source_highlight",
+      "sql": "SELECT uqa_highlight('c++', 'c++', NULL, NULL, NULL, NULL, 'binding_nori') AS snippet",
+      "rows": [
+        {
+          "snippet": "<b>c++</b>"
+        }
+      ]
+    },
+    {
+      "name": "generic_definition_reopens",
+      "reopen": true
+    },
+    {
+      "name": "generic_source_highlight_after_reopen",
+      "sql": "SELECT uqa_highlight('c++', 'c++', NULL, NULL, NULL, NULL, 'binding_nori') AS snippet",
+      "rows": [
+        {
+          "snippet": "<b>c++</b>"
+        }
+      ]
+    }
+  ]
+}

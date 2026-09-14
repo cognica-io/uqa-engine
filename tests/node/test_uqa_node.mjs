@@ -10,10 +10,13 @@ import { createRequire } from "node:module";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { noriEnabled, runNoriBindings } from "../parity/nori/bindings.mjs";
 
 const require = createRequire(import.meta.url);
-const uqa = require("../../crates/uqa-node");
+const packagePath = require.resolve(process.env.UQA_TEST_PACKAGE ? resolve(process.env.UQA_TEST_PACKAGE) : "../../crates/uqa-node");
+const uqa = require(packagePath);
 
 async function readRequestJSON(request) {
   const chunks = [];
@@ -236,7 +239,7 @@ test("JavaScript HTTP values agree with the native client across SQL carriers", 
 });
 
 test("CommonJS and ESM package exports agree", async () => {
-  const esm = await import("../../crates/uqa-node/api.js");
+  const esm = await import(pathToFileURL(packagePath).href);
   assert.equal(esm.Engine, uqa.Engine);
   assert.equal(esm.HttpEngine, uqa.HttpEngine);
   assert.equal(esm.HttpSQLStream, uqa.HttpSQLStream);
@@ -304,6 +307,36 @@ test("sql, params, vector, tensor, and cypher surfaces", async () => {
     { name: "Ada" }
   );
   assert.deepEqual(cypher.rows, [{ name: "Ada" }]);
+});
+
+test("Node Nori diagnostics match the requested feature configuration", async () => {
+  const engine = new uqa.Engine();
+  const listed = await engine.sql(
+    "SELECT analyzer_name FROM list_analyzers() ORDER BY analyzer_name",
+  );
+  assert.equal(listed.rows.some((row) => row.analyzer_name === "nori"), noriEnabled);
+  if (!noriEnabled) {
+    await assert.rejects(engine.sql("SELECT * FROM analyze_text('nori', '나물은')"), /is not registered/);
+    await engine.close();
+    return;
+  }
+
+  const result = await engine.sql("SELECT analysis FROM analyze_text('nori', '나물은')");
+  assert.deepEqual(result.columns, ["analysis"]);
+  const analysis = result.rows[0].analysis;
+  assert.equal(analysis.analyzer_fingerprint.length, 64);
+  assert.equal(analysis.final_offsets.utf16.end, 3);
+  assert.ok(analysis.tokens.some((token) => "korean_morphology" in token));
+  await engine.close();
+});
+
+test("Nori user dictionaries and retained graph revisions survive Node reopen", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "uqa-node-nori-"));
+  try {
+    await runNoriBindings((path) => uqa.open(path), join(dir, "nori.db"), noriEnabled);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("async errors reject the promise", async () => {

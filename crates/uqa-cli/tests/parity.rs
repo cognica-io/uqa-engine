@@ -71,6 +71,31 @@ fn command_string_executes_without_repl_banner() {
 }
 
 #[test]
+fn builtin_nori_follows_the_cli_feature_configuration() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let output = run_usql(
+        &[
+            "--copy-text",
+            "-c",
+            "SELECT analysis -> 'tokens' -> 0 ->> 'term' AS term FROM analyze_text('nori', '한국 경제')",
+        ],
+        "",
+        dir.path(),
+    );
+    if cfg!(feature = "nori") {
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert_eq!(stdout(&output), "한국\n");
+    } else {
+        assert!(!output.status.success());
+        assert!(
+            stdout(&output).contains("analyzer `nori` is not registered"),
+            "{}",
+            stdout(&output)
+        );
+    }
+}
+
+#[test]
 fn copy_text_output_distinguishes_null_empty_and_literal_null() {
     let dir = tempfile::tempdir().expect("tempdir");
     let output = run_usql(

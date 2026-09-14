@@ -72,7 +72,10 @@ impl IndexCreationPublication for Engine {
         analyzer: Option<&str>,
     ) -> Result<(), SQLError> {
         self.add_fts_field_with_analyzer(table, column.to_string(), analyzer)
-            .map_err(|error| SQLError::Internal(format!("add_fts_field: {error}")))?;
+            .map_err(|error| match self.runtime.cancellation.check() {
+                Err(cancelled) => SQLError::Cancelled(cancelled),
+                Ok(()) => SQLError::Internal(format!("add_fts_field: {error}")),
+            })?;
         Ok(())
     }
     fn rebuild_vector_field(

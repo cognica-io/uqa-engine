@@ -80,14 +80,17 @@ pub fn referencing_rows<S: Clone + 'static>(
     comparison: &ForeignKeyComparison,
     expected: &[Value],
     referential_actions: &ReferentialActionContext,
+    action: ForeignKeyAction,
 ) -> Result<Vec<(PhysicalDocumentIdentity, Document)>, SQLError> {
     let mut out = Vec::new();
+    let snapshot = super::snapshots::ReferenceSnapshot::new(context)?;
     for physical_table in context
         .constraints
         .catalog
         .hierarchy_scan_tables(table, true)?
     {
-        for doc_id in context.constraints.reads.table_doc_ids(&physical_table)? {
+        let rows = snapshot.table(&physical_table)?;
+        for doc_id in rows.doc_ids()? {
             let identity = PhysicalDocumentIdentity {
                 table: physical_table.clone(),
                 doc_id,
@@ -96,11 +99,7 @@ pub fn referencing_rows<S: Clone + 'static>(
                 Some(Some(document)) => document.clone(),
                 Some(None) => continue,
                 None => {
-                    let Some(document) = context
-                        .constraints
-                        .reads
-                        .get_document(&physical_table, doc_id)?
-                    else {
+                    let Some(document) = rows.document(doc_id)? else {
                         return Err(missing_document_error(
                             "foreign-key reference scan",
                             &physical_table,
@@ -116,6 +115,15 @@ pub fn referencing_rows<S: Clone + 'static>(
                 .map(|column| doc.get(column).cloned().unwrap_or(Value::Null))
                 .collect();
             if comparison.normalize(values)? == expected {
+                if matches!(
+                    action,
+                    ForeignKeyAction::Cascade
+                        | ForeignKeyAction::SetNull
+                        | ForeignKeyAction::SetDefault
+                ) && referential_actions.pending_document(&identity).is_none()
+                {
+                    rows.check_visible(doc_id)?;
+                }
                 out.push((identity, doc));
             }
         }

@@ -1,0 +1,24 @@
+# Nori persistent-index measurements
+
+The SQLite and redb benchmark entrypoints live in `uqa-storage-sqlite` and `uqa-storage-redb`. They exercise each provider's public inverted-index and transaction APIs with the pinned Nori revision. Shared measurement code lives in `benchmarks/nori/persistent.rs`; it contains fixture construction, timers, allocation instrumentation, and output verification. No Engine algorithm or runtime dependency is added. Both benchmark targets require the dependency feature `uqa-analysis/nori` and leave their provider's runtime features unchanged.
+
+```sh
+python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --output target/benchmark-runs/nori-sqlite-native.json
+python3 scripts/run-nori-persistent-benchmark.py --provider redb --output target/benchmark-runs/nori-redb-native.json
+python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --target wasm --output target/benchmark-runs/nori-sqlite-wasm.json
+python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --output target/benchmark-runs/nori-sqlite-repeat.json --baseline target/benchmark-runs/nori-sqlite-native.json
+```
+
+The corpus and document identities match the [Memory-index benchmark](INDEXING.md). Four workloads commit a 256-document batch into an empty index, commit 16 additional documents after 256 or 2,048 existing documents, and roll back 16 appended documents after 2,048 existing documents. A closed seed database is copied into a fresh temporary directory for every sample. Seven timed operations follow one warmup; a separate operation records allocations. Input construction, transaction begin, index mutation, and commit or rollback are measured. Seed creation/copying, connection initialization, close, graph checking, and reopen are excluded. Run measurements sequentially after other builds finish.
+
+Every one of the nine executions per workload is checked against an independently built Memory index, both through the live provider and after dropping every database handle and reopening the file. The digest includes every document's versioned source/revision metadata, sorted canonical term keys, and complete encoded score/occurrence clusters. Document count, field length, and posting count are verified separately. The rollback workload must retain the seed graph and document count. The gate rejects missing workloads, incomplete sampling, changed graphs/counts, and omitted reopen checks. Reviewed allocation limits use the exact target OS, architecture, and pointer width; an unmeasured target requires calibration and cannot inherit another target's ceiling.
+
+Native measurements use files on the host temporary filesystem. The SQLite report reads its actual library version, journal mode, synchronous setting, and page size from a connection. redb uses its default immediate commit durability. SQLite WASM measurements use Emscripten's virtual filesystem in Node, so their results cover provider serialization and transaction behavior without host filesystem durability or browser storage synchronization. This matrix measures native SQLite/redb and WASM SQLite; it does not claim a WASM redb result.
+
+Allocation counters measure current-thread Rust allocator requests during the operation. They exclude the existing index, dictionary, C allocations inside SQLite/SQLCipher, OS page cache, stack, and JavaScript heap. Net allocation can include released seed-owned buffers. File observations are the sum of closed file lengths, including remaining sidecars, rather than allocated disk blocks or a peak disk-space measurement. SQLite and redb have different transaction and durability costs; their elapsed times are reported separately.
+
+Reports include CPU, platform, compiler versions and flags, C compiler overrides, executable hashes, runtime-source hashes, and both entrypoint/shared benchmark-source identities. Home directory prefixes in flag text become `${HOME}` for publication, while the SHA-256 of the complete original flag dictionary preserves exact comparison identity. A same-environment timing comparison rejects changed original flags, durability/filesystem scope, and benchmark code. Candidate collection uses `--measure-only` and records a false gate status until checked against reviewed limits. The instrumented benchmark is excluded from Cargo archives.
+
+These measurements cover physical index transactions. SQL parsing, row storage, catalog assignment, Engine/session snapshots, phrase scoring, browser host memory, and release binding acceptance remain separate work in the [implementation plan](../../docs/plans/0006-nori-analyzer.md).
+
+Generated reports stay in ignored output directories and CI artifacts. See the [report storage and timing policy](README.md#report-storage-and-timing-interpretation); historical source references in the limits do not establish performance acceptance on an uncontrolled host.

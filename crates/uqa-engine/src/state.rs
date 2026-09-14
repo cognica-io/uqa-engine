@@ -85,7 +85,7 @@ pub(super) struct DurableCatalogState {
     pub(super) sequence_persistence:
         CatalogCell<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
     pub(super) sequence_security: CatalogCell<BTreeMap<RelationIdentity, SequenceSecurity>>,
-    pub(super) named_analyzers: CatalogCell<BTreeMap<String, String>>,
+    pub(super) named_analyzers: CatalogCell<BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>>>,
     pub(super) table_field_analyzers: CatalogCell<TableFieldAnalyzerRegistry>,
     pub(super) foreign_servers: CatalogCell<BTreeMap<String, uqa_fdw::ForeignServer>>,
     pub(super) foreign_tables:
@@ -118,7 +118,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) sequence_persistence:
         Arc<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
     pub(super) sequence_security: Arc<BTreeMap<RelationIdentity, SequenceSecurity>>,
-    pub(super) named_analyzers: Arc<BTreeMap<String, String>>,
+    pub(super) named_analyzers: Arc<BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>>>,
     pub(super) table_field_analyzers: Arc<TableFieldAnalyzerRegistry>,
     pub(super) foreign_servers: Arc<BTreeMap<String, uqa_fdw::ForeignServer>>,
     pub(super) foreign_tables: Arc<BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>>,

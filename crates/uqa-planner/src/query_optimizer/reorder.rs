@@ -191,6 +191,9 @@ impl QueryOptimizer {
         match target {
             OperatorTree::Term {
                 field: term_field, ..
+            }
+            | OperatorTree::Phrase {
+                field: term_field, ..
             } => match term_field {
                 Some(f) => f == field,
                 None => true,

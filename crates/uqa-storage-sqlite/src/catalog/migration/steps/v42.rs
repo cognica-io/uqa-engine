@@ -28,7 +28,7 @@ struct MigratedDocument {
     tuple_xmin: Option<i64>,
 }
 
-pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+pub(super) fn migrate(tx: &rusqlite::Connection) -> Result<()> {
     let columns = Catalog::table_columns(tx, "_documents")?.unwrap_or_default();
     if !columns.contains_key("tuple_xmin") {
         tx.execute_batch(
@@ -68,7 +68,7 @@ pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<()> {
 }
 
 fn document_page(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     after: Option<&(String, i64)>,
 ) -> Result<Vec<PersistedDocument>> {
     let (after_table, after_doc_id) =
@@ -161,9 +161,7 @@ fn migrate_document(
     }))
 }
 
-fn catalog_xmin_tables(
-    tx: &rusqlite::Transaction<'_>,
-) -> Result<(BTreeSet<String>, BTreeSet<String>)> {
+fn catalog_xmin_tables(tx: &rusqlite::Connection) -> Result<(BTreeSet<String>, BTreeSet<String>)> {
     let mut statement = tx.prepare(
         "SELECT schema_name, relation_name, columns
          FROM _tables

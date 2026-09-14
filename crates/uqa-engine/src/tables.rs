@@ -5,11 +5,11 @@
 //
 
 use super::{
-    standard_analyzer, Analyzer, AnalyzerPhase, Arc, AtomicBool, BTreeMap, DocId, Document,
-    DocumentStore, Engine, FieldName, HNSWIndex, IVFIndex, InvertedIndex, MemoryDocumentStore,
-    MemoryInvertedIndex, MemoryVectorIndex, RelationIdentity, RwLock, SQLError,
-    StorageBackendError, StorageBackendResult, TableSchema, TableState, VectorFieldSchema,
-    VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
+    standard_analyzer, Analyzer, Arc, AtomicBool, BTreeMap, DocId, Document, DocumentStore, Engine,
+    FieldName, HNSWIndex, IVFIndex, InvertedIndex, MemoryDocumentStore, MemoryInvertedIndex,
+    MemoryVectorIndex, RelationIdentity, RwLock, SQLError, StorageBackendError,
+    StorageBackendResult, TableSchema, TableState, VectorFieldSchema, VectorIndex,
+    VectorIndexOpenMode, VectorIndexSpec,
 };
 use crate::state::TableSecurity;
 
@@ -181,6 +181,15 @@ impl Engine {
                 "relation `{name}` already exists as {kind}"
             )));
         }
+        let default_revision = if fts_fields.is_empty() {
+            None
+        } else {
+            Some(analyzer.compile()?)
+        };
+        let analyzer = match &default_revision {
+            Some(revision) => revision.descriptor().configuration()?,
+            None => analyzer,
+        };
         let (docs, inv): (Box<dyn DocumentStore>, Box<dyn InvertedIndex>) =
             if persistence == uqa_sql::ast::RelationPersistence::Temporary {
                 (
@@ -232,7 +241,13 @@ impl Engine {
         if self.is_persistent() && persistence != uqa_sql::ast::RelationPersistence::Temporary {
             self.try_save_table_schema(&name, &table_arc)?;
         }
+        let analyzer_bindings =
+            self.initialize_table_analyzer_bindings(&name, &table_arc, default_revision)?;
         self.storage.tables.write().insert(relation, table_arc);
+        self.durable
+            .table_field_analyzers
+            .write()
+            .extend(analyzer_bindings);
         self.clear_regtype_output_cache();
         if persistence == uqa_sql::ast::RelationPersistence::Temporary {
             self.note_table_catalog_changed();
@@ -333,15 +348,15 @@ impl Engine {
             .map_err(|err| format!("resolve table `{table}`: {err}"))?
             .ok_or_else(|| format!("unknown table `{table}`"))?;
         if let Some(analyzer_name) = analyzer {
-            let analyzer = self.resolve_analyzer(analyzer_name)?;
-            t.inverted_index
-                .write()
-                .set_field_analyzer(field, analyzer, AnalyzerPhase::Both)
-                .map_err(|e| format!("restore_fts_field: {e}"))?;
-            self.durable.table_field_analyzers.write().insert(
-                (table.to_string(), field.to_string()),
-                (analyzer_name.to_string(), "both".to_string()),
-            );
+            let bindings = self.durable.table_field_analyzers.read();
+            let binding = bindings
+                .get(&(table.to_owned(), field.to_owned()))
+                .ok_or_else(|| "GIN field has no restored analyzer binding".to_owned())?;
+            if binding.owner != uqa_storage::AnalyzerBindingOwner::Gin
+                || binding.index.name.as_deref() != Some(analyzer_name.trim())
+            {
+                return Err("GIN field conflicts with restored analyzer ownership".into());
+            }
         }
         {
             let mut fts = t.fts_fields.write();

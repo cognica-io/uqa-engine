@@ -44,10 +44,22 @@ Register custom JSON with `create_analyzer`, bind it through a GIN `analyzer` op
 
 The query string accepts terms, quoted phrases, `AND`, `OR`, `NOT`, parentheses, field scoping, and field-scoped vector literals. Precedence is `NOT`, then `AND`, then `OR`; adjacency implies `AND`.
 
+A quoted phrase is analyzed as one complete input with the field's retained search analyzer. It matches connected token paths in order, with exact adjacency and any internal gaps left by removed tokens. Synonym and compound alternatives preserve their positions and lengths; matching follows each query and document edge's own length. Leading and trailing removed tokens do not anchor the phrase to either end of the field, and a phrase with no remaining tokens matches no documents. All-field search requires the complete phrase to match within one field. Position filtering happens before score ordering and `LIMIT`; ordinary unquoted leaves continue to union their analyzed terms.
+
+The physical phrase node remains intact through optimization. Phrase BM25 scores preserve emitted query-term multiplicity, including repeated terms; complete Boolean query calibration uses those emitted phrase units along with the existing unquoted leaf units.
+
 ```sql
 SELECT id, _score
 FROM documents
 WHERE fts_match(body, '(database OR retrieval) AND NOT legacy')
+ORDER BY _score DESC, id ASC
+LIMIT 20;
+```
+
+```sql
+SELECT id, _score
+FROM documents
+WHERE fts_match(body, '"information retrieval"')
 ORDER BY _score DESC, id ASC
 LIMIT 20;
 ```
@@ -152,7 +164,30 @@ Use held out evaluation and version every feature schema, model identity, and ca
 
 ## Highlighting and facets
 
-`uqa_highlight` creates highlighted text for matching terms. It currently uses the built-in English `standard` analyzer and does not inherit a table-field analyzer. `uqa_facets` computes facet output over retrieval support. Apply them after establishing the intended candidate set and preserve the original field separately when highlighted output is rendered as HTML.
+`uqa_highlight(text, query [, start_tag, end_tag, max_fragments, fragment_size, analyzer])` returns highlighted source text. All arguments are expressions; the optional seventh argument names a built-in or registered analyzer.
+
+| Argument | Meaning and default |
+| --- | --- |
+| `text` | Original source text; a NULL source returns NULL |
+| `query` | Query text; NULL returns the original source before evaluating later arguments |
+| `start_tag`, `end_tag` | Text inserted around matches; omitted or NULL values use `<b>` and `</b>` |
+| `max_fragments` | Non-negative integer; omitted, NULL, or `0` returns the complete source |
+| `fragment_size` | Positive target size in Unicode characters, default `150`; a selected match stays whole even when longer than the target |
+| `analyzer` | Analyzer name; omitted or NULL preserves the built-in English word-scanning behavior |
+
+With an explicit analyzer name, one immutable resolved revision analyzes the complete source and complete query text. Matching terms retain their original source spans through character replacement, HTML stripping, morphology, reading conversion, and token filters. Overlapping spans merge when markers are rendered; adjacent spans remain separate. Raw UTF-16 terms match by exact identity while markers cover complete original UTF-8 scalars. Query text is passed to the analyzer as plain text, so Boolean words are not removed by a separate query parser. Without a name, query candidates are split on whitespace, `AND`, `OR`, and `NOT` are removed, and the existing English analyzer checks individual source words.
+
+The result is one TEXT value. Highlighting reads the named revision visible to the session without changing catalog or index state, and it does not infer a table-field analyzer from a bare text value. It needs no GIN index. Later calls observe committed name replacements and transaction/savepoint restoration; each call retains the same revision for its source and query.
+
+After argument evaluation and NULL short circuits, each call reads the current session `work_mem` and cancellation token. The allowance covers analysis-owned runtime buffers, matching, fragment selection, and the complete highlighted output; a prepared statement reads the setting again when executed. Exhausting it returns SQLSTATE `53200`, and cancellation returns `57014`, without a partial highlighted string. Input values, immutable analyzer resources and library search workspaces have separate owners. Highlighting does not spill its working state to disk.
+
+Invalid argument counts outside `2..=7`, non-text query/tag/analyzer arguments, negative fragment counts, and non-positive fragment sizes fail. Empty or unknown analyzer names, unavailable resources, and analysis failures also fail without falling back to another analyzer. NULL source/query short circuits take precedence over validation or evaluation of later arguments.
+
+```sql execute
+SELECT uqa_highlight('c++', 'c++', NULL, NULL, NULL, NULL, 'keyword') AS snippet;
+```
+
+This returns `<b>c++</b>`. The typed Rust `uqa_analysis::highlight` API accepts an explicit analyzer and uses the same original-source spans; `highlight_compiled` accepts an already retained compiled revision. `uqa_facets` computes facet output over retrieval support. Apply these helpers after establishing the intended candidate set and preserve the original field separately when highlighted output is rendered as HTML.
 
 Never treat highlighted text as trusted HTML solely because the engine inserted markers. Escape source content according to the rendering context.
 

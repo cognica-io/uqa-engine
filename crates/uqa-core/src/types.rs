@@ -39,6 +39,7 @@ mod graph;
 mod graph_phi;
 mod index_stats;
 mod jsonb;
+mod occurrence;
 mod posting;
 mod temporal;
 mod value;
@@ -52,6 +53,7 @@ pub use graph_phi::{
 };
 pub use index_stats::IndexStats;
 pub use jsonb::jsonb_equality_key;
+pub use occurrence::{TokenOccurrence, TokenOccurrenceError, TokenOffsets};
 pub use posting::{GeneralizedPayload, GeneralizedPostingEntry, Payload, PostingEntry};
 pub use temporal::TemporalValue;
 pub use value::Value;

@@ -189,10 +189,7 @@ pub fn alter_type<S: Clone + 'static>(
         .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?;
     match ty {
         ColumnType::Text if target_generated_kind != Some(GeneratedColumnKind::Virtual) => {
-            context
-                .fields
-                .add_text_field(table, name.to_string())
-                .map_err(|error| SQLError::Internal(format!("add_fts_field: {error}")))?;
+            context.fields.add_text_field(table, name.to_string())?;
         }
         ColumnType::Vector(dimensions) | ColumnType::Tensor(dimensions) => {
             context

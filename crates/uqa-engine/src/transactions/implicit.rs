@@ -45,11 +45,7 @@ impl Engine {
         }
     }
 
-    /// Make a direct persistent-engine mutation atomic when the caller has not
-    /// already opened a transaction. Memory stores validate fallible vector
-    /// input before their infallible writes; explicit memory transactions use
-    /// deep writable snapshots. Avoiding a whole-engine snapshot for each
-    /// direct memory insert keeps bulk ingestion linear.
+    /// Make a direct persistent-engine mutation atomic when the caller has not already opened a transaction. Memory stores validate fallible vector input before their infallible writes; explicit memory transactions retain writable snapshots whose document and inverted-index state is copied on mutation. Avoiding a whole-engine snapshot for each direct memory insert keeps bulk ingestion linear.
     pub(crate) fn with_implicit_transaction<R>(
         &self,
         f: impl FnOnce(&Self) -> Result<R, SQLError>,

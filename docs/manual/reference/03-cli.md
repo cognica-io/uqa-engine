@@ -17,6 +17,8 @@ When building from this repository instead, run the Rust binary directly:
 cargo run -p uqa-cli --bin usql
 ```
 
+The Rust CLI enables the bundled `nori` analyzer by default, matching the Python-installed command. A custom `cargo build -p uqa-cli --no-default-features` omits Nori and rejects requests for that analyzer. Enabling `--features nori` forwards the feature to the existing Engine and analysis owners.
+
 Common forms are:
 
 ```text

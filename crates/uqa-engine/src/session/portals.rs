@@ -433,16 +433,24 @@ impl Engine {
             let source_index = data.inverted_index.read();
             for field in fts_fields {
                 inverted_index
-                    .set_field_analyzer(
+                    .set_field_analyzer_revision(
                         field,
-                        source_index.get_field_analyzer(field),
+                        source_index
+                            .index_analyzer_revision(field)
+                            .map_err(|error| {
+                                portal_snapshot_error("index analyzer revision", &error)
+                            })?,
                         AnalyzerPhase::Index,
                     )
                     .map_err(|error| portal_snapshot_error("index analyzer", &error))?;
                 inverted_index
-                    .set_field_analyzer(
+                    .set_field_analyzer_revision(
                         field,
-                        source_index.get_search_analyzer(field),
+                        source_index
+                            .search_analyzer_revision(field)
+                            .map_err(|error| {
+                                portal_snapshot_error("search analyzer revision", &error)
+                            })?,
                         AnalyzerPhase::Search,
                     )
                     .map_err(|error| portal_snapshot_error("search analyzer", &error))?;

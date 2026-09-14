@@ -1,0 +1,40 @@
+{
+  "format": "uqa-nori-bundled-resource",
+  "format_version": 1,
+  "bundle_format_version": 1,
+  "dictionary_id": "ee85ee5796c706ea7288e44e64c7f58ba7bd22cea5683c1f4196c29a2435d74a",
+  "packer": "uqa-analysis pack_nori; bundle format 1",
+  "compression": "miniz_oxide 0.8.9; zlib level 9",
+  "files": [
+    {
+      "path": "data/nori.uqan",
+      "bytes": 9829534,
+      "sha256": "0d920523991ed60909972d85df630c65747ff5d49e1138e4998ca39f0079538d"
+    },
+    {
+      "path": "data/model_manifest.json",
+      "bytes": 11215,
+      "sha256": "4dcc735ed00862d2558d08af39256e933c6c59dd0b4fc13dd5f0a7d27977b699"
+    },
+    {
+      "path": "THIRD-PARTY/JDK-UNICODE.md",
+      "bytes": 9078,
+      "sha256": "6f72f10d166b2c2e8a395e03e734c5afc852b59aeca73ced124f6b9c96268d53"
+    },
+    {
+      "path": "THIRD-PARTY/LUCENE-LICENSE.txt",
+      "bytes": 26085,
+      "sha256": "a2521407b3209df7dcebfc12cd6d732b24bfa2fe44982ef613e269666482521d"
+    },
+    {
+      "path": "THIRD-PARTY/LUCENE-NOTICE.txt",
+      "bytes": 9782,
+      "sha256": "d3b82734d5e181509c4b6b832f5d3a90c8c6a34fc195272fc8957ccb9e8e20a8"
+    },
+    {
+      "path": "THIRD-PARTY/MECAB-COPYING.txt",
+      "bytes": 11357,
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    }
+  ]
+}

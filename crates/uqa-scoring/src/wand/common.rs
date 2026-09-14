@@ -12,8 +12,6 @@ use std::collections::BinaryHeap;
 use uqa_core::{DocId, PostingList};
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
-pub(super) const INF_DOC: u64 = u64::MAX;
-
 /// Min-heap entry by score for top-k selection.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct HeapEntry {

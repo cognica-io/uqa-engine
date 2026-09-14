@@ -12,4 +12,6 @@ These standalone workspace crates exercise the same five scenarios as the Python
 
 Each crate declares only the dependencies needed by its scenario, so its manifest is also a dependency reference for an external Rust application.
 
+The [shared persistent Nori contract](../../tests/parity/nori/BINDINGS.md) additionally executes the enabled and disabled analyzer scenarios through the existing Rust integration harness against SQLite and redb, alongside equivalent Python, Node.js, and actual-browser checks.
+
 For local or Cloud SQL without embedding storage, use `uqa_client::HttpEngine`; see the [HTTP Engine reference](../../docs/manual/reference/09-http-engine.md). Its live protocol coverage is in the `uqa-client` integration harness.

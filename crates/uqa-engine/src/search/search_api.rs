@@ -30,7 +30,7 @@ impl Engine {
         };
         let tree = self.plan_text_top_k_tree(table, field, query, scoring, top_k)?;
         let entries = crate::operator_tree_bridge::execute_scored_tree(self, table, &[], &tree)?;
-        Ok(Self::rank_scored_entries_top_k(entries, top_k))
+        Ok(uqa_scoring::rank_scored_entries_top_k(entries, top_k))
     }
 
     /// Run the same planner-selected physical text path as [`Self::search`]
@@ -94,9 +94,11 @@ impl Engine {
         let (query_term_count, stats) = {
             let index = table_state.inverted_index.read();
             let query_term_count = index
-                .get_search_analyzer(field)
-                .analyze(query)
+                .search_analyzer_revision(field)
+                .map_err(|error| storage_sql_error("resolve calibration analyzer revision", error))?
+                .analyze_tokens(query)
                 .map_err(|error| storage_sql_error("analyze calibration query", error))?
+                .tokens()
                 .len();
             let stats = Arc::new(
                 index

@@ -8,6 +8,9 @@
 //! index, vector indexes (IVF), B-tree, in-memory spatial scan, block-max, and the
 //! provider-neutral catalog and transaction contracts.
 
+pub mod analyzer_binding;
+pub use analyzer_binding::{AnalyzerBindingOwner, BoundAnalyzerRevision, FieldAnalyzerBinding};
+
 pub mod backend;
 pub mod block_max_index;
 pub mod btree_index;
@@ -24,7 +27,9 @@ pub mod index_types;
 pub mod inverted_index;
 pub mod ivf_index;
 pub mod key_value;
+pub mod read_control;
 pub mod spatial_index;
+pub mod term_key;
 pub mod transaction;
 pub mod vector_index;
 
@@ -60,6 +65,7 @@ pub use key_value::{
     KeyValueStorageBackend, KeyValueStore, KeyValueVectorIndex, MemoryKeyValueStore,
 };
 pub use spatial_index::{haversine_distance, MemorySpatialIndex, SpatialIndex};
+pub use term_key::TokenTermKey;
 pub use transaction::{InMemoryTransaction, Snapshotable, TransactionError, TxResult};
 pub use vector_index::{
     cosine_similarity, HNSWIndexParams, IVFIndexParams, MemoryVectorIndex, VectorIndex,
