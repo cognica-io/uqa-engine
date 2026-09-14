@@ -7,8 +7,8 @@
 //! Fallible enumeration of every accepted surface in UTF-16 lexical order.
 
 use super::Lexicon;
-use crate::nori::io::vector;
-use crate::nori::DictionaryResult;
+use crate::morphology::io::vector;
+use crate::morphology::DictionaryResult;
 
 struct Position {
     node: u32,

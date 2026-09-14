@@ -9,8 +9,8 @@
 use std::sync::Arc;
 
 use super::error::{check_limit, invalid};
-use super::lexicon::{Builder, Lexicon};
 use super::{DictionaryId, DictionaryResult, NoriDictionary, POSTag, POSType};
+use crate::morphology::lexicon::{Builder, Lexicon};
 
 mod parse;
 
@@ -108,7 +108,7 @@ impl UserDictionary {
                 .encode_utf16()
                 .cmp(right.surface().encode_utf16())
         });
-        let mut entries = super::io::vector(lines.len())?;
+        let mut entries = crate::morphology::io::vector(lines.len())?;
         let mut builder = Builder::new();
         let mut previous = None;
         for line in &lines {
@@ -124,7 +124,7 @@ impl UserDictionary {
             let segments = if line.labels().len() == 0 {
                 None
             } else {
-                let mut lengths = super::io::vector(line.labels().len())?;
+                let mut lengths = crate::morphology::io::vector(line.labels().len())?;
                 let mut total = 0_usize;
                 for label in line.labels() {
                     let length = label.encode_utf16().count();
@@ -194,7 +194,7 @@ impl UserDictionary {
         self.lexicon.lookup(text.encode_utf16())
     }
 
-    pub(super) fn cursor(&self) -> super::lexicon::Cursor<'_> {
+    pub(super) fn cursor(&self) -> crate::morphology::lexicon::Cursor<'_> {
         self.lexicon.cursor()
     }
 

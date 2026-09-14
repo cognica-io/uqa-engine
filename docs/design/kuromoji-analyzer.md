@@ -1,6 +1,6 @@
 # Native Kuromoji analysis and shared morphology
 
-Status: Design proposal, based on the UQA 0.3.0 release preparation tree at `67fa9c14a5322421b80f1187c2071a08a665e968` and Lucene 10.5.1. No Kuromoji implementation, dictionary conversion, JVM differential run, or performance acceptance is claimed by this document. The 0.3.0 release proceeds independently.
+Status: Implementation in progress against UQA 0.3.0 and Lucene 10.5.1. The private shared dictionary reader/writer, UTF-16 lexicon, and connection-cost matrix are extracted from Nori into `uqa-analysis::morphology`. Japanese dictionary conversion, tokenization, analyzer integration, and reference verification remain to be implemented. The 0.3.0 release proceeds independently.
 
 ## Objective
 

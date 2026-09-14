@@ -7,8 +7,8 @@
 //! Generated JVM classification and simple lowercase intervals.
 
 use super::error::invalid;
-use super::io::{vector, Reader};
 use super::DictionaryResult;
+use crate::morphology::io::{vector, Reader};
 
 pub(super) const CODE_POINTS: u32 = 0x11_0000;
 
@@ -61,7 +61,7 @@ impl UnicodeTable {
 
     pub fn decode(reader: &mut Reader<'_>, script_count: usize) -> DictionaryResult<Self> {
         if reader.u32()? != CODE_POINTS {
-            return Err(reader.invalid("incomplete Unicode profile"));
+            return Err(reader.invalid("incomplete Unicode profile").into());
         }
         let count = reader.count(12)?;
         let mut ranges = vector(count)?;
@@ -136,7 +136,7 @@ impl UnicodeTable {
     }
 
     #[cfg(any(test, feature = "nori-tools"))]
-    pub fn encode(&self, output: &mut super::io::Writer) -> DictionaryResult<()> {
+    pub fn encode(&self, output: &mut crate::morphology::io::Writer) -> DictionaryResult<()> {
         output.u32(CODE_POINTS)?;
         output.count(self.ranges.len())?;
         for range in &self.ranges {

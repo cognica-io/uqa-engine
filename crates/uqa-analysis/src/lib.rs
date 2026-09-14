@@ -17,6 +17,8 @@ pub mod descriptor;
 pub mod error;
 pub mod highlight;
 #[cfg(feature = "nori")]
+mod morphology;
+#[cfg(feature = "nori")]
 pub mod nori;
 pub mod porter;
 pub mod registry;

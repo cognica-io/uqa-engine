@@ -10,8 +10,8 @@ use std::path::Path;
 
 use super::dictionary::provenance::canonical;
 use super::frame::{self, Section};
-use super::io::Writer;
 use super::{DictionaryLimits, DictionaryResult, NoriDictionary};
+use crate::morphology::io::Writer;
 
 mod neutral;
 mod verify;
@@ -66,7 +66,7 @@ pub fn pack_directory(directory: &Path, limits: DictionaryLimits) -> DictionaryR
         model.morphology.encode(output)
     })?;
     write_section(4, model.matrix.costs.len() as u64, &mut |output| {
-        model.matrix.encode(output)
+        model.matrix.encode(output).map_err(Into::into)
     })?;
     write_section(5, model.characters.values.len() as u64, &mut |output| {
         model.characters.encode(output)

@@ -11,7 +11,7 @@ use super::io::{vector, Reader};
 use super::DictionaryResult;
 
 mod builder;
-pub(super) use builder::Builder;
+pub(crate) use builder::Builder;
 #[cfg(any(test, feature = "nori-tools"))]
 mod entries;
 
@@ -31,7 +31,7 @@ struct Arc {
 }
 
 #[derive(Debug)]
-pub(super) struct Lexicon {
+pub(crate) struct Lexicon {
     nodes: Vec<Node>,
     arcs: Vec<Arc>,
     root: u32,
@@ -224,7 +224,7 @@ impl Lexicon {
     }
 }
 
-pub(super) struct Cursor<'a> {
+pub(crate) struct Cursor<'a> {
     lexicon: &'a Lexicon,
     node: u32,
     rank: u32,

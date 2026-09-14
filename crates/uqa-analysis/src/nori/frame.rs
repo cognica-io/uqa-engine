@@ -13,8 +13,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 
 use super::error::{check_limit, invalid};
-use super::io::{vector, Reader};
 use super::{DictionaryError, DictionaryLimits, DictionaryResult};
+use crate::morphology::io::{vector, Reader};
 
 const MAGIC: &[u8; 8] = b"UQANORI\0";
 const VERSION: u32 = 1;
@@ -97,7 +97,7 @@ fn identity(entries: &[DirectoryEntry]) -> DictionaryId {
 }
 
 fn size(reader: &mut Reader<'_>) -> DictionaryResult<usize> {
-    usize::try_from(reader.u64()?).map_err(|_| reader.invalid("size exceeds address space"))
+    usize::try_from(reader.u64()?).map_err(|_| reader.invalid("size exceeds address space").into())
 }
 
 pub(super) fn decode(
@@ -107,14 +107,14 @@ pub(super) fn decode(
     check_limit("encoded bytes", bytes.len(), limits.max_encoded_bytes)?;
     let mut reader = Reader::new(bytes, "bundle frame", false);
     if reader.take(8)? != MAGIC {
-        return Err(reader.invalid("invalid magic"));
+        return Err(reader.invalid("invalid magic").into());
     }
     let version = reader.u32()?;
     if version != VERSION {
         return Err(DictionaryError::Version(version));
     }
     if reader.u32()? as usize != SECTION_COUNT {
-        return Err(reader.invalid("missing or unknown sections"));
+        return Err(reader.invalid("missing or unknown sections").into());
     }
     let total = size(&mut reader)?;
     check_limit("decoded bytes", total, limits.max_decoded_bytes)?;
@@ -133,10 +133,12 @@ pub(super) fn decode(
             hash: reader.array()?,
         };
         if entry.kind as usize != index + 1 || entry.codec > 1 || entry.offset != offset {
-            return Err(reader.invalid("invalid section order, codec, or offset"));
+            return Err(reader
+                .invalid("invalid section order, codec, or offset")
+                .into());
         }
         if entry.codec == 0 && entry.stored != entry.decoded {
-            return Err(reader.invalid("uncompressed section lengths differ"));
+            return Err(reader.invalid("uncompressed section lengths differ").into());
         }
         decoded = decoded
             .checked_add(entry.decoded)
@@ -146,12 +148,14 @@ pub(super) fn decode(
             .checked_add(entry.stored)
             .ok_or_else(|| reader.invalid("stored size overflow"))?;
         if offset > bytes.len() {
-            return Err(reader.invalid("section exceeds input"));
+            return Err(reader.invalid("section exceeds input").into());
         }
         entries.push(entry);
     }
     if decoded != total || offset != bytes.len() {
-        return Err(reader.invalid("size totals differ or trailing data is present"));
+        return Err(reader
+            .invalid("size totals differ or trailing data is present")
+            .into());
     }
     if identity(&entries) != id {
         return Err(DictionaryError::Checksum(0));
@@ -198,7 +202,7 @@ pub(super) fn decode(
 
 #[cfg(any(test, feature = "nori-tools"))]
 pub(super) fn encode(sections: &[Section], limits: DictionaryLimits) -> DictionaryResult<Vec<u8>> {
-    use super::io::Writer;
+    use crate::morphology::io::Writer;
 
     if sections.len() != SECTION_COUNT {
         return Err(invalid("bundle encoder", "incorrect section count"));

@@ -7,7 +7,7 @@
 //! Minimized suffix sharing must preserve exact UTF-16 lexical ranks and valid paths.
 
 use super::{Builder, Lexicon};
-use crate::nori::io::{Reader, Writer};
+use crate::morphology::io::{Reader, Writer};
 
 fn build(words: &[&str]) -> Lexicon {
     let mut builder = Builder::new();

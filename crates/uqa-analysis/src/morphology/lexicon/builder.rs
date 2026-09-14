@@ -9,8 +9,8 @@
 use std::collections::HashMap;
 
 use super::{Arc, Lexicon, Node};
-use crate::nori::error::invalid;
-use crate::nori::DictionaryResult;
+use crate::morphology::error::invalid;
+use crate::morphology::DictionaryResult;
 
 #[derive(Default, Hash, PartialEq, Eq, Clone)]
 struct State {

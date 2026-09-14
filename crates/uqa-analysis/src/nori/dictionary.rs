@@ -11,17 +11,18 @@ use std::sync::Arc;
 
 use super::error::invalid;
 use super::frame::{self, Section};
-use super::io::{vector, Reader};
-use super::lexicon::Lexicon;
 use super::morphology::{self, DictionaryWord, Morphology, WordEntry};
 use super::unicode::{UnicodeProperties, UnicodeTable};
 use super::{DictionaryId, DictionaryResult};
+use crate::morphology::io::{vector, Reader};
+use crate::morphology::lexicon::Lexicon;
 
 pub(super) mod provenance;
 pub(super) mod tables;
 
+use crate::morphology::matrix::Matrix;
 use provenance::Provenance;
-use tables::{Characters, Matrix};
+use tables::Characters;
 
 /// Bounds for input bytes, decompressed section bytes, and decoded string metadata.
 #[derive(Debug, Clone, Copy)]
@@ -107,7 +108,9 @@ impl NoriDictionary {
             let lexicon = Lexicon::decode(reader, limits.max_text_utf16)?;
             let count = reader.count(2)?;
             if count != lexicon.len() {
-                return Err(reader.invalid("surface table and lexicon lengths differ"));
+                return Err(reader
+                    .invalid("surface table and lexicon lengths differ")
+                    .into());
             }
             let mut seen = vector(count)?;
             seen.resize(count, false);
@@ -128,7 +131,9 @@ impl NoriDictionary {
                     || start != next_word
                     || count == 0
                 {
-                    return Err(reader.invalid("invalid source identity or word range"));
+                    return Err(reader
+                        .invalid("invalid source identity or word range")
+                        .into());
                 }
                 seen[source_id as usize] = true;
                 let word_ids = morphology::word_range(start, count, known_words as usize)?;
@@ -139,7 +144,7 @@ impl NoriDictionary {
                 });
             }
             if next_word != known_words {
-                return Err(reader.invalid("known words are not fully covered"));
+                return Err(reader.invalid("known words are not fully covered").into());
             }
             let count = surfaces.len();
             Ok(((lexicon, surfaces), count))
@@ -278,7 +283,9 @@ fn read_section<T>(
     let mut reader = Reader::new(&section.bytes, "dictionary section", false);
     let (value, count) = decode(&mut reader)?;
     if count as u64 != section.records {
-        return Err(reader.invalid("directory and decoded record counts differ"));
+        return Err(reader
+            .invalid("directory and decoded record counts differ")
+            .into());
     }
     reader.finish()?;
     drop(section);

@@ -8,7 +8,7 @@
 
 use super::{DictionaryError, DictionaryResult};
 
-pub(super) struct Reader<'a> {
+pub(crate) struct Reader<'a> {
     bytes: &'a [u8],
     position: usize,
     section: &'static str,
@@ -127,7 +127,7 @@ impl<'a> Reader<'a> {
     }
 }
 
-pub(super) fn vector<T>(capacity: usize) -> DictionaryResult<Vec<T>> {
+pub(crate) fn vector<T>(capacity: usize) -> DictionaryResult<Vec<T>> {
     let mut values = Vec::new();
     values.try_reserve_exact(capacity)?;
     Ok(values)
@@ -135,7 +135,7 @@ pub(super) fn vector<T>(capacity: usize) -> DictionaryResult<Vec<T>> {
 
 #[cfg(any(test, feature = "nori-tools"))]
 #[derive(Default)]
-pub(super) struct Writer(pub Vec<u8>);
+pub(crate) struct Writer(pub Vec<u8>);
 
 #[cfg(any(test, feature = "nori-tools"))]
 impl Writer {

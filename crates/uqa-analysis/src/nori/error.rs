@@ -46,6 +46,35 @@ pub enum DictionaryError {
 
 pub type DictionaryResult<T> = Result<T, DictionaryError>;
 
+impl From<crate::morphology::error::DictionaryError> for DictionaryError {
+    fn from(error: crate::morphology::error::DictionaryError) -> Self {
+        use crate::morphology::error::DictionaryError as Shared;
+
+        match error {
+            Shared::Invalid {
+                section,
+                offset,
+                reason,
+            } => Self::Invalid {
+                section,
+                offset,
+                reason,
+            },
+            Shared::Limit {
+                resource,
+                required,
+                limit,
+            } => Self::Limit {
+                resource,
+                required,
+                limit,
+            },
+            Shared::Allocation(error) => Self::Allocation(error),
+            Shared::Utf8(error) => Self::Utf8(error),
+        }
+    }
+}
+
 pub(super) fn invalid(section: &'static str, reason: &'static str) -> DictionaryError {
     DictionaryError::Invalid {
         section,
@@ -59,12 +88,5 @@ pub(super) fn check_limit(
     required: usize,
     limit: usize,
 ) -> DictionaryResult<()> {
-    if required > limit {
-        return Err(DictionaryError::Limit {
-            resource,
-            required,
-            limit,
-        });
-    }
-    Ok(())
+    crate::morphology::error::check_limit(resource, required, limit).map_err(Into::into)
 }

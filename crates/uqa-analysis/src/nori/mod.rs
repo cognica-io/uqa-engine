@@ -55,8 +55,6 @@ mod dictionary;
 mod error;
 pub(crate) mod filters;
 mod frame;
-mod io;
-mod lexicon;
 mod morphology;
 mod number;
 pub(crate) mod pipeline;
