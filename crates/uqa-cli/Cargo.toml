@@ -19,6 +19,7 @@ categories = ["command-line-utilities", "database"]
 [features]
 default = ["nori"]
 nori = ["uqa-engine/nori"]
+kuromoji = ["uqa-engine/kuromoji"]
 
 [[bin]]
 name = "usql"

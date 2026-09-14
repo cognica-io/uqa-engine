@@ -24,6 +24,8 @@ These functions are used in `FROM` like other table functions. `SELECT * FROM fu
 | `standard_cjk` | `standard` pipeline followed by 2-to-3-character n-grams with short-token retention | CJK-style text and substring-oriented matching |
 | `keyword` | Keyword tokenizer with no filters | Treat the complete non-empty field as one exact token |
 | `nori` (when the `nori` feature is enabled) | Native Lucene-compatible Korean tokenizer, POS and reading-form filters, and simple lowercase | Korean morphological analysis with graph positions and source offsets |
+| `kuromoji` (unreleased; requires `kuromoji`) | CJK width, SEARCH tokenization, base form, POS/word stops, Katakana stemming and pinned simple lowercase | Japanese morphology with full graph and original-source coordinates |
+| `kuromoji_completion` (unreleased; requires `kuromoji`) | CJK width, NORMAL tokenization, INDEX completion and pinned simple lowercase | Japanese surface and romanized completion alternatives |
 
 `standard` is used when a GIN field has no explicit analyzer. `standard_cjk` is a built-in character n-gram pipeline, not a Chinese, Japanese, or Korean morphological segmenter. The `nori` built-in is available only when the Engine is built with the native Nori dictionary feature. A built-in can be assigned without calling `create_analyzer`:
 
@@ -37,6 +39,8 @@ SELECT * FROM set_table_analyzer(
 ```
 
 The field must already belong to a physical GIN index. Assigning `both` rebuilds its postings and uses the same analyzer for queries.
+
+The unreleased `kuromoji` feature is available through `uqa`, `uqa-engine` and the CLI. Both Japanese built-ins are protected catalog names, and custom Japanese pipelines use the [compiled component configuration](../reference/06-text-analyzers.md#japanese-tokenizers-in-compiled-pipelines). Analysis and the Rust Engine/facade have no default dictionary feature. CLI and binding defaults still include only Nori while actual Japanese Python/Node.js/WASM delivery is being verified.
 
 ## Analyzer JSON
 
@@ -137,7 +141,7 @@ FROM list_analyzers()
 ORDER BY analyzer_name;
 ```
 
-The result includes `keyword`, `standard`, `standard_cjk`, `whitespace`, feature-enabled `nori`, and custom analyzer names stored in the engine catalog. The function accepts no arguments.
+The result includes `keyword`, `standard`, `standard_cjk`, `whitespace`, feature-enabled `nori`, feature-enabled `kuromoji` and `kuromoji_completion`, and custom analyzer names stored in the engine catalog. The function accepts no arguments.
 
 ## ANALYZE TEXT function
 
@@ -153,12 +157,22 @@ Inspect one complete analysis result without changing the catalog:
 
 Each token preserves its term, UTF-8 and UTF-16 source ranges, position increment and length, keyword state, and any analyzer-specific metadata. Nori tokens additionally include Korean morphology, readings, and morpheme origins when those attributes are present. The final offsets and final position increment are retained even when filters remove every token, and `analyzer_fingerprint` identifies the resolved immutable revision used for the call.
 
+Japanese tokens use `japanese_morphology` with independent optional `part_of_speech`, `base_form`, `reading`, `pronunciation`, `inflection_type` and `inflection_form` attributes plus origin. Completion-generated tokens omit morphology. For example, with `kuromoji` enabled, the following diagnostic returns `走る` and the original UTF-16 span `4..6`; width conversion and base-form replacement preserve the source coordinates:
+
+```sql
+SELECT analysis->'tokens'->1->>'term' AS term,
+       analysis->'tokens'->1->'offsets'->'utf16' AS source_span
+FROM analyze_text('kuromoji', 'ＵＱＡで走りました');
+```
+
 ```sql
 SELECT analysis
 FROM analyze_text('nori', '나물은') AS a(analysis);
 ```
 
 The JSONB diagnostic is the SQL form of the same rich token stream returned by the Rust `uqa_analysis::CompiledAnalyzer::analyze_tokens` API. Analysis and diagnostic encoding share one memory allowance; the analysis result remains reserved until serialization finishes. A feature-disabled build reports an unknown analyzer for `nori` rather than silently falling back to another pipeline.
+
+The same error rule applies to disabled Japanese built-ins and component tags. Native Japanese diagnostics and highlighting preserve `57014` cancellation and `53200` allocation errors, and subsequent calls recover after resetting cancellation or increasing the allowance. SQLite/redb tests execute the [shared Japanese SQL contract](../../../tests/parity/kuromoji/BINDINGS.md), including prepared statements, failed registration, independent index/search revisions, transaction/savepoint rollback, column/table rename, reopen, and closed-copy backup restoration after removing the original database directory.
 
 ## Bind through CREATE INDEX
 

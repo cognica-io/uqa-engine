@@ -22,30 +22,60 @@ fn json_value(value: &Value) -> Json {
 
 #[test]
 fn nori_binding_contract_preserves_resources_graphs_and_reopen() {
-    verify_contract(false);
+    verify_nori(false);
 }
 
 #[test]
 fn nori_binding_contract_survives_backup_restore_without_the_original_database() {
-    verify_contract(true);
+    verify_nori(true);
 }
 
-fn verify_contract(restore_backup: bool) {
-    let fixture: Json = serde_json::from_str(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../tests/parity/nori/bindings.json"
-    )))
-    .unwrap();
+fn verify_nori(restore_backup: bool) {
+    verify_contract(
+        "nori",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/parity/nori/bindings.json"
+        )),
+        cfg!(feature = "nori"),
+        restore_backup,
+    );
+}
+
+#[test]
+fn kuromoji_binding_contract_preserves_resources_graphs_and_reopen() {
+    verify_kuromoji(false);
+}
+
+#[test]
+fn kuromoji_binding_contract_survives_backup_restore_without_the_original_database() {
+    verify_kuromoji(true);
+}
+
+fn verify_kuromoji(restore_backup: bool) {
+    verify_contract(
+        "kuromoji",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/parity/kuromoji/bindings.json"
+        )),
+        cfg!(feature = "kuromoji"),
+        restore_backup,
+    );
+}
+
+fn verify_contract(language: &str, fixture: &str, required: bool, restore_backup: bool) {
+    let fixture: Json = serde_json::from_str(fixture).unwrap();
     assert_eq!(fixture["schema_version"], 1);
-    let enabled = uqa_analysis::get_analyzer("nori").is_ok();
+    let enabled = uqa_analysis::get_analyzer(language).is_ok();
     assert!(
-        !cfg!(feature = "nori") || enabled,
-        "an Engine built with Nori must register the bundled analyzer"
+        !required || enabled,
+        "an Engine built with {language} must register the bundled analyzer"
     );
     let mode = if enabled { "enabled" } else { "disabled" };
     for backend in [Backend::SQLite, Backend::Redb] {
         let mut directory = TempDir::new().unwrap();
-        let mut database = directory.path().join("nori-bindings.db");
+        let mut database = directory.path().join(format!("{language}-bindings.db"));
         let mut engine = Some(backend.open(&database));
         for step in fixture[mode].as_array().unwrap() {
             let context = format!(

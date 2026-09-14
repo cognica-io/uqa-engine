@@ -18,6 +18,8 @@ const KEYWORD: &str = r#"{"tokenizer":{"type":"keyword"}}"#;
 
 #[path = "analyzer_revisions/binding_parity.rs"]
 mod binding_parity;
+#[path = "analyzer_revisions/kuromoji_runtime.rs"]
+mod kuromoji_runtime;
 #[path = "analyzer_revisions/migration.rs"]
 mod migration;
 

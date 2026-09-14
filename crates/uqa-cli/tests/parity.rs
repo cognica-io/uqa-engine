@@ -72,23 +72,38 @@ fn command_string_executes_without_repl_banner() {
 
 #[test]
 fn builtin_nori_follows_the_cli_feature_configuration() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let output = run_usql(
-        &[
-            "--copy-text",
-            "-c",
-            "SELECT analysis -> 'tokens' -> 0 ->> 'term' AS term FROM analyze_text('nori', '한국 경제')",
-        ],
-        "",
-        dir.path(),
+    verify_builtin("nori", "한국 경제", 0, "한국", cfg!(feature = "nori"));
+}
+
+#[test]
+fn builtin_kuromoji_follows_the_cli_feature_configuration() {
+    verify_builtin(
+        "kuromoji",
+        "ＵＱＡで走りました",
+        1,
+        "走る",
+        cfg!(feature = "kuromoji"),
     );
-    if cfg!(feature = "nori") {
+    verify_builtin(
+        "kuromoji_completion",
+        "東京",
+        1,
+        "toukyou",
+        cfg!(feature = "kuromoji"),
+    );
+}
+
+fn verify_builtin(name: &str, input: &str, position: usize, expected: &str, enabled: bool) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let sql = format!("SELECT analysis -> 'tokens' -> {position} ->> 'term' AS term FROM analyze_text('{name}', '{input}')");
+    let output = run_usql(&["--copy-text", "-c", &sql], "", dir.path());
+    if enabled {
         assert!(output.status.success(), "{}", stderr(&output));
-        assert_eq!(stdout(&output), "한국\n");
+        assert_eq!(stdout(&output), format!("{expected}\n"));
     } else {
         assert!(!output.status.success());
         assert!(
-            stdout(&output).contains("analyzer `nori` is not registered"),
+            stdout(&output).contains(&format!("analyzer `{name}` is not registered")),
             "{}",
             stdout(&output)
         );

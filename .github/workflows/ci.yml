@@ -60,13 +60,16 @@ jobs:
         run: |
           cargo test -p uqa-analysis --features kuromoji-tools --no-default-features --locked
           cargo test -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb -p uqa-scoring -p uqa-operators --features uqa-analysis/kuromoji --locked japanese_
+          cargo test -p uqa-engine --features kuromoji --test integration --locked kuromoji_
+          cargo test -p uqa-engine --no-default-features --test integration --locked kuromoji_
+          cargo test -p uqa-cli --features kuromoji --test integration --locked builtin_
           python3 scripts/check-analyzer-feature-isolation.py
-      - name: Verify the standalone CLI without Nori
+      - name: Verify the standalone CLI without morphology dictionaries
         run: |
           cargo test -p uqa-cli --locked --no-default-features --test integration
-          cargo tree --locked -p uqa-cli --no-default-features --edges normal > target/cli-without-nori.txt
-          if grep -q uqa-nori-data target/cli-without-nori.txt; then
-            echo "Nori dictionary present in the feature-disabled CLI" >&2
+          cargo tree --locked -p uqa-cli --no-default-features --edges normal > target/cli-without-morphology.txt
+          if grep -Eq 'uqa-(nori|kuromoji)-data' target/cli-without-morphology.txt; then
+            echo "Morphology dictionary present in the feature-disabled CLI" >&2
             exit 1
           fi
 

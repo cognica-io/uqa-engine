@@ -1,0 +1,707 @@
+{
+  "schema_version": 1,
+  "enabled": [
+    {
+      "name": "both_builtins_are_registered",
+      "sql": "SELECT analyzer_name FROM list_analyzers() WHERE analyzer_name IN ('kuromoji', 'kuromoji_completion') ORDER BY analyzer_name",
+      "rows": [
+        {
+          "analyzer_name": "kuromoji"
+        },
+        {
+          "analyzer_name": "kuromoji_completion"
+        }
+      ]
+    },
+    {
+      "name": "six_attributes_and_original_source_offsets",
+      "sql": "SELECT analysis->'tokens'->1->>'term' AS term, analysis->'tokens'->1->'japanese_morphology'->>'part_of_speech' AS part_of_speech, analysis->'tokens'->1->'japanese_morphology'->>'base_form' AS base_form, analysis->'tokens'->1->'japanese_morphology'->>'reading' AS reading, analysis->'tokens'->1->'japanese_morphology'->>'pronunciation' AS pronunciation, analysis->'tokens'->1->'japanese_morphology'->>'inflection_type' AS inflection_type, analysis->'tokens'->1->'japanese_morphology'->>'inflection_form' AS inflection_form, analysis->'tokens'->1->'offsets'->'utf16'->>'start' AS source_start, analysis->'tokens'->1->'offsets'->'utf16'->>'end' AS source_end, analysis->>'final_position_increment' AS final_increment FROM analyze_text('kuromoji', $1)",
+      "params": [
+        "ＵＱＡで走りました"
+      ],
+      "rows": [
+        {
+          "term": "走る",
+          "part_of_speech": "動詞-自立",
+          "base_form": "走る",
+          "reading": "ハシリ",
+          "pronunciation": "ハシリ",
+          "inflection_type": "五段・ラ行",
+          "inflection_form": "連用形",
+          "source_start": "4",
+          "source_end": "6",
+          "final_increment": "2"
+        }
+      ]
+    },
+    {
+      "name": "completion_keeps_pinned_spelling",
+      "sql": "SELECT analysis->'tokens'->1->>'term' AS term, analysis->'tokens'->1->>'position_increment' AS increment FROM analyze_text('kuromoji_completion', '東京')",
+      "rows": [
+        {
+          "term": "toukyou",
+          "increment": "0"
+        }
+      ]
+    },
+    {
+      "name": "register_user_dictionary",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "binding_kuromoji",
+        "{\"char_filters\":[{\"type\":\"html_strip\"},{\"type\":\"cjk_width\"}],\"tokenizer\":{\"type\":\"kuromoji_tokenizer\",\"discard_compound_token\":false,\"n_best_cost\":1000,\"user_dictionary\":\"東京大学,東京 大学,トウキョウ ダイガク,名詞\"},\"token_filters\":[{\"type\":\"kuromoji_baseform\"},{\"type\":\"kuromoji_part_of_speech\"},{\"type\":\"kuromoji_stop\"},{\"type\":\"kuromoji_stemmer\"},{\"type\":\"unicode_simple_lowercase\",\"unicode_profile\":{\"provider\":\"kuromoji\",\"dictionary\":\"lucene-10.5.1\"}}],\"normalization\":{\"type\":\"cjk_width_simple_lowercase\",\"profile\":{\"provider\":\"kuromoji\",\"dictionary\":\"lucene-10.5.1\"}}}"
+      ]
+    },
+    {
+      "name": "html_source_offsets_survive_user_segmentation",
+      "sql": "SELECT analysis->'tokens'->0->>'term' AS term, analysis->'tokens'->0->'offsets'->'utf16'->>'start' AS source_start, analysis->'tokens'->0->'offsets'->'utf16'->>'end' AS source_end FROM analyze_text('binding_kuromoji', '<b>東京大学</b>')",
+      "rows": [
+        {
+          "term": "東京",
+          "source_start": "3",
+          "source_end": "5"
+        }
+      ]
+    },
+    {
+      "name": "create_diagnostic_snapshot",
+      "sql": "CREATE TABLE diagnostic_snapshot (analysis JSONB)"
+    },
+    {
+      "name": "retain_complete_diagnostic",
+      "sql": "INSERT INTO diagnostic_snapshot SELECT analysis FROM analyze_text($1, $2)",
+      "params": [
+        "binding_kuromoji",
+        "東京大学 関西国際空港"
+      ]
+    },
+    {
+      "name": "protect_kuromoji",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "kuromoji",
+        "{\"char_filters\":[{\"type\":\"html_strip\"},{\"type\":\"cjk_width\"}],\"tokenizer\":{\"type\":\"kuromoji_tokenizer\",\"discard_compound_token\":false,\"n_best_cost\":1000,\"user_dictionary\":\"東京大学,東京 大学,トウキョウ ダイガク,名詞\"},\"token_filters\":[{\"type\":\"kuromoji_baseform\"},{\"type\":\"kuromoji_part_of_speech\"},{\"type\":\"kuromoji_stop\"},{\"type\":\"kuromoji_stemmer\"},{\"type\":\"unicode_simple_lowercase\",\"unicode_profile\":{\"provider\":\"kuromoji\",\"dictionary\":\"lucene-10.5.1\"}}],\"normalization\":{\"type\":\"cjk_width_simple_lowercase\",\"profile\":{\"provider\":\"kuromoji\",\"dictionary\":\"lucene-10.5.1\"}}}"
+      ],
+      "error_contains": "built-in"
+    },
+    {
+      "name": "protect_kuromoji_completion",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "kuromoji_completion",
+        "{\"char_filters\":[{\"type\":\"html_strip\"},{\"type\":\"cjk_width\"}],\"tokenizer\":{\"type\":\"kuromoji_tokenizer\",\"discard_compound_token\":false,\"n_best_cost\":1000,\"user_dictionary\":\"東京大学,東京 大学,トウキョウ ダイガク,名詞\"},\"token_filters\":[{\"type\":\"kuromoji_baseform\"},{\"type\":\"kuromoji_part_of_speech\"},{\"type\":\"kuromoji_stop\"},{\"type\":\"kuromoji_stemmer\"},{\"type\":\"unicode_simple_lowercase\",\"unicode_profile\":{\"provider\":\"kuromoji\",\"dictionary\":\"lucene-10.5.1\"}}],\"normalization\":{\"type\":\"cjk_width_simple_lowercase\",\"profile\":{\"provider\":\"kuromoji\",\"dictionary\":\"lucene-10.5.1\"}}}"
+      ],
+      "error_contains": "built-in"
+    },
+    {
+      "name": "missing_bundle_preserves_definition",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "binding_kuromoji",
+        "{\"char_filters\": [{\"type\": \"html_strip\"}, {\"type\": \"cjk_width\"}], \"tokenizer\": {\"type\": \"kuromoji_tokenizer\", \"discard_compound_token\": false, \"n_best_cost\": 1000, \"user_dictionary\": \"東京大学,東京 大学,トウキョウ ダイガク,名詞\", \"dictionary\": \"unavailable-kuromoji-bundle\"}, \"token_filters\": [{\"type\": \"kuromoji_baseform\"}, {\"type\": \"kuromoji_part_of_speech\"}, {\"type\": \"kuromoji_stop\"}, {\"type\": \"kuromoji_stemmer\"}, {\"type\": \"unicode_simple_lowercase\", \"unicode_profile\": {\"provider\": \"kuromoji\", \"dictionary\": \"lucene-10.5.1\"}}], \"normalization\": {\"type\": \"cjk_width_simple_lowercase\", \"profile\": {\"provider\": \"kuromoji\", \"dictionary\": \"lucene-10.5.1\"}}}"
+      ],
+      "error_contains": "Kuromoji dictionary resource is unavailable"
+    },
+    {
+      "name": "missing_bundle_keeps_diagnostic",
+      "sql": "SELECT 1 AS identical FROM diagnostic_snapshot s, analyze_text($1, $2) a WHERE s.analysis = a.analysis",
+      "params": [
+        "binding_kuromoji",
+        "東京大学 関西国際空港"
+      ],
+      "rows": [
+        {
+          "identical": 1
+        }
+      ]
+    },
+    {
+      "name": "invalid_user_rule_preserves_definition",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "binding_kuromoji",
+        "{\"char_filters\": [{\"type\": \"html_strip\"}, {\"type\": \"cjk_width\"}], \"tokenizer\": {\"type\": \"kuromoji_tokenizer\", \"discard_compound_token\": false, \"n_best_cost\": 1000, \"user_dictionary\": \"東京大学,東京 大学,トウキョウ\"}, \"token_filters\": [{\"type\": \"kuromoji_baseform\"}, {\"type\": \"kuromoji_part_of_speech\"}, {\"type\": \"kuromoji_stop\"}, {\"type\": \"kuromoji_stemmer\"}, {\"type\": \"unicode_simple_lowercase\", \"unicode_profile\": {\"provider\": \"kuromoji\", \"dictionary\": \"lucene-10.5.1\"}}], \"normalization\": {\"type\": \"cjk_width_simple_lowercase\", \"profile\": {\"provider\": \"kuromoji\", \"dictionary\": \"lucene-10.5.1\"}}}"
+      ],
+      "error_contains": "fewer than four fields"
+    },
+    {
+      "name": "invalid_user_rule_keeps_diagnostic",
+      "sql": "SELECT 1 AS identical FROM diagnostic_snapshot s, analyze_text($1, $2) a WHERE s.analysis = a.analysis",
+      "params": [
+        "binding_kuromoji",
+        "東京大学 関西国際空港"
+      ],
+      "rows": [
+        {
+          "identical": 1
+        }
+      ]
+    },
+    {
+      "name": "missing_bundle_publishes_no_name",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "missing_japanese",
+        "{\"char_filters\": [{\"type\": \"html_strip\"}, {\"type\": \"cjk_width\"}], \"tokenizer\": {\"type\": \"kuromoji_tokenizer\", \"discard_compound_token\": false, \"n_best_cost\": 1000, \"user_dictionary\": \"東京大学,東京 大学,トウキョウ ダイガク,名詞\", \"dictionary\": \"unavailable-kuromoji-bundle\"}, \"token_filters\": [{\"type\": \"kuromoji_baseform\"}, {\"type\": \"kuromoji_part_of_speech\"}, {\"type\": \"kuromoji_stop\"}, {\"type\": \"kuromoji_stemmer\"}, {\"type\": \"unicode_simple_lowercase\", \"unicode_profile\": {\"provider\": \"kuromoji\", \"dictionary\": \"lucene-10.5.1\"}}], \"normalization\": {\"type\": \"cjk_width_simple_lowercase\", \"profile\": {\"provider\": \"kuromoji\", \"dictionary\": \"lucene-10.5.1\"}}}"
+      ],
+      "error_contains": "Kuromoji dictionary resource is unavailable"
+    },
+    {
+      "name": "failed_name_absent",
+      "sql": "SELECT analyzer_name FROM list_analyzers() WHERE analyzer_name = 'missing_japanese'",
+      "rows": []
+    },
+    {
+      "name": "create_documents",
+      "sql": "CREATE TABLE docs (id INTEGER PRIMARY KEY, body TEXT)"
+    },
+    {
+      "name": "create_physical_index",
+      "sql": "CREATE INDEX docs_fts ON docs USING gin (body)"
+    },
+    {
+      "name": "bind_both_revisions",
+      "sql": "SELECT * FROM set_table_analyzer('docs', 'body', 'binding_kuromoji', 'both')"
+    },
+    {
+      "name": "insert_graph_sources",
+      "sql": "INSERT INTO docs VALUES (1, $1), (2, $2), (3, $3), (4, $4)",
+      "params": [
+        "東京大学 関西国際空港",
+        "関西国際空港 東京大学",
+        "東京 大学 関西 国際 空港",
+        "東京大学 の 関西国際空港"
+      ]
+    },
+    {
+      "name": "compound_and_user_paths",
+      "sql": "SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id",
+      "params": [
+        "\"東京大学 関西国際空港\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        },
+        {
+          "id": 3
+        }
+      ]
+    },
+    {
+      "name": "stopped_position_holes",
+      "sql": "SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id",
+      "params": [
+        "\"東京大学 の 関西国際空港\""
+      ],
+      "rows": [
+        {
+          "id": 4
+        }
+      ]
+    },
+    {
+      "name": "reversed_phrase",
+      "sql": "SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id",
+      "params": [
+        "\"関西国際空港 東京大学\""
+      ],
+      "rows": [
+        {
+          "id": 2
+        }
+      ]
+    },
+    {
+      "name": "width_and_baseform_highlight",
+      "sql": "SELECT uqa_highlight($1, $2, NULL, NULL, NULL, NULL, $3) AS snippet",
+      "params": [
+        "ＵＱＡで走りました",
+        "uqa 走る",
+        "kuromoji"
+      ],
+      "rows": [
+        {
+          "snippet": "<b>ＵＱＡ</b>で<b>走り</b>ました"
+        }
+      ]
+    },
+    {
+      "name": "register_numeric_analysis",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "japanese_numbers",
+        "{\"tokenizer\": {\"type\": \"kuromoji_tokenizer\"}, \"token_filters\": [{\"type\": \"kuromoji_number\"}]}"
+      ]
+    },
+    {
+      "name": "number_highlights_original_text",
+      "sql": "SELECT uqa_highlight($1, $2, NULL, NULL, NULL, NULL, $3) AS snippet",
+      "params": [
+        "三千二百円",
+        "3200",
+        "japanese_numbers"
+      ],
+      "rows": [
+        {
+          "snippet": "<b>三千二百</b>円"
+        }
+      ]
+    },
+    {
+      "name": "register_reading_analysis",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "japanese_reading",
+        "{\"tokenizer\": {\"type\": \"kuromoji_tokenizer\"}, \"token_filters\": [{\"type\": \"kuromoji_readingform\"}]}"
+      ]
+    },
+    {
+      "name": "reading_highlights_original_text",
+      "sql": "SELECT uqa_highlight($1, $2, NULL, NULL, NULL, NULL, $3) AS snippet",
+      "params": [
+        "東京",
+        "トウキョウ",
+        "japanese_reading"
+      ],
+      "rows": [
+        {
+          "snippet": "<b>東京</b>"
+        }
+      ]
+    },
+    {
+      "name": "register_iteration_analysis",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "japanese_iteration",
+        "{\"char_filters\": [{\"type\": \"kuromoji_iteration_mark\"}], \"tokenizer\": {\"type\": \"kuromoji_tokenizer\", \"user_dictionary\": \"時時,時時,ジジ,名詞\"}}"
+      ]
+    },
+    {
+      "name": "iteration_highlights_original_text",
+      "sql": "SELECT uqa_highlight($1, $2, NULL, NULL, NULL, NULL, $3) AS snippet",
+      "params": [
+        "時々",
+        "時時",
+        "japanese_iteration"
+      ],
+      "rows": [
+        {
+          "snippet": "<b>時々</b>"
+        }
+      ]
+    },
+    {
+      "name": "prepare_phrase",
+      "sql": "PREPARE binding_search(text) AS SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id"
+    },
+    {
+      "name": "prepared_phrase_uses_installed_revision",
+      "sql": "EXECUTE binding_search($1)",
+      "params": [
+        "\"東京大学 関西国際空港\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        },
+        {
+          "id": 3
+        }
+      ]
+    },
+    {
+      "name": "begin_write",
+      "sql": "BEGIN"
+    },
+    {
+      "name": "insert_before_savepoint",
+      "sql": "INSERT INTO docs VALUES (5, $1)",
+      "params": [
+        "東京大学 関西国際空港"
+      ]
+    },
+    {
+      "name": "savepoint",
+      "sql": "SAVEPOINT keep_insert"
+    },
+    {
+      "name": "replace_indexed_source",
+      "sql": "UPDATE docs SET body = '京都' WHERE id = 1"
+    },
+    {
+      "name": "transaction_graph",
+      "sql": "EXECUTE binding_search($1)",
+      "params": [
+        "\"東京大学 関西国際空港\""
+      ],
+      "rows": [
+        {
+          "id": 3
+        },
+        {
+          "id": 5
+        }
+      ]
+    },
+    {
+      "name": "rollback_savepoint",
+      "sql": "ROLLBACK TO SAVEPOINT keep_insert"
+    },
+    {
+      "name": "release_savepoint",
+      "sql": "RELEASE SAVEPOINT keep_insert"
+    },
+    {
+      "name": "savepoint_restores_graph",
+      "sql": "EXECUTE binding_search($1)",
+      "params": [
+        "\"東京大学 関西国際空港\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        },
+        {
+          "id": 3
+        },
+        {
+          "id": 5
+        }
+      ]
+    },
+    {
+      "name": "rollback_transaction",
+      "sql": "ROLLBACK"
+    },
+    {
+      "name": "rollback_restores_graph",
+      "sql": "EXECUTE binding_search($1)",
+      "params": [
+        "\"東京大学 関西国際空港\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        },
+        {
+          "id": 3
+        }
+      ]
+    },
+    {
+      "name": "replace_catalog_name",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "binding_kuromoji",
+        "{\"tokenizer\":{\"type\":\"keyword\"}}"
+      ]
+    },
+    {
+      "name": "installed_revision_survives_name_change",
+      "sql": "EXECUTE binding_search($1)",
+      "params": [
+        "\"東京大学 関西国際空港\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        },
+        {
+          "id": 3
+        }
+      ]
+    },
+    {
+      "name": "close_all_handles_and_reopen",
+      "reopen": true
+    },
+    {
+      "name": "reopen_keeps_installed_revision",
+      "sql": "SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id",
+      "params": [
+        "\"東京大学 関西国際空港\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        },
+        {
+          "id": 3
+        }
+      ]
+    },
+    {
+      "name": "insert_uses_retained_revision",
+      "sql": "INSERT INTO docs VALUES (5, $1)",
+      "params": [
+        "東京大学 関西国際空港"
+      ]
+    },
+    {
+      "name": "new_source_uses_retained_revision",
+      "sql": "SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id",
+      "params": [
+        "\"東京大学 関西国際空港\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        },
+        {
+          "id": 3
+        },
+        {
+          "id": 5
+        }
+      ]
+    },
+    {
+      "name": "restore_catalog_definition",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "binding_kuromoji",
+        "{\"char_filters\":[{\"type\":\"html_strip\"},{\"type\":\"cjk_width\"}],\"tokenizer\":{\"type\":\"kuromoji_tokenizer\",\"discard_compound_token\":false,\"n_best_cost\":1000,\"user_dictionary\":\"東京大学,東京 大学,トウキョウ ダイガク,名詞\"},\"token_filters\":[{\"type\":\"kuromoji_baseform\"},{\"type\":\"kuromoji_part_of_speech\"},{\"type\":\"kuromoji_stop\"},{\"type\":\"kuromoji_stemmer\"},{\"type\":\"unicode_simple_lowercase\",\"unicode_profile\":{\"provider\":\"kuromoji\",\"dictionary\":\"lucene-10.5.1\"}}],\"normalization\":{\"type\":\"cjk_width_simple_lowercase\",\"profile\":{\"provider\":\"kuromoji\",\"dictionary\":\"lucene-10.5.1\"}}}"
+      ]
+    },
+    {
+      "name": "exact_diagnostic_restores",
+      "sql": "SELECT 1 AS identical FROM diagnostic_snapshot s, analyze_text($1, $2) a WHERE s.analysis = a.analysis",
+      "params": [
+        "binding_kuromoji",
+        "東京大学 関西国際空港"
+      ],
+      "rows": [
+        {
+          "identical": 1
+        }
+      ]
+    },
+    {
+      "name": "prepare_after_reopen",
+      "sql": "PREPARE binding_search(text) AS SELECT id FROM docs WHERE fts_match(body, $1) ORDER BY id"
+    },
+    {
+      "name": "begin_search_change",
+      "sql": "BEGIN"
+    },
+    {
+      "name": "replace_search_only",
+      "sql": "SELECT * FROM set_table_analyzer('docs', 'body', 'keyword', 'search')"
+    },
+    {
+      "name": "prepared_query_observes_independent_search",
+      "sql": "EXECUTE binding_search($1)",
+      "params": [
+        "\"東京大学 関西国際空港\""
+      ],
+      "rows": []
+    },
+    {
+      "name": "rollback_search_change",
+      "sql": "ROLLBACK"
+    },
+    {
+      "name": "prepared_query_recovers_search_revision",
+      "sql": "EXECUTE binding_search($1)",
+      "params": [
+        "\"東京大学 関西国際空港\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        },
+        {
+          "id": 3
+        },
+        {
+          "id": 5
+        }
+      ]
+    },
+    {
+      "name": "rename_field",
+      "sql": "ALTER TABLE docs RENAME COLUMN body TO content"
+    },
+    {
+      "name": "rename_table",
+      "sql": "ALTER TABLE docs RENAME TO documents"
+    },
+    {
+      "name": "renamed_field_keeps_revisions",
+      "sql": "SELECT id FROM documents WHERE fts_match(content, $1) ORDER BY id",
+      "params": [
+        "\"東京大学 関西国際空港\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        },
+        {
+          "id": 3
+        },
+        {
+          "id": 5
+        }
+      ]
+    },
+    {
+      "name": "close_renamed_catalog",
+      "reopen": true
+    },
+    {
+      "name": "renamed_field_survives_reopen",
+      "sql": "SELECT id FROM documents WHERE fts_match(content, $1) ORDER BY id",
+      "params": [
+        "\"東京大学 関西国際空港\""
+      ],
+      "rows": [
+        {
+          "id": 1
+        },
+        {
+          "id": 3
+        },
+        {
+          "id": 5
+        }
+      ]
+    },
+    {
+      "name": "diagnostic_survives_reopen",
+      "sql": "SELECT 1 AS identical FROM diagnostic_snapshot s, analyze_text($1, $2) a WHERE s.analysis = a.analysis",
+      "params": [
+        "binding_kuromoji",
+        "東京大学 関西国際空港"
+      ],
+      "rows": [
+        {
+          "identical": 1
+        }
+      ]
+    },
+    {
+      "name": "drop_documents",
+      "sql": "DROP TABLE documents"
+    },
+    {
+      "name": "drop_binding_kuromoji",
+      "sql": "SELECT * FROM drop_analyzer($1)",
+      "params": [
+        "binding_kuromoji"
+      ]
+    },
+    {
+      "name": "drop_japanese_numbers",
+      "sql": "SELECT * FROM drop_analyzer($1)",
+      "params": [
+        "japanese_numbers"
+      ]
+    },
+    {
+      "name": "drop_japanese_reading",
+      "sql": "SELECT * FROM drop_analyzer($1)",
+      "params": [
+        "japanese_reading"
+      ]
+    },
+    {
+      "name": "drop_japanese_iteration",
+      "sql": "SELECT * FROM drop_analyzer($1)",
+      "params": [
+        "japanese_iteration"
+      ]
+    },
+    {
+      "name": "release_diagnostic_snapshot",
+      "sql": "DROP TABLE diagnostic_snapshot"
+    },
+    {
+      "name": "released_name_absent",
+      "sql": "SELECT analyzer_name FROM list_analyzers() WHERE analyzer_name = $1",
+      "params": [
+        "binding_kuromoji"
+      ],
+      "rows": []
+    }
+  ],
+  "disabled": [
+    {
+      "name": "both_builtins_absent",
+      "sql": "SELECT analyzer_name FROM list_analyzers() WHERE analyzer_name IN ('kuromoji', 'kuromoji_completion')",
+      "rows": []
+    },
+    {
+      "name": "tokenizer_rejects_disabled_feature",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "binding_kuromoji",
+        "{\"tokenizer\":{\"type\":\"kuromoji_tokenizer\"}}"
+      ],
+      "error_contains": "unknown variant `kuromoji_tokenizer`"
+    },
+    {
+      "name": "filter_rejects_disabled_feature",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "binding_kuromoji",
+        "{\"token_filters\":[{\"type\":\"kuromoji_completion\"}]}"
+      ],
+      "error_contains": "unknown variant `kuromoji_completion`"
+    },
+    {
+      "name": "disabled_feature_publishes_no_name",
+      "sql": "SELECT analyzer_name FROM list_analyzers() WHERE analyzer_name = $1",
+      "params": [
+        "binding_kuromoji"
+      ],
+      "rows": []
+    },
+    {
+      "name": "diagnostics_do_not_fallback",
+      "sql": "SELECT * FROM analyze_text('kuromoji', '東京')",
+      "error_contains": "analyzer `kuromoji` is not registered"
+    },
+    {
+      "name": "generic_analysis_stays_available",
+      "sql": "SELECT * FROM create_analyzer($1, $2)",
+      "params": [
+        "binding_kuromoji",
+        "{\"tokenizer\":{\"type\":\"keyword\"}}"
+      ]
+    },
+    {
+      "name": "generic_highlight",
+      "sql": "SELECT uqa_highlight($1, $2, NULL, NULL, NULL, NULL, $3) AS snippet",
+      "params": [
+        "c++",
+        "c++",
+        "binding_kuromoji"
+      ],
+      "rows": [
+        {
+          "snippet": "<b>c++</b>"
+        }
+      ]
+    },
+    {
+      "name": "generic_definition_reopens",
+      "reopen": true
+    },
+    {
+      "name": "generic_highlight_after_reopen",
+      "sql": "SELECT uqa_highlight($1, $2, NULL, NULL, NULL, NULL, $3) AS snippet",
+      "params": [
+        "c++",
+        "c++",
+        "binding_kuromoji"
+      ],
+      "rows": [
+        {
+          "snippet": "<b>c++</b>"
+        }
+      ]
+    }
+  ]
+}
