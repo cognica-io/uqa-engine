@@ -24,3 +24,6 @@ mod persistent_graph;
 mod skip_blockmax_coverage;
 #[path = "cases/sqlite_document_store.rs"]
 mod sqlite_document_store;
+
+#[path = "cases/japanese.rs"]
+mod japanese;

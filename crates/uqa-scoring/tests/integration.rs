@@ -36,3 +36,6 @@ mod wand;
 mod wand_exactness;
 #[path = "wand_tightness_coverage.rs"]
 mod wand_tightness_coverage;
+
+#[path = "cases/japanese.rs"]
+mod japanese;

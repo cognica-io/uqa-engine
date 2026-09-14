@@ -4079,6 +4079,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "uqa-analysis",
+ "uqa-core",
  "uqa-storage",
 ]
 

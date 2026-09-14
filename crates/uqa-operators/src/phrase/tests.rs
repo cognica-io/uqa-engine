@@ -14,6 +14,7 @@ use uqa_scoring::{score_text_terms, BM25Params, TextSearchAlgorithm};
 use uqa_storage::{inverted_index::analyze_query_graph, MemoryInvertedIndex};
 
 mod allocation;
+mod japanese;
 
 fn edge(term: &str, position: u32, length: u32) -> (TokenTermKey, TokenOccurrence) {
     (

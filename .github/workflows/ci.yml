@@ -59,6 +59,7 @@ jobs:
       - name: Verify independent analyzer features
         run: |
           cargo test -p uqa-analysis --features kuromoji-tools --no-default-features --locked
+          cargo test -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb -p uqa-scoring -p uqa-operators --features uqa-analysis/kuromoji --locked japanese_
           python3 scripts/check-analyzer-feature-isolation.py
       - name: Verify the standalone CLI without Nori
         run: |
