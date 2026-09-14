@@ -84,5 +84,40 @@ class RegistryTransferIntegrityTest(unittest.TestCase):
                 self.assertIn("inventory differs from verified files", result.stderr)
 
 
+class PythonPublicationSelectionTest(unittest.TestCase):
+    def test_explicit_source_location_preserves_selected_inventory_and_digests(self):
+        source = (ROOT / ".github/workflows/pypi.yml").read_text()
+        step = source.split("      - name: Select Python distributions for PyPI\n", 1)[1]
+        step = step.split("\n      - ", 1)[0]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+        original = {"uqa-0.3.0.tar.gz": b"source", "uqa.whl": b"wheel"}
+        for choice in ("true", "false", "invalid"):
+            with self.subTest(choice=choice), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                dist = root / "dist"
+                dist.mkdir()
+                for filename, content in original.items():
+                    (dist / filename).write_bytes(content)
+                output = root / "output"
+                result = subprocess.run(
+                    ["bash", "-e"], input=script, text=True, capture_output=True,
+                    cwd=root, check=False,
+                    env={**os.environ, "RELEASE_TAG": "v0.3.0",
+                         "PUBLISH_SDIST": choice, "GITHUB_OUTPUT": str(output)},
+                )
+                if choice == "invalid":
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertFalse(output.exists())
+                    continue
+                self.assertEqual(result.returncode, 0, result.stderr)
+                expected = original if choice == "true" else {"uqa.whl": b"wheel"}
+                self.assertEqual({p.name: p.read_bytes() for p in dist.iterdir()}, expected)
+                self.assertEqual(
+                    set(output.read_text().splitlines()),
+                    {"digests<<UQA_RELEASE_DIGESTS", "UQA_RELEASE_DIGESTS",
+                     *RegistryTransferIntegrityTest.manifest(expected).splitlines()},
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -209,9 +209,11 @@ jobs:
                   f"unexpected={sorted(actual - set(expected))}"
               )
           for filename, digest in expected.items():
+              actual_digest = hashlib.sha256()
               with Path(filename).open("rb") as stream:
-                  actual_digest = hashlib.file_digest(stream, "sha256").hexdigest()
-              if actual_digest != digest:
+                  for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                      actual_digest.update(chunk)
+              if actual_digest.hexdigest() != digest:
                   raise SystemExit(f"Transferred release digest mismatch: {filename}")
           print(f"Verified all {len(expected)} transferred release files")
           PYTHON
