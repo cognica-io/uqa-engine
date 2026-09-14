@@ -8,6 +8,12 @@
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DictionaryError {
+    #[error("invalid provenance manifest: {0}")]
+    Manifest(#[from] serde_json::Error),
+    #[error("unsupported bundle version {0}")]
+    Version(u32),
+    #[error("dictionary checksum mismatch in section {0}")]
+    Checksum(u32),
     #[error("invalid {section} at byte {offset}: {reason}")]
     Invalid {
         section: &'static str,

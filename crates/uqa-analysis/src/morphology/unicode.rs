@@ -10,7 +10,7 @@ use super::error::invalid;
 use super::DictionaryResult;
 use crate::morphology::io::{vector, Reader};
 
-pub(super) const CODE_POINTS: u32 = 0x11_0000;
+pub(crate) const CODE_POINTS: u32 = 0x11_0000;
 
 /// Pinned Java Character values, including surrogate code points and simple lowercase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,7 +24,7 @@ pub struct UnicodeProperties {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct Properties {
+pub(crate) struct Properties {
     pub category: u8,
     pub flags: u8,
     pub script: u16,
@@ -32,13 +32,13 @@ pub(super) struct Properties {
 }
 
 #[derive(Debug)]
-pub(super) struct UnicodeRange {
+pub(crate) struct UnicodeRange {
     pub end: u32,
     pub properties: Properties,
 }
 
 #[derive(Debug)]
-pub(super) struct UnicodeTable {
+pub(crate) struct UnicodeTable {
     pub ranges: Vec<UnicodeRange>,
 }
 
@@ -61,7 +61,7 @@ impl UnicodeTable {
 
     pub fn decode(reader: &mut Reader<'_>, script_count: usize) -> DictionaryResult<Self> {
         if reader.u32()? != CODE_POINTS {
-            return Err(reader.invalid("incomplete Unicode profile").into());
+            return Err(reader.invalid("incomplete Unicode profile"));
         }
         let count = reader.count(12)?;
         let mut ranges = vector(count)?;
@@ -148,4 +148,46 @@ impl UnicodeTable {
         }
         Ok(())
     }
+}
+
+#[cfg(any(test, feature = "nori-tools"))]
+pub(crate) fn read_neutral(
+    mut reader: Reader<'_>,
+    script_count: usize,
+) -> DictionaryResult<UnicodeTable> {
+    if reader.u32()? != CODE_POINTS {
+        return Err(reader.invalid("incomplete Unicode profile"));
+    }
+    let mut ranges: Vec<UnicodeRange> = Vec::new();
+    for code_point in 0..CODE_POINTS {
+        let category = reader.u8()?;
+        let script = reader.u16()?;
+        let flags = reader.u8()?;
+        let lowercase = reader.u32()?;
+        if lowercase >= CODE_POINTS {
+            return Err(reader.invalid("invalid lowercase code point"));
+        }
+        let properties = Properties {
+            category,
+            script,
+            flags,
+            lowercase_delta: lowercase as i32 - code_point as i32,
+        };
+        if let Some(previous) = ranges
+            .last_mut()
+            .filter(|range| range.properties == properties)
+        {
+            previous.end = code_point + 1;
+        } else {
+            ranges.try_reserve(1)?;
+            ranges.push(UnicodeRange {
+                end: code_point + 1,
+                properties,
+            });
+        }
+    }
+    reader.finish()?;
+    let unicode = UnicodeTable { ranges };
+    unicode.validate(script_count)?;
+    Ok(unicode)
 }

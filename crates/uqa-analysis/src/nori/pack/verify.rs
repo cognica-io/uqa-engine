@@ -6,82 +6,31 @@
 
 //! Reconstruct every neutral-model value from the decoded runtime representation.
 
-use sha2::{Digest, Sha256};
-
 use crate::nori::dictionary::tables::CLASSES;
 use crate::nori::error::{check_limit, invalid};
 use crate::nori::{DictionaryLimits, DictionaryResult, DictionaryWord, NoriDictionary};
 
-struct NeutralHash {
-    hash: Sha256,
-    bytes: u64,
-    expected_bytes: u64,
-}
+use crate::morphology::neutral::hash::NeutralHash;
 
-impl NeutralHash {
-    fn bytes(&mut self, bytes: &[u8]) -> DictionaryResult<()> {
-        self.bytes = self
-            .bytes
-            .checked_add(bytes.len() as u64)
-            .ok_or_else(|| invalid("neutral verification", "byte count overflow"))?;
-        if self.bytes > self.expected_bytes {
-            return Err(invalid(
-                "neutral verification",
-                "reconstructed data exceeds expected length",
-            ));
+fn write_word(output: &mut NeutralHash, word: DictionaryWord<'_>) -> DictionaryResult<()> {
+    output.u32(word.original_id())?;
+    output.u32(u32::from(word.left_context()))?;
+    output.u32(u32::from(word.right_context()))?;
+    output.i32(i32::from(word.cost()))?;
+    output.u32(word.pos_type() as u32)?;
+    output.u32(u32::from(word.left_pos().ordinal()))?;
+    output.u32(u32::from(word.right_pos().ordinal()))?;
+    output.text(word.reading())?;
+    if let Some(morphemes) = word.morphemes() {
+        output.count(morphemes.len())?;
+        for morpheme in morphemes {
+            output.u32(u32::from(morpheme.pos.ordinal()))?;
+            output.text(Some(morpheme.surface))?;
         }
-        self.hash.update(bytes);
-        Ok(())
+    } else {
+        output.i32(-1)?;
     }
-
-    fn u32(&mut self, value: u32) -> DictionaryResult<()> {
-        self.bytes(&value.to_be_bytes())
-    }
-    fn i32(&mut self, value: i32) -> DictionaryResult<()> {
-        self.u32(value as u32)
-    }
-    fn u16(&mut self, value: u16) -> DictionaryResult<()> {
-        self.bytes(&value.to_be_bytes())
-    }
-
-    fn count(&mut self, value: usize) -> DictionaryResult<()> {
-        self.u32(
-            u32::try_from(value)
-                .map_err(|_| invalid("neutral verification", "count exceeds u32"))?,
-        )
-    }
-
-    fn text(&mut self, value: Option<&str>) -> DictionaryResult<()> {
-        let Some(text) = value else {
-            return self.i32(-1);
-        };
-        self.count(text.encode_utf16().count())?;
-        for unit in text.encode_utf16() {
-            self.u16(unit)?;
-        }
-        Ok(())
-    }
-
-    fn word(&mut self, word: DictionaryWord<'_>) -> DictionaryResult<()> {
-        self.u32(word.original_id())?;
-        self.u32(u32::from(word.left_context()))?;
-        self.u32(u32::from(word.right_context()))?;
-        self.i32(i32::from(word.cost()))?;
-        self.u32(word.pos_type() as u32)?;
-        self.u32(u32::from(word.left_pos().ordinal()))?;
-        self.u32(u32::from(word.right_pos().ordinal()))?;
-        self.text(word.reading())?;
-        if let Some(morphemes) = word.morphemes() {
-            self.count(morphemes.len())?;
-            for morpheme in morphemes {
-                self.u32(u32::from(morpheme.pos.ordinal()))?;
-                self.text(Some(morpheme.surface))?;
-            }
-        } else {
-            self.i32(-1)?;
-        }
-        Ok(())
-    }
+    Ok(())
 }
 
 fn verify(
@@ -89,30 +38,9 @@ fn verify(
     name: &str,
     write: impl FnOnce(&mut NeutralHash) -> DictionaryResult<()>,
 ) -> DictionaryResult<()> {
-    let files = dictionary.provenance()["files"]
-        .as_array()
-        .ok_or_else(|| invalid("neutral verification", "missing file inventory"))?;
-    let expected = files
-        .iter()
-        .find(|file| file["path"] == name)
-        .ok_or_else(|| invalid("neutral verification", "missing expected file"))?;
-    let expected_bytes = expected["bytes"]
-        .as_u64()
-        .ok_or_else(|| invalid("neutral verification", "missing expected byte count"))?;
-    let mut output = NeutralHash {
-        hash: Sha256::new(),
-        bytes: 0,
-        expected_bytes,
-    };
+    let mut output = NeutralHash::new(dictionary.provenance(), name)?;
     write(&mut output)?;
-    let digest = format!("{:x}", output.hash.finalize());
-    if output.bytes != expected_bytes || expected["sha256"] != digest {
-        return Err(invalid(
-            "neutral verification",
-            "reconstructed model hash or length differs",
-        ));
-    }
-    Ok(())
+    output.finish().map_err(Into::into)
 }
 
 /// Reconstruct all five neutral streams and compare their complete hashes, including every lexicon lookup.
@@ -170,8 +98,8 @@ pub fn verify_dictionary(
     })?;
     verify(dictionary, "unicode.bin", |output| {
         output.bytes(b"UQANUNI1")?;
-        output.u32(crate::nori::unicode::CODE_POINTS)?;
-        for code_point in 0..crate::nori::unicode::CODE_POINTS {
+        output.u32(crate::morphology::unicode::CODE_POINTS)?;
+        for code_point in 0..crate::morphology::unicode::CODE_POINTS {
             let value = dictionary
                 .unicode(code_point)
                 .ok_or_else(|| invalid("neutral verification", "missing code point"))?;
@@ -206,7 +134,8 @@ fn verify_lexicon(dictionary: &NoriDictionary) -> DictionaryResult<()> {
             output.text(Some(&text))?;
             output.u32(surface.word_ids.end - surface.word_ids.start)?;
             for id in surface.word_ids.clone() {
-                output.word(
+                write_word(
+                    output,
                     dictionary
                         .word(id)
                         .ok_or_else(|| invalid("neutral verification", "missing system word"))?,
@@ -228,7 +157,8 @@ fn verify_unknown(dictionary: &NoriDictionary) -> DictionaryResult<()> {
             let words = &dictionary.characters.words[index];
             output.u32(words.end - words.start)?;
             for id in words.clone() {
-                output.word(
+                write_word(
+                    output,
                     dictionary
                         .word(id)
                         .ok_or_else(|| invalid("neutral verification", "missing unknown word"))?,

@@ -60,12 +60,12 @@ mod number;
 pub(crate) mod pipeline;
 mod resources;
 mod tokenizer;
-mod unicode;
 mod user_dictionary;
 
 #[cfg(feature = "nori-tools")]
 pub mod pack;
 
+pub use crate::morphology::unicode::UnicodeProperties;
 pub use analyzer::KoreanAnalyzer;
 pub use attributes::KoreanMorphology;
 pub use config::{
@@ -85,7 +85,6 @@ pub use resources::{
     ResolvedDictionary, ResolvedUserDictionary, ResourceCacheStats, ResourceHash, ResourceLimits,
     DEFAULT_NORI_DICTIONARY,
 };
-pub use unicode::UnicodeProperties;
 
 #[cfg(test)]
 mod tests;

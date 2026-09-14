@@ -11,11 +11,11 @@ use serde_json::{json, Value};
 use crate::morphology::io::Writer;
 use crate::morphology::lexicon::Builder;
 use crate::morphology::matrix::Matrix;
+use crate::morphology::unicode::{Properties, UnicodeRange, UnicodeTable, CODE_POINTS};
 use crate::nori::dictionary::provenance::{canonical, FILES};
 use crate::nori::dictionary::tables::{Characters, CLASSES};
 use crate::nori::frame::{self, Section};
 use crate::nori::morphology::{encode_words, Morpheme, Morphology, WordEntry, ABSENT};
-use crate::nori::unicode::{Properties, UnicodeRange, UnicodeTable, CODE_POINTS};
 use crate::nori::{DictionaryLimits, DictionaryResult, POSTag, POSType};
 
 fn section(
@@ -117,7 +117,9 @@ pub(in crate::nori) fn sections() -> Vec<Section> {
         })
         .into(),
     };
-    let unicode = section(6, u64::from(CODE_POINTS), |output| unicode.encode(output));
+    let unicode = section(6, u64::from(CODE_POINTS), |output| {
+        unicode.encode(output).map_err(Into::into)
+    });
     let provenance = Section {
         kind: 7,
         records: 1,

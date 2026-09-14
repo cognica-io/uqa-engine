@@ -112,7 +112,10 @@ impl Provenance {
             ("unknown_class_count", dictionary.characters.words.len()),
             ("matrix_forward", dictionary.matrix.forward),
             ("matrix_backward", dictionary.matrix.backward),
-            ("unicode_count", crate::nori::unicode::CODE_POINTS as usize),
+            (
+                "unicode_count",
+                crate::morphology::unicode::CODE_POINTS as usize,
+            ),
             ("character_count", dictionary.characters.values.len()),
         ];
         for (name, expected) in counts {
@@ -128,51 +131,9 @@ impl Provenance {
 }
 
 fn strings(value: &Value) -> DictionaryResult<Vec<String>> {
-    value
-        .as_array()
-        .ok_or_else(|| invalid("provenance", "missing vocabulary array"))?
-        .iter()
-        .map(|value| {
-            value
-                .as_str()
-                .map(str::to_owned)
-                .ok_or_else(|| invalid("provenance", "vocabulary entry is not a string"))
-        })
-        .collect()
+    crate::morphology::manifest::strings(value).map_err(Into::into)
 }
 
 pub(in crate::nori) fn canonical(value: &Value) -> DictionaryResult<Vec<u8>> {
-    fn write(value: &Value, output: &mut Vec<u8>) -> DictionaryResult<()> {
-        match value {
-            Value::Array(values) => {
-                output.push(b'[');
-                for (index, value) in values.iter().enumerate() {
-                    if index != 0 {
-                        output.push(b',');
-                    }
-                    write(value, output)?;
-                }
-                output.push(b']');
-            }
-            Value::Object(values) => {
-                output.push(b'{');
-                let mut keys: Vec<_> = values.keys().collect();
-                keys.sort_unstable();
-                for (index, key) in keys.into_iter().enumerate() {
-                    if index != 0 {
-                        output.push(b',');
-                    }
-                    serde_json::to_writer(&mut *output, key)?;
-                    output.push(b':');
-                    write(&values[key], output)?;
-                }
-                output.push(b'}');
-            }
-            _ => serde_json::to_writer(&mut *output, value)?,
-        }
-        Ok(())
-    }
-    let mut output = Vec::new();
-    write(value, &mut output)?;
-    Ok(output)
+    crate::morphology::manifest::canonical(value).map_err(Into::into)
 }

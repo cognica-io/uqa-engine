@@ -6,23 +6,20 @@
 
 //! Strict neutral-model input, retaining entry order and absent metadata.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fs::File;
-use std::io::Read;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 use crate::morphology::io::{vector, Reader};
 use crate::morphology::lexicon::{Builder, Lexicon};
 use crate::morphology::matrix::Matrix;
+use crate::morphology::unicode::UnicodeTable;
 use crate::nori::dictionary::provenance::Provenance;
 use crate::nori::dictionary::provenance::FILES;
 use crate::nori::dictionary::tables::{Characters, CLASSES};
-use crate::nori::error::{check_limit, invalid};
+use crate::nori::error::check_limit;
 use crate::nori::morphology::{Morpheme, Morphology, WordEntry, ABSENT};
-use crate::nori::unicode::{Properties, UnicodeRange, UnicodeTable, CODE_POINTS};
 use crate::nori::{DictionaryLimits, DictionaryResult, POSTag, POSType, SurfaceWords};
 
 pub(super) struct Model {
@@ -38,56 +35,10 @@ pub(super) struct Model {
 }
 
 pub(super) fn read_file(path: &Path, limit: usize) -> DictionaryResult<Vec<u8>> {
-    let file = File::open(path)?;
-    let length = usize::try_from(file.metadata()?.len())
-        .map_err(|_| invalid("input file", "length exceeds address space"))?;
-    check_limit("input bytes", length, limit)?;
-    let mut bytes = vector(length)?;
-    let maximum = u64::try_from(limit)
-        .ok()
-        .and_then(|limit| limit.checked_add(1))
-        .ok_or_else(|| invalid("input file", "read limit overflow"))?;
-    file.take(maximum).read_to_end(&mut bytes)?;
-    check_limit("input bytes", bytes.len(), limit)?;
-    Ok(bytes)
+    crate::morphology::neutral::read_file(path, limit).map_err(Into::into)
 }
 
-fn header<'a>(bytes: &'a [u8], magic: &[u8]) -> DictionaryResult<Reader<'a>> {
-    let mut reader = Reader::new(bytes, "neutral model", true);
-    if reader.take(8)? != magic {
-        return Err(reader.invalid("invalid neutral file magic").into());
-    }
-    Ok(reader)
-}
-
-fn text(reader: &mut Reader<'_>, limits: DictionaryLimits) -> DictionaryResult<Option<String>> {
-    let count = reader.i32()?;
-    if count == -1 {
-        return Ok(None);
-    }
-    let count = usize::try_from(count).map_err(|_| reader.invalid("negative string length"))?;
-    check_limit(
-        "UTF-16 units per dictionary string",
-        count,
-        limits.max_text_utf16,
-    )?;
-    if count > reader.remaining() / 2 {
-        return Err(reader.invalid("truncated UTF-16 string").into());
-    }
-    let mut units = vector(count)?;
-    for _ in 0..count {
-        units.push(reader.u16()?);
-    }
-    Ok(Some(String::from_utf16(&units)?))
-}
-
-fn required_text(reader: &mut Reader<'_>, limits: DictionaryLimits) -> DictionaryResult<String> {
-    text(reader, limits)?.ok_or_else(|| reader.invalid("required string is absent").into())
-}
-
-fn count32(count: usize) -> DictionaryResult<u32> {
-    u32::try_from(count).map_err(|_| invalid("neutral model", "count exceeds u32"))
-}
+use crate::morphology::neutral::{count32, header, required_text, text};
 
 struct Metadata {
     value: Morphology,
@@ -180,51 +131,7 @@ fn read_inputs(
     )?;
     let manifest: Value = serde_json::from_slice(&manifest_bytes)?;
     Provenance::from_value(manifest.clone())?;
-    let listed = manifest["files"]
-        .as_array()
-        .ok_or_else(|| invalid("neutral model", "missing file inventory"))?;
-    let expected: BTreeSet<_> = FILES.iter().copied().collect();
-    let mut names = BTreeSet::new();
-    let mut inputs = BTreeMap::new();
-    let mut total = 0_usize;
-    for file in listed {
-        let name = file["path"]
-            .as_str()
-            .ok_or_else(|| invalid("neutral model", "invalid file path"))?;
-        if !expected.contains(name) || !names.insert(name) {
-            return Err(invalid(
-                "neutral model",
-                "duplicate or unexpected input file",
-            ));
-        }
-        let bytes = read_file(&directory.join(name), limits.max_decoded_bytes)?;
-        total = total
-            .checked_add(bytes.len())
-            .ok_or_else(|| invalid("neutral model", "size overflow"))?;
-        check_limit("neutral model bytes", total, limits.max_decoded_bytes)?;
-        let hash = format!("{:x}", Sha256::digest(&bytes));
-        if file["bytes"].as_u64() != Some(bytes.len() as u64) || file["sha256"] != hash {
-            return Err(invalid(
-                "neutral model",
-                "input file size or checksum differs",
-            ));
-        }
-        inputs.insert(name.to_owned(), bytes);
-    }
-    if names != expected {
-        return Err(invalid("neutral model", "incomplete input inventory"));
-    }
-    let actual: BTreeSet<_> = std::fs::read_dir(directory)?
-        .map(|entry| entry.map(|entry| entry.file_name()))
-        .collect::<Result<_, _>>()?;
-    let mut allowed: BTreeSet<_> = FILES.iter().map(std::ffi::OsString::from).collect();
-    allowed.insert("model_manifest.json".into());
-    if actual != allowed {
-        return Err(invalid(
-            "neutral model",
-            "unexpected files in input directory",
-        ));
-    }
+    let inputs = crate::morphology::neutral::read_inputs(directory, &manifest, FILES, limits)?;
 
     Ok((manifest, inputs))
 }
@@ -345,42 +252,8 @@ fn read_characters(bytes: &[u8], words: Vec<std::ops::Range<u32>>) -> Dictionary
 }
 
 fn read_unicode(bytes: &[u8], script_count: usize) -> DictionaryResult<UnicodeTable> {
-    let mut reader = header(bytes, b"UQANUNI1")?;
-    if reader.u32()? != CODE_POINTS {
-        return Err(reader.invalid("incomplete Unicode profile").into());
-    }
-    let mut ranges: Vec<UnicodeRange> = Vec::new();
-    for code_point in 0..CODE_POINTS {
-        let category = reader.u8()?;
-        let script = reader.u16()?;
-        let flags = reader.u8()?;
-        let lowercase = reader.u32()?;
-        if lowercase >= CODE_POINTS {
-            return Err(reader.invalid("invalid lowercase code point").into());
-        }
-        let properties = Properties {
-            category,
-            script,
-            flags,
-            lowercase_delta: lowercase as i32 - code_point as i32,
-        };
-        if let Some(previous) = ranges
-            .last_mut()
-            .filter(|range| range.properties == properties)
-        {
-            previous.end = code_point + 1;
-        } else {
-            ranges.try_reserve(1)?;
-            ranges.push(UnicodeRange {
-                end: code_point + 1,
-                properties,
-            });
-        }
-    }
-    reader.finish()?;
-    let unicode = UnicodeTable { ranges };
-    unicode.validate(script_count)?;
-    Ok(unicode)
+    crate::morphology::unicode::read_neutral(header(bytes, b"UQANUNI1")?, script_count)
+        .map_err(Into::into)
 }
 
 #[cfg(test)]

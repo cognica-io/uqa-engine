@@ -8,7 +8,7 @@
 
 use std::ops::Range;
 
-use super::error::{check_limit, invalid};
+use super::error::invalid;
 use super::DictionaryResult;
 use crate::morphology::io::{vector, Reader};
 
@@ -116,21 +116,7 @@ impl Morphology {
         maximum_strings: usize,
         maximum_text: usize,
     ) -> DictionaryResult<Self> {
-        let count = reader.count(4)?;
-        check_limit("dictionary strings", count, maximum_strings)?;
-        let mut strings = vector(count)?;
-        for _ in 0..count {
-            let text = reader.text()?;
-            check_limit(
-                "UTF-16 units per dictionary string",
-                text.encode_utf16().count(),
-                maximum_text,
-            )?;
-            let mut owned = String::new();
-            owned.try_reserve_exact(text.len())?;
-            owned.push_str(text);
-            strings.push(owned);
-        }
+        let strings = crate::morphology::strings::decode(reader, maximum_strings, maximum_text)?;
         let count = reader.count(5)?;
         let mut morphemes = vector(count)?;
         for _ in 0..count {
@@ -148,10 +134,7 @@ impl Morphology {
 
     #[cfg(any(test, feature = "nori-tools"))]
     pub fn encode(&self, output: &mut crate::morphology::io::Writer) -> DictionaryResult<()> {
-        output.count(self.strings.len())?;
-        for string in &self.strings {
-            output.text(string)?;
-        }
+        crate::morphology::strings::encode(&self.strings, output)?;
         output.count(self.morphemes.len())?;
         for morpheme in &self.morphemes {
             output.u32(morpheme.surface)?;
@@ -228,13 +211,7 @@ pub(super) fn decode_words(
 }
 
 pub(super) fn word_range(start: u32, count: u32, length: usize) -> DictionaryResult<Range<u32>> {
-    let end = start
-        .checked_add(count)
-        .ok_or_else(|| invalid("word entries", "range overflow"))?;
-    if end as usize > length {
-        return Err(invalid("word entries", "range exceeds table"));
-    }
-    Ok(start..end)
+    crate::morphology::surfaces::word_range(start, count, length).map_err(Into::into)
 }
 
 #[cfg(any(test, feature = "nori-tools"))]

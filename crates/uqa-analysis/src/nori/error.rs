@@ -51,6 +51,9 @@ impl From<crate::morphology::error::DictionaryError> for DictionaryError {
         use crate::morphology::error::DictionaryError as Shared;
 
         match error {
+            Shared::Manifest(error) => Self::Manifest(error),
+            Shared::Version(version) => Self::Version(version),
+            Shared::Checksum(section) => Self::Checksum(section),
             Shared::Invalid {
                 section,
                 offset,
@@ -89,4 +92,17 @@ pub(super) fn check_limit(
     limit: usize,
 ) -> DictionaryResult<()> {
     crate::morphology::error::check_limit(resource, required, limit).map_err(Into::into)
+}
+
+#[cfg(feature = "nori-tools")]
+impl From<crate::morphology::neutral::Error> for DictionaryError {
+    fn from(error: crate::morphology::neutral::Error) -> Self {
+        use crate::morphology::neutral::Error;
+        match error {
+            Error::Dictionary(error) => error.into(),
+            Error::Io(error) => Self::Io(error),
+            Error::Utf16(error) => Self::Utf16(error),
+            Error::Manifest(error) => Self::Manifest(error),
+        }
+    }
 }

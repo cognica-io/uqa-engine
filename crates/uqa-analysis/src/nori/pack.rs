@@ -45,19 +45,8 @@ pub fn pack_directory(directory: &Path, limits: DictionaryLimits) -> DictionaryR
             Ok::<(), super::DictionaryError>(())
         };
     write_section(1, model.surfaces.len() as u64, &mut |output| {
-        model.lexicon.encode(output)?;
-        output.count(model.surfaces.len())?;
-        let mut previous_id = 0_i64;
-        for surface in &model.surfaces {
-            let id = i64::from(surface.source_id);
-            let delta = i32::try_from(id - previous_id).map_err(|_| {
-                super::error::invalid("surface encoder", "source ID delta exceeds i32")
-            })?;
-            output.var_u32(((delta as u32) << 1) ^ ((delta >> 31) as u32))?;
-            output.var_u32(surface.word_ids.end - surface.word_ids.start)?;
-            previous_id = id;
-        }
-        Ok(())
+        crate::morphology::surfaces::encode(&model.lexicon, &model.surfaces, output)
+            .map_err(Into::into)
     })?;
     write_section(2, model.words.len() as u64, &mut |output| {
         super::morphology::encode_words(&model.words, model.known, output)
@@ -71,9 +60,11 @@ pub fn pack_directory(directory: &Path, limits: DictionaryLimits) -> DictionaryR
     write_section(5, model.characters.values.len() as u64, &mut |output| {
         model.characters.encode(output)
     })?;
-    write_section(6, u64::from(super::unicode::CODE_POINTS), &mut |output| {
-        model.unicode.encode(output)
-    })?;
+    write_section(
+        6,
+        u64::from(crate::morphology::unicode::CODE_POINTS),
+        &mut |output| model.unicode.encode(output).map_err(Into::into),
+    )?;
     sections.push(Section {
         kind: 7,
         records: 1,
