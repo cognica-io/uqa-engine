@@ -102,3 +102,15 @@ cargo test -p uqa-analysis --no-default-features --features kuromoji-tools --loc
 ```
 
 Native and common owner tests also verify exact retained buffers, every cancellation callback for bounded coefficient/fallback/composition cases, byte and numeric/input/token/attribute limits, shared source lifetime, corrected HTML/width spans, independent normalization and invalid terminal-attribute rejection. Both language features use the same private decimal/parser/composition machinery with separate symbol, morphology and diagnostic policies.
+
+## Japanese iteration marks
+
+`run_iteration_reference.py` invokes the pinned `JapaneseIterationMarkCharFilter` and hashes input, complete output and every corrected UTF-16 boundary. Its 189 cases cover all 63,488 BMP scalars with each of the five horizontal marks under all four kanji/kana settings (1,269,760 combinations), 35 fixed examples per setting, single-unit and offset buffer reads, 1,023/1,024/1,025/4,097-unit spans, repeated boundaries and 32 deterministic cases drawn with seed `0x105013005`. Inputs include source-script mismatches, unchanged-table unvoicing, supplementary barriers, full stops, disabled mark types, illegal leading/excess runs, halfwidth characters and unsupported vertical marks.
+
+Inputs, outputs and provenance total 77,783 bytes. Matrix and long-span recipes expand only inside the verifiers; outputs above 128 UTF-16 units retain complete hashes and lengths. No timing measurements are collected. Rust compares every complete identity and verifies original HTML/mapping source spans, compiled configurations and canonical descriptor flag identities, feature gating, cancellation and allocation cleanup.
+
+```sh
+python3 tests/parity/kuromoji/run_iteration_reference.py --offline
+python3 tests/parity/kuromoji/run_iteration_reference.py --offline --platform linux/amd64
+cargo test -p uqa-analysis --no-default-features --features kuromoji-tools --locked iteration
+```

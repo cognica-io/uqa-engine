@@ -30,6 +30,8 @@ impl RuntimeProfiles {
                 CharFilter::HTMLStrip => "<[^>]+>",
                 CharFilter::PatternReplace { pattern, .. } => pattern,
                 CharFilter::Mapping { .. } | CharFilter::CJKWidth => continue,
+                #[cfg(feature = "kuromoji")]
+                CharFilter::KuromojiIterationMark { .. } => continue,
             };
             expressions.push(expression(pattern, "pattern-replace character filter")?);
         }

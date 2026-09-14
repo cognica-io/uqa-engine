@@ -70,12 +70,15 @@ A custom analyzer is stored as JSON with one tokenizer and optional ordered filt
 | --- | --- | --- |
 | `html_strip` | None | Replaces tag-shaped text with spaces and decodes the built-in `amp`, `lt`, `gt`, `quot`, `#39`, `apos`, and `nbsp` entities |
 | `cjk_width` | None | Folds fullwidth ASCII and halfwidth Katakana, composing compatible following halfwidth voiced marks and preserving original source spans |
+| `kuromoji_iteration_mark` | `normalize_kanji`, `normalize_kana`, both default `true`; requires the Rust `kuromoji` feature | Expands Japanese horizontal iteration marks using the original input and pinned span/voicing rules, preserving UTF-16 length and original source coordinates |
 | `mapping` | `mapping` object | Applies string replacements longest-key-first |
 | `pattern_replace` | `pattern`, optional `replacement` | Replaces every Rust regular-expression match; replacement defaults to an empty string |
 
 The HTML filter is a search normalization filter, not a validating HTML parser or sanitizer. Sanitize untrusted HTML at the application boundary according to its rendering context.
 
 `cjk_width` maps U+FF01–U+FF5E and U+FF65–U+FF9F. For example, `ｶﾞＡ①` becomes `ガA①`, and `ガ` retains the source span covering both `ｶ` and `ﾞ`. Other compatibility characters, ideographic spaces, and halfwidth punctuation U+FF61–U+FF64 remain unchanged. This stage is available independently of dictionary features and uses the same budgeted character-filter APIs and cancellation controls as the other stages. Composed outputs retain mappings through preceding character edits.
+
+`CharFilter::KuromojiIterationMark { normalize_kanji, normalize_kana }` is available with `uqa-analysis/kuromoji`. It handles `々`, `ゝ`, `ゞ`, `ヽ` and `ヾ`; vertical marks remain unchanged. A run refers to original input characters rather than earlier replacements. Full stop `。` and supplementary characters delimit spans; excess marks at an illegal boundary pass through unchanged. Reference script and voicing quirks are retained: `?ゝ` becomes `??`, and `なゝ` becomes `など`. Both flags false preserve the input. The character-filter APIs retain original UTF-8/UTF-16 coordinates through prior HTML, mapping and width stages, and compiled generic pipelines snapshot the explicit flags. Standalone Japanese analyzers can consume its result through `analyze_mapped`; their default chain and ordinary normalization do not add this optional stage. Upper-layer Japanese feature forwarding remains part of the pending binding integration.
 
 ## Tokenizers
 
