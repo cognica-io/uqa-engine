@@ -6,11 +6,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-09-15
+
+See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.3.5/docs/manual/reference/10-upgrading.md) for Japanese analysis, package features and Rust analyzer configuration changes.
+
 ### Added
 
-- Added Japanese user dictionaries with pinned Lucene CSV, segmentation, morphology and lookup semantics under explicit preparation limits.
-- Added the optional Rust `kuromoji` dictionary loader and independent `uqa-kuromoji-data` package, preserving the complete pinned Lucene Japanese model and original upstream notices. `kuromoji-tools` adds offline packing and exhaustive model verification; Japanese tokenizer and analyzer integration remain in development.
-- Added the `cjk_width` character filter for fullwidth ASCII, halfwidth Katakana and compatible voiced-mark composition, with original source offsets, memory-budget and cancellation support, and pinned Lucene text/offset verification. It is available independently of dictionary features.
+- Added native Lucene 10.5.1 Kuromoji analysis with NORMAL/SEARCH/EXTENDED tokenization, N-best paths, Japanese user dictionaries, six morphology attributes, base-form/POS/stopword/reading/number filters, small-kana conversion, completion and independent normalization. The protected `kuromoji` and `kuromoji_completion` analyzers are available through SQL and all bindings without a JVM or runtime dictionary download.
+- Added the independent `uqa-kuromoji-data` package with the complete pinned Japanese dictionary and upstream notices. Rust applications select `nori` and `kuromoji` independently; the CLI and official Python, Node.js and Browser WASM distributions include both languages by default.
+- Added dictionary-independent CJK width and Japanese iteration-mark character filters with corrected source offsets, memory limits and cancellation. Immutable Japanese revisions preserve diagnostics, phrase graphs, highlighting and independent index/search bindings through transactions, sibling sessions, backups and reopen.
+
+### Changed
+
+- Shared dictionary codecs, resources, Unicode profiles, bounded lattice traversal, numeric composition and source-coordinate ownership between Nori and Kuromoji in `uqa-analysis`, preserving Korean dictionary bytes and retained descriptor identities.
+- Added optional explicit normalization to Rust `Analyzer` values and typed language profile selection to `SimpleLowercaseConfig`. Existing Rust struct literals need the changes described in the upgrade guide; existing generic/Nori serialized configurations and stored revisions remain compatible.
+
+### Fixed
+
+- Updated `rustls` to 0.23.45 and `rustls-webpki` to 0.103.15 for [RUSTSEC-2026-0285](https://rustsec.org/advisories/RUSTSEC-2026-0285.html), which corrects TLS 1.3 handshake encryption-level validation.
+- Restored declared text argument inference for parameterized analyzer table functions, including `INSERT ... SELECT analysis FROM analyze_text($1, $2)`.
+- Verified release-file digests across artifact transfers before registry publication and complete dictionary/notice inventories in native and WASM packages, including split WASM data segments.
 
 ## [0.3.0] - 2026-09-14
 

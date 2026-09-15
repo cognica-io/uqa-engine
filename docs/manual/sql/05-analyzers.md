@@ -24,8 +24,8 @@ These functions are used in `FROM` like other table functions. `SELECT * FROM fu
 | `standard_cjk` | `standard` pipeline followed by 2-to-3-character n-grams with short-token retention | CJK-style text and substring-oriented matching |
 | `keyword` | Keyword tokenizer with no filters | Treat the complete non-empty field as one exact token |
 | `nori` (when the `nori` feature is enabled) | Native Lucene-compatible Korean tokenizer, POS and reading-form filters, and simple lowercase | Korean morphological analysis with graph positions and source offsets |
-| `kuromoji` (unreleased; requires `kuromoji`) | CJK width, SEARCH tokenization, base form, POS/word stops, Katakana stemming and pinned simple lowercase | Japanese morphology with full graph and original-source coordinates |
-| `kuromoji_completion` (unreleased; requires `kuromoji`) | CJK width, NORMAL tokenization, INDEX completion and pinned simple lowercase | Japanese surface and romanized completion alternatives |
+| `kuromoji` (requires `kuromoji`) | CJK width, SEARCH tokenization, base form, POS/word stops, Katakana stemming and pinned simple lowercase | Japanese morphology with full graph and original-source coordinates |
+| `kuromoji_completion` (requires `kuromoji`) | CJK width, NORMAL tokenization, INDEX completion and pinned simple lowercase | Japanese surface and romanized completion alternatives |
 
 `standard` is used when a GIN field has no explicit analyzer. `standard_cjk` is a built-in character n-gram pipeline, not a Chinese, Japanese, or Korean morphological segmenter. The `nori` built-in is available only when the Engine is built with the native Nori dictionary feature. A built-in can be assigned without calling `create_analyzer`:
 
@@ -40,7 +40,7 @@ SELECT * FROM set_table_analyzer(
 
 The field must already belong to a physical GIN index. Assigning `both` rebuilds its postings and uses the same analyzer for queries.
 
-The unreleased `kuromoji` feature is available through `uqa`, `uqa-engine` and the CLI. Both Japanese built-ins are protected catalog names, and custom Japanese pipelines use the [compiled component configuration](../reference/06-text-analyzers.md#japanese-tokenizers-in-compiled-pipelines). Analysis and the Rust Engine/facade have no default dictionary feature. CLI, Python, Node.js and WASM development builds default to both language features. The already published 0.3.0 packages are unchanged.
+The `kuromoji` feature in 0.3.5 is available through `uqa`, `uqa-engine` and the CLI. Both Japanese built-ins are protected catalog names, and custom Japanese pipelines use the [compiled component configuration](../reference/06-text-analyzers.md#japanese-tokenizers-in-compiled-pipelines). Analysis and the Rust Engine/facade have no default dictionary feature. CLI, Python, Node.js and WASM 0.3.5 distribution builds default to both language features.
 
 ## Analyzer JSON
 
