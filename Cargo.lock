@@ -3998,6 +3998,7 @@ dependencies = [
  "uqa-execution",
  "uqa-operators",
  "uqa-sql",
+ "uqa-storage",
 ]
 
 [[package]]

@@ -7,6 +7,8 @@
 use super::*;
 use uqa_operators::{DeepFusionLayer, ProgressiveFusionEntry};
 
+mod vector_thresholds;
+
 fn term(field: &str) -> OperatorTree {
     OperatorTree::Term {
         query: "q".into(),
@@ -185,28 +187,6 @@ fn absorption_does_not_discard_scored_branches() {
 }
 
 #[test]
-fn merge_vector_thresholds_keeps_max() {
-    let v1 = OperatorTree::VectorSimilarity {
-        query_vector: vec![1.0, 0.0],
-        threshold: 0.5,
-        field: "emb".into(),
-    };
-    let v2 = OperatorTree::VectorSimilarity {
-        query_vector: vec![1.0, 0.0],
-        threshold: 0.7,
-        field: "emb".into(),
-    };
-    let op = OperatorTree::Intersect(vec![v1, v2]);
-    let optimised = QueryOptimizer::new().optimize(op);
-    match optimised {
-        OperatorTree::VectorSimilarity { threshold, .. } => {
-            assert!((threshold - 0.7).abs() < 1e-6);
-        }
-        _ => panic!("expected single VectorSimilarity"),
-    }
-}
-
-#[test]
 fn optimizer_reaches_children_inside_physical_wrappers() {
     let vector = |threshold| OperatorTree::VectorSimilarity {
         query_vector: vec![1.0, 0.0],
@@ -223,6 +203,8 @@ fn optimizer_reaches_children_inside_physical_wrappers() {
                             source: Box::new(OperatorTree::Intersect(vec![
                                 vector(0.5),
                                 vector(0.7),
+                                membership_filter("year", 2026),
+                                membership_filter("year", 2026),
                             ])),
                         },
                         k: 10,
@@ -253,10 +235,21 @@ fn optimizer_reaches_children_inside_physical_wrappers() {
     let OperatorTree::MessagePassing { source } = &stages[0].signal else {
         panic!("expected message-passing wrapper");
     };
-    let OperatorTree::VectorSimilarity { threshold, .. } = source.as_ref() else {
-        panic!("expected merged vector leaf");
+    let OperatorTree::Intersect(children) = source.as_ref() else {
+        panic!("expected separate vector score contributions");
     };
-    assert!((*threshold - 0.7).abs() < f32::EPSILON);
+    assert_eq!(
+        children.len(),
+        3,
+        "only the duplicate membership filter is removed"
+    );
+    assert_eq!(
+        children
+            .iter()
+            .filter(|child| matches!(child, OperatorTree::VectorSimilarity { .. }))
+            .count(),
+        2,
+    );
 }
 
 #[test]

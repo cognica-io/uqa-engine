@@ -12,7 +12,7 @@ use super::QueryOptimizer;
 
 impl QueryOptimizer {
     // ---------------------------------------------------------------
-    // Generic recursion (used by simplify / merge_vector / reorder)
+    // Apply the complete optimizer to each child.
     // ---------------------------------------------------------------
 
     pub(super) fn recurse_children(&self, op: OperatorTree) -> OperatorTree {

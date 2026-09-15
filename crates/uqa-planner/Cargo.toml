@@ -24,6 +24,7 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 uqa-execution = { workspace = true }
+uqa-storage = { workspace = true }
 proptest = { workspace = true }
 criterion = { workspace = true }
 
