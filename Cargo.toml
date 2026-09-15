@@ -40,7 +40,7 @@ members = [
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.3.5"
+version = "0.3.6"
 edition = "2021"
 # This is the base license. Optional additional permissions and commercial
 # terms are documented in LICENSING.md.
@@ -54,30 +54,30 @@ exclude = ["/tests", "/benches", "/examples"]
 
 [workspace.dependencies]
 # Internal crates
-uqa-core = { version = "0.3.5", path = "crates/uqa-core" }
-uqa-analysis = { version = "0.3.5", path = "crates/uqa-analysis" }
-uqa-nori-data = { version = "0.3.5", path = "crates/uqa-nori-data" }
-uqa-kuromoji-data = { version = "0.3.5", path = "crates/uqa-kuromoji-data" }
-uqa-storage = { version = "0.3.5", path = "crates/uqa-storage" }
-uqa-storage-redb = { version = "0.3.5", path = "crates/uqa-storage-redb" }
-uqa-storage-sqlite = { version = "0.3.5", path = "crates/uqa-storage-sqlite" }
-uqa-scoring = { version = "0.3.5", path = "crates/uqa-scoring" }
-uqa-fusion = { version = "0.3.5", path = "crates/uqa-fusion" }
-uqa-operators = { version = "0.3.5", path = "crates/uqa-operators" }
-uqa-ml = { version = "0.3.5", path = "crates/uqa-ml" }
-uqa-graph = { version = "0.3.5", path = "crates/uqa-graph" }
-uqa-joins = { version = "0.3.5", path = "crates/uqa-joins" }
-uqa-planner = { version = "0.3.5", path = "crates/uqa-planner" }
-uqa-execution = { version = "0.3.5", path = "crates/uqa-execution" }
-uqa-pg-query = { version = "0.3.5", path = "crates/uqa-pg-query" }
-uqa-sql = { version = "0.3.5", path = "crates/uqa-sql" }
-uqa-pg-wire = { version = "0.3.5", path = "crates/uqa-pg-wire" }
-uqa-fdw = { version = "0.3.5", path = "crates/uqa-fdw" }
-uqa-engine = { version = "0.3.5", path = "crates/uqa-engine", default-features = false }
-uqa = { version = "0.3.5", path = "crates/uqa" }
-uqa-client = { version = "0.3.5", path = "crates/uqa-client" }
-uqa-api = { version = "0.3.5", path = "crates/uqa-api" }
-uqa-cli = { version = "0.3.5", path = "crates/uqa-cli", default-features = false }
+uqa-core = { version = "0.3.6", path = "crates/uqa-core" }
+uqa-analysis = { version = "0.3.6", path = "crates/uqa-analysis" }
+uqa-nori-data = { version = "0.3.6", path = "crates/uqa-nori-data" }
+uqa-kuromoji-data = { version = "0.3.6", path = "crates/uqa-kuromoji-data" }
+uqa-storage = { version = "0.3.6", path = "crates/uqa-storage" }
+uqa-storage-redb = { version = "0.3.6", path = "crates/uqa-storage-redb" }
+uqa-storage-sqlite = { version = "0.3.6", path = "crates/uqa-storage-sqlite" }
+uqa-scoring = { version = "0.3.6", path = "crates/uqa-scoring" }
+uqa-fusion = { version = "0.3.6", path = "crates/uqa-fusion" }
+uqa-operators = { version = "0.3.6", path = "crates/uqa-operators" }
+uqa-ml = { version = "0.3.6", path = "crates/uqa-ml" }
+uqa-graph = { version = "0.3.6", path = "crates/uqa-graph" }
+uqa-joins = { version = "0.3.6", path = "crates/uqa-joins" }
+uqa-planner = { version = "0.3.6", path = "crates/uqa-planner" }
+uqa-execution = { version = "0.3.6", path = "crates/uqa-execution" }
+uqa-pg-query = { version = "0.3.6", path = "crates/uqa-pg-query" }
+uqa-sql = { version = "0.3.6", path = "crates/uqa-sql" }
+uqa-pg-wire = { version = "0.3.6", path = "crates/uqa-pg-wire" }
+uqa-fdw = { version = "0.3.6", path = "crates/uqa-fdw" }
+uqa-engine = { version = "0.3.6", path = "crates/uqa-engine", default-features = false }
+uqa = { version = "0.3.6", path = "crates/uqa" }
+uqa-client = { version = "0.3.6", path = "crates/uqa-client" }
+uqa-api = { version = "0.3.6", path = "crates/uqa-api" }
+uqa-cli = { version = "0.3.6", path = "crates/uqa-cli", default-features = false }
 
 # Shared external dependencies (versions added when first consumer pulls them in)
 serde = { version = "1.0", features = ["derive"] }

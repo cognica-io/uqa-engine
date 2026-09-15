@@ -6,9 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-09-15
+
+See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.3.6/docs/manual/reference/10-upgrading.md) for package updates and operator-tree optimizer compatibility.
+
 ### Fixed
 
 - Preserved vector-threshold intersection scores, document support, and invalid-threshold errors by removing the operator-tree threshold merge. Identical and nearby query vectors retain their separate score contributions, including inside nested operators.
+
+### Deprecated
+
+- Deprecated `uqa_planner::TreeOptimizerConfig::enable_merge_vector_thresholds`. The field remains source-compatible but is ignored for either value; vector-threshold predicates always preserve their separate score and validation semantics.
 
 ## [0.3.5] - 2026-09-15
 
