@@ -115,64 +115,6 @@ impl QueryOptimizer {
     pub(super) fn recurse_simplify(&self, op: OperatorTree) -> OperatorTree {
         map_operator_children(op, |child| self.simplify_algebra(child))
     }
-
-    // ---------------------------------------------------------------
-    // 7. Merge adjacent vector thresholds
-    // ---------------------------------------------------------------
-
-    pub(super) fn merge_vector_thresholds(&self, op: OperatorTree) -> OperatorTree {
-        if let OperatorTree::Intersect(operands) = op {
-            let mut vector_ops: Vec<(Vec<f32>, f32, String)> = Vec::new();
-            let mut other_ops: Vec<OperatorTree> = Vec::new();
-            for child in operands {
-                let child = self.recurse_children(child);
-                match child {
-                    OperatorTree::VectorSimilarity {
-                        query_vector,
-                        threshold,
-                        field,
-                    } => vector_ops.push((query_vector, threshold, field)),
-                    other => other_ops.push(other),
-                }
-            }
-            let mut merged_vectors: Vec<OperatorTree> = Vec::new();
-            let mut used = vec![false; vector_ops.len()];
-            for i in 0..vector_ops.len() {
-                if used[i] {
-                    continue;
-                }
-                let (q, mut t, f) = (
-                    vector_ops[i].0.clone(),
-                    vector_ops[i].1,
-                    vector_ops[i].2.clone(),
-                );
-                for j in (i + 1)..vector_ops.len() {
-                    if used[j] {
-                        continue;
-                    }
-                    if vector_ops[j].2 == f && vectors_close(&q, &vector_ops[j].0) {
-                        t = t.max(vector_ops[j].1);
-                        used[j] = true;
-                    }
-                }
-                used[i] = true;
-                merged_vectors.push(OperatorTree::VectorSimilarity {
-                    query_vector: q,
-                    threshold: t,
-                    field: f,
-                });
-            }
-            let mut all = other_ops;
-            all.extend(merged_vectors);
-            if all.len() == 1 {
-                if let Some(only) = all.pop() {
-                    return only;
-                }
-            }
-            return OperatorTree::Intersect(all);
-        }
-        self.recurse_children(op)
-    }
 }
 
 /// Whether Boolean composition observes only membership for this subtree.
@@ -293,13 +235,4 @@ fn same_membership_multiset(left: &[OperatorTree], right: &[OperatorTree]) -> bo
         matched[index] = true;
     }
     true
-}
-
-fn vectors_close(a: &[f32], b: &[f32]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    a.iter()
-        .zip(b.iter())
-        .all(|(x, y)| (x - y).abs() <= 1e-7 * x.abs().max(y.abs()) + 1e-9)
 }

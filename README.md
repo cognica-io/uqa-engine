@@ -23,13 +23,13 @@ It is designed for applications that need more than a relational table but do no
 - Use the same SQL result and parameter shapes against a local or Cloud UQA node through authenticated Rust, Python, Node.js, and browser HTTP engines.
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
-## New in 0.3.5
+## New in 0.3.6
 
-Version 0.3.5 adds native Lucene Kuromoji Japanese analysis: tokenization modes, N-best paths, user dictionaries, morphological filters, completion and separate normalization. Rust applications enable `kuromoji` independently of `nori`; the CLI and official Python, Node.js and browser WASM packages include both dictionaries. Analysis runs without a JVM or runtime dictionary download.
+Version 0.3.6 fixes operator-tree optimization of vector-threshold intersections. Each query vector retains its own score contribution, matching documents and validation errors, including when identical or nearby vectors appear inside nested operators.
 
-Nori and Kuromoji share dictionary, resource, traversal and numeric mechanisms in `uqa-analysis`. Memory, SQLite and redb retain exact analyzer revisions and complete token graphs for phrases and highlighting at original source offsets. The release also fixes analyzer parameter inference and updates TLS dependencies for RUSTSEC-2026-0285.
+The deprecated Rust `TreeOptimizerConfig::enable_merge_vector_thresholds` field remains accepted and is ignored. Existing 0.3.5 database formats and analyzer configurations remain compatible.
 
-Read the [release history](HISTORY.md#035---2026-09-15) for the complete changes and the [upgrade guide](docs/manual/reference/10-upgrading.md) for Rust normalization/profile configuration changes and persistent analyzer requirements.
+Read the [release history](HISTORY.md#036---2026-09-15) and the [upgrade guide](docs/manual/reference/10-upgrading.md) for the fix and package update instructions.
 
 ## Mathematical foundation
 
@@ -42,7 +42,7 @@ The manuscript consolidates and revises the published work on [unified query alg
 Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
 ```sh
-python -m pip install uqa==0.3.5
+python -m pip install uqa==0.3.6
 usql
 ```
 
@@ -94,7 +94,7 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 Add the released package to your application:
 
 ```sh
-cargo add uqa@0.3.5
+cargo add uqa@0.3.6
 ```
 
 `uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.

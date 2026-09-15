@@ -20,8 +20,7 @@
 //!   graph the enumerator walks.
 //! * [`join_enumerator`] -- DPccp (Moerkotte/Neumann 2006). Bitmask
 //!   `u64` for relation subsets, `HashMap` for the DP cache.
-//! * [`optimizer`] -- algebraic rewrites: filter pushdown, vector
-//!   threshold merging, facet additivity, Boolean simplification.
+//! * [`optimizer`] -- algebraic rewrites: filter pushdown, facet additivity, Boolean simplification.
 
 #![allow(
     clippy::enum_glob_use,

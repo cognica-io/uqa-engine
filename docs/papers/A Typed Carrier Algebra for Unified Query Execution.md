@@ -869,12 +869,13 @@ The current rewrite families can be summarized as follows. The second column nam
 | absorption                       | support            | membership-only values and structural equivalence            |
 | complement                       | support            | explicit universe and a null-free, two-valued predicate      |
 | filter pushdown                  | payload            | deterministic predicate whose fields belong to the child; no changed null-extension |
-| vector threshold merge           | payload            | identical field and query vector; threshold predicate with $\max(\tau_1,\tau_2)$ |
 | top-$k$ pushdown                 | rank order         | score-preserving merge and identifier-only tie key (Proposition 4.5) |
 | inner-join reordering            | tuple identity     | associative inner region; predicates preserved; no outer or lateral boundary |
 | pattern-filter fusion            | graph context      | constraint representable inside the graph pattern            |
 | pattern-join fusion              | graph context      | compatible shared variables and identical assignment multiplicity |
 | aggregate decomposition          | aggregate value    | commutative monoid state for unordered partitions (Corollary 5.2); contiguous partition otherwise |
+
+Vector threshold merging is absent because it does not preserve payloads. For identical fields and query vectors with valid thresholds, replacing $V(q,\tau_1)\wedge V(q,\tau_2)$ by $V(q,\max(\tau_1,\tau_2))$ preserves support but changes a surviving document's score from $2s$ to $s$. Approximate query-vector equality does not even preserve support at threshold boundaries, and merging must not erase invalid-threshold errors. The planner therefore retains separate vector-threshold operands; no demanded-support analysis currently licenses this rewrite.
 
 Truncation below a score-combining merge is deliberately absent from the table. It is not a rewrite at all: by the counterexample of Section 4.4 no observation is preserved, and early termination there requires a threshold algorithm with admissible bounds (Section 9.2), which is a physical refinement justified separately.
 

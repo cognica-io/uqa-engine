@@ -6,8 +6,7 @@
 
 //! Rule-based and cost-aware operator-tree optimizer.
 //!
-//! Walks an [`OperatorTree`] and applies the ten rewrite stages from
-//! Theorem 6.1.2 (Paper 1) and Theorem 6.1.1 (Paper 2):
+//! Walks an [`OperatorTree`] and applies algebraic, graph, and physical rewrites:
 //!
 //! 1. `simplify_algebra` -- address-independent idempotence /
 //!    absorption / empty elimination on membership-only Intersect /
@@ -23,16 +22,13 @@
 //!    when the field belongs to the left side.
 //! 6. `fuse_join_pattern` -- merge intersected PatternMatch operators
 //!    that share a vertex variable.
-//! 7. `merge_vector_thresholds` -- collapse adjacent
-//!    VectorSimilarity(q, t1) AND VectorSimilarity(q, t2) into a
-//!    single VectorSimilarity(q, max(t1, t2)).
-//! 8. `reorder_intersect` -- sort Intersect children by estimated
-//!    cardinality (cheapest first).
-//! 9. `reorder_fusion_signals` -- sort fusion signals by cost; graph
+//! 7. `reorder_intersect` -- sort Intersect children by estimated operator cost (cheapest first).
+//! 8. `reorder_fusion_signals` -- sort fusion signals by cost; graph
 //!    operators receive a 0.5x discount when graph stats are
 //!    available.
-//! 10. `apply_index_scan` -- substitute leaf Filter with IndexScan
-//!     when a covering index is registered and cheaper.
+//! 9. `apply_index_scan` -- substitute leaf Filter with IndexScan when a covering index is registered and cheaper.
+//!
+//! Vector-threshold operands remain distinct: intersection adds each raw cosine score, and approximate query-vector equality cannot preserve threshold support. Rewrites must also retain invalid-threshold errors.
 
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -59,6 +55,8 @@ pub struct OptimizerConfig {
     pub enable_push_filter_into_traverse: bool,
     pub enable_push_filter_below_graph_join: bool,
     pub enable_fuse_join_pattern: bool,
+    /// Retained for source compatibility; ignored because merging vector thresholds loses scores and can suppress validation errors.
+    #[deprecated(note = "vector threshold merging was removed; this field has no effect")]
     pub enable_merge_vector_thresholds: bool,
     pub enable_reorder_intersect: bool,
     pub enable_reorder_fusion_signals: bool,
@@ -81,6 +79,10 @@ pub struct IndexScanCandidate {
 }
 
 impl Default for OptimizerConfig {
+    #[allow(
+        deprecated,
+        reason = "initialize the retained source-compatibility field"
+    )]
     fn default() -> Self {
         Self {
             enable_simplify_algebra: true,
@@ -89,7 +91,7 @@ impl Default for OptimizerConfig {
             enable_push_filter_into_traverse: true,
             enable_push_filter_below_graph_join: true,
             enable_fuse_join_pattern: true,
-            enable_merge_vector_thresholds: true,
+            enable_merge_vector_thresholds: false,
             enable_reorder_intersect: true,
             enable_reorder_fusion_signals: true,
             enable_apply_index_scan: true,
@@ -184,9 +186,6 @@ impl QueryOptimizer {
         }
         if self.config.enable_fuse_join_pattern {
             op = Self::fuse_join_pattern(op);
-        }
-        if self.config.enable_merge_vector_thresholds {
-            op = self.merge_vector_thresholds(op);
         }
         if self.config.enable_reorder_intersect {
             op = self.reorder_intersect(op);
