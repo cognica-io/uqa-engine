@@ -112,7 +112,7 @@ jobs:
               exit 1
             fi
           done
-          python3 scripts/check-release-licenses.py --require-nori "${actual[@]}"
+          python3 scripts/check-release-licenses.py --require-nori --require-kuromoji "${actual[@]}"
 
       - name: Select Python distributions for PyPI
         id: inventory

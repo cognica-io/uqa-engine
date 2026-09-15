@@ -23,13 +23,13 @@ It is designed for applications that need more than a relational table but do no
 - Use the same SQL result and parameter shapes against a local or Cloud UQA node through authenticated Rust, Python, Node.js, and browser HTTP engines.
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
-## New in 0.3.0
+## New in 0.3.5
 
-Version 0.3.0 adds native Korean Nori analysis with an embedded dictionary, user dictionaries, morphological token attributes, and optional number composition. Rust applications enable the `nori` feature; the official Python, Node.js, and browser WASM packages include it. Analysis runs without a JVM. Memory, SQLite, and redb preserve exact analyzer revisions and complete token graphs for phrase queries and highlighting at original source offsets.
+Version 0.3.5 adds native Lucene Kuromoji Japanese analysis: tokenization modes, N-best paths, user dictionaries, morphological filters, completion and separate normalization. Rust applications enable `kuromoji` independently of `nori`; the CLI and official Python, Node.js and browser WASM packages include both dictionaries. Analysis runs without a JVM or runtime dictionary download.
 
-The release also adds PostgreSQL-style domains, data-modifying CTEs, prepared parameter inference and custom/generic plan selection, and a source-distributed PostgreSQL Simple Query TCP server. SQL fixes cover object ownership and dependency cascades, stored routine bindings, floating-point behavior, temporal precision, and transaction clocks. Concrete SQLite APIs now belong to `uqa-storage-sqlite`.
+Nori and Kuromoji share dictionary, resource, traversal and numeric mechanisms in `uqa-analysis`. Memory, SQLite and redb retain exact analyzer revisions and complete token graphs for phrases and highlighting at original source offsets. The release also fixes analyzer parameter inference and updates TLS dependencies for RUSTSEC-2026-0285.
 
-Read the [release history](HISTORY.md#030---2026-09-14) for the complete changes and the [upgrade guide](docs/manual/reference/10-upgrading.md) for Rust API changes and persistent analyzer/index migration before updating an application or custom storage provider.
+Read the [release history](HISTORY.md#035---2026-09-15) for the complete changes and the [upgrade guide](docs/manual/reference/10-upgrading.md) for Rust normalization/profile configuration changes and persistent analyzer requirements.
 
 ## Mathematical foundation
 
@@ -42,7 +42,7 @@ The manuscript consolidates and revises the published work on [unified query alg
 Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
 ```sh
-python -m pip install uqa==0.3.0
+python -m pip install uqa==0.3.5
 usql
 ```
 
@@ -94,7 +94,7 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 Add the released package to your application:
 
 ```sh
-cargo add uqa@0.3.0
+cargo add uqa@0.3.5
 ```
 
 `uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.
@@ -190,7 +190,7 @@ Python and Node.js provide matching `local` and `cloud` project constructors; br
 
 `Engine::new()` keeps data in memory, while `Engine::open(path)` and `usql --db <path>` use the default persistent SQLite backend. Persistent engines restore schemas, documents, text postings, graphs, scoring parameters, models, views, and statistics when reopened.
 
-In 0.3.0, `uqa-storage` owns provider-independent contracts and shared data structures, while `uqa-storage-sqlite` owns SQLite connections, catalogs, indexes, transactions, graph persistence, and compressed storage. Rust callers using concrete storage types must use the [updated provider imports](docs/manual/reference/10-upgrading.md#sqlite-provider-ownership). This ownership change preserves the database format and engine SQL API.
+`uqa-storage` owns provider-independent contracts and shared data structures, while `uqa-storage-sqlite` owns SQLite connections, catalogs, indexes, transactions, graph persistence, and compressed storage. Rust callers using concrete storage types must use the [updated provider imports](docs/manual/reference/10-upgrading.md#sqlite-provider-ownership). This ownership change preserves the database format and engine SQL API.
 
 Applications that want a pure-Rust single-file store can compose the engine with `uqa-storage-redb`. The provider owns the database, and every `Engine::new_session()` receives independent transaction state over the same file.
 

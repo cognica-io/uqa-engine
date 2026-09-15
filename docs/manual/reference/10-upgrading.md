@@ -1,12 +1,14 @@
-# Upgrading to UQA Engine 0.3.0
+# Upgrading to UQA Engine 0.3.5
 
-Version 0.3.0 adds native Korean Nori analysis, durable analyzer revisions and token graphs, graph-aware phrases and highlighting, PostgreSQL domains and data-modifying CTEs, and prepared-plan improvements. It also moves concrete SQLite APIs into `uqa-storage-sqlite` and changes low-level Rust SQL and retrieval interfaces. The [release history](../../../HISTORY.md#030---2026-09-14) records the changes.
+Version 0.3.5 adds native Japanese Kuromoji analysis, completion and independent normalization, with shared Nori/Kuromoji mechanisms and both dictionaries in the CLI and official bindings. It also fixes analyzer parameter inference and updates TLS dependencies. Existing 0.3.0 generic/Nori descriptors and database formats remain compatible; Rust callers using analyzer struct literals or explicit simple-lowercase profiles must apply the source changes below. See the [release history](../../../HISTORY.md#035---2026-09-15).
+
+The 0.3.0 release added native Korean Nori analysis, durable analyzer revisions and token graphs, graph-aware phrases and highlighting, PostgreSQL domains and data-modifying CTEs, and prepared-plan improvements. It also moved concrete SQLite APIs into `uqa-storage-sqlite` and changed low-level Rust SQL and retrieval interfaces. The [release history](../../../HISTORY.md#030---2026-09-14) records the changes.
 
 The 0.2 series includes SQL object and privilege lifecycle changes, durable expression and unique indexes, expanded sequences and PL/pgSQL, native cross-process notifications, and a Node.js HTTP client that runs without native addons. These changes were introduced in [0.2.0](../../../HISTORY.md#020---2026-09-05); the [compatibility guide](../sql/09-compatibility.md) defines the verified PostgreSQL 18 surface and the behavior still being implemented.
 
 ## Korean analysis and package features
 
-Rust applications using Korean analysis enable `nori` on `uqa` or `uqa-engine`, for example `cargo add uqa@0.3.0 --features nori`. The feature includes the immutable dictionary through `uqa-nori-data`; the official Python, Node.js, and browser WASM packages enable it. No JVM or runtime dictionary download is required. Builds without this feature retain the non-Korean analyzers and reject Korean analysis requests explicitly.
+Rust applications using Korean analysis enable `nori` on `uqa` or `uqa-engine`, for example `cargo add uqa@0.3.5 --features nori`. The feature includes the immutable dictionary through `uqa-nori-data`; the official Python, Node.js, and browser WASM packages enable it. No JVM or runtime dictionary download is required. Builds without this feature retain the non-Korean analyzers and reject Korean analysis requests explicitly.
 
 The built-in `nori` analyzer and custom Korean pipelines retain exact dictionary and user-rule identities in durable descriptors. Deploy the same feature configuration and required resources in every process opening the database. Rich analysis retains UTF-16 terms, morphology, token graph edges, and corrected source spans; existing string projections remain available but cannot represent isolated UTF-16 units. See the [analyzer reference](06-text-analyzers.md) and [binding contracts](08-bindings-and-extensions.md) for analysis, normalization, and result APIs.
 
@@ -20,20 +22,20 @@ SQLite catalogs advance to version 46 for durable cache revisions, graph access 
 
 ## Package versions
 
-Update the UQA packages used by one application together. Rust's `0.1` and `0.2` dependency requirements do not select `0.3.0`; change the requirement explicitly and regenerate the application's lockfile.
+Update the UQA packages used by one application together. Rust's `0.1` and `0.2` dependency requirements do not select `0.3.5`; change the requirement explicitly and regenerate the application's lockfile.
 
 | Environment | Versioned installation |
 | --- | --- |
-| Embedded Rust | `cargo add uqa@0.3.0` |
-| Rust HTTP client | `cargo add uqa-client@0.3.0` |
-| Python and `usql` | `python -m pip install --upgrade uqa==0.3.0` |
-| Embedded Node.js | `npm install @cognica-io/uqa@0.3.0` |
-| Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.3.0` |
-| Browser WASM | `npm install @cognica-io/uqa-wasm@0.3.0` |
+| Embedded Rust | `cargo add uqa@0.3.5` |
+| Rust HTTP client | `cargo add uqa-client@0.3.5` |
+| Python and `usql` | `python -m pip install --upgrade uqa==0.3.5` |
+| Embedded Node.js | `npm install @cognica-io/uqa@0.3.5` |
+| Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.3.5` |
+| Browser WASM | `npm install @cognica-io/uqa-wasm@0.3.5` |
 
 The Rust workspace requires Rust 1.90 or newer. Python requires Python 3.8 or newer, and the Node.js package requires Node.js 16 or newer. The Node.js root package selects an exact-version native optional package for embedded execution; deploy the root and native packages from the same release. Deploy the Browser WASM JavaScript module and `uqa.wasm` from the same package together, including when updating a browser cache.
 
-The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.3.0) contains the Python and npm archives, standalone Node.js addons, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.3.0"` consistently for every UQA dependency.
+The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.3.5) contains the Python and npm archives, standalone Node.js addons, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.3.5"` consistently for every UQA dependency.
 
 ## Automatic statistics and session caches
 
@@ -98,10 +100,10 @@ The B-tree methods on `uqa_storage::PersistentStorageBackend` now use `ValueInde
 Opening an older supported database performs the required provider and catalog migrations. The 0.2 minor release adds typed tuple metadata, richer object and column identities, ownership and ACL records, bound routine and rule dependencies, and expression-index metadata. Initial open owns migration writes; later catalog refresh validates the persisted representation. The shipped SQLite and key-value providers handle their storage migrations through the normal engine open path.
 
 1. Stop writers, close every engine using the database, and create a recoverable backup through the [storage backup procedure](04-storage-and-security.md#backups-and-copies).
-2. Open a copy with the exact 0.3.0 application and its selected provider, encryption key, and compression configuration.
+2. Open a copy with the exact 0.3.5 application and its selected provider, encryption key, and compression configuration.
 3. Execute representative reads, writes, role and privilege checks, stored routines and views, and retrieval queries. Verify indexes, transaction rollback, and close-and-reopen behavior with the application's data.
 4. Update every process sharing the database before reopening the original file. Register process-local runtime callbacks again when the application starts.
-5. If the application must return to an older binary, restore the pre-upgrade backup. Do not rely on an older binary reading a file migrated by 0.3.0.
+5. If the application must return to an older binary, restore the pre-upgrade backup. Do not rely on an older binary reading a file migrated by 0.3.5.
 
 Keep migration failures visible and resolve them before admitting writes. Retain encryption keys and any external rollback anchor according to the [storage and security contract](04-storage-and-security.md).
 
@@ -141,17 +143,17 @@ Custom `CatalogFacade` implementations must atomically implement `save_analyzer_
 
 Key/Value indexes now store complete token occurrences and original-source metadata under canonical binary term keys. Opening an older positional index requires its original documents and resolvable analyzer descriptors; Engine rebuilds it in the initial catalog transaction, including tokenless fields. Failure preserves the prior positional data. Direct `KeyValueInvertedIndex` users must supply original documents to `try_rebuild_documents` when `source_rebuild_required` returns true. The [occurrence format](../../design/occurrence-posting-format.md#keyvalue-publication-and-migration) describes the persistent keys and migration boundary. SQLite schema 48 stores complete occurrence graphs and source metadata separately from legacy positional tables. Initial open rebuilds legacy full-text indexes from original documents in the same catalog transaction; missing sources or unresolved descriptors fail without committing a partial migration. Standalone SQLite catalog preparation preserves the source-rebuild obligation. See [native SQLite ownership](../../design/occurrence-posting-format.md#native-sqlite-ownership) for the format and publication contract.
 
-## Japanese analysis and distribution features (unreleased)
+## Japanese analysis and distribution features
 
-The development tree adds opt-in `kuromoji` to `uqa` and `uqa-engine`, independently of `nori`; both Rust packages retain empty defaults. CLI, Python, Node.js and WASM distribution builds now default to both languages. `--no-default-features` excludes both dictionaries; add `--features nori` or `--features kuromoji` to select one. The WASM build script accepts those same feature arguments. This does not change the already published 0.3.0 artifacts.
+Version 0.3.5 adds opt-in `kuromoji` to `uqa` and `uqa-engine`, independently of `nori`; both Rust packages retain empty defaults. CLI, Python, Node.js and WASM distribution builds now default to both languages. `--no-default-features` excludes both dictionaries; add `--features nori` or `--features kuromoji` to select one. The WASM build script accepts those same feature arguments.
 
 Deploy a build with the required language features and exact resources to every process opening a database with retained analyzers. The source and binary packages include the pinned Lucene, JDK, MeCab and IPADIC notices and both resource/model identities. The archive verifier checks complete embedded dictionary bytes in wheel, Node and WASM runtimes and complete resources in the source archive.
 
-## Explicit normalization configuration (unreleased)
+## Explicit normalization configuration
 
-The Kuromoji work following 0.3.0 adds `normalization: Option<NormalizationConfig>` to `uqa_analysis::Analyzer`. Existing Rust struct literals must add `normalization: None` or use `Analyzer::new` or `Analyzer::default`; the existing constructors still omit normalization. Use `.with_normalization(plan)` to select it explicitly. Omitted JSON configurations and existing generic/Nori descriptor identities remain unchanged, so this source change does not rewrite stored revisions or require a storage migration. `CompiledAnalyzer::normalize` and `normalize_budgeted` are now available in all analysis feature configurations; pipelines with no plan return `NormalizationUnavailable`. See [explicit normalization plans](06-text-analyzers.md#explicit-normalization-plans).
+Version 0.3.5 adds `normalization: Option<NormalizationConfig>` to `uqa_analysis::Analyzer`. Existing Rust struct literals must add `normalization: None` or use `Analyzer::new` or `Analyzer::default`; the existing constructors still omit normalization. Use `.with_normalization(plan)` to select it explicitly. Omitted JSON configurations and existing generic/Nori descriptor identities remain unchanged, so this source change does not rewrite stored revisions or require a storage migration. `CompiledAnalyzer::normalize` and `normalize_budgeted` are now available in all analysis feature configurations; pipelines with no plan return `NormalizationUnavailable`. See [explicit normalization plans](06-text-analyzers.md#explicit-normalization-plans).
 
-## Simple-lowercase profile configuration (unreleased)
+## Simple-lowercase profile configuration
 
 `SimpleLowercaseConfig` now belongs to `uqa_analysis` and is still re-exported from `uqa_analysis::nori`. Its `unicode_profile` field changes from `String` to `UnicodeProfileSource`. Convert existing owned strings with `.into()`; existing string-literal `.into()` expressions and the default constructor continue to work. Legacy JSON strings preserve their Nori interpretation, resolved form and descriptor identity. The new explicit `UnicodeProfile` object selects a provider and dictionary independently of the tokenizer. See [profile selection](06-text-analyzers.md#simple-lowercase-profile-selection).
 
