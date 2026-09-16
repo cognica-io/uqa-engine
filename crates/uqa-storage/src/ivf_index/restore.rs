@@ -12,6 +12,7 @@ use uqa_core::DocId;
 
 use super::math::l2_normalize;
 use super::state::{IVFIndex, IVFMetadataSnapshot, IVFState, StoredVector};
+use crate::read_control::StorageReadControl;
 use crate::vector_index::validate_vector_values;
 use crate::{StorageBackendError, StorageBackendResult};
 
@@ -24,6 +25,27 @@ impl IVFIndex {
         vectors: Vec<(DocId, u32, Vec<f32>)>,
         snapshot: IVFMetadataSnapshot,
     ) -> StorageBackendResult<Self> {
+        Self::restore(
+            dimensions,
+            nlist,
+            nprobe,
+            train_threshold,
+            vectors,
+            snapshot,
+            None,
+        )
+    }
+
+    pub(super) fn restore(
+        dimensions: u32,
+        nlist: usize,
+        nprobe: usize,
+        train_threshold: usize,
+        vectors: Vec<(DocId, u32, Vec<f32>)>,
+        snapshot: IVFMetadataSnapshot,
+        control: Option<&StorageReadControl>,
+    ) -> StorageBackendResult<Self> {
+        super::prepare::check(control)?;
         if snapshot.vector_count != vectors.len() {
             return Err(corrupt(format!(
                 "metadata vector_count {} does not match {} canonical vectors",
@@ -32,6 +54,7 @@ impl IVFIndex {
             )));
         }
         for centroid in &snapshot.centroids {
+            super::prepare::check(control)?;
             validate_vector_values(dimensions, centroid)
                 .map_err(|error| corrupt(format!("invalid centroid: {error}")))?;
         }
@@ -43,17 +66,18 @@ impl IVFIndex {
         }
         validate_state_shape(&snapshot)?;
 
-        let assignments = snapshot
-            .assignments
-            .iter()
-            .map(|(doc_id, ordinal, centroid)| ((*doc_id, *ordinal), *centroid))
-            .collect::<BTreeMap<_, _>>();
+        let mut assignments = BTreeMap::new();
+        for (doc_id, ordinal, centroid) in &snapshot.assignments {
+            super::prepare::check(control)?;
+            assignments.insert((*doc_id, *ordinal), *centroid);
+        }
         if assignments.len() != snapshot.assignments.len() {
             return Err(corrupt("duplicate vector assignment"));
         }
         let mut persisted = BTreeMap::new();
         let mut seen = BTreeSet::new();
         for (doc_id, ordinal, raw_vector) in vectors {
+            super::prepare::check(control)?;
             validate_vector_values(dimensions, &raw_vector)
                 .map_err(|error| corrupt(format!("invalid canonical vector: {error}")))?;
             if !seen.insert((doc_id, ordinal)) {
@@ -93,6 +117,7 @@ impl IVFIndex {
         }
         let mut inverted_lists = vec![Vec::new(); snapshot.centroids.len()];
         for (key, vector) in &persisted {
+            super::prepare::check(control)?;
             if let Some(centroid) = vector.centroid {
                 inverted_lists[centroid].push(*key);
             }

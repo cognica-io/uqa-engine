@@ -22,7 +22,7 @@ pub enum IVFState {
     Stale,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IVFMetadataSnapshot {
     pub state: IVFState,
     pub centroids: Vec<Vec<f32>>,

@@ -16,6 +16,8 @@ pub(super) struct SQLiteIVFMeta {
     pub(super) dimensions: u32,
     pub(super) params: IVFIndexParams,
     pub(super) state: IVFState,
+    pub(super) trained_size: usize,
+    pub(super) deletes_since_train: usize,
     pub(super) vector_count: usize,
 }
 
@@ -116,8 +118,6 @@ pub(super) type RawMetadata = (i64, i64, i64, i64, String, i64, i64, i64);
 
 pub(super) fn decode_metadata(row: RawMetadata) -> SQLiteResult<SQLiteIVFMeta> {
     let (dimensions, nlist, nprobe, threshold, state, trained, deleted, count) = row;
-    i64_to_usize("IVF trained_size", trained)?;
-    i64_to_usize("IVF deletes_since_train", deleted)?;
     Ok(SQLiteIVFMeta {
         dimensions: u32::try_from(dimensions)
             .map_err(|_| invalid_metadata("dimensions", dimensions))?,
@@ -127,6 +127,8 @@ pub(super) fn decode_metadata(row: RawMetadata) -> SQLiteResult<SQLiteIVFMeta> {
             train_threshold: positive_i64_to_usize("train_threshold", threshold)?,
         },
         state: parse_state(&state)?,
+        trained_size: i64_to_usize("IVF trained_size", trained)?,
+        deletes_since_train: i64_to_usize("IVF deletes_since_train", deleted)?,
         vector_count: i64_to_usize("IVF vector_count", count)?,
     })
 }

@@ -39,13 +39,17 @@ impl SQLiteIVFIndex {
             .persistent
             .write_native(|read, batch| {
                 let read = read.owned(batch)?;
-                let entries = read.vectors()?;
-                let snapshot = self.metadata_for_entries(&entries)?;
-                super::native::write_metadata(
-                    &read,
-                    batch,
-                    &encode_metadata(self.params, &snapshot)?,
-                )
+                let index = super::native::load_state(&read, self.params, true)?;
+                let snapshot = index.prepare_metadata(
+                    uqa_storage::ivf_index::IVFMutation::Train,
+                    &read.snapshot.control,
+                )?;
+                let encoded = super::native::encode_controlled(
+                    self.params,
+                    &snapshot,
+                    &read.snapshot.control,
+                )?;
+                super::native::write_metadata(&read, batch, &encoded)
             })?
             .is_some()
         {

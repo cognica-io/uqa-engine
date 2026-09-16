@@ -18,7 +18,7 @@ use super::index_keys::{
 use super::index_view::{read_only, read_view, IndexState, IndexView};
 use super::ivf_persistence;
 use super::{KeyValueBatch, KeyValueRead, KeyValueStore, KeyValueVectorIndex};
-use crate::ivf_index::{IVFIndex, IVFMetadataSnapshot, IVFState};
+use crate::ivf_index::{IVFIndex, IVFMetadataSnapshot, IVFMutation, IVFState};
 use crate::vector_index::{IVFIndexParams, VectorIndex};
 use crate::{StorageBackendError, StorageBackendResult};
 
@@ -127,20 +127,23 @@ impl KeyValueIVFIndex {
 
     fn mutate(
         &self,
-        changed_doc: Option<DocId>,
-        mutate: impl FnOnce(&mut IVFIndex, &mut dyn KeyValueBatch) -> StorageBackendResult<()>,
+        mutation: IVFMutation<'_>,
+        canonical: impl FnOnce(&mut dyn KeyValueBatch) -> StorageBackendResult<()>,
     ) -> StorageBackendResult<()> {
         self.view.evaluate(self.store.as_ref(), |read, batch| {
             let cached = self.index_at(read)?;
-            let before = cached.value.metadata_snapshot();
-            let mut candidate = cached.value.detached_clone();
-            mutate(&mut candidate, batch)?;
-            train_if_stale(&candidate)?;
-            let after = candidate.metadata_snapshot();
+            let after = cached.value.prepare_metadata(mutation, read.control())?;
+            let changed_doc = match mutation {
+                IVFMutation::Replace { document, .. } | IVFMutation::Delete(document) => {
+                    Some(document)
+                }
+                IVFMutation::Clear | IVFMutation::Train => None,
+            };
             let full_rewrite = changed_doc.is_none()
                 || cached.definition_candidate
                 || cached.revision.is_none()
-                || before.centroids != after.centroids;
+                || !cached.value.centroids_match(&after);
+            canonical(batch)?;
             self.stage_snapshot(
                 batch,
                 &after,
@@ -226,22 +229,21 @@ impl VectorIndex for KeyValueIVFIndex {
         self.add_many(doc_id, vec![vector])
     }
     fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>) -> StorageBackendResult<()> {
-        self.mutate(Some(doc_id), |candidate, batch| {
-            self.raw.stage_replace(batch, doc_id, &vectors)?;
-            candidate.add_many(doc_id, vectors)
-        })
+        self.mutate(
+            IVFMutation::Replace {
+                document: doc_id,
+                vectors: &vectors,
+            },
+            |batch| self.raw.stage_replace(batch, doc_id, &vectors),
+        )
     }
     fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
-        self.mutate(Some(doc_id), |candidate, batch| {
-            self.raw.stage_replace(batch, doc_id, &[])?;
-            candidate.delete(doc_id)
+        self.mutate(IVFMutation::Delete(doc_id), |batch| {
+            self.raw.stage_replace(batch, doc_id, &[])
         })
     }
     fn clear(&mut self) -> StorageBackendResult<()> {
-        self.mutate(None, |candidate, batch| {
-            self.raw.stage_clear(batch)?;
-            candidate.clear()
-        })
+        self.mutate(IVFMutation::Clear, |batch| self.raw.stage_clear(batch))
     }
     fn search_knn(&self, query: &[f32], k: usize) -> StorageBackendResult<PostingList> {
         let cached = self.read_index()?;
@@ -277,11 +279,4 @@ fn next_revision(revision: Option<u64>) -> StorageBackendResult<u64> {
         .unwrap_or(0)
         .checked_add(1)
         .ok_or_else(|| StorageBackendError::Other("IVF metadata revision space exhausted".into()))
-}
-
-fn train_if_stale(index: &IVFIndex) -> StorageBackendResult<()> {
-    if index.state() == IVFState::Stale {
-        index.train()?;
-    }
-    Ok(())
 }

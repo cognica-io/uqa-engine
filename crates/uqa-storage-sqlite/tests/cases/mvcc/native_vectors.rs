@@ -6,6 +6,9 @@
 
 //! Exact, IVF and HNSW public APIs retain canonical/derived views and publish atomic native batches.
 
+#[path = "native_vectors/ivf.rs"]
+mod ivf;
+
 use std::{sync::mpsc, time::Duration};
 
 use super::{native_tables::schema, open, MODES};
@@ -255,11 +258,19 @@ fn native_ivf_generations_publish_atomically_and_reopen_with_canonical_vectors()
         drop((vectors, empty, old, private, observer, connection));
         let reopened = open(mode, &path);
         bind(&reopened);
-        let restored = index(&reopened, IndexKind::Ivf, "new\0日本語");
+        let mut restored = index(&reopened, IndexKind::Ivf, "new\0日本語");
         assert_eq!(restored.count().unwrap(), 4);
         assert_eq!(nearest(&*restored, &Y), vec![1]);
+        let retained = restored.snapshot().unwrap();
         SQLiteIVFIndex::drop_metadata(&reopened, "new\0日本語", "embedding").unwrap();
         assert_eq!(restored.count().unwrap(), 4);
+        assert_eq!(nearest(&*retained, &Y), vec![1]);
+        assert!(restored
+            .search_knn(&Y, 1)
+            .unwrap_err()
+            .to_string()
+            .contains("missing native IVF metadata"));
+        restored.initialize().unwrap();
         assert_eq!(nearest(&*restored, &Y), vec![1]);
     }
 }

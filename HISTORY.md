@@ -19,6 +19,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve bound native SQLite IVF centroids and deletion counters through ordinary document changes, and retrain at the common storage threshold. Native and Key/Value IVF mutations now share bounded, cancellable candidate preparation. Reject missing or inconsistent native IVF generations instead of silently using exact search; explicit initialization rebuilds from canonical tensors. Shared-index merging remains in progress.
+
 - Merge independent native SQLite, SQLite Key/Value and redb occurrence writes sharing posting clusters and field totals. Preserve same-document and structural conflicts, invalidate late accelerator builds, and retain bounded preparation, savepoints and receipt-based retry without replaying analysis or scoring. Development MVCC record format 2 upgrades prior metadata atomically and rejects older writers afterward; native mapping format 5 adds document/structural guards with an atomic predecessor upgrade. Concurrent Engine SQL remains in progress.
 - Validate bound native SQLite catalogs on their retained committed/private view during Engine restoration. Reject inconsistent schema, relation, definition and index references without reading raw physical rows; B-tree validation uses bounded key pages without loading entry payloads.
 - Keep bounded common occurrence cursors on their original snapshot across cluster pages, and aggregate cross-field term frequencies on one view. Deterministic interleavings verify that later replacements cannot mix new frequencies into an older result.

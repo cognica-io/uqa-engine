@@ -6,25 +6,37 @@
 
 //! IVF state transitions, centroid training, and posting-list maintenance.
 
-use super::math::{kmeans, nearest_centroid};
+use super::math::{kmeans, nearest_centroid_controlled};
+use super::prepare::check;
 use super::state::{IVFIndex, IVFState, VectorKey};
+use crate::read_control::StorageReadControl;
 use crate::{StorageBackendError, StorageBackendResult};
 
 pub(super) const STALE_DENOMINATOR: usize = 5;
 
 impl IVFIndex {
     pub fn train(&self) -> StorageBackendResult<()> {
+        self.train_controlled(None)
+    }
+
+    pub(super) fn train_controlled(
+        &self,
+        control: Option<&StorageReadControl>,
+    ) -> StorageBackendResult<()> {
+        check(control)?;
         let training_vectors = {
             let vectors = self.vectors.lock();
             if vectors.len() < self.train_threshold {
                 drop(vectors);
-                self.transition_to_untrained();
+                self.transition_to_untrained(control)?;
                 return Ok(());
             }
-            vectors
-                .values()
-                .map(|vector| vector.vector.clone())
-                .collect::<Vec<_>>()
+            let mut training = Vec::with_capacity(vectors.len());
+            for vector in vectors.values() {
+                check(control)?;
+                training.push(vector.vector.clone());
+            }
+            training
         };
         let dimensions = usize::try_from(self.dimensions).map_err(|_| {
             StorageBackendError::Other(format!(
@@ -37,11 +49,12 @@ impl IVFIndex {
             self.nlist.min(training_vectors.len()),
             dimensions,
             10,
-        );
+            control,
+        )?;
         let mut vectors = self.vectors.lock();
         let mut inverted_lists = vec![Vec::new(); centroids.len()];
         for vector in vectors.values_mut() {
-            let centroid = nearest_centroid(&vector.vector, &centroids);
+            let centroid = nearest_centroid_controlled(&vector.vector, &centroids, control)?;
             vector.centroid = Some(centroid);
             inverted_lists[centroid].push(vector.key);
         }
@@ -53,8 +66,12 @@ impl IVFIndex {
         Ok(())
     }
 
-    fn transition_to_untrained(&self) {
+    fn transition_to_untrained(
+        &self,
+        control: Option<&StorageReadControl>,
+    ) -> StorageBackendResult<()> {
         for vector in self.vectors.lock().values_mut() {
+            check(control)?;
             vector.centroid = None;
         }
         self.centroids.lock().clear();
@@ -62,6 +79,7 @@ impl IVFIndex {
         *self.trained_size.lock() = 0;
         *self.deletes_since_train.lock() = 0;
         *self.state.lock() = IVFState::Untrained;
+        Ok(())
     }
 
     pub(super) fn maybe_mark_stale(&self) {
