@@ -18,8 +18,10 @@ use std::time::Duration;
 use super::NotificationHub;
 use fs2::FileExt;
 use parking_lot::Mutex;
-use rusqlite::{params, Connection, TransactionBehavior};
+use rusqlite::{params, TransactionBehavior};
 use uqa_sql::SQLError;
+use uqa_storage::StorageEncryptionKey;
+use uqa_storage_sqlite::{ManagedConnection, SQLiteConnectionLease};
 
 const REGISTRY_SCHEMA_VERSION: i64 = 1;
 const REGISTRY_APPLICATION_ID: i64 = 0x5551_4e31;
@@ -74,7 +76,7 @@ impl Drop for ListenerLease {
 }
 
 pub(super) struct CrossProcessRegistryTransaction {
-    connection: Connection,
+    connection: SQLiteConnectionLease,
     finished: bool,
 }
 
@@ -316,27 +318,26 @@ impl Drop for CrossProcessRegistryTransaction {
 
 pub(super) struct CrossProcessCoordinator {
     database_path: PathBuf,
-    registry_path: PathBuf,
+    registry: ManagedConnection,
     wake_port: u16,
     shutdown: Arc<AtomicBool>,
     worker: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl CrossProcessCoordinator {
-    pub(super) fn allocate_backend_process_id_for_database(
-        database_path: &Path,
+    pub(super) fn allocate_backend_process_id(
+        registry: &ManagedConnection,
     ) -> Result<i32, SQLError> {
-        let registry_path = suffixed_path(database_path, ".uqa-notification-state");
-        initialize_registry(&registry_path).map_err(SQLError::Internal)?;
-        let transaction = open_registry_transaction(&registry_path)?;
+        let transaction = open_registry_transaction(registry)?;
         let process_id = transaction.allocate_backend_process_id()?;
         transaction.commit()?;
         Ok(process_id)
     }
 
-    pub(super) fn open(database_path: &Path) -> Result<(Self, TcpListener), String> {
-        let registry_path = suffixed_path(database_path, ".uqa-notification-state");
-        initialize_registry(&registry_path)?;
+    pub(super) fn open(
+        database_path: &Path,
+        registry: ManagedConnection,
+    ) -> Result<(Self, TcpListener), String> {
         let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .map_err(|error| format!("bind asynchronous notification wake listener: {error}"))?;
         let wake_port = listener
@@ -346,7 +347,7 @@ impl CrossProcessCoordinator {
         Ok((
             Self {
                 database_path: database_path.to_path_buf(),
-                registry_path,
+                registry,
                 wake_port,
                 shutdown: Arc::new(AtomicBool::new(false)),
                 worker: Mutex::new(None),
@@ -394,7 +395,7 @@ impl CrossProcessCoordinator {
     pub(super) fn begin_registry_transaction(
         &self,
     ) -> Result<CrossProcessRegistryTransaction, SQLError> {
-        open_registry_transaction(&self.registry_path)
+        open_registry_transaction(&self.registry)
     }
 
     pub(super) fn create_listener_lease(&self) -> Result<ListenerLease, SQLError> {
@@ -502,8 +503,20 @@ impl Drop for CrossProcessCoordinator {
     }
 }
 
-fn initialize_registry(path: &Path) -> Result<(), String> {
-    let mut connection = Connection::open(path)
+pub(super) fn open_registry(
+    database_path: &Path,
+    key: Option<&StorageEncryptionKey>,
+) -> Result<ManagedConnection, String> {
+    let path = suffixed_path(database_path, ".uqa-notification-state");
+    let registry = ManagedConnection::open_auxiliary(&path, key.cloned())
+        .map_err(|error| format!("open asynchronous notification registry: {error}"))?;
+    initialize_registry(&registry)?;
+    Ok(registry)
+}
+
+fn initialize_registry(registry: &ManagedConnection) -> Result<(), String> {
+    let mut connection = registry
+        .lease_connection()
         .map_err(|error| format!("open asynchronous notification registry: {error}"))?;
     connection
         .busy_timeout(REGISTRY_BUSY_TIMEOUT)
@@ -650,10 +663,13 @@ fn registry_error(action: &str, error: &rusqlite::Error) -> SQLError {
 }
 
 fn open_registry_transaction(
-    registry_path: &Path,
+    registry: &ManagedConnection,
 ) -> Result<CrossProcessRegistryTransaction, SQLError> {
-    let connection =
-        Connection::open(registry_path).map_err(|error| registry_error("open registry", &error))?;
+    let connection = registry.lease_connection().map_err(|error| {
+        SQLError::Internal(format!(
+            "lease asynchronous notification registry connection: {error}"
+        ))
+    })?;
     connection
         .busy_timeout(REGISTRY_BUSY_TIMEOUT)
         .map_err(|error| registry_error("set registry busy timeout", &error))?;
@@ -713,39 +729,52 @@ fn suffixed_path(database_path: &Path, suffix: &str) -> PathBuf {
 mod tests {
     use std::sync::{Arc, Barrier};
 
+    use rusqlite::Connection;
+
     use super::*;
 
     #[test]
     fn registry_initialization_serializes_concurrent_first_open() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = Arc::new(directory.path().join("notification-state"));
-        let barrier = Arc::new(Barrier::new(8));
-        let workers = (0..8)
-            .map(|_| {
-                let path = Arc::clone(&path);
-                let barrier = Arc::clone(&barrier);
-                std::thread::spawn(move || {
-                    barrier.wait();
-                    initialize_registry(&path)
+        for key in [
+            None,
+            Some(StorageEncryptionKey::new("concurrent-registry-test-key")),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = Arc::new(directory.path().join("notification-state"));
+            let barrier = Arc::new(Barrier::new(8));
+            let workers = (0..8)
+                .map(|_| {
+                    let path = Arc::clone(&path);
+                    let barrier = Arc::clone(&barrier);
+                    let key = key.clone();
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        open_registry(&path, key.as_ref()).map(|_| ())
+                    })
                 })
-            })
-            .collect::<Vec<_>>();
-        for worker in workers {
-            worker.join().unwrap().unwrap();
+                .collect::<Vec<_>>();
+            for worker in workers {
+                worker.join().unwrap().unwrap();
+            }
+            let registry = open_registry(&path, key.as_ref()).unwrap();
+            let connection = registry.lease_connection().unwrap();
+            let mode: String = connection
+                .pragma_query_value(None, "journal_mode", |row| row.get(0))
+                .unwrap();
+            assert_eq!(mode, "delete");
         }
-        initialize_registry(&path).unwrap();
     }
 
     #[test]
     fn registry_open_rejects_missing_versioned_state_instead_of_repairing_it() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("notification-state");
-        initialize_registry(&path).unwrap();
-        Connection::open(&path)
+        let registry = open_registry(&path, None).unwrap();
+        Connection::open(registry.database_path().unwrap())
             .unwrap()
             .execute_batch("DROP TABLE listeners")
             .unwrap();
-        let error = initialize_registry(&path).unwrap_err();
+        let error = initialize_registry(&registry).unwrap_err();
         assert!(
             error.contains("validate asynchronous notification registry listeners"),
             "{error}"
@@ -756,7 +785,8 @@ mod tests {
     fn dropped_registry_transaction_discards_prepared_queue_changes() {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("database");
-        let (coordinator, _listener) = CrossProcessCoordinator::open(&database).unwrap();
+        let registry = open_registry(&database, None).unwrap();
+        let (coordinator, _listener) = CrossProcessCoordinator::open(&database, registry).unwrap();
         {
             let transaction = coordinator.begin_registry_transaction().unwrap();
             transaction

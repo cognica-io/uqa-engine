@@ -109,9 +109,13 @@ fn cross_process_notification_listener_child() {
     };
     let handshake = std::path::PathBuf::from(std::env::var("UQA_NOTIFICATION_CHILD_DIR").unwrap());
     let mode = std::env::var("UQA_NOTIFICATION_CHILD_MODE").unwrap();
-    let engine = Engine::open(Path::new(&database)).unwrap();
+    let engine = if mode.starts_with("encrypted-") {
+        Engine::open_auto(Path::new(&database), Some(super::encryption::KEY)).unwrap()
+    } else {
+        Engine::open(Path::new(&database)).unwrap()
+    };
     exec(&engine, "LISTEN cross_process_events");
-    if mode == "transaction" {
+    if mode.ends_with("transaction") {
         exec(&engine, "BEGIN");
     }
     std::fs::write(
@@ -122,7 +126,7 @@ fn cross_process_notification_listener_child() {
     if mode == "crash" {
         std::process::exit(0);
     }
-    if mode == "transaction" {
+    if mode.ends_with("transaction") {
         assert!(!engine
             .wait_for_sql_notifications(Duration::from_millis(500))
             .unwrap());
@@ -144,6 +148,45 @@ fn cross_process_notification_listener_child() {
         ),
     )
     .unwrap();
+}
+
+#[test]
+fn encrypted_separate_process_notifications_defer_until_the_listener_commits() {
+    use super::encryption::{assert_no_plaintext, KEY, PAYLOAD};
+
+    for compressed in [false, true] {
+        let directory = TempDir::new().unwrap();
+        let database = directory.path().join("encrypted-cross-process.db");
+        let sender = if compressed {
+            Engine::open_compressed_encrypted(
+                &database,
+                KEY,
+                uqa_storage_sqlite::SQLiteCompressionOptions::default(),
+            )
+            .unwrap()
+        } else {
+            Engine::open_encrypted(&database, KEY).unwrap()
+        };
+        let mut listener =
+            spawn_notification_child(&database, directory.path(), "encrypted-transaction");
+        wait_for_notification_file(&directory.path().join("encrypted-transaction-ready"));
+        exec(
+            &sender,
+            &format!("NOTIFY cross_process_events, '{PAYLOAD}'"),
+        );
+        wait_for_notification_file(&directory.path().join("transaction-wait-finished"));
+        assert_no_plaintext(&database, &["cross_process_events", PAYLOAD, KEY]);
+        std::fs::write(directory.path().join("release-transaction"), b"1").unwrap();
+        assert_eq!(
+            wait_for_notification_result(&directory.path().join("encrypted-transaction-result")),
+            (
+                sender.backend_process_id(),
+                "cross_process_events".into(),
+                PAYLOAD.into()
+            )
+        );
+        assert!(listener.wait().unwrap().success());
+    }
 }
 
 #[test]

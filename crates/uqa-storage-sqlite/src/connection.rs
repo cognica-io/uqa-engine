@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use parking_lot::{Condvar, Mutex, RwLock};
 use rusqlite::{Connection, OpenFlags};
+use uqa_storage::StorageEncryptionKey;
 
 use crate::compressed_vfs::{self, SQLiteCompressedContainerAnchor, SQLiteCompressionOptions};
 
@@ -37,6 +38,8 @@ pub enum SQLiteError {
     EncryptionKeyRequired,
     #[error("database is not encrypted but an encryption key was provided")]
     NotEncrypted,
+    #[error("auxiliary database requires DELETE journaling, found {0}")]
+    AuxiliaryJournalMode(String),
     #[error("compressed sqlite container error: {0}")]
     CompressedContainer(String),
     #[error("io error: {0}")]
@@ -83,11 +86,16 @@ const MAX_POOL_CONNECTIONS: usize = 32;
 enum ConnectionSpec {
     File {
         path: PathBuf,
-        key: Option<Arc<str>>,
+        key: Option<StorageEncryptionKey>,
+    },
+    Auxiliary {
+        path: PathBuf,
+        key: Option<StorageEncryptionKey>,
     },
     Compressed {
         path: PathBuf,
         compression: SQLiteCompressionOptions,
+        key: Option<StorageEncryptionKey>,
     },
     Memory,
 }
@@ -95,18 +103,32 @@ enum ConnectionSpec {
 impl ConnectionSpec {
     fn open(&self, initialize_database: bool) -> Result<Connection> {
         match self {
-            Self::File { path, key } => {
+            Self::File { path, key } | Self::Auxiliary { path, key } => {
                 let conn = Connection::open(path)?;
                 if let Some(key) = key {
-                    ManagedConnection::apply_encryption_key(&conn, key)?;
+                    ManagedConnection::apply_encryption_key(&conn, key.expose_secret())?;
                 }
-                if initialize_database {
-                    ManagedConnection::enable_wal(&conn)?;
+                if matches!(self, Self::Auxiliary { .. }) {
+                    // Registry writers already serialize their transactions.
+                    // Retain the original journal mode instead of racing to
+                    // promote a new registry to WAL during concurrent opens.
+                    let mode: String =
+                        conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
+                    if mode != "delete" {
+                        return Err(SQLiteError::AuxiliaryJournalMode(mode));
+                    }
+                    ManagedConnection::configure_rollback_connection(&conn)?;
+                } else {
+                    if initialize_database {
+                        ManagedConnection::enable_wal(&conn)?;
+                    }
+                    ManagedConnection::configure_wal_connection(&conn)?;
                 }
-                ManagedConnection::configure_wal_connection(&conn)?;
                 Ok(conn)
             }
-            Self::Compressed { path, compression } => {
+            Self::Compressed {
+                path, compression, ..
+            } => {
                 let conn = Connection::open_with_flags_and_vfs(
                     path,
                     OpenFlags::default(),
@@ -116,7 +138,7 @@ impl ConnectionSpec {
                     conn.pragma_update(None, "page_size", compression.page_size)?;
                     ManagedConnection::enable_compressed_journal(&conn)?;
                 }
-                ManagedConnection::configure_compressed_connection(&conn)?;
+                ManagedConnection::configure_rollback_connection(&conn)?;
                 Ok(conn)
             }
             Self::Memory => {
@@ -203,19 +225,19 @@ impl ConnectionPool {
     }
 }
 
-struct PooledConnection {
+pub(crate) struct PooledConnection {
     pool: Arc<ConnectionPool>,
     connection: Option<Connection>,
 }
 
 impl PooledConnection {
-    fn connection(&self) -> Result<&Connection> {
+    pub(crate) fn connection(&self) -> Result<&Connection> {
         self.connection
             .as_ref()
             .ok_or(SQLiteError::MissingCheckedOutConnection)
     }
 
-    fn connection_mut(&mut self) -> Result<&mut Connection> {
+    pub(crate) fn connection_mut(&mut self) -> Result<&mut Connection> {
         self.connection
             .as_mut()
             .ok_or(SQLiteError::MissingCheckedOutConnection)
@@ -294,11 +316,47 @@ impl ManagedConnection {
     #[must_use]
     pub fn database_path(&self) -> Option<&Path> {
         match &self.pool.spec {
-            ConnectionSpec::File { path, .. } | ConnectionSpec::Compressed { path, .. } => {
-                Some(path)
-            }
+            ConnectionSpec::File { path, .. }
+            | ConnectionSpec::Auxiliary { path, .. }
+            | ConnectionSpec::Compressed { path, .. } => Some(path),
             ConnectionSpec::Memory => None,
         }
+    }
+
+    /// Retain the database credential for encrypted auxiliary storage, including
+    /// compressed containers whose main-file encryption lives in the VFS.
+    #[must_use]
+    pub fn auxiliary_encryption_key(&self) -> Option<StorageEncryptionKey> {
+        match &self.pool.spec {
+            ConnectionSpec::File { key, .. }
+            | ConnectionSpec::Auxiliary { key, .. }
+            | ConnectionSpec::Compressed { key, .. } => key.clone(),
+            ConnectionSpec::Memory => None,
+        }
+    }
+
+    /// Lease an independent physical connection without joining this logical
+    /// session's transaction. The pool retains encryption and connection policy.
+    pub fn lease_connection(&self) -> Result<crate::SQLiteConnectionLease> {
+        self.pool.checkout().map(crate::SQLiteConnectionLease)
+    }
+
+    /// Open database-owned auxiliary storage with its inherited credential and
+    /// original DELETE journaling. Concurrent first opens never change journal
+    /// modes. An incompatible existing mode is rejected without rewriting it.
+    pub fn open_auxiliary(path: &Path, key: Option<StorageEncryptionKey>) -> Result<Self> {
+        if path == Path::new(":memory:") || path.as_os_str().is_empty() {
+            return Err(SQLiteError::StorageBackend(
+                "auxiliary storage requires a database file".into(),
+            ));
+        }
+        Self::from_spec(
+            ConnectionSpec::Auxiliary {
+                path: path.to_path_buf(),
+                key,
+            },
+            default_pool_connections(),
+        )
     }
 
     pub fn open_encrypted(path: &Path, key: &str) -> Result<Self> {
@@ -337,7 +395,7 @@ impl ManagedConnection {
     fn open_with_optional_key(path: &Path, key: Option<&str>) -> Result<Self> {
         let spec = ConnectionSpec::File {
             path: path.to_path_buf(),
-            key: key.map(Arc::from),
+            key: key.map(StorageEncryptionKey::new),
         };
         Self::from_spec(spec, default_pool_connections())
     }
@@ -364,6 +422,7 @@ impl ManagedConnection {
         let spec = ConnectionSpec::Compressed {
             path: path.to_path_buf(),
             compression,
+            key: key.map(StorageEncryptionKey::new),
         };
         Self::from_spec(spec, default_pool_connections())
     }
@@ -419,7 +478,7 @@ impl ManagedConnection {
         Ok(())
     }
 
-    fn configure_compressed_connection(conn: &Connection) -> Result<()> {
+    fn configure_rollback_connection(conn: &Connection) -> Result<()> {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.pragma_update(None, "synchronous", "FULL")?;
         conn.pragma_update(None, "temp_store", "MEMORY")?;
@@ -464,19 +523,22 @@ impl ManagedConnection {
     /// Whether this session's independent [`Self::data_version`] monitor can
     /// read without contending with the currently pinned transaction.
     ///
-    /// A rollback-journal writer's pending lock blocks new readers while waiting for existing readers to finish. A compressed read transaction must therefore also avoid the independent monitor: its own shared lock may be preventing that waiting writer from proceeding. Callers refresh through the pinned connection instead. WAL sessions and compressed sessions without a pinned transaction permit the independent monitor.
+    /// A rollback-journal writer's pending lock blocks new readers while waiting for existing readers to finish. A rollback-journal read transaction must therefore also avoid the independent monitor: its own shared lock may be preventing that waiting writer from proceeding. Callers refresh through the pinned connection instead. WAL sessions and sessions without a pinned transaction permit the independent monitor.
     pub fn data_version_monitor_is_nonblocking(&self) -> Result<bool> {
-        if !matches!(&self.pool.spec, ConnectionSpec::Compressed { .. }) {
+        if self.supports_concurrent_pinned_read_and_write() {
             return Ok(true);
         }
         let _gate = self.session.gate.read();
         Ok(self.session.transaction.lock().is_none())
     }
 
-    /// Whether one pooled connection may retain a read snapshot while another writes. Plain and encrypted `SQLite` databases use WAL; compressed containers use rollback journaling and therefore require a detached engine snapshot before writer promotion.
+    /// Whether one pooled connection may retain a read snapshot while another writes. Ordinary plain and encrypted `SQLite` databases use WAL; compressed containers and auxiliary files use rollback journaling and therefore require a detached engine snapshot before writer promotion.
     #[must_use]
     pub fn supports_concurrent_pinned_read_and_write(&self) -> bool {
-        !matches!(&self.pool.spec, ConnectionSpec::Compressed { .. })
+        !matches!(
+            &self.pool.spec,
+            ConnectionSpec::Compressed { .. } | ConnectionSpec::Auxiliary { .. }
+        )
     }
 
     /// Database change counter observed on one stable connection shared by
