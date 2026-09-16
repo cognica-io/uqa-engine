@@ -45,6 +45,8 @@ Expression key preparation finishes before the document-store write lock is acqu
 
 SQLite is the default persistent engine. redb uses the same SQL and logical storage surface through the provider contract.
 
+The [concurrent storage transaction design](../../design/concurrent-storage-transactions.md) proposes shared MVCC for native SQLite, SQLite Key/Value and redb; it is not implemented behavior. Its [implementation plan](../../plans/0008-concurrent-storage-transactions.md) tracks the required provider, transaction, migration and recovery work.
+
 ## Durable catalog
 
 The persistent catalog records:

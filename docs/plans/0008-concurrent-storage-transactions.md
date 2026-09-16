@@ -1,0 +1,129 @@
+# Concurrent storage transaction implementation plan
+
+Status: Design and planning only; runtime implementation has not started. Baseline: UQA 0.3.6, commit `24e464f7709cd5d942df8d0aeef5d522716b1bfb`, inspected on 2026-09-16. The [design](../design/concurrent-storage-transactions.md) defines the intended architecture. This plan tracks implementation dependencies and evidence without claiming that the proposal is already public behavior.
+
+## Objective and completion boundary
+
+Implement overlapping logical write transactions for default relational SQLite, SQLite Key/Value and redb using shared storage MVCC and brief serialized physical commits. Transaction B must write and commit independent rows while transaction A retains uncommitted changes; A's later commit or rollback must preserve B. Include shared indexes, catalog/graph state, PostgreSQL 18 transaction semantics, existing persistent open modes, migration, bounded resources and recovery. Engine retains transaction/session adapters; storage and execution algorithms remain with their owning crates.
+
+Design-document completion and runtime completion are separate. This documentation task is complete when both documents agree with the inspected source, define decisions and acceptance gates, pass document/repository checks and are committed and submitted for review. Runtime completion requires every implementation unit and acceptance row below, with evidence attached to the implementation revision. A passing two-row test, one provider, a subset of isolation levels or a green reference-only PostgreSQL run cannot substitute for that full boundary.
+
+## Confirmed starting points
+
+- [`PersistentStorageSession`](../../crates/uqa-storage/src/backend.rs) already pairs catalog/backend handles, and provider factories create independent sessions. Extend this boundary instead of introducing a parallel Engine persistence API.
+- SQLite `BEGIN IMMEDIATE`, redb's retained `WriteState`, Engine deferred promotion and Engine eager transaction entry all participate in current serialization. The reader/writer capability does not imply multiple writers.
+- [`uqa-execution::row_locks`](../../crates/uqa-execution/src/row_locks/mod.rs) owns row/relation waits, deadlocks, cross-process coordination and row-change rechecks. Engine's `row_locks.rs` is only a reexport.
+- Common storage already owns K/V catalogs, rows, occurrences, B-tree, IVF and HNSW behavior. Physical clusters/counters are shared by different rows, so opaque buffered K/V replacement is insufficient.
+- Existing ownership/dependency policy forbids common storage and its tests from depending on providers, and forbids execution from depending on either concrete provider. No policy weakening or new Engine runtime dependency on redb is planned.
+- The manifest audit resolved rusqlite 0.39.0 and redb 4.1.0; native SQLCipher, compressed rollback-journal and Emscripten plain SQLite must retain their separate physical contracts. No new Cargo feature currently supplies this behavior.
+
+## Implementation units and dependencies
+
+The units below are implementation order and review boundaries, not names to copy into source comments, tests or permanent policy labels. Each unit includes owning tests and a plan update. Provider units can share the same established contract; end-to-end enablement waits for every required dependency.
+
+| Work unit | Owner and intended changes | Dependencies | Exit evidence | Status |
+| --- | --- | --- | --- | --- |
+| Transaction access inventory and deterministic schedules | Storage/execution owners plus Engine adapter tests: enumerate every durable read/write/open/maintenance path; capture PostgreSQL schedules and current blocking behavior; define the transaction-model capability and typed results | This design | Reviewed access inventory linked to source; reproducible old failure; compact Docker reference traces; no runtime capability advertised | Pending |
+| Versioned record and session contracts | `uqa-storage::mvcc`: stable identities, commit sequences, provider read/commit interface, transaction handle, reference persistence implementation and conformance entry points | Access inventory | Common-crate tests for point/absent/range reads, tombstones, snapshot admission, command visibility and atomic multi-family commits; no provider imports | Pending |
+| Private changes and savepoints | Common storage: ordered overlays, typed mutation log, undo positions, transaction-written state, retention accounting and spill interface | Versioned contracts | Nested and duplicate savepoint cases; read-your-writes; rollback/cancellation/allocation failures; command-boundary tests; no physical writer retained during idle SQL time | Pending |
+| SQLite versioned persistence | `uqa-storage-sqlite`: native relational and K/V record adapters, history/head tables, bounded reads, atomic receipts, encrypted/compressed paths, coordinator transport and native-write guards | Versioned contracts and private changes | Both SQLite layouts pass common conformance; SQLCipher and compressed reads/writes remain protected; two independently opened providers coordinate correctly; the private guard function works in native/Emscripten runtime builds | Pending |
+| redb versioned persistence | `uqa-storage-redb`: logical sessions, head/history/receipt tables, native transactions restricted to durable operations and file-owner coordination | Versioned contracts and private changes | Shared conformance and crash/reopen tests; no retained `WriteTransaction` between SQL commands; preserve typed errors and exclusive file ownership | Pending |
+| Shared logical mutations and physical indexes | Existing storage owners plus graph persistence: per-row deltas, evaluated expression keys, posting/occurrence merges, checked counters, canonical vectors and atomic IVF/HNSW generations, object/name mappings | Versioned contracts and private changes; provider tests as adapters land | Concurrent same-cluster/counter/HNSW-node cases preserve both writers; index generations match visible canonical values before and after rollback/reopen | Pending |
+| SQL lock and conflict integration | `uqa-execution` and SQL owners: logical reservations, target-version rechecks, predicate observations, deferred constraints and deadlock/wait integration | Common sessions and logical mutation contracts | PostgreSQL schedules for row/key conflicts, `ON CONFLICT`, `MERGE`, FK/exclusion checks, NOWAIT/SKIP LOCKED, partition movement and real deadlocks | Pending |
+| Serializable dependency tracking | Common storage algorithm with execution observations: overlap graph, commit-order rules, retained dependencies and safe snapshots | Versioned contracts and SQL observations | Forced write-skew/phantom/read-only/pivot schedules, resource bounds and committed-reader retention; safe/unsafe histories compared with PostgreSQL | Pending |
+| Engine session and publication adapters | Engine transaction/open/cache/notification owners: select model, remove concurrent-session lifetime writer gate, retain snapshots, refresh overlays, resolve durable receipts and publish revisions | Both providers, logical mutations, SQL conflicts and serialization tracking | B commits before A is released on all persistent paths; A commit/rollback/savepoint leaves B intact; catalog/graph/index/cache publication is consistent | Pending |
+| Allocation, maintenance and extension boundaries | Existing sequence/execution/storage owners; Engine adapters: durable ID/sequence allocation, background statistics, notifications, temporary objects, callbacks, cursor/FDW boundaries | Sessions, provider adapters and Engine integration | No ID collisions; PostgreSQL sequence and event order; maintenance joins the protocol; no callback replay or unrelated rollback | Pending |
+| Version reclamation and failure recovery | Common storage horizon/retention algorithm, provider coordination and secure spill | Providers, publication protocol and serialization tracking | Pinned history survives GC; dead-process cleanup; bounded memory/spill; crash points around durable commit; encrypted temporary data; cancellation and indeterminate outcomes | Pending |
+| Existing-file migration and default enablement | Provider migrations, Engine open adapters and upgrade manual | Provider adapters, logical mutations, Engine/SQL integration, allocation and recovery | Atomic/idempotent old-file conversion; actual 0.3.6 writers cannot alter upgraded files; encrypted/compressed backup/reopen; every built-in path advertises capability only after complete conformance | Pending |
+| Binding, platform and final acceptance | Existing Rust, Python, Node.js, WASM/server tests and CI | All runtime units | Complete matrix below at final implementation head, full affected-owner tests, policy checks, public manual/upgrade updates and reviewable PR | Pending |
+
+Introduce and test the memory reference persistence implementation in common storage first, then exercise the exact same conformance contract from both provider crates. Integrate actual Engine SQL as soon as the providers and mutation paths can preserve the required invariants; do not postpone all integration discovery to the last commit. Intermediate commits can expose internal contracts, but incomplete combinations must not claim the concurrent capability.
+
+## Access-path audit deliverable
+
+Before changing transaction entry, record concrete source owners and migration/routing decisions for catalog initialization, ordinary SQL DML/DDL, direct document/index APIs, graph/Cypher, B-tree/expression/unique indexes, posting clusters and statistics, IVF/HNSW, models/analyzers/routines, sequences and ID allocation, LISTEN/NOTIFY, prepared statements and cursors, temporary and unlogged relations, background ANALYZE, VACUUM/rebuild, backup/restore, callbacks, FDWs and each Engine/provider open constructor. Include error/unwind and savepoint paths. Update the inventory when a bypass is discovered; do not paper over it with a global transaction lock.
+
+Native SQLite and SQLite K/V require distinct physical adapters to the same common record/visibility contract. Route both completely before claiming default SQLite support. Keep current SQLite tables as atomic current-state materializations with history; do not silently convert `Engine::open` into an unrelated K/V format. redb's current table initializer ignores a proposed new format flag, so prove an old-writer rejection mechanism with the actual old library. These are implementation deliverables, not optional follow-up optimizations.
+
+Audit lower-level native SQLite writers as well as Engine/catalog opens. The proposed persistent write guards require rusqlite `functions` as a runtime feature in both SQLite-provider target declarations; check packaged consumers without development-feature unification. Verify manually paired catalog/backend construction rejects incompatible concurrent contexts. These changes belong to the provider/common interface units, with corresponding Rust upgrade notes.
+
+## Acceptance matrix
+
+Use named synchronization events and channels/barriers. Start A, receive proof that A staged a change, start B, receive B's successful commit before allowing A to finish, and verify both session views and reopened state. Timeouts only detect a hung schedule. Where PostgreSQL permits multiple victims, fixtures specify allowed outcomes and serial histories instead of requiring one scheduler-dependent winner.
+
+| Required behavior | Deterministic evidence | Required coverage |
+| --- | --- | --- |
+| Independent writer progress | A writes row 1 and waits; B writes row 2 and commits; A then commits, rolls back or rolls back a savepoint. Check intermediate visibility and final reopen state. | Default SQLite, SQLite K/V, redb; same table and different tables; separately constructed SQLite providers and native processes |
+| Shared physical data | Force two independent documents into one term cluster, common counters, index nodes and catalog containers; both commits survive and query results agree with visible rows. | Full-text scores/occurrences, B-tree/expression keys, IVF/HNSW, graph membership/path data, statistics |
+| Snapshot isolation | Interleave reads and commits, including a writer retaining its private changes while a later command sees B; missing keys, empty ranges, paging, reverse scans, cursors, drop/recreate and PostgreSQL TRUNCATE/table-rewrite exceptions. | RC, RU-as-RC, RR; all providers; command, transaction and retained-resource boundaries |
+| Conflicting writes and constraints | Same-row update/delete, key collisions, parent removal, deferred checks, cascades, exclusions, partition moves and `MERGE` actions; compare row counts, returned values and SQLSTATE. | Owning execution tests plus real multi-session Engine/Docker PostgreSQL schedules |
+| Serializable histories | Write skew, insert phantoms, read-only anomalies, dangerous pivots, overlapping committed transactions and `READ ONLY DEFERRABLE`. | Common algorithm tests, provider SQL schedules and cross-process SQLite |
+| Waits and deadlocks | Preserve real row/relation cycles, NOWAIT, SKIP LOCKED, cancellation and timeout semantics; prove the obsolete backend-writer cycle no longer blocks independent writes. | Execution owner, Engine adapters, POSIX/Windows coordination |
+| Savepoints and statement effects | Savepoint after writes, nested/duplicate names, failed statements, trigger subtransactions, command snapshots, callback invocation counts and data-modifying CTE visibility. | Common storage and Engine/execution tests; no SQL or callback replay at commit |
+| Complete atomic publication | Inject failure at each mutation family and before/after physical commit and in-memory publication; observers see one complete committed version. | Rows, indexes, graphs, catalogs, ACLs, analyzer/model/routine state and notifications |
+| IDs, sequences and maintenance | Concurrent allocations across rollback/reopen, sequence definition versus value behavior, automatic statistics and rebuild while other transactions remain open. | Storage/sequence owners and cross-provider Engine schedules |
+| Retention and cleanup | Hold an old cursor/snapshot while B commits and GC runs; release it and prove reclamation; cancel/spill/kill a participant. | Memory accounting, version/tombstone/index-root retention, cross-process leases, no plaintext encrypted spill |
+| Failure outcome and durability | Kill a writer before persistence, during native commit, and after commit before publication; recover receipts, generations and notifications; distinguish unknown outcome. | Each native provider/open mode; independent process recovery; declared sync guarantees |
+| Upgrade and backup | Open representative 0.3.6 files, interrupt conversion, reopen twice, query/mutate, backup/restore and attempt an actual old writer. | Native SQLite, SQLite K/V, SQLCipher, compressed variants and redb |
+| Public entry points and platforms | Run overlapping/interleaved sessions through actual binding artifacts and the server; browser close/reopen retains committed state. | Rust/Linux/macOS/Windows where supported, Python, Node.js, Emscripten browser; memory-engine regressions |
+
+redb tests use one supported open database owner and independent logical sessions; concurrent redb file opens by separate processes are not a capability of the current library. SQLite native multiprocess tests are required. Browser tests cover the supported runtime/file ownership model and must not silently skip core session semantics under the label of platform limitations. No entire-provider or isolation-mode exemption is allowed for the requested behavior.
+
+## Test placement and commands
+
+Keep algorithms' tests with their owners. Common MVCC tests and a fault-injectable reference store belong in `uqa-storage`; provider durability/mapping tests belong in the respective provider crates; SQL rechecks and lock algorithms belong in `uqa-execution`; only actual session/cache/publication integration belongs in Engine. Add submodules to each existing test executable. Do not create another top-level `tests/*.rs` file or another test target.
+
+Existing integration entry points to extend include [`uqa-storage/tests/integration.rs`](../../crates/uqa-storage/tests/integration.rs), [`uqa-storage-sqlite/tests/integration.rs`](../../crates/uqa-storage-sqlite/tests/integration.rs), [`redb store_contract.rs`](../../crates/uqa-storage-redb/tests/store_contract.rs), [`Engine transaction_lifecycle.rs`](../../crates/uqa-engine/tests/transaction_lifecycle.rs), [`Engine redb_backend.rs`](../../crates/uqa-engine/tests/redb_backend.rs), [`Engine sqlite_key_value_backend.rs`](../../crates/uqa-engine/tests/sqlite_key_value_backend.rs), [`Engine sessions.rs`](../../crates/uqa-engine/tests/sessions.rs) and [`row-lock rechecks`](../../crates/uqa-engine/tests/queries/sql_row_locks_recheck.rs). Inspect their registration paths before choosing filters. New common/provider tests must be callable through the existing harness, and a filter that runs zero tests is not evidence.
+
+Run focused new tests during development, then the affected crates and existing cross-provider regressions. These are required command families for the completed runtime change, not claims that they were run for this documentation proposal:
+
+```sh
+cargo test -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb
+cargo test -p uqa-execution -p uqa-sql -p uqa-graph
+cargo test -p uqa-engine --test integration
+cargo clippy -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb -p uqa-execution -p uqa-sql -p uqa-graph -p uqa-engine --all-targets -- -D warnings
+cargo fmt --all -- --check
+python3 scripts/check-workspace-dependencies.py
+python3 scripts/check-engine-capabilities.py
+python3 scripts/check-integration-test-harnesses.py
+python3 scripts/check-analyzer-feature-isolation.py
+bash scripts/check-rust-file-headers.sh
+bash scripts/check-rust-file-lines.sh
+bash scripts/check-public-repository-hygiene.sh
+python3 tests/parity/pg18/run_diff.py --validate-manifest
+```
+
+Exercise neither/Nori-only/Kuromoji-only/both Cargo configurations for changed analyzer/storage integration and the actual native/Emscripten dependency trees. Use the existing [CI](../../.github/workflows/ci.yml), [Python](../../.github/workflows/python-wheels.yml) and [JavaScript](../../.github/workflows/javascript-bindings.yml) workflows for platform builds and artifact execution. Add focused concurrent-session scenarios to the owning existing suites; do not infer Python/Node/browser success from Rust tests. Run the [manual SQL check](../manual/internals/09-verification.md) when adding implemented public examples.
+
+Extend the existing [PG18 reference tools](../../tests/parity/pg18/README.md) with deterministic multi-session schedules and compact expectations derived from the pinned Docker oracle. A sequence of separate `usql` invocations is not a concurrent-session runner. Use a runner that retains connections and controls named barriers for both PostgreSQL and UQA. Record source/image identity, schedule, expected outcome set and tested UQA commit; raw traces remain ignored artifacts. Keep the PG18 manifest and generated plan ledger synchronized when implementation changes tracked evidence. A successful upstream reference run alone never verifies UQA.
+
+## Review risks that must be closed
+
+- Native SQLite bypasses: a correct K/V adapter cannot compensate for direct native catalog/document/index reads that ignore snapshot visibility.
+- Shared physical values: same-term clusters, counters, vector roots and graph adjacency must merge typed logical changes without losing updates or creating unrelated SQL conflicts.
+- Publication races: a process can die after physical commit and before publishing its in-memory epoch; surviving processes must recover from durable evidence.
+- Read/GC admission: pinning after horizon selection can lose required history; compressed native read transactions can accidentally retain the old writer bottleneck.
+- Isolation versus retries: RC target rechecks must preserve command sources and effect counts; RR/serializable errors cannot be replaced by transparent transaction replay.
+- Format safety: an unrecognized metadata key does not keep a 0.3.6 redb or SQLite K/V writer out of a new database.
+- Security and resources: history, spill and cross-process observations can disclose data or grow without bounds unless their owning budgets and encryption are explicit.
+
+Each risk needs owning tests and review evidence in the implementation PR. An unresolved risk keeps the corresponding unit pending; it is not a reason to waive that portion of the requested feature.
+
+## Commits, evidence and document maintenance
+
+Commit and push completed logical units with their tests and necessary contract changes. Separate mechanical ownership extraction from behavior changes when extraction is needed. Do not create a long chain of experiment, timing-output or corrective bookkeeping commits. Keep one reviewable implementation PR current with the final behavior, validation and remaining work; this design proposal can be reviewed separately before runtime changes begin.
+
+Track status and compact evidence in the table above rather than appending repeated chronological reports. Each accepted unit records the tested commit, commands or CI links, test counts/schedule identifiers and unresolved gates. An implementation change that alters a decision updates the design and plan together; only verified public behavior enters the manual. Review the final diff for dependency direction and ownership before committing, and run `python3 scripts/check-workspace-dependencies.py --staged` on the exact index.
+
+No performance measurements are scheduled by this plan. Deterministic concurrency progress, bounded work/memory and correctness are acceptance gates. Any later throughput study requires a controlled host, independently established noise bound, fixed workload and run limit before measurement. Keep generated reports and diagnostic traces in ignored output directories or CI artifacts; commit only compact fixtures, expected outcomes and provenance.
+
+## Runtime completion checklist
+
+- [ ] All access paths and both SQLite layouts use the intended common transaction contract.
+- [ ] SQLite and redb allow B to commit while A remains an independent uncommitted writer, including shared index records.
+- [ ] PostgreSQL snapshots, conflicts, constraints, command effects, savepoints and serializable histories pass the required schedules.
+- [ ] Engine contains only adapters; storage, execution, SQL and graph behavior and tests remain in their owners.
+- [ ] Durable publication, old snapshots, secure bounded spill, GC and process recovery pass fault injection and reopen checks.
+- [ ] Every existing persistent open mode migrates safely, rejects unsafe old writers and preserves backup/restore.
+- [ ] Actual supported binding/platform artifacts pass, alongside memory regressions and ownership/dependency checks.
+- [ ] Final-head implementation CI, public/upgrade documentation and review evidence cover every acceptance row with no requested-provider exemption.

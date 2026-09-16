@@ -2,6 +2,8 @@
 
 This document defines the implemented Key/Value storage boundary, session ownership contract, redb behavior, and remaining compatibility limits. SQLite remains the default engine format, while applications can compose `uqa-engine` with `uqa-storage-redb` or another provider without changing query execution.
 
+The [concurrent storage transaction proposal](concurrent-storage-transactions.md) and [implementation plan](../plans/0008-concurrent-storage-transactions.md) describe a future shared MVCC layer for native SQLite, SQLite Key/Value and redb. That proposal does not change the implemented transaction mapping below.
+
 ## Architecture
 
 ```mermaid
@@ -31,7 +33,7 @@ Third-party implementations should run `uqa_storage::key_value::conformance::ver
 
 | Implementation | Crate | Durable | Session model | Notes |
 | --- | --- | --- | --- | --- |
-| Relational SQLite | `uqa-storage` | yes | one `ManagedConnection` session per engine session | Default engine backend; supports persisted B-tree, IVF, and HNSW indexes plus SQLCipher and compressed-container variants |
+| Relational SQLite | `uqa-storage-sqlite` | yes | one `ManagedConnection` session per engine session | Default engine backend; supports persisted B-tree, IVF, and HNSW indexes plus SQLCipher and compressed-container variants |
 | `SQLiteKeyValueStore` | `uqa-storage-sqlite` | yes | independent SQLite session over a shared pool | Stores all logical Key/Value data in `_key_value (key BLOB PRIMARY KEY, value BLOB NOT NULL) WITHOUT ROWID` |
 | `RedbKeyValueStore` | `uqa-storage-redb` | yes | one redb read or write transaction per store session | Pure Rust, single file, MVCC readers, one concurrent writer, committed generation tracking, durable B-tree/IVF/HNSW through the shared logical layer |
 | `MemoryKeyValueStore` | `uqa-storage` | no | one in-process test state | Reference implementation for logical tests, not a durable engine provider |

@@ -13,6 +13,7 @@ The research-level foundation is developed separately in [A Typed Carrier Algebr
 | [Engine state ownership](engine-state-ownership.md) | Session isolation, mutable state domains, lock ownership, epochs, transactions, and publication order | Engine and concurrency contributors |
 | [Compressed VFS security](compressed-vfs-security.md) | Authenticated format, threat boundary, rollback protection, trusted anchors, and deployment choice | Security reviewers and operators |
 | [Key/Value storage backends](kv-storage-backends.md) | Provider/session ownership, clustered posting layout and migration, redb transactions, compatibility limits, and third-party conformance | Storage contributors and integrators |
+| [Concurrent storage transaction proposal](concurrent-storage-transactions.md) | Shared MVCC for native SQLite, SQLite K/V and redb; logical writes, physical commit boundaries, isolation, migration and recovery | Storage and concurrency contributors |
 | [Parity fixtures](parity.md) | SQL golden data, relevance fixtures, vector calibration gates, versioning, and CI use | Test and compatibility contributors |
 | [Performance](performance.md) | Benchmark provenance, regression gates, measured bottlenecks, PostgreSQL 17 TPC-H-derived evidence, optimizations, and limitations | Performance contributors and evaluators |
 | [Nori analyzer proposal](nori-analyzer.md) | Lucene-compatible Korean morphology, Docker reference tools, rich token graphs, dictionary distribution, persistence, retrieval, and verification | Analysis, storage, and retrieval contributors |
@@ -24,6 +25,7 @@ The research-level foundation is developed separately in [A Typed Carrier Algebr
 
 - To understand a query from SQL text to result batches, read [system architecture](architecture.md), then follow its links to planner and execution code.
 - To add session, catalog, cache, or transaction state, read [engine state ownership](engine-state-ownership.md) before changing `Engine`.
+- To implement concurrent persistent writers, read the [transaction proposal](concurrent-storage-transactions.md) and its [implementation plan](../plans/0008-concurrent-storage-transactions.md); the proposed capability is not yet implemented.
 - To select an encrypted storage mode, read [compressed VFS security](compressed-vfs-security.md) and prefer SQLCipher when compression is not required.
 - To change a benchmark or make a performance claim, read [performance](performance.md) and preserve fixture, provenance, and ratio-gate comparability.
 - To change a compatibility or calibration contract, read [parity fixtures](parity.md) and version the affected manifest.
