@@ -35,20 +35,17 @@ uqa-storage = { workspace = true }
 # emscripten builds bundle plain SQLite instead. `fs2` file locks are
 # replaced by a single-process shim there.
 [target.'cfg(not(target_os = "emscripten"))'.dependencies]
-rusqlite = { workspace = true }
+rusqlite = { workspace = true, features = ["functions"] }
 fs2 = { workspace = true }
 
 [target.'cfg(target_os = "emscripten")'.dependencies]
-rusqlite = { version = "0.39", default-features = false, features = ["bundled", "blob", "cache"] }
+rusqlite = { version = "0.39", default-features = false, features = ["bundled", "blob", "cache", "functions"] }
 
 [dev-dependencies]
 allocation-counter = "=0.8.1"
 uqa-scoring = { workspace = true }
 criterion = { workspace = true }
 tempfile = "3.13"
-
-[target.'cfg(not(target_os = "emscripten"))'.dev-dependencies]
-rusqlite = { workspace = true, features = ["functions"] }
 
 [[test]]
 name = "integration"

@@ -7,7 +7,9 @@
 //! Size probes precede BLOB materialization in the same retained `SQLite` snapshot.
 
 use crate::{
-    read_control::{blob, copy_bytes, payload_length, reserve_bindings},
+    read_control::{
+        blob, copy_bytes, payload_length, prefix_upper_bound as upper_bound, reserve_bindings,
+    },
     Result, SQLiteError,
 };
 use rusqlite::{params, Connection, OptionalExtension};
@@ -155,21 +157,6 @@ fn row_after(
     };
     control.check()?;
     Ok(next)
-}
-
-fn upper_bound(prefix: &[u8], control: &StorageReadControl) -> Result<Option<BudgetedVec<u8>>> {
-    let mut upper = copy_bytes(prefix, 0, control)?;
-    loop {
-        control.check()?;
-        match upper.pop() {
-            Some(255) => {}
-            Some(byte) => {
-                upper.push(byte + 1)?;
-                return Ok(Some(upper));
-            }
-            None => return Ok(None),
-        }
-    }
 }
 
 pub(super) fn contains_prefix(

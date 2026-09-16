@@ -82,3 +82,21 @@ pub(crate) fn copy_bytes(
     control.check()?;
     Ok(output)
 }
+
+pub(crate) fn prefix_upper_bound(
+    prefix: &[u8],
+    control: &StorageReadControl,
+) -> Result<Option<BudgetedVec<u8>>> {
+    let mut upper = copy_bytes(prefix, 0, control)?;
+    loop {
+        control.check()?;
+        match upper.pop() {
+            Some(255) => {}
+            Some(byte) => {
+                upper.push(byte + 1)?;
+                return Ok(Some(upper));
+            }
+            None => return Ok(None),
+        }
+    }
+}
