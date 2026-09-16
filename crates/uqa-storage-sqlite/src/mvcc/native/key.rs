@@ -33,6 +33,17 @@ pub struct NativeRecordIdentity {
 }
 
 impl NativeRecordIdentity {
+    pub(crate) fn family_prefix(
+        family: NativeRecordFamily,
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<u8>> {
+        control.cancellation().check()?;
+        let mut key = BudgetedVec::new(control.memory());
+        key.extend_from_slice(PREFIX)?;
+        key.extend_from_slice(&family.id().to_be_bytes())?;
+        Ok(key)
+    }
+
     pub fn new(family: NativeRecordFamily, owner: NativeRecordOwner) -> VersionResult<Self> {
         if family.layout().object_owned != matches!(owner, NativeRecordOwner::Object { .. }) {
             return Err(invalid("native family does not match its owner kind"));
@@ -138,9 +149,7 @@ impl NativeRecordIdentity {
         if components.len() > self.family.layout().identity_columns.len() {
             return Err(invalid("native primary key prefix exceeds its layout"));
         }
-        let mut key = BudgetedVec::new(control.memory());
-        key.extend_from_slice(PREFIX)?;
-        key.extend_from_slice(&self.family.id().to_be_bytes())?;
+        let mut key = Self::family_prefix(self.family, control)?;
         match self.owner {
             NativeRecordOwner::Database(database) => {
                 key.push(0)?;

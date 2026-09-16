@@ -11,13 +11,19 @@ use uqa_storage::ValueIndexKey;
 
 pub(crate) struct SQLiteValueIndexKey<T>(pub T);
 
-impl<T: Borrow<ValueIndexKey>> rusqlite::ToSql for SQLiteValueIndexKey<T> {
-    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
-        use rusqlite::types::{ToSqlOutput, ValueRef};
-        Ok(ToSqlOutput::Borrowed(match self.0.borrow() {
+impl<T: Borrow<ValueIndexKey>> SQLiteValueIndexKey<T> {
+    pub(crate) fn as_value_ref(&self) -> rusqlite::types::ValueRef<'_> {
+        use rusqlite::types::ValueRef;
+        match self.0.borrow() {
             ValueIndexKey::Column(name) => ValueRef::Text(name.as_bytes()),
             ValueIndexKey::Index(name) => ValueRef::Blob(name.as_bytes()),
-        }))
+        }
+    }
+}
+
+impl<T: Borrow<ValueIndexKey>> rusqlite::ToSql for SQLiteValueIndexKey<T> {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(rusqlite::types::ToSqlOutput::Borrowed(self.as_value_ref()))
     }
 }
 

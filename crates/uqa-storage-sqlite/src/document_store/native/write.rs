@@ -14,7 +14,7 @@ use crate::document_store::{
     encode_document_blobs, sqlite_doc_id, BTreeMap, DocId, Document, DocumentMetadata,
     SQLiteResult, Value,
 };
-use crate::mvcc::native::{NativeRecordFamily as Family, NativeRecordIdentity, NativeRecordOwner};
+use crate::mvcc::native::{NativeRecordFamily as Family, NativeRecordOwner};
 
 impl NativeDocumentRead<'_> {
     pub(crate) fn put(
@@ -144,43 +144,7 @@ impl NativeDocumentRead<'_> {
         self.snapshot
             .delete_prefix(batch, Family::Documents, owner, &[ValueRef::Integer(id)])?;
         // Native SQLite's document deletion also cascades to both TEXT and BLOB B-tree namespaces.
-        let identity = NativeRecordIdentity::new(Family::BtreeIndexEntries, owner)?;
-        let control = &self.snapshot.control;
-        let prefix = identity.encode_prefix(&[], control)?;
-        let mut after = None;
-        loop {
-            let mut next = None;
-            // Seek once per physical field namespace, skipping its remaining document keys and historical tombstones.
-            self.snapshot.view.visit_keys(
-                &prefix,
-                after.as_deref(),
-                1,
-                control,
-                &mut |key, _| {
-                    NativeRecordIdentity::visit_key_components(
-                        key,
-                        control,
-                        |component, field| {
-                            if component == 0 {
-                                batch.delete(
-                                    &identity
-                                        .encode_key(&[field, ValueRef::Integer(id)], control)?,
-                                )?;
-                                next =
-                                    Some(identity.encode_key(
-                                        &[field, ValueRef::Integer(i64::MAX)],
-                                        control,
-                                    )?);
-                            }
-                            Ok(())
-                        },
-                    )?;
-                    Ok(false)
-                },
-            )?;
-            let Some(next) = next else { break };
-            after = Some(next);
-        }
+        crate::btree_index::delete_native_document_entries(self.snapshot, batch, owner, id)?;
         Ok(())
     }
 

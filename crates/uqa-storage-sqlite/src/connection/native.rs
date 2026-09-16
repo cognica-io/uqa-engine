@@ -15,7 +15,7 @@ use super::{Arc, KeyValueStore, ManagedConnection, Result, SQLiteError, Versione
 use crate::mvcc::native::NativeSnapshot;
 
 impl ManagedConnection {
-    /// Bind an initialized native catalog to shared logical record transactions, converting its physical format if needed. Document stores use this session; other native APIs require their own logical routing and still reject direct physical access. This development entry point does not enable concurrent Engine SQL.
+    /// Bind an initialized native catalog to shared logical record transactions, converting its physical format if needed. Document and B-tree stores use this session; other native APIs require their own logical routing and still reject direct physical access. This development entry point does not enable concurrent Engine SQL.
     pub fn bind_native_records(&self, options: VersionedSessionOptions) -> Result<()> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.write();

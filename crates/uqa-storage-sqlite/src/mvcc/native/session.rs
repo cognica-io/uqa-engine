@@ -7,7 +7,7 @@
 //! Native row addressing over a retained common committed/private view.
 
 use rusqlite::types::ValueRef;
-use uqa_storage::mvcc::{DatabaseId, MergedRecordSnapshot, VersionedKeyValueStore};
+use uqa_storage::mvcc::{DatabaseId, MergedRecordSnapshot, VersionError, VersionedKeyValueStore};
 use uqa_storage::read_control::StorageReadControl;
 use uqa_storage::KeyValueBatch;
 
@@ -70,6 +70,52 @@ impl NativeSnapshot {
                 Ok(owner)
             },
         )
+    }
+
+    /// Visit live rows on this fixed boundary without retaining a corpus-sized payload collection. The callback must not reenter persistence.
+    pub(crate) fn visit_rows(
+        &self,
+        family: Family,
+        owner: Option<NativeRecordOwner>,
+        components: &[ValueRef<'_>],
+        mut visit: impl FnMut(&[ValueRef<'_>]) -> Result<()>,
+    ) -> Result<()> {
+        let prefix = match owner {
+            Some(owner) => NativeRecordIdentity::new(family, owner)?
+                .encode_prefix(components, &self.control)?,
+            None if components.is_empty() => {
+                NativeRecordIdentity::family_prefix(family, &self.control)?
+            }
+            None => return Err(invalid("native components require an owner").into()),
+        };
+        self.view.visit_prefix(
+            &prefix,
+            None,
+            usize::MAX,
+            &self.control,
+            &mut |key, record| {
+                if let Some(bytes) = record.value {
+                    let (_, row) = decode_record(key, bytes, &self.control)?;
+                    visit(&row).map_err(|error| VersionError::Storage(error.into()))?;
+                }
+                Ok(true)
+            },
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn contains_row(
+        &self,
+        family: Family,
+        owner: NativeRecordOwner,
+        components: &[ValueRef<'_>],
+    ) -> Result<bool> {
+        let key =
+            NativeRecordIdentity::new(family, owner)?.encode_key(components, &self.control)?;
+        Ok(self
+            .view
+            .metadata(&key, &self.control)?
+            .is_some_and(|record| record.live))
     }
 
     pub(crate) fn ensure_table_owner(
