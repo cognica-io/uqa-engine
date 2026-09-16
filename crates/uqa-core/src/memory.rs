@@ -6,7 +6,7 @@
 
 //! Shared byte allowances with reservations that follow allocation ownership.
 //!
-//! Owners reserve requested buffer layouts before allocating. Allocator bookkeeping, borrowed data, and separately owned immutable resources are outside this allowance.
+//! Owners reserve requested buffer layouts before allocating and charge any additional reported capacity before moving values. Allocator bookkeeping, borrowed data, and separately owned immutable resources are outside this allowance.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -221,6 +221,13 @@ fn buffer_bytes<T>(capacity: usize) -> Result<usize, MemoryError> {
         .checked_mul(std::mem::size_of::<T>())
         .filter(|bytes| isize::try_from(*bytes).is_ok())
         .ok_or(MemoryError::SizeOverflow)
+}
+
+fn reconcile_buffer_capacity<T>(
+    memory: &mut MemoryReservation,
+    capacity: usize,
+) -> Result<(), MemoryError> {
+    memory.grow(buffer_bytes::<T>(capacity)?.saturating_sub(memory.bytes()))
 }
 
 fn replacement<T>(
