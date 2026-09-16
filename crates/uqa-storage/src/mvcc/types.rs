@@ -45,6 +45,12 @@ pub enum VersionError {
         expected: Option<CommitSequence>,
         actual: Option<CommitSequence>,
     },
+    /// The provider verified a pending receipt under exclusive admission, but evaluated derived effects used an earlier committed snapshot. Only those pure effects may be prepared again.
+    #[error("derived commit snapshot {expected:?} changed to {actual:?}")]
+    CommitSnapshotChanged {
+        expected: CommitSequence,
+        actual: CommitSequence,
+    },
     #[error("record mutations {first} and {second} replace the same identity")]
     DuplicateRecord { first: usize, second: usize },
     #[error("private record revision space exhausted")]

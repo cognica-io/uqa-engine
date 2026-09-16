@@ -235,6 +235,26 @@ impl KeyValueBatch for SQLiteKeyValueBatch<'_> {
     fn delete_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
         self.batch.delete_prefix(prefix)
     }
+    fn graph_mutation(
+        &mut self,
+        mutation: uqa_storage::mvcc::GraphMutation<'_>,
+    ) -> StorageBackendResult<()> {
+        self.batch.graph_mutation(mutation)
+    }
+    fn preview_graph_invalidation(
+        &mut self,
+        key: &[u8],
+        value: Option<&[u8]>,
+    ) -> StorageBackendResult<()> {
+        self.batch.preview_graph_invalidation(key, value)
+    }
+    fn replace_graph_cache(
+        &mut self,
+        key: &[u8],
+        value: Option<&[u8]>,
+    ) -> StorageBackendResult<()> {
+        self.batch.replace_graph_cache(key, value)
+    }
     fn commit(self: Box<Self>) -> StorageBackendResult<()> {
         let Self { connection, batch } = *self;
         connection.with_records(|_| batch.commit())

@@ -166,14 +166,15 @@ impl RedbRecordStore {
             return Ok((receipt, false));
         }
         let mut heads = transaction.open_table(HEADS).map_err(redb_error)?;
+        let mut metadata = transaction.open_table(METADATA).map_err(redb_error)?;
+        let current = CommitSequence::from_u64(read_u64(&metadata, "sequence")?);
+        prepared.validate_snapshot(current)?;
         prepared.validate(control.cancellation(), |key| {
             Ok(heads
                 .get(key)
                 .map_err(redb_error)?
                 .map(|version| CommitSequence::from_u64(version.value())))
         })?;
-        let mut metadata = transaction.open_table(METADATA).map_err(redb_error)?;
-        let current = CommitSequence::from_u64(read_u64(&metadata, "sequence")?);
         let sequence = if prepared.records().is_empty() {
             current
         } else {
@@ -225,6 +226,10 @@ impl RedbRecordStore {
 impl VersionedPersistence for RedbRecordStore {
     fn database_id(&self) -> DatabaseId {
         self.identity
+    }
+
+    fn graph_record_layout(&self) -> Option<&dyn uqa_storage::mvcc::GraphRecordLayout> {
+        Some(&uqa_storage::key_value::KeyValueGraphRecords)
     }
 
     fn allocate_transaction(

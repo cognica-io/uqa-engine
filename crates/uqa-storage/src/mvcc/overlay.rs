@@ -128,7 +128,14 @@ impl PrivateRecordChanges {
     ) -> VersionResult<()> {
         let owned_control = StorageReadControl::new(&self.owner.memory, control.cancellation());
         let prepared = PreparedRecordCommit::new(writes, &owned_control)?;
-        let writes = prepared.records();
+        self.apply_owned(prepared.records(), control)
+    }
+
+    pub(super) fn apply_owned(
+        &self,
+        writes: &[PreparedRecordWrite],
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
         if writes.is_empty() {
             return Ok(());
         }

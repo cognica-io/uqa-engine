@@ -29,6 +29,8 @@ use crate::{StorageBackendError, StorageBackendResult};
 
 mod catalog;
 pub use catalog::KeyValueCatalog;
+mod graph_commit;
+pub use graph_commit::KeyValueGraphRecords;
 
 const TAG_METADATA: u8 = b'm';
 const TAG_TABLE: u8 = b't';
@@ -92,6 +94,35 @@ pub trait KeyValueBatch {
     fn put(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()>;
     fn delete(&mut self, key: &[u8]) -> StorageBackendResult<()>;
     fn delete_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()>;
+    /// Record graph-cache dependencies in the same atomic batch. Concurrent MVCC stores must resolve these logical effects before admitting a commit; serialized legacy stores use the ordinary preview writes already included by the catalog.
+    fn graph_mutation(
+        &mut self,
+        _mutation: crate::mvcc::GraphMutation<'_>,
+    ) -> StorageBackendResult<()> {
+        Ok(())
+    }
+    /// Maintain read-your-writes for a graph invalidation. MVCC replaces this preview with effects selected from current graph ownership at commit.
+    fn preview_graph_invalidation(
+        &mut self,
+        key: &[u8],
+        value: Option<&[u8]>,
+    ) -> StorageBackendResult<()> {
+        match value {
+            Some(value) => self.put(key, value),
+            None => self.delete(key),
+        }
+    }
+    /// Replace or clear derived graph cache state. Publishing a completed build must also record `GraphMutation::PublishPath` so its source dependencies are validated.
+    fn replace_graph_cache(
+        &mut self,
+        key: &[u8],
+        value: Option<&[u8]>,
+    ) -> StorageBackendResult<()> {
+        match value {
+            Some(value) => self.put(key, value),
+            None => self.delete(key),
+        }
+    }
     fn commit(self: Box<Self>) -> StorageBackendResult<()>;
 }
 

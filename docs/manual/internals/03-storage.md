@@ -37,6 +37,10 @@ Expression key preparation finishes before the document-store write lock is acqu
 
 `KeyValueStore` supports point reads, ordered prefix scans, bounded key-only paging, atomic batches, and range deletion. Binary keys encode segments unambiguously and use big-endian numeric identities so lexical order preserves document order.
 
+Development Key/Value graph catalogs record typed path-cache effects with their private source changes. Common storage resolves graph memberships and path ownership against a fresh committed view, so independent graph writers can both invalidate a shared cache and an older writer also invalidates indexes or memberships created after its snapshot. Private invalidation previews do not clear a cache subsequently reassigned to another graph. A completed path build validates the graph registration, label registry, membership/source revisions and index definition before publishing its validity marker; a build with stale inputs is not published as current. Savepoints restore both records and effect order. Canonical source records retain their original conflict checks.
+
+The prepared fingerprint seals original records, cache-write kinds and ordered graph effects. SQLite Key/Value and redb check the durable receipt first, then validate the snapshot used to prepare derived effects under physical write admission. An intervening commit permits only those effects to be prepared again, with the same transaction identity and fingerprint; SQL, graph evaluation and callbacks are not repeated. A lost commit reply resolves through its receipt before applying any cache effect again. Typed cache state and dependency discovery remain bounded by the session allowance and cancellation. Native relational graph mutation routing and fair admission for repeated preparation are still pending.
+
 ## Provider matrix
 
 | Provider | Main implementation | Session transaction identity | Security notes |

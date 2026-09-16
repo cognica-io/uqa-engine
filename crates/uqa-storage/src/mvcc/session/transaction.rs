@@ -8,6 +8,8 @@ use std::sync::Arc;
 
 use uqa_core::memory::BudgetedVec;
 
+use crate::mvcc::commit::RecordWriteKind;
+use crate::mvcc::graph::OwnedGraphMutation;
 use crate::mvcc::key::RecordKey;
 use crate::mvcc::{
     CommitErrorOutcome, CommitFailure, CommitStatus, CommittedRecordSnapshot, MergedRecordSnapshot,
@@ -20,6 +22,7 @@ use crate::{StorageBackendError, StorageSavepointId};
 struct Savepoint {
     name: BudgetedVec<u8>,
     id: StorageSavepointId,
+    graph_position: usize,
 }
 
 pub(super) struct Transaction {
@@ -28,6 +31,8 @@ pub(super) struct Transaction {
     read_only: bool,
     pub(super) allocation: Option<StorageTransactionId>,
     prepared: Option<PreparedRecordCommit>,
+    materialized: Option<PreparedRecordCommit>,
+    graph: BudgetedVec<OwnedGraphMutation>,
     outcome: Option<CommitErrorOutcome>,
     savepoints: BudgetedVec<Savepoint>,
 }
@@ -44,6 +49,8 @@ impl Transaction {
             read_only,
             allocation: None,
             prepared: None,
+            materialized: None,
+            graph: BudgetedVec::new(control.memory()),
             outcome: None,
             savepoints: BudgetedVec::new(control.memory()),
         })
@@ -75,21 +82,43 @@ impl Transaction {
         value: Option<&[u8]>,
         control: &StorageReadControl,
     ) -> VersionResult<()> {
+        self.write_record(key, value, RecordWriteKind::Canonical, control)
+    }
+
+    pub(super) fn write_record(
+        &mut self,
+        key: &[u8],
+        value: Option<&[u8]>,
+        kind: RecordWriteKind,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
         self.writable()?;
         let record = self.view()?.metadata(key, control)?;
         let expected = record.and_then(|record| record.revision);
         let exists = record.is_some_and(|record| record.live);
-        if value.is_none() && !exists {
+        if value.is_none() && !exists && kind != RecordWriteKind::GraphCache {
             return Ok(());
         }
-        self.changes.apply(
+        let prepared = PreparedRecordCommit::new(
             &[RecordWrite {
                 key,
                 expected,
                 value,
             }],
             control,
-        )
+        )?;
+        let write = prepared.records()[0].clone().with_kind(kind);
+        self.changes.apply_owned(&[write], control)
+    }
+
+    pub(super) fn graph_mutation(&mut self, mutation: &OwnedGraphMutation) -> VersionResult<()> {
+        self.writable()?;
+        self.graph.push(mutation.clone())?;
+        Ok(())
+    }
+
+    pub(super) fn has_graph_changes(&self) -> bool {
+        !self.graph.is_empty()
     }
 
     pub(super) fn delete_prefix(
@@ -126,9 +155,11 @@ impl Transaction {
         self.writable()?;
         let id = StorageSavepointId::allocate();
         self.changes.savepoint(id)?;
+        let graph_position = self.graph.len();
         let result = operation(self);
         if result.is_err() {
             self.changes.rollback_to_savepoint(id)?;
+            self.graph.truncate(graph_position);
         }
         self.changes.release_savepoint(id)?;
         result
@@ -144,7 +175,11 @@ impl Transaction {
         self.savepoints.reserve(1)?;
         let id = StorageSavepointId::allocate();
         self.changes.savepoint(id)?;
-        self.savepoints.push(Savepoint { name: owned, id })?;
+        self.savepoints.push(Savepoint {
+            name: owned,
+            id,
+            graph_position: self.graph.len(),
+        })?;
         Ok(())
     }
 
@@ -169,6 +204,8 @@ impl Transaction {
         let position = self.savepoint_position(name)?;
         self.changes
             .rollback_to_savepoint(self.savepoints[position].id)?;
+        self.graph
+            .truncate(self.savepoints[position].graph_position);
         self.savepoints.truncate(position + 1);
         Ok(())
     }
@@ -186,10 +223,14 @@ impl Transaction {
             None | Some(CommitErrorOutcome::Indeterminate(_)) => {}
         }
         if self.prepared.is_none() {
-            self.prepared = Some(self.changes.prepare(control)?);
+            self.prepared = Some(self.changes.prepare(control)?.with_graph_effects(
+                self.committed.sequence(),
+                &self.graph,
+                control,
+            )?);
         }
         let prepared = self.prepared.as_ref().expect("prepared once");
-        if prepared.records().is_empty() {
+        if prepared.records().is_empty() && prepared.graph.is_none() {
             return Ok(());
         }
         let allocation = if let Some(id) = self.allocation {
@@ -199,24 +240,68 @@ impl Transaction {
             self.allocation = Some(id);
             id
         };
-        match persistence.commit(allocation, prepared, control) {
-            Ok(receipt)
-                if receipt.transaction == allocation
-                    && receipt.fingerprint == prepared.fingerprint() =>
-            {
-                self.outcome = Some(CommitErrorOutcome::Committed(receipt));
-                Ok(())
+        loop {
+            if let Err(error) = self.prepare_effects(persistence, control) {
+                return Err(self.retain_uncertain_outcome(allocation, error.into()));
             }
-            Ok(_) => {
-                self.outcome = Some(CommitErrorOutcome::Indeterminate(allocation));
-                Err(self.retain_uncertain_outcome(allocation, VersionError::CommitMismatch.into()))
+            let prepared = self
+                .materialized
+                .as_ref()
+                .or(self.prepared.as_ref())
+                .expect("prepared once");
+            match persistence.commit(allocation, prepared, control) {
+                Ok(receipt)
+                    if receipt.transaction == allocation
+                        && receipt.fingerprint == prepared.fingerprint() =>
+                {
+                    self.outcome = Some(CommitErrorOutcome::Committed(receipt));
+                    return Ok(());
+                }
+                Ok(_) => {
+                    self.outcome = Some(CommitErrorOutcome::Indeterminate(allocation));
+                    return Err(self.retain_uncertain_outcome(
+                        allocation,
+                        VersionError::CommitMismatch.into(),
+                    ));
+                }
+                Err(CommitFailure::Rejected(VersionError::CommitSnapshotChanged {
+                    expected,
+                    actual,
+                })) if prepared.resolved_at == Some(expected) && expected != actual => {
+                    // Admission proved the receipt is still pending. Re-evaluate only typed storage effects; the original user changes and fingerprint stay sealed.
+                    self.materialized = None;
+                }
+                Err(CommitFailure::Rejected(VersionError::TransactionFinished)) => {
+                    self.outcome = Some(CommitErrorOutcome::Aborted(allocation));
+                    return Err(VersionError::AlreadyAborted(allocation).into());
+                }
+                Err(error) => return Err(self.retain_uncertain_outcome(allocation, error)),
             }
-            Err(CommitFailure::Rejected(VersionError::TransactionFinished)) => {
-                self.outcome = Some(CommitErrorOutcome::Aborted(allocation));
-                Err(VersionError::AlreadyAborted(allocation).into())
-            }
-            Err(error) => Err(self.retain_uncertain_outcome(allocation, error)),
         }
+    }
+
+    fn prepare_effects(
+        &mut self,
+        persistence: &dyn VersionedPersistence,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        control.cancellation().check()?;
+        let prepared = self.prepared.as_ref().expect("prepared once");
+        if prepared.graph.is_some() && self.materialized.is_none() {
+            let layout = persistence
+                .graph_record_layout()
+                .ok_or(VersionError::InvalidEncoding(
+                    "provider has no graph record layout",
+                ))?;
+            self.materialized = Some(crate::mvcc::graph::resolve(
+                prepared,
+                persistence.snapshot(control)?,
+                layout,
+                persistence.database_id(),
+                control,
+            )?);
+        }
+        Ok(())
     }
 
     fn retain_uncertain_outcome(

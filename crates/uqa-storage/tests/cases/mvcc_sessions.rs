@@ -6,6 +6,9 @@
 
 //! Session algorithms use a fault-injectable in-memory record owner, without provider dependencies.
 
+#[path = "mvcc_sessions/graph.rs"]
+mod graph;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -57,6 +60,7 @@ enum CommitFault {
     Reject,
     CorruptReply,
     LoseBeforeCommit,
+    ConcurrentCommit,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -71,6 +75,7 @@ struct State {
     receipts: BTreeMap<u64, CommitStatus>,
     commit_fault: CommitFault,
     abort_fault: AbortFault,
+    attempts: Vec<CommitFingerprint>,
 }
 struct Persistence {
     store: MemoryVersionStore,
@@ -86,6 +91,7 @@ impl Persistence {
                 receipts: BTreeMap::new(),
                 commit_fault: CommitFault::None,
                 abort_fault: AbortFault::None,
+                attempts: Vec::new(),
             }),
         })
     }
@@ -101,6 +107,9 @@ impl Persistence {
 impl VersionedPersistence for Persistence {
     fn database_id(&self) -> DatabaseId {
         DatabaseId::from_bytes([9; 16])
+    }
+    fn graph_record_layout(&self) -> Option<&dyn GraphRecordLayout> {
+        Some(&uqa_storage::key_value::KeyValueGraphRecords)
     }
     fn allocate_transaction(&self, _: &StorageReadControl) -> VersionResult<StorageTransactionId> {
         let mut state = self.state.lock();
@@ -139,6 +148,18 @@ impl VersionedPersistence for Persistence {
             resolve_prepared_receipt(status, transaction, prepared.fingerprint())?
         {
             return Ok(receipt);
+        }
+        state.attempts.push(prepared.fingerprint());
+        if state.commit_fault == CommitFault::ConcurrentCommit {
+            state.commit_fault = CommitFault::None;
+            self.store.commit(
+                &[RecordWrite {
+                    key: b"concurrent unrelated record",
+                    expected: None,
+                    value: Some(b"committed"),
+                }],
+                control,
+            )?;
         }
         if state.commit_fault == CommitFault::LoseBeforeCommit {
             state.commit_fault = CommitFault::None;

@@ -15,6 +15,42 @@ use uqa_storage_sqlite::{
 };
 
 #[test]
+fn graph_caches_follow_concurrent_sources_and_reopen_in_every_sqlite_mode() {
+    use std::sync::Arc;
+    use uqa_storage::key_value::conformance::{
+        verify_graph_cache_concurrency, verify_graph_cache_reopen,
+    };
+
+    for mode in MODES {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("graph-caches.db");
+        {
+            let a = Arc::new(SQLiteKeyValueStore::new(open(mode, &path)).unwrap());
+            let b = Arc::new(SQLiteKeyValueStore::new(open(mode, &path)).unwrap());
+            verify_graph_cache_concurrency(a, b).unwrap();
+        }
+        let reopened = Arc::new(SQLiteKeyValueStore::new(open(mode, &path)).unwrap());
+        verify_graph_cache_reopen(reopened).unwrap();
+    }
+}
+
+#[test]
+fn graph_admission_retries_a_real_intervening_commit_in_every_sqlite_mode() {
+    for mode in MODES {
+        let directory = tempfile::tempdir().unwrap();
+        let records = uqa_storage_sqlite::SQLiteRecordStore::new(&open(
+            mode,
+            &directory.path().join("graph-admission.db"),
+        ))
+        .unwrap();
+        uqa_storage::key_value::conformance::verify_graph_admission_retry(std::sync::Arc::new(
+            records,
+        ))
+        .unwrap();
+    }
+}
+
+#[test]
 fn public_stores_commit_independently_of_another_connection_clones_private_writes() {
     for mode in MODES {
         for ending in ["commit", "rollback", "savepoint"] {

@@ -15,14 +15,25 @@ use uqa_core::CancellationToken;
 
 use crate::read_control::StorageReadControl;
 
+use super::graph::{GraphEffects, OwnedGraphMutation};
 use super::key::RecordKey;
-use super::{CommitFingerprint, CommitSequence, RecordWrite, VersionError, VersionResult};
+use super::{
+    CommitFingerprint, CommitSequence, GraphMutation, RecordWrite, VersionError, VersionResult,
+};
 
 #[derive(Clone)]
 pub struct PreparedRecordWrite {
     key: RecordKey,
     expected: Option<CommitSequence>,
     value: Option<Arc<BudgetedVec<u8>>>,
+    kind: RecordWriteKind,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum RecordWriteKind {
+    Canonical,
+    GraphCache,
+    GraphPreview,
 }
 
 impl PreparedRecordWrite {
@@ -45,12 +56,27 @@ impl PreparedRecordWrite {
     pub(super) fn shared_key(&self) -> RecordKey {
         self.key.clone()
     }
+
+    pub(super) fn rebase(mut self, expected: Option<CommitSequence>) -> Self {
+        self.expected = expected;
+        self
+    }
+
+    pub(super) fn kind(&self) -> RecordWriteKind {
+        self.kind
+    }
+    pub(super) fn with_kind(mut self, kind: RecordWriteKind) -> Self {
+        self.kind = kind;
+        self
+    }
 }
 
 /// Immutable prepared replacements. Construct before opening a physical writer.
 pub struct PreparedRecordCommit {
     writes: BudgetedVec<PreparedRecordWrite>,
     fingerprint: CommitFingerprint,
+    pub(super) graph: Option<GraphEffects>,
+    pub(super) resolved_at: Option<CommitSequence>,
 }
 
 impl PreparedRecordCommit {
@@ -91,6 +117,7 @@ impl PreparedRecordCommit {
                 key,
                 expected: write.expected,
                 value,
+                kind: RecordWriteKind::Canonical,
             })?;
         }
         control.cancellation().check()?;
@@ -107,10 +134,24 @@ impl PreparedRecordCommit {
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
         let mut digest = Sha256::new();
-        digest.update(b"UQA prepared records 1");
+        let typed = writes
+            .iter()
+            .any(|write| write.kind != RecordWriteKind::Canonical);
+        if typed {
+            digest.update(b"UQA prepared record kinds 1");
+        } else {
+            digest.update(b"UQA prepared records 1");
+        }
         digest.update((writes.len() as u64).to_be_bytes());
         for write in writes.iter() {
             control.cancellation().check()?;
+            if typed {
+                digest.update([match write.kind {
+                    RecordWriteKind::Canonical => 0,
+                    RecordWriteKind::GraphCache => 1,
+                    RecordWriteKind::GraphPreview => 2,
+                }]);
+            }
             digest.update((write.key().len() as u64).to_be_bytes());
             hash_bytes(&mut digest, write.key(), control)?;
             digest.update(
@@ -132,7 +173,96 @@ impl PreparedRecordCommit {
         Ok(Self {
             writes,
             fingerprint: digest.finalize().into(),
+            graph: None,
+            resolved_at: None,
         })
+    }
+
+    pub(super) fn with_graph_effects(
+        mut self,
+        base: CommitSequence,
+        operations: &[OwnedGraphMutation],
+        control: &StorageReadControl,
+    ) -> VersionResult<Self> {
+        if operations.is_empty()
+            && self
+                .writes
+                .iter()
+                .all(|write| write.kind == RecordWriteKind::Canonical)
+        {
+            return Ok(self);
+        }
+        let mut owned = BudgetedVec::new(control.memory());
+        owned.reserve(operations.len())?;
+        let mut digest = Sha256::new();
+        digest.update(b"UQA prepared graph effects 1");
+        digest.update(self.fingerprint);
+        digest.update(base.as_u64().to_be_bytes());
+        digest.update((operations.len() as u64).to_be_bytes());
+        let mut text = |bytes: &[u8]| -> VersionResult<()> {
+            digest.update((bytes.len() as u64).to_be_bytes());
+            hash_bytes(&mut digest, bytes, control)
+        };
+        for operation in operations {
+            control.cancellation().check()?;
+            match operation.borrowed() {
+                GraphMutation::InvalidateGraph(graph) => {
+                    text(b"graph")?;
+                    text(graph.as_bytes())?;
+                }
+                GraphMutation::InvalidateEntity(kind, id) => {
+                    text(b"entity")?;
+                    text(kind.as_str().as_bytes())?;
+                    text(&id.to_be_bytes())?;
+                }
+                GraphMutation::PublishPath {
+                    index,
+                    graph,
+                    definition,
+                } => {
+                    text(b"path")?;
+                    text(index.as_bytes())?;
+                    text(graph.as_bytes())?;
+                    text(definition.as_bytes())?;
+                }
+            }
+            owned.push(operation.clone())?;
+        }
+        self.fingerprint = digest.finalize().into();
+        self.graph = Some(GraphEffects {
+            base,
+            operations: owned,
+        });
+        Ok(self)
+    }
+
+    pub(super) fn resolved(mut self, original: &Self, sequence: CommitSequence) -> Self {
+        self.fingerprint = original.fingerprint;
+        self.resolved_at = Some(sequence);
+        self
+    }
+
+    /// Check the snapshot used to discover derived dependencies under exclusive admission, after resolving any existing receipt and before validating record heads. A mismatch proves this pending attempt has not published and permits pure effect preparation to restart.
+    pub fn validate_snapshot(&self, current: CommitSequence) -> VersionResult<()> {
+        if self.graph.is_some()
+            || self
+                .writes
+                .iter()
+                .any(|write| write.kind != RecordWriteKind::Canonical)
+        {
+            return Err(VersionError::InvalidEncoding(
+                "unresolved graph commit effects",
+            ));
+        }
+        if let Some(expected) = self.resolved_at {
+            if expected != current {
+                return Err(VersionError::CommitSnapshotChanged {
+                    expected,
+                    actual: current,
+                });
+            }
+        }
+        Ok(())
     }
 
     pub fn fingerprint(&self) -> CommitFingerprint {
@@ -146,6 +276,16 @@ impl PreparedRecordCommit {
         mut head_revision: impl FnMut(&[u8]) -> VersionResult<Option<CommitSequence>>,
     ) -> VersionResult<()> {
         cancellation.check()?;
+        if self.graph.is_some()
+            || self
+                .writes
+                .iter()
+                .any(|write| write.kind != RecordWriteKind::Canonical)
+        {
+            return Err(VersionError::InvalidEncoding(
+                "unresolved graph commit effects",
+            ));
+        }
         for (index, write) in self.writes.iter().enumerate() {
             cancellation.check()?;
             let actual = head_revision(write.key())?;

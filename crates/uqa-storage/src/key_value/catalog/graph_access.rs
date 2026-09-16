@@ -397,6 +397,10 @@ impl KeyValueCatalog {
         id: u64,
         row: Option<&StoredVertex>,
     ) -> StorageBackendResult<()> {
+        batch.graph_mutation(crate::mvcc::GraphMutation::InvalidateEntity(
+            GraphEntityKind::Vertex,
+            id,
+        ))?;
         for graph in self.graph_entity_memberships_impl(GraphEntityKind::Vertex, id)? {
             self.invalidate_graph_path_data(batch, &graph)?;
         }
@@ -419,6 +423,10 @@ impl KeyValueCatalog {
         id: u64,
         row: Option<&StoredEdge>,
     ) -> StorageBackendResult<()> {
+        batch.graph_mutation(crate::mvcc::GraphMutation::InvalidateEntity(
+            GraphEntityKind::Edge,
+            id,
+        ))?;
         for graph in self.graph_entity_memberships_impl(GraphEntityKind::Edge, id)? {
             self.invalidate_graph_path_data(batch, &graph)?;
         }

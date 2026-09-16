@@ -12,6 +12,34 @@ use uqa_storage::KeyValueStore;
 use uqa_storage_redb::RedbStorage;
 
 #[test]
+fn graph_caches_follow_concurrent_sources_and_survive_reopen() {
+    use std::sync::Arc;
+    use uqa_storage::key_value::conformance::{
+        verify_graph_cache_concurrency, verify_graph_cache_reopen,
+    };
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("graph-caches.redb");
+    {
+        let storage = RedbStorage::open(&path).unwrap();
+        verify_graph_cache_concurrency(Arc::new(storage.store()), Arc::new(storage.store()))
+            .unwrap();
+    }
+    let reopened = RedbStorage::open(&path).unwrap();
+    verify_graph_cache_reopen(Arc::new(reopened.store())).unwrap();
+}
+
+#[test]
+fn graph_admission_retries_a_real_intervening_commit() {
+    let directory = tempfile::tempdir().unwrap();
+    let storage = RedbStorage::open(directory.path().join("graph-admission.redb")).unwrap();
+    uqa_storage::key_value::conformance::verify_graph_admission_retry(std::sync::Arc::new(
+        storage.record_store().unwrap(),
+    ))
+    .unwrap();
+}
+
+#[test]
 fn an_independent_key_value_writer_finishes_before_the_first_transaction_ends() {
     for ending in ["commit", "rollback", "savepoint"] {
         let directory = tempfile::tempdir().unwrap();

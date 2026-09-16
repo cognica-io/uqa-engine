@@ -14,6 +14,11 @@
 use super::KeyValueStore;
 use crate::{StorageBackendError, StorageBackendResult};
 
+mod graph;
+pub use graph::{verify_graph_cache_concurrency, verify_graph_cache_reopen};
+mod graph_retry;
+pub use graph_retry::verify_graph_admission_retry;
+
 const PREFIX: &[u8] = b"\0uqa-key-value-conformance/v1/";
 
 /// Verify the single-session ordered Key/Value and transaction contract.

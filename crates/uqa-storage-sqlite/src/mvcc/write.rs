@@ -81,6 +81,7 @@ pub(super) fn commit(
     if let Some(receipt) = resolve_prepared_receipt(status, id, prepared.fingerprint())? {
         return Ok(receipt);
     }
+    prepared.validate_snapshot(current.sequence)?;
     prepared.validate(control.cancellation(), |key| {
         codec::head(&transaction, key).map_err(Error::into_version)
     })?;

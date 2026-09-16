@@ -97,6 +97,7 @@ impl MemoryVersionStore {
         control.cancellation().check()?;
         let values = self.retain_values(commit, control)?;
         let mut state = self.database.state.lock();
+        commit.validate_snapshot(state.sequence)?;
         let writes = commit.records();
         if writes.is_empty() {
             return Ok(state.sequence);

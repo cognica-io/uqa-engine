@@ -436,6 +436,26 @@ impl uqa_storage::key_value::KeyValueBatch for CancellingBatch<'_> {
     fn delete_prefix(&mut self, prefix: &[u8]) -> uqa_storage::StorageBackendResult<()> {
         self.inner.delete_prefix(prefix)
     }
+    fn graph_mutation(
+        &mut self,
+        mutation: uqa_storage::mvcc::GraphMutation<'_>,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.graph_mutation(mutation)
+    }
+    fn preview_graph_invalidation(
+        &mut self,
+        key: &[u8],
+        value: Option<&[u8]>,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.preview_graph_invalidation(key, value)
+    }
+    fn replace_graph_cache(
+        &mut self,
+        key: &[u8],
+        value: Option<&[u8]>,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.replace_graph_cache(key, value)
+    }
     fn commit(self: Box<Self>) -> uqa_storage::StorageBackendResult<()> {
         self.inner.commit()
     }

@@ -59,6 +59,9 @@ impl VersionedPersistence for FaultPersistence {
     fn database_id(&self) -> DatabaseId {
         self.inner.database_id()
     }
+    fn graph_record_layout(&self) -> Option<&dyn uqa_storage::mvcc::GraphRecordLayout> {
+        self.inner.graph_record_layout()
+    }
     fn allocate_transaction(
         &self,
         control: &StorageReadControl,

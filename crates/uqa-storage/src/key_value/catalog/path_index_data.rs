@@ -40,6 +40,7 @@ impl KeyValueCatalog {
         batch: &mut dyn KeyValueBatch,
         graph: &str,
     ) -> StorageBackendResult<()> {
+        batch.graph_mutation(crate::mvcc::GraphMutation::InvalidateGraph(graph))?;
         let prefix = key(b'g', graph)?;
         let mut after = None;
         loop {
@@ -53,7 +54,9 @@ impl KeyValueCatalog {
             for stored_key in keys {
                 let mut offset = prefix.len();
                 let index = read_str(&stored_key, &mut offset)?;
-                batch.delete(&key(b'v', &index)?)?;
+                if self.store.get(&key(b's', &index)?)?.as_deref() == Some(graph.as_bytes()) {
+                    batch.preview_graph_invalidation(&key(b'v', &index)?, None)?;
+                }
             }
         }
         Ok(())
@@ -70,7 +73,7 @@ impl KeyValueCatalog {
             batch.delete(&reverse_key(&graph, index)?)?;
         }
         batch.delete_prefix(&key(b'p', index)?)?;
-        batch.delete(&key(b'v', index)?)?;
+        batch.replace_graph_cache(&key(b'v', index)?, None)?;
         batch.delete(&state)
     }
     pub(super) fn clear_path_index_data_impl(&self, index: &str) -> StorageBackendResult<()> {
@@ -82,7 +85,7 @@ impl KeyValueCatalog {
         batch: &mut dyn KeyValueBatch,
         index: &str,
     ) -> StorageBackendResult<()> {
-        batch.delete(&key(b'v', index)?)
+        batch.replace_graph_cache(&key(b'v', index)?, None)
     }
     pub(super) fn save_path_index_pairs_impl(
         &self,
@@ -119,9 +122,21 @@ impl KeyValueCatalog {
             )));
         }
         let mut batch = self.store.batch();
+        if let Some(previous) = self.store.get(&key(b's', index)?)? {
+            let previous = std::str::from_utf8(&previous)
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            if previous != graph {
+                batch.delete(&reverse_key(previous, index)?)?;
+            }
+        }
         batch.put(&key(b's', index)?, graph.as_bytes())?;
-        batch.put(&key(b'v', index)?, definition.as_bytes())?;
+        batch.replace_graph_cache(&key(b'v', index)?, Some(definition.as_bytes()))?;
         batch.put(&reverse_key(graph, index)?, &[])?;
+        batch.graph_mutation(crate::mvcc::GraphMutation::PublishPath {
+            index,
+            graph,
+            definition,
+        })?;
         batch.commit()
     }
     pub(super) fn path_index_data_is_current_impl(

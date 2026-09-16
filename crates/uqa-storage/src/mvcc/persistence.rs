@@ -127,6 +127,10 @@ pub type CommitResult = Result<CommitReceipt, CommitFailure>;
 pub trait VersionedPersistence: Send + Sync {
     fn database_id(&self) -> DatabaseId;
 
+    fn graph_record_layout(&self) -> Option<&dyn super::GraphRecordLayout> {
+        None
+    }
+
     /// Persist a new transaction allocation before returning it, without advancing record visibility.
     fn allocate_transaction(
         &self,
@@ -138,7 +142,7 @@ pub trait VersionedPersistence: Send + Sync {
         control: &StorageReadControl,
     ) -> VersionResult<Arc<dyn CommittedRecordSnapshot>>;
 
-    /// Retry only the same immutable prepared batch. A durable matching receipt is returned before revalidating stale preconditions; mismatched reuse is rejected.
+    /// Retry the same sealed logical changes and fingerprint. Return a durable matching receipt before validating snapshots or record heads. After verifying a pending receipt under exclusive admission, call `PreparedRecordCommit::validate_snapshot` before validating heads; only its rejection permits common storage to materialize derived effects again. Canonical changes and application callbacks must never be replayed, and mismatched fingerprint reuse is rejected.
     fn commit(
         &self,
         transaction: StorageTransactionId,

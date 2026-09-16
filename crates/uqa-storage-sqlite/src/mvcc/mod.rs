@@ -149,6 +149,13 @@ impl VersionedPersistence for SQLiteRecordStore {
     fn database_id(&self) -> DatabaseId {
         self.identity
     }
+    fn graph_record_layout(&self) -> Option<&dyn uqa_storage::mvcc::GraphRecordLayout> {
+        if self.native {
+            None
+        } else {
+            Some(&uqa_storage::key_value::KeyValueGraphRecords)
+        }
+    }
     fn allocate_transaction(
         &self,
         control: &StorageReadControl,
