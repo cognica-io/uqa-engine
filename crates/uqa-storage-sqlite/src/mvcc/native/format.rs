@@ -71,6 +71,7 @@ pub(in crate::mvcc) fn initialize(
             return Err(invalid("mixed native and KeyValue mappings").into());
         }
         check_mapping(&transaction, true)?;
+        super::sequences::validate_source(&transaction)?;
         return Ok(identity);
     }
     let source: Option<bool> = transaction
@@ -114,6 +115,7 @@ pub(in crate::mvcc) fn initialize(
     transaction.execute_batch(OWNER_INDEX)?;
     validate_layouts(&transaction)?;
     owners::seed(&transaction, control)?;
+    super::sequences::validate_source(&transaction)?;
     transaction.execute(
         "UPDATE _metadata SET value = '49' WHERE key = 'schema_version'",
         [],

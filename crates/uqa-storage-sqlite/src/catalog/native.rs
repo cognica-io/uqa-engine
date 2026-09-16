@@ -11,6 +11,7 @@ mod columns;
 mod foreign;
 mod indexes;
 mod relations;
+mod sequences;
 mod stats;
 mod tables;
 mod views;

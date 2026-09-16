@@ -89,7 +89,7 @@ impl NativeSnapshot {
         family: Family,
         owner: Option<NativeRecordOwner>,
         components: &[ValueRef<'_>],
-        mut visit: impl FnMut(&[ValueRef<'_>]) -> Result<()>,
+        visit: impl FnMut(&[ValueRef<'_>]) -> Result<()>,
     ) -> Result<()> {
         let prefix = match owner {
             Some(owner) => NativeRecordIdentity::new(family, owner)?
@@ -99,8 +99,26 @@ impl NativeSnapshot {
             }
             None => return Err(invalid("native components require an owner").into()),
         };
+        self.visit_row_prefix(&prefix, visit)
+    }
+
+    pub(crate) fn visit_object_rows(
+        &self,
+        family: Family,
+        identity: [u8; 16],
+        visit: impl FnMut(&[ValueRef<'_>]) -> Result<()>,
+    ) -> Result<()> {
+        let prefix = NativeRecordIdentity::object_prefix(family, identity, &self.control)?;
+        self.visit_row_prefix(&prefix, visit)
+    }
+
+    fn visit_row_prefix(
+        &self,
+        prefix: &[u8],
+        mut visit: impl FnMut(&[ValueRef<'_>]) -> Result<()>,
+    ) -> Result<()> {
         self.view.visit_prefix(
-            &prefix,
+            prefix,
             None,
             usize::MAX,
             &self.control,

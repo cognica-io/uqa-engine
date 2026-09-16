@@ -10,168 +10,13 @@ use super::{
     migration_relation, params, Catalog, OptionalExtension, RelationIdentity, RelationKind, Result,
     SQLiteError, SequenceOptions, SequenceReservationResult, SequenceRow, ViewRow,
 };
-use uqa_storage::catalog::{
-    sequence_value_reservation, SequenceOwner, SequenceOwnerDependency, SequenceValuePosition,
+use uqa_storage::catalog::{sequence_value_reservation, SequenceValuePosition};
+
+pub(in crate::catalog) mod codec;
+use codec::{
+    concrete_sequence_options, decode_raw_sequence_row, decode_sequence_identity,
+    read_raw_sequence_row,
 };
-
-fn concrete_sequence_options(sequence: &SequenceRow) -> SequenceOptions {
-    let default_min = if sequence.increment > 0 { 1 } else { i64::MIN };
-    let default_max = if sequence.increment > 0 { i64::MAX } else { -1 };
-    SequenceOptions {
-        data_type: sequence.options.data_type.clone(),
-        min_value: Some(sequence.options.min_value.unwrap_or(default_min)),
-        max_value: Some(sequence.options.max_value.unwrap_or(default_max)),
-        cycle: sequence.options.cycle,
-        cache_size: sequence.options.cache_size,
-    }
-}
-
-fn decode_sequence_owner(
-    relation: &RelationIdentity,
-    table_object_id: Option<Vec<u8>>,
-    column_object_id: Option<Vec<u8>>,
-    dependency: Option<String>,
-) -> Result<Option<SequenceOwner>> {
-    let (table_object_id, column_object_id, dependency) =
-        match (table_object_id, column_object_id, dependency) {
-            (None, None, None) => return Ok(None),
-            (Some(table), Some(column), Some(dependency)) => (table, column, dependency),
-            _ => {
-                return Err(SQLiteError::StorageBackend(format!(
-                    "corrupt sequence `{}` has an incomplete owner dependency",
-                    relation.qualified_name()
-                )))
-            }
-        };
-    let table_object_id: [u8; 16] = table_object_id.try_into().map_err(|value: Vec<u8>| {
-        SQLiteError::StorageBackend(format!(
-            "corrupt sequence `{}` owner table identity has {} bytes",
-            relation.qualified_name(),
-            value.len()
-        ))
-    })?;
-    let column_object_id: [u8; 16] = column_object_id.try_into().map_err(|value: Vec<u8>| {
-        SQLiteError::StorageBackend(format!(
-            "corrupt sequence `{}` owner column identity has {} bytes",
-            relation.qualified_name(),
-            value.len()
-        ))
-    })?;
-    let dependency = match dependency.as_str() {
-        "a" => SequenceOwnerDependency::Automatic,
-        "i" => SequenceOwnerDependency::Internal,
-        other => {
-            return Err(SQLiteError::StorageBackend(format!(
-                "corrupt sequence `{}` owner dependency `{other}`",
-                relation.qualified_name()
-            )))
-        }
-    };
-    Ok(Some(SequenceOwner {
-        table_object_id,
-        column_object_id,
-        dependency,
-    }))
-}
-
-struct RawSequenceRow {
-    schema: String,
-    name: String,
-    object_id: Vec<u8>,
-    definition_generation: Vec<u8>,
-    start: i64,
-    increment: i64,
-    current: i64,
-    called: bool,
-    persistence: String,
-    data_type: String,
-    min_value: i64,
-    max_value: i64,
-    cycle: bool,
-    cache_size: i64,
-    owner_table_object_id: Option<Vec<u8>>,
-    owner_column_object_id: Option<Vec<u8>>,
-    owner_dependency: Option<String>,
-    role_owner: String,
-    acl_json: Option<String>,
-    log_count: i64,
-}
-
-fn read_raw_sequence_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawSequenceRow> {
-    Ok(RawSequenceRow {
-        schema: row.get(0)?,
-        name: row.get(1)?,
-        object_id: row.get(2)?,
-        definition_generation: row.get(3)?,
-        start: row.get(4)?,
-        increment: row.get(5)?,
-        current: row.get(6)?,
-        called: row.get(7)?,
-        persistence: row.get(8)?,
-        data_type: row.get(9)?,
-        min_value: row.get(10)?,
-        max_value: row.get(11)?,
-        cycle: row.get(12)?,
-        cache_size: row.get(13)?,
-        owner_table_object_id: row.get(14)?,
-        owner_column_object_id: row.get(15)?,
-        owner_dependency: row.get(16)?,
-        role_owner: row.get(17)?,
-        acl_json: row.get(18)?,
-        log_count: row.get(19)?,
-    })
-}
-
-fn decode_sequence_identity(
-    relation: &RelationIdentity,
-    label: &str,
-    value: Vec<u8>,
-) -> Result<[u8; 16]> {
-    value.try_into().map_err(|value: Vec<u8>| {
-        SQLiteError::StorageBackend(format!(
-            "corrupt sequence `{}` {label} has {} bytes",
-            relation.qualified_name(),
-            value.len()
-        ))
-    })
-}
-
-fn decode_raw_sequence_row(raw: RawSequenceRow) -> Result<SequenceRow> {
-    let relation = RelationIdentity::new(raw.schema, raw.name);
-    Ok(SequenceRow {
-        role_owner: raw.role_owner,
-        acl: raw
-            .acl_json
-            .map(|json| serde_json::from_str(&json))
-            .transpose()?,
-        owner: decode_sequence_owner(
-            &relation,
-            raw.owner_table_object_id,
-            raw.owner_column_object_id,
-            raw.owner_dependency,
-        )?,
-        object_id: decode_sequence_identity(&relation, "object identity", raw.object_id)?,
-        definition_generation: decode_sequence_identity(
-            &relation,
-            "definition generation",
-            raw.definition_generation,
-        )?,
-        relation,
-        start: raw.start,
-        increment: raw.increment,
-        current: raw.current,
-        called: raw.called,
-        log_count: raw.log_count,
-        persistence: raw.persistence,
-        options: SequenceOptions {
-            data_type: raw.data_type,
-            min_value: Some(raw.min_value),
-            max_value: Some(raw.max_value),
-            cycle: raw.cycle,
-            cache_size: raw.cache_size,
-        },
-    })
-}
 
 fn reserve_sequence_values_in_connection(
     connection: &rusqlite::Connection,
@@ -215,23 +60,12 @@ fn reserve_sequence_values_in_connection(
     else {
         return Ok(SequenceReservationResult::Missing);
     };
-    let stored_object_id: [u8; 16] = stored_object_id.try_into().map_err(|value: Vec<u8>| {
-        SQLiteError::StorageBackend(format!(
-            "corrupt sequence `{}` object identity has {} bytes",
-            relation.qualified_name(),
-            value.len()
-        ))
-    })?;
+    let stored_object_id = decode_sequence_identity(relation, "object identity", stored_object_id)?;
     if stored_object_id != object_id {
         return Ok(SequenceReservationResult::Missing);
     }
-    let stored_generation: [u8; 16] = stored_generation.try_into().map_err(|value: Vec<u8>| {
-        SQLiteError::StorageBackend(format!(
-            "corrupt sequence `{}` definition generation has {} bytes",
-            relation.qualified_name(),
-            value.len()
-        ))
-    })?;
+    let stored_generation =
+        decode_sequence_identity(relation, "definition generation", stored_generation)?;
     if stored_generation != definition_generation {
         return Ok(SequenceReservationResult::DefinitionChanged);
     }
@@ -278,6 +112,9 @@ fn reserve_sequence_values_in_connection(
 
 impl Catalog {
     pub fn create_sequence_row(&self, sequence: &SequenceRow) -> Result<bool> {
+        if let Some(result) = self.write_native_sequence(sequence, false)? {
+            return Ok(result);
+        }
         self.conn.with_mut(|connection| {
             let tx = connection.savepoint()?;
             let exists = tx
@@ -337,6 +174,9 @@ impl Catalog {
     }
 
     pub fn replace_sequence_row(&self, sequence: &SequenceRow) -> Result<bool> {
+        if let Some(result) = self.write_native_sequence(sequence, true)? {
+            return Ok(result);
+        }
         self.conn.with(|connection| {
             let options = concrete_sequence_options(sequence);
             let owner_table = sequence.owner.map(|owner| owner.table_object_id);
@@ -384,6 +224,9 @@ impl Catalog {
     pub fn rename_sequence_row(&self, from: &str, to: &str) -> Result<bool> {
         let from_relation = migration_relation(from)?;
         let to_relation = migration_relation(to)?;
+        if let Some(result) = self.rename_native_sequence(&from_relation, &to_relation)? {
+            return Ok(result);
+        }
         self.conn.with_mut(|connection| {
             let tx = connection.savepoint()?;
             let source_exists = tx
@@ -440,6 +283,9 @@ impl Catalog {
 
     pub fn drop_sequence_row(&self, name: &str) -> Result<bool> {
         let relation = migration_relation(name)?;
+        if let Some(result) = self.drop_native_sequence(&relation)? {
+            return Ok(result);
+        }
         self.conn.with_mut(|connection| {
             let tx = connection.savepoint()?;
             let removed = tx.execute(
@@ -456,6 +302,9 @@ impl Catalog {
     }
 
     pub fn load_sequence_rows(&self) -> Result<Vec<SequenceRow>> {
+        if let Some(result) = self.load_native_sequences()? {
+            return Ok(result);
+        }
         self.conn.with(|connection| {
             let mut statement = connection.prepare(
                 "SELECT schema_name, relation_name, object_id, definition_generation, start, increment, current, called, persistence,
@@ -477,6 +326,11 @@ impl Catalog {
         definition_generation: [u8; 16],
     ) -> Result<SequenceReservationResult> {
         let relation = migration_relation(name)?;
+        if let Some(result) =
+            self.reserve_native_sequence_values(&relation, object_id, definition_generation)?
+        {
+            return Ok(result);
+        }
         self.conn.with_mut(|connection| {
             if connection.is_autocommit() {
                 let tx = connection
@@ -511,6 +365,11 @@ impl Catalog {
         log_count: i64,
     ) -> Result<Option<i64>> {
         let relation = migration_relation(name)?;
+        if let super::native::NativeLookup::Value(result) =
+            self.set_native_sequence_value(&relation, object_id, value, called, log_count)?
+        {
+            return Ok(result);
+        }
         self.conn.with(|connection| {
             Ok(connection
                 .query_row(

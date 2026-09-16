@@ -29,6 +29,8 @@ mod native_columns;
 mod native_documents;
 #[path = "mvcc/native_relations.rs"]
 mod native_relations;
+#[path = "mvcc/native_sequences.rs"]
+mod native_sequences;
 #[path = "mvcc/native_tables.rs"]
 mod native_tables;
 

@@ -33,6 +33,23 @@ pub struct NativeRecordIdentity {
 }
 
 impl NativeRecordIdentity {
+    /// Address every retained generation of one object without scanning other object payloads.
+    pub(crate) fn object_prefix(
+        family: NativeRecordFamily,
+        identity: [u8; 16],
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<u8>> {
+        if !family.layout().object_owned || identity == [0; 16] {
+            return Err(invalid(
+                "native object prefix requires an assigned object identity",
+            ));
+        }
+        let mut key = Self::family_prefix(family, control)?;
+        key.push(1)?;
+        key.extend_from_slice(&identity)?;
+        Ok(key)
+    }
+
     pub(crate) fn family_prefix(
         family: NativeRecordFamily,
         control: &StorageReadControl,

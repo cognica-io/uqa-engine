@@ -86,6 +86,7 @@ fn apply(
 ) -> PhysicalResult<()> {
     seed_originals(connection, database, prepared, control)?;
     seed_targets(connection, prepared, control)?;
+    super::sequences::validate_prepared(connection, prepared, control)?;
     queue::visit(
         connection,
         "_uqa_mvcc_native_expected",

@@ -12,6 +12,96 @@ use super::materialization::{delete, initialize, records, replace, with};
 use super::*;
 use crate::SQLiteRecordStore;
 
+fn sequence_generation(
+    original: &NativeRecord,
+    identity: [u8; 16],
+    generation: [u8; 16],
+    control: &StorageReadControl,
+) -> NativeRecord {
+    let (_, row) = decode_record(original.key(), original.row(), control).unwrap();
+    let mut values = row.to_vec();
+    values[8] = ValueRef::Blob(&identity);
+    values[14] = ValueRef::Blob(&generation);
+    NativeRecord::encode(
+        NativeRecordFamily::Sequences,
+        NativeRecordOwner::Object {
+            identity,
+            generation,
+        },
+        &values,
+        control,
+    )
+    .unwrap()
+}
+
+#[test]
+fn native_sequence_preparation_rejects_multiple_final_generations_of_one_incarnation() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    initialize(&connection);
+    with(&connection, |sql| {
+        sql.execute_batch("INSERT INTO _relations VALUES ('public', 'a', 'sequence'), ('public', 'b', 'sequence'); INSERT INTO _sequences(schema_name, relation_name, start, increment, current) VALUES ('public', 'a', 1, 1, 0), ('public', 'b', 1, 1, 0);")?;
+        Ok(())
+    });
+    let control = StorageReadControl::with_limit(1 << 24);
+    let store = SQLiteRecordStore::for_native(&connection, &control).unwrap();
+    let original = records(&connection, &store, NativeRecordFamily::Sequences, &control);
+    let (identity, _) = decode_record(original[0].key(), original[0].row(), &control).unwrap();
+    let NativeRecordOwner::Object { identity, .. } = identity.owner() else {
+        panic!("sequence owner")
+    };
+    let first = sequence_generation(&original[0], identity, [90; 16], &control);
+    let second = sequence_generation(&original[1], identity, [91; 16], &control);
+    let conflicting = PreparedRecordCommit::new(
+        &[
+            delete(&original[0]),
+            delete(&original[1]),
+            first.write(None),
+            second.write(None),
+        ],
+        &control,
+    )
+    .unwrap();
+    let id = store.allocate_transaction(&control).unwrap();
+    assert!(matches!(
+        store.commit(id, &conflicting, &control),
+        Err(CommitFailure::Rejected(VersionError::InvalidEncoding(
+            "native sequence incarnation has competing definitions"
+        )))
+    ));
+    let after = store.snapshot(&control).unwrap();
+    assert_eq!(after.sequence(), CommitSequence::from_u64(1));
+    for record in &original {
+        assert_eq!(
+            &***after
+                .get(record.key(), &control)
+                .unwrap()
+                .unwrap()
+                .value()
+                .unwrap(),
+            record.row()
+        );
+    }
+    let replacement =
+        PreparedRecordCommit::new(&[delete(&original[0]), first.write(None)], &control).unwrap();
+    store.commit(id, &replacement, &control).unwrap();
+    let after = store.snapshot(&control).unwrap();
+    assert_eq!(
+        &***after
+            .get(first.key(), &control)
+            .unwrap()
+            .unwrap()
+            .value()
+            .unwrap(),
+        first.row()
+    );
+    assert!(after
+        .get(original[0].key(), &control)
+        .unwrap()
+        .unwrap()
+        .value()
+        .is_none());
+}
+
 #[test]
 fn owner_generation_changes_require_complete_retirement_and_reject_old_writers() {
     let connection = ManagedConnection::open_in_memory().unwrap();

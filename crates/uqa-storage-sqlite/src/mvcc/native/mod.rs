@@ -16,6 +16,7 @@ mod physical;
 mod projection;
 mod queue;
 mod row;
+mod sequences;
 mod session;
 
 pub(crate) use session::NativeSnapshot;
