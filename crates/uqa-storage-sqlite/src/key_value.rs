@@ -249,6 +249,22 @@ impl KeyValueBatch for SQLiteKeyValueBatch<'_> {
     fn delete_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
         self.batch.delete_prefix(prefix)
     }
+    fn replace_occurrence_record(
+        &mut self,
+        key: &[u8],
+        value: Option<&[u8]>,
+    ) -> StorageBackendResult<()> {
+        self.batch.replace_occurrence_record(key, value)
+    }
+    fn invalidate_occurrence_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
+        self.batch.invalidate_occurrence_prefix(prefix)
+    }
+    fn occurrence_document(&mut self, table: &str, document: u64) -> StorageBackendResult<()> {
+        self.batch.occurrence_document(table, document)
+    }
+    fn reset_occurrences(&mut self, table: &str) -> StorageBackendResult<()> {
+        self.batch.reset_occurrences(table)
+    }
     fn graph_mutation(
         &mut self,
         mutation: uqa_storage::mvcc::GraphMutation<'_>,

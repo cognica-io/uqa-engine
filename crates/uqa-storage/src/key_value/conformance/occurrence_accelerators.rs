@@ -108,16 +108,20 @@ pub fn verify_occurrence_accelerators(
     a.begin_transaction()?;
     index.add_document(0, fields("alpha alpha alpha alpha"))?;
     other.rebuild_persisted_block_max("body", &Frequency, "late")?;
-    expect(
-        a.commit_transaction().is_err(),
-        "older invalidation cannot miss a later cache build",
-    )?;
-    a.rollback_transaction()?;
+    a.commit_transaction()?;
     expect_eq(
         &other.persisted_block_max_scores("body", "alpha", "late")?,
-        &expected,
-        "winning build retains its unchanged source",
+        &None,
+        "source merge invalidates a later cache build",
     )?;
+    a.begin_transaction()?;
+    index.rebuild_persisted_block_max("body", &Frequency, "stale")?;
+    other.add_document(0, fields("alpha"))?;
+    expect(
+        a.commit_transaction().is_err(),
+        "stale scorer output cannot publish after a source change",
+    )?;
+    a.rollback_transaction()?;
     index.clear()?;
     expect_eq(
         &index.persisted_block_max_scores("body", "alpha", "late")?,

@@ -482,6 +482,8 @@ pub(super) fn apply_table_migration(
     if table.old_physical_name == canonical {
         return Ok(None);
     }
+    batch.reset_occurrences(&table.old_physical_name)?;
+    batch.reset_occurrences(&canonical)?;
     for (old_prefix, new_prefix) in table_data_prefixes(&table.old_physical_name)?
         .into_iter()
         .zip(table_data_prefixes(&canonical)?)

@@ -32,6 +32,7 @@ pub use catalog::KeyValueCatalog;
 mod graph_commit;
 pub use graph_commit::KeyValueGraphRecords;
 mod index_view;
+pub(crate) mod occurrence_commit;
 mod view;
 pub use view::{KeyValueMutation, KeyValueRead, KeyValueReadRevision, KeyValueReadScope};
 
@@ -97,6 +98,29 @@ pub trait KeyValueBatch {
     fn put(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()>;
     fn delete(&mut self, key: &[u8]) -> StorageBackendResult<()>;
     fn delete_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()>;
+    /// Stage an evaluated common-format occurrence cluster, field total or source marker. Source mutations must include their format marker and document guards. Concurrent stores merge only these explicitly typed replacements; ordinary byte writes remain conditional replacements.
+    fn replace_occurrence_record(
+        &mut self,
+        key: &[u8],
+        value: Option<&[u8]>,
+    ) -> StorageBackendResult<()> {
+        match value {
+            Some(value) => self.put(key, value),
+            None => self.delete(key),
+        }
+    }
+    /// Stage source-owned occurrence-cache invalidation. The source marker in the same batch also drives discovery of caches published after the retained source view.
+    fn invalidate_occurrence_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
+        self.delete_prefix(prefix)
+    }
+    /// Protect whole-document replacement even when two writers select different fields of an originally absent document.
+    fn occurrence_document(&mut self, _table: &str, _document: DocId) -> StorageBackendResult<()> {
+        Ok(())
+    }
+    /// Fence a structural occurrence change, including an empty rebuild, drop, purge or rename. Serialized projections already retain their native mutation boundary.
+    fn reset_occurrences(&mut self, _table: &str) -> StorageBackendResult<()> {
+        Ok(())
+    }
     /// Record graph-cache dependencies in the same atomic batch. Concurrent MVCC stores must resolve these logical effects before admitting a commit; serialized legacy stores use the ordinary preview writes already included by the catalog.
     fn graph_mutation(
         &mut self,

@@ -75,6 +75,7 @@ fn invalidate_accelerators(
     from: &str,
     to: Option<&str>,
 ) -> StorageBackendResult<()> {
+    batch.reset_occurrences(table)?;
     for field in std::iter::once(from).chain(to) {
         for kind in [keys::SKIP, keys::BLOCK_MAX] {
             batch.delete_prefix(&keys::field_prefix(table, kind, field)?)?;

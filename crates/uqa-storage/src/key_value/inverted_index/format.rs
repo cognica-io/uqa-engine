@@ -70,6 +70,7 @@ impl OccurrenceRead<'_> {
         &self,
         batch: &mut dyn KeyValueBatch,
     ) -> StorageBackendResult<()> {
+        batch.reset_occurrences(self.table)?;
         batch.delete_prefix(&keys::table_prefix(self.table)?)?;
         for prefix in legacy_prefixes(self.table)? {
             batch.delete_prefix(&prefix)?;

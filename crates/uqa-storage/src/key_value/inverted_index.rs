@@ -60,10 +60,10 @@ struct FieldSnapshot {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct FieldStats {
-    revision: IndexedFieldRevision,
-    doc_count: u64,
-    total_length: u64,
+pub(super) struct FieldStats {
+    pub(super) revision: IndexedFieldRevision,
+    pub(super) doc_count: u64,
+    pub(super) total_length: u64,
 }
 
 /// Inverted index implemented over [`KeyValueStore`].

@@ -96,7 +96,13 @@ impl Transaction {
         let record = self.view()?.metadata(key, control)?;
         let expected = record.and_then(|record| record.revision);
         let exists = record.is_some_and(|record| record.live);
-        if value.is_none() && !exists && kind != RecordWriteKind::GraphCache {
+        if value.is_none()
+            && !exists
+            && matches!(
+                kind,
+                RecordWriteKind::Canonical | RecordWriteKind::GraphPreview
+            )
+        {
             return Ok(());
         }
         let prepared = PreparedRecordCommit::new(
@@ -110,6 +116,12 @@ impl Transaction {
         let kind = if kind == RecordWriteKind::GraphPreview {
             // A later preview must retain an earlier explicit replacement or canonical write to the same private record.
             self.changes.write_kind(key, control)?.unwrap_or(kind)
+        } else if matches!(
+            kind,
+            RecordWriteKind::Occurrence | RecordWriteKind::OccurrenceCache
+        ) && self.changes.write_kind(key, control)? == Some(RecordWriteKind::Canonical)
+        {
+            RecordWriteKind::Canonical
         } else {
             kind
         };
@@ -132,24 +144,45 @@ impl Transaction {
         prefix: &[u8],
         control: &StorageReadControl,
     ) -> VersionResult<usize> {
+        self.delete_prefix_kind(prefix, RecordWriteKind::Canonical, control)
+    }
+
+    pub(super) fn fence_record(
+        &mut self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        self.writable()?;
+        let record = self.view()?.get(key, control)?;
+        self.changes.apply(
+            &[RecordWrite {
+                key,
+                expected: record
+                    .as_ref()
+                    .and_then(crate::mvcc::VisibleRecord::original_revision),
+                value: record.as_ref().and_then(|record| record.value()),
+            }],
+            control,
+        )
+    }
+
+    pub(super) fn delete_prefix_kind(
+        &mut self,
+        prefix: &[u8],
+        kind: RecordWriteKind,
+        control: &StorageReadControl,
+    ) -> VersionResult<usize> {
         self.writable()?;
         let mut keys = BudgetedVec::new(control.memory());
         self.view()?
             .visit_keys(prefix, None, usize::MAX, control, &mut |key, record| {
                 if record.live {
-                    keys.push((RecordKey::new(key, control.memory())?, record.revision))?;
+                    keys.push(RecordKey::new(key, control.memory())?)?;
                 }
                 Ok(true)
             })?;
-        for (key, expected) in keys.iter() {
-            self.changes.apply(
-                &[RecordWrite {
-                    key: key.bytes(),
-                    expected: *expected,
-                    value: None,
-                }],
-                control,
-            )?;
+        for key in keys.iter() {
+            self.write_record(key.bytes(), None, kind, control)?;
         }
         Ok(keys.len())
     }
@@ -296,19 +329,42 @@ impl Transaction {
     ) -> VersionResult<()> {
         control.cancellation().check()?;
         let prepared = self.prepared.as_ref().expect("prepared once");
-        if prepared.graph.is_some() && self.materialized.is_none() {
-            let layout = persistence
-                .graph_record_layout()
-                .ok_or(VersionError::InvalidEncoding(
-                    "provider has no graph record layout",
-                ))?;
-            self.materialized = Some(crate::mvcc::graph::resolve(
-                prepared,
-                persistence.snapshot(control)?,
-                layout,
-                persistence.database_id(),
-                control,
-            )?);
+        let occurrences = prepared.records().iter().any(|write| {
+            matches!(
+                write.kind(),
+                RecordWriteKind::Occurrence | RecordWriteKind::OccurrenceCache
+            )
+        });
+        if (prepared.graph.is_some() || occurrences) && self.materialized.is_none() {
+            let current = persistence.snapshot(control)?;
+            let merged = if occurrences {
+                Some(crate::key_value::occurrence_commit::resolve(
+                    prepared,
+                    &*self.committed,
+                    &*current,
+                    control,
+                )?)
+            } else {
+                None
+            };
+            let input = merged.as_ref().unwrap_or(prepared);
+            self.materialized = if input.graph.is_some() {
+                let layout =
+                    persistence
+                        .graph_record_layout()
+                        .ok_or(VersionError::InvalidEncoding(
+                            "provider has no graph record layout",
+                        ))?;
+                Some(crate::mvcc::graph::resolve(
+                    input,
+                    current,
+                    layout,
+                    persistence.database_id(),
+                    control,
+                )?)
+            } else {
+                merged
+            };
         }
         Ok(())
     }

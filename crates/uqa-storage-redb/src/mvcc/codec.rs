@@ -8,10 +8,23 @@
 
 use redb::ReadableTable;
 use uqa_storage::mvcc::{
-    CommitReceipt, CommitSequence, CommitStatus, StorageTransactionId, VersionError, VersionResult,
+    CommitReceipt, CommitSequence, CommitStatus, DatabaseId, StorageTransactionId, VersionError,
+    VersionResult,
 };
 
 use crate::error::redb_error;
+
+pub(super) fn database_id(
+    table: &impl ReadableTable<&'static str, &'static [u8]>,
+) -> VersionResult<DatabaseId> {
+    let bytes = table
+        .get("database")
+        .map_err(redb_error)?
+        .ok_or(VersionError::InvalidEncoding("missing database identity"))?;
+    Ok(DatabaseId::from_bytes(bytes.value().try_into().map_err(
+        |_| VersionError::InvalidEncoding("invalid database identity"),
+    )?))
+}
 
 pub(super) fn read_u64(
     table: &impl ReadableTable<&'static str, &'static [u8]>,

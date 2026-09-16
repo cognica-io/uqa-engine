@@ -30,10 +30,12 @@ pub struct PreparedRecordWrite {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum RecordWriteKind {
+pub(crate) enum RecordWriteKind {
     Canonical,
     GraphCache,
     GraphPreview,
+    Occurrence,
+    OccurrenceCache,
 }
 
 impl PreparedRecordWrite {
@@ -62,10 +64,10 @@ impl PreparedRecordWrite {
         self
     }
 
-    pub(super) fn kind(&self) -> RecordWriteKind {
+    pub(crate) fn kind(&self) -> RecordWriteKind {
         self.kind
     }
-    pub(super) fn with_kind(mut self, kind: RecordWriteKind) -> Self {
+    pub(crate) fn with_kind(mut self, kind: RecordWriteKind) -> Self {
         self.kind = kind;
         self
     }
@@ -150,6 +152,8 @@ impl PreparedRecordCommit {
                     RecordWriteKind::Canonical => 0,
                     RecordWriteKind::GraphCache => 1,
                     RecordWriteKind::GraphPreview => 2,
+                    RecordWriteKind::Occurrence => 3,
+                    RecordWriteKind::OccurrenceCache => 4,
                 }]);
             }
             digest.update((write.key().len() as u64).to_be_bytes());
@@ -185,10 +189,12 @@ impl PreparedRecordCommit {
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
         if operations.is_empty()
-            && self
-                .writes
-                .iter()
-                .all(|write| write.kind == RecordWriteKind::Canonical)
+            && self.writes.iter().all(|write| {
+                !matches!(
+                    write.kind,
+                    RecordWriteKind::GraphCache | RecordWriteKind::GraphPreview
+                )
+            })
         {
             return Ok(self);
         }
@@ -240,10 +246,21 @@ impl PreparedRecordCommit {
         Ok(self)
     }
 
-    pub(super) fn resolved(mut self, original: &Self, sequence: CommitSequence) -> Self {
+    pub(crate) fn resolved(mut self, original: &Self, sequence: CommitSequence) -> Self {
         self.fingerprint = original.fingerprint;
         self.resolved_at = Some(sequence);
         self
+    }
+
+    pub(crate) fn retain_graph_effects(
+        self,
+        original: &Self,
+        control: &StorageReadControl,
+    ) -> VersionResult<Self> {
+        match &original.graph {
+            Some(effects) => self.with_graph_effects(effects.base, &effects.operations, control),
+            None => Ok(self),
+        }
     }
 
     /// Check the snapshot used to discover derived dependencies under exclusive admission, after resolving any existing receipt and before validating record heads. A mismatch proves this pending attempt has not published and permits pure effect preparation to restart.
@@ -255,7 +272,7 @@ impl PreparedRecordCommit {
                 .any(|write| write.kind != RecordWriteKind::Canonical)
         {
             return Err(VersionError::InvalidEncoding(
-                "unresolved graph commit effects",
+                "unresolved storage commit effects",
             ));
         }
         if let Some(expected) = self.resolved_at {
@@ -287,7 +304,7 @@ impl PreparedRecordCommit {
                 .any(|write| write.kind != RecordWriteKind::Canonical)
         {
             return Err(VersionError::InvalidEncoding(
-                "unresolved graph commit effects",
+                "unresolved storage commit effects",
             ));
         }
         for (index, write) in self.writes.iter().enumerate() {

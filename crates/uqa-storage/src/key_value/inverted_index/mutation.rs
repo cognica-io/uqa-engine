@@ -45,12 +45,12 @@ impl OccurrenceRead<'_> {
         let score_key = keys::cluster_key(self.table, keys::SCORE, field, term, cluster)?;
         let graph_key = keys::cluster_key(self.table, keys::POSITIONS, field, term, cluster)?;
         if entries.is_empty() {
-            batch.delete(&score_key)?;
-            batch.delete(&graph_key)?;
+            batch.replace_occurrence_record(&score_key, None)?;
+            batch.replace_occurrence_record(&graph_key, None)?;
         } else {
             let (score, graph) = encode_occurrence_cluster(entries)?;
-            batch.put(&score_key, &score)?;
-            batch.put(&graph_key, &graph)?;
+            batch.replace_occurrence_record(&score_key, Some(&score))?;
+            batch.replace_occurrence_record(&graph_key, Some(&graph))?;
         }
         Ok(())
     }
@@ -118,9 +118,9 @@ impl OccurrenceRead<'_> {
                 if stats.total_length != 0 {
                     return Err(other_error("empty indexed field retains document length"));
                 }
-                batch.delete(&key)?;
+                batch.replace_occurrence_record(&key, None)?;
             } else {
-                batch.put(&key, &stats.to_bytes()?)?;
+                batch.replace_occurrence_record(&key, Some(&stats.to_bytes()?))?;
             }
         }
         Ok(())
@@ -137,6 +137,7 @@ impl OccurrenceRead<'_> {
         let mut totals = BTreeMap::<FieldName, FieldStats>::new();
         let mut changes = ClusterChanges::new();
         for (doc_id, fields) in &staged {
+            batch.occurrence_document(self.table, *doc_id)?;
             let old = self.old_document(*doc_id)?;
             for field in old.keys().chain(fields.keys()) {
                 if !totals.contains_key(field) {
@@ -203,9 +204,9 @@ impl OccurrenceRead<'_> {
             self.put_document(batch, *doc_id, fields)?;
         }
         self.put_field_statistics(batch, totals)?;
-        batch.put(
+        batch.replace_occurrence_record(
             &keys::kind_prefix(self.table, keys::FORMAT)?,
-            keys::FORMAT_NAME,
+            Some(keys::FORMAT_NAME),
         )?;
         Ok(())
     }

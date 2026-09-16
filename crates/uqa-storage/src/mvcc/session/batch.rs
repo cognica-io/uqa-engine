@@ -17,9 +17,10 @@ use super::VersionedKeyValueStore;
 enum Operation {
     Put(BudgetedVec<u8>, BudgetedVec<u8>),
     Delete(BudgetedVec<u8>),
-    DeletePrefix(BudgetedVec<u8>),
+    DeletePrefix(BudgetedVec<u8>, RecordWriteKind),
+    OccurrenceReset(BudgetedVec<u8>),
     Graph(OwnedGraphMutation),
-    GraphCache {
+    TypedRecord {
         key: BudgetedVec<u8>,
         value: Option<BudgetedVec<u8>>,
         kind: RecordWriteKind,
@@ -43,13 +44,13 @@ impl<'a> Batch<'a> {
         owned.extend_from_slice(bytes)?;
         Ok(owned)
     }
-    fn cache(
+    fn typed_record(
         &mut self,
         key: &[u8],
         value: Option<&[u8]>,
         kind: RecordWriteKind,
     ) -> StorageBackendResult<()> {
-        self.operations.push(Operation::GraphCache {
+        self.operations.push(Operation::TypedRecord {
             key: self.copy(key)?,
             value: value.map(|value| self.copy(value)).transpose()?,
             kind,
@@ -64,11 +65,24 @@ impl<'a> Batch<'a> {
                     transaction.replace(key, Some(value), &self.store.control)?;
                 }
                 Operation::Delete(key) => transaction.replace(key, None, &self.store.control)?,
-                Operation::DeletePrefix(prefix) => {
-                    transaction.delete_prefix(prefix, &self.store.control)?;
+                Operation::DeletePrefix(prefix, kind) => {
+                    transaction.delete_prefix_kind(prefix, *kind, &self.store.control)?;
+                }
+                Operation::OccurrenceReset(table) => {
+                    let table = std::str::from_utf8(table)
+                        .map_err(|_| VersionError::InvalidEncoding("invalid occurrence table"))?;
+                    let key = crate::key_value::occurrence_commit::guard(
+                        table,
+                        None,
+                        &self.store.control,
+                    )?;
+                    transaction.replace(&key, Some(b""), &self.store.control)?;
+                    let key =
+                        crate::key_value::occurrence_commit::format(table, &self.store.control)?;
+                    transaction.fence_record(&key, &self.store.control)?;
                 }
                 Operation::Graph(mutation) => transaction.graph_mutation(mutation)?,
-                Operation::GraphCache { key, value, kind } => {
+                Operation::TypedRecord { key, value, kind } => {
                     transaction.write_record(key, value.as_deref(), *kind, &self.store.control)?;
                 }
             }
@@ -88,8 +102,35 @@ impl KeyValueBatch for Batch<'_> {
         Ok(())
     }
     fn delete_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
+        self.operations.push(Operation::DeletePrefix(
+            self.copy(prefix)?,
+            RecordWriteKind::Canonical,
+        ))?;
+        Ok(())
+    }
+    fn replace_occurrence_record(
+        &mut self,
+        key: &[u8],
+        value: Option<&[u8]>,
+    ) -> StorageBackendResult<()> {
+        self.typed_record(key, value, RecordWriteKind::Occurrence)
+    }
+    fn invalidate_occurrence_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
+        self.operations.push(Operation::DeletePrefix(
+            self.copy(prefix)?,
+            RecordWriteKind::OccurrenceCache,
+        ))?;
+        Ok(())
+    }
+    fn occurrence_document(&mut self, table: &str, document: u64) -> StorageBackendResult<()> {
+        let key =
+            crate::key_value::occurrence_commit::guard(table, Some(document), &self.store.control)
+                .map_err(VersionError::into_storage_error)?;
+        self.put(&key, b"")
+    }
+    fn reset_occurrences(&mut self, table: &str) -> StorageBackendResult<()> {
         self.operations
-            .push(Operation::DeletePrefix(self.copy(prefix)?))?;
+            .push(Operation::OccurrenceReset(self.copy(table.as_bytes())?))?;
         Ok(())
     }
     fn graph_mutation(
@@ -107,14 +148,14 @@ impl KeyValueBatch for Batch<'_> {
         key: &[u8],
         value: Option<&[u8]>,
     ) -> StorageBackendResult<()> {
-        self.cache(key, value, RecordWriteKind::GraphPreview)
+        self.typed_record(key, value, RecordWriteKind::GraphPreview)
     }
     fn replace_graph_cache(
         &mut self,
         key: &[u8],
         value: Option<&[u8]>,
     ) -> StorageBackendResult<()> {
-        self.cache(key, value, RecordWriteKind::GraphCache)
+        self.typed_record(key, value, RecordWriteKind::GraphCache)
     }
     fn commit(self: Box<Self>) -> StorageBackendResult<()> {
         self.store.write(|transaction| self.apply(transaction))

@@ -159,6 +159,38 @@ fn fields(text: &str) -> BTreeMap<String, String> {
 }
 
 #[test]
+fn independent_occurrence_writers_merge_one_cluster_and_field_totals() {
+    let persistence = Persistence::new();
+    let a = Arc::new(persistence.session(1 << 20));
+    let b = Arc::new(persistence.session(1 << 20));
+    let mut first =
+        KeyValueInvertedIndex::new(a.clone(), "docs", uqa_analysis::whitespace_analyzer());
+    let mut second = KeyValueInvertedIndex::new(b, "docs", uqa_analysis::whitespace_analyzer());
+    first.add_document(1, fields("alpha alpha")).unwrap();
+    a.begin_transaction().unwrap();
+    first.add_document(2, fields("alpha alpha alpha")).unwrap();
+    let retained = first.snapshot().unwrap();
+    second
+        .add_document(3, fields("alpha alpha alpha alpha"))
+        .unwrap();
+    assert_eq!(second.doc_count().unwrap(), 2);
+    assert_eq!(second.total_field_length("body").unwrap(), 6);
+    assert_eq!(first.doc_count().unwrap(), 2);
+    assert_eq!(first.total_field_length("body").unwrap(), 5);
+    a.commit_transaction().unwrap();
+    for index in [&first, &second] {
+        assert_eq!(index.doc_count().unwrap(), 3);
+        assert_eq!(index.total_field_length("body").unwrap(), 9);
+        assert_eq!(index.doc_freq("body", "alpha").unwrap(), 3);
+        for (id, frequency) in [(1, 2), (2, 3), (3, 4)] {
+            assert_eq!(index.get_term_freq(id, "body", "alpha").unwrap(), frequency);
+        }
+    }
+    assert_eq!(retained.doc_count().unwrap(), 2);
+    assert_eq!(retained.total_field_length("body").unwrap(), 5);
+}
+
+#[test]
 fn compound_occurrence_queries_keep_original_rows_during_an_intervening_commit() {
     for query in 0..4 {
         let persistence = Persistence::new();
@@ -286,7 +318,7 @@ fn occurrence_evaluation_retains_original_preconditions_and_never_replays() {
         KeyValueInvertedIndex::new(b.clone(), "docs", uqa_analysis::whitespace_analyzer());
     winner.add_document(1, fields("alpha")).unwrap();
     *a.after_evaluation.lock() = Some(Box::new(move || {
-        winner.add_document(3, fields("alpha alpha alpha")).unwrap();
+        winner.add_document(2, fields("alpha alpha alpha")).unwrap();
     }));
     let mut loser =
         KeyValueInvertedIndex::new(a.clone(), "docs", uqa_analysis::whitespace_analyzer());
@@ -297,8 +329,8 @@ fn occurrence_evaluation_retains_original_preconditions_and_never_replays() {
     let committed = KeyValueInvertedIndex::new(b, "docs", uqa_analysis::whitespace_analyzer());
     assert_eq!(committed.doc_count().unwrap(), 2);
     assert_eq!(committed.total_field_length("body").unwrap(), 4);
-    assert_eq!(committed.get_term_freq(2, "body", "alpha").unwrap(), 0);
-    assert_eq!(committed.get_term_freq(3, "body", "alpha").unwrap(), 3);
+    assert_eq!(committed.get_term_freq(2, "body", "alpha").unwrap(), 3);
+    assert_eq!(committed.get_term_freq(3, "body", "alpha").unwrap(), 0);
     a.inner.rollback_transaction().unwrap();
     assert_eq!(loser.total_field_length("body").unwrap(), 4);
 }

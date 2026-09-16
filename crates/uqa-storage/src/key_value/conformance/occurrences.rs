@@ -160,11 +160,12 @@ fn verify_retained_occurrences(
     Ok(())
 }
 
-/// Verify independent index writers and an explicitly pinned reader. This does not claim merging concurrent updates of one shared posting cluster or field counter.
+/// Verify independent document writers sharing clusters and field totals, structural conflicts and explicitly pinned readers.
 pub fn verify_occurrence_concurrency(
     a: &Arc<dyn KeyValueStore>,
     b: &Arc<dyn KeyValueStore>,
 ) -> StorageBackendResult<()> {
+    super::occurrence_merging::verify(a, b)?;
     let mut left = KeyValueInvertedIndex::new(a.clone(), "occurrence_left", whitespace_analyzer());
     let mut right =
         KeyValueInvertedIndex::new(b.clone(), "occurrence_right", whitespace_analyzer());
@@ -211,6 +212,7 @@ pub fn verify_occurrence_concurrency(
 
 /// Verify the durable results of `verify_occurrence_concurrency` after all original sessions close.
 pub fn verify_occurrence_reopen(store: Arc<dyn KeyValueStore>) -> StorageBackendResult<()> {
+    super::occurrence_merging::verify_reopen(&store)?;
     let left = KeyValueInvertedIndex::new(store.clone(), "occurrence_left", whitespace_analyzer());
     let right = KeyValueInvertedIndex::new(store, "occurrence_right", whitespace_analyzer());
     expect_eq(&left.doc_count()?, &3, "reopened occurrence documents")?;

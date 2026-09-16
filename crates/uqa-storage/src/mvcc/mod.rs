@@ -8,7 +8,7 @@
 //!
 //! Record validation is independent of SQL tuple locks and command execution. A physical record replacement must carry the revision it replaces, including the revision of a tombstone. Derived indexes additionally need their owning logical mutation rules; an opaque replacement is not an index merge.
 
-mod commit;
+pub(crate) mod commit;
 mod graph;
 mod history;
 mod key;

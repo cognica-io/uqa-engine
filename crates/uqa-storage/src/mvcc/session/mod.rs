@@ -40,7 +40,7 @@ impl Default for VersionedSessionOptions {
     }
 }
 
-/// A provider-independent session with pinned reads and conditional atomic publication. SQL isolation, locks and index merging belong to the callers above this byte-record contract.
+/// A provider-independent session with pinned reads and conditional atomic publication. Common storage resolves typed index changes before physical admission; SQL isolation and tuple locks remain above this byte-record contract.
 pub struct VersionedKeyValueStore {
     affinity: StorageSessionAffinity,
     persistence: Arc<dyn VersionedPersistence>,

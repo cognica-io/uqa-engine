@@ -2,6 +2,8 @@
 
 Status: Implementation in progress. This design was checked against UQA 0.3.6 at `24e464f7709cd5d942df8d0aeef5d522716b1bfb` on 2026-09-16. Direct SQLite Key/Value and redb sessions now use common MVCC, but native relational SQLite and the complete concurrent SQL capability described here remain unfinished. The [implementation plan](../plans/0008-concurrent-storage-transactions.md) tracks the work and acceptance evidence; the [storage manual](../manual/internals/03-storage.md) distinguishes released behavior from development changes.
 
+The common Key/Value occurrence owner now merges independent document writes sharing clusters and field totals, with persistent document/structure guards and fresh cache invalidation. SQLite Key/Value and redb share this implementation; native row projections and vector merges still require integration. The [storage manual](../manual/internals/03-storage.md) defines the implemented contract.
+
 ## Required outcome
 
 SQLite and redb remain durable storage providers. UQA owns multiversion concurrency control (MVCC), private transaction changes, logical conflict detection and publication above their physical transactions. If transaction A has changed row 1 and remains open, transaction B must be able to change independent row 2 and commit before A finishes. Both committed changes must survive reopen; rolling A back must preserve B. This applies to the default relational SQLite provider, SQLite Key/Value storage and redb, including writes whose rows share physical index records.

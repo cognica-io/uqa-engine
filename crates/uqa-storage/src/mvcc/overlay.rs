@@ -191,7 +191,7 @@ impl PrivateRecordChanges {
         self.apply_owned(prepared.records(), control)
     }
 
-    pub(super) fn apply_owned(
+    pub(crate) fn apply_owned(
         &self,
         writes: &[PreparedRecordWrite],
         control: &StorageReadControl,

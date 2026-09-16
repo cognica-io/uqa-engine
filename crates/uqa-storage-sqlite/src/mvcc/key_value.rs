@@ -34,7 +34,8 @@ pub(super) fn initialize(
             |row| row.get(0),
         )
         .optional()?;
-    let (identity, _) = schema::initialize_in(&transaction)?;
+    let initialized = schema::initialize_in(&transaction)?;
+    let identity = initialized.identity;
     let header = codec::header(&transaction, identity)?;
     if header.key_value_mapping {
         if legacy != Some(2)
@@ -44,6 +45,9 @@ pub(super) fn initialize(
             return Err(
                 VersionError::InvalidEncoding("incomplete versioned KeyValue format").into(),
             );
+        }
+        if initialized.upgraded {
+            transaction.commit()?;
         }
         return Ok(identity);
     }

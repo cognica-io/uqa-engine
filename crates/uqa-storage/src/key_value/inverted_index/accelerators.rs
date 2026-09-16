@@ -140,7 +140,7 @@ impl OccurrenceRead<'_> {
         batch: &mut dyn KeyValueBatch,
     ) -> StorageBackendResult<()> {
         for kind in [keys::SKIP, keys::BLOCK_MAX] {
-            batch.delete_prefix(&keys::kind_prefix(self.table, kind)?)?;
+            batch.invalidate_occurrence_prefix(&keys::kind_prefix(self.table, kind)?)?;
         }
         Ok(())
     }

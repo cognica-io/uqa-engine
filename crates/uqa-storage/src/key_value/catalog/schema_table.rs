@@ -201,6 +201,9 @@ impl KeyValueCatalog {
         self.drop_catalog_indexes_for_table_in_batch(batch.as_mut(), &relation.qualified_name())?;
         batch.delete(&relation_key(TAG_TABLE, &relation)?)?;
         self.release_relation(batch.as_mut(), &relation, RelationKind::Table)?;
+        for name in relation.canonical_and_legacy_public_names() {
+            batch.reset_occurrences(&name)?;
+        }
         batch.commit()
     }
 
@@ -213,6 +216,7 @@ impl KeyValueCatalog {
         batch.delete(&relation_key(TAG_TABLE, &relation)?)?;
         self.release_relation(batch.as_mut(), &relation, RelationKind::Table)?;
         for storage_name in &storage_names {
+            batch.reset_occurrences(storage_name)?;
             batch.delete_prefix(&document_key_prefix(storage_name)?)?;
             batch.delete_prefix(&posting_key_prefix(storage_name)?)?;
             batch.delete_prefix(&occurrence::table_prefix(storage_name)?)?;
@@ -236,6 +240,7 @@ impl KeyValueCatalog {
             RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?;
         let mut batch = self.store.batch();
         for storage_name in relation.canonical_and_legacy_public_names() {
+            batch.reset_occurrences(&storage_name)?;
             batch.delete_prefix(&document_key_prefix(&storage_name)?)?;
             batch.delete_prefix(&posting_key_prefix(&storage_name)?)?;
             batch.delete_prefix(&occurrence::table_prefix(&storage_name)?)?;
@@ -285,6 +290,8 @@ impl KeyValueCatalog {
             .ok_or_else(|| StorageBackendError::Other(format!("table `{from}` does not exist")))?;
         let mut batch = self.store.batch();
         let mut schema = decode_value::<TableSchema>(&value)?;
+        batch.reset_occurrences(from)?;
+        batch.reset_occurrences(to)?;
         schema.relation = to_relation.clone();
         batch.put(&to_key, &encode_value(&schema)?)?;
         batch.delete(&from_key)?;

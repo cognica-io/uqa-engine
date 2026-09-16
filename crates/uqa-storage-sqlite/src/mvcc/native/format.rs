@@ -91,7 +91,7 @@ pub(in crate::mvcc) fn initialize(
     if source != Some(true) {
         return Err(invalid("native mapping requires an initialized schema 48 catalog").into());
     }
-    let (identity, _) = schema::initialize_in(&transaction)?;
+    let identity = schema::initialize_in(&transaction)?.identity;
     let header = codec::header(&transaction, identity)?;
     let populated: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_heads) OR EXISTS(SELECT 1 FROM _uqa_mvcc_versions) OR EXISTS(SELECT 1 FROM _uqa_mvcc_transactions)", [], |row| row.get(0))?;
     if header.key_value_mapping
@@ -186,8 +186,9 @@ fn reopen(connection: &Connection, control: &StorageReadControl) -> PhysicalResu
             4
         };
     validate_format(connection, version)?;
-    let (identity, created) = schema::initialize_in(connection)?;
-    if created {
+    let initialized = schema::initialize_in(connection)?;
+    let identity = initialized.identity;
+    if initialized.created {
         return Err(invalid("native mapping has no record history format").into());
     }
     if codec::header(connection, identity)?.key_value_mapping {

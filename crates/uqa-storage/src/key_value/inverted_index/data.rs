@@ -14,7 +14,7 @@ use super::{
 };
 
 impl FieldStats {
-    pub(super) fn to_bytes(self) -> StorageBackendResult<[u8; 56]> {
+    pub(in crate::key_value) fn to_bytes(self) -> StorageBackendResult<[u8; 56]> {
         if self.doc_count == 0 {
             return Err(other_error("empty field statistics must be removed"));
         }
@@ -25,7 +25,7 @@ impl FieldStats {
         Ok(bytes)
     }
 
-    pub(super) fn from_bytes(bytes: &[u8]) -> StorageBackendResult<Self> {
+    pub(in crate::key_value) fn from_bytes(bytes: &[u8]) -> StorageBackendResult<Self> {
         if bytes.len() != 56 {
             return Err(other_error("invalid occurrence field statistics"));
         }
