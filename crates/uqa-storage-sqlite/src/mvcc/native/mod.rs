@@ -9,6 +9,7 @@
 mod capture;
 mod family;
 mod format;
+mod graph_lookup;
 mod key;
 mod layout;
 mod owners;

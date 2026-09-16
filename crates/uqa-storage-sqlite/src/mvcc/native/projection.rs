@@ -19,7 +19,7 @@ use super::{
 use crate::mvcc::{read, write, Error, PhysicalResult};
 
 // Parents precede their children; native document guards and graph invalidation triggers also run before evaluated index materializations are installed.
-const ORDER: [Family; 44] = [
+const ORDER: [Family; 45] = [
     Family::TableOwners,
     Family::Schemas,
     Family::Relations,
@@ -42,6 +42,7 @@ const ORDER: [Family; 44] = [
     Family::GraphEdges,
     Family::NamedGraphs,
     Family::GraphMembership,
+    Family::GraphLookups,
     Family::HNSWIndexes,
     Family::HNSWNodes,
     Family::HNSWEdges,
@@ -125,6 +126,7 @@ fn apply(
             physical::upsert(connection, family.layout(), &values, control)?;
         }
     }
+    super::graph_lookup::validate_deletions(connection, prepared, control)?;
     for record in prepared.records() {
         if let Some(row) = record.value() {
             let (identity, values) = decode_record(record.key(), row, control)?;

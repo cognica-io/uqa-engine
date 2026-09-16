@@ -169,7 +169,7 @@ impl CommittedRecordSnapshot for Snapshot {
     }
 }
 
-fn keys(
+pub(super) fn keys(
     connection: &Connection,
     prefix: &[u8],
     after: Option<&[u8]>,

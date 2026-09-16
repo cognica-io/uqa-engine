@@ -12,11 +12,17 @@ use uqa_storage::{
     read_control::StorageReadControl,
 };
 
-use super::{capture, invalid, owners, physical, NativeRecord, NativeRecordFamily as Family};
+use super::{
+    capture, graph_lookup, invalid, owners, physical, NativeRecord, NativeRecordFamily as Family,
+};
 use crate::mvcc::{codec, schema, write, PhysicalResult};
 
+mod graph_lookup_upgrade;
+
+const LEGACY_FORMAT: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 1), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))";
+
 const TABLES: [(&str, &str); 4] = [
-    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 1), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))"),
+    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 2), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))"),
     ("_uqa_mvcc_native_owners", "CREATE TABLE _uqa_mvcc_native_owners (name TEXT PRIMARY KEY NOT NULL, object_id BLOB NOT NULL CHECK(typeof(object_id) = 'blob' AND length(object_id) = 16 AND object_id != zeroblob(16)), generation BLOB NOT NULL CHECK(typeof(generation) = 'blob' AND length(generation) = 16 AND generation != zeroblob(16)), catalog_owned INTEGER NOT NULL CHECK(catalog_owned IN (0, 1))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_expected", "CREATE TABLE _uqa_mvcc_native_expected (family INTEGER NOT NULL, physical_key BLOB NOT NULL, old_key BLOB, new_key BLOB, new_value BLOB, PRIMARY KEY(family, physical_key), CHECK((new_key IS NULL) = (new_value IS NULL))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_changes", "CREATE TABLE _uqa_mvcc_native_changes (family INTEGER NOT NULL, physical_key BLOB NOT NULL, PRIMARY KEY(family, physical_key)) WITHOUT ROWID"),
@@ -45,7 +51,11 @@ pub(in crate::mvcc) fn check_mapping(connection: &Connection, native: bool) -> P
     if !native {
         return reject_mapped(connection);
     }
-    let valid: bool = connection.query_row("SELECT (SELECT count(*) = 1 FROM _uqa_mvcc_native_format WHERE singleton = 1 AND format = 1 AND catalog_version = 49) AND (SELECT value = '49' FROM _metadata WHERE key = 'schema_version') AND NOT EXISTS(SELECT 1 FROM _uqa_mvcc_native_expected) AND NOT EXISTS(SELECT 1 FROM _uqa_mvcc_native_changes)", [], |row| row.get(0))?;
+    check_mapping_version(connection, 2)
+}
+
+fn check_mapping_version(connection: &Connection, version: u32) -> PhysicalResult<()> {
+    let valid: bool = connection.query_row("SELECT (SELECT count(*) = 1 FROM _uqa_mvcc_native_format WHERE singleton = 1 AND format = ?1 AND catalog_version = 49) AND (SELECT value = '49' FROM _metadata WHERE key = 'schema_version') AND NOT EXISTS(SELECT 1 FROM _uqa_mvcc_native_expected) AND NOT EXISTS(SELECT 1 FROM _uqa_mvcc_native_changes)", [version], |row| row.get(0))?;
     if !valid {
         return Err(
             invalid("incomplete native record format or unfinished materialization").into(),
@@ -62,16 +72,9 @@ pub(in crate::mvcc) fn initialize(
     let _permit = schema::WritePermit::acquire(connection)?;
     let transaction = schema::begin(connection)?;
     if present(&transaction)? {
-        validate_format(&transaction)?;
-        let (identity, created) = schema::initialize_in(&transaction)?;
-        if created {
-            return Err(invalid("native mapping has no record history format").into());
-        }
-        if codec::header(&transaction, identity)?.key_value_mapping {
-            return Err(invalid("mixed native and KeyValue mappings").into());
-        }
-        check_mapping(&transaction, true)?;
-        super::sequences::validate_source(&transaction)?;
+        let identity = reopen(&transaction, control)?;
+        control.cancellation().check().map_err(VersionError::from)?;
+        transaction.commit()?;
         return Ok(identity);
     }
     let source: Option<bool> = transaction
@@ -113,9 +116,11 @@ pub(in crate::mvcc) fn initialize(
         transaction.execute_batch(sql)?;
     }
     transaction.execute_batch(OWNER_INDEX)?;
-    validate_layouts(&transaction)?;
+    transaction.execute_batch(graph_lookup::SQL)?;
+    validate_layouts(&transaction, false)?;
     owners::seed(&transaction, control)?;
     super::sequences::validate_source(&transaction)?;
+    graph_lookup::seed(&transaction, control)?;
     transaction.execute(
         "UPDATE _metadata SET value = '49' WHERE key = 'schema_version'",
         [],
@@ -145,7 +150,7 @@ pub(in crate::mvcc) fn initialize(
         "UPDATE _uqa_mvcc_metadata SET sequence = ?1 WHERE singleton = 1",
         params![baseline.as_u64().to_be_bytes().as_slice()],
     )?;
-    transaction.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1, 1, 49)", [])?;
+    transaction.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1, 2, 49)", [])?;
     install_guards(&transaction)?;
     let invalid_foreign_key = transaction
         .prepare("PRAGMA foreign_key_check")?
@@ -160,6 +165,24 @@ pub(in crate::mvcc) fn initialize(
     Ok(identity)
 }
 
+fn reopen(connection: &Connection, control: &StorageReadControl) -> PhysicalResult<DatabaseId> {
+    let legacy = schema::definition_matches(connection, TABLES[0].0, LEGACY_FORMAT)? == Some(true);
+    validate_format(connection, legacy)?;
+    let (identity, created) = schema::initialize_in(connection)?;
+    if created {
+        return Err(invalid("native mapping has no record history format").into());
+    }
+    if codec::header(connection, identity)?.key_value_mapping {
+        return Err(invalid("mixed native and KeyValue mappings").into());
+    }
+    check_mapping_version(connection, if legacy { 1 } else { 2 })?;
+    super::sequences::validate_source(connection)?;
+    if legacy {
+        graph_lookup_upgrade::upgrade(connection, identity, control)?;
+    }
+    Ok(identity)
+}
+
 fn install_guards(transaction: &Connection) -> PhysicalResult<()> {
     for (name, _) in TABLES {
         for action in ["INSERT", "UPDATE", "DELETE"] {
@@ -167,18 +190,31 @@ fn install_guards(transaction: &Connection) -> PhysicalResult<()> {
         }
     }
     for family in Family::all() {
-        for action in ["INSERT", "UPDATE", "DELETE"] {
-            if family != Family::TableOwners {
-                transaction.execute_batch(&schema::trigger(family.layout().table, action).1)?;
-            }
-            transaction.execute_batch(&capture::trigger(family, action).1)?;
-        }
+        install_family_guards(transaction, family)?;
+    }
+    for (_, sql) in graph_lookup::triggers() {
+        transaction.execute_batch(&sql)?;
     }
     Ok(())
 }
 
-fn validate_format(connection: &Connection) -> PhysicalResult<()> {
+fn install_family_guards(transaction: &Connection, family: Family) -> PhysicalResult<()> {
+    for action in ["INSERT", "UPDATE", "DELETE"] {
+        if family != Family::TableOwners {
+            transaction.execute_batch(&schema::trigger(family.layout().table, action).1)?;
+        }
+        transaction.execute_batch(&capture::trigger(family, action).1)?;
+    }
+    Ok(())
+}
+
+fn validate_format(connection: &Connection, legacy: bool) -> PhysicalResult<()> {
     for (name, sql) in TABLES {
+        let sql = if legacy && name == TABLES[0].0 {
+            LEGACY_FORMAT
+        } else {
+            sql
+        };
         require_definition(connection, name, sql)?;
         for action in ["INSERT", "UPDATE", "DELETE"] {
             let (name, sql) = schema::trigger(name, action);
@@ -186,7 +222,7 @@ fn validate_format(connection: &Connection) -> PhysicalResult<()> {
         }
     }
     require_definition(connection, "_uqa_mvcc_native_owner_identity", OWNER_INDEX)?;
-    for family in Family::all() {
+    for family in families(legacy) {
         for action in ["INSERT", "UPDATE", "DELETE"] {
             let (name, sql) = schema::trigger(family.layout().table, action);
             require_definition(connection, &name, &sql)?;
@@ -194,7 +230,17 @@ fn validate_format(connection: &Connection) -> PhysicalResult<()> {
             require_definition(connection, &name, &sql)?;
         }
     }
-    validate_layouts(connection)
+    if !legacy {
+        require_definition(
+            connection,
+            Family::GraphLookups.layout().table,
+            graph_lookup::SQL,
+        )?;
+        for (name, sql) in graph_lookup::triggers() {
+            require_definition(connection, &name, &sql)?;
+        }
+    }
+    validate_layouts(connection, legacy)
 }
 
 fn require_definition(connection: &Connection, name: &str, sql: &str) -> PhysicalResult<()> {
@@ -204,8 +250,12 @@ fn require_definition(connection: &Connection, name: &str, sql: &str) -> Physica
     Ok(())
 }
 
-fn validate_layouts(connection: &Connection) -> PhysicalResult<()> {
-    for family in Family::all() {
+fn families(legacy: bool) -> impl Iterator<Item = Family> {
+    Family::all().filter(move |family| !legacy || *family != Family::GraphLookups)
+}
+
+fn validate_layouts(connection: &Connection, legacy: bool) -> PhysicalResult<()> {
+    for family in families(legacy) {
         let layout = family.layout();
         let mut statement = connection.prepare(&format!("PRAGMA table_info({})", layout.table))?;
         let mut rows = statement.query([])?;
@@ -254,7 +304,7 @@ fn validate_layouts(connection: &Connection) -> PhysicalResult<()> {
             .get_ref(0)?
             .as_str()
             .map_err(|_| invalid("native table name is not UTF-8"))?;
-        if !Family::all().any(|family| family.layout().table == name)
+        if !families(legacy).any(|family| family.layout().table == name)
             && !TABLES.iter().any(|(table, _)| *table == name)
             && !matches!(
                 name,

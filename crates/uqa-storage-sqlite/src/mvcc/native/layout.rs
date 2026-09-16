@@ -682,6 +682,22 @@ pub(super) const LAYOUTS: &[NativeRecordLayout] = &[
         identity_columns: &[0],
         object_owned: false,
     },
+    NativeRecordLayout {
+        family: NativeRecordFamily::GraphLookups,
+        table: "_uqa_mvcc_native_graph_lookup",
+        columns: &[
+            "kind",
+            "text_key",
+            "integer_key",
+            "entity_type",
+            "entity_id",
+        ],
+        column_types: &[Text, Text, Integer, Text, Integer],
+        nullable: &[false, false, false, false, false],
+        primary_key: &[0, 1, 2, 3, 4],
+        identity_columns: &[0, 1, 2, 3, 4],
+        object_owned: false,
+    },
 ];
 
 impl NativeRecordLayout {
