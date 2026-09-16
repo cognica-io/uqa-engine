@@ -8,7 +8,9 @@
 
 mod analyzers;
 mod foreign;
+mod indexes;
 mod relations;
+mod tables;
 mod views;
 pub(super) use analyzers::FieldWrite;
 pub(super) use relations::RelationRecord;

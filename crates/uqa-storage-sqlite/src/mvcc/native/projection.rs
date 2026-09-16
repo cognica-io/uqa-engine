@@ -99,10 +99,12 @@ fn apply(
         },
     )?;
     validate_retired_owners(connection, prepared, control)?;
+    // Release changed name bindings before installing any new ones so identity reuse does not depend on lexical name order.
     for family in ORDER.into_iter().rev() {
         let filter = format!(
-            "family = {} AND old_key IS NOT NULL AND old_key IS NOT new_key",
-            family.id()
+            "family = {} AND old_key IS NOT NULL AND (old_key IS NOT new_key OR family = {})",
+            family.id(),
+            Family::TableOwners.id(),
         );
         queue::visit(
             connection,
@@ -284,6 +286,14 @@ fn validate_retired_owners(
                     }
                     let values =
                         decode_row(old, Family::TableOwners.layout().columns.len(), control)?;
+                    if let Some(new) = record.value() {
+                        let updated =
+                            decode_row(new, Family::TableOwners.layout().columns.len(), control)?;
+                        // Changing catalog membership preserves this owner and needs no data rewrite.
+                        if values[..3] == updated[..3] {
+                            return Ok(());
+                        }
+                    }
                     owners::validate_retirement(connection, values[0], control)
                 };
                 validate().map_err(Error::into_version)

@@ -50,6 +50,10 @@ impl NativeSnapshot {
     }
 
     pub(crate) fn table_owner(&self, table: &str) -> Result<Option<NativeRecordOwner>> {
+        Ok(self.table_binding(table)?.map(|(owner, _)| owner))
+    }
+
+    pub(crate) fn table_binding(&self, table: &str) -> Result<Option<(NativeRecordOwner, bool)>> {
         self.read_row(
             Family::TableOwners,
             NativeRecordOwner::Database(self.database),
@@ -67,9 +71,16 @@ impl NativeSnapshot {
                     generation: id(values[2])?,
                 };
                 NativeRecordIdentity::new(Family::Documents, owner)?;
-                Ok(owner)
+                Ok((owner, values[3] == ValueRef::Integer(1)))
             },
         )
+    }
+
+    pub(crate) fn allocate_identity(&self, value: [u8; 16]) -> Result<[u8; 16]> {
+        self.control.check()?;
+        owners::allocate(ValueRef::Blob(&value))
+            .map_err(crate::mvcc::Error::into_version)
+            .map_err(Into::into)
     }
 
     /// Visit live rows on this fixed boundary without retaining a corpus-sized payload collection. The callback must not reenter persistence.

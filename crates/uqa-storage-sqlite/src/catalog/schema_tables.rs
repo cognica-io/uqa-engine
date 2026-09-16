@@ -141,6 +141,9 @@ impl Catalog {
     }
 
     pub fn save_table(&self, schema: &TableSchema) -> Result<()> {
+        if self.save_native_table(schema)?.is_some() {
+            return Ok(());
+        }
         let analyzer = schema.analyzer_json.clone();
         let fts = serde_json::to_string(&schema.fts_fields)?;
         let vectors = serde_json::to_string(&schema.vector_fields)?;
@@ -192,6 +195,9 @@ impl Catalog {
     }
 
     pub fn load_tables(&self) -> Result<Vec<TableSchema>> {
+        if let Some(tables) = self.load_native_tables()? {
+            return Ok(tables);
+        }
         self.conn.with(|c| {
             let mut stmt = c.prepare(
                 "SELECT schema_name, relation_name, analyzer, fts_fields,
@@ -272,6 +278,9 @@ impl Catalog {
 
     pub fn drop_table(&self, name: &str) -> Result<()> {
         let relation = migration_relation(name)?;
+        if self.drop_native_table(&relation, false)?.is_some() {
+            return Ok(());
+        }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
             Self::drop_catalog_index_rows_for_table(&tx, &relation)?;
@@ -292,6 +301,9 @@ impl Catalog {
     /// well.
     pub fn purge_table_data(&self, name: &str) -> Result<()> {
         let relation = migration_relation(name)?;
+        if self.purge_native_table_data(&relation)?.is_some() {
+            return Ok(());
+        }
         let storage_names = relation.canonical_and_legacy_public_names();
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
@@ -331,6 +343,9 @@ impl Catalog {
 
     pub fn drop_table_and_data(&self, name: &str) -> Result<()> {
         let relation = migration_relation(name)?;
+        if self.drop_native_table(&relation, true)?.is_some() {
+            return Ok(());
+        }
         let storage_names = relation.canonical_and_legacy_public_names();
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
@@ -388,6 +403,12 @@ impl Catalog {
             return Err(SQLiteError::StorageBackend(
                 "moving a table between schemas is not supported by the catalog".into(),
             ));
+        }
+        if self
+            .rename_native_table(from, to, &from_relation, &to_relation)?
+            .is_some()
+        {
+            return Ok(());
         }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;

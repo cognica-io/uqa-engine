@@ -294,6 +294,9 @@ impl Catalog {
                 table.qualified_name()
             )));
         }
+        if self.save_native_catalog_index(index, &table)?.is_some() {
+            return Ok(());
+        }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
             Self::claim_relation(&tx, relation, RelationKind::Index)?;
@@ -326,6 +329,9 @@ impl Catalog {
     }
 
     pub fn drop_catalog_index(&self, relation: &RelationIdentity) -> Result<()> {
+        if self.drop_native_catalog_index(relation)?.is_some() {
+            return Ok(());
+        }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
             tx.execute(
@@ -342,6 +348,9 @@ impl Catalog {
     pub fn drop_catalog_indexes_for_table(&self, table_name: &str) -> Result<()> {
         let table =
             RelationIdentity::from_legacy_name(table_name).map_err(SQLiteError::StorageBackend)?;
+        if self.drop_native_table_indexes(&table)?.is_some() {
+            return Ok(());
+        }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
             Self::drop_catalog_index_rows_for_table(&tx, &table)?;
@@ -382,6 +391,9 @@ impl Catalog {
     }
 
     pub fn load_catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>> {
+        if let Some(indexes) = self.load_native_catalog_indexes()? {
+            return Ok(indexes);
+        }
         self.conn.with(|c| {
             let mut stmt = c.prepare(
                 "SELECT schema_name, relation_name, index_type,

@@ -36,7 +36,10 @@ impl RelationRecord {
 }
 
 impl NativeSnapshot {
-    fn relation_kind(&self, relation: &RelationIdentity) -> Result<Option<String>> {
+    pub(in crate::catalog) fn relation_kind(
+        &self,
+        relation: &RelationIdentity,
+    ) -> Result<Option<String>> {
         self.read_row(
             Family::Relations,
             NativeRecordOwner::Database(self.database),
@@ -69,7 +72,7 @@ impl NativeSnapshot {
         Ok(())
     }
 
-    fn release_relation(
+    pub(in crate::catalog) fn release_relation(
         &self,
         batch: &mut dyn KeyValueBatch,
         relation: &RelationIdentity,
