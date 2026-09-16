@@ -14,17 +14,19 @@ use uqa_core::CancellationToken;
 
 use crate::read_control::StorageReadControl;
 
+use super::key::RecordKey;
 use super::{CommitSequence, RecordWrite, VersionError, VersionResult};
 
+#[derive(Clone)]
 pub struct PreparedRecordWrite {
-    key: BudgetedVec<u8>,
+    key: RecordKey,
     expected: Option<CommitSequence>,
     value: Option<Arc<BudgetedVec<u8>>>,
 }
 
 impl PreparedRecordWrite {
     pub fn key(&self) -> &[u8] {
-        &self.key
+        self.key.bytes()
     }
 
     pub fn expected(&self) -> Option<CommitSequence> {
@@ -37,6 +39,10 @@ impl PreparedRecordWrite {
 
     pub(crate) fn shared_value(&self) -> Option<Arc<BudgetedVec<u8>>> {
         self.value.clone()
+    }
+
+    pub(super) fn shared_key(&self) -> RecordKey {
+        self.key.clone()
     }
 }
 
@@ -71,8 +77,7 @@ impl PreparedRecordCommit {
         prepared.reserve(writes.len())?;
         for write in writes {
             control.cancellation().check()?;
-            let mut key = BudgetedVec::new(control.memory());
-            key.extend_from_slice(write.key)?;
+            let key = RecordKey::new(write.key, control.memory())?;
             let value = if let Some(value) = write.value {
                 let mut owned = BudgetedVec::new(control.memory());
                 owned.extend_from_slice(value)?;
@@ -92,6 +97,11 @@ impl PreparedRecordCommit {
 
     pub fn records(&self) -> &[PreparedRecordWrite] {
         &self.writes
+    }
+
+    /// The caller supplies exactly one final replacement for each identity.
+    pub(super) fn from_unique_owned(writes: BudgetedVec<PreparedRecordWrite>) -> Self {
+        Self { writes }
     }
 
     /// Check all preconditions under the provider's exclusive commit boundary. The callback reads current committed heads, not the caller's old snapshot.

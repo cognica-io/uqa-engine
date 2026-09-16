@@ -10,10 +10,13 @@
 
 mod commit;
 mod history;
+mod key;
 mod memory;
+mod overlay;
 mod types;
 
 pub use commit::{PreparedRecordCommit, PreparedRecordWrite};
 pub use history::{RecordHistory, RecordVersion};
 pub use memory::{MemoryRecordSnapshot, MemoryVersionStore, ScannedRecord};
+pub use overlay::{PrivateRecordChanges, PrivateRecordSnapshot};
 pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};

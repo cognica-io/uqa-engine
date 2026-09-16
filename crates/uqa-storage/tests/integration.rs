@@ -28,3 +28,6 @@ mod japanese;
 
 #[path = "cases/mvcc.rs"]
 mod mvcc;
+
+#[path = "cases/mvcc_private.rs"]
+mod mvcc_private;

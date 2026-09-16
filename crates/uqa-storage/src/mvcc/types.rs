@@ -47,6 +47,10 @@ pub enum VersionError {
     },
     #[error("record mutations {first} and {second} replace the same identity")]
     DuplicateRecord { first: usize, second: usize },
+    #[error("private record revision space exhausted")]
+    PrivateRevisionExhausted,
+    #[error("private record savepoint {0:?} does not exist")]
+    SavepointMissing(crate::StorageSavepointId),
     #[error(transparent)]
     Memory(#[from] uqa_core::memory::MemoryError),
     #[error(transparent)]

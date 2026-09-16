@@ -15,38 +15,13 @@ use uqa_core::memory::{BudgetedVec, MemoryBudget, MemoryReservation};
 
 use crate::read_control::StorageReadControl;
 
+use super::key::RecordKey;
 use super::{
     CommitSequence, PreparedRecordCommit, RecordHistory, RecordVersion, RecordWrite, VersionResult,
 };
 
 type SharedValue = Arc<BudgetedVec<u8>>;
 type History = RecordHistory<SharedValue>;
-
-#[derive(Debug)]
-struct RecordKey(BudgetedVec<u8>);
-
-impl Borrow<[u8]> for RecordKey {
-    fn borrow(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl PartialEq for RecordKey {
-    fn eq(&self, other: &Self) -> bool {
-        *self.0 == *other.0
-    }
-}
-impl Eq for RecordKey {}
-impl PartialOrd for RecordKey {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for RecordKey {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.cmp(&other.0)
-    }
-}
 
 struct RecordEntry {
     history: History,
@@ -137,7 +112,7 @@ impl MemoryVersionStore {
         prepared.reserve(writes.len())?;
         for write in writes {
             control.cancellation().check()?;
-            let key = RecordKey(copy_bytes(write.key(), &self.database.memory)?);
+            let key = RecordKey::new(write.key(), &self.database.memory)?;
             let value = write.shared_value();
             let history = if let Some(entry) = state.records.get(write.key()) {
                 entry.history.fork_appending(sequence, value)?

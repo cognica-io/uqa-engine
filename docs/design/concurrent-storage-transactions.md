@@ -28,7 +28,7 @@ The [dependency policy](../../scripts/workspace-dependency-policy.json) permits 
 
 ### Runtime access paths
 
-The following inventory identifies existing entry points that must join the new contract. It is an integration checklist, not evidence that those paths already use concurrent transactions. The initial record-history implementation does not change any of these provider or Engine paths.
+The following inventory identifies existing entry points that must join the new contract. It is an integration checklist, not evidence that those paths already use concurrent transactions. The common record-history and private-overlay implementations do not change any of these provider or Engine paths.
 
 | Access path | Existing owner/entry point | Required integration |
 | --- | --- | --- |
@@ -66,7 +66,7 @@ flowchart TD
 
 | Owner | Responsibility |
 | --- | --- |
-| `uqa-storage::mvcc` (proposed module) | Transaction IDs, snapshot leases, version visibility, ordered overlays, undo positions, record/range observations, serialization dependencies, commit validation, version reclamation and reusable conformance tests. |
+| `uqa-storage::mvcc` | Transaction IDs, snapshot leases, version visibility, ordered overlays, undo positions, record/range observations, serialization dependencies, commit validation, version reclamation and reusable conformance tests. |
 | Existing `uqa-storage` document, catalog, posting and vector owners | Stable record identities, typed mutations, merge rules and versioned physical-index roots. Reuse existing codecs and algorithms. |
 | `uqa-storage-sqlite` | Native-table and K/V record mapping, short SQLite read/commit transactions, schema migration, physical atomicity, encrypted/compressed storage and secure temporary storage. |
 | `uqa-storage-redb` | redb record mapping, short native read/commit transactions, file-format migration and durability. |
