@@ -285,5 +285,8 @@ mod controlled;
 #[path = "store_contract/mvcc.rs"]
 mod mvcc;
 
+#[path = "store_contract/logical_sessions.rs"]
+mod logical_sessions;
+
 #[path = "store_contract/japanese.rs"]
 mod japanese;

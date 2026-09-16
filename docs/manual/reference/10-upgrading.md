@@ -8,6 +8,14 @@ The 0.3.0 release added native Korean Nori analysis, durable analyzer revisions 
 
 The 0.2 series includes SQL object and privilege lifecycle changes, durable expression and unique indexes, expanded sequences and PL/pgSQL, native cross-process notifications, and a Node.js HTTP client that runs without native addons. These changes were introduced in [0.2.0](../../../HISTORY.md#020---2026-09-05); the [compatibility guide](../sql/09-compatibility.md) defines the verified PostgreSQL 18 surface and the behavior still being implemented.
 
+## Unreleased redb record format
+
+The development redb provider migrates existing Key/Value files when `RedbStorage::open` opens them under redb's exclusive file-owner admission. It copies legacy records into version histories and atomically replaces the old writable table with a typed guard. Migration preserves binary keys, values and the committed change counter; interrupted publication reopens as a complete old or new format, and reopening the new format does not copy data again. The actual crates.io 0.3.6 writer rejects the migrated file before writing. Keep a closed-file backup before this one-way upgrade; restoring that original file is required to return to the released provider. SQLite formats are unchanged by this redb conversion.
+
+`RedbKeyValueStore` now reexports the common `VersionedKeyValueStore`. A failed commit retains a sealed attempt instead of discarding transaction state; `commit_transaction` retries the identical prepared records and resolves their receipt. Further mutations require resolving or rolling back that attempt. `rollback_transaction` reports an error containing the receipt if persistence says it already committed, and leaves the attempt available for commit resolution. Callers must not replay application operations merely because a native commit returned an error.
+
+Private changes, savepoint history, batches and retained view metadata share a default 64 MiB session allowance. Use `RedbStorage::open_with_options(path, VersionedSessionOptions { retained_bytes })` to set it explicitly. This limit is separate from SQL statement memory; exhaustion returns a typed error and no spill files are written. Provider version/receipt reclamation and full concurrent Engine SQL support remain tracked in the [implementation plan](../../plans/0008-concurrent-storage-transactions.md).
+
 ## Vector-threshold optimizer compatibility
 
 `uqa_planner::TreeOptimizerConfig::enable_merge_vector_thresholds` is deprecated and ignored for both `true` and `false`. Remove explicit assignments to avoid deprecation warnings; callers using `TreeOptimizerConfig::default()` need no source change. The optimizer keeps separate threshold operators for identical and nearby query vectors, preserving additive intersection scores, document support and invalid-threshold errors even inside nested operators. No data migration is required when upgrading from 0.3.5.

@@ -268,6 +268,96 @@ pub struct PrivateRecordSnapshot {
 }
 
 impl PrivateRecordSnapshot {
+    pub(super) fn visit_merged(
+        &self,
+        committed: &dyn super::CommittedRecordSnapshot,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut super::RecordScanVisitor<'_>,
+    ) -> VersionResult<()> {
+        use super::BorrowedRecord;
+        control.cancellation().check()?;
+        if limit == 0 {
+            return Ok(());
+        }
+        let state = self.owner.state.lock();
+        let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
+        let mut entries = state
+            .heads
+            .range::<[u8], _>((std::ops::Bound::Included(start), std::ops::Bound::Unbounded));
+        let mut next_private = || -> VersionResult<Option<&PreparedRecordWrite>> {
+            for (key, head) in entries.by_ref() {
+                control.cancellation().check()?;
+                if !key.bytes().starts_with(prefix) {
+                    return Ok(None);
+                }
+                if after.is_some_and(|after| key.bytes() <= after) {
+                    continue;
+                }
+                if let Some(write) =
+                    state.visible(head.position, self.revision, control.cancellation())?
+                {
+                    return Ok(Some(write));
+                }
+            }
+            Ok(None)
+        };
+        let mut pending = next_private()?;
+        let mut count = 0;
+        let mut running = true;
+        let mut emit = |key: &[u8], record: BorrowedRecord<'_>| -> VersionResult<bool> {
+            control.cancellation().check()?;
+            count += 1;
+            let more = visit(key, record)?;
+            control.cancellation().check()?;
+            Ok(more && count < limit)
+        };
+        committed.visit_prefix(prefix, after, usize::MAX, control, &mut |key, record| {
+            while let Some(write) = pending.filter(|write| write.key() < key) {
+                running = emit(
+                    write.key(),
+                    BorrowedRecord {
+                        revision: write.expected(),
+                        value: write.value(),
+                    },
+                )?;
+                if !running {
+                    return Ok(false);
+                }
+                pending = next_private()?;
+            }
+            if let Some(write) = pending.filter(|write| write.key() == key) {
+                running = emit(
+                    key,
+                    BorrowedRecord {
+                        revision: write.expected(),
+                        value: write.value(),
+                    },
+                )?;
+                pending = next_private()?;
+            } else {
+                running = emit(key, record)?;
+            }
+            Ok(running)
+        })?;
+        while running {
+            let Some(write) = pending else {
+                break;
+            };
+            running = emit(
+                write.key(),
+                BorrowedRecord {
+                    revision: write.expected(),
+                    value: write.value(),
+                },
+            )?;
+            pending = next_private()?;
+        }
+        Ok(())
+    }
+
     pub fn get(
         &self,
         key: &[u8],

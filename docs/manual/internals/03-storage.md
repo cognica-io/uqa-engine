@@ -41,11 +41,13 @@ Expression key preparation finishes before the document-store write lock is acqu
 | --- | --- | --- | --- |
 | Memory | In-engine memory stores | Engine session state | No durability |
 | SQLite | `uqa-storage-sqlite` | Managed connection | Plain, SQLCipher, or compressed VFS open paths |
-| redb | `uqa-storage-redb` | Independent read or write transaction over shared database | No encryption at rest |
+| redb | `uqa-storage-redb` | Common logical session over one shared database owner | No encryption at rest |
 
 SQLite is the default persistent engine. redb uses the same SQL and logical storage surface through the provider contract.
 
-The [concurrent storage transaction design](../../design/concurrent-storage-transactions.md) proposes shared MVCC for native SQLite, SQLite Key/Value and redb; it is not implemented behavior. Its [implementation plan](../../plans/0008-concurrent-storage-transactions.md) tracks the required provider, transaction, migration and recovery work.
+The development redb provider uses common logical Key/Value sessions: private changes and savepoints retain no physical writer, reads pin a committed sequence, and short conditional commits publish versions and receipts atomically. Its catalog/backend pair shares that session. Default retention is 64 MiB per session and can be set through `RedbStorage::open_with_options`; it is separate from the query read allowance. See the [transaction and file-format contract](../../design/kv-storage-backends.md#redb-transaction-mapping) and [unreleased upgrade boundary](../reference/10-upgrading.md#unreleased-redb-record-format).
+
+The [concurrent storage transaction design](../../design/concurrent-storage-transactions.md) covers native SQLite, SQLite Key/Value and redb. Concurrent Engine SQL writers are not yet enabled: Engine retains its writer gate, while SQLite, shared index deltas, SQL isolation and publication integration remain in progress. The [implementation plan](../../plans/0008-concurrent-storage-transactions.md) tracks these acceptance requirements separately from direct Key/Value behavior.
 
 ## Durable catalog
 

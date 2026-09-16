@@ -13,6 +13,8 @@ use redb::{backends::InMemoryBackend, StorageBackend};
 
 use super::*;
 
+mod migration;
+
 #[derive(Clone, Debug, Default)]
 struct FaultBackend {
     storage: Arc<InMemoryBackend>,

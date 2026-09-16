@@ -37,3 +37,6 @@ mod mvcc_reads;
 
 #[path = "cases/mvcc_persistence.rs"]
 mod mvcc_persistence;
+
+#[path = "cases/mvcc_sessions.rs"]
+mod mvcc_sessions;

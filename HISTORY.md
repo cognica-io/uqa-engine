@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Routed redb Key/Value, catalog and backend sessions through common logical transactions with pinned reads, private savepoints, bounded retention and durable commit receipts. Independent direct Key/Value writers can commit concurrently; complete concurrent Engine SQL support remains in progress.
+- Added an atomic, one-way redb record-format upgrade that rejects released 0.3.6 writers after migration. The default private session allowance is 64 MiB and can be configured with `RedbStorage::open_with_options`. See the [unreleased upgrade contract](docs/manual/reference/10-upgrading.md#unreleased-redb-record-format).
+
 ## [0.3.6] - 2026-09-15
 
 See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.3.6/docs/manual/reference/10-upgrading.md) for package updates and operator-tree optimizer compatibility.

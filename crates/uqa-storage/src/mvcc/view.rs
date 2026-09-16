@@ -18,6 +18,15 @@ use super::{
     SharedRecordValue, VersionResult,
 };
 
+#[derive(Clone, Copy)]
+pub struct BorrowedRecord<'a> {
+    pub revision: Option<CommitSequence>,
+    pub value: Option<&'a [u8]>,
+}
+
+pub type RecordValueVisitor<'a> = dyn FnMut(Option<BorrowedRecord<'_>>) -> VersionResult<()> + 'a;
+pub type RecordScanVisitor<'a> = dyn FnMut(&[u8], BorrowedRecord<'_>) -> VersionResult<bool> + 'a;
+
 /// A retained committed view whose lease protects visible versions until this owner is dropped. Provider read windows must finish inside each call, without retaining a physical writer or calling user code.
 pub trait CommittedRecordSnapshot: Send + Sync {
     fn sequence(&self) -> CommitSequence;
@@ -37,6 +46,64 @@ pub trait CommittedRecordSnapshot: Send + Sync {
         limit: usize,
         control: &StorageReadControl,
     ) -> VersionResult<BudgetedVec<ScannedRecord>>;
+
+    /// Borrow provider-owned bytes for an internal storage visitor. Visitors must not reenter this snapshot or execute SQL/user callbacks.
+    fn visit_value(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+        visit: &mut RecordValueVisitor<'_>,
+    ) -> VersionResult<()> {
+        let record = self.get(key, control)?;
+        visit(record.as_ref().map(|record| BorrowedRecord {
+            revision: Some(record.sequence()),
+            value: record.value().map(|value| &***value),
+        }))?;
+        control.cancellation().check()?;
+        Ok(())
+    }
+
+    /// Visit ordered versions until the limit, exhaustion or a visitor returning `false`. Implementations with borrowed pages avoid charging their encoded payloads to the caller's decode allowance.
+    fn visit_prefix(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut RecordScanVisitor<'_>,
+    ) -> VersionResult<()> {
+        control.cancellation().check()?;
+        let mut cursor: Option<BudgetedVec<u8>> = None;
+        let mut remaining = limit;
+        while remaining != 0 {
+            let mut page = self.scan(
+                prefix,
+                cursor.as_deref().or(after),
+                remaining.min(64),
+                control,
+            )?;
+            if page.is_empty() {
+                break;
+            }
+            for record in page.iter() {
+                control.cancellation().check()?;
+                if !visit(
+                    &record.key,
+                    BorrowedRecord {
+                        revision: Some(record.version.sequence()),
+                        value: record.version.value().map(|value| &***value),
+                    },
+                )? {
+                    control.cancellation().check()?;
+                    return Ok(());
+                }
+                remaining -= 1;
+            }
+            cursor = page.pop().map(|record| record.key);
+        }
+        control.cancellation().check()?;
+        Ok(())
+    }
 }
 
 struct RetainedSnapshot<T> {
@@ -78,6 +145,25 @@ impl<T: CommittedRecordSnapshot> CommittedRecordSnapshot for RetainedSnapshot<T>
         control: &StorageReadControl,
     ) -> VersionResult<BudgetedVec<ScannedRecord>> {
         self.snapshot.scan(prefix, after, limit, control)
+    }
+    fn visit_value(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+        visit: &mut RecordValueVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.snapshot.visit_value(key, control, visit)
+    }
+    fn visit_prefix(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut RecordScanVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.snapshot
+            .visit_prefix(prefix, after, limit, control, visit)
     }
 }
 
@@ -140,6 +226,35 @@ impl MergedRecordSnapshot {
 
     pub fn sequence(&self) -> CommitSequence {
         self.committed.sequence()
+    }
+
+    pub fn visit_value(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+        visit: &mut RecordValueVisitor<'_>,
+    ) -> VersionResult<()> {
+        if let Some(write) = self.private.get(key, control)? {
+            visit(Some(BorrowedRecord {
+                revision: write.expected(),
+                value: write.value(),
+            }))?;
+            control.cancellation().check()?;
+            return Ok(());
+        }
+        self.committed.visit_value(key, control, visit)
+    }
+
+    pub fn visit_prefix(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut RecordScanVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.private
+            .visit_merged(&*self.committed, prefix, after, limit, control, visit)
     }
 
     pub fn get(

@@ -61,6 +61,10 @@ pub enum VersionError {
     UnknownTransaction,
     #[error("transaction has already ended")]
     TransactionFinished,
+    #[error("transaction changes are sealed for commit; resolve or roll back this transaction")]
+    TransactionSealed,
+    #[error("transaction already committed: {0:?}")]
+    AlreadyCommitted(super::CommitReceipt),
     #[error("transaction was committed with a different prepared batch")]
     CommitMismatch,
     #[error("invalid versioned record encoding: {0}")]
@@ -74,6 +78,18 @@ pub enum VersionError {
 }
 
 pub type VersionResult<T> = Result<T, VersionError>;
+
+impl VersionError {
+    /// Preserve resource and provider diagnostics through existing storage APIs.
+    pub fn into_storage_error(self) -> crate::StorageBackendError {
+        match self {
+            Self::Memory(error) => error.into(),
+            Self::Cancelled(error) => error.into(),
+            Self::Storage(error) => error,
+            error => crate::StorageBackendError::backend("MVCC", error),
+        }
+    }
+}
 
 /// Already evaluated replacement of one logical record. `None` is a tombstone.
 ///

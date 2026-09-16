@@ -331,6 +331,12 @@ proptest! {
             }
             if page.len() < page_size { break; }
         }
-        prop_assert_eq!(found, expected);
+        prop_assert_eq!(&found, &expected);
+        let mut borrowed = BTreeMap::new();
+        snapshot.visit_prefix(b"", None, usize::MAX, &StorageReadControl::with_limit(0), &mut |key, record| {
+            assert!(borrowed.insert(key[0], record.value.map(|value| value[0])).is_none());
+            Ok(true)
+        }).unwrap();
+        prop_assert_eq!(borrowed, expected);
     }
 }

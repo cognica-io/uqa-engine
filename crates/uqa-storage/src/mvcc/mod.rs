@@ -14,6 +14,7 @@ mod key;
 mod memory;
 mod overlay;
 mod persistence;
+mod session;
 mod types;
 mod view;
 
@@ -25,8 +26,9 @@ pub use persistence::{
     resolve_prepared_receipt, CommitFailure, CommitFingerprint, CommitReceipt, CommitResult,
     CommitStatus, DatabaseId, RecordPage, StorageTransactionId, VersionedPersistence,
 };
+pub use session::{VersionedKeyValueStore, VersionedSessionOptions};
 pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};
 pub use view::{
-    retain_record_snapshot, CommittedRecordSnapshot, MergedRecordSnapshot, ScannedVisibleRecord,
-    VisibleRecord,
+    retain_record_snapshot, BorrowedRecord, CommittedRecordSnapshot, MergedRecordSnapshot,
+    RecordScanVisitor, RecordValueVisitor, ScannedVisibleRecord, VisibleRecord,
 };

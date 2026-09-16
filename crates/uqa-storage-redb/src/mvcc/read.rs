@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 use redb::{Database, ReadableDatabase, ReadableTable};
 use uqa_storage::mvcc::{
-    CommitSequence, CommittedRecordSnapshot, RecordPage, RecordVersion, ScannedRecord,
-    SharedRecordValue, VersionResult,
+    BorrowedRecord, CommitSequence, CommittedRecordSnapshot, RecordPage, RecordVersion,
+    ScannedRecord, SharedRecordValue, VersionError, VersionResult,
 };
 use uqa_storage::read_control::StorageReadControl;
 
@@ -26,6 +26,76 @@ pub(super) struct Snapshot {
 impl CommittedRecordSnapshot for Snapshot {
     fn sequence(&self) -> CommitSequence {
         self.sequence
+    }
+
+    fn visit_value(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+        visit: &mut uqa_storage::mvcc::RecordValueVisitor<'_>,
+    ) -> VersionResult<()> {
+        control.cancellation().check()?;
+        let transaction = self.database.begin_read().map_err(redb_error)?;
+        let versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
+        let entry = versions
+            .range((key, 0)..=(key, self.sequence.as_u64()))
+            .map_err(redb_error)?
+            .next_back()
+            .transpose()
+            .map_err(redb_error)?;
+        let record = entry
+            .as_ref()
+            .map(|(key, bytes)| borrowed(key.value().1, bytes.value()))
+            .transpose()?;
+        visit(record)?;
+        control.cancellation().check()?;
+        Ok(())
+    }
+
+    fn visit_prefix(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut uqa_storage::mvcc::RecordScanVisitor<'_>,
+    ) -> VersionResult<()> {
+        control.cancellation().check()?;
+        if limit == 0 {
+            return Ok(());
+        }
+        let transaction = self.database.begin_read().map_err(redb_error)?;
+        let heads = transaction.open_table(HEADS).map_err(redb_error)?;
+        let versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
+        let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
+        let mut count = 0;
+        for entry in heads.range(start..).map_err(redb_error)? {
+            control.cancellation().check()?;
+            let (key, _) = entry.map_err(redb_error)?;
+            let key = key.value();
+            if !key.starts_with(prefix) {
+                break;
+            }
+            if after.is_some_and(|after| key <= after) {
+                continue;
+            }
+            let entry = versions
+                .range((key, 0)..=(key, self.sequence.as_u64()))
+                .map_err(redb_error)?
+                .next_back()
+                .transpose()
+                .map_err(redb_error)?;
+            if let Some((version, bytes)) = entry {
+                let record = borrowed(version.value().1, bytes.value())?;
+                let more = visit(key, record)?;
+                control.cancellation().check()?;
+                count += 1;
+                if !more || count == limit {
+                    break;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn get(
@@ -74,6 +144,16 @@ impl CommittedRecordSnapshot for Snapshot {
         }
         Ok(result)
     }
+}
+
+fn borrowed(sequence: u64, bytes: &[u8]) -> VersionResult<BorrowedRecord<'_>> {
+    if sequence == 0 {
+        return Err(VersionError::InvalidEncoding("zero record revision"));
+    }
+    Ok(BorrowedRecord {
+        revision: Some(CommitSequence::from_u64(sequence)),
+        value: value_bytes(bytes)?,
+    })
 }
 
 fn visible(

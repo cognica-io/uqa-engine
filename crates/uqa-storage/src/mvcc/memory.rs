@@ -272,6 +272,51 @@ impl CommittedRecordSnapshot for MemoryRecordSnapshot {
     ) -> VersionResult<BudgetedVec<ScannedRecord>> {
         Self::scan(self, prefix, after, limit, control)
     }
+
+    fn visit_prefix(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut super::RecordScanVisitor<'_>,
+    ) -> VersionResult<()> {
+        control.cancellation().check()?;
+        if limit == 0 {
+            return Ok(());
+        }
+        let state = self.database.state.lock();
+        let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
+        let mut count = 0;
+        for (key, history) in state
+            .records
+            .range::<[u8], _>((std::ops::Bound::Included(start), std::ops::Bound::Unbounded))
+        {
+            control.cancellation().check()?;
+            let key = key.bytes();
+            if !key.starts_with(prefix) {
+                break;
+            }
+            if after.is_some_and(|after| key <= after) {
+                continue;
+            }
+            if let Some(record) = history.history.visible_at(self.sequence) {
+                let more = visit(
+                    key,
+                    super::BorrowedRecord {
+                        revision: Some(record.sequence()),
+                        value: record.value().map(|value| &***value),
+                    },
+                )?;
+                control.cancellation().check()?;
+                count += 1;
+                if !more || count == limit {
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Drop for MemoryRecordSnapshot {

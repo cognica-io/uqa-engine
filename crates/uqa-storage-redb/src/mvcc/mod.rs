@@ -7,6 +7,7 @@
 //! Short redb transactions persist versioned records and authoritative commit receipts.
 
 mod codec;
+mod migration;
 mod read;
 #[cfg(test)]
 mod tests;
@@ -34,7 +35,7 @@ const TRANSACTIONS: TableDefinition<u64, &[u8]> = TableDefinition::new("uqa_mvcc
 
 /// Physical record persistence over one shared redb file owner. Reads retain logical sequence boundaries, and native writers exist only inside allocation, commit and abort calls.
 ///
-/// This adapter preserves all historical versions and receipts. Provider reclamation and legacy Key/Value/catalog mapping remain separate integration work; opening this adapter does not advertise concurrent Engine SQL transactions.
+/// This adapter preserves all historical versions and receipts. Logical Key/Value sessions use these records; Engine SQL isolation and shared-index publication require additional coordination.
 #[derive(Clone)]
 pub struct RedbRecordStore {
     database: Arc<Database>,
@@ -42,6 +43,10 @@ pub struct RedbRecordStore {
 }
 
 impl RedbRecordStore {
+    pub(crate) fn migrate_key_value(&self) -> VersionResult<()> {
+        migration::migrate(&self.database)
+    }
+
     pub(crate) fn new(database: Arc<Database>) -> VersionResult<Self> {
         let transaction = physical_writer(&database)?;
         let names = [
