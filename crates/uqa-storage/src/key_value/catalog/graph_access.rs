@@ -12,6 +12,7 @@ use super::{
     KeyValueCatalog, StorageBackendError, StorageBackendResult, StoredEdge, StoredVertex, TAG_EDGE,
     TAG_METADATA, TAG_VERTEX,
 };
+use crate::catalog::GraphEntitySelector;
 use crate::key_value::TAG_GRAPH_LOOKUP;
 use crate::{GraphEntityFilter, GraphEntityKind, GraphVertexRow};
 
@@ -271,27 +272,25 @@ impl KeyValueCatalog {
         after: Option<u64>,
         limit: usize,
     ) -> StorageBackendResult<Vec<u64>> {
-        filter.validate()?;
+        let selector = filter.selector()?;
         crate::catalog::validate_graph_page(limit)?;
         if filter.source.is_some() || filter.target.is_some() || filter.label.is_some() {
             self.require_graph_lookup_indexes()?;
         }
-        let prefix = if let Some(source) = filter.source {
-            endpoint_prefix(true, source)
-        } else if let Some(target) = filter.target {
-            endpoint_prefix(false, target)
-        } else if let Some(label) = filter.label {
-            label_prefix(filter.kind, label)?
-        } else if let Some(graph) = filter.graph {
-            let mut key = graph_membership_graph_prefix(graph)?;
-            push_str(&mut key, filter.kind.as_str())?;
-            key
-        } else {
-            key_with_tag(if filter.kind == GraphEntityKind::Vertex {
+        let prefix = match selector {
+            GraphEntitySelector::Source(source) => endpoint_prefix(true, source),
+            GraphEntitySelector::Target(target) => endpoint_prefix(false, target),
+            GraphEntitySelector::Label(label) => label_prefix(filter.kind, label)?,
+            GraphEntitySelector::Graph(graph) => {
+                let mut key = graph_membership_graph_prefix(graph)?;
+                push_str(&mut key, filter.kind.as_str())?;
+                key
+            }
+            GraphEntitySelector::All => key_with_tag(if filter.kind == GraphEntityKind::Vertex {
                 TAG_VERTEX
             } else {
                 TAG_EDGE
-            })
+            }),
         };
         let mut cursor = after.map(|id| identity_key(prefix.clone(), id));
         let mut result = Vec::new();

@@ -35,6 +35,16 @@ pub struct GraphEntityFilter<'a> {
     pub target: Option<u64>,
 }
 
+/// Primary identity index before applying the remaining conjunction. Adjacency and label selections take precedence over graph-wide membership scans.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraphEntitySelector<'a> {
+    All,
+    Graph(&'a str),
+    Label(&'a str),
+    Source(u64),
+    Target(u64),
+}
+
 impl<'a> GraphEntityFilter<'a> {
     pub fn new(kind: GraphEntityKind, graph: Option<&'a str>) -> Self {
         Self {
@@ -54,6 +64,21 @@ impl<'a> GraphEntityFilter<'a> {
             ));
         }
         Ok(())
+    }
+
+    pub fn selector(self) -> StorageBackendResult<GraphEntitySelector<'a>> {
+        self.validate()?;
+        Ok(if let Some(source) = self.source {
+            GraphEntitySelector::Source(source)
+        } else if let Some(target) = self.target {
+            GraphEntitySelector::Target(target)
+        } else if let Some(label) = self.label {
+            GraphEntitySelector::Label(label)
+        } else if let Some(graph) = self.graph {
+            GraphEntitySelector::Graph(graph)
+        } else {
+            GraphEntitySelector::All
+        })
     }
 }
 

@@ -9,6 +9,7 @@
 mod analyzers;
 mod columns;
 mod foreign;
+pub(super) mod graph;
 mod indexes;
 mod relations;
 mod sequences;

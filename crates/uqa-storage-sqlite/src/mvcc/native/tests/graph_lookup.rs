@@ -7,6 +7,7 @@
 //! Graph selectors retain the same boundaries as their source records without loading entity properties.
 
 mod migration;
+mod reads;
 
 use std::sync::Arc;
 

@@ -23,7 +23,9 @@ mod schema;
 
 pub use cache_revisions::CatalogCacheRevisions;
 pub use graph_access::validate_graph_page;
-pub use graph_access::{GraphEntityFilter, GraphEntityKind, MAX_GRAPH_ID_PAGE};
+pub use graph_access::{
+    GraphEntityFilter, GraphEntityKind, GraphEntitySelector, MAX_GRAPH_ID_PAGE,
+};
 pub use relation::RelationIdentity;
 mod table;
 

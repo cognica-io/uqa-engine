@@ -6,6 +6,7 @@
 
 //! Named graph entities, membership, and snapshot replacement.
 
+use super::native::graph;
 use super::{
     decode_catalog_id, encode_catalog_id, params, Catalog, EdgeRow, GraphSnapshot,
     OptionalExtension, Result, SQLiteError,
@@ -15,6 +16,9 @@ impl Catalog {
     /// Indexed, graph-scoped hydration. LEFT JOIN retains invalid memberships
     /// so missing entities cannot silently disappear from a restored graph.
     pub fn load_named_graph_snapshot(&self, name: &str) -> Result<Option<GraphSnapshot>> {
+        if let Some(snapshot) = self.read_native(|snapshot| graph::load_snapshot(snapshot, name))? {
+            return Ok(snapshot);
+        }
         self.conn.with(|conn| {
             let exists: bool = conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM _named_graphs WHERE name = ?1)",
@@ -98,6 +102,9 @@ impl Catalog {
 
     /// Return every persisted named graph in sorted order.
     pub fn load_named_graphs(&self) -> Result<Vec<String>> {
+        if let Some(names) = self.read_native(graph::load_names)? {
+            return Ok(names);
+        }
         self.conn.with(|c| {
             let mut stmt = c.prepare("SELECT name FROM _named_graphs ORDER BY name")?;
             let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
@@ -138,6 +145,9 @@ impl Catalog {
     /// `(vertex_id, label, properties_json)` so the caller can rebuild each
     /// `Vertex` from typed columns and the JSON-encoded property map.
     pub fn load_vertices(&self) -> Result<Vec<(u64, String, String)>> {
+        if let Some(rows) = self.read_native(graph::load_vertices)? {
+            return Ok(rows);
+        }
         self.conn.with(|c| {
             let mut stmt = c.prepare(
                 "SELECT vertex_id, label, properties_json FROM _graph_vertices ORDER BY vertex_id",
@@ -196,6 +206,9 @@ impl Catalog {
 
     /// Return every edge row in identifier order.
     pub fn load_edges(&self) -> Result<Vec<EdgeRow>> {
+        if let Some(rows) = self.read_native(graph::load_edges)? {
+            return Ok(rows);
+        }
         self.conn.with(|c| {
             let mut stmt = c.prepare(
                 "SELECT edge_id, source_id, target_id, label, properties_json \
@@ -279,6 +292,9 @@ impl Catalog {
 
     /// Every membership row, returned as `(entity_type, entity_id, graph_name)`.
     pub fn load_graph_memberships(&self) -> Result<Vec<(String, u64, String)>> {
+        if let Some(rows) = self.read_native(graph::load_memberships)? {
+            return Ok(rows);
+        }
         self.conn.with(|c| {
             let mut stmt = c.prepare(
                 "SELECT entity_type, entity_id, graph_name FROM _graph_membership \
