@@ -64,6 +64,10 @@ impl SQLiteKeyValueStore {
 }
 
 impl KeyValueStore for SQLiteKeyValueStore {
+    fn transaction_affinity(&self) -> Option<uqa_storage::StorageSessionAffinity> {
+        Some(self.records.session_affinity())
+    }
+
     fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
         self.records.storage_identity()
     }

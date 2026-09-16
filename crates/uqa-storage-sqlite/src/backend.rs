@@ -88,6 +88,10 @@ impl PersistentStorageProvider for SQLiteStorageProvider {
 }
 
 impl PersistentStorageBackend for SQLiteStorageBackend {
+    fn transaction_affinity(&self) -> Option<uqa_storage::StorageSessionAffinity> {
+        Some(self.conn.transaction_affinity())
+    }
+
     fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
         let Some(path) = self.conn.database_path() else {
             return Ok(None);

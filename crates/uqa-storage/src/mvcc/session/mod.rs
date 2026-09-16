@@ -17,7 +17,7 @@ use parking_lot::Mutex;
 use crate::read_control::{KeyValueReadVisitor, StorageReadControl, ValueReadVisitor};
 use crate::{
     KeyValueBatch, KeyValueStore, PersistentStorageIdentity, StorageBackendError,
-    StorageBackendResult,
+    StorageBackendResult, StorageSessionAffinity,
 };
 
 use super::{
@@ -42,6 +42,7 @@ impl Default for VersionedSessionOptions {
 
 /// A provider-independent session with pinned reads and conditional atomic publication. SQL isolation, locks and index merging belong to the callers above this byte-record contract.
 pub struct VersionedKeyValueStore {
+    affinity: StorageSessionAffinity,
     persistence: Arc<dyn VersionedPersistence>,
     identity: Option<PersistentStorageIdentity>,
     options: VersionedSessionOptions,
@@ -56,6 +57,7 @@ impl VersionedKeyValueStore {
         options: VersionedSessionOptions,
     ) -> Self {
         Self {
+            affinity: StorageSessionAffinity::new(),
             persistence,
             identity,
             options,
@@ -75,6 +77,10 @@ impl VersionedKeyValueStore {
 
     pub fn options(&self) -> VersionedSessionOptions {
         self.options
+    }
+
+    pub fn session_affinity(&self) -> StorageSessionAffinity {
+        self.affinity.clone()
     }
 
     /// Identify a sealed attempt after a failed commit. Retrying `commit_transaction` resubmits only the identical evaluated batch, and never reevaluates application code.
@@ -146,6 +152,10 @@ impl VersionedKeyValueStore {
 }
 
 impl KeyValueStore for VersionedKeyValueStore {
+    fn transaction_affinity(&self) -> Option<StorageSessionAffinity> {
+        Some(self.session_affinity())
+    }
+
     fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
         Ok(self.identity.clone())
     }

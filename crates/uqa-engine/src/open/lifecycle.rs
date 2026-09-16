@@ -229,6 +229,7 @@ impl Engine {
         }
         let observed_epochs = self.epochs.published_epochs();
         let storage_session = provider.open_session()?;
+        storage_session.validate_transaction_affinity()?;
         let storage_version_before_restore = storage_session.backend.change_version()?;
         let shared = if share_catalog {
             self.session_from_shared_catalog(&storage_session, provider)?
@@ -386,6 +387,7 @@ impl Engine {
         provider: Option<Arc<dyn PersistentStorageProvider>>,
         initialize_catalog: bool,
     ) -> StorageBackendResult<Self> {
+        storage_session.validate_transaction_affinity()?;
         let restore_catalog = Arc::clone(&storage_session.catalog);
         let restore_backend = Arc::clone(&storage_session.backend);
         let cache_revisions_before;

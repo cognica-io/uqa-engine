@@ -18,6 +18,9 @@ use uqa_sql::SQLError;
 use uqa_storage::{RelationIdentity, SequenceOptions, SequenceRow};
 use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
+#[path = "sessions/affinity.rs"]
+mod affinity;
+
 fn scalar_int(engine: &Engine, sql: &str, column: &str) -> i64 {
     match engine.sql(sql, &[]).unwrap().rows[0].get(column) {
         Some(Value::Int(value)) => *value,

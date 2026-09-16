@@ -21,6 +21,8 @@ flowchart TD
 
 `PersistentStorageProvider` owns a durable database and creates independent `PersistentStorageSession` values. Each session contains a `CatalogFacade` and `PersistentStorageBackend` bound to the same transaction context, which prevents catalog mutations and document/index mutations from committing through different physical sessions. `Engine::from_persistent_provider` retains the provider so `Engine::new_session` works for every backend; `Engine::from_persistent_backends` remains available for already-bound handles and delegates independent session creation to the backend's `open_session` implementation.
 
+Common logical stores report one `StorageSessionAffinity`, which both Key/Value facades forward. Native SQLite derives the same contract from its managed session. Engine rejects mismatched reported contexts before restoration or sibling attachment. An independently opened store over the same file is a different context; sharing a database identity is not enough to make catalog/data writes atomic. The [Rust upgrade notes](../manual/reference/10-upgrading.md#unreleased-rust-session-affinity) describe wrapper forwarding and legacy custom providers.
+
 ## Physical store contract
 
 `KeyValueStore` provides byte-exact point reads and writes, lexicographically ordered prefix scans, bounded key and key/value cursors, atomic batches, prefix deletion, read/write and read-first transaction boundaries, savepoints, and transaction-state observation. `KeyValueStorageBackend` and `KeyValueCatalog` implement UQA documents, text postings, B-tree postings, brute-force vectors, IVF centroid assignments, HNSW graph generations, graph data, and durable registries once above this byte-key boundary.

@@ -97,6 +97,11 @@ pub trait KeyValueBatch {
 
 /// Ordered byte-key storage used by Key/Value catalog and index backends.
 pub trait KeyValueStore: Send + Sync {
+    /// Identity of the transaction context shared by this store's catalog and data handles. Independent sessions must report different identities, even over the same file.
+    fn transaction_affinity(&self) -> Option<crate::StorageSessionAffinity> {
+        None
+    }
+
     fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
         Ok(None)
     }

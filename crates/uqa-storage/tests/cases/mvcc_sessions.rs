@@ -15,6 +15,41 @@ use uqa_storage::mvcc::*;
 use uqa_storage::read_control::StorageReadControl;
 use uqa_storage::{KeyValueStore, StorageBackendError};
 
+#[test]
+fn paired_handles_require_the_same_reported_transaction_context() {
+    use uqa_storage::{
+        KeyValueCatalog, KeyValueStorageBackend, MemoryKeyValueStore, PersistentStorageSession,
+        StorageSessionMismatch,
+    };
+
+    let persistence = Persistence::new();
+    let a: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 20));
+    let b = a.open_session().unwrap();
+    let legacy: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+    for (catalog, backend, expected) in [
+        (a.clone(), a.clone(), true),
+        (a.clone(), b, false),
+        (a.clone(), legacy.clone(), false),
+        (legacy.clone(), a.clone(), false),
+        (legacy.clone(), legacy, true),
+    ] {
+        let pair = PersistentStorageSession::new(
+            Arc::new(KeyValueCatalog::new(catalog)),
+            Arc::new(KeyValueStorageBackend::new(backend)),
+        );
+        match pair.validate_transaction_affinity() {
+            Ok(()) => assert!(expected),
+            Err(StorageBackendError::Backend { source, .. }) => {
+                assert!(!expected);
+                assert!(source.downcast_ref::<StorageSessionMismatch>().is_some());
+            }
+            Err(error) => panic!("unexpected affinity error: {error}"),
+        }
+    }
+    assert!(!a.in_transaction());
+    assert!(a.scan_prefix(b"").unwrap().is_empty());
+}
+
 struct State {
     next: u64,
     receipts: BTreeMap<u64, CommitStatus>,

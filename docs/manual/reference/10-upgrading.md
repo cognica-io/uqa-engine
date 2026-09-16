@@ -18,6 +18,12 @@ Low-level Rust code must perform ordinary reads and writes through the Key/Value
 
 Failed commits retain their sealed attempt, as with redb below. Retry `commit_transaction` to resolve the same prepared bytes and receipt; do not replay application operations after an uncertain native outcome. A failed rollback retains unresolved transaction state. Direct Key/Value concurrency does not yet enable concurrent Engine SQL: native relational mapping, shared-index merges, SQL isolation/publication, reclamation and platform acceptance remain in the [implementation plan](../../plans/0008-concurrent-storage-transactions.md).
 
+## Unreleased Rust session affinity
+
+Engine now checks that persistent catalog and data handles report the same transaction context before restoring or attaching a session. This includes `from_persistent_backends`, provider initial sessions and `new_session`. Native SQLite, SQLite Key/Value and redb report `StorageSessionAffinity`; combining handles from separate sessions fails with `StorageBackendError::Backend` whose source is `StorageSessionMismatch`, even when both refer to the same file. Use a provider-created pair or clone handles from one session. Connection clones preserve affinity; `new_session` creates another identity.
+
+Custom `CatalogFacade`, `PersistentStorageBackend` and `KeyValueStore` wrappers must forward `transaction_affinity` from a reporting implementation. A reported identity cannot be paired with `None`. Existing custom pairs that both return `None` retain their caller-managed contract, but this does not establish support for the proposed concurrent transaction model. The affinity token is process-local and must not be persisted as a database or transaction ID.
+
 ## Unreleased redb record format
 
 The development redb provider migrates existing Key/Value files when `RedbStorage::open` opens them under redb's exclusive file-owner admission. It copies legacy records into version histories and atomically replaces the old writable table with a typed guard. Migration preserves binary keys, values and the committed change counter; interrupted publication reopens as a complete old or new format, and reopening the new format does not copy data again. The actual crates.io 0.3.6 writer rejects the migrated file before writing. Keep a closed-file backup before this one-way upgrade; restoring that original file is required to return to the released provider. SQLite formats are unchanged by this redb conversion.

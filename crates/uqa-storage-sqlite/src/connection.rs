@@ -246,6 +246,7 @@ impl Drop for PooledConnection {
 }
 
 struct SessionState {
+    affinity: uqa_storage::StorageSessionAffinity,
     /// Read guards cover ordinary operations. Transaction lifecycle calls take
     /// the write guard, making BEGIN/COMMIT/ROLLBACK linearizable with respect
     /// to every operation issued through the same logical session.
@@ -259,6 +260,7 @@ struct SessionState {
 impl SessionState {
     fn new() -> Self {
         Self {
+            affinity: uqa_storage::StorageSessionAffinity::new(),
             gate: RwLock::new(()),
             transaction: Mutex::new(None),
             transaction_failure: Mutex::new(None),
@@ -455,6 +457,15 @@ impl ManagedConnection {
             session: Arc::new(session),
             record_access: self.record_access,
         }
+    }
+
+    /// Identity shared by handles using this session's native or logical transaction context.
+    pub fn transaction_affinity(&self) -> uqa_storage::StorageSessionAffinity {
+        let _gate = self.session.gate.read();
+        self.session.logical.get().map_or_else(
+            || self.session.affinity.clone(),
+            |logical| logical.session_affinity(),
+        )
     }
 
     /// Whether this session has an active native or logical record transaction.

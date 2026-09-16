@@ -15,6 +15,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - Roll back a retained storage transaction before refreshing Engine caches after a failed commit. If rollback also fails, preserve the failed Engine frame and locks until storage cleanup succeeds instead of exposing private catalog or graph state as committed.
+- Reject persistent catalog/backend pairs from different reported transaction contexts before Engine restoration or sibling attachment, including separate sessions over the same file. Native SQLite, SQLite Key/Value and redb expose the shared affinity contract; custom wrappers must forward it as described in the [Rust upgrade notes](docs/manual/reference/10-upgrading.md#unreleased-rust-session-affinity).
 
 ## [0.3.6] - 2026-09-15
 

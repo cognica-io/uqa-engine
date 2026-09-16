@@ -31,6 +31,10 @@ impl KeyValueStorageBackend {
 }
 
 impl PersistentStorageBackend for KeyValueStorageBackend {
+    fn transaction_affinity(&self) -> Option<crate::StorageSessionAffinity> {
+        self.store.transaction_affinity()
+    }
+
     fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
         self.store.storage_identity()
     }

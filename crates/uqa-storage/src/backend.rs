@@ -57,6 +57,35 @@ impl StorageBackendError {
 
 pub type StorageBackendResult<T> = std::result::Result<T, StorageBackendError>;
 
+/// Process-local identity of one storage transaction context. Clone it for handles sharing that context; allocate a new identity for each independent session. This is not a durable database or transaction ID.
+#[derive(Clone, Debug)]
+pub struct StorageSessionAffinity(Arc<()>);
+
+impl StorageSessionAffinity {
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Arc::new(()))
+    }
+}
+
+impl Default for StorageSessionAffinity {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PartialEq for StorageSessionAffinity {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for StorageSessionAffinity {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("catalog and data backend must share one storage transaction context")]
+pub struct StorageSessionMismatch;
+
 /// Opaque transaction checkpoint identity. SQL savepoint names remain engine metadata and are never forwarded into a backend namespace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StorageSavepointId(u64);
@@ -176,6 +205,17 @@ impl PersistentStorageSession {
     ) -> Self {
         Self { catalog, backend }
     }
+
+    /// Check affinity before restoration, migration or session attachment. Legacy pairs that both omit identity keep their existing contract; a reported identity must match on both handles.
+    pub fn validate_transaction_affinity(&self) -> StorageBackendResult<()> {
+        if self.catalog.transaction_affinity() != self.backend.transaction_affinity() {
+            return Err(StorageBackendError::backend(
+                "session",
+                StorageSessionMismatch,
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Factory for independent sessions over one durable database.
@@ -199,6 +239,11 @@ pub trait PersistentStorageProvider: Send + Sync {
 
 /// Factory plus transaction surface for persistent table/index storage.
 pub trait PersistentStorageBackend: Send + Sync {
+    /// Identity shared with the paired catalog's transaction context. Wrappers must delegate this when their underlying backend reports an identity.
+    fn transaction_affinity(&self) -> Option<StorageSessionAffinity> {
+        None
+    }
+
     /// Return the stable database identity for independently constructed engines over this backend. File identities also enable cross-process row-lock coordination.
     fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
         Ok(None)

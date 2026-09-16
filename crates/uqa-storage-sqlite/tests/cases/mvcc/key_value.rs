@@ -80,6 +80,12 @@ fn memory_sessions_and_rebound_handles_keep_one_logical_transaction_boundary() {
     let a = SQLiteKeyValueStore::new(connection).unwrap();
     let same = SQLiteKeyValueStore::new(before_binding.clone()).unwrap();
     let b = a.new_session();
+    assert_eq!(a.transaction_affinity(), same.transaction_affinity());
+    assert_eq!(
+        a.transaction_affinity(),
+        Some(before_binding.transaction_affinity())
+    );
+    assert_ne!(a.transaction_affinity(), b.transaction_affinity());
     before_binding.begin_deferred_transaction().unwrap();
     same.put(b"a", b"private").unwrap();
     b.put(b"b", b"committed").unwrap();

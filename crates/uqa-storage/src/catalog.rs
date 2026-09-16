@@ -364,6 +364,11 @@ pub fn sequence_value_reservation(
 
 /// Engine-facing catalog facade for persistent metadata.
 pub trait CatalogFacade: Send + Sync {
+    /// Identity shared with the paired data backend's transaction context. Wrappers must delegate this when their underlying catalog reports an identity.
+    fn transaction_affinity(&self) -> Option<crate::StorageSessionAffinity> {
+        None
+    }
+
     /// Prepare durable catalog storage inside the backend's owning initial-restore transaction. Already initialized catalogs may keep the default.
     fn initialize_storage(&self) -> StorageBackendResult<()> {
         Ok(())

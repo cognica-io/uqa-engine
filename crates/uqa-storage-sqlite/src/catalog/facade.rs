@@ -18,6 +18,10 @@ fn into_storage_result<T>(result: Result<T>) -> StorageBackendResult<T> {
 }
 
 impl CatalogFacade for Catalog {
+    fn transaction_affinity(&self) -> Option<uqa_storage::StorageSessionAffinity> {
+        Some(self.conn.transaction_affinity())
+    }
+
     fn clear_path_index_data(&self, index: &str) -> StorageBackendResult<()> {
         into_storage_result(Catalog::clear_path_index_data(self, index))
     }

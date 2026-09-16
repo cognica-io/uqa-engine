@@ -24,6 +24,10 @@ struct CommitDuringRestore {
 }
 
 impl PersistentStorageBackend for CommitDuringRestore {
+    fn transaction_affinity(&self) -> Option<uqa_storage::StorageSessionAffinity> {
+        self.inner.transaction_affinity()
+    }
+
     fn document_store(&self, table: &str) -> Box<dyn DocumentStore> {
         if self.armed.swap(false, Ordering::AcqRel) {
             assert!(

@@ -23,6 +23,8 @@ flowchart TD
 
 `PersistentStorageProvider` creates catalog and backend handles together for a new session. `Engine::from_persistent_provider` retains that factory and can create sibling sessions. `Engine::from_persistent_backends` accepts already-bound handles and retains the backend's session factory; independent sessions require that backend to implement `open_session`.
 
+Built-in persistent catalog and backend handles report a common `StorageSessionAffinity`. Connection/store clones share this process-local identity, while independent sessions receive different identities even over the same database. `PersistentStorageSession::validate_transaction_affinity` rejects different identities or a known identity paired with an omitted one. Engine validates initial restoration and sibling attachment before using their storage handles. Legacy custom pairs that both omit identity retain their existing caller-managed contract; wrappers around a reporting implementation must delegate the identity. This check establishes transaction affinity, not complete concurrent SQL support.
+
 ## Logical storage contracts
 
 `uqa-storage` defines backend-neutral traits for document rows, inverted postings, vector and tensor values, B-tree values, block-max metadata, spatial data, catalog records, and ordered Key/Value operations.

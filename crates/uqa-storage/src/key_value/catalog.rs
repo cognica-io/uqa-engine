@@ -94,6 +94,10 @@ impl KeyValueCatalog {
 }
 
 impl CatalogFacade for KeyValueCatalog {
+    fn transaction_affinity(&self) -> Option<crate::StorageSessionAffinity> {
+        self.store.transaction_affinity()
+    }
+
     fn clear_path_index_data(&self, index: &str) -> StorageBackendResult<()> {
         self.clear_path_index_data_impl(index)
     }
