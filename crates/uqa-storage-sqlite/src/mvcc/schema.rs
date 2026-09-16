@@ -18,7 +18,7 @@ use uqa_storage::mvcc::{DatabaseId, VersionError};
 use super::{codec, PhysicalResult};
 
 const TABLES: [(&str, &str); 4] = [
-    ("_uqa_mvcc_metadata", "CREATE TABLE _uqa_mvcc_metadata (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 1), database_id BLOB NOT NULL CHECK(typeof(database_id) = 'blob' AND length(database_id) = 16), allocated BLOB NOT NULL CHECK(typeof(allocated) = 'blob' AND length(allocated) = 8), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8))"),
+    ("_uqa_mvcc_metadata", "CREATE TABLE _uqa_mvcc_metadata (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 1), database_id BLOB NOT NULL CHECK(typeof(database_id) = 'blob' AND length(database_id) = 16), allocated BLOB NOT NULL CHECK(typeof(allocated) = 'blob' AND length(allocated) = 8), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8), mapping INTEGER NOT NULL DEFAULT 0 CHECK(mapping IN (0, 1)))"),
     ("_uqa_mvcc_heads", "CREATE TABLE _uqa_mvcc_heads (key BLOB PRIMARY KEY CHECK(typeof(key) = 'blob'), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8 AND sequence > x'0000000000000000')) WITHOUT ROWID"),
     ("_uqa_mvcc_versions", "CREATE TABLE _uqa_mvcc_versions (key BLOB NOT NULL CHECK(typeof(key) = 'blob'), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8 AND sequence > x'0000000000000000'), value BLOB CHECK(value IS NULL OR typeof(value) = 'blob'), PRIMARY KEY(key, sequence)) WITHOUT ROWID"),
     ("_uqa_mvcc_transactions", "CREATE TABLE _uqa_mvcc_transactions (allocation BLOB PRIMARY KEY CHECK(typeof(allocation) = 'blob' AND length(allocation) = 8 AND allocation > x'0000000000000000'), status INTEGER NOT NULL CHECK(status IN (0, 1, 2)), sequence BLOB, fingerprint BLOB, CHECK((status IN (0, 1) AND sequence IS NULL AND fingerprint IS NULL) OR (status = 2 AND typeof(sequence) = 'blob' AND length(sequence) = 8 AND typeof(fingerprint) = 'blob' AND length(fingerprint) = 32))) WITHOUT ROWID"),
@@ -62,7 +62,7 @@ pub(super) fn begin(connection: &Connection) -> PhysicalResult<Transaction<'_>> 
     )?)
 }
 
-fn definition_matches(
+pub(super) fn definition_matches(
     connection: &Connection,
     name: &str,
     expected: &str,
@@ -85,9 +85,17 @@ fn trigger(table: &str, action: &str) -> (String, String) {
 pub(super) fn initialize(connection: &Connection) -> PhysicalResult<DatabaseId> {
     let _permit = WritePermit::acquire(connection)?;
     let transaction = begin(connection)?;
+    let (identity, created) = initialize_in(&transaction)?;
+    if created {
+        transaction.commit()?;
+    }
+    Ok(identity)
+}
+
+pub(super) fn initialize_in(transaction: &Connection) -> PhysicalResult<(DatabaseId, bool)> {
     let mut present = 0;
     for (name, expected) in TABLES {
-        if let Some(matches) = definition_matches(&transaction, name, expected)? {
+        if let Some(matches) = definition_matches(transaction, name, expected)? {
             if !matches {
                 return Err(
                     VersionError::InvalidEncoding("unexpected record table definition").into(),
@@ -113,16 +121,15 @@ pub(super) fn initialize(connection: &Connection) -> PhysicalResult<DatabaseId> 
             )
         })?;
         transaction.execute(
-            "INSERT INTO _uqa_mvcc_metadata VALUES (1, 1, ?1, ?2, ?2)",
+            "INSERT INTO _uqa_mvcc_metadata (singleton, format, database_id, allocated, sequence) VALUES (1, 1, ?1, ?2, ?2)",
             params![identity.as_slice(), 0_u64.to_be_bytes().as_slice()],
         )?;
-        transaction.commit()?;
-        return Ok(DatabaseId::from_bytes(identity));
+        return Ok((DatabaseId::from_bytes(identity), true));
     }
     for (name, _) in TABLES {
         for action in ["INSERT", "UPDATE", "DELETE"] {
             let (name, expected) = trigger(name, action);
-            if definition_matches(&transaction, &name, &expected)? != Some(true) {
+            if definition_matches(transaction, &name, &expected)? != Some(true) {
                 return Err(
                     VersionError::InvalidEncoding("missing or changed record write guard").into(),
                 );
@@ -138,7 +145,7 @@ pub(super) fn initialize(connection: &Connection) -> PhysicalResult<DatabaseId> 
             .ok_or(VersionError::InvalidEncoding("missing database identity"))?;
         codec::identity(codec::bytes(row, 0)?)?
     };
-    codec::header(&transaction, identity)?;
+    codec::header(transaction, identity)?;
     // A verified existing format does not need another durable write.
-    Ok(identity)
+    Ok((identity, false))
 }

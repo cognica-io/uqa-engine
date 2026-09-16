@@ -17,6 +17,9 @@ use uqa_storage::read_control::StorageReadControl;
 use uqa_storage::KeyValueStore;
 use uqa_storage_sqlite::{ManagedConnection, SQLiteCompressionOptions, SQLiteRecordStore};
 
+#[path = "mvcc/key_value.rs"]
+mod key_value;
+
 #[derive(Clone, Copy, Debug)]
 enum Mode {
     Plain,
@@ -386,14 +389,24 @@ fn foreign_allocations_and_unknown_outcomes_are_not_treated_as_rollback() {
 #[cfg(not(target_os = "emscripten"))]
 #[test]
 fn another_process_publishes_records_before_the_parent_transaction_ends() {
+    process_writer_schedule(false);
+}
+
+#[cfg(not(target_os = "emscripten"))]
+#[test]
+fn another_process_uses_the_public_key_value_store_before_the_parent_transaction_ends() {
+    process_writer_schedule(true);
+}
+
+#[cfg(not(target_os = "emscripten"))]
+fn process_writer_schedule(public_store: bool) {
     use std::process::{Command, Stdio};
     use std::time::Instant;
 
     for (mode_index, mode) in MODES.into_iter().enumerate() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("process.db");
-        let store = SQLiteRecordStore::new(&open(mode, &path)).unwrap();
-        let a = session(&store);
+        let a = process_store(mode, &path, public_store);
         a.begin_transaction().unwrap();
         a.put(b"parent", b"private").unwrap();
         let mut child = Command::new(std::env::current_exe().unwrap())
@@ -405,6 +418,7 @@ fn another_process_publishes_records_before_the_parent_transaction_ends() {
             ])
             .env("UQA_SQLITE_RECORD_TEST_FILE", &path)
             .env("UQA_SQLITE_RECORD_TEST_MODE", mode_index.to_string())
+            .env("UQA_SQLITE_RECORD_TEST_PUBLIC", public_store.to_string())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -434,12 +448,22 @@ fn another_process_publishes_records_before_the_parent_transaction_ends() {
         assert!(a.in_transaction());
         assert_eq!(a.get(b"child").unwrap(), None);
         assert_eq!(
-            session(&store).get(b"child").unwrap().unwrap(),
+            a.open_session().unwrap().get(b"child").unwrap().unwrap(),
             b"committed"
         );
         a.commit_transaction().unwrap();
         assert_eq!(a.get(b"child").unwrap().unwrap(), b"committed");
         assert_eq!(a.get(b"parent").unwrap().unwrap(), b"private");
+    }
+}
+
+#[cfg(not(target_os = "emscripten"))]
+fn process_store(mode: Mode, path: &Path, public_store: bool) -> Box<dyn KeyValueStore> {
+    let connection = open(mode, path);
+    if public_store {
+        Box::new(uqa_storage_sqlite::SQLiteKeyValueStore::new(connection).unwrap())
+    } else {
+        Box::new(session(&SQLiteRecordStore::new(&connection).unwrap()))
     }
 }
 
@@ -452,7 +476,9 @@ fn process_writer_helper() {
         .unwrap()
         .parse::<usize>()
         .unwrap()];
-    let store = SQLiteRecordStore::new(&open(mode, Path::new(&path))).unwrap();
-    session(&store).put(b"child", b"committed").unwrap();
+    let public = std::env::var("UQA_SQLITE_RECORD_TEST_PUBLIC").unwrap() == "true";
+    process_store(mode, Path::new(&path), public)
+        .put(b"child", b"committed")
+        .unwrap();
     println!("record-commit-complete");
 }

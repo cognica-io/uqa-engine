@@ -268,16 +268,15 @@ pub struct PrivateRecordSnapshot {
 }
 
 impl PrivateRecordSnapshot {
-    pub(super) fn visit_merged(
+    pub(super) fn visit_merged<P: super::projection::Projection>(
         &self,
         committed: &dyn super::CommittedRecordSnapshot,
         prefix: &[u8],
         after: Option<&[u8]>,
         limit: usize,
         control: &StorageReadControl,
-        visit: &mut super::RecordScanVisitor<'_>,
+        visit: &mut super::projection::Visitor<'_, P>,
     ) -> VersionResult<()> {
-        use super::BorrowedRecord;
         control.cancellation().check()?;
         if limit == 0 {
             return Ok(());
@@ -307,35 +306,23 @@ impl PrivateRecordSnapshot {
         let mut pending = next_private()?;
         let mut count = 0;
         let mut running = true;
-        let mut emit = |key: &[u8], record: BorrowedRecord<'_>| -> VersionResult<bool> {
+        let mut emit = |key: &[u8], record: P::Record<'_>| -> VersionResult<bool> {
             control.cancellation().check()?;
             count += 1;
             let more = visit(key, record)?;
             control.cancellation().check()?;
             Ok(more && count < limit)
         };
-        committed.visit_prefix(prefix, after, usize::MAX, control, &mut |key, record| {
+        P::visit(committed, prefix, after, control, &mut |key, record| {
             while let Some(write) = pending.filter(|write| write.key() < key) {
-                running = emit(
-                    write.key(),
-                    BorrowedRecord {
-                        revision: write.expected(),
-                        value: write.value(),
-                    },
-                )?;
+                running = emit(write.key(), P::private(write))?;
                 if !running {
                     return Ok(false);
                 }
                 pending = next_private()?;
             }
             if let Some(write) = pending.filter(|write| write.key() == key) {
-                running = emit(
-                    key,
-                    BorrowedRecord {
-                        revision: write.expected(),
-                        value: write.value(),
-                    },
-                )?;
+                running = emit(key, P::private(write))?;
                 pending = next_private()?;
             } else {
                 running = emit(key, record)?;
@@ -346,13 +333,7 @@ impl PrivateRecordSnapshot {
             let Some(write) = pending else {
                 break;
             };
-            running = emit(
-                write.key(),
-                BorrowedRecord {
-                    revision: write.expected(),
-                    value: write.value(),
-                },
-            )?;
+            running = emit(write.key(), P::private(write))?;
             pending = next_private()?;
         }
         Ok(())

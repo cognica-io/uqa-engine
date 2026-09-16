@@ -132,6 +132,10 @@ fn point_reads_distinguish_committed_absence_and_both_kinds_of_tombstone() {
     assert!(deleted.value().is_none());
     assert!(deleted.is_private());
     assert!(view.get(b"absent", &control).unwrap().is_none());
+    let metadata = view.metadata(b"live", &control).unwrap().unwrap();
+    assert_eq!(metadata.revision, Some(committed));
+    assert!(!metadata.live);
+    assert!(view.metadata(b"absent", &control).unwrap().is_none());
 }
 
 #[test]
@@ -337,6 +341,12 @@ proptest! {
             assert!(borrowed.insert(key[0], record.value.map(|value| value[0])).is_none());
             Ok(true)
         }).unwrap();
-        prop_assert_eq!(borrowed, expected);
+        prop_assert_eq!(&borrowed, &expected);
+        let mut keys = BTreeMap::new();
+        snapshot.visit_keys(b"", None, usize::MAX, &StorageReadControl::with_limit(0), &mut |key, record| {
+            assert!(keys.insert(key[0], record.live).is_none());
+            Ok(true)
+        }).unwrap();
+        prop_assert_eq!(keys, expected.into_iter().map(|(key, value)| (key, value.is_some())).collect::<BTreeMap<_, _>>());
     }
 }

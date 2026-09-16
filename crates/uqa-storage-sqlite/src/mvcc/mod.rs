@@ -7,6 +7,7 @@
 //! `SQLite` persistence for shared logical records, with short physical transactions and durable receipts.
 
 mod codec;
+mod key_value;
 mod read;
 mod schema;
 #[cfg(test)]
@@ -60,7 +61,7 @@ fn sqlite_error(error: rusqlite::Error) -> VersionError {
 
 /// Record persistence over a managed `SQLite` pool, including `SQLCipher` and compressed connections. Snapshots retain logical sequences; this adapter does not retain physical transactions between operations.
 ///
-/// All versions and receipts are currently retained. Existing native relational and Key/Value stores still need routing and format migration before they can use this transaction model.
+/// All versions and receipts are currently retained. The Key/Value provider uses these records and migrates its legacy format atomically; native relational stores still require their own routing and format migration.
 #[derive(Clone)]
 pub struct SQLiteRecordStore {
     connection: ManagedConnection,
@@ -74,9 +75,24 @@ impl SQLiteRecordStore {
                 SQLiteError::TransactionAlreadyActive.into(),
             ));
         }
-        let connection = connection.new_session();
+        let connection = connection.record_connection();
         let identity = connection
             .with(|connection| Ok(schema::initialize(connection)))
+            .map_err(|error| VersionError::Storage(error.into()))?
+            .map_err(Error::into_version)?;
+        Ok(Self {
+            connection,
+            identity,
+        })
+    }
+
+    pub(crate) fn for_key_value(
+        connection: &ManagedConnection,
+        control: &StorageReadControl,
+    ) -> VersionResult<Self> {
+        let connection = connection.record_connection();
+        let identity = connection
+            .with(|connection| Ok(key_value::initialize(connection, control)))
             .map_err(|error| VersionError::Storage(error.into()))?
             .map_err(Error::into_version)?;
         Ok(Self {

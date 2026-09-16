@@ -188,11 +188,7 @@ impl Engine {
         }
     }
 
-    /// A failed outer backend COMMIT/ROLLBACK has already ended the managed
-    /// storage transaction; a failed nested savepoint finish aborts the
-    /// enclosing transaction explicitly. In every case the engine stack and
-    /// session-local caches are restored before the error escapes, so callers
-    /// never inherit a ghost transaction or uncommitted catalog state.
+    /// End any retained backend transaction before restoring caches. If cleanup fails while storage still retains its transaction, keep the engine frames and locks for a later explicit resolution instead of reading private state as committed state.
     pub(super) fn recover_failed_transaction_finish(
         &self,
         stack: &mut Vec<TransactionFrame>,
@@ -221,10 +217,26 @@ impl Engine {
             .first()
             .map_or_else(TransactionDirtyState::default, |frame| frame.dirty_at_begin);
         let mut cleanup_errors = Vec::new();
-        if nested {
-            if let Some(backend) = self.storage.backend.as_ref() {
+        if let Some(backend) = self.storage.backend.as_ref() {
+            if nested || backend.in_transaction() {
                 if let Err(error) = backend.rollback_transaction() {
+                    if backend.in_transaction() {
+                        for frame in stack.iter_mut() {
+                            frame.status = TransactionStatus::Failed;
+                        }
+                        return SQLError::Internal(format!(
+                            "{finish_error}; storage rollback failed; transaction state is retained: {error}"
+                        ));
+                    }
                     cleanup_errors.push(format!("storage rollback: {error}"));
+                }
+                if backend.in_transaction() {
+                    for frame in stack.iter_mut() {
+                        frame.status = TransactionStatus::Failed;
+                    }
+                    return SQLError::Internal(format!(
+                        "{finish_error}; storage rollback did not end the transaction; transaction state is retained"
+                    ));
                 }
             }
         }

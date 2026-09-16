@@ -2,7 +2,7 @@
 
 This document defines the implemented Key/Value storage boundary, session ownership contract, redb behavior, and remaining compatibility limits. SQLite remains the default engine format, while applications can compose `uqa-engine` with `uqa-storage-redb` or another provider without changing query execution.
 
-The [concurrent storage transaction design](concurrent-storage-transactions.md) and [implementation plan](../plans/0008-concurrent-storage-transactions.md) track shared MVCC for native SQLite, SQLite Key/Value and redb. The development redb provider uses the common logical session below; SQLite and complete concurrent SQL transaction integration remain in progress.
+The [concurrent storage transaction design](concurrent-storage-transactions.md) and [implementation plan](../plans/0008-concurrent-storage-transactions.md) track shared MVCC for native SQLite, SQLite Key/Value and redb. The development SQLite Key/Value and redb providers use common logical sessions; native relational SQLite and complete concurrent SQL transaction integration remain in progress.
 
 ## Architecture
 
@@ -15,11 +15,11 @@ flowchart TD
     C --> K[KeyValueStore]
     B --> K
     K --> M[Memory]
-    K --> Q[SQLite _key_value]
+    K --> Q[SQLite versioned records]
     K --> R[redb]
 ```
 
-`PersistentStorageProvider` owns a durable database and creates independent `PersistentStorageSession` values. Each session contains a `CatalogFacade` and `PersistentStorageBackend` bound to the same transaction context, which prevents catalog mutations and document/index mutations from committing through different physical sessions. `Engine::from_persistent_provider` retains the provider so `Engine::new_session` works for every backend; `Engine::from_persistent_backends` remains available for already-bound handles but intentionally cannot manufacture another session.
+`PersistentStorageProvider` owns a durable database and creates independent `PersistentStorageSession` values. Each session contains a `CatalogFacade` and `PersistentStorageBackend` bound to the same transaction context, which prevents catalog mutations and document/index mutations from committing through different physical sessions. `Engine::from_persistent_provider` retains the provider so `Engine::new_session` works for every backend; `Engine::from_persistent_backends` remains available for already-bound handles and delegates independent session creation to the backend's `open_session` implementation.
 
 ## Physical store contract
 
@@ -34,9 +34,19 @@ Third-party implementations should run `uqa_storage::key_value::conformance::ver
 | Implementation | Crate | Durable | Session model | Notes |
 | --- | --- | --- | --- | --- |
 | Relational SQLite | `uqa-storage-sqlite` | yes | one `ManagedConnection` session per engine session | Default engine backend; supports persisted B-tree, IVF, and HNSW indexes plus SQLCipher and compressed-container variants |
-| `SQLiteKeyValueStore` | `uqa-storage-sqlite` | yes | independent SQLite session over a shared pool | Stores all logical Key/Value data in `_key_value (key BLOB PRIMARY KEY, value BLOB NOT NULL) WITHOUT ROWID` |
+| `SQLiteKeyValueStore` | `uqa-storage-sqlite` | yes | common logical session bound to managed connection clones | Stores versioned records with short physical transactions; migrates the legacy `_key_value` table atomically |
 | `RedbKeyValueStore` | `uqa-storage-redb` | yes | common logical session over one shared redb file owner | Private changes, pinned record snapshots and conditional commits; physical writes remain serialized, and Engine SQL still retains its writer gate |
 | `MemoryKeyValueStore` | `uqa-storage` | no | one in-process test state | Reference implementation for logical tests, not a durable engine provider |
+
+## SQLite Key/Value transaction mapping
+
+`SQLiteKeyValueStore` binds its `ManagedConnection` and all existing connection clones to one common logical session. `new_session` creates an independent logical session over the same pool. The paired catalog/backend share that store, and transaction control through a connection clone operates on the same private changes. Binding rejects an active native transaction before changing the format. An in-memory pool with one physical connection can host independent logical sessions because snapshots and private changes retain no physical transaction.
+
+The common session implements pinned reads, ordered private changes, savepoints and retained commit attempts as described for redb below. SQLite key-only reads inspect record metadata without materializing values, including private tombstones. Independent direct Key/Value writers can commit across separately opened providers and native processes while another session retains private writes; plain, SQLCipher, compressed and encrypted compressed files use the same logical contract. Physical allocation, commit, abort and migration use short guarded transactions with `synchronous=FULL`.
+
+Initial open copies legacy `_key_value` bytes into versioned histories in one bounded physical transaction and replaces the old writable table with a guard view. A separate catalog guard rejects the released native catalog initializer. Durable metadata identifies the Key/Value mapping, and reopen rejects missing or changed guards instead of recreating them. Resource exhaustion or a record collision rolls back the conversion, preserving the old format. [`verify-sqlite-legacy-writer.py`](../../scripts/verify-sqlite-legacy-writer.py) verifies migration, old-writer rejection and reopen with the actual crates.io 0.3.6 provider in all four native file modes. Native relational databases require their own mapping and are rejected by this conversion.
+
+`SQLiteKeyValueStorage::open_with_options` and `from_connection_with_options` accept `VersionedSessionOptions { retained_bytes }`, with the same default 64 MiB allowance and no spill as redb. Sibling sessions inherit the configured limit. `ManagedConnection::with` and `with_mut` reject a bound logical session; `with_physical` provides explicit diagnostics or physical maintenance outside that session's transaction and does not expose private records. Record-table write guards remain active. See the [unreleased upgrade contract](../manual/reference/10-upgrading.md#unreleased-sqlite-keyvalue-record-format) for the Rust API and one-way file-format boundary. Full concurrent Engine SQL, shared-index merges and provider history reclamation remain unfinished.
 
 ## redb transaction mapping
 

@@ -21,7 +21,7 @@ flowchart TD
     K[redb provider] --> D
 ```
 
-`PersistentStorageProvider` creates catalog and backend handles together for a new session. `Engine::from_persistent_provider` retains that factory and can create sibling sessions. `Engine::from_persistent_backends` accepts already-bound handles and therefore cannot manufacture another transaction context.
+`PersistentStorageProvider` creates catalog and backend handles together for a new session. `Engine::from_persistent_provider` retains that factory and can create sibling sessions. `Engine::from_persistent_backends` accepts already-bound handles and retains the backend's session factory; independent sessions require that backend to implement `open_session`.
 
 ## Logical storage contracts
 
@@ -40,18 +40,20 @@ Expression key preparation finishes before the document-store write lock is acqu
 | Provider | Main implementation | Session transaction identity | Security notes |
 | --- | --- | --- | --- |
 | Memory | In-engine memory stores | Engine session state | No durability |
-| SQLite | `uqa-storage-sqlite` | Managed connection | Plain, SQLCipher, or compressed VFS open paths |
+| SQLite | `uqa-storage-sqlite` | Managed connection; Key/Value binds it to a common logical session | Plain, SQLCipher, or compressed VFS open paths |
 | redb | `uqa-storage-redb` | Common logical session over one shared database owner | No encryption at rest |
 
 SQLite is the default persistent engine. redb uses the same SQL and logical storage surface through the provider contract.
 
 The development redb provider uses common logical Key/Value sessions: private changes and savepoints retain no physical writer, reads pin a committed sequence, and short conditional commits publish versions and receipts atomically. Its catalog/backend pair shares that session. Default retention is 64 MiB per session and can be set through `RedbStorage::open_with_options`; it is separate from the query read allowance. See the [transaction and file-format contract](../../design/kv-storage-backends.md#redb-transaction-mapping) and [unreleased upgrade boundary](../reference/10-upgrading.md#unreleased-redb-record-format).
 
-The development SQLite `SQLiteRecordStore` implements the common record-persistence contract. Its provider-owned `_uqa_mvcc_metadata` table stores the format version, database identity, transaction allocation counter and committed sequence. `_uqa_mvcc_heads` identifies each key's latest revision, `_uqa_mvcc_versions` retains historical values and tombstones, and `_uqa_mvcc_transactions` retains transaction outcomes and prepared-batch fingerprints. These objects belong to the physical SQLite format; applications do not manage them through UQA SQL. Existing native relational and SQLite Key/Value stores still require routing and migration to this format, and historical versions and receipts currently remain retained.
+The development SQLite `SQLiteRecordStore` implements the common record-persistence contract. Its provider-owned `_uqa_mvcc_metadata` table stores the format version, database identity, transaction allocation counter, committed sequence and record mapping. `_uqa_mvcc_heads` identifies each key's latest revision, `_uqa_mvcc_versions` retains historical values and tombstones, and `_uqa_mvcc_transactions` retains transaction outcomes and prepared-batch fingerprints. These objects belong to the physical SQLite format; applications do not manage them through UQA SQL. Historical versions and receipts currently remain retained.
+
+`SQLiteKeyValueStore` and its paired catalog/backend now use common logical sessions over these records. Connection clones retain one transaction context, while `new_session` creates an independent context. Legacy Key/Value bytes migrate atomically, and persistent `_key_value` and `_metadata` guard views reject old byte-store writes and native catalog initialization. Missing or changed guards cause reopen to fail. The default session allowance is 64 MiB, configurable through `SQLiteKeyValueStorage::open_with_options` or `from_connection_with_options`. Native relational SQLite still requires its separate mapping and migration. See [SQLite Key/Value transactions](../../design/kv-storage-backends.md#sqlite-keyvalue-transaction-mapping) and the [upgrade contract](../reference/10-upgrading.md#unreleased-sqlite-keyvalue-record-format).
 
 SQLite record-table triggers call the connection-local `__uqa_mvcc_write_permit()` function, which returns one only while the provider holds its private physical-write permit. Dropping the permit closes it even after an error or unwind. This prevents accidental writes outside the versioned persistence path; the guard currently covers only the new record tables and does not protect against deliberate external schema changes. Common storage owns private changes and conflict validation, while the provider owns this function, physical transactions and durable record encoding. redb implements the same common persistence contract using its own tables without a SQLite function.
 
-The [concurrent storage transaction design](../../design/concurrent-storage-transactions.md) covers native SQLite, SQLite Key/Value and redb. Concurrent Engine SQL writers are not yet enabled: Engine retains its writer gate, while SQLite, shared index deltas, SQL isolation and publication integration remain in progress. The [implementation plan](../../plans/0008-concurrent-storage-transactions.md) tracks these acceptance requirements separately from direct Key/Value behavior.
+The [concurrent storage transaction design](../../design/concurrent-storage-transactions.md) covers native SQLite, SQLite Key/Value and redb. Concurrent Engine SQL writers are not yet enabled: Engine retains its writer gate, while native SQLite, shared index deltas, SQL isolation and publication integration remain in progress. The [implementation plan](../../plans/0008-concurrent-storage-transactions.md) tracks these acceptance requirements separately from direct Key/Value behavior.
 
 ## Durable catalog
 

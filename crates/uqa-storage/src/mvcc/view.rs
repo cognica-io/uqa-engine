@@ -24,12 +24,57 @@ pub struct BorrowedRecord<'a> {
     pub value: Option<&'a [u8]>,
 }
 
+/// Visible revision metadata, including tombstones, without retaining the encoded payload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecordMetadata {
+    pub revision: Option<CommitSequence>,
+    pub live: bool,
+}
+
+impl From<BorrowedRecord<'_>> for RecordMetadata {
+    fn from(record: BorrowedRecord<'_>) -> Self {
+        Self {
+            revision: record.revision,
+            live: record.value.is_some(),
+        }
+    }
+}
+
 pub type RecordValueVisitor<'a> = dyn FnMut(Option<BorrowedRecord<'_>>) -> VersionResult<()> + 'a;
 pub type RecordScanVisitor<'a> = dyn FnMut(&[u8], BorrowedRecord<'_>) -> VersionResult<bool> + 'a;
+pub type RecordKeyVisitor<'a> = dyn FnMut(&[u8], RecordMetadata) -> VersionResult<bool> + 'a;
 
 /// A retained committed view whose lease protects visible versions until this owner is dropped. Provider read windows must finish inside each call, without retaining a physical writer or calling user code.
 pub trait CommittedRecordSnapshot: Send + Sync {
     fn sequence(&self) -> CommitSequence;
+
+    /// Read a revision and tombstone marker without materializing its value when the provider supports key-only access.
+    fn metadata(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<RecordMetadata>> {
+        let mut found = None;
+        self.visit_value(key, control, &mut |record| {
+            found = record.map(Into::into);
+            Ok(())
+        })?;
+        Ok(found)
+    }
+
+    /// Visit ordered record identities, including tombstones, without fetching values from providers with key-only access.
+    fn visit_keys(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut RecordKeyVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.visit_prefix(prefix, after, limit, control, &mut |key, record| {
+            visit(key, record.into())
+        })
+    }
 
     /// Return the newest revision at or before this snapshot, including tombstones. Missing identities return `None`.
     fn get(
@@ -129,6 +174,24 @@ pub fn retain_record_snapshot<T: CommittedRecordSnapshot + 'static>(
 impl<T: CommittedRecordSnapshot> CommittedRecordSnapshot for RetainedSnapshot<T> {
     fn sequence(&self) -> CommitSequence {
         self.snapshot.sequence()
+    }
+    fn metadata(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<RecordMetadata>> {
+        self.snapshot.metadata(key, control)
+    }
+    fn visit_keys(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut RecordKeyVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.snapshot
+            .visit_keys(prefix, after, limit, control, visit)
     }
     fn get(
         &self,
@@ -253,8 +316,46 @@ impl MergedRecordSnapshot {
         control: &StorageReadControl,
         visit: &mut RecordScanVisitor<'_>,
     ) -> VersionResult<()> {
-        self.private
-            .visit_merged(&*self.committed, prefix, after, limit, control, visit)
+        self.private.visit_merged::<super::projection::Values>(
+            &*self.committed,
+            prefix,
+            after,
+            limit,
+            control,
+            visit,
+        )
+    }
+
+    pub fn metadata(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<RecordMetadata>> {
+        if let Some(write) = self.private.get(key, control)? {
+            return Ok(Some(RecordMetadata {
+                revision: write.expected(),
+                live: write.value().is_some(),
+            }));
+        }
+        self.committed.metadata(key, control)
+    }
+
+    pub fn visit_keys(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut RecordKeyVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.private.visit_merged::<super::projection::Keys>(
+            &*self.committed,
+            prefix,
+            after,
+            limit,
+            control,
+            visit,
+        )
     }
 
     pub fn get(

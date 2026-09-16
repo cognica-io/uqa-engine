@@ -64,6 +64,19 @@ impl VersionedKeyValueStore {
         }
     }
 
+    /// Create an independent logical session with the same persistence and retention limit.
+    pub fn new_session(&self) -> Self {
+        Self::new(
+            Arc::clone(&self.persistence),
+            self.identity.clone(),
+            self.options,
+        )
+    }
+
+    pub fn options(&self) -> VersionedSessionOptions {
+        self.options
+    }
+
     /// Identify a sealed attempt after a failed commit. Retrying `commit_transaction` resubmits only the identical evaluated batch, and never reevaluates application code.
     pub fn pending_commit(&self) -> Option<StorageTransactionId> {
         self.active
@@ -138,11 +151,7 @@ impl KeyValueStore for VersionedKeyValueStore {
     }
 
     fn open_session(&self) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
-        Ok(Arc::new(Self::new(
-            Arc::clone(&self.persistence),
-            self.identity.clone(),
-            self.options,
-        )))
+        Ok(Arc::new(self.new_session()))
     }
 
     fn get(&self, key: &[u8]) -> StorageBackendResult<Option<Vec<u8>>> {
@@ -155,11 +164,27 @@ impl KeyValueStore for VersionedKeyValueStore {
     }
 
     fn contains_key(&self, key: &[u8]) -> StorageBackendResult<bool> {
+        Ok(self
+            .view()
+            .and_then(|view| view.metadata(key, &self.control))
+            .map_err(VersionError::into_storage_error)?
+            .is_some_and(|record| record.live))
+    }
+
+    fn contains_prefix_budgeted(
+        &self,
+        prefix: &[u8],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        control.check()?;
         let mut found = false;
-        self.visit_value(key, &self.control, &mut |bytes| {
-            found = bytes.is_some();
-            Ok(())
-        })?;
+        self.view()
+            .map_err(VersionError::into_storage_error)?
+            .visit_keys(prefix, None, usize::MAX, control, &mut |_, record| {
+                found = record.live;
+                Ok(!found)
+            })
+            .map_err(VersionError::into_storage_error)?;
         Ok(found)
     }
 
@@ -227,10 +252,23 @@ impl KeyValueStore for VersionedKeyValueStore {
         limit: usize,
     ) -> StorageBackendResult<Vec<Vec<u8>>> {
         let mut keys = Vec::new();
-        self.visit_prefix_after(prefix, after, limit, &self.control, &mut |key, _| {
-            keys.push(key.to_vec());
-            Ok(())
-        })?;
+        if limit != 0 {
+            self.view()
+                .map_err(VersionError::into_storage_error)?
+                .visit_keys(
+                    prefix,
+                    after,
+                    usize::MAX,
+                    &self.control,
+                    &mut |key, record| {
+                        if record.live {
+                            keys.push(key.to_vec());
+                        }
+                        Ok(keys.len() < limit)
+                    },
+                )
+                .map_err(VersionError::into_storage_error)?;
+        }
         Ok(keys)
     }
 

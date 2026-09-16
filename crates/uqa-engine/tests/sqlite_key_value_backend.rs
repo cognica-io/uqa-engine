@@ -51,7 +51,7 @@ fn fail_nth_key_value_insert(connection: &ManagedConnection, nth: usize) {
         "fault injection requires a positive operation index"
     );
     connection
-        .with(|sqlite| {
+        .with_physical(|sqlite| {
             sqlite.execute_batch(&format!(
                 "DROP TRIGGER IF EXISTS injected_key_value_insert_failure;
                  CREATE TABLE IF NOT EXISTS _key_value_fault_counter (
@@ -60,7 +60,7 @@ fn fail_nth_key_value_insert(connection: &ManagedConnection, nth: usize) {
                  DELETE FROM _key_value_fault_counter;
                  INSERT INTO _key_value_fault_counter (remaining) VALUES ({nth});
                  CREATE TRIGGER injected_key_value_insert_failure
-                 BEFORE INSERT ON _key_value
+                 BEFORE INSERT ON _uqa_mvcc_versions
                  BEGIN
                      UPDATE _key_value_fault_counter
                      SET remaining = remaining - 1;
@@ -77,7 +77,7 @@ fn fail_nth_key_value_insert(connection: &ManagedConnection, nth: usize) {
 
 fn clear_key_value_insert_failure(connection: &ManagedConnection) {
     connection
-        .with(|sqlite| {
+        .with_physical(|sqlite| {
             sqlite.execute_batch(
                 "DROP TRIGGER IF EXISTS injected_key_value_insert_failure;
                  DROP TABLE IF EXISTS _key_value_fault_counter;",
@@ -508,8 +508,7 @@ fn failed_key_value_catalog_batch_does_not_leave_an_orphan_relation() {
     let (storage, engine) = open_key_value_storage_and_engine(&path);
     let connection = storage.store().connection();
 
-    // Sequence creation first claims the shared relation name and then writes
-    // the sequence payload. Failing the second write must roll both back.
+    // Fail during physical publication so neither the relation claim nor its sequence payload survives.
     fail_nth_key_value_insert(&connection, 2);
     let error = engine
         .sql("CREATE SEQUENCE rolled_back_relation START 7", &[])
@@ -517,6 +516,7 @@ fn failed_key_value_catalog_batch_does_not_leave_an_orphan_relation() {
     assert!(error
         .to_string()
         .contains("injected KeyValue insert failure"));
+    assert_eq!(engine.transaction_depth(), 0);
     assert!(engine
         .sequence_state("rolled_back_relation")
         .unwrap()
@@ -573,10 +573,7 @@ fn failed_key_value_graph_replacement_preserves_snapshot_and_path_index() {
         .build_path_index("knows_idx", "g", &[vec!["knows".to_string()]])
         .unwrap();
 
-    // Graph replacement writes the graph marker, removes old memberships and
-    // dependent path indexes, then writes the replacement snapshot. Failing
-    // its second INSERT proves that the preceding put and deletes are covered
-    // by the same SQLite KeyValue savepoint.
+    // Fail midway through physical publication of the graph replacement. Its marker, membership changes and dependent path-index removal must roll back together.
     fail_nth_key_value_insert(&connection, 2);
     let error = engine
         .add_graph_vertex(Vertex::new(3, "Person"), "g")
@@ -619,4 +616,51 @@ fn failed_key_value_graph_replacement_preserves_snapshot_and_path_index() {
             .collect::<Vec<_>>(),
         vec![(1, 2)]
     );
+}
+
+#[test]
+fn failed_commit_cleanup_retains_the_frame_until_storage_rollback_succeeds() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("retained-failure.sqlite3");
+    let (storage, engine) = open_key_value_storage_and_engine(&path);
+    let connection = storage.store().connection();
+    fail_nth_key_value_insert(&connection, 2);
+    connection.with_physical(|sqlite| {
+        sqlite.execute_batch("CREATE TRIGGER injected_key_value_abort_failure BEFORE UPDATE ON _uqa_mvcc_transactions WHEN NEW.status = 1 BEGIN SELECT RAISE(ABORT, 'injected receipt abort failure'); END")?;
+        Ok(())
+    }).unwrap();
+    let error = engine
+        .sql("CREATE SEQUENCE retained_failed_sequence START 7", &[])
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("transaction state is retained"),
+        "{error}"
+    );
+    assert_eq!(engine.transaction_depth(), 1);
+    assert_eq!(
+        engine.sql("SELECT 1", &[]).unwrap_err().sqlstate(),
+        Some("25P02")
+    );
+    connection
+        .with_physical(|sqlite| {
+            sqlite.execute_batch("DROP TRIGGER injected_key_value_abort_failure")?;
+            Ok(())
+        })
+        .unwrap();
+    clear_key_value_insert_failure(&connection);
+    engine.rollback().unwrap();
+    assert_eq!(engine.transaction_depth(), 0);
+    assert!(engine
+        .sequence_state("retained_failed_sequence")
+        .unwrap()
+        .is_none());
+    engine
+        .sql(
+            "CREATE TABLE retained_failed_sequence (id INTEGER PRIMARY KEY)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql("INSERT INTO retained_failed_sequence VALUES (1)", &[])
+        .unwrap();
 }

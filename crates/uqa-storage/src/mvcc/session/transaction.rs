@@ -74,13 +74,9 @@ impl Transaction {
         control: &StorageReadControl,
     ) -> VersionResult<()> {
         self.writable()?;
-        let mut expected = None;
-        let mut exists = false;
-        self.view()?.visit_value(key, control, &mut |record| {
-            expected = record.and_then(|record| record.revision);
-            exists = record.is_some_and(|record| record.value.is_some());
-            Ok(())
-        })?;
+        let record = self.view()?.metadata(key, control)?;
+        let expected = record.and_then(|record| record.revision);
+        let exists = record.is_some_and(|record| record.live);
         if value.is_none() && !exists {
             return Ok(());
         }
@@ -102,8 +98,8 @@ impl Transaction {
         self.writable()?;
         let mut keys = BudgetedVec::new(control.memory());
         self.view()?
-            .visit_prefix(prefix, None, usize::MAX, control, &mut |key, record| {
-                if record.value.is_some() {
+            .visit_keys(prefix, None, usize::MAX, control, &mut |key, record| {
+                if record.live {
                     keys.push((RecordKey::new(key, control.memory())?, record.revision))?;
                 }
                 Ok(true)

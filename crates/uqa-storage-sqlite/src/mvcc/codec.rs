@@ -14,6 +14,7 @@ use super::PhysicalResult;
 pub(super) struct Header {
     pub(super) allocated: u64,
     pub(super) sequence: CommitSequence,
+    pub(super) key_value_mapping: bool,
 }
 
 pub(super) fn bytes<'a>(row: &'a Row<'_>, column: usize) -> PhysicalResult<&'a [u8]> {
@@ -30,7 +31,7 @@ pub(super) fn integer(bytes: &[u8]) -> PhysicalResult<u64> {
 }
 
 pub(super) fn header(connection: &Connection, expected: DatabaseId) -> PhysicalResult<Header> {
-    let mut statement = connection.prepare("SELECT format, database_id, allocated, sequence FROM _uqa_mvcc_metadata WHERE singleton = 1")?;
+    let mut statement = connection.prepare("SELECT format, database_id, allocated, sequence, mapping FROM _uqa_mvcc_metadata WHERE singleton = 1")?;
     let mut rows = statement.query([])?;
     let row = rows
         .next()?
@@ -45,6 +46,11 @@ pub(super) fn header(connection: &Connection, expected: DatabaseId) -> PhysicalR
     Ok(Header {
         allocated: integer(bytes(row, 2)?)?,
         sequence: CommitSequence::from_u64(integer(bytes(row, 3)?)?),
+        key_value_mapping: match row.get::<_, i64>(4)? {
+            0 => false,
+            1 => true,
+            _ => return Err(VersionError::InvalidEncoding("unknown record mapping").into()),
+        },
     })
 }
 

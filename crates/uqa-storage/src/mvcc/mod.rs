@@ -14,6 +14,7 @@ mod key;
 mod memory;
 mod overlay;
 mod persistence;
+mod projection;
 mod session;
 mod types;
 mod view;
@@ -30,5 +31,6 @@ pub use session::{VersionedKeyValueStore, VersionedSessionOptions};
 pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};
 pub use view::{
     retain_record_snapshot, BorrowedRecord, CommittedRecordSnapshot, MergedRecordSnapshot,
-    RecordScanVisitor, RecordValueVisitor, ScannedVisibleRecord, VisibleRecord,
+    RecordKeyVisitor, RecordMetadata, RecordScanVisitor, RecordValueVisitor, ScannedVisibleRecord,
+    VisibleRecord,
 };

@@ -10,6 +10,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Routed redb Key/Value, catalog and backend sessions through common logical transactions with pinned reads, private savepoints, bounded retention and durable commit receipts. Independent direct Key/Value writers can commit concurrently; complete concurrent Engine SQL support remains in progress.
 - Added an atomic, one-way redb record-format upgrade that rejects released 0.3.6 writers after migration. The default private session allowance is 64 MiB and can be configured with `RedbStorage::open_with_options`. See the [unreleased upgrade contract](docs/manual/reference/10-upgrading.md#unreleased-redb-record-format).
+- Routed SQLite Key/Value sessions and their connection clones through the same logical transactions, including SQLCipher and compressed variants. Independent direct writers retain private changes without holding SQLite's physical writer. Legacy Key/Value files migrate atomically and reject released 0.3.6 writers; native relational SQLite integration remains in progress. See the [SQLite upgrade contract](docs/manual/reference/10-upgrading.md#unreleased-sqlite-keyvalue-record-format).
+
+### Fixed
+
+- Roll back a retained storage transaction before refreshing Engine caches after a failed commit. If rollback also fails, preserve the failed Engine frame and locks until storage cleanup succeeds instead of exposing private catalog or graph state as committed.
 
 ## [0.3.6] - 2026-09-15
 

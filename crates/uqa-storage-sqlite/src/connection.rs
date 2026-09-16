@@ -14,12 +14,15 @@
 //! readers to make real concurrent progress.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use parking_lot::{Condvar, Mutex, RwLock};
 use rusqlite::{Connection, OpenFlags};
+use uqa_storage::{mvcc::VersionedKeyValueStore, KeyValueStore};
 
 use crate::compressed_vfs::{self, SQLiteCompressedContainerAnchor, SQLiteCompressionOptions};
+
+mod logical;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SQLiteError {
@@ -62,6 +65,8 @@ pub enum SQLiteError {
     Serde(#[from] serde_json::Error),
     #[error("storage backend error: {0}")]
     StorageBackend(String),
+    #[error(transparent)]
+    StorageSource(Box<uqa_storage::StorageBackendError>),
     #[error("transaction already active for this sqlite session")]
     TransactionAlreadyActive,
     #[error("no active transaction for this sqlite session")]
@@ -72,6 +77,10 @@ pub enum SQLiteError {
     SessionCleanupFailed(String),
     #[error("sqlite connection-pool checkout lost its connection")]
     MissingCheckedOutConnection,
+    #[error("versioned KeyValue storage requires its logical session; use with_physical only for explicit physical maintenance")]
+    LogicalSessionRequired,
+    #[error("the SQLite session already has a different retention limit")]
+    SessionOptionsMismatch,
 }
 
 pub type Result<T> = std::result::Result<T, SQLiteError>;
@@ -244,6 +253,7 @@ struct SessionState {
     transaction: Mutex<Option<PooledConnection>>,
     transaction_failure: Mutex<Option<String>>,
     cleanup_failure: Mutex<Option<String>>,
+    logical: OnceLock<Arc<VersionedKeyValueStore>>,
 }
 
 impl SessionState {
@@ -253,6 +263,7 @@ impl SessionState {
             transaction: Mutex::new(None),
             transaction_failure: Mutex::new(None),
             cleanup_failure: Mutex::new(None),
+            logical: OnceLock::new(),
         }
     }
 }
@@ -273,6 +284,7 @@ impl Drop for SessionState {
 pub struct ManagedConnection {
     pool: Arc<ConnectionPool>,
     session: Arc<SessionState>,
+    record_access: bool,
 }
 
 impl ManagedConnection {
@@ -380,6 +392,7 @@ impl ManagedConnection {
         Ok(Self {
             pool: ConnectionPool::new(spec, initial, max_connections),
             session: Arc::new(SessionState::new()),
+            record_access: false,
         })
     }
 
@@ -432,25 +445,34 @@ impl ManagedConnection {
     /// capture operations issued through the other session.
     #[must_use]
     pub fn new_session(&self) -> Self {
+        let _gate = self.session.gate.read();
+        let session = SessionState::new();
+        if let Some(logical) = self.session.logical.get() {
+            let _ = session.logical.set(Arc::new(logical.new_session()));
+        }
         Self {
             pool: Arc::clone(&self.pool),
-            session: Arc::new(SessionState::new()),
+            session: Arc::new(session),
+            record_access: self.record_access,
         }
     }
 
-    /// Whether this logical session currently owns a pinned transaction
-    /// connection.
+    /// Whether this session has an active native or logical record transaction.
     #[must_use]
     pub fn in_transaction(&self) -> bool {
         let _gate = self.session.gate.read();
+        if let Some(logical) = self.session.logical.get() {
+            return logical.in_transaction();
+        }
         self.session.transaction.lock().is_some()
     }
 
-    /// Whether the currently pinned transaction has upgraded to a write
-    /// transaction. Callers use this to enforce read-only execution
-    /// boundaries before COMMIT rather than inferring writes from SQL shape.
+    /// Whether this session has staged writes, including private logical records. Callers use this to enforce read-only execution boundaries before COMMIT.
     pub fn transaction_has_written(&self) -> Result<bool> {
         let _gate = self.session.gate.read();
+        if let Some(logical) = self.session.logical.get() {
+            return logical.transaction_has_written().map_err(Into::into);
+        }
         let transaction = self.session.transaction.lock();
         let transaction = transaction
             .as_ref()
@@ -466,17 +488,22 @@ impl ManagedConnection {
     ///
     /// A rollback-journal writer's pending lock blocks new readers while waiting for existing readers to finish. A compressed read transaction must therefore also avoid the independent monitor: its own shared lock may be preventing that waiting writer from proceeding. Callers refresh through the pinned connection instead. WAL sessions and compressed sessions without a pinned transaction permit the independent monitor.
     pub fn data_version_monitor_is_nonblocking(&self) -> Result<bool> {
+        let _gate = self.session.gate.read();
+        if self.session.logical.get().is_some() {
+            return Ok(true);
+        }
         if !matches!(&self.pool.spec, ConnectionSpec::Compressed { .. }) {
             return Ok(true);
         }
-        let _gate = self.session.gate.read();
         Ok(self.session.transaction.lock().is_none())
     }
 
     /// Whether one pooled connection may retain a read snapshot while another writes. Plain and encrypted `SQLite` databases use WAL; compressed containers use rollback journaling and therefore require a detached engine snapshot before writer promotion.
     #[must_use]
     pub fn supports_concurrent_pinned_read_and_write(&self) -> bool {
-        !matches!(&self.pool.spec, ConnectionSpec::Compressed { .. })
+        let _gate = self.session.gate.read();
+        self.session.logical.get().is_some()
+            || !matches!(&self.pool.spec, ConnectionSpec::Compressed { .. })
     }
 
     /// Database change counter observed on one stable connection shared by
@@ -484,6 +511,10 @@ impl ManagedConnection {
     /// `SQLite` connection commits. In-memory databases have no independent
     /// connections and therefore return `None`.
     pub fn data_version(&self) -> Result<Option<u64>> {
+        let _gate = self.session.gate.read();
+        if let Some(logical) = self.session.logical.get() {
+            return logical.change_version().map_err(Into::into);
+        }
         if matches!(&self.pool.spec, ConnectionSpec::Memory) {
             return Ok(None);
         }
@@ -512,7 +543,16 @@ impl ManagedConnection {
     /// read. Reading `sqlite_schema` is database-wide and keeps the operation
     /// independent of any application table.
     pub fn pin_transaction_snapshot(&self) -> Result<()> {
-        self.with(|connection| {
+        self.surface_cleanup_failure()?;
+        let _gate = self.session.gate.read();
+        if let Some(logical) = self.session.logical.get() {
+            return if logical.in_transaction() {
+                Ok(())
+            } else {
+                Err(SQLiteError::NoActiveTransaction)
+            };
+        }
+        self.with_native(|connection| {
             if connection.is_autocommit() {
                 return Err(SQLiteError::NoActiveTransaction);
             }
@@ -528,11 +568,20 @@ impl ManagedConnection {
     pub fn with<R>(&self, f: impl FnOnce(&Connection) -> Result<R>) -> Result<R> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.read();
+        if self.session.logical.get().is_some() {
+            return Err(SQLiteError::LogicalSessionRequired);
+        }
+        self.with_native(f)
+    }
+
+    /// The caller holds the session gate and has ruled out logical record access.
+    fn with_native<R>(&self, f: impl FnOnce(&Connection) -> Result<R>) -> Result<R> {
         let transaction = self.session.transaction.lock();
         if let Some(connection) = transaction.as_ref() {
             if let Some(error) = self.session.transaction_failure.lock().as_ref() {
                 return Err(SQLiteError::TransactionAborted(error.clone()));
             }
+            self.check_native_access(connection.connection()?)?;
             let result = f(connection.connection()?);
             if let Err(error) = &result {
                 let mut failure = self.session.transaction_failure.lock();
@@ -544,17 +593,22 @@ impl ManagedConnection {
         }
         drop(transaction);
         let connection = self.pool.checkout()?;
+        self.check_native_access(connection.connection()?)?;
         f(connection.connection()?)
     }
 
     pub fn with_mut<R>(&self, f: impl FnOnce(&mut Connection) -> Result<R>) -> Result<R> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.read();
+        if self.session.logical.get().is_some() {
+            return Err(SQLiteError::LogicalSessionRequired);
+        }
         let mut transaction = self.session.transaction.lock();
         if let Some(connection) = transaction.as_mut() {
             if let Some(error) = self.session.transaction_failure.lock().as_ref() {
                 return Err(SQLiteError::TransactionAborted(error.clone()));
             }
+            self.check_native_access(connection.connection()?)?;
             let result = f(connection.connection_mut()?);
             if let Err(error) = &result {
                 let mut failure = self.session.transaction_failure.lock();
@@ -566,6 +620,7 @@ impl ManagedConnection {
         }
         drop(transaction);
         let mut connection = self.pool.checkout()?;
+        self.check_native_access(connection.connection()?)?;
         f(connection.connection_mut()?)
     }
 
@@ -573,7 +628,13 @@ impl ManagedConnection {
     pub fn vacuum(&self) -> Result<()> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.write();
-        if self.session.transaction.lock().is_some() {
+        if self.session.transaction.lock().is_some()
+            || self
+                .session
+                .logical
+                .get()
+                .is_some_and(|logical| logical.in_transaction())
+        {
             return Err(SQLiteError::TransactionAlreadyActive);
         }
         let connection = self.pool.checkout()?;
@@ -602,11 +663,18 @@ impl ManagedConnection {
     fn begin_transaction_with(&self, statement: &str) -> Result<()> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.write();
+        if let Some(logical) = self.session.logical.get() {
+            if logical.in_transaction() {
+                return Err(SQLiteError::TransactionAlreadyActive);
+            }
+            return logical.begin_transaction().map_err(Into::into);
+        }
         let mut transaction = self.session.transaction.lock();
         if transaction.is_some() {
             return Err(SQLiteError::TransactionAlreadyActive);
         }
         let connection = self.pool.checkout()?;
+        self.check_native_access(connection.connection()?)?;
         connection.connection()?.execute_batch(statement)?;
         self.session.transaction_failure.lock().take();
         *transaction = Some(connection);
@@ -637,6 +705,17 @@ impl ManagedConnection {
 
     fn finish_transaction(&self, statement: &str) -> Result<()> {
         let _gate = self.session.gate.write();
+        if let Some(logical) = self.session.logical.get() {
+            if !logical.in_transaction() {
+                return Err(SQLiteError::NoActiveTransaction);
+            }
+            return if statement == "COMMIT" {
+                logical.commit_transaction()
+            } else {
+                logical.rollback_transaction()
+            }
+            .map_err(Into::into);
+        }
         let mut transaction = self.session.transaction.lock();
         let connection = transaction
             .as_ref()
@@ -667,42 +746,59 @@ impl ManagedConnection {
         Ok(())
     }
 
-    fn with_transaction<R>(&self, f: impl FnOnce(&Connection) -> Result<R>) -> Result<R> {
+    fn with_transaction<R>(
+        &self,
+        logical: impl FnOnce(&VersionedKeyValueStore) -> uqa_storage::StorageBackendResult<R>,
+        native: impl FnOnce(&Connection) -> Result<R>,
+    ) -> Result<R> {
+        self.surface_cleanup_failure()?;
         let _gate = self.session.gate.read();
+        if let Some(store) = self.session.logical.get() {
+            if !store.in_transaction() {
+                return Err(SQLiteError::NoActiveTransaction);
+            }
+            return logical(store).map_err(Into::into);
+        }
         let transaction = self.session.transaction.lock();
         let connection = transaction
             .as_ref()
             .ok_or(SQLiteError::NoActiveTransaction)?;
-        f(connection.connection()?)
+        self.check_native_access(connection.connection()?)?;
+        native(connection.connection()?)
     }
 
     pub fn savepoint(&self, name: &str) -> Result<()> {
-        self.surface_cleanup_failure()?;
-        let stmt = format!("SAVEPOINT \"{}\"", name.replace('"', "\"\""));
-        self.with_transaction(|c| {
-            c.execute_batch(&stmt)?;
-            Ok(())
-        })
+        self.with_transaction(
+            |logical| logical.savepoint(name),
+            |connection| {
+                let stmt = format!("SAVEPOINT \"{}\"", name.replace('"', "\"\""));
+                connection.execute_batch(&stmt)?;
+                Ok(())
+            },
+        )
     }
 
     pub fn release_savepoint(&self, name: &str) -> Result<()> {
-        self.surface_cleanup_failure()?;
-        let stmt = format!("RELEASE SAVEPOINT \"{}\"", name.replace('"', "\"\""));
-        self.with_transaction(|c| {
-            c.execute_batch(&stmt)?;
-            Ok(())
-        })
+        self.with_transaction(
+            |logical| logical.release_savepoint(name),
+            |connection| {
+                let stmt = format!("RELEASE SAVEPOINT \"{}\"", name.replace('"', "\"\""));
+                connection.execute_batch(&stmt)?;
+                Ok(())
+            },
+        )
     }
 
     pub fn rollback_to_savepoint(&self, name: &str) -> Result<()> {
-        self.surface_cleanup_failure()?;
-        let stmt = format!("ROLLBACK TO SAVEPOINT \"{}\"", name.replace('"', "\"\""));
-        self.with_transaction(|c| {
-            c.execute_batch(&stmt)?;
-            Ok(())
-        })?;
-        self.session.transaction_failure.lock().take();
-        Ok(())
+        self.with_transaction(
+            |logical| logical.rollback_to_savepoint(name),
+            |connection| {
+                let stmt = format!("ROLLBACK TO SAVEPOINT \"{}\"", name.replace('"', "\"\""));
+                connection.execute_batch(&stmt)?;
+                self.session.transaction_failure.lock().take();
+                Ok(())
+            },
+        )
     }
 }
 
@@ -720,6 +816,7 @@ impl From<SQLiteError> for uqa_storage::StorageBackendError {
         match source {
             SQLiteError::Memory(error) => Self::Memory(error),
             SQLiteError::Cancelled(error) => Self::Cancelled(error),
+            SQLiteError::StorageSource(error) => *error,
             source => Self::backend("SQLite", source),
         }
     }
@@ -741,7 +838,9 @@ impl From<uqa_storage::StorageBackendError> for SQLiteError {
             StorageBackendError::Serde(error) => Self::Serde(error),
             StorageBackendError::Backend { backend, source } => match source.downcast::<Self>() {
                 Ok(error) => *error,
-                Err(source) => Self::StorageBackend(format!("{backend} storage failed: {source}")),
+                Err(source) => {
+                    Self::StorageSource(Box::new(StorageBackendError::Backend { backend, source }))
+                }
             },
             StorageBackendError::Other(message) => Self::StorageBackend(message),
         }

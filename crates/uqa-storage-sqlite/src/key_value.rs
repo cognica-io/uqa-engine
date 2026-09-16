@@ -4,42 +4,24 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `SQLite`-backed physical `KeyValue` storage.
-//!
-//! The logical catalog, document store, inverted index, and vector index live
-//! in `uqa-storage::key_value`. This crate provides the `SQLite` implementation
-//! of the ordered byte-key store they require.
+//! `SQLite` persistence and connection affinity for common logical Key/Value sessions.
 
-use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
-use crate::{ManagedConnection, Result as SQLiteResult, SQLiteError};
-use rusqlite::{params, OptionalExtension};
-use uqa_storage::key_value::{
-    prefix_upper_bound, KeyValueBatch, KeyValueCatalog, KeyValueStorageBackend, KeyValueStore,
-};
+use crate::{ManagedConnection, Result as SQLiteResult};
+use uqa_storage::mvcc::{StorageTransactionId, VersionedKeyValueStore, VersionedSessionOptions};
+use uqa_storage::read_control::{KeyValueReadVisitor, StorageReadControl, ValueReadVisitor};
 use uqa_storage::{
-    CatalogFacade, PersistentStorageBackend, PersistentStorageIdentity, PersistentStorageProvider,
-    PersistentStorageSession, StorageBackendError, StorageBackendResult,
+    CatalogFacade, KeyValueBatch, KeyValueCatalog, KeyValueStorageBackend, KeyValueStore,
+    PersistentStorageBackend, PersistentStorageIdentity, PersistentStorageProvider,
+    PersistentStorageSession, StorageBackendResult,
 };
 
-const KEY_VALUE_TABLE: &str = "_key_value";
-
-mod controlled;
-
-#[derive(Debug, Clone)]
-enum SQLiteKeyValueBatchOperation {
-    Put(Vec<u8>, Vec<u8>),
-    Delete(Vec<u8>),
-    DeletePrefix(Vec<u8>),
-}
-
-/// `SQLite` physical implementation of [`KeyValueStore`].
+/// A logical byte-store session sharing transaction state with its managed connection clones.
 #[derive(Clone)]
 pub struct SQLiteKeyValueStore {
     conn: ManagedConnection,
-    table_ready: Arc<AtomicBool>,
+    records: Arc<VersionedKeyValueStore>,
 }
 
 impl SQLiteKeyValueStore {
@@ -52,104 +34,38 @@ impl SQLiteKeyValueStore {
     }
 
     pub fn new(conn: ManagedConnection) -> SQLiteResult<Self> {
-        let store = Self {
-            conn,
-            table_ready: Arc::new(AtomicBool::new(false)),
-        };
-        store.ensure_table()?;
-        Ok(store)
+        Self::with_options(conn, VersionedSessionOptions::default())
+    }
+
+    /// Bind the connection and every existing clone to one bounded logical session.
+    pub fn with_options(
+        conn: ManagedConnection,
+        options: VersionedSessionOptions,
+    ) -> SQLiteResult<Self> {
+        let records = conn.bind_records(options)?;
+        Ok(Self { conn, records })
     }
 
     pub fn connection(&self) -> ManagedConnection {
         self.conn.clone()
     }
 
-    /// Create an isolated transaction session over the same `SQLite` database.
     pub fn new_session(&self) -> Self {
-        Self {
-            conn: self.conn.new_session(),
-            table_ready: Arc::clone(&self.table_ready),
-        }
+        let conn = self.conn.new_session();
+        let records = conn
+            .bind_records(self.records.options())
+            .expect("a fresh connection inherits the same logical session configuration");
+        Self { conn, records }
     }
 
-    fn ensure_table(&self) -> SQLiteResult<()> {
-        if self.table_ready.load(Ordering::Acquire) {
-            return Ok(());
-        }
-        self.conn.with(|conn| {
-            conn.execute(
-                &format!(
-                    "CREATE TABLE IF NOT EXISTS {KEY_VALUE_TABLE} (
-                        key   BLOB PRIMARY KEY,
-                        value BLOB NOT NULL
-                    ) WITHOUT ROWID"
-                ),
-                [],
-            )?;
-            Ok(())
-        })?;
-        self.table_ready.store(true, Ordering::Release);
-        Ok(())
+    pub fn pending_commit(&self) -> Option<StorageTransactionId> {
+        self.records.pending_commit()
     }
 }
 
 impl KeyValueStore for SQLiteKeyValueStore {
-    fn contains_prefix_budgeted(
-        &self,
-        prefix: &[u8],
-        control: &uqa_storage::read_control::StorageReadControl,
-    ) -> StorageBackendResult<bool> {
-        control.check()?;
-        self.ensure_table()?;
-        Ok(self
-            .conn
-            .with(|connection| controlled::contains_prefix(connection, prefix, control))?)
-    }
-
-    fn visit_value(
-        &self,
-        key: &[u8],
-        control: &uqa_storage::read_control::StorageReadControl,
-        visit: &mut uqa_storage::read_control::ValueReadVisitor<'_>,
-    ) -> StorageBackendResult<()> {
-        control.check()?;
-        self.ensure_table()?;
-        self.conn
-            .with(|connection| {
-                crate::read_control::read_snapshot(connection, |connection| {
-                    controlled::value(connection, key, control, visit)
-                })
-            })
-            .map_err(Into::into)
-    }
-
-    fn visit_prefix_after(
-        &self,
-        prefix: &[u8],
-        after: Option<&[u8]>,
-        limit: usize,
-        control: &uqa_storage::read_control::StorageReadControl,
-        visit: &mut uqa_storage::read_control::KeyValueReadVisitor<'_>,
-    ) -> StorageBackendResult<()> {
-        control.check()?;
-        if limit == 0 {
-            return Ok(());
-        }
-        self.ensure_table()?;
-        self.conn
-            .with(|connection| {
-                crate::read_control::read_snapshot(connection, |connection| {
-                    controlled::prefix(connection, prefix, after, limit, control, visit)
-                })
-            })
-            .map_err(Into::into)
-    }
-
     fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
-        let Some(path) = self.conn.database_path() else {
-            return Ok(None);
-        };
-        PersistentStorageIdentity::for_database_path(path).map(Some)
+        self.records.storage_identity()
     }
 
     fn open_session(&self) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
@@ -157,90 +73,58 @@ impl KeyValueStore for SQLiteKeyValueStore {
     }
 
     fn get(&self, key: &[u8]) -> StorageBackendResult<Option<Vec<u8>>> {
-        self.ensure_table()?;
-        Ok(self.conn.with(|conn| {
-            conn.query_row(
-                &format!("SELECT value FROM {KEY_VALUE_TABLE} WHERE key = ?1"),
-                params![key],
-                |row| row.get::<_, Vec<u8>>(0),
-            )
-            .optional()
-            .map_err(SQLiteError::from)
-        })?)
+        self.conn.with_records(|store| store.get(key))
     }
 
     fn contains_key(&self, key: &[u8]) -> StorageBackendResult<bool> {
-        self.ensure_table()?;
-        Ok(self.conn.with(|conn| {
-            conn.query_row(
-                &format!("SELECT 1 FROM {KEY_VALUE_TABLE} WHERE key = ?1 LIMIT 1"),
-                params![key],
-                |_| Ok(()),
-            )
-            .optional()
-            .map(|value| value.is_some())
-            .map_err(SQLiteError::from)
-        })?)
+        self.conn.with_records(|store| store.contains_key(key))
+    }
+
+    fn contains_prefix_budgeted(
+        &self,
+        prefix: &[u8],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        self.conn
+            .with_records(|store| store.contains_prefix_budgeted(prefix, control))
+    }
+
+    fn visit_value(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+        visit: &mut ValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.conn
+            .with_records(|store| store.visit_value(key, control, visit))
+    }
+
+    fn visit_prefix_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut KeyValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.conn
+            .with_records(|store| store.visit_prefix_after(prefix, after, limit, control, visit))
     }
 
     fn put(&self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
-        self.ensure_table()?;
-        self.conn.with(|conn| {
-            conn.execute(
-                &format!("INSERT OR REPLACE INTO {KEY_VALUE_TABLE} (key, value) VALUES (?1, ?2)"),
-                params![key, value],
-            )?;
-            Ok(())
-        })?;
-        Ok(())
+        self.conn.with_records(|store| store.put(key, value))
     }
 
     fn delete(&self, key: &[u8]) -> StorageBackendResult<()> {
-        self.ensure_table()?;
-        self.conn.with(|conn| {
-            conn.execute(
-                &format!("DELETE FROM {KEY_VALUE_TABLE} WHERE key = ?1"),
-                params![key],
-            )?;
-            Ok(())
-        })?;
-        Ok(())
+        self.conn.with_records(|store| store.delete(key))
+    }
+
+    fn delete_prefix(&self, prefix: &[u8]) -> StorageBackendResult<usize> {
+        self.conn.with_records(|store| store.delete_prefix(prefix))
     }
 
     fn scan_prefix(&self, prefix: &[u8]) -> StorageBackendResult<Vec<(Vec<u8>, Vec<u8>)>> {
-        self.ensure_table()?;
-        let upper = prefix_upper_bound(prefix);
-        self.conn
-            .with(|conn| {
-                let mut rows = Vec::new();
-                if let Some(upper) = upper {
-                    let mut stmt = conn.prepare(&format!(
-                        "SELECT key, value FROM {KEY_VALUE_TABLE}
-                         WHERE key >= ?1 AND key < ?2
-                         ORDER BY key"
-                    ))?;
-                    let iter = stmt.query_map(params![prefix, upper], |row| {
-                        Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
-                    })?;
-                    for row in iter {
-                        rows.push(row?);
-                    }
-                } else {
-                    let mut stmt = conn.prepare(&format!(
-                        "SELECT key, value FROM {KEY_VALUE_TABLE}
-                         WHERE key >= ?1
-                         ORDER BY key"
-                    ))?;
-                    let iter = stmt.query_map(params![prefix], |row| {
-                        Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
-                    })?;
-                    for row in iter {
-                        rows.push(row?);
-                    }
-                }
-                Ok(rows)
-            })
-            .map_err(StorageBackendError::from)
+        self.conn.with_records(|store| store.scan_prefix(prefix))
     }
 
     fn scan_prefix_after(
@@ -249,77 +133,8 @@ impl KeyValueStore for SQLiteKeyValueStore {
         after: Option<&[u8]>,
         limit: usize,
     ) -> StorageBackendResult<Vec<(Vec<u8>, Vec<u8>)>> {
-        if limit == 0 {
-            return Ok(Vec::new());
-        }
-        self.ensure_table()?;
-        let upper = prefix_upper_bound(prefix);
-        let after = after.filter(|after| *after >= prefix);
-        let limit = i64::try_from(limit).map_err(|_| {
-            StorageBackendError::Other(format!(
-                "key/value cursor limit {limit} is outside SQLite's integer range"
-            ))
-        })?;
         self.conn
-            .with(|connection| {
-                let mut output = Vec::new();
-                match (after, upper) {
-                    (Some(after), Some(upper)) => {
-                        let mut statement = connection.prepare_cached(&format!(
-                            "SELECT key, value FROM {KEY_VALUE_TABLE}
-                             WHERE key > ?1 AND key < ?2
-                             ORDER BY key LIMIT ?3"
-                        ))?;
-                        let rows = statement.query_map(params![after, upper, limit], |row| {
-                            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
-                        })?;
-                        for row in rows {
-                            output.push(row?);
-                        }
-                    }
-                    (Some(after), None) => {
-                        let mut statement = connection.prepare_cached(&format!(
-                            "SELECT key, value FROM {KEY_VALUE_TABLE}
-                             WHERE key > ?1
-                             ORDER BY key LIMIT ?2"
-                        ))?;
-                        let rows = statement.query_map(params![after, limit], |row| {
-                            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
-                        })?;
-                        for row in rows {
-                            output.push(row?);
-                        }
-                    }
-                    (None, Some(upper)) => {
-                        let mut statement = connection.prepare_cached(&format!(
-                            "SELECT key, value FROM {KEY_VALUE_TABLE}
-                             WHERE key >= ?1 AND key < ?2
-                             ORDER BY key LIMIT ?3"
-                        ))?;
-                        let rows = statement.query_map(params![prefix, upper, limit], |row| {
-                            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
-                        })?;
-                        for row in rows {
-                            output.push(row?);
-                        }
-                    }
-                    (None, None) => {
-                        let mut statement = connection.prepare_cached(&format!(
-                            "SELECT key, value FROM {KEY_VALUE_TABLE}
-                             WHERE key >= ?1
-                             ORDER BY key LIMIT ?2"
-                        ))?;
-                        let rows = statement.query_map(params![prefix, limit], |row| {
-                            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
-                        })?;
-                        for row in rows {
-                            output.push(row?);
-                        }
-                    }
-                }
-                Ok(output)
-            })
-            .map_err(StorageBackendError::from)
+            .with_records(|store| store.scan_prefix_after(prefix, after, limit))
     }
 
     fn scan_prefix_keys_after(
@@ -328,71 +143,8 @@ impl KeyValueStore for SQLiteKeyValueStore {
         after: Option<&[u8]>,
         limit: usize,
     ) -> StorageBackendResult<Vec<Vec<u8>>> {
-        if limit == 0 {
-            return Ok(Vec::new());
-        }
-        self.ensure_table()?;
-        let upper = prefix_upper_bound(prefix);
-        let after = after.filter(|after| *after >= prefix);
-        let limit = i64::try_from(limit).map_err(|_| {
-            StorageBackendError::Other(format!(
-                "key/value cursor limit {limit} is outside SQLite's integer range"
-            ))
-        })?;
         self.conn
-            .with(|connection| {
-                let mut keys = Vec::new();
-                match (after, upper) {
-                    (Some(after), Some(upper)) => {
-                        let mut stmt = connection.prepare_cached(&format!(
-                            "SELECT key FROM {KEY_VALUE_TABLE}
-                             WHERE key > ?1 AND key < ?2
-                             ORDER BY key LIMIT ?3"
-                        ))?;
-                        let rows =
-                            stmt.query_map(params![after, upper, limit], |row| row.get(0))?;
-                        for key in rows {
-                            keys.push(key?);
-                        }
-                    }
-                    (Some(after), None) => {
-                        let mut stmt = connection.prepare_cached(&format!(
-                            "SELECT key FROM {KEY_VALUE_TABLE}
-                             WHERE key > ?1
-                             ORDER BY key LIMIT ?2"
-                        ))?;
-                        let rows = stmt.query_map(params![after, limit], |row| row.get(0))?;
-                        for key in rows {
-                            keys.push(key?);
-                        }
-                    }
-                    (None, Some(upper)) => {
-                        let mut stmt = connection.prepare_cached(&format!(
-                            "SELECT key FROM {KEY_VALUE_TABLE}
-                             WHERE key >= ?1 AND key < ?2
-                             ORDER BY key LIMIT ?3"
-                        ))?;
-                        let rows =
-                            stmt.query_map(params![prefix, upper, limit], |row| row.get(0))?;
-                        for key in rows {
-                            keys.push(key?);
-                        }
-                    }
-                    (None, None) => {
-                        let mut stmt = connection.prepare_cached(&format!(
-                            "SELECT key FROM {KEY_VALUE_TABLE}
-                             WHERE key >= ?1
-                             ORDER BY key LIMIT ?2"
-                        ))?;
-                        let rows = stmt.query_map(params![prefix, limit], |row| row.get(0))?;
-                        for key in rows {
-                            keys.push(key?);
-                        }
-                    }
-                }
-                Ok(keys)
-            })
-            .map_err(StorageBackendError::from)
+            .with_records(|store| store.scan_prefix_keys_after(prefix, after, limit))
     }
 
     fn first_prefix_after(
@@ -400,101 +152,27 @@ impl KeyValueStore for SQLiteKeyValueStore {
         prefix: &[u8],
         after: Option<&[u8]>,
     ) -> StorageBackendResult<Option<(Vec<u8>, Vec<u8>)>> {
-        self.ensure_table()?;
-        let upper = prefix_upper_bound(prefix);
-        let after = after.filter(|after| *after >= prefix);
         self.conn
-            .with(|connection| {
-                let row = match (after, upper) {
-                    (Some(after), Some(upper)) => connection
-                        .prepare_cached(&format!(
-                            "SELECT key, value FROM {KEY_VALUE_TABLE}
-                             WHERE key > ?1 AND key < ?2
-                             ORDER BY key LIMIT 1"
-                        ))?
-                        .query_row(params![after, upper], |row| {
-                            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
-                        })
-                        .optional()?,
-                    (Some(after), None) => connection
-                        .prepare_cached(&format!(
-                            "SELECT key, value FROM {KEY_VALUE_TABLE}
-                             WHERE key > ?1
-                             ORDER BY key LIMIT 1"
-                        ))?
-                        .query_row(params![after], |row| {
-                            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
-                        })
-                        .optional()?,
-                    (None, Some(upper)) => connection
-                        .prepare_cached(&format!(
-                            "SELECT key, value FROM {KEY_VALUE_TABLE}
-                             WHERE key >= ?1 AND key < ?2
-                             ORDER BY key LIMIT 1"
-                        ))?
-                        .query_row(params![prefix, upper], |row| {
-                            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
-                        })
-                        .optional()?,
-                    (None, None) => connection
-                        .prepare_cached(&format!(
-                            "SELECT key, value FROM {KEY_VALUE_TABLE}
-                             WHERE key >= ?1
-                             ORDER BY key LIMIT 1"
-                        ))?
-                        .query_row(params![prefix], |row| {
-                            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
-                        })
-                        .optional()?,
-                };
-                Ok(row.filter(|(key, _)| key.starts_with(prefix)))
-            })
-            .map_err(StorageBackendError::from)
-    }
-
-    fn delete_prefix(&self, prefix: &[u8]) -> StorageBackendResult<usize> {
-        self.ensure_table()?;
-        let upper = prefix_upper_bound(prefix);
-        let deleted = self.conn.with(|conn| {
-            let deleted = if let Some(upper) = upper {
-                conn.execute(
-                    &format!(
-                        "DELETE FROM {KEY_VALUE_TABLE}
-                         WHERE key >= ?1 AND key < ?2"
-                    ),
-                    params![prefix, upper],
-                )?
-            } else {
-                conn.execute(
-                    &format!("DELETE FROM {KEY_VALUE_TABLE} WHERE key >= ?1"),
-                    params![prefix],
-                )?
-            };
-            Ok(deleted)
-        })?;
-        Ok(deleted)
+            .with_records(|store| store.first_prefix_after(prefix, after))
     }
 
     fn batch(&self) -> Box<dyn KeyValueBatch + '_> {
         Box::new(SQLiteKeyValueBatch {
-            store: self,
-            operations: Vec::new(),
+            connection: &self.conn,
+            batch: self.records.batch(),
         })
     }
 
     fn begin_transaction(&self) -> StorageBackendResult<()> {
-        self.conn.begin_transaction()?;
-        Ok(())
+        self.conn.begin_transaction().map_err(Into::into)
     }
 
     fn begin_read_transaction(&self) -> StorageBackendResult<()> {
-        self.conn.begin_deferred_transaction()?;
-        Ok(())
+        self.conn.begin_record_read().map_err(Into::into)
     }
 
     fn begin_upgradeable_transaction(&self) -> StorageBackendResult<()> {
-        self.conn.begin_deferred_transaction()?;
-        Ok(())
+        self.conn.begin_deferred_transaction().map_err(Into::into)
     }
 
     fn in_transaction(&self) -> bool {
@@ -502,119 +180,66 @@ impl KeyValueStore for SQLiteKeyValueStore {
     }
 
     fn transaction_has_written(&self) -> StorageBackendResult<bool> {
-        Ok(self.conn.transaction_has_written()?)
+        self.conn.transaction_has_written().map_err(Into::into)
     }
 
     fn change_version(&self) -> StorageBackendResult<Option<u64>> {
-        Ok(self.conn.data_version()?)
+        self.conn.data_version().map_err(Into::into)
     }
 
     fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
-        Ok(self.conn.data_version_monitor_is_nonblocking()?)
+        Ok(true)
     }
 
     fn pin_transaction_snapshot(&self) -> StorageBackendResult<()> {
-        self.conn.pin_transaction_snapshot()?;
-        Ok(())
+        self.conn.pin_transaction_snapshot().map_err(Into::into)
     }
 
     fn commit_transaction(&self) -> StorageBackendResult<()> {
-        self.conn.commit_transaction()?;
-        Ok(())
+        self.conn.commit_transaction().map_err(Into::into)
     }
 
     fn rollback_transaction(&self) -> StorageBackendResult<()> {
-        self.conn.rollback_transaction()?;
-        Ok(())
+        self.conn.rollback_transaction().map_err(Into::into)
     }
 
     fn savepoint(&self, name: &str) -> StorageBackendResult<()> {
-        self.conn.savepoint(name)?;
-        Ok(())
+        self.conn.savepoint(name).map_err(Into::into)
     }
 
     fn release_savepoint(&self, name: &str) -> StorageBackendResult<()> {
-        self.conn.release_savepoint(name)?;
-        Ok(())
+        self.conn.release_savepoint(name).map_err(Into::into)
     }
 
     fn rollback_to_savepoint(&self, name: &str) -> StorageBackendResult<()> {
-        self.conn.rollback_to_savepoint(name)?;
-        Ok(())
+        self.conn.rollback_to_savepoint(name).map_err(Into::into)
     }
 }
 
 struct SQLiteKeyValueBatch<'a> {
-    store: &'a SQLiteKeyValueStore,
-    operations: Vec<SQLiteKeyValueBatchOperation>,
+    connection: &'a ManagedConnection,
+    batch: Box<dyn KeyValueBatch + 'a>,
 }
 
 impl KeyValueBatch for SQLiteKeyValueBatch<'_> {
     fn put(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
-        self.operations.push(SQLiteKeyValueBatchOperation::Put(
-            key.to_vec(),
-            value.to_vec(),
-        ));
-        Ok(())
+        self.batch.put(key, value)
     }
-
     fn delete(&mut self, key: &[u8]) -> StorageBackendResult<()> {
-        self.operations
-            .push(SQLiteKeyValueBatchOperation::Delete(key.to_vec()));
-        Ok(())
+        self.batch.delete(key)
     }
-
     fn delete_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
-        self.operations
-            .push(SQLiteKeyValueBatchOperation::DeletePrefix(prefix.to_vec()));
-        Ok(())
+        self.batch.delete_prefix(prefix)
     }
-
     fn commit(self: Box<Self>) -> StorageBackendResult<()> {
-        self.store.ensure_table()?;
-        self.store.conn.with_mut(|conn| {
-            let tx = conn.savepoint()?;
-            for operation in self.operations {
-                match operation {
-                    SQLiteKeyValueBatchOperation::Put(key, value) => {
-                        tx.execute(
-                            &format!(
-                                "INSERT OR REPLACE INTO {KEY_VALUE_TABLE} (key, value)
-                                 VALUES (?1, ?2)"
-                            ),
-                            params![key, value],
-                        )?;
-                    }
-                    SQLiteKeyValueBatchOperation::Delete(key) => {
-                        tx.execute(
-                            &format!("DELETE FROM {KEY_VALUE_TABLE} WHERE key = ?1"),
-                            params![key],
-                        )?;
-                    }
-                    SQLiteKeyValueBatchOperation::DeletePrefix(prefix) => {
-                        if let Some(upper) = prefix_upper_bound(&prefix) {
-                            tx.execute(
-                                &format!(
-                                    "DELETE FROM {KEY_VALUE_TABLE}
-                                     WHERE key >= ?1 AND key < ?2"
-                                ),
-                                params![prefix, upper],
-                            )?;
-                        } else {
-                            tx.execute(
-                                &format!("DELETE FROM {KEY_VALUE_TABLE} WHERE key >= ?1"),
-                                params![prefix],
-                            )?;
-                        }
-                    }
-                }
-            }
-            tx.commit()?;
-            Ok(())
-        })?;
-        Ok(())
+        let Self { connection, batch } = *self;
+        connection.with_records(|_| batch.commit())
     }
 }
+
+#[cfg(test)]
+#[path = "key_value/controlled/tests.rs"]
+mod controlled_tests;
 
 /// Shared `SQLite` `KeyValue` storage handle with catalog and backend factories.
 #[derive(Clone)]
@@ -627,9 +252,11 @@ pub type SQLiteKeyValueStorageBackend = KeyValueStorageBackend;
 
 impl SQLiteKeyValueStorage {
     pub fn open(path: &Path) -> SQLiteResult<Self> {
-        Ok(Self {
-            store: Arc::new(SQLiteKeyValueStore::open(path)?),
-        })
+        Self::open_with_options(path, VersionedSessionOptions::default())
+    }
+
+    pub fn open_with_options(path: &Path, options: VersionedSessionOptions) -> SQLiteResult<Self> {
+        Self::from_connection_with_options(ManagedConnection::open(path)?, options)
     }
 
     pub fn open_in_memory() -> SQLiteResult<Self> {
@@ -639,8 +266,15 @@ impl SQLiteKeyValueStorage {
     }
 
     pub fn from_connection(conn: ManagedConnection) -> SQLiteResult<Self> {
+        Self::from_connection_with_options(conn, VersionedSessionOptions::default())
+    }
+
+    pub fn from_connection_with_options(
+        conn: ManagedConnection,
+        options: VersionedSessionOptions,
+    ) -> SQLiteResult<Self> {
         Ok(Self {
-            store: Arc::new(SQLiteKeyValueStore::new(conn)?),
+            store: Arc::new(SQLiteKeyValueStore::with_options(conn, options)?),
         })
     }
 

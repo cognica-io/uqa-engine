@@ -9,9 +9,9 @@
 use rusqlite::{params, types::ValueRef, Connection, OptionalExtension};
 use uqa_core::memory::BudgetedVec;
 use uqa_storage::mvcc::{
-    BorrowedRecord, CommitSequence, CommittedRecordSnapshot, RecordPage, RecordScanVisitor,
-    RecordValueVisitor, RecordVersion, ScannedRecord, SharedRecordValue, VersionError,
-    VersionResult,
+    BorrowedRecord, CommitSequence, CommittedRecordSnapshot, RecordKeyVisitor, RecordMetadata,
+    RecordPage, RecordScanVisitor, RecordValueVisitor, RecordVersion, ScannedRecord,
+    SharedRecordValue, VersionError, VersionResult,
 };
 use uqa_storage::read_control::StorageReadControl;
 
@@ -93,6 +93,24 @@ impl CommittedRecordSnapshot for Snapshot {
         self.read(|connection| value(connection, key, self.sequence, control, visit))
     }
 
+    fn metadata(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<RecordMetadata>> {
+        control.cancellation().check()?;
+        self.read(|connection| {
+            let _bindings = reserve_bindings(control, &[key])?;
+            let record =
+                info(connection, key, self.sequence)?.map(|(revision, length)| RecordMetadata {
+                    revision: Some(CommitSequence::from_u64(revision)),
+                    live: length.is_some(),
+                });
+            control.cancellation().check().map_err(VersionError::from)?;
+            Ok(record)
+        })
+    }
+
     fn visit_prefix(
         &self,
         prefix: &[u8],
@@ -106,36 +124,106 @@ impl CommittedRecordSnapshot for Snapshot {
             return Ok(());
         }
         self.read(|connection| {
-            let upper = prefix_upper_bound(prefix, control)?;
-            let mut cursor: Option<BudgetedVec<u8>> = None;
-            let mut count = 0;
-            loop {
-                let Some(key) = next_key(
-                    connection,
-                    prefix,
-                    cursor.as_deref().or(after),
-                    upper.as_deref(),
-                    control,
-                )?
-                else {
-                    break;
-                };
-                let mut more = true;
-                value(connection, &key, self.sequence, control, &mut |record| {
+            keys(connection, prefix, after, limit, control, &mut |key| {
+                let mut more = None;
+                value(connection, key, self.sequence, control, &mut |record| {
                     if let Some(record) = record {
-                        count += 1;
-                        more = visit(&key, record)?;
+                        more = Some(visit(key, record)?);
                     }
                     Ok(())
                 })?;
-                if !more || count == limit {
-                    break;
-                }
-                cursor = Some(key);
-            }
-            Ok(())
+                Ok(more)
+            })
         })
     }
+
+    fn visit_keys(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut RecordKeyVisitor<'_>,
+    ) -> VersionResult<()> {
+        control.cancellation().check()?;
+        if limit == 0 {
+            return Ok(());
+        }
+        self.read(|connection| {
+            keys(connection, prefix, after, limit, control, &mut |key| {
+                let _bindings = reserve_bindings(control, &[key])?;
+                info(connection, key, self.sequence)?
+                    .map(|(revision, length)| {
+                        Ok(visit(
+                            key,
+                            RecordMetadata {
+                                revision: Some(CommitSequence::from_u64(revision)),
+                                live: length.is_some(),
+                            },
+                        )?)
+                    })
+                    .transpose()
+            })
+        })
+    }
+}
+
+fn keys(
+    connection: &Connection,
+    prefix: &[u8],
+    after: Option<&[u8]>,
+    limit: usize,
+    control: &StorageReadControl,
+    visit: &mut impl FnMut(&[u8]) -> PhysicalResult<Option<bool>>,
+) -> PhysicalResult<()> {
+    let upper = prefix_upper_bound(prefix, control)?;
+    let mut cursor: Option<BudgetedVec<u8>> = None;
+    let mut count = 0;
+    loop {
+        let Some(key) = next_key(
+            connection,
+            prefix,
+            cursor.as_deref().or(after),
+            upper.as_deref(),
+            control,
+        )?
+        else {
+            break;
+        };
+        if let Some(more) = visit(&key)? {
+            count += 1;
+            control.cancellation().check().map_err(VersionError::from)?;
+            if !more || count == limit {
+                break;
+            }
+        }
+        cursor = Some(key);
+    }
+    control.cancellation().check().map_err(VersionError::from)?;
+    Ok(())
+}
+
+fn info(
+    connection: &Connection,
+    key: &[u8],
+    boundary: CommitSequence,
+) -> PhysicalResult<Option<(u64, Option<usize>)>> {
+    let boundary = boundary.as_u64().to_be_bytes();
+    let mut statement = connection.prepare("SELECT sequence, CASE WHEN value IS NULL THEN NULL WHEN typeof(value) = 'blob' THEN length(value) ELSE -1 END FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence <= ?2 ORDER BY sequence DESC LIMIT 1")?;
+    let mut rows = statement.query(params![key, boundary.as_slice()])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    let revision = codec::integer(codec::bytes(row, 0)?)?;
+    if revision == 0 {
+        return Err(VersionError::InvalidEncoding("zero record revision").into());
+    }
+    Ok(Some((
+        revision,
+        row.get::<_, Option<i64>>(1)?
+            .map(payload_length)
+            .transpose()?,
+    )))
 }
 
 fn value(
@@ -146,25 +234,7 @@ fn value(
     visit: &mut RecordValueVisitor<'_>,
 ) -> PhysicalResult<()> {
     let _bindings = reserve_bindings(control, &[key])?;
-    let boundary = boundary.as_u64().to_be_bytes();
-    let info = {
-        let mut statement = connection.prepare("SELECT sequence, CASE WHEN value IS NULL THEN NULL WHEN typeof(value) = 'blob' THEN length(value) ELSE -1 END FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence <= ?2 ORDER BY sequence DESC LIMIT 1")?;
-        let mut rows = statement.query(params![key, boundary.as_slice()])?;
-        if let Some(row) = rows.next()? {
-            let revision = codec::integer(codec::bytes(row, 0)?)?;
-            if revision == 0 {
-                return Err(VersionError::InvalidEncoding("zero record revision").into());
-            }
-            Some((
-                revision,
-                row.get::<_, Option<i64>>(1)?
-                    .map(payload_length)
-                    .transpose()?,
-            ))
-        } else {
-            None
-        }
-    };
+    let info = info(connection, key, boundary)?;
     let Some((revision, length)) = info else {
         control.cancellation().check().map_err(VersionError::from)?;
         visit(None)?;
