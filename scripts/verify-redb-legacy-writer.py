@@ -14,7 +14,8 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
-import tomllib
+
+from cargo_package_provenance import registry_package_checksum
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -96,10 +97,8 @@ new_storage = {{ package = "uqa-storage", path = {json.dumps(str(ROOT / "crates/
             check=True,
             env=environment,
         )
-        packages = tomllib.loads((project / "Cargo.lock").read_text())["package"]
-        released = [package for package in packages if package["name"] == "uqa-storage-redb" and package.get("source", "").startswith("registry+")]
-        assert len(released) == 1 and released[0]["version"] == "0.3.6", released
-        print(f"Released provider checksum: {released[0]['checksum']}", flush=True)
+        checksum = registry_package_checksum(project / "Cargo.toml", "uqa-storage-redb", "0.3.6")
+        print(f"Released provider checksum: {checksum}", flush=True)
         extension = ".exe" if os.name == "nt" else ""
         old = str(target / "debug" / f"old{extension}")
         new = str(target / "debug" / f"new{extension}")
