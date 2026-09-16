@@ -14,6 +14,8 @@ use uqa_storage_sqlite::{
     Catalog, ManagedConnection, SQLiteCompressionOptions, SQLiteStorageProvider,
 };
 
+const KEY: &str = "native session fixture";
+
 fn native_engine(connection: ManagedConnection) -> Engine {
     connection
         .bind_native_records(VersionedSessionOptions::default())
@@ -69,13 +71,13 @@ impl Mode {
     fn open(self, path: &Path) -> ManagedConnection {
         match self {
             Self::Plain => ManagedConnection::open(path),
-            Self::Encrypted => ManagedConnection::open_encrypted(path, "native session fixture"),
+            Self::Encrypted => ManagedConnection::open_encrypted(path, KEY),
             Self::Compressed => {
                 ManagedConnection::open_compressed(path, SQLiteCompressionOptions::default())
             }
             Self::CompressedEncrypted => ManagedConnection::open_compressed_encrypted(
                 path,
-                "native session fixture",
+                KEY,
                 SQLiteCompressionOptions::default(),
             ),
         }
@@ -119,6 +121,53 @@ fn assert_published(engine: &Engine) {
     assert_eq!(scalar_int(engine, "SELECT count(*) AS n FROM cypher('items', $$ MATCH (n) RETURN id(n) $$) AS result(id agtype)", "n"), 2);
 }
 
+fn assert_notifications(engine: &Engine, observer: &Engine, path: &Path, mode: Mode) {
+    const CHANNEL: &str = "native_restore_channel";
+    const PAYLOAD: &str = "native-restore-retained-secret-payload";
+    observer.sql(&format!("LISTEN {CHANNEL}"), &[]).unwrap();
+    observer.sql("BEGIN", &[]).unwrap();
+    engine
+        .sql(&format!("NOTIFY {CHANNEL}, '{PAYLOAD}'"), &[])
+        .unwrap();
+    assert!(observer.take_sql_notifications().is_empty());
+    if matches!(mode, Mode::Encrypted | Mode::CompressedEncrypted) {
+        let mut registry = path.as_os_str().to_owned();
+        registry.push(".uqa-notification-state");
+        let registry = std::path::PathBuf::from(registry);
+        let raw = rusqlite::Connection::open(&registry).unwrap();
+        assert!(raw
+            .query_row("SELECT payload FROM queue_entries", [], |row| row
+                .get::<_, String>(0))
+            .is_err());
+        drop(raw);
+        let keyed = rusqlite::Connection::open(&registry).unwrap();
+        keyed.pragma_update(None, "key", KEY).unwrap();
+        let retained: String = keyed
+            .query_row("SELECT payload FROM queue_entries", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(retained, PAYLOAD);
+        drop(keyed);
+        let bytes = std::fs::read(registry).unwrap();
+        for marker in [CHANNEL, PAYLOAD, KEY] {
+            assert!(!bytes
+                .windows(marker.len())
+                .any(|window| window == marker.as_bytes()));
+        }
+    }
+    observer.sql("COMMIT", &[]).unwrap();
+    let notifications = observer.take_sql_notifications();
+    assert_eq!(notifications.len(), 1);
+    assert_eq!(notifications[0].channel, CHANNEL);
+    assert_eq!(notifications[0].payload, PAYLOAD);
+    engine
+        .sql(
+            &format!("BEGIN; NOTIFY {CHANNEL}, 'discarded'; ROLLBACK"),
+            &[],
+        )
+        .unwrap();
+    assert!(observer.take_sql_notifications().is_empty());
+}
+
 fn restore_legacy_and_reopen_native(mode: Mode) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("native.db");
@@ -160,6 +209,7 @@ fn restore_legacy_and_reopen_native(mode: Mode) {
             .sql("BEGIN; DELETE FROM docs; ROLLBACK", &[])
             .unwrap();
         assert_published(&engine);
+        assert_notifications(&engine, &observer, &path, mode);
     }
     let reopened = native_engine(mode.open(&path));
     assert_published(&reopened);

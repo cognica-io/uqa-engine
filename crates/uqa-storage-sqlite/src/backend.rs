@@ -55,6 +55,10 @@ impl SQLiteStorageProvider {
 }
 
 impl PersistentStorageProvider for SQLiteStorageProvider {
+    fn auxiliary_encryption_key(&self) -> Option<uqa_storage::StorageEncryptionKey> {
+        self.connection.auxiliary_encryption_key()
+    }
+
     fn open_initial_session(&self) -> StorageBackendResult<PersistentStorageSession> {
         let connection = self.connection.new_session();
         let catalog: Arc<dyn CatalogFacade> =
@@ -90,6 +94,10 @@ impl PersistentStorageProvider for SQLiteStorageProvider {
 impl PersistentStorageBackend for SQLiteStorageBackend {
     fn transaction_affinity(&self) -> Option<uqa_storage::StorageSessionAffinity> {
         Some(self.conn.transaction_affinity())
+    }
+
+    fn auxiliary_encryption_key(&self) -> Option<uqa_storage::StorageEncryptionKey> {
+        self.conn.auxiliary_encryption_key()
     }
 
     fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {

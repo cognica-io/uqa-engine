@@ -197,6 +197,8 @@ assert_eq!(messages[0].process_id, sender.backend_process_id());
 
 Subscription changes and outgoing messages take effect at outer commit, rollback and savepoint rollback discard their transactional changes, and identical channel-and-payload pairs are delivered once per transaction. Polling, waiting, or draining while the listener has an open transaction returns no messages and leaves them queued until the transaction ends. SQL exposes committed channels through `pg_listening_channels()` and queue occupancy through `pg_notification_queue_usage()`. Native file-backed coordination uses an explicitly versioned sidecar for the queue, database-wide backend-process identifier allocation, and listener-liveness leases; opaque identities and targets without native process support remain process-local. An embedding server must drain messages and encode the existing `uqa-pg-wire::NotificationResponse` itself because the engine does not own its client connection.
 
+`open_encrypted`, encrypted `open_auto`, and compressed-encrypted constructors protect notification payloads and channels in the sidecar with the same credential as the main database. SQLite provider and backend factories preserve that protection for independently opened engines and new sessions. An existing plaintext sidecar or a mismatched sidecar key causes open to fail; it is never silently overwritten or opened without encryption. Custom encrypted file providers must implement `auxiliary_encryption_key` on their provider and backend. See [auxiliary storage encryption](../internals/03-storage.md#encryption-and-compression) for ownership and upgrade boundaries.
+
 ## Document and retrieval APIs
 
 The API also exposes typed operations that bypass SQL text:

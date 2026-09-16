@@ -235,6 +235,13 @@ pub trait PersistentStorageProvider: Send + Sync {
     fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
         Ok(None)
     }
+
+    /// Protect engine-owned auxiliary files with the database's encryption
+    /// credential. Encrypted file providers must forward this capability;
+    /// `None` declares that their auxiliary storage may be unencrypted.
+    fn auxiliary_encryption_key(&self) -> Option<crate::StorageEncryptionKey> {
+        None
+    }
 }
 
 /// Factory plus transaction surface for persistent table/index storage.
@@ -247,6 +254,12 @@ pub trait PersistentStorageBackend: Send + Sync {
     /// Return the stable database identity for independently constructed engines over this backend. File identities also enable cross-process row-lock coordination.
     fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
         Ok(None)
+    }
+
+    /// Return the encryption credential for database-owned auxiliary files,
+    /// including engines constructed directly from this backend.
+    fn auxiliary_encryption_key(&self) -> Option<crate::StorageEncryptionKey> {
+        None
     }
 
     /// Open a transaction-isolated catalog/backend pair over the same durable database. Engines constructed from already-open backends retain this factory so a row-lock recheck can read the latest committed tuple while the caller's statement snapshot remains pinned.

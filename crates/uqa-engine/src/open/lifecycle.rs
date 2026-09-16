@@ -18,6 +18,10 @@ struct BackendSessionProvider {
 }
 
 impl PersistentStorageProvider for BackendSessionProvider {
+    fn auxiliary_encryption_key(&self) -> Option<uqa_storage::StorageEncryptionKey> {
+        self.backend.auxiliary_encryption_key()
+    }
+
     fn open_session(&self) -> StorageBackendResult<PersistentStorageSession> {
         self.backend.open_session()
     }

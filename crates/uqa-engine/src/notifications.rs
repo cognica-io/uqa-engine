@@ -247,6 +247,8 @@ struct PreparedCrossSubscription {
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 struct CrossProcessState {
     database_path: std::path::PathBuf,
+    encryption_key: Option<uqa_storage::StorageEncryptionKey>,
+    registry: Mutex<Option<uqa_storage_sqlite::ManagedConnection>>,
     hub: Weak<NotificationHub>,
     coordinator: Mutex<Option<Arc<CrossProcessCoordinator>>>,
 }
@@ -256,8 +258,21 @@ struct CrossProcessState;
 
 impl CrossProcessState {
     #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+    fn registry(&self) -> Result<uqa_storage_sqlite::ManagedConnection, SQLError> {
+        let mut initialized = self.registry.lock();
+        if let Some(registry) = initialized.as_ref() {
+            return Ok(registry.clone());
+        }
+        let registry =
+            cross_process::open_registry(&self.database_path, self.encryption_key.as_ref())
+                .map_err(SQLError::Internal)?;
+        *initialized = Some(registry.clone());
+        Ok(registry)
+    }
+
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     fn allocate_backend_process_id(&self) -> Result<i32, SQLError> {
-        CrossProcessCoordinator::allocate_backend_process_id_for_database(&self.database_path)
+        CrossProcessCoordinator::allocate_backend_process_id(&self.registry()?)
     }
 
     #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
@@ -274,7 +289,8 @@ impl CrossProcessState {
             return Ok(Arc::clone(coordinator));
         }
         let (coordinator, listener) =
-            CrossProcessCoordinator::open(&self.database_path).map_err(SQLError::Internal)?;
+            CrossProcessCoordinator::open(&self.database_path, self.registry()?)
+                .map_err(SQLError::Internal)?;
         let coordinator = Arc::new(coordinator);
         coordinator
             .start_worker(listener, self.hub.clone())
@@ -488,6 +504,7 @@ pub(crate) fn shared_provider_notification_hub(
     shared_notification_hub(
         identity,
         NotificationHubIdentity::Provider(Arc::as_ptr(provider).cast::<()>() as usize),
+        provider.auxiliary_encryption_key(),
     )
 }
 
@@ -498,12 +515,14 @@ pub(crate) fn shared_backend_notification_hub(
     shared_notification_hub(
         identity,
         NotificationHubIdentity::Provider(Arc::as_ptr(backend).cast::<()>() as usize),
+        backend.auxiliary_encryption_key(),
     )
 }
 
 fn shared_notification_hub(
     identity: Option<uqa_storage::PersistentStorageIdentity>,
     fallback: NotificationHubIdentity,
+    encryption_key: Option<uqa_storage::StorageEncryptionKey>,
 ) -> Arc<NotificationHub> {
     let identity = identity.map_or(fallback, NotificationHubIdentity::Durable);
     let registry = DATABASE_NOTIFICATION_HUBS.get_or_init(|| Mutex::new(HashMap::new()));
@@ -514,7 +533,7 @@ fn shared_notification_hub(
     }
     let hub = match &identity {
         NotificationHubIdentity::Durable(uqa_storage::PersistentStorageIdentity::File(path)) => {
-            NotificationHub::for_database_file(path)
+            NotificationHub::for_database_file(path, encryption_key)
         }
         _ => Arc::new(NotificationHub::default()),
     };

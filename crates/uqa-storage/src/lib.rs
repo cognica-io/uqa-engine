@@ -20,6 +20,8 @@ pub use value_index_key::ValueIndexKey;
 pub mod catalog;
 pub mod clustered_postings;
 pub mod document_store;
+pub mod encryption_key;
+pub use encryption_key::StorageEncryptionKey;
 pub mod hnsw_index;
 pub mod index_abc;
 pub mod index_manager;
