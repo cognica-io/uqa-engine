@@ -285,6 +285,8 @@ mod controlled;
 #[path = "store_contract/mvcc.rs"]
 mod mvcc;
 
+#[path = "store_contract/compound.rs"]
+mod compound;
 #[path = "store_contract/logical_sessions.rs"]
 mod logical_sessions;
 

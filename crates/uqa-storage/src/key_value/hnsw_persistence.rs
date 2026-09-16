@@ -13,7 +13,7 @@ use uqa_core::DocId;
 
 use super::codec::{decode_value, encode_value, other_error, read_u64, usize_to_u64};
 use super::index_keys::{hnsw_metadata_key, hnsw_node_key, hnsw_node_prefix};
-use super::{KeyValueBatch, KeyValueStore, KeyValueVectorIndex};
+use super::{KeyValueBatch, KeyValueRead, KeyValueVectorIndex};
 use crate::hnsw_index::{
     HNSWGraphMeta, HNSWIndex, HNSWNodeSnapshot, HNSWPersistenceDelta, MAX_HNSW_LEVEL,
 };
@@ -51,7 +51,7 @@ struct PersistedHNSWNode {
 }
 
 pub(super) fn restore_graph(
-    store: &dyn KeyValueStore,
+    store: &dyn KeyValueRead,
     raw: &KeyValueVectorIndex,
     table: &str,
     field: &str,
@@ -65,7 +65,7 @@ pub(super) fn restore_graph(
     })?;
     validate_metadata(&metadata, table, field, dimensions, params)?;
     let nodes = load_nodes(store, table, field)?;
-    validate_canonical_vectors(&raw.load_all_with_ordinals()?, &nodes)?;
+    validate_canonical_vectors(&raw.load_all_from(store)?, &nodes)?;
     let meta = HNSWGraphMeta {
         entry_point: metadata.entry_point,
         max_level: checked_level(metadata.max_level, "HNSW max_level")?,
@@ -78,7 +78,7 @@ pub(super) fn restore_graph(
 }
 
 pub(super) fn load_revision(
-    store: &dyn KeyValueStore,
+    store: &dyn KeyValueRead,
     table: &str,
     field: &str,
 ) -> StorageBackendResult<Option<u64>> {
@@ -113,7 +113,7 @@ pub(super) fn stage_delta(
 }
 
 fn load_metadata(
-    store: &dyn KeyValueStore,
+    store: &dyn KeyValueRead,
     table: &str,
     field: &str,
 ) -> StorageBackendResult<Option<PersistedHNSWMetadata>> {
@@ -124,19 +124,19 @@ fn load_metadata(
 }
 
 fn load_nodes(
-    store: &dyn KeyValueStore,
+    store: &dyn KeyValueRead,
     table: &str,
     field: &str,
 ) -> StorageBackendResult<Vec<HNSWNodeSnapshot>> {
     let prefix = hnsw_node_prefix(table, field)?;
     let mut nodes = Vec::new();
-    for (key, value) in store.scan_prefix(&prefix)? {
+    store.visit_prefix(&prefix, &mut |key, value| {
         let mut offset = prefix.len();
-        let node_id = read_u64(&key, &mut offset)?;
+        let node_id = read_u64(key, &mut offset)?;
         if offset != key.len() {
             return Err(other_error("persisted HNSW node key has trailing bytes"));
         }
-        let persisted: PersistedHNSWNode = decode_value(&value)?;
+        let persisted: PersistedHNSWNode = decode_value(value)?;
         if persisted.node_id != node_id {
             return Err(other_error(format!(
                 "persisted HNSW node key {node_id} disagrees with its payload {}",
@@ -144,7 +144,8 @@ fn load_nodes(
             )));
         }
         nodes.push(persisted.try_into()?);
-    }
+        Ok(())
+    })?;
     Ok(nodes)
 }
 

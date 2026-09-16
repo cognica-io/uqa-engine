@@ -162,13 +162,16 @@ impl Transaction {
         let id = StorageSavepointId::allocate();
         self.changes.savepoint(id)?;
         let graph_position = self.graph.len();
-        let result = operation(self);
-        if result.is_err() {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(self)));
+        if !matches!(&result, Ok(Ok(_))) {
             self.changes.rollback_to_savepoint(id)?;
             self.graph.truncate(graph_position);
         }
         self.changes.release_savepoint(id)?;
-        result
+        match result {
+            Ok(result) => result,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
     }
 
     pub(super) fn savepoint(

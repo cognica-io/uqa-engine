@@ -18,6 +18,10 @@ mod graph;
 pub use graph::{verify_graph_cache_concurrency, verify_graph_cache_reopen};
 mod graph_retry;
 pub use graph_retry::verify_graph_admission_retry;
+mod compound;
+pub use compound::{verify_compound_concurrency, verify_compound_mutations};
+mod hnsw;
+pub use hnsw::{verify_hnsw_concurrency, verify_hnsw_reopen, verify_hnsw_undo};
 
 const PREFIX: &[u8] = b"\0uqa-key-value-conformance/v1/";
 

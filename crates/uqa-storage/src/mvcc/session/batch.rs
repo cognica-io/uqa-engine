@@ -11,6 +11,7 @@ use crate::mvcc::graph::OwnedGraphMutation;
 use crate::mvcc::VersionError;
 use crate::{KeyValueBatch, StorageBackendResult};
 
+use super::transaction::Transaction;
 use super::VersionedKeyValueStore;
 
 enum Operation {
@@ -55,6 +56,25 @@ impl<'a> Batch<'a> {
         })?;
         Ok(())
     }
+
+    pub(super) fn apply(&self, transaction: &mut Transaction) -> Result<(), VersionError> {
+        for operation in self.operations.iter() {
+            match operation {
+                Operation::Put(key, value) => {
+                    transaction.replace(key, Some(value), &self.store.control)?;
+                }
+                Operation::Delete(key) => transaction.replace(key, None, &self.store.control)?,
+                Operation::DeletePrefix(prefix) => {
+                    transaction.delete_prefix(prefix, &self.store.control)?;
+                }
+                Operation::Graph(mutation) => transaction.graph_mutation(mutation)?,
+                Operation::GraphCache { key, value, kind } => {
+                    transaction.write_record(key, value.as_deref(), *kind, &self.store.control)?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl KeyValueBatch for Batch<'_> {
@@ -97,32 +117,6 @@ impl KeyValueBatch for Batch<'_> {
         self.cache(key, value, RecordWriteKind::GraphCache)
     }
     fn commit(self: Box<Self>) -> StorageBackendResult<()> {
-        self.store.write(|transaction| {
-            for operation in self.operations.iter() {
-                match operation {
-                    Operation::Put(key, value) => {
-                        transaction.replace(key, Some(value), &self.store.control)?;
-                    }
-                    Operation::Delete(key) => {
-                        transaction.replace(key, None, &self.store.control)?;
-                    }
-                    Operation::DeletePrefix(prefix) => {
-                        transaction.delete_prefix(prefix, &self.store.control)?;
-                    }
-                    Operation::Graph(mutation) => {
-                        transaction.graph_mutation(mutation)?;
-                    }
-                    Operation::GraphCache { key, value, kind } => {
-                        transaction.write_record(
-                            key,
-                            value.as_deref(),
-                            *kind,
-                            &self.store.control,
-                        )?;
-                    }
-                }
-            }
-            Ok::<_, VersionError>(())
-        })
+        self.store.write(|transaction| self.apply(transaction))
     }
 }

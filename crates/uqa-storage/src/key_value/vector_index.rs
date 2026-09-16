@@ -8,9 +8,11 @@
 
 use std::collections::BTreeMap;
 
+mod read;
+
 use super::codec::{
-    blob_to_vector, other_error, read_str, read_u64, usize_to_u64, validate_vector_ordinal_count,
-    vector_doc_prefix, vector_field_prefix, vector_key, vector_to_blob,
+    other_error, usize_to_u64, validate_vector_ordinal_count, vector_doc_prefix,
+    vector_field_prefix, vector_key, vector_to_blob,
 };
 use super::{
     cosine_similarity, validate_vector_values, Arc, DocId, KeyValueBatch, KeyValueStore, Payload,
@@ -45,37 +47,12 @@ impl KeyValueVectorIndex {
         &self,
     ) -> StorageBackendResult<Vec<(DocId, u32, Vec<f32>)>> {
         let mut vectors = Vec::new();
-        let mut current_doc = None;
-        let mut expected_ordinal = 0_u32;
+        let mut decoder = read::CanonicalDecoder::new(self);
         for (key, value) in self
             .store
             .scan_prefix(&vector_field_prefix(&self.table, &self.field)?)?
         {
-            let mut offset = 1;
-            let _table = read_str(&key, &mut offset)?;
-            let _field = read_str(&key, &mut offset)?;
-            let doc_id = read_u64(&key, &mut offset)?;
-            let ordinal = read_u64(&key, &mut offset)?;
-            let ordinal = u32::try_from(ordinal)
-                .map_err(|_| other_error("persisted vector ordinal exceeds u32 index format"))?;
-            if offset != key.len() {
-                return Err(other_error("persisted vector key has trailing bytes"));
-            }
-            if current_doc != Some(doc_id) {
-                current_doc = Some(doc_id);
-                expected_ordinal = 0;
-            }
-            if ordinal != expected_ordinal {
-                return Err(other_error(format!(
-                    "invalid persisted vector ordinal sequence for document {doc_id}: expected {expected_ordinal}, found {ordinal}"
-                )));
-            }
-            expected_ordinal = expected_ordinal
-                .checked_add(1)
-                .ok_or_else(|| other_error("persisted vector ordinal sequence overflow"))?;
-            let vector = blob_to_vector(&value)?;
-            self.validate_dimensions(&vector)?;
-            vectors.push((doc_id, ordinal, vector));
+            vectors.push(decoder.decode(&key, &value)?);
         }
         Ok(vectors)
     }

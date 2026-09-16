@@ -64,6 +64,20 @@ impl SQLiteKeyValueStore {
 }
 
 impl KeyValueStore for SQLiteKeyValueStore {
+    fn with_read_view(
+        &self,
+        read: &mut uqa_storage::key_value::KeyValueReadScope<'_>,
+    ) -> StorageBackendResult<()> {
+        self.conn.with_records(|store| store.with_read_view(read))
+    }
+
+    fn with_mutation(
+        &self,
+        mutate: &mut uqa_storage::key_value::KeyValueMutation<'_>,
+    ) -> StorageBackendResult<()> {
+        self.conn.with_records(|store| store.with_mutation(mutate))
+    }
+
     fn transaction_affinity(&self) -> Option<uqa_storage::StorageSessionAffinity> {
         Some(self.records.session_affinity())
     }

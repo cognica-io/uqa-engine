@@ -31,6 +31,8 @@ mod catalog;
 pub use catalog::KeyValueCatalog;
 mod graph_commit;
 pub use graph_commit::KeyValueGraphRecords;
+mod view;
+pub use view::{KeyValueMutation, KeyValueRead, KeyValueReadRevision, KeyValueReadScope};
 
 const TAG_METADATA: u8 = b'm';
 const TAG_TABLE: u8 = b't';
@@ -128,6 +130,20 @@ pub trait KeyValueBatch {
 
 /// Ordered byte-key storage used by Key/Value catalog and index backends.
 pub trait KeyValueStore: Send + Sync {
+    /// Evaluate a compound read against one fixed committed/private view. The callback must use the supplied reader and must not reenter this session. Stores without this capability reject it explicitly.
+    fn with_read_view(&self, _read: &mut KeyValueReadScope<'_>) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "compound KeyValue reads are not supported by this store".into(),
+        ))
+    }
+
+    /// Evaluate once against the same view that supplies write preconditions, then atomically stage the batch. Errors and unwinds discard that batch; failed publication retains the evaluated attempt. The callback must not reenter this session or perform transaction control.
+    fn with_mutation(&self, _mutate: &mut KeyValueMutation<'_>) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "atomic KeyValue evaluation is not supported by this store".into(),
+        ))
+    }
+
     /// Identity of the transaction context shared by this store's catalog and data handles. Independent sessions must report different identities, even over the same file.
     fn transaction_affinity(&self) -> Option<crate::StorageSessionAffinity> {
         None

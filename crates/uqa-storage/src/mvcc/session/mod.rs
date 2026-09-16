@@ -162,6 +162,39 @@ impl VersionedKeyValueStore {
 }
 
 impl KeyValueStore for VersionedKeyValueStore {
+    fn with_read_view(
+        &self,
+        operation: &mut crate::key_value::KeyValueReadScope<'_>,
+    ) -> StorageBackendResult<()> {
+        self.control.check()?;
+        let view = self.view().map_err(VersionError::into_storage_error)?;
+        operation(&read::RecordRead {
+            view: &view,
+            database: self.persistence.database_id(),
+            control: &self.control,
+        })?;
+        self.control.check()
+    }
+
+    fn with_mutation(
+        &self,
+        operation: &mut crate::key_value::KeyValueMutation<'_>,
+    ) -> StorageBackendResult<()> {
+        self.control.check()?;
+        self.write(|transaction| {
+            let view = transaction.view()?;
+            let read = read::RecordRead {
+                view: &view,
+                database: self.persistence.database_id(),
+                control: &self.control,
+            };
+            let mut batch = batch::Batch::new(self);
+            operation(&read, &mut batch)?;
+            self.control.check()?;
+            batch.apply(transaction)
+        })
+    }
+
     fn transaction_affinity(&self) -> Option<StorageSessionAffinity> {
         Some(self.session_affinity())
     }
