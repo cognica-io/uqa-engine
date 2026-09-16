@@ -337,6 +337,16 @@ pub struct PrivateRecordSnapshot {
 }
 
 impl PrivateRecordSnapshot {
+    /// Retain this exact private revision without following later writes or copying its values.
+    pub(super) fn try_clone(&self) -> VersionResult<Self> {
+        let memory = self.owner.memory.reserve(std::mem::size_of::<Self>())?;
+        Ok(Self {
+            owner: Arc::clone(&self.owner),
+            revision: self.revision,
+            _memory: memory,
+        })
+    }
+
     /// Select changed keys on this retained command boundary, including deletions. Undo restores their earlier identities, while later branches and other transactions receive distinct identities.
     pub fn scan_keys(
         &self,

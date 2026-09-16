@@ -30,9 +30,7 @@ impl KeyValueRead for MemoryRead<'_> {
         key: &[u8],
         visit: &mut ValueReadVisitor<'_>,
     ) -> StorageBackendResult<()> {
-        self.control.check()?;
-        visit(self.state.map.get(key).map(Vec::as_slice))?;
-        self.control.check()
+        self.visit_value_budgeted(key, self.control, visit)
     }
 
     fn visit_prefix(
@@ -40,19 +38,61 @@ impl KeyValueRead for MemoryRead<'_> {
         prefix: &[u8],
         visit: &mut KeyValueReadVisitor<'_>,
     ) -> StorageBackendResult<()> {
-        use std::ops::Bound::{Included, Unbounded};
-        self.control.check()?;
+        self.visit_prefix_after(prefix, None, usize::MAX, self.control, visit)
+    }
+
+    fn visit_value_budgeted(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+        visit: &mut ValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        visit(self.state.map.get(key).map(Vec::as_slice))?;
+        control.check()
+    }
+
+    fn visit_prefix_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut KeyValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        use std::ops::Bound::{Excluded, Included, Unbounded};
+        control.check()?;
+        let lower = match after {
+            Some(after) if after >= prefix => Excluded(after),
+            _ => Included(prefix),
+        };
         for (key, value) in self
             .state
             .map
-            .range::<[u8], _>((Included(prefix), Unbounded))
+            .range::<[u8], _>((lower, Unbounded))
+            .take(limit)
         {
             if !key.starts_with(prefix) {
                 break;
             }
-            self.control.check()?;
+            control.check()?;
             visit(key, value)?;
         }
-        self.control.check()
+        control.check()
+    }
+
+    fn contains_prefix_budgeted(
+        &self,
+        prefix: &[u8],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        use std::ops::Bound::{Included, Unbounded};
+        control.check()?;
+        Ok(self
+            .state
+            .map
+            .range::<[u8], _>((Included(prefix), Unbounded))
+            .next()
+            .is_some_and(|(key, _)| key.starts_with(prefix)))
     }
 }

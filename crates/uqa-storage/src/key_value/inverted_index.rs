@@ -33,8 +33,11 @@ mod format;
 mod migration;
 mod mutation;
 mod queries;
+mod read_impl;
 mod rebuild;
 mod trait_impl;
+mod view;
+use view::{OccurrenceRead, OccurrenceSource};
 
 use migration::{migrate_legacy_forward_postings, migrate_legacy_reverse_postings};
 
@@ -63,7 +66,7 @@ struct FieldStats {
 /// Inverted index implemented over [`KeyValueStore`].
 #[derive(Clone)]
 pub struct KeyValueInvertedIndex {
-    store: Arc<dyn KeyValueStore>,
+    source: OccurrenceSource,
     table: String,
     bindings: AnalyzerBindings,
 }
@@ -75,7 +78,7 @@ impl KeyValueInvertedIndex {
         analyzer: Analyzer,
     ) -> Self {
         Self {
-            store,
+            source: OccurrenceSource::Live(store),
             table: table.into(),
             bindings: AnalyzerBindings::new(analyzer),
         }

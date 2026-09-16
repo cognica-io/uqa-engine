@@ -407,6 +407,22 @@ struct CancellingStore {
     puts: std::sync::atomic::AtomicUsize,
 }
 
+struct BorrowedBatch<'a>(&'a mut dyn uqa_storage::key_value::KeyValueBatch);
+impl uqa_storage::key_value::KeyValueBatch for BorrowedBatch<'_> {
+    fn put(&mut self, key: &[u8], value: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.0.put(key, value)
+    }
+    fn delete(&mut self, key: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.0.delete(key)
+    }
+    fn delete_prefix(&mut self, prefix: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.0.delete_prefix(prefix)
+    }
+    fn commit(self: Box<Self>) -> uqa_storage::StorageBackendResult<()> {
+        panic!("evaluation cannot commit its borrowed batch")
+    }
+}
+
 struct CancellingBatch<'a> {
     inner: Box<dyn uqa_storage::key_value::KeyValueBatch + 'a>,
     store: &'a CancellingStore,
@@ -462,6 +478,27 @@ impl uqa_storage::key_value::KeyValueBatch for CancellingBatch<'_> {
 }
 
 impl KeyValueStore for CancellingStore {
+    fn with_read_view(
+        &self,
+        read: &mut uqa_storage::key_value::KeyValueReadScope<'_>,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.with_read_view(read)
+    }
+    fn with_mutation(
+        &self,
+        mutate: &mut uqa_storage::key_value::KeyValueMutation<'_>,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.with_mutation(&mut |read, batch| {
+            mutate(
+                read,
+                &mut CancellingBatch {
+                    inner: Box::new(BorrowedBatch(batch)),
+                    store: self,
+                },
+            )
+        })
+    }
+
     fn get(&self, key: &[u8]) -> uqa_storage::StorageBackendResult<Option<Vec<u8>>> {
         self.inner.get(key)
     }

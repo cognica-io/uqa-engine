@@ -9,7 +9,7 @@
 use super::{
     decode_occurrence_cluster, decode_u64_value, keys, other_error, score_count, BTreeMap,
     BTreeSet, ClusteredPostingCursor, DocId, EncodedScoreCluster, FieldStats, IndexStats,
-    KeyValueInvertedIndex, OccurrencePosting, PostingCursor, StorageBackendResult, TokenTermKey,
+    OccurrencePosting, OccurrenceRead, PostingCursor, StorageBackendResult, TokenTermKey,
 };
 
 pub(super) fn require_score_version(score: &[u8]) -> StorageBackendResult<()> {
@@ -21,12 +21,12 @@ pub(super) fn require_score_version(score: &[u8]) -> StorageBackendResult<()> {
     Ok(())
 }
 
-impl KeyValueInvertedIndex {
+impl OccurrenceRead<'_> {
     pub(super) fn score_prefix(&self, field: Option<&str>) -> StorageBackendResult<Vec<u8>> {
         self.require_graph_format()?;
         match field {
-            Some(field) => keys::field_prefix(&self.table, keys::SCORE, field),
-            None => keys::kind_prefix(&self.table, keys::SCORE),
+            Some(field) => keys::field_prefix(self.table, keys::SCORE, field),
+            None => keys::kind_prefix(self.table, keys::SCORE),
         }
     }
 
@@ -37,13 +37,16 @@ impl KeyValueInvertedIndex {
     ) -> StorageBackendResult<Box<dyn PostingCursor>> {
         self.require_graph_format()?;
         let mut clusters = Vec::new();
-        for (key, bytes) in
-            self.store
-                .scan_prefix(&keys::term_prefix(&self.table, keys::SCORE, field, term)?)?
+        for (key, bytes) in self
+            .scan_prefix(&keys::term_prefix(self.table, keys::SCORE, field, term)?)?
+            .iter()
         {
-            let (_, _, cluster_id) = keys::read_cluster(&key, keys::SCORE)?;
-            require_score_version(&bytes)?;
-            clusters.push(EncodedScoreCluster { cluster_id, bytes });
+            let (_, _, cluster_id) = keys::read_cluster(key, keys::SCORE)?;
+            require_score_version(bytes)?;
+            clusters.push(EncodedScoreCluster {
+                cluster_id,
+                bytes: bytes.to_vec(),
+            });
         }
         Ok(Box::new(ClusteredPostingCursor::new(clusters)?))
     }
@@ -55,22 +58,22 @@ impl KeyValueInvertedIndex {
     ) -> StorageBackendResult<Vec<OccurrencePosting>> {
         self.require_graph_format()?;
         let mut postings = Vec::new();
-        for (key, score) in
-            self.store
-                .scan_prefix(&keys::term_prefix(&self.table, keys::SCORE, field, term)?)?
+        for (key, score) in self
+            .scan_prefix(&keys::term_prefix(self.table, keys::SCORE, field, term)?)?
+            .iter()
         {
-            let (_, _, cluster) = keys::read_cluster(&key, keys::SCORE)?;
+            let (_, _, cluster) = keys::read_cluster(key, keys::SCORE)?;
             let graph = self
                 .store
                 .get(&keys::cluster_key(
-                    &self.table,
+                    self.table,
                     keys::POSITIONS,
                     field,
                     term,
                     cluster,
                 )?)?
                 .ok_or_else(|| other_error("occurrence graph payload is missing"))?;
-            let entries = decode_occurrence_cluster(cluster, &score, &graph)?;
+            let entries = decode_occurrence_cluster(cluster, score, &graph)?;
             for entry in &entries {
                 self.validate_posting_metadata(field, entry)?;
             }
@@ -95,7 +98,7 @@ impl KeyValueInvertedIndex {
         let length = self
             .store
             .get(&keys::document_key(
-                &self.table,
+                self.table,
                 keys::LENGTH,
                 doc_id,
                 field,
@@ -113,30 +116,29 @@ impl KeyValueInvertedIndex {
     }
 
     pub(super) fn index_statistics(&self) -> StorageBackendResult<IndexStats> {
-        use super::InvertedIndex;
         let doc_count = self.doc_count()?;
         let mut stats = IndexStats::default();
         stats.total_docs = doc_count;
         let mut total = 0_u64;
         for (key, value) in self
-            .store
-            .scan_prefix(&keys::kind_prefix(&self.table, keys::FIELD)?)?
+            .scan_prefix(&keys::kind_prefix(self.table, keys::FIELD)?)?
+            .iter()
         {
-            keys::read_field(&key)?;
+            keys::read_field(key)?;
             total = total
-                .checked_add(FieldStats::from_bytes(&value)?.total_length)
+                .checked_add(FieldStats::from_bytes(value)?.total_length)
                 .ok_or_else(|| other_error("index total field length overflow"))?;
         }
         if doc_count > 0 {
             stats.avg_doc_length = total as f64 / doc_count as f64;
         }
         let mut counts = BTreeMap::<(String, TokenTermKey), u64>::new();
-        for (key, value) in self.store.scan_prefix(&self.score_prefix(None)?)? {
-            let (field, term, _) = keys::read_cluster(&key, keys::SCORE)?;
-            require_score_version(&value)?;
+        for (key, value) in self.scan_prefix(&self.score_prefix(None)?)?.iter() {
+            let (field, term, _) = keys::read_cluster(key, keys::SCORE)?;
+            require_score_version(value)?;
             let count = counts.entry((field, term)).or_default();
             *count = count
-                .checked_add(score_count(&value)?)
+                .checked_add(score_count(value)?)
                 .ok_or_else(|| other_error("index document frequency overflow"))?;
         }
         for ((field, term), frequency) in counts {
@@ -155,8 +157,8 @@ impl KeyValueInvertedIndex {
         field: Option<&str>,
     ) -> StorageBackendResult<Vec<TokenTermKey>> {
         let mut terms = BTreeSet::new();
-        for (key, _) in self.store.scan_prefix(&self.score_prefix(field)?)? {
-            let (_, term, _) = keys::read_cluster(&key, keys::SCORE)?;
+        for (key, _) in self.scan_prefix(&self.score_prefix(field)?)?.iter() {
+            let (_, term, _) = keys::read_cluster(key, keys::SCORE)?;
             terms.insert(term);
         }
         Ok(terms.into_iter().collect())

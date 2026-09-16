@@ -14,6 +14,8 @@ use crate::mvcc::{CommitSequence, DatabaseId, PrivateRecordRevision};
 use crate::read_control::{KeyValueReadVisitor, StorageReadControl, ValueReadVisitor};
 use crate::{KeyValueBatch, StorageBackendResult};
 
+mod snapshot;
+
 pub type KeyValueReadScope<'a> = dyn FnMut(&dyn KeyValueRead) -> StorageBackendResult<()> + 'a;
 pub type KeyValueMutation<'a> =
     dyn FnMut(&dyn KeyValueRead, &mut dyn KeyValueBatch) -> StorageBackendResult<()> + 'a;
@@ -22,6 +24,13 @@ pub type KeyValueMutation<'a> =
 pub trait KeyValueRead {
     fn control(&self) -> &StorageReadControl;
     fn revision(&self, prefixes: &[&[u8]]) -> StorageBackendResult<KeyValueReadRevision>;
+    /// Retain this committed/private boundary after the callback returns. Callers may only read the selected prefixes. The default copies selected bytes under this reader's allowance; versioned providers retain their existing visibility owners without loading values.
+    fn retain(
+        &self,
+        prefixes: &[&[u8]],
+    ) -> StorageBackendResult<Arc<dyn KeyValueRead + Send + Sync>> {
+        snapshot::capture(self, prefixes)
+    }
     fn visit_value(&self, key: &[u8], visit: &mut ValueReadVisitor<'_>)
         -> StorageBackendResult<()>;
     fn visit_prefix(
@@ -29,6 +38,46 @@ pub trait KeyValueRead {
         prefix: &[u8],
         visit: &mut KeyValueReadVisitor<'_>,
     ) -> StorageBackendResult<()>;
+
+    /// Visit one value on this same boundary, charging temporary provider buffers to the supplied query allowance.
+    fn visit_value_budgeted(
+        &self,
+        _key: &[u8],
+        control: &StorageReadControl,
+        _visit: &mut ValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        Err(super::codec::other_error(
+            "controlled compound value reads are not supported",
+        ))
+    }
+
+    /// Visit at most `limit` values in key order, strictly after `after`, without advancing this read boundary.
+    fn visit_prefix_after(
+        &self,
+        _prefix: &[u8],
+        _after: Option<&[u8]>,
+        _limit: usize,
+        control: &StorageReadControl,
+        _visit: &mut KeyValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        Err(super::codec::other_error(
+            "controlled compound prefix reads are not supported",
+        ))
+    }
+
+    /// Probe live keys on this boundary without materializing their values.
+    fn contains_prefix_budgeted(
+        &self,
+        _prefix: &[u8],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        control.check()?;
+        Err(super::codec::other_error(
+            "compound key-only probes are not supported",
+        ))
+    }
 
     fn get(&self, key: &[u8]) -> StorageBackendResult<Option<BudgetedVec<u8>>> {
         let mut result = None;

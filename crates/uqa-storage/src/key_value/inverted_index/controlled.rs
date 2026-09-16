@@ -6,7 +6,7 @@
 
 //! Bounded provider keys, borrowed reads and selected-document graph decoding.
 
-use super::{keys, other_error, FieldStats, IndexedFieldMetadata, KeyValueInvertedIndex};
+use super::{keys, other_error, FieldStats, IndexedFieldMetadata, OccurrenceRead};
 use crate::clustered_postings::{
     cluster_id, decode_occurrence_document_budgeted, EncodedScoreClusterRef, ScoreClusterVisitor,
 };
@@ -22,14 +22,14 @@ use uqa_core::{
     DocId, IndexStats, TokenOccurrence,
 };
 
-impl KeyValueInvertedIndex {
+impl OccurrenceRead<'_> {
     fn read_key(
         &self,
         kind: u8,
         tail: &[Part<'_>],
         control: &StorageReadControl,
     ) -> StorageBackendResult<BudgetedVec<u8>> {
-        controlled(&self.table, TAG_OCCURRENCE_INDEX, Some(kind), tail, control)
+        controlled(self.table, TAG_OCCURRENCE_INDEX, Some(kind), tail, control)
     }
 
     pub(super) fn require_graph_format_budgeted(
@@ -39,13 +39,14 @@ impl KeyValueInvertedIndex {
         let mut marker = false;
         {
             let key = self.read_key(keys::FORMAT, &[], control)?;
-            self.store.visit_value(&key, control, &mut |bytes| {
-                marker = bytes.is_some();
-                if bytes.is_some_and(|bytes| bytes != keys::FORMAT_NAME) {
-                    return Err(other_error("unsupported occurrence index format"));
-                }
-                Ok(())
-            })?;
+            self.store
+                .visit_value_budgeted(&key, control, &mut |bytes| {
+                    marker = bytes.is_some();
+                    if bytes.is_some_and(|bytes| bytes != keys::FORMAT_NAME) {
+                        return Err(other_error("unsupported occurrence index format"));
+                    }
+                    Ok(())
+                })?;
         }
         for tag in [
             TAG_POSTING,
@@ -56,7 +57,7 @@ impl KeyValueInvertedIndex {
             TAG_FIELD_STATS,
             TAG_REVERSE_POSTING,
         ] {
-            let prefix = controlled(&self.table, tag, None, &[], control)?;
+            let prefix = controlled(self.table, tag, None, &[], control)?;
             if self.store.contains_prefix_budgeted(&prefix, control)? {
                 return Err(other_error(
                     "legacy positional data requires an atomic source rebuild",
@@ -64,7 +65,7 @@ impl KeyValueInvertedIndex {
             }
         }
         if !marker {
-            let prefix = controlled(&self.table, TAG_OCCURRENCE_INDEX, None, &[], control)?;
+            let prefix = controlled(self.table, TAG_OCCURRENCE_INDEX, None, &[], control)?;
             if self.store.contains_prefix_budgeted(&prefix, control)? {
                 return Err(other_error("occurrence index format marker is missing"));
             }
@@ -131,10 +132,11 @@ impl KeyValueInvertedIndex {
     ) -> StorageBackendResult<Option<FieldStats>> {
         let key = self.read_key(keys::FIELD, &[Segment(field.as_bytes())], control)?;
         let mut stats = None;
-        self.store.visit_value(&key, control, &mut |bytes| {
-            stats = bytes.map(FieldStats::from_bytes).transpose()?;
-            Ok(())
-        })?;
+        self.store
+            .visit_value_budgeted(&key, control, &mut |bytes| {
+                stats = bytes.map(FieldStats::from_bytes).transpose()?;
+                Ok(())
+            })?;
         Ok(stats)
     }
 
@@ -173,20 +175,21 @@ impl KeyValueInvertedIndex {
                 ],
                 control,
             )?;
-            self.store.visit_value(&key, control, &mut |bytes| {
-                if let Some(bytes) = bytes {
-                    let mut copy = BudgetedVec::new(control.memory());
-                    copy.reserve(bytes.len())?;
-                    for (index, byte) in bytes.iter().copied().enumerate() {
-                        if index % 1024 == 0 {
-                            control.check()?;
+            self.store
+                .visit_value_budgeted(&key, control, &mut |bytes| {
+                    if let Some(bytes) = bytes {
+                        let mut copy = BudgetedVec::new(control.memory());
+                        copy.reserve(bytes.len())?;
+                        for (index, byte) in bytes.iter().copied().enumerate() {
+                            if index % 1024 == 0 {
+                                control.check()?;
+                            }
+                            copy.push(byte)?;
                         }
-                        copy.push(byte)?;
+                        scores = Some(copy);
                     }
-                    scores = Some(copy);
-                }
-                Ok(())
-            })?;
+                    Ok(())
+                })?;
         }
         let mut posting = None;
         {
@@ -199,23 +202,26 @@ impl KeyValueInvertedIndex {
                 ],
                 control,
             )?;
-            self.store.visit_value(&key, control, &mut |positions| {
-                match (scores.as_deref(), positions) {
-                    (None, None) => {}
-                    (Some(scores), Some(positions)) => {
-                        posting = decode_occurrence_document_budgeted(
-                            cluster,
-                            scores,
-                            positions,
-                            doc_id,
-                            control.memory(),
-                            || control.check(),
-                        )?;
+            self.store
+                .visit_value_budgeted(&key, control, &mut |positions| {
+                    match (scores.as_deref(), positions) {
+                        (None, None) => {}
+                        (Some(scores), Some(positions)) => {
+                            posting = decode_occurrence_document_budgeted(
+                                cluster,
+                                scores,
+                                positions,
+                                doc_id,
+                                control.memory(),
+                                || control.check(),
+                            )?;
+                        }
+                        _ => {
+                            return Err(other_error("occurrence score and graph payloads disagree"))
+                        }
                     }
-                    _ => return Err(other_error("occurrence score and graph payloads disagree")),
-                }
-                Ok(())
-            })?;
+                    Ok(())
+                })?;
         }
         drop(scores);
         let Some(posting) = posting else {
@@ -231,10 +237,11 @@ impl KeyValueInvertedIndex {
                 &[Segment(field.as_bytes()), Number(doc_id)],
                 control,
             )?;
-            self.store.visit_value(&key, control, &mut |bytes| {
-                metadata = bytes.map(IndexedFieldMetadata::from_bytes).transpose()?;
-                Ok(())
-            })?;
+            self.store
+                .visit_value_budgeted(&key, control, &mut |bytes| {
+                    metadata = bytes.map(IndexedFieldMetadata::from_bytes).transpose()?;
+                    Ok(())
+                })?;
         }
         let metadata =
             metadata.ok_or_else(|| other_error("occurrence source metadata is missing"))?;

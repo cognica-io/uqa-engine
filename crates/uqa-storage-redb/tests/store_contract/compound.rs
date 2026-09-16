@@ -62,3 +62,18 @@ fn ivf_and_exact_independent_commits_and_reopen() {
     let reopened = RedbStorage::open(&path).unwrap();
     verify_ivf_reopen(Arc::new(reopened.store())).unwrap();
 }
+
+#[test]
+fn occurrence_snapshots_independent_commits_and_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("occurrences.redb");
+    {
+        let storage = RedbStorage::open(&path).unwrap();
+        let a: Arc<dyn KeyValueStore> = Arc::new(storage.store());
+        let b: Arc<dyn KeyValueStore> = Arc::new(storage.store());
+        verify_occurrence_snapshots(&a).unwrap();
+        verify_occurrence_concurrency(&a, &b).unwrap();
+    }
+    let storage = RedbStorage::open(&path).unwrap();
+    verify_occurrence_reopen(Arc::new(storage.store())).unwrap();
+}

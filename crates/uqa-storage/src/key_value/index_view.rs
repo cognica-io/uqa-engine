@@ -81,17 +81,7 @@ impl<T: VectorIndex + 'static> IndexView<T> {
         store: &dyn KeyValueStore,
         operation: impl FnOnce(&dyn KeyValueRead, &mut dyn KeyValueBatch) -> StorageBackendResult<()>,
     ) -> StorageBackendResult<()> {
-        let mut operation = Some(operation);
-        store.with_mutation(&mut |read, batch| {
-            operation.take().ok_or_else(|| {
-                other_error("KeyValue provider attempted to replay mutation evaluation")
-            })?(read, batch)
-        })?;
-        if operation.is_some() {
-            return Err(other_error(
-                "KeyValue provider did not evaluate the mutation",
-            ));
-        }
+        evaluate_mutation(store, operation)?;
         // Creation owns the requested parameters until its first successful staging, including across unrelated changes to the initial view.
         self.preparing_definition.store(false, Ordering::Release);
         Ok(())
@@ -111,4 +101,22 @@ pub(super) fn read_view<T>(
         Ok(())
     })?;
     result.ok_or_else(|| other_error("KeyValue provider did not evaluate the read"))
+}
+
+pub(super) fn evaluate_mutation(
+    store: &dyn KeyValueStore,
+    operation: impl FnOnce(&dyn KeyValueRead, &mut dyn KeyValueBatch) -> StorageBackendResult<()>,
+) -> StorageBackendResult<()> {
+    let mut operation = Some(operation);
+    store.with_mutation(&mut |read, batch| {
+        operation.take().ok_or_else(|| {
+            other_error("KeyValue provider attempted to replay mutation evaluation")
+        })?(read, batch)
+    })?;
+    if operation.is_some() {
+        return Err(other_error(
+            "KeyValue provider did not evaluate the mutation",
+        ));
+    }
+    Ok(())
 }

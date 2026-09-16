@@ -109,3 +109,13 @@ fn exact_snapshots_retain_their_allowance_and_release_failed_loads() {
     assert_eq!(control.memory().used(), 0);
     assert_eq!(vectors.count().unwrap(), 128);
 }
+
+#[test]
+fn occurrence_snapshots_and_independent_indexes_share_the_session_boundary() {
+    let persistence = Persistence::new();
+    let a: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 20));
+    let b = a.open_session().unwrap();
+    verify_occurrence_snapshots(&a).unwrap();
+    verify_occurrence_concurrency(&a, &b).unwrap();
+    verify_occurrence_reopen(b).unwrap();
+}

@@ -52,16 +52,32 @@ impl KeyValueRead for RecordRead<'_> {
         ))
     }
 
+    fn retain(
+        &self,
+        _prefixes: &[&[u8]],
+    ) -> StorageBackendResult<std::sync::Arc<dyn KeyValueRead + Send + Sync>> {
+        self.control.check()?;
+        let memory = self
+            .control
+            .memory()
+            .reserve(std::mem::size_of::<RetainedRecordRead>())?;
+        Ok(std::sync::Arc::new(RetainedRecordRead {
+            view: self
+                .view
+                .try_clone()
+                .map_err(VersionError::into_storage_error)?,
+            database: self.database,
+            control: self.control.clone(),
+            _memory: memory,
+        }))
+    }
+
     fn visit_value(
         &self,
         key: &[u8],
         visit: &mut ValueReadVisitor<'_>,
     ) -> StorageBackendResult<()> {
-        self.view
-            .visit_value(key, self.control, &mut |record| {
-                visit(record.and_then(|record| record.value)).map_err(Into::into)
-            })
-            .map_err(VersionError::into_storage_error)
+        self.visit_value_budgeted(key, self.control, visit)
     }
 
     fn visit_prefix(
@@ -69,8 +85,48 @@ impl KeyValueRead for RecordRead<'_> {
         prefix: &[u8],
         visit: &mut KeyValueReadVisitor<'_>,
     ) -> StorageBackendResult<()> {
-        visit_live(self.view, prefix, None, usize::MAX, self.control, visit)
+        self.visit_prefix_after(prefix, None, usize::MAX, self.control, visit)
+    }
+
+    fn visit_value_budgeted(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+        visit: &mut ValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.view
+            .visit_value(key, control, &mut |record| {
+                visit(record.and_then(|record| record.value)).map_err(Into::into)
+            })
             .map_err(VersionError::into_storage_error)
+    }
+
+    fn visit_prefix_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut KeyValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        visit_live(self.view, prefix, after, limit, control, visit)
+            .map_err(VersionError::into_storage_error)
+    }
+
+    fn contains_prefix_budgeted(
+        &self,
+        prefix: &[u8],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        control.check()?;
+        let mut found = false;
+        self.view
+            .visit_keys(prefix, None, usize::MAX, control, &mut |_, record| {
+                found = record.live;
+                Ok(!found)
+            })
+            .map_err(VersionError::into_storage_error)?;
+        Ok(found)
     }
 }
 
@@ -94,4 +150,74 @@ pub(super) fn visit_live(
         }
         Ok(count < limit)
     })
+}
+
+struct RetainedRecordRead {
+    view: MergedRecordSnapshot,
+    database: DatabaseId,
+    control: StorageReadControl,
+    _memory: uqa_core::memory::MemoryReservation,
+}
+impl RetainedRecordRead {
+    fn read(&self) -> RecordRead<'_> {
+        RecordRead {
+            view: &self.view,
+            database: self.database,
+            control: &self.control,
+        }
+    }
+}
+impl KeyValueRead for RetainedRecordRead {
+    fn control(&self) -> &StorageReadControl {
+        &self.control
+    }
+    fn revision(&self, prefixes: &[&[u8]]) -> StorageBackendResult<KeyValueReadRevision> {
+        self.read().revision(prefixes)
+    }
+    fn retain(
+        &self,
+        prefixes: &[&[u8]],
+    ) -> StorageBackendResult<std::sync::Arc<dyn KeyValueRead + Send + Sync>> {
+        self.read().retain(prefixes)
+    }
+    fn visit_value(
+        &self,
+        key: &[u8],
+        visit: &mut ValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.read().visit_value(key, visit)
+    }
+    fn visit_prefix(
+        &self,
+        prefix: &[u8],
+        visit: &mut KeyValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.read().visit_prefix(prefix, visit)
+    }
+    fn visit_value_budgeted(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+        visit: &mut ValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.read().visit_value_budgeted(key, control, visit)
+    }
+    fn visit_prefix_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut KeyValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.read()
+            .visit_prefix_after(prefix, after, limit, control, visit)
+    }
+    fn contains_prefix_budgeted(
+        &self,
+        prefix: &[u8],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        self.read().contains_prefix_budgeted(prefix, control)
+    }
 }
