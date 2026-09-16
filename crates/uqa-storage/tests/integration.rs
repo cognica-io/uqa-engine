@@ -25,3 +25,6 @@ mod field_metadata;
 
 #[path = "cases/japanese.rs"]
 mod japanese;
+
+#[path = "cases/mvcc.rs"]
+mod mvcc;

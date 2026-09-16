@@ -48,7 +48,8 @@
     "prepared_plan_selection": "tests/parity/pg18/prepared_plan_selection_oracle.expected.json",
     "prepared_plan_cost": "tests/parity/pg18/prepared_plan_cost_oracle.expected.json",
     "prepared_plan_settings": "tests/parity/pg18/prepared_plan_settings_oracle.expected.json",
-    "prepared_plan_types": "tests/parity/pg18/prepared_plan_types_oracle.expected.json"
+    "prepared_plan_types": "tests/parity/pg18/prepared_plan_types_oracle.expected.json",
+    "concurrent_writes": "tests/parity/pg18/concurrent_writes.expected.json"
   },
   "parser_chain": {
     "crate": "crates/uqa-pg-query",
@@ -286,11 +287,11 @@
     },
     {
       "id": "query.row-locking-complete-matrix",
-      "postgresql_reference": "PostgreSQL 18.4 SELECT locking clauses, tuple recheck semantics, official row-lock regression cases, and isolation schedules",
+      "postgresql_reference": "PostgreSQL 18.4 SELECT locking clauses, tuple recheck semantics, official row-lock regression cases, and isolation schedules; independent-writer commit/rollback/savepoint schedules in tests/parity/pg18/concurrent_writes.expected.json",
       "uqa_test": "cargo test -p uqa-engine --test integration queries::sql_row_locks::; cargo test -p uqa-engine --test integration queries::sql_row_locks_recheck::; cargo test -p uqa-engine --test integration queries::sql_cte_pg18_controls::row_lock_errors_follow_shape_clause_and_cte_ordering",
       "supported_version": "Implemented FOR UPDATE, FOR NO KEY UPDATE, FOR SHARE, FOR KEY SHARE, OF, NOWAIT, SKIP LOCKED, tuple recheck, process-boundary, join, subquery, view, CTE, mutation, savepoint, persistent-provider, validation-order, CTE-interaction, and base pg_catalog plus Apache AGE catalog-relation slices",
       "status": "partial",
-      "open_issue": "The complete PostgreSQL 18 row-lock regression, isolation, remaining virtual-view and unsupported-relation diagnostics, deadlock, and process-boundary matrix remains."
+      "open_issue": "The complete PostgreSQL 18 row-lock regression, isolation, remaining virtual-view and unsupported-relation diagnostics, deadlock, and process-boundary matrix remains. Native SQLite, SQLite K/V and redb retain a single writer for an entire logical write transaction, preventing independent writers from committing first. The SQLite behavior is reproduced against public UQA 0.3.6; PostgreSQL 18.4 completes all three independent-writer reference schedules. SQL lock_timeout is unrecognized by UQA 0.3.6. Shared MVCC/provider integration and these SQL locking fixes remain required."
     },
     {
       "id": "query.cte-search-cycle-and-materialization",

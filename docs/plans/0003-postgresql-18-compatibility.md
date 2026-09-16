@@ -302,7 +302,7 @@ The extended protocol slice now resolves Bind and FunctionCall format vectors th
 
 ### 7. Complete SQL, catalog, and transaction compatibility
 
-The [concurrent storage transaction design](../design/concurrent-storage-transactions.md) and [implementation plan](0008-concurrent-storage-transactions.md) specify shared MVCC for native SQLite, SQLite Key/Value and redb, including SQL isolation, locking, publication and recovery acceptance. This is proposed work with no new verified compatibility evidence; implementation must update the existing manifest and ledger when its gates pass.
+The [concurrent storage transaction design](../design/concurrent-storage-transactions.md) and [implementation plan](0008-concurrent-storage-transactions.md) specify shared MVCC for native SQLite, SQLite Key/Value and redb, including SQL isolation, locking, publication and recovery acceptance. Three [PostgreSQL reference schedules](../../tests/parity/pg18/concurrent_writes.expected.json) now establish independent writer progress across commit, rollback and savepoint endings; UQA 0.3.6 SQLite still blocks the independent writer while the earlier transaction remains open. SQL `lock_timeout` is also unrecognized in that release. These bugs remain under `query.row-locking-complete-matrix`; no new UQA SQL compatibility gate is verified.
 
 Drive remaining work from the PostgreSQL 18 official regression schedules rather than an ad hoc feature list. Import queries and expected behavior in license-compatible differential harnesses, categorize failures by parser, binder, type system, planner, executor, catalog, transaction, protocol, or administration, and maintain a burn-down manifest with owners and evidence.
 

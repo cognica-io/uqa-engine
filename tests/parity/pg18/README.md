@@ -9,6 +9,14 @@ The [official upstream regression harness](upstream/README.md) separately import
 - `sqlstate-mismatch`: both engines reject, but with different SQLSTATE codes.
 - `value-mismatch`: both answer, values differ after normalization (boolean display and numerically equivalent float formatting are normalized; JSON and JSONB output text is compared exactly).
 
+## Concurrent writer reference
+
+The compact [`concurrent_writes.expected.json`](concurrent_writes.expected.json) records three PostgreSQL 18.4 schedules in which B writes and commits an independent row while A still owns an uncommitted write. A subsequently commits, rolls back, or rolls back to a savepoint and commits. [`capture_concurrent_writes.py`](capture_concurrent_writes.py) retains both connections, waits for B's actual commit completion before sending A's termination step, and records the source hash and Docker image identity. Its random test schema is removed when the sessions close. These are reference expectations; current UQA provider acceptance remains pending in the [concurrent transaction plan](../../../docs/plans/0008-concurrent-storage-transactions.md).
+
+```sh
+python3 tests/parity/pg18/capture_concurrent_writes.py --container uqa-pg18-completion-oracle --output target/concurrent_writes.reference.json
+```
+
 ## Prerequisites
 
 - A PostgreSQL 18 container named `uqa-pg18` with user `postgres`, database `uqa`:

@@ -1,0 +1,84 @@
+{
+  "postgresql_version": "18.4",
+  "image_id": "sha256:22c89fe0d0f507606260237fd55e51f6137f58b2d5bcf6152242b96d9fe8f9a4",
+  "source_sha256": "c12bbb226a4a3ae944740e95844c0b874dd4a9c2e80b144497600205f9ef4366",
+  "setup": [
+    "CREATE TABLE records(id INT PRIMARY KEY, value INT)",
+    "INSERT INTO records VALUES (1,0),(2,0)"
+  ],
+  "observe": "SELECT id, value FROM records ORDER BY id",
+  "cases": [
+    {
+      "name": "commit",
+      "a_before": [
+        "BEGIN",
+        "UPDATE records SET value=10 WHERE id=1"
+      ],
+      "b": [
+        "BEGIN",
+        "UPDATE records SET value=20 WHERE id=2",
+        "COMMIT"
+      ],
+      "before_a_end": [
+        "1|0",
+        "2|20"
+      ],
+      "a_finish": [
+        "COMMIT"
+      ],
+      "after_a_end": [
+        "1|10",
+        "2|20"
+      ]
+    },
+    {
+      "name": "rollback",
+      "a_before": [
+        "BEGIN",
+        "UPDATE records SET value=10 WHERE id=1"
+      ],
+      "b": [
+        "BEGIN",
+        "UPDATE records SET value=20 WHERE id=2",
+        "COMMIT"
+      ],
+      "before_a_end": [
+        "1|0",
+        "2|20"
+      ],
+      "a_finish": [
+        "ROLLBACK"
+      ],
+      "after_a_end": [
+        "1|0",
+        "2|20"
+      ]
+    },
+    {
+      "name": "savepoint",
+      "a_before": [
+        "BEGIN",
+        "UPDATE records SET value=5 WHERE id=1",
+        "SAVEPOINT keep",
+        "UPDATE records SET value=10 WHERE id=1"
+      ],
+      "b": [
+        "BEGIN",
+        "UPDATE records SET value=20 WHERE id=2",
+        "COMMIT"
+      ],
+      "before_a_end": [
+        "1|0",
+        "2|20"
+      ],
+      "a_finish": [
+        "ROLLBACK TO keep",
+        "COMMIT"
+      ],
+      "after_a_end": [
+        "1|5",
+        "2|20"
+      ]
+    }
+  ]
+}
