@@ -161,13 +161,13 @@ fn native_accelerator_builds_never_replay_or_publish_after_their_source_changes(
     index(&other, "docs")
         .rebuild_persisted_block_max("body", &Frequency, "winner")
         .unwrap();
-    assert!(connection.commit_transaction().is_err());
-    connection.rollback_transaction().unwrap();
+    connection.commit_transaction().unwrap();
     assert_eq!(
         live.persisted_block_max_scores("body", "alpha", "winner")
             .unwrap(),
-        Some(vec![3.0, 2.0])
+        None
     );
+    assert_eq!(live.get_doc_length(0, "body").unwrap(), 1);
 }
 
 #[test]

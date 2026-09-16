@@ -6,7 +6,9 @@
 
 //! Native occurrence rows adapt the common algorithms to one logical transaction boundary.
 
+mod commit;
 mod mutation;
+pub(crate) use commit::NativeOccurrenceRecords;
 mod read;
 mod records;
 

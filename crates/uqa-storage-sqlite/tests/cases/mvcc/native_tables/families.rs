@@ -59,7 +59,10 @@ pub(in crate::mvcc) fn seed_missing_families(connection: &ManagedConnection) {
         _ => 2,
     });
     for family in ordered {
-        if matches!(family, Family::OccurrenceSkips | Family::OccurrenceBlockMax) {
+        if matches!(
+            family,
+            Family::OccurrenceSkips | Family::OccurrenceBlockMax | Family::OccurrenceGuards
+        ) {
             continue;
         }
         if !rows(connection, family, "public.docs").is_empty() {
@@ -110,7 +113,10 @@ pub(in crate::mvcc) fn seed_missing_families(connection: &ManagedConnection) {
     }
 }
 
-pub(in crate::mvcc) fn seed_accelerators(store: &SQLiteRecordStore, control: &StorageReadControl) {
+pub(in crate::mvcc) fn seed_native_families(
+    store: &SQLiteRecordStore,
+    control: &StorageReadControl,
+) {
     use rusqlite::types::ValueRef;
     use uqa_storage::mvcc::PreparedRecordCommit;
     let owner = NativeRecordOwner::Object {
@@ -145,8 +151,18 @@ pub(in crate::mvcc) fn seed_accelerators(store: &SQLiteRecordStore, control: &St
         control,
     )
     .unwrap();
-    let batch =
-        PreparedRecordCommit::new(&[skips.write(None), bounds.write(None)], control).unwrap();
+    let guard = NativeRecord::encode(
+        Family::OccurrenceGuards,
+        owner,
+        &[ValueRef::Text(b"public.docs"), ValueRef::Integer(1)],
+        control,
+    )
+    .unwrap();
+    let batch = PreparedRecordCommit::new(
+        &[skips.write(None), bounds.write(None), guard.write(None)],
+        control,
+    )
+    .unwrap();
     store
         .commit(
             store.allocate_transaction(control).unwrap(),
@@ -165,11 +181,11 @@ fn table_rename_and_generation_transfer_preserve_every_native_owned_payload_and_
     seed_missing_families(&connection);
     let control = StorageReadControl::with_limit(1 << 24);
     let store = SQLiteRecordStore::for_native(&connection, &control).unwrap();
-    seed_accelerators(&store, &control);
+    seed_native_families(&store, &control);
     let original: Vec<_> = families()
         .map(|family| (family, rows(&connection, family, "public.docs")))
         .collect();
-    assert_eq!(original.len(), 25);
+    assert_eq!(original.len(), 26);
     let old = store.snapshot(&control).unwrap();
     bind(&connection);
     catalog

@@ -79,6 +79,7 @@ impl NativeSnapshot {
                         return Err(invalid("cache generations are owned by native publication"));
                     }
                     Family::TableOwners
+                    | Family::OccurrenceGuards
                     | Family::GraphLookups
                     | Family::GraphPathPairs
                     | Family::GraphPathIndexState => {}

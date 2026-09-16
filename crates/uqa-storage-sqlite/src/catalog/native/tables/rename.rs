@@ -54,13 +54,18 @@ impl Catalog {
                 NativeRecordOwner::Database(snapshot.database),
                 &[text(&old_name)],
             )?;
-            if from_name != old_name && snapshot.has_table_data(owner)? {
-                let retained = NativeRecordOwner::Object {
-                    identity: snapshot.allocate_identity([0; 16])?,
-                    generation: snapshot.allocate_identity([0; 16])?,
-                };
-                snapshot.transfer_table_data(batch, owner, retained, &old_name)?;
-                snapshot.put_table_binding(batch, &old_name, retained, false)?;
+            if from_name != old_name {
+                if snapshot.has_table_data(owner)? {
+                    let retained = NativeRecordOwner::Object {
+                        identity: snapshot.allocate_identity([0; 16])?,
+                        generation: snapshot.allocate_identity([0; 16])?,
+                    };
+                    snapshot.transfer_table_data(batch, owner, retained, &old_name)?;
+                    snapshot.put_table_binding(batch, &old_name, retained, false)?;
+                } else {
+                    // Internal guards follow their unchanged catalog owner even when there is no user data to retain under the old name.
+                    snapshot.transfer_table_data(batch, owner, owner, &new_name)?;
+                }
             }
             if let Some(source) = source {
                 let target = if to_name == new_name {

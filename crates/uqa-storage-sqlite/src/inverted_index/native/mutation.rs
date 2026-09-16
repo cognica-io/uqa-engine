@@ -25,6 +25,7 @@ struct Draft {
     values: [Option<BudgetedVec<u8>>; 2],
     _key: MemoryReservation,
     _entry: MemoryReservation,
+    merge: bool,
 }
 
 pub(super) struct ProjectionBatch<'a> {
@@ -46,7 +47,25 @@ impl<'a> ProjectionBatch<'a> {
         }
     }
 
-    fn change(&mut self, key: &[u8], value: Option<&[u8]>) -> StorageBackendResult<()> {
+    fn ensure_owner(&mut self) -> StorageBackendResult<NativeRecordOwner> {
+        if let Some(owner) = self.owner {
+            return Ok(owner);
+        }
+        let owner = self
+            .read
+            .snapshot
+            .ensure_table_owner(&self.read.table, self.native)?;
+        self.owner = Some(owner);
+        Ok(owner)
+    }
+
+    fn change(
+        &mut self,
+        key: &[u8],
+        value: Option<&[u8]>,
+        merge: bool,
+    ) -> StorageBackendResult<()> {
+        let owner = self.ensure_owner()?;
         let control = &self.read.snapshot.control;
         control.check()?;
         let address = self.read.address(key)?;
@@ -61,16 +80,6 @@ impl<'a> ProjectionBatch<'a> {
             .iter()
             .position(|&candidate| candidate == projection)
             .expect("current occurrence projection");
-        let owner = if let Some(owner) = self.owner {
-            owner
-        } else {
-            let owner = self
-                .read
-                .snapshot
-                .ensure_table_owner(&self.read.table, self.native)?;
-            self.owner = Some(owner);
-            owner
-        };
         let (key, key_memory) = records::key(address, owner, control)?.into_parts();
         let entry = self.rows.entry(key);
         let draft = match entry {
@@ -100,9 +109,11 @@ impl<'a> ProjectionBatch<'a> {
                     values,
                     _key: key_memory,
                     _entry: memory,
+                    merge,
                 })
             }
         };
+        draft.merge &= merge;
         draft.values[slot] = value
             .map(|bytes| {
                 let mut value = BudgetedVec::new(control.memory());
@@ -120,7 +131,11 @@ impl<'a> ProjectionBatch<'a> {
         for (key, draft) in self.rows {
             self.read.snapshot.control.check()?;
             if draft.values.iter().all(Option::is_none) {
-                self.native.delete(&key)?;
+                if draft.merge {
+                    self.native.replace_occurrence_record(&key, None)?;
+                } else {
+                    self.native.delete(&key)?;
+                }
             } else {
                 encoding::write(self.native, self.read, owner, &draft)?;
             }
@@ -131,10 +146,55 @@ impl<'a> ProjectionBatch<'a> {
 
 impl KeyValueBatch for ProjectionBatch<'_> {
     fn put(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
-        self.change(key, Some(value))
+        self.change(key, Some(value), false)
     }
     fn delete(&mut self, key: &[u8]) -> StorageBackendResult<()> {
-        self.change(key, None)
+        self.change(key, None, false)
+    }
+    fn replace_occurrence_record(
+        &mut self,
+        key: &[u8],
+        value: Option<&[u8]>,
+    ) -> StorageBackendResult<()> {
+        self.change(key, value, true)
+    }
+    fn invalidate_occurrence_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
+        let address = self.read.address(prefix)?;
+        if !matches!(
+            address.projection,
+            Some(Projection::Skip | Projection::BlockMax)
+        ) {
+            return Err(invalid("invalid native occurrence cache prefix"));
+        }
+        if let Some(owner) = self.owner {
+            self.native.invalidate_occurrence_prefix(&records::prefix(
+                address,
+                owner,
+                &self.read.snapshot.control,
+            )?)?;
+        }
+        Ok(())
+    }
+    fn occurrence_document(&mut self, table: &str, document: u64) -> StorageBackendResult<()> {
+        if table != self.read.table {
+            return Err(invalid("native occurrence document changed table"));
+        }
+        let owner = self.ensure_owner()?;
+        let document = crate::inverted_index::encode_index_u64("document", document)?;
+        self.read
+            .snapshot
+            .occurrence_guard(self.native, table, owner, document)?;
+        Ok(())
+    }
+    fn reset_occurrences(&mut self, table: &str) -> StorageBackendResult<()> {
+        if table != self.read.table {
+            return Err(invalid("native occurrence reset changed table"));
+        }
+        let owner = self.ensure_owner()?;
+        self.read
+            .snapshot
+            .reset_occurrence_rows(self.native, owner)?;
+        Ok(())
     }
     fn delete_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
         let address = self.read.address(prefix)?;

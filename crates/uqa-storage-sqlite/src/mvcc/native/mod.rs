@@ -13,6 +13,7 @@ mod graph_cache;
 mod graph_lookup;
 mod key;
 mod layout;
+mod occurrence_guards;
 mod owners;
 mod physical;
 mod projection;

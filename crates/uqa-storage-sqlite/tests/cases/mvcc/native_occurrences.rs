@@ -22,6 +22,9 @@ use uqa_storage_sqlite::{Catalog, ManagedConnection, SQLiteInvertedIndex};
 #[path = "native_occurrences/accelerators.rs"]
 mod accelerators;
 
+#[path = "native_occurrences/merging.rs"]
+mod merging;
+
 fn fields(text: &str) -> BTreeMap<String, String> {
     BTreeMap::from([("body".into(), text.into())])
 }
@@ -211,11 +214,21 @@ fn occurrence_materialization_failure_retries_the_original_complete_batch() {
                 Ok(())
             })
             .unwrap();
+        index(&observer, "docs")
+            .add_document(3, fields("alpha alpha alpha"))
+            .unwrap();
         connection.commit_transaction().unwrap();
-        assert_eq!(index(&observer, "docs").doc_count().unwrap(), 2);
+        assert_eq!(index(&observer, "docs").doc_count().unwrap(), 3);
+        assert_eq!(evaluated.total_field_length("body").unwrap(), 4);
         assert_eq!(
             index(&observer, "docs")
                 .get_term_freq(65_536, "body", "beta")
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            index(&observer, "docs")
+                .get_term_freq(3, "body", "alpha")
                 .unwrap(),
             3
         );
@@ -224,13 +237,19 @@ fn occurrence_materialization_failure_retries_the_original_complete_batch() {
         bind(&reopened);
         assert_eq!(
             index(&reopened, "docs").total_field_length("body").unwrap(),
-            4
+            7
+        );
+        assert_eq!(
+            index(&reopened, "docs")
+                .get_term_freq(3, "body", "alpha")
+                .unwrap(),
+            3
         );
     }
 }
 
 #[test]
-fn occurrence_validation_errors_and_shared_cluster_conflicts_publish_nothing_partial() {
+fn occurrence_validation_errors_and_same_document_conflicts_publish_nothing_partial() {
     let connection = memory();
     let mut a = index(&connection, "docs");
     a.add_document(1, fields("alpha")).unwrap();
@@ -243,10 +262,9 @@ fn occurrence_validation_errors_and_shared_cluster_conflicts_publish_nothing_par
     let mut b = index(&other, "docs");
     connection.begin_transaction().unwrap();
     a.add_document(2, fields("alpha alpha")).unwrap();
-    b.add_document(3, fields("alpha alpha alpha")).unwrap();
+    b.add_document(2, fields("alpha alpha alpha")).unwrap();
     assert!(connection.commit_transaction().is_err());
-    assert_eq!(b.get_term_freq(2, "body", "alpha").unwrap(), 0);
-    assert_eq!(b.get_term_freq(3, "body", "alpha").unwrap(), 3);
+    assert_eq!(b.get_term_freq(2, "body", "alpha").unwrap(), 3);
     connection.rollback_transaction().unwrap();
     assert_eq!(a.total_field_length("body").unwrap(), 4);
     assert!(a

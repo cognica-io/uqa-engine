@@ -156,6 +156,13 @@ impl VersionedPersistence for SQLiteRecordStore {
             Some(&uqa_storage::key_value::KeyValueGraphRecords)
         }
     }
+    fn occurrence_record_layout(&self) -> &dyn uqa_storage::mvcc::OccurrenceRecordLayout {
+        if self.native {
+            &crate::inverted_index::NativeOccurrenceRecords
+        } else {
+            &uqa_storage::key_value::KeyValueOccurrenceRecords
+        }
+    }
     fn allocate_transaction(
         &self,
         control: &StorageReadControl,

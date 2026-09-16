@@ -11,7 +11,7 @@ use super::{
     Draft, NativeRead,
 };
 use crate::inverted_index::encode_index_u64;
-use crate::mvcc::native::{NativeRecordFamily as Family, NativeRecordOwner};
+use crate::mvcc::native::{NativeRecord, NativeRecordFamily as Family, NativeRecordOwner};
 use rusqlite::types::ValueRef;
 use uqa_storage::key_value::occurrence_format::OccurrenceAddress as Address;
 use uqa_storage::{KeyValueBatch, StorageBackendResult};
@@ -109,7 +109,13 @@ pub(super) fn write(
         ],
         _ => return Err(invalid("legacy occurrence values cannot be written")),
     };
-    read.snapshot.put_row(batch, family, owner, row)?;
+    let record = NativeRecord::encode(family, owner, row, &read.snapshot.control)
+        .map_err(uqa_storage::mvcc::VersionError::into_storage_error)?;
+    if draft.merge {
+        batch.replace_occurrence_record(record.key(), Some(record.row()))?;
+    } else {
+        batch.put(record.key(), record.row())?;
+    }
     Ok(())
 }
 

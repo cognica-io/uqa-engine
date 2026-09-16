@@ -58,6 +58,7 @@ pub enum NativeRecordFamily {
     GraphLookups = 45,
     OccurrenceSkips = 46,
     OccurrenceBlockMax = 47,
+    OccurrenceGuards = 48,
 }
 
 impl NativeRecordFamily {

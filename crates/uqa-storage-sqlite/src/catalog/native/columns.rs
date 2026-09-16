@@ -28,12 +28,9 @@ impl Catalog {
             let Some(owner) = snapshot.table_owner(table)? else {
                 return Ok(());
             };
+            snapshot.reset_occurrence_rows(batch, owner)?;
             for family in Family::all() {
                 if family == Family::OccurrenceFormats {
-                    // Fence a late accelerator build even when no cached rows existed in this lifecycle operation's original view.
-                    snapshot.visit_rows(family, Some(owner), &[], |row| {
-                        snapshot.put_row(batch, family, owner, row)
-                    })?;
                     continue;
                 }
                 if matches!(family, Family::OccurrenceSkips | Family::OccurrenceBlockMax) {

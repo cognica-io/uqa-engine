@@ -19,6 +19,7 @@ impl Catalog {
             snapshot.drop_table_catalog_indexes(batch, relation)?;
             let name = relation.qualified_name();
             if let Some((owner, catalog)) = snapshot.table_binding(&name)? {
+                snapshot.reset_occurrence_rows(batch, owner)?;
                 snapshot.delete_prefix(batch, Family::Tables, owner, &[])?;
                 if !data && catalog {
                     snapshot.put_table_binding(batch, &name, owner, false)?;

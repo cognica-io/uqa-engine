@@ -728,6 +728,16 @@ pub(super) const LAYOUTS: &[NativeRecordLayout] = &[
         identity_columns: &[1, 2, 3],
         object_owned: true,
     },
+    NativeRecordLayout {
+        family: NativeRecordFamily::OccurrenceGuards,
+        table: "_uqa_mvcc_native_occurrence_guards",
+        columns: &["table_name", "document_id"],
+        column_types: &[Text, Integer],
+        nullable: &[false, false],
+        primary_key: &[0, 1],
+        identity_columns: &[1],
+        object_owned: true,
+    },
 ];
 
 impl NativeRecordLayout {

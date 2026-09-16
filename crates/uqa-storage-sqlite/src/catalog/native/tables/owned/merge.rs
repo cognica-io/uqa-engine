@@ -16,8 +16,9 @@ impl NativeSnapshot {
         &self,
         owner: NativeRecordOwner,
     ) -> Result<bool> {
-        for family in Family::all().filter(|family| family.layout().columns.contains(&"table_name"))
-        {
+        for family in Family::all().filter(|family| {
+            *family != Family::OccurrenceGuards && family.layout().columns.contains(&"table_name")
+        }) {
             let prefix =
                 NativeRecordIdentity::new(family, owner)?.encode_prefix(&[], &self.control)?;
             let mut found = false;
@@ -43,8 +44,9 @@ impl NativeSnapshot {
         from: NativeRecordOwner,
         to: NativeRecordOwner,
     ) -> Result<()> {
-        for family in Family::all().filter(|family| family.layout().columns.contains(&"table_name"))
-        {
+        for family in Family::all().filter(|family| {
+            *family != Family::OccurrenceGuards && family.layout().columns.contains(&"table_name")
+        }) {
             let source =
                 NativeRecordIdentity::new(family, from)?.encode_prefix(&[], &self.control)?;
             let target =

@@ -70,6 +70,10 @@ impl NativeSnapshot {
         to: NativeRecordOwner,
         name: &str,
     ) -> Result<()> {
+        self.reset_occurrence_rows(batch, from)?;
+        if from != to {
+            self.reset_occurrence_rows(batch, to)?;
+        }
         for family in Family::all() {
             let Some(column) = family
                 .layout()
@@ -98,6 +102,7 @@ impl NativeSnapshot {
         owner: NativeRecordOwner,
         analyzers: bool,
     ) -> Result<()> {
+        self.reset_occurrence_rows(batch, owner)?;
         for family in Family::all() {
             if family.layout().columns.contains(&"table_name")
                 && (analyzers || family != Family::TableFieldAnalyzers)

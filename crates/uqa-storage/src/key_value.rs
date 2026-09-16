@@ -99,7 +99,7 @@ pub trait KeyValueBatch {
     fn put(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()>;
     fn delete(&mut self, key: &[u8]) -> StorageBackendResult<()>;
     fn delete_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()>;
-    /// Stage an evaluated common-format occurrence cluster, field total or source marker. Source mutations must include their format marker and document guards. Concurrent stores merge only these explicitly typed replacements; ordinary byte writes remain conditional replacements.
+    /// Stage an evaluated occurrence cluster, field total or source marker using the persistence's declared record layout. Source mutations must include their format marker and document guards. Concurrent stores merge only these explicitly typed replacements; ordinary byte writes remain conditional replacements.
     fn replace_occurrence_record(
         &mut self,
         key: &[u8],

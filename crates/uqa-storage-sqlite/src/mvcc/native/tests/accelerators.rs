@@ -73,7 +73,7 @@ fn populated_dynamic_accelerators_convert_with_canonical_rows_in_every_file_mode
                     .get::<_, i64>(
                     0
                 ))?,
-                4
+                5
             );
             Ok(())
         });
@@ -107,12 +107,12 @@ fn ambiguous_populated_accelerators_leave_the_entire_source_format_unchanged() {
 fn native_format_three_upgrade_preserves_original_records_and_commit_sequence() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     Catalog::open(connection.clone()).unwrap();
-    connection
-        .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
-        .unwrap();
     let mut index = SQLiteInvertedIndex::new(connection.clone(), "docs", whitespace_analyzer());
     index
         .add_document(1, BTreeMap::from([("body".into(), "alpha".into())]))
+        .unwrap();
+    connection
+        .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
         .unwrap();
     let control = StorageReadControl::with_limit(1 << 20);
     let before = SQLiteRecordStore::for_native(&connection, &control).unwrap();
@@ -123,7 +123,7 @@ fn native_format_three_upgrade_preserves_original_records_and_commit_sequence() 
     with(&connection, |sqlite| {
         let _permit = crate::mvcc::schema::WritePermit::acquire(sqlite)?;
         let transaction = crate::mvcc::schema::begin(sqlite)?;
-        transaction.execute_batch("DROP TABLE _occurrence_skips; DROP TABLE _occurrence_block_max; DROP TABLE _uqa_mvcc_native_format")?;
+        transaction.execute_batch("DROP TABLE _uqa_mvcc_native_occurrence_guards; DROP TABLE _occurrence_skips; DROP TABLE _occurrence_block_max; DROP TABLE _uqa_mvcc_native_format")?;
         transaction.execute_batch("CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 3), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))")?;
         transaction.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1,3,49)", [])?;
         for action in ["INSERT", "UPDATE", "DELETE"] {

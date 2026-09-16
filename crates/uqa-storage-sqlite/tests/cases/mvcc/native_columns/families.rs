@@ -8,7 +8,7 @@
 
 use super::*;
 use crate::mvcc::native_tables::families::{
-    families, rows, seed_accelerators, seed_missing_families,
+    families, rows, seed_missing_families, seed_native_families,
 };
 use rusqlite::types::Value as SQLValue;
 use uqa_storage::{mvcc::VersionedPersistence, read_control::StorageReadControl};
@@ -33,7 +33,7 @@ fn native_column_rename_and_drop_preserve_every_fixed_field_family_and_old_histo
     seed_missing_families(&connection);
     let control = StorageReadControl::with_limit(1 << 24);
     let records = SQLiteRecordStore::for_native(&connection, &control).unwrap();
-    seed_accelerators(&records, &control);
+    seed_native_families(&records, &control);
     let original: Vec<_> = families()
         .filter_map(|family| {
             let column = family
