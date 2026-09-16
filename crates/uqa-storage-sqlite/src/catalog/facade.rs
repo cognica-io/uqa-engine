@@ -131,6 +131,12 @@ impl CatalogFacade for Catalog {
     }
 
     fn migrate_relation_namespace(&self) -> StorageBackendResult<()> {
+        if self
+            .read_native(crate::mvcc::native::NativeSnapshot::validate_catalog_namespace)?
+            .is_some()
+        {
+            return Ok(());
+        }
         into_storage_result(self.conn.with(|connection| {
             let foreign_key_violation = connection
                 .query_row("PRAGMA foreign_key_check", [], |row| {

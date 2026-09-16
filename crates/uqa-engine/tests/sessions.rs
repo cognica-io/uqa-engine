@@ -22,6 +22,8 @@ use uqa_storage_sqlite::{Catalog, ManagedConnection};
 mod affinity;
 #[path = "sessions/commit_resolution.rs"]
 mod commit_resolution;
+#[path = "sessions/native_records.rs"]
+mod native_records;
 
 fn scalar_int(engine: &Engine, sql: &str, column: &str) -> i64 {
     match engine.sql(sql, &[]).unwrap().rows[0].get(column) {

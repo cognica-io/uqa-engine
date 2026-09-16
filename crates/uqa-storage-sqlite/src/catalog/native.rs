@@ -16,6 +16,7 @@ mod relations;
 mod sequences;
 mod stats;
 mod tables;
+mod validation;
 mod views;
 pub(super) use analyzers::FieldWrite;
 pub(super) use relations::RelationRecord;

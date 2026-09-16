@@ -22,7 +22,7 @@ impl ManagedConnection {
             .is_some_and(|session| session.native.is_some())
     }
 
-    /// Bind an initialized native catalog to shared logical record transactions, converting its physical format if needed. Document/B-tree stores, exact/IVF/HNSW vectors and catalog operations use this session. Complete restoration, postings and standalone graph routing remain pending, and direct physical access is rejected. This development entry point does not enable concurrent Engine SQL.
+    /// Bind an initialized native catalog to shared logical record transactions, converting its physical format if needed. Document/B-tree stores, exact/IVF/HNSW vectors, occurrences and catalog operations use this session, including namespace validation during explicit provider restoration. Bind before opening a catalog on an already converted file. Standalone graph routing remains pending, and direct physical access is rejected. This development entry point does not enable concurrent Engine SQL.
     pub fn bind_native_records(&self, options: VersionedSessionOptions) -> Result<()> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.write();
