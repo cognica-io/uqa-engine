@@ -12,6 +12,37 @@ use uqa_core::{
 
 mod reference;
 
+#[test]
+fn occurrence_encoding_retains_and_releases_its_complete_budget() {
+    let entries = graph_fixture(0, 129);
+    let mut failures = 0;
+    let mut successes = 0;
+    for limit in [0, 32, 128, 512, 4096, 16384, 65536] {
+        let control = crate::read_control::StorageReadControl::with_limit(limit);
+        match encode_occurrence_cluster_controlled(entries.iter(), &control) {
+            Ok((scores, positions)) => {
+                successes += 1;
+                assert_eq!(
+                    decode_occurrence_cluster(0, &scores, &positions).unwrap(),
+                    entries
+                );
+                assert!(control.memory().used() >= scores.capacity() + positions.capacity());
+            }
+            Err(StorageBackendError::Memory(_)) => failures += 1,
+            Err(error) => panic!("unexpected encoding error: {error}"),
+        }
+        assert_eq!(control.memory().used(), 0);
+    }
+    assert!(failures > 0 && successes > 0);
+    let control = crate::read_control::StorageReadControl::with_limit(0);
+    control.cancellation().cancel();
+    assert!(matches!(
+        encode_occurrence_cluster_controlled(entries.iter(), &control),
+        Err(StorageBackendError::Cancelled(_))
+    ));
+    assert_eq!(control.memory().used(), 0);
+}
+
 fn graph_fixture(cluster: u64, count: usize) -> Vec<OccurrencePosting> {
     let base = cluster_base(cluster).unwrap();
     (0..count)

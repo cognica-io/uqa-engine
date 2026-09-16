@@ -9,9 +9,8 @@
 use uqa_core::TokenOffsets;
 
 use super::{
-    cluster_id, corrupt, encode_scores, put_u32, put_varint, read_varint, validate_header,
-    validate_scores, DocId, PostingScore, StorageBackendResult, TokenOccurrence,
-    OCCURRENCE_FORMAT_VERSION, POSITIONS_MAGIC, SCORE_MAGIC,
+    cluster_id, corrupt, read_varint, validate_header, validate_scores, DocId, PostingScore,
+    StorageBackendResult, TokenOccurrence, OCCURRENCE_FORMAT_VERSION, POSITIONS_MAGIC, SCORE_MAGIC,
 };
 
 mod allocation;
@@ -42,21 +41,46 @@ impl OccurrencePosting {
     }
 }
 
+use super::encoding::{put_u32, put_varint};
+use uqa_core::memory::BudgetedVec;
+
 pub fn encode_occurrence_cluster(
     entries: &[OccurrencePosting],
 ) -> StorageBackendResult<(Vec<u8>, Vec<u8>)> {
-    let Some(first) = entries.first() else {
+    let (scores, positions) = encode_occurrence_cluster_controlled(
+        entries.iter(),
+        &crate::read_control::StorageReadControl::with_limit(usize::MAX),
+    )?;
+    Ok((scores.into_parts().0, positions.into_parts().0))
+}
+
+pub(crate) fn encode_occurrence_cluster_controlled<'a>(
+    entries: impl Clone + ExactSizeIterator<Item = &'a OccurrencePosting>,
+    control: &crate::read_control::StorageReadControl,
+) -> StorageBackendResult<(BudgetedVec<u8>, BudgetedVec<u8>)> {
+    control.cancellation().check()?;
+    let Some(first) = entries.clone().next() else {
         return Err(corrupt("cannot encode an empty occurrence cluster"));
     };
-    let mut scores = Vec::with_capacity(entries.len());
-    let mut payload = Vec::new();
-    let mut offsets = vec![0_usize];
+    let count = entries.len();
+    let mut scores = BudgetedVec::new(control.memory());
+    scores.reserve(count)?;
+    let mut payload = BudgetedVec::new(control.memory());
+    let mut offsets = BudgetedVec::new(control.memory());
+    offsets.reserve(
+        count
+            .checked_add(1)
+            .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?,
+    )?;
+    offsets.push(0_usize)?;
     for entry in entries {
+        control.cancellation().check()?;
         if cluster_id(entry.doc_id) != cluster_id(first.doc_id) {
             return Err(corrupt("one occurrence value spans multiple clusters"));
         }
         let mut previous = 0_u32;
         for occurrence in &entry.occurrences {
+            control.cancellation().check()?;
             occurrence
                 .validate()
                 .map_err(|error| corrupt(error.to_string()))?;
@@ -64,31 +88,32 @@ pub fn encode_occurrence_cluster(
                 .position
                 .checked_sub(previous)
                 .ok_or_else(|| corrupt("occurrence positions are not ordered"))?;
-            put_varint(&mut payload, u64::from(delta));
-            put_varint(&mut payload, u64::from(occurrence.position_length));
-            payload.push(u8::from(occurrence.offsets.is_some()));
+            put_varint(&mut payload, u64::from(delta))?;
+            put_varint(&mut payload, u64::from(occurrence.position_length))?;
+            payload.push(u8::from(occurrence.offsets.is_some()))?;
             if let Some(offsets) = occurrence.offsets {
-                put_varint(&mut payload, offsets.start_utf8);
-                put_varint(&mut payload, offsets.end_utf8 - offsets.start_utf8);
-                put_varint(&mut payload, offsets.start_utf16);
-                put_varint(&mut payload, offsets.end_utf16 - offsets.start_utf16);
+                put_varint(&mut payload, offsets.start_utf8)?;
+                put_varint(&mut payload, offsets.end_utf8 - offsets.start_utf8)?;
+                put_varint(&mut payload, offsets.start_utf16)?;
+                put_varint(&mut payload, offsets.end_utf16 - offsets.start_utf16)?;
             }
             previous = occurrence.position;
         }
-        scores.push(entry.score());
-        offsets.push(payload.len());
+        scores.push(entry.score())?;
+        offsets.push(payload.len())?;
     }
     validate_scores(&scores)?;
-    let score_blob = encode_scores(&scores, OCCURRENCE_FORMAT_VERSION)?;
-    let mut blob = Vec::new();
-    blob.extend_from_slice(POSITIONS_MAGIC);
-    blob.extend_from_slice(&[OCCURRENCE_FORMAT_VERSION, 0, 0, 0]);
-    put_u32(&mut blob, entries.len(), "occurrence posting count")?;
+    let score_blob =
+        super::scores::encode_scores_controlled(&scores, OCCURRENCE_FORMAT_VERSION, control)?;
+    let mut blob = BudgetedVec::new(control.memory());
+    blob.extend_from_slice(POSITIONS_MAGIC)?;
+    blob.extend_from_slice(&[OCCURRENCE_FORMAT_VERSION, 0, 0, 0])?;
+    put_u32(&mut blob, count, "occurrence posting count")?;
     put_u32(&mut blob, offsets.len(), "occurrence offset count")?;
-    for offset in offsets {
+    for &offset in offsets.iter() {
         put_u32(&mut blob, offset, "occurrence payload offset")?;
     }
-    blob.extend_from_slice(&payload);
+    blob.extend_from_slice(&payload)?;
     Ok((score_blob, blob))
 }
 

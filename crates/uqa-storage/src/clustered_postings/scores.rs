@@ -7,30 +7,50 @@
 //! Columnar score streams; graph frequencies and overlap-discounted lengths remain independent.
 
 use super::{
-    cluster_base, cluster_offset, corrupt, put_u32, put_varint, read_u16, read_u32, read_varint,
-    validate_header, PostingScore, ScoreBlock, StorageBackendResult, DEFAULT_BLOCK_SIZE,
-    FORMAT_VERSION, HEADER_LEN, SCORE_DIRECTORY_ENTRY_LEN, SCORE_MAGIC,
+    cluster_base, cluster_offset, corrupt, read_u16, read_u32, read_varint, validate_header,
+    PostingScore, ScoreBlock, StorageBackendResult, DEFAULT_BLOCK_SIZE, FORMAT_VERSION, HEADER_LEN,
+    SCORE_DIRECTORY_ENTRY_LEN, SCORE_MAGIC,
 };
+
+use super::encoding::{put_u32, put_varint};
+use uqa_core::memory::BudgetedVec;
 
 pub(super) fn encode_scores(
     entries: &[PostingScore],
     version: u8,
 ) -> StorageBackendResult<Vec<u8>> {
+    Ok(encode_scores_controlled(
+        entries,
+        version,
+        &crate::read_control::StorageReadControl::with_limit(usize::MAX),
+    )?
+    .into_parts()
+    .0)
+}
+
+pub(super) fn encode_scores_controlled(
+    entries: &[PostingScore],
+    version: u8,
+    control: &crate::read_control::StorageReadControl,
+) -> StorageBackendResult<BudgetedVec<u8>> {
     struct EncodedBlock {
         count: u16,
         last_offset: u16,
-        docs: Vec<u8>,
-        term_freqs: Vec<u8>,
-        doc_lengths: Vec<u8>,
+        docs: BudgetedVec<u8>,
+        term_freqs: BudgetedVec<u8>,
+        doc_lengths: BudgetedVec<u8>,
     }
 
-    let mut blocks = Vec::with_capacity(entries.len().div_ceil(DEFAULT_BLOCK_SIZE));
+    control.cancellation().check()?;
+    let mut blocks = BudgetedVec::new(control.memory());
+    blocks.reserve(entries.len().div_ceil(DEFAULT_BLOCK_SIZE))?;
     for chunk in entries.chunks(DEFAULT_BLOCK_SIZE) {
-        let mut docs = Vec::new();
-        let mut term_freqs = Vec::new();
-        let mut doc_lengths = Vec::new();
+        let mut docs = BudgetedVec::new(control.memory());
+        let mut term_freqs = BudgetedVec::new(control.memory());
+        let mut doc_lengths = BudgetedVec::new(control.memory());
         let mut previous = 0_u16;
         for (index, entry) in chunk.iter().enumerate() {
+            control.cancellation().check()?;
             let offset = cluster_offset(entry.doc_id)?;
             let delta = if index == 0 {
                 u64::from(offset)
@@ -39,9 +59,9 @@ pub(super) fn encode_scores(
                     corrupt("posting document offsets are not strictly increasing")
                 })?)
             };
-            put_varint(&mut docs, delta);
-            put_varint(&mut term_freqs, entry.term_freq);
-            put_varint(&mut doc_lengths, entry.doc_length);
+            put_varint(&mut docs, delta)?;
+            put_varint(&mut term_freqs, entry.term_freq)?;
+            put_varint(&mut doc_lengths, entry.doc_length)?;
             previous = offset;
         }
         blocks.push(EncodedBlock {
@@ -51,7 +71,7 @@ pub(super) fn encode_scores(
             docs,
             term_freqs,
             doc_lengths,
-        });
+        })?;
     }
 
     let directory_bytes = blocks
@@ -68,21 +88,22 @@ pub(super) fn encode_scores(
             .and_then(|value| value.checked_add(block.doc_lengths.len()))
             .ok_or_else(|| corrupt("score blob size overflow"))
     })?;
-    let mut output = Vec::with_capacity(
+    let mut output = BudgetedVec::new(control.memory());
+    output.reserve(
         data_start
             .checked_add(data_bytes)
             .ok_or_else(|| corrupt("score blob size overflow"))?,
-    );
-    output.extend_from_slice(SCORE_MAGIC);
-    output.push(version);
-    output.extend_from_slice(&[0; 3]);
+    )?;
+    output.extend_from_slice(SCORE_MAGIC)?;
+    output.push(version)?;
+    output.extend_from_slice(&[0; 3])?;
     put_u32(&mut output, entries.len(), "posting count")?;
     put_u32(&mut output, blocks.len(), "score block count")?;
 
     let mut offset = data_start;
-    for block in &blocks {
-        output.extend_from_slice(&block.count.to_le_bytes());
-        output.extend_from_slice(&block.last_offset.to_le_bytes());
+    for block in blocks.iter() {
+        output.extend_from_slice(&block.count.to_le_bytes())?;
+        output.extend_from_slice(&block.last_offset.to_le_bytes())?;
         put_u32(&mut output, offset, "document stream offset")?;
         offset = offset
             .checked_add(block.docs.len())
@@ -99,10 +120,10 @@ pub(super) fn encode_scores(
             .ok_or_else(|| corrupt("score stream offset overflow"))?;
         put_u32(&mut output, offset, "document-length stream end")?;
     }
-    for block in blocks {
-        output.extend_from_slice(&block.docs);
-        output.extend_from_slice(&block.term_freqs);
-        output.extend_from_slice(&block.doc_lengths);
+    for block in blocks.iter() {
+        output.extend_from_slice(&block.docs)?;
+        output.extend_from_slice(&block.term_freqs)?;
+        output.extend_from_slice(&block.doc_lengths)?;
     }
     Ok(output)
 }

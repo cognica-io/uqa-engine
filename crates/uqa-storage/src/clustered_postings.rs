@@ -484,6 +484,7 @@ fn corrupt(message: impl Into<String>) -> StorageBackendError {
     StorageBackendError::Other(format!("corrupt clustered posting: {}", message.into()))
 }
 
+mod encoding;
 mod legacy;
 mod occurrences;
 mod scores;
@@ -491,6 +492,7 @@ mod term_keys;
 
 use legacy::{decode_positions, encode_positions};
 pub use legacy::{decode_terms, encode_terms};
+pub(crate) use occurrences::encode_occurrence_cluster_controlled;
 pub use occurrences::{
     decode_occurrence_cluster, decode_occurrence_cluster_budgeted,
     decode_occurrence_document_budgeted, encode_occurrence_cluster, OccurrencePosting,
