@@ -531,6 +531,9 @@ impl Catalog {
     }
 
     pub fn save_view(&self, view: &ViewRow) -> Result<()> {
+        if self.save_native_view(view)?.is_some() {
+            return Ok(());
+        }
         self.conn.with_mut(|connection| {
             let tx = connection.savepoint()?;
             Self::claim_relation(&tx, &view.relation, RelationKind::View)?;
@@ -559,6 +562,11 @@ impl Catalog {
             return Err(SQLiteError::StorageBackend(
                 "moving a view between schemas is not supported by the catalog".into(),
             ));
+        }
+        if let Some(renamed) =
+            self.rename_native_relation(super::native::RelationRecord::View, from, to)?
+        {
+            return Ok(renamed);
         }
         self.conn.with_mut(|connection| {
             let source_exists = connection.query_row(
@@ -599,6 +607,11 @@ impl Catalog {
     }
 
     pub fn drop_view(&self, relation: &RelationIdentity) -> Result<bool> {
+        if let Some(removed) =
+            self.drop_native_relation(super::native::RelationRecord::View, relation)?
+        {
+            return Ok(removed);
+        }
         self.conn.with_mut(|connection| {
             let tx = connection.savepoint()?;
             let removed = tx.execute(
@@ -614,6 +627,9 @@ impl Catalog {
     }
 
     pub fn load_views(&self) -> Result<Vec<ViewRow>> {
+        if let Some(views) = self.load_native_views()? {
+            return Ok(views);
+        }
         self.conn.with(|connection| {
             let mut statement = connection.prepare(
                 "SELECT schema_name, relation_name, role_owner, acl_json, column_acls_json, definition_json

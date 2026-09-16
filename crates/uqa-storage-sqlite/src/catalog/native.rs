@@ -7,7 +7,11 @@
 //! Native catalog records use the managed session's committed/private view and atomic staging boundary.
 
 mod analyzers;
+mod foreign;
+mod relations;
+mod views;
 pub(super) use analyzers::FieldWrite;
+pub(super) use relations::RelationRecord;
 
 use super::{Catalog, Result, SQLiteError, SchemaRow};
 use crate::mvcc::native::{NativeRecordFamily as Family, NativeRecordOwner, NativeSnapshot};

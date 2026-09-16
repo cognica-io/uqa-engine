@@ -25,6 +25,8 @@ mod native_btree;
 mod native_catalog;
 #[path = "mvcc/native_documents.rs"]
 mod native_documents;
+#[path = "mvcc/native_relations.rs"]
+mod native_relations;
 
 #[derive(Clone, Copy, Debug)]
 enum Mode {

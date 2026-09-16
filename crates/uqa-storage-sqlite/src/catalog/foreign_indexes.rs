@@ -6,10 +6,12 @@
 
 //! Foreign servers, foreign tables, catalog indexes, and path indexes.
 
+use super::native::{text, RelationRecord};
 use super::{
     params, Catalog, CatalogIndexRow, ForeignTableRow, RelationIdentity, RelationKind, Result,
     SQLiteError, TableAclEntry,
 };
+use crate::mvcc::native::NativeRecordFamily as Family;
 
 impl Catalog {
     // -- Foreign servers ---------------------------------------------------
@@ -20,6 +22,15 @@ impl Catalog {
         fdw_type: &str,
         options_json: &str,
     ) -> Result<()> {
+        if self
+            .put_native_named(
+                Family::ForeignServers,
+                &[text(name), text(fdw_type), text(options_json)],
+            )?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "INSERT OR REPLACE INTO _foreign_servers (name, fdw_type, options) \
@@ -31,6 +42,12 @@ impl Catalog {
     }
 
     pub fn drop_foreign_server(&self, name: &str) -> Result<()> {
+        if self
+            .drop_native_named(Family::ForeignServers, name)?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "DELETE FROM _foreign_servers WHERE name = ?1",
@@ -41,6 +58,9 @@ impl Catalog {
     }
 
     pub fn load_foreign_servers(&self) -> Result<Vec<(String, String, String)>> {
+        if let Some(servers) = self.load_native_foreign_servers()? {
+            return Ok(servers);
+        }
         self.conn.with(|c| {
             let mut stmt =
                 c.prepare("SELECT name, fdw_type, options FROM _foreign_servers ORDER BY name")?;
@@ -62,6 +82,9 @@ impl Catalog {
     // -- Foreign tables ----------------------------------------------------
 
     pub fn save_foreign_table(&self, row: &ForeignTableRow) -> Result<()> {
+        if self.save_native_foreign_table(row)?.is_some() {
+            return Ok(());
+        }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
             Self::claim_relation(&tx, &row.relation, RelationKind::ForeignTable)?;
@@ -94,6 +117,11 @@ impl Catalog {
         acl: Option<&[TableAclEntry]>,
         column_acls: &std::collections::BTreeMap<String, Vec<TableAclEntry>>,
     ) -> Result<bool> {
+        if let Some(updated) =
+            self.update_native_foreign_security(relation, role_owner, acl, column_acls)?
+        {
+            return Ok(updated);
+        }
         self.conn.with_mut(|connection| {
             let acl_json = acl.map(serde_json::to_string).transpose()?;
             let column_acls_json = serde_json::to_string(column_acls)?;
@@ -121,6 +149,11 @@ impl Catalog {
             return Err(SQLiteError::StorageBackend(
                 "moving a foreign table between schemas is not supported by the catalog".into(),
             ));
+        }
+        if let Some(renamed) =
+            self.rename_native_relation(RelationRecord::ForeignTable, from, to)?
+        {
+            return Ok(renamed);
         }
         self.conn.with_mut(|connection| {
             let source_exists = connection.query_row(
@@ -161,6 +194,12 @@ impl Catalog {
     }
 
     pub fn drop_foreign_table(&self, relation: &RelationIdentity) -> Result<()> {
+        if self
+            .drop_native_relation(RelationRecord::ForeignTable, relation)?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
             let removed = tx.execute(
@@ -177,6 +216,9 @@ impl Catalog {
     }
 
     pub fn load_foreign_tables(&self) -> Result<Vec<ForeignTableRow>> {
+        if let Some(tables) = self.load_native_foreign_tables()? {
+            return Ok(tables);
+        }
         self.conn.with(|c| {
             let mut stmt = c.prepare(
                 "SELECT schema_name, relation_name, role_owner, acl_json, column_acls_json, server_name, columns_json, options
