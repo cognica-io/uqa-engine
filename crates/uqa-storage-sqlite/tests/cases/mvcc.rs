@@ -37,6 +37,8 @@ mod native_documents;
 mod native_graph;
 #[path = "mvcc/native_hnsw.rs"]
 mod native_hnsw;
+#[path = "mvcc/native_occurrences.rs"]
+mod native_occurrences;
 #[path = "mvcc/native_relations.rs"]
 mod native_relations;
 #[path = "mvcc/native_sequences.rs"]

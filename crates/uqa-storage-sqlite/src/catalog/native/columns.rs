@@ -29,6 +29,19 @@ impl Catalog {
                 return Ok(());
             };
             for family in Family::all() {
+                if family == Family::OccurrenceFormats {
+                    // Fence a late accelerator build even when no cached rows existed in this lifecycle operation's original view.
+                    snapshot.visit_rows(family, Some(owner), &[], |row| {
+                        snapshot.put_row(batch, family, owner, row)
+                    })?;
+                    continue;
+                }
+                if matches!(family, Family::OccurrenceSkips | Family::OccurrenceBlockMax) {
+                    for field in std::iter::once(from).chain(to) {
+                        snapshot.delete_prefix(batch, family, owner, &[text(field)])?;
+                    }
+                    continue;
+                }
                 if matches!(
                     family,
                     Family::BtreeIndexes | Family::BtreeIndexEntries | Family::BtreeIndexRepairs

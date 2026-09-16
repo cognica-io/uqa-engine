@@ -12,7 +12,7 @@ use uqa_storage::{
     read_control::StorageReadControl,
 };
 
-use super::{graph_lookup, install_family_guards, invalid, physical, schema, Family, TABLES};
+use super::{graph_lookup, install_family_guards, invalid, physical, Family};
 use crate::mvcc::{
     native::{decode_record, NativeRecord, NativeRecordOwner},
     read, PhysicalResult,
@@ -47,20 +47,13 @@ pub(super) fn upgrade(
             connection.execute_batch(&super::capture::trigger(Family::GraphLookups, action).1)?;
         }
     }
-    connection.execute_batch("DROP TABLE _uqa_mvcc_native_format")?;
-    connection.execute_batch(TABLES[0].1)?;
-    connection.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1, 3, 49)", [])?;
-    for action in ["INSERT", "UPDATE", "DELETE"] {
-        connection.execute_batch(&schema::trigger(TABLES[0].0, action).1)?;
-    }
     if version == 1 {
         install_family_guards(connection, Family::GraphLookups)?;
     }
     for (_, sql) in graph_lookup::source_triggers(sources) {
         connection.execute_batch(&sql)?;
     }
-    super::validate_format(connection, 3)?;
-    super::check_mapping_version(connection, 3)
+    Ok(())
 }
 
 fn validate_sources(

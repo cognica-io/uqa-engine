@@ -59,6 +59,9 @@ pub(in crate::mvcc) fn seed_missing_families(connection: &ManagedConnection) {
         _ => 2,
     });
     for family in ordered {
+        if matches!(family, Family::OccurrenceSkips | Family::OccurrenceBlockMax) {
+            continue;
+        }
         if !rows(connection, family, "public.docs").is_empty() {
             continue;
         }
@@ -77,6 +80,7 @@ pub(in crate::mvcc) fn seed_missing_families(connection: &ManagedConnection) {
                 }
                 match kind {
                     NativeColumnType::Integer => SQLValue::Integer(1),
+                    NativeColumnType::Real => SQLValue::Real(1.0),
                     NativeColumnType::Blob => SQLValue::Blob(vec![0, 1, 2, 255]),
                     NativeColumnType::Text | NativeColumnType::TextOrBlob => {
                         SQLValue::Text(if *name == "seed" { "1" } else { "n" }.into())
@@ -106,6 +110,52 @@ pub(in crate::mvcc) fn seed_missing_families(connection: &ManagedConnection) {
     }
 }
 
+pub(in crate::mvcc) fn seed_accelerators(store: &SQLiteRecordStore, control: &StorageReadControl) {
+    use rusqlite::types::ValueRef;
+    use uqa_storage::mvcc::PreparedRecordCommit;
+    let owner = NativeRecordOwner::Object {
+        identity: [1; 16],
+        generation: [1; 16],
+    };
+    let term = uqa_storage::TokenTermKey::from_text("alpha");
+    let skips = NativeRecord::encode(
+        Family::OccurrenceSkips,
+        owner,
+        &[
+            ValueRef::Text(b"public.docs"),
+            ValueRef::Text(b"n"),
+            ValueRef::Blob(term.as_bytes()),
+            ValueRef::Integer(1),
+            ValueRef::Integer(0),
+        ],
+        control,
+    )
+    .unwrap();
+    let bounds = NativeRecord::encode(
+        Family::OccurrenceBlockMax,
+        owner,
+        &[
+            ValueRef::Text(b"public.docs"),
+            ValueRef::Text(b"n"),
+            ValueRef::Blob(term.as_bytes()),
+            ValueRef::Integer(0),
+            ValueRef::Real(1.0),
+            ValueRef::Text(b"fixture"),
+        ],
+        control,
+    )
+    .unwrap();
+    let batch =
+        PreparedRecordCommit::new(&[skips.write(None), bounds.write(None)], control).unwrap();
+    store
+        .commit(
+            store.allocate_transaction(control).unwrap(),
+            &batch,
+            control,
+        )
+        .unwrap();
+}
+
 #[test]
 fn table_rename_and_generation_transfer_preserve_every_native_owned_payload_and_history() {
     let connection = ManagedConnection::open_in_memory().unwrap();
@@ -113,12 +163,13 @@ fn table_rename_and_generation_transfer_preserve_every_native_owned_payload_and_
     write(&connection, &catalog, "docs", 1, 1);
     write(&connection, &catalog, "untouched", 9, 9);
     seed_missing_families(&connection);
+    let control = StorageReadControl::with_limit(1 << 24);
+    let store = SQLiteRecordStore::for_native(&connection, &control).unwrap();
+    seed_accelerators(&store, &control);
     let original: Vec<_> = families()
         .map(|family| (family, rows(&connection, family, "public.docs")))
         .collect();
-    assert_eq!(original.len(), 23);
-    let control = StorageReadControl::with_limit(1 << 24);
-    let store = SQLiteRecordStore::for_native(&connection, &control).unwrap();
+    assert_eq!(original.len(), 25);
     let old = store.snapshot(&control).unwrap();
     bind(&connection);
     catalog

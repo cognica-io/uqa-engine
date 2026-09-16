@@ -18,13 +18,15 @@ use super::{
 use crate::mvcc::{codec, schema, write, PhysicalResult};
 
 mod graph_lookup_upgrade;
+mod occurrence_accelerators;
 
 const LEGACY_FORMAT: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 1), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))";
 
 const FORMAT_TWO: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 2), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))";
+const FORMAT_THREE: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 3), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))";
 
 const TABLES: [(&str, &str); 4] = [
-    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 3), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))"),
+    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 4), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))"),
     ("_uqa_mvcc_native_owners", "CREATE TABLE _uqa_mvcc_native_owners (name TEXT PRIMARY KEY NOT NULL, object_id BLOB NOT NULL CHECK(typeof(object_id) = 'blob' AND length(object_id) = 16 AND object_id != zeroblob(16)), generation BLOB NOT NULL CHECK(typeof(generation) = 'blob' AND length(generation) = 16 AND generation != zeroblob(16)), catalog_owned INTEGER NOT NULL CHECK(catalog_owned IN (0, 1))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_expected", "CREATE TABLE _uqa_mvcc_native_expected (family INTEGER NOT NULL, physical_key BLOB NOT NULL, old_key BLOB, new_key BLOB, new_value BLOB, PRIMARY KEY(family, physical_key), CHECK((new_key IS NULL) = (new_value IS NULL))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_changes", "CREATE TABLE _uqa_mvcc_native_changes (family INTEGER NOT NULL, physical_key BLOB NOT NULL, PRIMARY KEY(family, physical_key)) WITHOUT ROWID"),
@@ -53,7 +55,7 @@ pub(in crate::mvcc) fn check_mapping(connection: &Connection, native: bool) -> P
     if !native {
         return reject_mapped(connection);
     }
-    check_mapping_version(connection, 3)
+    check_mapping_version(connection, 4)
 }
 
 fn check_mapping_version(connection: &Connection, version: u32) -> PhysicalResult<()> {
@@ -119,9 +121,11 @@ pub(in crate::mvcc) fn initialize(
     }
     transaction.execute_batch(OWNER_INDEX)?;
     transaction.execute_batch(graph_lookup::SQL)?;
+    occurrence_accelerators::create(&transaction)?;
+    occurrence_accelerators::import(&transaction, control)?;
     crate::Catalog::upgrade_metadata_cache_triggers(&transaction)?;
-    validate_layouts(&transaction, false)?;
-    validate_cache_triggers(&transaction)?;
+    validate_layouts(&transaction, 4)?;
+    validate_cache_triggers(&transaction, 4)?;
     owners::seed(&transaction, control)?;
     super::sequences::validate_source(&transaction)?;
     graph_lookup::seed(&transaction, control)?;
@@ -154,7 +158,7 @@ pub(in crate::mvcc) fn initialize(
         "UPDATE _uqa_mvcc_metadata SET sequence = ?1 WHERE singleton = 1",
         params![baseline.as_u64().to_be_bytes().as_slice()],
     )?;
-    transaction.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1, 3, 49)", [])?;
+    transaction.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1, 4, 49)", [])?;
     install_guards(&transaction)?;
     let invalid_foreign_key = transaction
         .prepare("PRAGMA foreign_key_check")?
@@ -176,8 +180,10 @@ fn reopen(connection: &Connection, control: &StorageReadControl) -> PhysicalResu
             1
         } else if schema::definition_matches(connection, TABLES[0].0, FORMAT_TWO)? == Some(true) {
             2
-        } else {
+        } else if schema::definition_matches(connection, TABLES[0].0, FORMAT_THREE)? == Some(true) {
             3
+        } else {
+            4
         };
     validate_format(connection, version)?;
     let (identity, created) = schema::initialize_in(connection)?;
@@ -191,6 +197,21 @@ fn reopen(connection: &Connection, control: &StorageReadControl) -> PhysicalResu
     super::sequences::validate_source(connection)?;
     if version < 3 {
         graph_lookup_upgrade::upgrade(connection, identity, version, control)?;
+    }
+    if version < 4 {
+        occurrence_accelerators::create(connection)?;
+        for family in [Family::OccurrenceSkips, Family::OccurrenceBlockMax] {
+            install_family_guards(connection, family)?;
+        }
+        crate::Catalog::upgrade_metadata_cache_triggers(connection)?;
+        connection.execute_batch("DROP TABLE _uqa_mvcc_native_format")?;
+        connection.execute_batch(TABLES[0].1)?;
+        connection.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1, 4, 49)", [])?;
+        for action in ["INSERT", "UPDATE", "DELETE"] {
+            connection.execute_batch(&schema::trigger(TABLES[0].0, action).1)?;
+        }
+        validate_format(connection, 4)?;
+        check_mapping_version(connection, 4)?;
     }
     Ok(identity)
 }
@@ -227,6 +248,7 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
             match version {
                 1 => LEGACY_FORMAT,
                 2 => FORMAT_TWO,
+                3 => FORMAT_THREE,
                 _ => sql,
             }
         } else {
@@ -239,7 +261,12 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
         }
     }
     require_definition(connection, "_uqa_mvcc_native_owner_identity", OWNER_INDEX)?;
-    for family in families(legacy) {
+    if version >= 4 {
+        for (family, sql) in occurrence_accelerators::TABLES {
+            require_definition(connection, family.layout().table, sql)?;
+        }
+    }
+    for family in families(version) {
         for action in ["INSERT", "UPDATE", "DELETE"] {
             let (name, sql) = schema::trigger(family.layout().table, action);
             require_definition(connection, &name, &sql)?;
@@ -247,7 +274,7 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
             require_definition(connection, &name, &sql)?;
         }
     }
-    validate_cache_triggers(connection)?;
+    validate_cache_triggers(connection, version)?;
     if !legacy {
         require_definition(
             connection,
@@ -263,7 +290,7 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
             require_definition(connection, &name, &sql)?;
         }
     }
-    validate_layouts(connection, legacy)
+    validate_layouts(connection, version)
 }
 
 fn require_definition(connection: &Connection, name: &str, sql: &str) -> PhysicalResult<()> {
@@ -273,8 +300,8 @@ fn require_definition(connection: &Connection, name: &str, sql: &str) -> Physica
     Ok(())
 }
 
-fn validate_cache_triggers(connection: &Connection) -> PhysicalResult<()> {
-    for family in Family::all().filter(|family| {
+fn validate_cache_triggers(connection: &Connection, version: u32) -> PhysicalResult<()> {
+    for family in families(version).filter(|family| {
         !matches!(
             family,
             Family::CacheRevisions
@@ -297,12 +324,16 @@ fn validate_cache_triggers(connection: &Connection) -> PhysicalResult<()> {
     Ok(())
 }
 
-fn families(legacy: bool) -> impl Iterator<Item = Family> {
-    Family::all().filter(move |family| !legacy || *family != Family::GraphLookups)
+fn families(version: u32) -> impl Iterator<Item = Family> {
+    Family::all().filter(move |family| match family {
+        Family::GraphLookups => version >= 2,
+        Family::OccurrenceSkips | Family::OccurrenceBlockMax => version >= 4,
+        _ => true,
+    })
 }
 
-fn validate_layouts(connection: &Connection, legacy: bool) -> PhysicalResult<()> {
-    for family in families(legacy) {
+fn validate_layouts(connection: &Connection, version: u32) -> PhysicalResult<()> {
+    for family in families(version) {
         let layout = family.layout();
         let mut statement = connection.prepare(&format!("PRAGMA table_info({})", layout.table))?;
         let mut rows = statement.query([])?;
@@ -351,7 +382,7 @@ fn validate_layouts(connection: &Connection, legacy: bool) -> PhysicalResult<()>
             .get_ref(0)?
             .as_str()
             .map_err(|_| invalid("native table name is not UTF-8"))?;
-        if !families(legacy).any(|family| family.layout().table == name)
+        if !families(version).any(|family| family.layout().table == name)
             && !TABLES.iter().any(|(table, _)| *table == name)
             && !matches!(
                 name,

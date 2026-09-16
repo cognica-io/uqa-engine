@@ -48,6 +48,7 @@ mod data;
 mod format;
 mod maintenance;
 mod mutation;
+mod native;
 mod queries;
 mod trait_impl;
 

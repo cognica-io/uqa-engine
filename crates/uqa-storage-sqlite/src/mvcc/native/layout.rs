@@ -13,6 +13,7 @@ use uqa_storage::mvcc::VersionResult;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeColumnType {
     Integer,
+    Real,
     Text,
     Blob,
     /// TEXT column names and BLOB catalog-index identities occupy distinct namespaces in the same physical column.
@@ -23,6 +24,7 @@ impl NativeColumnType {
     pub(super) fn declaration(self) -> &'static str {
         match self {
             Self::Integer => "INTEGER",
+            Self::Real => "REAL",
             Self::Text | Self::TextOrBlob => "TEXT",
             Self::Blob => "BLOB",
         }
@@ -32,6 +34,7 @@ impl NativeColumnType {
         matches!(
             (self, value),
             (Self::Integer, ValueRef::Integer(_))
+                | (Self::Real, ValueRef::Real(_))
                 | (Self::Text | Self::TextOrBlob, ValueRef::Text(_))
                 | (Self::Blob | Self::TextOrBlob, ValueRef::Blob(_))
         )
@@ -50,7 +53,7 @@ pub struct NativeRecordLayout {
     pub object_owned: bool,
 }
 
-use NativeColumnType::{Blob, Integer, Text, TextOrBlob};
+use NativeColumnType::{Blob, Integer, Real, Text, TextOrBlob};
 
 pub(super) const LAYOUTS: &[NativeRecordLayout] = &[
     NativeRecordLayout {
@@ -697,6 +700,33 @@ pub(super) const LAYOUTS: &[NativeRecordLayout] = &[
         primary_key: &[0, 1, 2, 3, 4],
         identity_columns: &[0, 1, 2, 3, 4],
         object_owned: false,
+    },
+    NativeRecordLayout {
+        family: NativeRecordFamily::OccurrenceSkips,
+        table: "_occurrence_skips",
+        columns: &["table_name", "field", "term", "skip_doc_id", "skip_offset"],
+        column_types: &[Text, Text, Blob, Integer, Integer],
+        nullable: &[false, false, false, false, false],
+        primary_key: &[0, 1, 2, 3],
+        identity_columns: &[1, 2, 3],
+        object_owned: true,
+    },
+    NativeRecordLayout {
+        family: NativeRecordFamily::OccurrenceBlockMax,
+        table: "_occurrence_block_max",
+        columns: &[
+            "table_name",
+            "field",
+            "term",
+            "block_idx",
+            "max_score",
+            "scorer_fingerprint",
+        ],
+        column_types: &[Text, Text, Blob, Integer, Real, Text],
+        nullable: &[false, false, false, false, false, false],
+        primary_key: &[0, 1, 2, 3],
+        identity_columns: &[1, 2, 3],
+        object_owned: true,
     },
 ];
 

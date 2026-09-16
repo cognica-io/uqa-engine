@@ -36,6 +36,9 @@ impl SQLiteInvertedIndex {
     }
 
     pub fn flush_skip_pointers(&self) -> StorageBackendResult<()> {
+        if let Some(index) = self.native_index() {
+            return index.flush_skip_pointers();
+        }
         let fields = self.field_names()?;
         for field in fields {
             self.rebuild_skip_pointers_for_field(&field)?;

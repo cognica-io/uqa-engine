@@ -56,6 +56,8 @@ pub enum NativeRecordFamily {
     Views = 43,
     TableOwners = 44,
     GraphLookups = 45,
+    OccurrenceSkips = 46,
+    OccurrenceBlockMax = 47,
 }
 
 impl NativeRecordFamily {

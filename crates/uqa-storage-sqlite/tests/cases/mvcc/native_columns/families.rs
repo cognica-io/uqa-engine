@@ -7,7 +7,9 @@
 //! Column lifecycle preserves physical payloads, expression namespaces and unrelated large BLOBs.
 
 use super::*;
-use crate::mvcc::native_tables::families::{families, rows, seed_missing_families};
+use crate::mvcc::native_tables::families::{
+    families, rows, seed_accelerators, seed_missing_families,
+};
 use rusqlite::types::Value as SQLValue;
 use uqa_storage::{mvcc::VersionedPersistence, read_control::StorageReadControl};
 use uqa_storage_sqlite::{
@@ -29,6 +31,9 @@ fn native_column_rename_and_drop_preserve_every_fixed_field_family_and_old_histo
         .unwrap();
     catalog.save_catalog_index_row(&index("i", TABLE)).unwrap();
     seed_missing_families(&connection);
+    let control = StorageReadControl::with_limit(1 << 24);
+    let records = SQLiteRecordStore::for_native(&connection, &control).unwrap();
+    seed_accelerators(&records, &control);
     let original: Vec<_> = families()
         .filter_map(|family| {
             let column = family
@@ -39,18 +44,20 @@ fn native_column_rename_and_drop_preserve_every_fixed_field_family_and_old_histo
             Some((family, column, rows(&connection, family, TABLE)))
         })
         .collect();
-    assert_eq!(original.len(), 21);
+    assert_eq!(original.len(), 23);
     assert!(original.iter().all(|(_, _, rows)| !rows.is_empty()));
-    let control = StorageReadControl::with_limit(1 << 24);
-    let records = SQLiteRecordStore::for_native(&connection, &control).unwrap();
     let old = records.snapshot(&control).unwrap();
     bind(&connection);
     catalog.rename_column_data(TABLE, "n", "renamed").unwrap();
     let renamed = records.snapshot(&control).unwrap();
     for (family, column, before) in &original {
         let mut expected = before.clone();
-        for row in &mut expected {
-            row[*column] = SQLValue::Text("renamed".into());
+        if matches!(family, Family::OccurrenceSkips | Family::OccurrenceBlockMax) {
+            expected.clear();
+        } else {
+            for row in &mut expected {
+                row[*column] = SQLValue::Text("renamed".into());
+            }
         }
         assert_eq!(
             rows(&connection, *family, TABLE),
