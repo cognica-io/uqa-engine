@@ -20,6 +20,7 @@ mod registry;
 mod relation;
 mod waits;
 
+pub use change_gate::RowChangePublication;
 use change_resolution::{
     epoch_is_after, mutation_strength, normalize_pending_row_changes, remove_inactive_versions,
     resolve_local_change_target, row_has_waiter,

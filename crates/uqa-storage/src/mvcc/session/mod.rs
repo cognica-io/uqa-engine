@@ -334,10 +334,10 @@ impl KeyValueStore for VersionedKeyValueStore {
     fn rollback_transaction(&self) -> StorageBackendResult<()> {
         let mut active = self.active.lock();
         active
-            .as_ref()
+            .as_mut()
             .ok_or_else(no_transaction)?
             .abort(&*self.persistence, &self.control)
-            .map_err(VersionError::into_storage_error)?;
+            .map_err(commit_error)?;
         *active = None;
         Ok(())
     }

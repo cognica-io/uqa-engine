@@ -15,6 +15,7 @@ struct Transactions {
     depth: usize,
     read_only: bool,
     rollback_fails: bool,
+    commit_pending: bool,
     events: RefCell<Vec<&'static str>>,
 }
 impl Transactions {
@@ -23,11 +24,15 @@ impl Transactions {
             depth,
             read_only: false,
             rollback_fails: false,
+            commit_pending: false,
             events: RefCell::new(Vec::new()),
         }
     }
 }
 impl StatementTransactions for Transactions {
+    fn commit_resolution_pending(&self) -> bool {
+        self.commit_pending
+    }
     fn transaction_depth(&self) -> usize {
         self.events.borrow_mut().push("depth");
         self.depth
@@ -100,6 +105,22 @@ fn statement_rollback_keeps_both_failures_and_does_not_rollback_a_closed_transac
     assert!(
         matches!(error, SQLError::Internal(message) if message.starts_with("restart reader: autocommit rollback failed:") && message.contains("rollback failure"))
     );
+}
+
+#[test]
+fn statement_cleanup_preserves_an_unresolved_commit_and_its_original_diagnostic() {
+    let transactions = Transactions {
+        commit_pending: true,
+        rollback_fails: true,
+        ..Transactions::new(1)
+    };
+    for error in [
+        abort_explicit_statement_error(&transactions, failure()),
+        rollback_after_statement_error::<()>(&transactions, failure()).unwrap_err(),
+    ] {
+        assert_eq!(error.sqlstate(), Some("22012"));
+    }
+    assert_eq!(*transactions.events.borrow(), ["depth", "depth"]);
 }
 
 struct Catalog;

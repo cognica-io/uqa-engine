@@ -14,6 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve and resolve uncertain logical commits through Engine without replaying SQL preparation or Rust callbacks. Typed storage outcomes retain their transaction identity across later failures; matching receipts complete session publication, and rollback cannot report success for already committed data. `Engine::pending_commit` exposes retained resolution state.
 - Roll back a retained storage transaction before refreshing Engine caches after a failed commit. If rollback also fails, preserve the failed Engine frame and locks until storage cleanup succeeds instead of exposing private catalog or graph state as committed.
 - Reject persistent catalog/backend pairs from different reported transaction contexts before Engine restoration or sibling attachment, including separate sessions over the same file. Native SQLite, SQLite Key/Value and redb expose the shared affinity contract; custom wrappers must forward it as described in the [Rust upgrade notes](docs/manual/reference/10-upgrading.md#unreleased-rust-session-affinity).
 

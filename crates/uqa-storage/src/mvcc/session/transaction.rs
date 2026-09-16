@@ -10,7 +10,7 @@ use uqa_core::memory::BudgetedVec;
 
 use crate::mvcc::key::RecordKey;
 use crate::mvcc::{
-    CommitFailure, CommitStatus, CommittedRecordSnapshot, MergedRecordSnapshot,
+    CommitErrorOutcome, CommitFailure, CommitStatus, CommittedRecordSnapshot, MergedRecordSnapshot,
     PreparedRecordCommit, PrivateRecordChanges, RecordWrite, StorageTransactionId, VersionError,
     VersionResult, VersionedPersistence,
 };
@@ -28,6 +28,7 @@ pub(super) struct Transaction {
     read_only: bool,
     pub(super) allocation: Option<StorageTransactionId>,
     prepared: Option<PreparedRecordCommit>,
+    outcome: Option<CommitErrorOutcome>,
     savepoints: BudgetedVec<Savepoint>,
 }
 
@@ -43,6 +44,7 @@ impl Transaction {
             read_only,
             allocation: None,
             prepared: None,
+            outcome: None,
             savepoints: BudgetedVec::new(control.memory()),
         })
     }
@@ -176,6 +178,13 @@ impl Transaction {
         persistence: &dyn VersionedPersistence,
         control: &StorageReadControl,
     ) -> Result<(), CommitFailure> {
+        match self.outcome {
+            Some(CommitErrorOutcome::Committed(_)) => return Ok(()),
+            Some(CommitErrorOutcome::Aborted(transaction)) => {
+                return Err(VersionError::AlreadyAborted(transaction).into())
+            }
+            None | Some(CommitErrorOutcome::Indeterminate(_)) => {}
+        }
         if self.prepared.is_none() {
             self.prepared = Some(self.changes.prepare(control)?);
         }
@@ -190,22 +199,89 @@ impl Transaction {
             self.allocation = Some(id);
             id
         };
-        persistence.commit(allocation, prepared, control)?;
-        Ok(())
+        match persistence.commit(allocation, prepared, control) {
+            Ok(receipt)
+                if receipt.transaction == allocation
+                    && receipt.fingerprint == prepared.fingerprint() =>
+            {
+                self.outcome = Some(CommitErrorOutcome::Committed(receipt));
+                Ok(())
+            }
+            Ok(_) => {
+                self.outcome = Some(CommitErrorOutcome::Indeterminate(allocation));
+                Err(self.retain_uncertain_outcome(allocation, VersionError::CommitMismatch.into()))
+            }
+            Err(CommitFailure::Rejected(VersionError::TransactionFinished)) => {
+                self.outcome = Some(CommitErrorOutcome::Aborted(allocation));
+                Err(VersionError::AlreadyAborted(allocation).into())
+            }
+            Err(error) => Err(self.retain_uncertain_outcome(allocation, error)),
+        }
+    }
+
+    fn retain_uncertain_outcome(
+        &mut self,
+        transaction: StorageTransactionId,
+        error: CommitFailure,
+    ) -> CommitFailure {
+        match error {
+            CommitFailure::Indeterminate { source, .. } => {
+                self.outcome = Some(CommitErrorOutcome::Indeterminate(transaction));
+                CommitFailure::Indeterminate {
+                    transaction,
+                    source,
+                }
+            }
+            CommitFailure::Rejected(error)
+                if matches!(self.outcome, Some(CommitErrorOutcome::Indeterminate(_))) =>
+            {
+                CommitFailure::Indeterminate {
+                    transaction,
+                    source: error.into_storage_error(),
+                }
+            }
+            error @ CommitFailure::Rejected(_) => error,
+        }
     }
 
     pub(super) fn abort(
-        &self,
+        &mut self,
         persistence: &dyn VersionedPersistence,
         control: &StorageReadControl,
-    ) -> VersionResult<()> {
+    ) -> Result<(), CommitFailure> {
+        match self.outcome {
+            Some(CommitErrorOutcome::Committed(receipt)) => {
+                return Err(VersionError::AlreadyCommitted(receipt).into())
+            }
+            Some(CommitErrorOutcome::Aborted(_)) => return Ok(()),
+            None | Some(CommitErrorOutcome::Indeterminate(_)) => {}
+        }
         let Some(id) = self.allocation else {
             return Ok(());
         };
-        match persistence.abort(id, control)? {
-            CommitStatus::Aborted => Ok(()),
-            CommitStatus::Committed(receipt) => Err(VersionError::AlreadyCommitted(receipt)),
-            CommitStatus::Unknown | CommitStatus::Pending => Err(VersionError::UnknownTransaction),
+        let status = persistence
+            .abort(id, control)
+            .map_err(|error| self.retain_uncertain_outcome(id, error.into()))?;
+        match status {
+            CommitStatus::Aborted => {
+                self.outcome = Some(CommitErrorOutcome::Aborted(id));
+                Ok(())
+            }
+            CommitStatus::Committed(receipt) => {
+                let prepared = self.prepared.as_ref().expect("allocated prepared attempt");
+                if receipt.transaction != id || receipt.fingerprint != prepared.fingerprint() {
+                    self.outcome = Some(CommitErrorOutcome::Indeterminate(id));
+                    return Err(
+                        self.retain_uncertain_outcome(id, VersionError::CommitMismatch.into())
+                    );
+                }
+                self.outcome = Some(CommitErrorOutcome::Committed(receipt));
+                Err(VersionError::AlreadyCommitted(receipt).into())
+            }
+            CommitStatus::Unknown | CommitStatus::Pending => {
+                self.outcome = Some(CommitErrorOutcome::Indeterminate(id));
+                Err(self.retain_uncertain_outcome(id, VersionError::UnknownTransaction.into()))
+            }
         }
     }
 }

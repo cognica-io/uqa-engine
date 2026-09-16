@@ -64,11 +64,11 @@ impl Engine {
     pub fn begin(&self) -> Result<(), SQLError> {
         let _statement = self.runtime.statement_gate.lock();
         let mut stack = self.session.transactions.lock();
-        if stack
+        if let Some(error) = stack
             .last()
-            .is_some_and(|frame| frame.status != TransactionStatus::Active)
+            .and_then(|frame| Self::transaction_status_error(frame.status))
         {
-            return Err(failed_transaction_error());
+            return Err(error);
         }
         let characteristics = self.transaction_characteristics_for_begin(
             &stack,
@@ -127,7 +127,23 @@ impl Engine {
             .transactions
             .lock()
             .last()
-            .is_some_and(|frame| frame.status != TransactionStatus::Active)
+            .is_some_and(|frame| {
+                matches!(
+                    frame.status,
+                    TransactionStatus::Failed | TransactionStatus::FailedBackendAborted
+                )
+            })
+    }
+
+    /// Durable identity of an unresolved commit. Only commit resolution or whole-transaction rollback may proceed; callers must not replay the transaction body.
+    pub fn pending_commit(&self) -> Option<uqa_storage::mvcc::StorageTransactionId> {
+        self.session.transactions.lock().last().and_then(|frame| {
+            if let TransactionStatus::CommitPending(transaction) = frame.status {
+                Some(transaction)
+            } else {
+                None
+            }
+        })
     }
 
     pub(crate) fn in_transaction_block(&self) -> bool {
@@ -170,14 +186,14 @@ impl Engine {
     }
 
     pub(crate) fn ensure_transaction_usable(&self) -> Result<(), SQLError> {
-        if self
+        if let Some(error) = self
             .session
             .transactions
             .lock()
             .last()
-            .is_some_and(|frame| frame.status != TransactionStatus::Active)
+            .and_then(|frame| Self::transaction_status_error(frame.status))
         {
-            return Err(failed_transaction_error());
+            return Err(error);
         }
         Ok(())
     }
@@ -500,6 +516,39 @@ impl Engine {
         }
     }
     pub(super) fn storage_tx_error(action: &str, err: &StorageBackendError) -> SQLError {
+        if let Some(uqa_storage::mvcc::CommitErrorOutcome::Aborted(transaction)) =
+            err.commit_outcome()
+        {
+            return SQLError::Routine {
+                sqlstate: "25000".into(),
+                message: format!(
+                    "{action} cannot commit transaction {transaction:?}: it was already aborted"
+                ),
+            };
+        }
         SQLError::Internal(format!("{action} failed in storage backend: {err}"))
+    }
+
+    pub(super) fn transaction_status_error(status: TransactionStatus) -> Option<SQLError> {
+        match status {
+            TransactionStatus::Active => None,
+            TransactionStatus::CommitPending(transaction) => Some(Self::pending_commit_error(
+                transaction,
+                "resolve the retained commit before executing another statement",
+            )),
+            TransactionStatus::Failed | TransactionStatus::FailedBackendAborted => {
+                Some(failed_transaction_error())
+            }
+        }
+    }
+
+    pub(super) fn pending_commit_error(
+        transaction: uqa_storage::mvcc::StorageTransactionId,
+        detail: impl std::fmt::Display,
+    ) -> SQLError {
+        SQLError::Routine {
+            sqlstate: "08007".into(),
+            message: format!("transaction {transaction:?} requires commit resolution: {detail}"),
+        }
     }
 }

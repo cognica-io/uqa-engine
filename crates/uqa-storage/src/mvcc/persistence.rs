@@ -74,6 +74,40 @@ pub enum CommitStatus {
     Committed(CommitReceipt),
 }
 
+/// Durable outcome information retained in a storage error, including through provider wrappers. Absence of this information does not prove that a transaction aborted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommitErrorOutcome {
+    Indeterminate(StorageTransactionId),
+    Committed(CommitReceipt),
+    Aborted(StorageTransactionId),
+}
+
+impl StorageBackendError {
+    /// Classify typed commit evidence without interpreting provider diagnostic text.
+    pub fn commit_outcome(&self) -> Option<CommitErrorOutcome> {
+        let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = cause {
+            if let Some(CommitFailure::Indeterminate { transaction, .. }) =
+                error.downcast_ref::<CommitFailure>()
+            {
+                return Some(CommitErrorOutcome::Indeterminate(*transaction));
+            }
+            if let Some(VersionError::AlreadyCommitted(receipt)) =
+                error.downcast_ref::<VersionError>()
+            {
+                return Some(CommitErrorOutcome::Committed(*receipt));
+            }
+            if let Some(VersionError::AlreadyAborted(transaction)) =
+                error.downcast_ref::<VersionError>()
+            {
+                return Some(CommitErrorOutcome::Aborted(*transaction));
+            }
+            cause = error.source();
+        }
+        None
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum CommitFailure {
     /// The attempt published no changes; any prior successful attempt still has its receipt.

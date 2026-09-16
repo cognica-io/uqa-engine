@@ -12,9 +12,7 @@ use super::{
 };
 
 impl Engine {
-    /// Run `f` inside one engine transaction. On success the transaction is
-    /// committed; on error or panic it is rolled back before the error/panic is
-    /// returned to the caller.
+    /// Run `f` inside one engine transaction. An error or panic from `f` rolls back the transaction. A successful callback commits; an indeterminate commit retains its sealed attempt in the session for resolution through `commit` or `rollback`, without replaying `f`.
     pub fn transaction<R>(
         &self,
         f: impl FnOnce(&Self) -> Result<R, SQLError>,

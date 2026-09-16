@@ -65,6 +65,8 @@ pub enum VersionError {
     TransactionSealed,
     #[error("transaction already committed: {0:?}")]
     AlreadyCommitted(super::CommitReceipt),
+    #[error("transaction was aborted: {0:?}")]
+    AlreadyAborted(super::StorageTransactionId),
     #[error("transaction was committed with a different prepared batch")]
     CommitMismatch,
     #[error("invalid versioned record encoding: {0}")]

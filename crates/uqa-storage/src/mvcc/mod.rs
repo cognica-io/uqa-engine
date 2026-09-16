@@ -24,8 +24,8 @@ pub use history::{RecordHistory, RecordVersion, ScannedRecord, SharedRecordValue
 pub use memory::{MemoryRecordSnapshot, MemoryVersionStore};
 pub use overlay::{PrivateRecordChanges, PrivateRecordSnapshot};
 pub use persistence::{
-    resolve_prepared_receipt, CommitFailure, CommitFingerprint, CommitReceipt, CommitResult,
-    CommitStatus, DatabaseId, RecordPage, StorageTransactionId, VersionedPersistence,
+    resolve_prepared_receipt, CommitErrorOutcome, CommitFailure, CommitFingerprint, CommitReceipt,
+    CommitResult, CommitStatus, DatabaseId, RecordPage, StorageTransactionId, VersionedPersistence,
 };
 pub use session::{VersionedKeyValueStore, VersionedSessionOptions};
 pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};

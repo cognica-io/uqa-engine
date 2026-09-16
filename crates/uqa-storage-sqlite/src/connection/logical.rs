@@ -122,7 +122,7 @@ impl ManagedConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uqa_storage::mvcc::{CommitFailure, DatabaseId, StorageTransactionId};
+    use uqa_storage::mvcc::{CommitErrorOutcome, CommitFailure, DatabaseId, StorageTransactionId};
     use uqa_storage::StorageBackendError;
 
     #[test]
@@ -136,6 +136,10 @@ mod tests {
             },
         );
         let converted = StorageBackendError::from(SQLiteError::from(original));
+        assert_eq!(
+            converted.commit_outcome(),
+            Some(CommitErrorOutcome::Indeterminate(transaction))
+        );
         let StorageBackendError::Backend { backend, source } = converted else {
             panic!("typed commit outcome was lost");
         };

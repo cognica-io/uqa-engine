@@ -127,11 +127,18 @@ The engine exposes explicit transaction primitives:
 
 - `begin`, `commit`, and `rollback`
 - `savepoint`, `release_savepoint`, and `rollback_to_savepoint`
+- `transaction_failed` and `pending_commit` for failed or unresolved transaction state
 - SQL forms such as `BEGIN`, `SAVEPOINT`, and `COMMIT`
 
-`Engine::transaction` executes a Rust closure as one transaction. An error or a panic rolls the transaction back; a successful closure commits it.
+`Engine::transaction` executes a Rust closure as one transaction. An error or panic from the closure rolls the transaction back; a successful closure attempts to commit it.
 
-`Engine::sql_batch` executes a slice of SQL statement and parameter pairs in one transaction. The entire batch rolls back when any statement fails.
+The development SQLite Key/Value and redb providers retain uncertain commits. A commit whose durable result cannot be confirmed returns SQLSTATE `08007` and leaves `Engine::pending_commit()` set to its durable storage transaction identity. Ordinary SQL, nested BEGIN and savepoint commands are blocked until the caller resolves the attempt with `commit`/`COMMIT` or requests whole-transaction rollback. `transaction_failed()` is false for an unresolved commit; its separate `pending_commit()` state must be checked before resuming work.
+
+Repeating COMMIT resolves the same evaluated storage batch and does not rerun the Rust callback, deferred triggers, held-cursor materialization or temporary-table COMMIT actions. If rollback discovers a matching committed receipt, Engine finishes that commit's session publication and returns `25000` explaining that rollback could not undo it. If a later COMMIT confirms a recorded abort, Engine restores the rolled-back session state and returns `25000` instead of a successful COMMIT.
+
+An unresolved result must not be treated as proof of rollback or a reason to replay application operations. Session receipt resolution does not provide crash-safe publication recovery or exactly-once acknowledgement after process loss.
+
+`Engine::sql_batch` executes a slice of SQL statement and parameter pairs in one transaction. A statement failure rolls the batch back; an indeterminate commit follows the resolution contract above.
 
 ```rust
 use uqa_core::Value;
