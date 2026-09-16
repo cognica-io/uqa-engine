@@ -4,12 +4,21 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Typed physical row encoding for native `SQLite` record mapping. These codecs do not enable the concurrent transaction model or migrate a database; routing and atomic materialization use the owning provider's persistence boundary.
+//! Native `SQLite` row mapping, atomic baseline conversion and evaluated commit materialization. The record adapter preserves existing physical tables while shared storage owns private changes and visibility; native catalog/store session routing remains separate.
 
+mod capture;
 mod family;
+mod format;
 mod key;
 mod layout;
+mod owners;
+mod physical;
+mod projection;
+mod queue;
 mod row;
+
+pub(super) use format::{check_mapping, initialize, reject_mapped};
+pub(super) use projection::materialize;
 
 #[cfg(test)]
 mod tests;

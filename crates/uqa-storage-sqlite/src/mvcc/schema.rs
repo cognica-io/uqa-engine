@@ -76,7 +76,7 @@ pub(super) fn definition_matches(
         .optional()?)
 }
 
-fn trigger(table: &str, action: &str) -> (String, String) {
+pub(super) fn trigger(table: &str, action: &str) -> (String, String) {
     let name = format!("{table}_{action}_guard");
     let sql = format!("CREATE TRIGGER {name} BEFORE {action} ON {table} WHEN __uqa_mvcc_write_permit() != 1 BEGIN SELECT RAISE(ABORT, 'versioned records require commit admission'); END");
     (name, sql)
@@ -85,6 +85,7 @@ fn trigger(table: &str, action: &str) -> (String, String) {
 pub(super) fn initialize(connection: &Connection) -> PhysicalResult<DatabaseId> {
     let _permit = WritePermit::acquire(connection)?;
     let transaction = begin(connection)?;
+    super::native::reject_mapped(&transaction)?;
     let (identity, created) = initialize_in(&transaction)?;
     if created {
         transaction.commit()?;

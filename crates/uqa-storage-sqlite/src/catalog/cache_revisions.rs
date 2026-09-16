@@ -15,7 +15,7 @@ use uqa_storage::CatalogCacheRevisions;
 impl Catalog {
     pub(super) fn install_cache_revision_tracking(conn: &rusqlite::Connection) -> Result<()> {
         let tables = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, 1) = '_' AND name NOT IN ('_cache_revisions', '_graph_path_pairs', '_graph_path_index_state') ORDER BY name")?
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, 1) = '_' AND name NOT GLOB '_uqa_mvcc_*' AND name NOT IN ('_cache_revisions', '_graph_path_pairs', '_graph_path_index_state') ORDER BY name")?
             .query_map([], |row| row.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         for table in tables {

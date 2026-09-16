@@ -15,6 +15,27 @@ pub enum NativeColumnType {
     Integer,
     Text,
     Blob,
+    /// TEXT column names and BLOB catalog-index identities occupy distinct namespaces in the same physical column.
+    TextOrBlob,
+}
+
+impl NativeColumnType {
+    pub(super) fn declaration(self) -> &'static str {
+        match self {
+            Self::Integer => "INTEGER",
+            Self::Text | Self::TextOrBlob => "TEXT",
+            Self::Blob => "BLOB",
+        }
+    }
+
+    pub(super) fn accepts(self, value: ValueRef<'_>) -> bool {
+        matches!(
+            (self, value),
+            (Self::Integer, ValueRef::Integer(_))
+                | (Self::Text | Self::TextOrBlob, ValueRef::Text(_))
+                | (Self::Blob | Self::TextOrBlob, ValueRef::Blob(_))
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -29,7 +50,7 @@ pub struct NativeRecordLayout {
     pub object_owned: bool,
 }
 
-use NativeColumnType::{Blob, Integer, Text};
+use NativeColumnType::{Blob, Integer, Text, TextOrBlob};
 
 pub(super) const LAYOUTS: &[NativeRecordLayout] = &[
     NativeRecordLayout {
@@ -46,7 +67,7 @@ pub(super) const LAYOUTS: &[NativeRecordLayout] = &[
         family: NativeRecordFamily::BtreeIndexEntries,
         table: "_btree_index_entries",
         columns: &["table_name", "field", "doc_id", "value_json"],
-        column_types: &[Text, Text, Integer, Text],
+        column_types: &[Text, TextOrBlob, Integer, Text],
         nullable: &[false, false, false, false],
         primary_key: &[0, 1, 2],
         identity_columns: &[1, 2],
@@ -56,7 +77,7 @@ pub(super) const LAYOUTS: &[NativeRecordLayout] = &[
         family: NativeRecordFamily::BtreeIndexRepairs,
         table: "_btree_index_repairs",
         columns: &["table_name", "field"],
-        column_types: &[Text, Text],
+        column_types: &[Text, TextOrBlob],
         nullable: &[false, false],
         primary_key: &[0, 1],
         identity_columns: &[1],
@@ -66,7 +87,7 @@ pub(super) const LAYOUTS: &[NativeRecordLayout] = &[
         family: NativeRecordFamily::BtreeIndexes,
         table: "_btree_indexes",
         columns: &["table_name", "field"],
-        column_types: &[Text, Text],
+        column_types: &[Text, TextOrBlob],
         nullable: &[false, false],
         primary_key: &[0, 1],
         identity_columns: &[1],
@@ -651,6 +672,16 @@ pub(super) const LAYOUTS: &[NativeRecordLayout] = &[
         identity_columns: &[0, 1],
         object_owned: false,
     },
+    NativeRecordLayout {
+        family: NativeRecordFamily::TableOwners,
+        table: "_uqa_mvcc_native_owners",
+        columns: &["name", "object_id", "generation", "catalog_owned"],
+        column_types: &[Text, Blob, Blob, Integer],
+        nullable: &[false, false, false, false],
+        primary_key: &[0],
+        identity_columns: &[0],
+        object_owned: false,
+    },
 ];
 
 impl NativeRecordLayout {
@@ -660,12 +691,9 @@ impl NativeRecordLayout {
         }
         for ((value, expected), nullable) in values.iter().zip(self.column_types).zip(self.nullable)
         {
-            let matches = match (value, expected) {
-                (ValueRef::Null, _) => *nullable,
-                (ValueRef::Integer(_), NativeColumnType::Integer)
-                | (ValueRef::Text(_), NativeColumnType::Text)
-                | (ValueRef::Blob(_), NativeColumnType::Blob) => true,
-                _ => false,
+            let matches = match value {
+                ValueRef::Null => *nullable,
+                value => expected.accepts(*value),
             };
             if !matches {
                 return Err(invalid(

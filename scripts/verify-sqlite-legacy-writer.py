@@ -5,7 +5,7 @@
 # Copyright (c) 2023-2026 Cognica, Inc.
 #
 
-"""Verify SQLite Key/Value migration with the actual released 0.3.6 library."""
+"""Verify SQLite native and Key/Value migration with the released 0.3.6 library."""
 
 from __future__ import annotations
 
@@ -36,6 +36,10 @@ use old_provider::{ManagedConnection, SQLiteCompressionOptions, SQLiteKeyValueSt
 
 fn main() {
     let args: Vec<_> = std::env::args().collect();
+    if args[2].starts_with("native-") {
+        native(&args);
+        return;
+    }
     let opened = SQLiteKeyValueStore::new(open(&args[1], std::path::Path::new(&args[3])));
     if args[2] == "reject" {
         match opened {
@@ -68,6 +72,27 @@ fn main() {
     store.commit_transaction().unwrap();
     assert_eq!(store.get(b"a\0\xff").unwrap().unwrap(), b"original\0\xff");
 }
+
+fn native(args: &[String]) {
+    use old_storage::DocumentStore;
+    let connection = open(&args[1], std::path::Path::new(&args[3]));
+    if args[2] == "native-create" {
+        old_provider::Catalog::open(connection.clone()).unwrap();
+        let mut documents = old_provider::SQLiteDocumentStore::new(connection, "public.native");
+        documents.put(7, std::collections::BTreeMap::new()).unwrap();
+        return;
+    }
+    let error = old_provider::Catalog::open(connection.clone()).err().expect("released catalog accepted the native MVCC format");
+    assert!(error.to_string().contains("49"), "unrelated native open failure: {error}");
+    let mut documents = old_provider::SQLiteDocumentStore::new(connection.clone(), "public.native");
+    assert!(documents.delete(7).is_err(), "released direct store bypassed native guards");
+    assert!(documents.put(8, std::collections::BTreeMap::new()).is_err());
+    assert!(connection.with(|connection| {
+        connection.execute("DELETE FROM _documents", [])?;
+        Ok(())
+    }).is_err());
+    println!("Released native writer rejected for {}", args[1]);
+}
 '''
 NEW = r'''
 use new_storage::KeyValueStore;
@@ -75,6 +100,10 @@ use new_provider::{ManagedConnection, SQLiteCompressionOptions, SQLiteKeyValueSt
 
 fn main() {
     let args: Vec<_> = std::env::args().collect();
+    if args[2].starts_with("native-") {
+        native(&args);
+        return;
+    }
     let store = SQLiteKeyValueStore::new(open(&args[1], std::path::Path::new(&args[3]))).unwrap();
     assert_eq!(store.get(b"").unwrap(), Some(Vec::new()));
     assert_eq!(store.get(b"a\0\xff").unwrap().unwrap(), b"original\0\xff");
@@ -87,6 +116,43 @@ fn main() {
         assert_eq!(store.get(b"new").unwrap().unwrap(), b"after migration");
     }
     assert_eq!(store.change_version().unwrap(), Some(2));
+}
+
+fn native(args: &[String]) {
+    use new_storage::{mvcc::{PreparedRecordCommit, VersionedPersistence}, read_control::StorageReadControl};
+    use new_provider::mvcc::native::{NativeRecord, NativeRecordFamily, NativeRecordOwner};
+    use rusqlite::types::ValueRef;
+    let connection = open(&args[1], std::path::Path::new(&args[3]));
+    let control = StorageReadControl::with_limit(1 << 24);
+    let store = new_provider::SQLiteRecordStore::for_native(&connection, &control).unwrap();
+    let owner = connection.with_physical(|connection| {
+        Ok(connection.query_row("SELECT object_id, generation FROM _uqa_mvcc_native_owners WHERE name = 'public.native'", [], |row| {
+            Ok(NativeRecordOwner::Object {
+                identity: row.get::<_, Vec<u8>>(0)?.try_into().unwrap(),
+                generation: row.get::<_, Vec<u8>>(1)?.try_into().unwrap(),
+            })
+        })?)
+    }).unwrap();
+    let original = NativeRecord::encode(NativeRecordFamily::Documents, owner, &[ValueRef::Text(b"public.native"), ValueRef::Integer(7), ValueRef::Text(b"{}"), ValueRef::Null], &control).unwrap();
+    let changed = NativeRecord::encode(NativeRecordFamily::Documents, owner, &[ValueRef::Text(b"public.native"), ValueRef::Integer(7), ValueRef::Text(b"{}"), ValueRef::Integer(123)], &control).unwrap();
+    let before = store.snapshot(&control).unwrap();
+    let found = before.get(original.key(), &control).unwrap().unwrap();
+    if args[2] == "native-migrate" {
+        assert_eq!(before.sequence().as_u64(), 1);
+        assert_eq!(&***found.value().unwrap(), original.row());
+        let prepared = PreparedRecordCommit::new(&[changed.write(Some(before.sequence()))], &control).unwrap();
+        let id = store.allocate_transaction(&control).unwrap();
+        store.commit(id, &prepared, &control).unwrap();
+        assert_eq!(&***before.get(original.key(), &control).unwrap().unwrap().value().unwrap(), original.row());
+    } else {
+        assert_eq!(&***found.value().unwrap(), changed.row());
+    }
+    assert_eq!(store.snapshot(&control).unwrap().sequence().as_u64(), 2);
+    connection.with_physical(|connection| {
+        assert_eq!(connection.query_row("SELECT tuple_xmin FROM _documents WHERE table_name='public.native' AND doc_id=7", [], |row| row.get::<_, i64>(0))?, 123);
+        assert_eq!(connection.query_row("SELECT count(*) FROM _documents", [], |row| row.get::<_, i64>(0))?, 1);
+        Ok(())
+    }).unwrap();
 }
 '''
 
@@ -125,7 +191,10 @@ new_storage = {{ package = "uqa-storage", path = {json.dumps(str(ROOT / "crates/
             database = str(project / f"{mode}.db")
             for binary, action in ((old, "create"), (new, "migrate"), (old, "reject"), (new, "reopen")):
                 subprocess.run([binary, mode, action, database], check=True)
-        print("Actual 0.3.6 create, migration, old-writer rejection and reopen passed in four modes.")
+            database = str(project / f"native-{mode}.db")
+            for binary, action in ((old, "native-create"), (new, "native-migrate"), (old, "native-reject"), (new, "native-reopen")):
+                subprocess.run([binary, mode, action, database], check=True)
+        print("Actual 0.3.6 create, migration, old-writer rejection and reopen passed for both layouts in four modes.")
 
 
 if __name__ == "__main__":

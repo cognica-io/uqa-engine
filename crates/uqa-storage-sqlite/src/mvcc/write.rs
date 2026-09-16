@@ -7,12 +7,13 @@
 use rusqlite::{params, Connection};
 use uqa_core::memory::{MemoryError, MemoryReservation};
 use uqa_storage::mvcc::{
-    resolve_prepared_receipt, CommitFailure, CommitReceipt, CommitResult, CommitStatus, DatabaseId,
-    PreparedRecordCommit, StorageTransactionId, VersionError, VersionResult,
+    resolve_prepared_receipt, CommitFailure, CommitReceipt, CommitResult, CommitSequence,
+    CommitStatus, DatabaseId, PreparedRecordCommit, StorageTransactionId, VersionError,
+    VersionResult,
 };
 use uqa_storage::read_control::StorageReadControl;
 
-use super::{codec, schema, Error, PhysicalResult};
+use super::{codec, native, schema, Error, PhysicalResult};
 
 pub(super) fn reserve_bindings(
     prepared: &PreparedRecordCommit,
@@ -36,10 +37,12 @@ pub(super) fn reserve_bindings(
 pub(super) fn allocate(
     connection: &Connection,
     identity: DatabaseId,
+    native: bool,
     control: &StorageReadControl,
 ) -> PhysicalResult<StorageTransactionId> {
     let _permit = schema::WritePermit::acquire(connection)?;
     let transaction = schema::begin(connection)?;
+    native::check_mapping(&transaction, native)?;
     let current = codec::header(&transaction, identity)?;
     let id = StorageTransactionId::new(
         identity,
@@ -66,11 +69,13 @@ pub(super) fn commit(
     connection: &Connection,
     id: StorageTransactionId,
     prepared: &PreparedRecordCommit,
+    native: bool,
     control: &StorageReadControl,
 ) -> CommitResult {
     let rejected = |error: Error| CommitFailure::Rejected(error.into_version());
     let _permit = schema::WritePermit::acquire(connection).map_err(rejected)?;
     let transaction = schema::begin(connection).map_err(rejected)?;
+    native::check_mapping(&transaction, native).map_err(rejected)?;
     let current = codec::header(&transaction, id.database()).map_err(rejected)?;
     let status = codec::status(&transaction, id).map_err(rejected)?;
     if let Some(receipt) = resolve_prepared_receipt(status, id, prepared.fingerprint())? {
@@ -89,6 +94,10 @@ pub(super) fn commit(
         sequence,
         fingerprint: prepared.fingerprint(),
     };
+    if native {
+        native::materialize(&transaction, id.database(), prepared, sequence, control)
+            .map_err(rejected)?;
+    }
     stage(&transaction, prepared, receipt, control).map_err(rejected)?;
     transaction
         .commit()
@@ -127,13 +136,34 @@ fn stage(
     Ok(())
 }
 
+pub(super) fn stage_record(
+    connection: &Connection,
+    key: &[u8],
+    value: Option<&[u8]>,
+    sequence: CommitSequence,
+    control: &StorageReadControl,
+) -> PhysicalResult<()> {
+    control.cancellation().check().map_err(VersionError::from)?;
+    let _bindings =
+        crate::read_control::reserve_bindings(control, &[key, value.unwrap_or_default()])?;
+    let sequence = sequence.as_u64().to_be_bytes();
+    connection.execute(
+        "INSERT INTO _uqa_mvcc_versions(key, sequence, value) VALUES (?1, ?2, ?3)",
+        params![key, sequence.as_slice(), value],
+    )?;
+    connection.execute("INSERT INTO _uqa_mvcc_heads(key, sequence) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence", params![key, sequence.as_slice()])?;
+    Ok(())
+}
+
 pub(super) fn abort(
     connection: &Connection,
     id: StorageTransactionId,
+    native: bool,
     control: &StorageReadControl,
 ) -> PhysicalResult<CommitStatus> {
     let _permit = schema::WritePermit::acquire(connection)?;
     let transaction = schema::begin(connection)?;
+    native::check_mapping(&transaction, native)?;
     codec::header(&transaction, id.database())?;
     let status = codec::status(&transaction, id)?;
     if status != CommitStatus::Pending {

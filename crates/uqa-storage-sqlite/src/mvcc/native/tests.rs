@@ -13,6 +13,9 @@ use uqa_storage::read_control::StorageReadControl;
 use super::*;
 use crate::{Catalog, ManagedConnection};
 
+mod generations;
+mod materialization;
+mod migration;
 mod persistence;
 
 fn owner() -> NativeRecordOwner {
@@ -33,11 +36,13 @@ fn native_layout_inventory_covers_every_current_catalog_table_and_primary_key() 
                 .query_map([], |row| row.get::<_, String>(0))?
                 .collect::<Result<BTreeSet<_>, _>>()?;
             let expected: BTreeSet<_> = NativeRecordFamily::all()
+                .filter(|family| *family != NativeRecordFamily::TableOwners)
                 .map(|family| family.layout().table.to_owned())
                 .collect();
             assert_eq!(actual, expected);
             for family in NativeRecordFamily::all() {
                 assert_eq!(NativeRecordFamily::from_id(family.id()), Some(family));
+                if family == NativeRecordFamily::TableOwners { continue; }
                 let layout = family.layout();
                 let mut statement = connection.prepare(&format!("PRAGMA table_info({})", layout.table))?;
                 let columns = statement.query_map([], |row| {
@@ -51,13 +56,7 @@ fn native_layout_inventory_covers_every_current_catalog_table_and_primary_key() 
                 assert_eq!(layout.columns.len(), layout.column_types.len());
                 assert_eq!(layout.columns.len(), layout.nullable.len());
                 for (slot, (_, _, kind, not_null)) in columns.iter().enumerate() {
-                    let kind = match kind.as_str() {
-                        "INTEGER" => NativeColumnType::Integer,
-                        "TEXT" => NativeColumnType::Text,
-                        "BLOB" => NativeColumnType::Blob,
-                        other => panic!("unmapped native column storage class {other}"),
-                    };
-                    assert_eq!(layout.column_types[slot], kind, "{}", layout.table);
+                    assert_eq!(layout.column_types[slot].declaration(), kind, "{}", layout.table);
                     assert_eq!(layout.nullable[slot], !not_null, "{}", layout.table);
                 }
             }
@@ -315,7 +314,9 @@ fn native_definition_records_validate_the_persisted_object_identity_and_generati
             .iter()
             .map(|kind| match kind {
                 NativeColumnType::Integer => ValueRef::Integer(1),
-                NativeColumnType::Text => ValueRef::Text(b"original"),
+                NativeColumnType::Text | NativeColumnType::TextOrBlob => {
+                    ValueRef::Text(b"original")
+                }
                 NativeColumnType::Blob => ValueRef::Blob(&[9]),
             })
             .collect();

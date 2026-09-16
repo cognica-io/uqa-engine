@@ -11,7 +11,7 @@ use uqa_core::memory::{BudgetedVec, MemoryError};
 use uqa_storage::mvcc::{DatabaseId, VersionResult};
 use uqa_storage::read_control::StorageReadControl;
 
-use super::{invalid, NativeColumnType, NativeRecordFamily};
+use super::{invalid, NativeRecordFamily};
 
 const PREFIX: &[u8] = b"\0uqa-native-record\x01";
 
@@ -158,12 +158,7 @@ impl NativeRecordIdentity {
         for (component, &column) in components.iter().zip(self.family.layout().identity_columns) {
             control.cancellation().check()?;
             let expected = self.family.layout().column_types[column];
-            if !matches!(
-                (component, expected),
-                (ValueRef::Integer(_), NativeColumnType::Integer)
-                    | (ValueRef::Text(_), NativeColumnType::Text)
-                    | (ValueRef::Blob(_), NativeColumnType::Blob)
-            ) {
+            if !expected.accepts(*component) {
                 return Err(invalid(
                     "native primary key storage class does not match its layout",
                 ));
@@ -190,6 +185,67 @@ impl NativeRecordIdentity {
             }
         }
         Ok(key)
+    }
+
+    /// Validate every ordered component, including keys for an absent tombstone.
+    pub(super) fn decode_full(key: &[u8], control: &StorageReadControl) -> VersionResult<Self> {
+        let identity = Self::decode(key)?;
+        let header = identity.encode_prefix(&[], control)?;
+        let mut input = &key[header.len()..];
+        for &column in identity.family.layout().identity_columns {
+            control.cancellation().check()?;
+            let (&tag, rest) = input
+                .split_first()
+                .ok_or_else(|| invalid("truncated native key component"))?;
+            input = rest;
+            let mut bytes = BudgetedVec::new(control.memory());
+            let value = match tag {
+                1 => {
+                    let (integer, rest) = input
+                        .split_at_checked(8)
+                        .ok_or_else(|| invalid("truncated native integer key"))?;
+                    input = rest;
+                    let ordered = u64::from_be_bytes(integer.try_into().expect("eight bytes"));
+                    ValueRef::Integer(i64::from_be_bytes((ordered ^ (1 << 63)).to_be_bytes()))
+                }
+                2 | 3 => {
+                    loop {
+                        control.cancellation().check()?;
+                        let (&byte, rest) = input
+                            .split_first()
+                            .ok_or_else(|| invalid("unterminated native binary key"))?;
+                        input = rest;
+                        if byte == 0 {
+                            let (&escape, rest) = input
+                                .split_first()
+                                .ok_or_else(|| invalid("truncated native key escape"))?;
+                            input = rest;
+                            match escape {
+                                0 => break,
+                                255 => {}
+                                _ => return Err(invalid("invalid native key escape")),
+                            }
+                        }
+                        bytes.push(byte)?;
+                    }
+                    if tag == 2 {
+                        std::str::from_utf8(&bytes)
+                            .map_err(|_| invalid("native text key is not UTF-8"))?;
+                        ValueRef::Text(&bytes)
+                    } else {
+                        ValueRef::Blob(&bytes)
+                    }
+                }
+                _ => return Err(invalid("unknown native key component")),
+            };
+            if !identity.family.layout().column_types[column].accepts(value) {
+                return Err(invalid("native key component does not match its layout"));
+            }
+        }
+        if !input.is_empty() {
+            return Err(invalid("native key has trailing components"));
+        }
+        Ok(identity)
     }
 }
 

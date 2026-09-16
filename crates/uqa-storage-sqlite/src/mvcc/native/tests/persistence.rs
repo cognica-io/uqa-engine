@@ -15,7 +15,7 @@ use uqa_storage::{DocumentMetadata, DocumentStore, StoredDocument};
 use super::*;
 use crate::{SQLiteCompressionOptions, SQLiteDocumentStore, SQLiteRecordStore};
 
-fn connection(path: &Path, mode: usize) -> ManagedConnection {
+pub(super) fn connection(path: &Path, mode: usize) -> ManagedConnection {
     match mode {
         0 => ManagedConnection::open(path),
         1 => ManagedConnection::open_encrypted(path, "native record codec test"),

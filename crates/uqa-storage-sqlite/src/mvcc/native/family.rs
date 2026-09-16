@@ -54,6 +54,7 @@ pub enum NativeRecordFamily {
     Tables = 41,
     Vectors = 42,
     Views = 43,
+    TableOwners = 44,
 }
 
 impl NativeRecordFamily {

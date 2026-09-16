@@ -31,6 +31,7 @@ impl Snapshot {
     ) -> VersionResult<T> {
         self.store.with(|connection| {
             let transaction = connection.unchecked_transaction()?;
+            super::native::check_mapping(&transaction, self.store.native)?;
             codec::header(&transaction, self.store.identity)?;
             let result = operation(&transaction)?;
             transaction.commit()?;
@@ -226,7 +227,7 @@ fn info(
     )))
 }
 
-fn value(
+pub(super) fn value(
     connection: &Connection,
     key: &[u8],
     boundary: CommitSequence,

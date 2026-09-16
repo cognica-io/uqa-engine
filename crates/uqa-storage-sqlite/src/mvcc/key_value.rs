@@ -26,6 +26,7 @@ pub(super) fn initialize(
     control.cancellation().check().map_err(VersionError::from)?;
     let _permit = schema::WritePermit::acquire(connection)?;
     let transaction = schema::begin(connection)?;
+    super::native::reject_mapped(&transaction)?;
     let legacy: Option<i64> = transaction
         .query_row(
             "SELECT CASE type WHEN 'table' THEN 1 WHEN 'view' THEN 2 ELSE 3 END FROM sqlite_schema WHERE name = '_key_value'",

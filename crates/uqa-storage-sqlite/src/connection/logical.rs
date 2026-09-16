@@ -93,7 +93,7 @@ impl ManagedConnection {
             return Ok(());
         }
         let versioned: bool = connection.prepare_cached(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = '_key_value' AND type = 'view')",
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE (name = '_key_value' AND type = 'view') OR name GLOB '_uqa_mvcc_native_*')",
         )?.query_row([], |row| row.get(0))?;
         if versioned {
             return Err(SQLiteError::LogicalSessionRequired);

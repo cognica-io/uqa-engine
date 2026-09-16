@@ -62,11 +62,12 @@ fn sqlite_error(error: rusqlite::Error) -> VersionError {
 
 /// Record persistence over a managed `SQLite` pool, including `SQLCipher` and compressed connections. Snapshots retain logical sequences; this adapter does not retain physical transactions between operations.
 ///
-/// All versions and receipts are currently retained. The Key/Value provider uses these records and migrates its legacy format atomically; native relational stores still require their own routing and format migration.
+/// All versions and receipts are currently retained. The Key/Value provider uses these records directly. `Self::for_native` converts a native catalog and atomically maintains its current rows with their history; existing native catalog/backend sessions still require logical routing before Engine can use that format.
 #[derive(Clone)]
 pub struct SQLiteRecordStore {
     connection: ManagedConnection,
     identity: DatabaseId,
+    native: bool,
 }
 
 impl SQLiteRecordStore {
@@ -84,6 +85,29 @@ impl SQLiteRecordStore {
         Ok(Self {
             connection,
             identity,
+            native: false,
+        })
+    }
+
+    /// Atomically import an initialized native schema 48 catalog, or reopen its versioned materialization. Ordinary native store handles are disabled after conversion; callers must prepare native records through the shared transaction contract. This lower persistence adapter does not enable concurrent Engine SQL.
+    pub fn for_native(
+        connection: &ManagedConnection,
+        control: &StorageReadControl,
+    ) -> VersionResult<Self> {
+        if connection.in_transaction() {
+            return Err(VersionError::Storage(
+                SQLiteError::TransactionAlreadyActive.into(),
+            ));
+        }
+        let connection = connection.record_connection();
+        let identity = connection
+            .with(|connection| Ok(native::initialize(connection, control)))
+            .map_err(|error| VersionError::Storage(error.into()))?
+            .map_err(Error::into_version)?;
+        Ok(Self {
+            connection,
+            identity,
+            native: true,
         })
     }
 
@@ -99,6 +123,7 @@ impl SQLiteRecordStore {
         Ok(Self {
             connection,
             identity,
+            native: false,
         })
     }
 
@@ -129,15 +154,20 @@ impl VersionedPersistence for SQLiteRecordStore {
         control: &StorageReadControl,
     ) -> VersionResult<StorageTransactionId> {
         control.cancellation().check()?;
-        self.with(|connection| write::allocate(connection, self.identity, control))
+        self.with(|connection| write::allocate(connection, self.identity, self.native, control))
     }
     fn snapshot(
         &self,
         control: &StorageReadControl,
     ) -> VersionResult<Arc<dyn CommittedRecordSnapshot>> {
         control.cancellation().check()?;
-        let sequence =
-            self.with(|connection| Ok(codec::header(connection, self.identity)?.sequence))?;
+        let sequence = self.with(|connection| {
+            let read = connection.unchecked_transaction()?;
+            native::check_mapping(&read, self.native)?;
+            let sequence = codec::header(&read, self.identity)?.sequence;
+            read.commit()?;
+            Ok(sequence)
+        })?;
         uqa_storage::mvcc::retain_record_snapshot(
             read::Snapshot {
                 store: self.clone(),
@@ -155,7 +185,15 @@ impl VersionedPersistence for SQLiteRecordStore {
         self.check_transaction(transaction)?;
         control.cancellation().check().map_err(VersionError::from)?;
         let _bindings = write::reserve_bindings(prepared, control)?;
-        self.with(|connection| Ok(write::commit(connection, transaction, prepared, control)))?
+        self.with(|connection| {
+            Ok(write::commit(
+                connection,
+                transaction,
+                prepared,
+                self.native,
+                control,
+            ))
+        })?
     }
     fn commit_status(
         &self,
@@ -166,6 +204,7 @@ impl VersionedPersistence for SQLiteRecordStore {
         control.cancellation().check()?;
         self.with(|connection| {
             let read = connection.unchecked_transaction()?;
+            native::check_mapping(&read, self.native)?;
             codec::header(&read, self.identity)?;
             let status = codec::status(&read, transaction)?;
             control.cancellation().check().map_err(VersionError::from)?;
@@ -180,6 +219,6 @@ impl VersionedPersistence for SQLiteRecordStore {
     ) -> VersionResult<CommitStatus> {
         self.check_transaction(transaction)?;
         control.cancellation().check()?;
-        self.with(|connection| write::abort(connection, transaction, control))
+        self.with(|connection| write::abort(connection, transaction, self.native, control))
     }
 }
