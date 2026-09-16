@@ -7,6 +7,7 @@
 //! Native catalog records use the managed session's committed/private view and atomic staging boundary.
 
 mod analyzers;
+mod cache_revisions;
 mod columns;
 mod foreign;
 pub(super) mod graph;

@@ -7,6 +7,7 @@
 //! Transaction-private evaluated replacements, retained command views and undo.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -21,10 +22,44 @@ use super::{PreparedRecordCommit, PreparedRecordWrite, RecordWrite, VersionError
 
 struct Change {
     write: PreparedRecordWrite,
+    identity: PrivateRecordRevision,
     introduced: u64,
     undone_at: Option<u64>,
     previous_for_key: Option<usize>,
     previous_active: Option<usize>,
+}
+
+/// Process-local identity of an evaluated private batch. Identities are never reused across transactions or undo branches; they are not durable commit sequences.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PrivateRecordRevision(u64);
+
+impl PrivateRecordRevision {
+    fn allocate() -> VersionResult<Self> {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .map(Self)
+            .map_err(|_| VersionError::PrivateRevisionExhausted)
+    }
+
+    pub fn as_u64(self) -> u64 {
+        self.0
+    }
+}
+
+/// A changed key and its private batch identity, without retaining or copying its payload.
+pub struct PrivateRecordKey {
+    key: RecordKey,
+    revision: PrivateRecordRevision,
+}
+
+impl PrivateRecordKey {
+    pub fn key(&self) -> &[u8] {
+        self.key.bytes()
+    }
+
+    pub fn revision(&self) -> PrivateRecordRevision {
+        self.revision
+    }
 }
 
 struct Head {
@@ -48,15 +83,26 @@ struct State {
 impl State {
     fn visible(
         &self,
-        mut position: Option<usize>,
+        position: Option<usize>,
         revision: u64,
         cancellation: &CancellationToken,
     ) -> VersionResult<Option<&PreparedRecordWrite>> {
+        Ok(self
+            .visible_change(position, revision, cancellation)?
+            .map(|change| &change.write))
+    }
+
+    fn visible_change(
+        &self,
+        mut position: Option<usize>,
+        revision: u64,
+        cancellation: &CancellationToken,
+    ) -> VersionResult<Option<&Change>> {
         while let Some(index) = position {
             cancellation.check()?;
             let change = &self.changes[index];
             if change.introduced <= revision && change.undone_at.is_none_or(|end| revision < end) {
-                return Ok(Some(&change.write));
+                return Ok(Some(change));
             }
             position = change.previous_for_key;
         }
@@ -186,6 +232,7 @@ impl PrivateRecordChanges {
         }
         state.changes.reserve(writes.len())?;
         control.cancellation().check()?;
+        let identity = PrivateRecordRevision::allocate()?;
         // Every fallible reservation and validation precedes publication under this mutex.
         while let Some((key, head)) = inserted.pop() {
             state.heads.insert(key, head);
@@ -198,6 +245,7 @@ impl PrivateRecordChanges {
                 .changes
                 .push(Change {
                     write: write.clone(),
+                    identity,
                     introduced: revision,
                     undone_at: None,
                     previous_for_key,
@@ -289,6 +337,48 @@ pub struct PrivateRecordSnapshot {
 }
 
 impl PrivateRecordSnapshot {
+    /// Select changed keys on this retained command boundary, including deletions. Undo restores their earlier identities, while later branches and other transactions receive distinct identities.
+    pub fn scan_keys(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<PrivateRecordKey>> {
+        control.check()?;
+        let mut result = BudgetedVec::new(control.memory());
+        if limit == 0 {
+            return Ok(result);
+        }
+        let state = self.owner.state.lock();
+        let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
+        for (key, head) in state
+            .heads
+            .range::<[u8], _>((std::ops::Bound::Included(start), std::ops::Bound::Unbounded))
+        {
+            control.check()?;
+            let key = key.bytes();
+            if !key.starts_with(prefix) {
+                break;
+            }
+            if after.is_some_and(|after| key <= after) {
+                continue;
+            }
+            if let Some(change) =
+                state.visible_change(head.position, self.revision, control.cancellation())?
+            {
+                result.push(PrivateRecordKey {
+                    key: change.write.shared_key(),
+                    revision: change.identity,
+                })?;
+                if result.len() == limit {
+                    break;
+                }
+            }
+        }
+        Ok(result)
+    }
+
     pub(super) fn visit_merged<P: super::projection::Projection>(
         &self,
         committed: &dyn super::CommittedRecordSnapshot,

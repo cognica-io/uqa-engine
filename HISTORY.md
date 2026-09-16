@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Routed native SQLite catalog cache generations through retained committed/private snapshots, including savepoint restoration, independent writers and bounded changed-key projections. Complete concurrent Engine SQL integration remains in progress.
 - Routed bound native SQLite graph catalog mutations, snapshot replacement/removal and path-index definitions/pairs through common logical transactions and shared cache validation. Mapping format 3 atomically adds versioned graph-to-path ownership while preserving predecessor histories and receipts; complete concurrent Engine SQL remains in progress.
 - Added versioned native SQLite graph lookup entries for label, adjacency and membership reads, and routed native catalog graph reads and named-graph hydration through one retained logical snapshot. The development native adapter atomically upgrades mapping format 1 to 2 while preserving source history, original commit boundaries and receipts; complete graph constraints and concurrent Engine SQL integration remain in progress.
 - Routed redb Key/Value, catalog and backend sessions through common logical transactions with pinned reads, private savepoints, bounded retention and durable commit receipts. Independent direct Key/Value writers can commit concurrently; complete concurrent Engine SQL support remains in progress.
@@ -16,6 +17,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve embedded NUL characters in metadata-derived cache names and atomically repair the known prior triggers. Native conversion and reopen now reject missing or changed catalog cache tracking.
 - Preserve graph path-cache validity across overlapping development SQLite Key/Value and redb transactions: merge source invalidations, include late graph dependencies, reject stale builds and preserve caches reassigned to another graph. Savepoints and receipt-based commit retry retain these effects without repeating graph evaluation; native relational graph writes and concurrent Engine SQL remain in progress.
 - Reject duplicate sequence incarnations during native SQLite record conversion and competing live definition generations at commit, including aliases created concurrently by independent sessions. Native sequence catalog and value operations now share the selected logical session; complete concurrent Engine SQL integration remains in progress.
 - Preserve data when the SQLite catalog column-rename API receives the same source and destination name. Move or remove B-tree repair markers with their column so renamed and deleted fields do not leave stale repair requests; preserve an existing destination B-tree without mixing in discarded source postings, including when SQLite foreign-key cascades are disabled.

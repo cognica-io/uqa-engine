@@ -37,6 +37,80 @@ fn value(snapshot: &PrivateRecordSnapshot, key: &[u8]) -> Option<Vec<u8>> {
 }
 
 #[test]
+fn private_key_revisions_survive_undo_without_reuse_or_payload_hydration() {
+    let storage = StorageReadControl::with_limit(4 << 20);
+    let read = StorageReadControl::with_limit(4096);
+    let a = PrivateRecordChanges::new(storage.memory());
+    let b = PrivateRecordChanges::new(storage.memory());
+    let payload = vec![7; 1 << 20];
+    a.apply(&[write(b"a", &payload)], &storage).unwrap();
+    let original = a.snapshot().unwrap();
+    let first = original.scan_keys(b"", None, 1, &read).unwrap()[0].revision();
+    let checkpoint = StorageSavepointId::allocate();
+    a.savepoint(checkpoint).unwrap();
+    a.apply(
+        &[RecordWrite {
+            key: b"a",
+            expected: None,
+            value: None,
+        }],
+        &storage,
+    )
+    .unwrap();
+    let deleted = a.snapshot().unwrap();
+    let second = deleted.scan_keys(b"", None, 1, &read).unwrap()[0].revision();
+    assert_ne!(first, second);
+    a.rollback_to_savepoint(checkpoint).unwrap();
+    assert_eq!(
+        a.snapshot()
+            .unwrap()
+            .scan_keys(b"", None, 1, &read)
+            .unwrap()[0]
+            .revision(),
+        first
+    );
+    a.apply(&[write(b"b", b"next")], &storage).unwrap();
+    b.apply(&[write(b"a", b"other transaction")], &storage)
+        .unwrap();
+    let last = a
+        .snapshot()
+        .unwrap()
+        .scan_keys(b"", Some(b"a"), 1, &read)
+        .unwrap();
+    assert_eq!(last[0].key(), b"b");
+    let other = b
+        .snapshot()
+        .unwrap()
+        .scan_keys(b"a", None, 1, &read)
+        .unwrap();
+    assert!(first < second && second < last[0].revision());
+    assert_ne!(last[0].revision(), other[0].revision());
+    a.rollback().unwrap();
+    assert!(a
+        .snapshot()
+        .unwrap()
+        .scan_keys(b"", None, 8, &read)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        original.scan_keys(b"", None, 1, &read).unwrap()[0].revision(),
+        first
+    );
+    assert_eq!(
+        deleted.scan_keys(b"", None, 1, &read).unwrap()[0].revision(),
+        second
+    );
+    assert!(original.scan_keys(b"z", None, 1, &read).unwrap().is_empty());
+    assert!(original.scan_keys(b"", None, 0, &read).unwrap().is_empty());
+    assert!(original
+        .scan_keys(b"", None, 1, &StorageReadControl::with_limit(0))
+        .is_err());
+    let cancelled = StorageReadControl::with_limit(4096);
+    cancelled.cancellation().cancel();
+    assert!(original.scan_keys(b"", None, 1, &cancelled).is_err());
+}
+
+#[test]
 fn command_views_keep_values_across_later_changes_and_rollback() {
     let control = control();
     let changes = PrivateRecordChanges::new(control.memory());

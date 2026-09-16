@@ -114,6 +114,7 @@ impl Catalog {
             if schema_before_repair != schema_after_repair {
                 Self::install_cache_revision_tracking(&repair)?;
             }
+            Self::upgrade_metadata_cache_triggers(&repair)?;
             repair.commit()?;
             conn.commit()?;
             Ok(())

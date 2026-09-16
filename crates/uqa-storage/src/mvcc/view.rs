@@ -291,6 +291,22 @@ impl MergedRecordSnapshot {
         self.committed.sequence()
     }
 
+    /// The pinned committed boundary underlying this command view, without private replacements.
+    pub fn committed(&self) -> &dyn CommittedRecordSnapshot {
+        self.committed.as_ref()
+    }
+
+    /// Bounded private key metadata for provider-derived cache invalidation; values are never materialized.
+    pub fn private_keys(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<super::PrivateRecordKey>> {
+        self.private.scan_keys(prefix, after, limit, control)
+    }
+
     pub fn visit_value(
         &self,
         key: &[u8],

@@ -117,7 +117,7 @@ impl NativeRecordIdentity {
         Ok(())
     }
 
-    pub(super) fn decode(key: &[u8]) -> VersionResult<Self> {
+    pub(crate) fn decode(key: &[u8]) -> VersionResult<Self> {
         let bytes = key
             .strip_prefix(PREFIX)
             .ok_or_else(|| invalid("unknown native record key codec"))?;

@@ -119,7 +119,9 @@ pub(in crate::mvcc) fn initialize(
     }
     transaction.execute_batch(OWNER_INDEX)?;
     transaction.execute_batch(graph_lookup::SQL)?;
+    crate::Catalog::upgrade_metadata_cache_triggers(&transaction)?;
     validate_layouts(&transaction, false)?;
+    validate_cache_triggers(&transaction)?;
     owners::seed(&transaction, control)?;
     super::sequences::validate_source(&transaction)?;
     graph_lookup::seed(&transaction, control)?;
@@ -168,6 +170,7 @@ pub(in crate::mvcc) fn initialize(
 }
 
 fn reopen(connection: &Connection, control: &StorageReadControl) -> PhysicalResult<DatabaseId> {
+    crate::Catalog::upgrade_metadata_cache_triggers(connection)?;
     let version =
         if schema::definition_matches(connection, TABLES[0].0, LEGACY_FORMAT)? == Some(true) {
             1
@@ -244,6 +247,7 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
             require_definition(connection, &name, &sql)?;
         }
     }
+    validate_cache_triggers(connection)?;
     if !legacy {
         require_definition(
             connection,
@@ -265,6 +269,30 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
 fn require_definition(connection: &Connection, name: &str, sql: &str) -> PhysicalResult<()> {
     if schema::definition_matches(connection, name, sql)? != Some(true) {
         return Err(invalid("missing or changed native materialization schema or guard").into());
+    }
+    Ok(())
+}
+
+fn validate_cache_triggers(connection: &Connection) -> PhysicalResult<()> {
+    for family in Family::all().filter(|family| {
+        !matches!(
+            family,
+            Family::CacheRevisions
+                | Family::TableOwners
+                | Family::GraphLookups
+                | Family::GraphPathPairs
+                | Family::GraphPathIndexState
+        )
+    }) {
+        let layout = family.layout();
+        for event in ["INSERT", "DELETE", "UPDATE"] {
+            let (name, sql) = crate::Catalog::cache_revision_trigger(
+                layout.table,
+                layout.columns.contains(&"table_name"),
+                event,
+            );
+            require_definition(connection, &name, &sql)?;
+        }
     }
     Ok(())
 }
