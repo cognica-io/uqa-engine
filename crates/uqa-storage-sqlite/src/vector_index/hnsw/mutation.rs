@@ -20,6 +20,13 @@ use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 impl SQLiteHNSWIndex {
     pub(super) fn initialize_graph(&self) -> StorageBackendResult<()> {
+        if self
+            .persistent
+            .write_native(|read, batch| self.initialize_native(read, batch))?
+            .is_some()
+        {
+            return Ok(());
+        }
         let ((graph, revision), identity) =
             self.persistent.conn.with_snapshot(|connection, _| {
                 let expected =
@@ -56,6 +63,20 @@ impl SQLiteHNSWIndex {
     ) -> StorageBackendResult<()> {
         let (encoded_doc_id, encoded_vectors) =
             self.persistent.stage_doc_vectors(doc_id, &vectors)?;
+        if self
+            .persistent
+            .write_native(|read, batch| {
+                self.mutate_native(
+                    read,
+                    batch,
+                    |graph| graph.add_many(doc_id, vectors.clone()),
+                    |read, batch| read.replace(batch, encoded_doc_id, &encoded_vectors),
+                )
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.mutate_graph(
             |graph| graph.add_many(doc_id, vectors),
             |connection| replace_canonical(connection, self, encoded_doc_id, &encoded_vectors),
@@ -64,6 +85,20 @@ impl SQLiteHNSWIndex {
 
     pub(super) fn delete_document(&self, doc_id: DocId) -> StorageBackendResult<()> {
         let encoded = encode_doc_id(doc_id)?;
+        if self
+            .persistent
+            .write_native(|read, batch| {
+                self.mutate_native(
+                    read,
+                    batch,
+                    |graph| graph.delete(doc_id),
+                    |read, batch| read.delete(batch, encoded),
+                )
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.mutate_graph(
             |graph| graph.delete(doc_id),
             |connection| {
@@ -77,6 +112,17 @@ impl SQLiteHNSWIndex {
     }
 
     pub(super) fn clear_graph(&self) -> StorageBackendResult<()> {
+        if self
+            .persistent
+            .write_native(|read, batch| {
+                self.mutate_native(read, batch, HNSWIndex::clear, |read, batch| {
+                    read.clear_family(batch, crate::mvcc::native::NativeRecordFamily::Vectors)
+                })
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.mutate_graph(HNSWIndex::clear, |connection| {
             connection.execute(
                 "DELETE FROM _vectors WHERE table_name = ?1 AND field = ?2",
@@ -146,7 +192,7 @@ pub(super) fn missing_metadata(index: &SQLiteHNSWIndex) -> StorageBackendError {
     ))
 }
 
-fn next_revision(current: Option<u64>) -> StorageBackendResult<u64> {
+pub(super) fn next_revision(current: Option<u64>) -> StorageBackendResult<u64> {
     current
         .unwrap_or(0)
         .checked_add(1)

@@ -48,6 +48,12 @@ pub(super) fn drop_metadata(
     table: &str,
     field: &str,
 ) -> SQLiteResult<()> {
+    if crate::SQLiteVectorIndex::new(conn.clone(), table, field, 0)
+        .write_native(super::native::drop_metadata)?
+        .is_some()
+    {
+        return Ok(());
+    }
     conn.with_mut(|conn| {
         let tx = conn.savepoint()?;
         for metadata_table in ["_hnsw_edges", "_hnsw_nodes", "_hnsw_indexes"] {

@@ -238,7 +238,7 @@ impl<'a> NativeVectorRead<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Catalog, ManagedConnection, SQLiteIVFIndex, SQLiteVectorIndex};
+    use crate::{Catalog, ManagedConnection, SQLiteHNSWIndex, SQLiteIVFIndex, SQLiteVectorIndex};
     use uqa_storage::{mvcc::VersionedSessionOptions, vector_index::VectorIndex};
 
     #[test]
@@ -248,7 +248,7 @@ mod tests {
         connection
             .bind_native_records(VersionedSessionOptions::default())
             .unwrap();
-        let indexes: [Box<dyn VectorIndex>; 2] = [
+        let indexes: [Box<dyn VectorIndex>; 3] = [
             Box::new(SQLiteVectorIndex::new(
                 connection.clone(),
                 "docs",
@@ -256,6 +256,7 @@ mod tests {
                 3,
             )),
             Box::new(SQLiteIVFIndex::new(connection.clone(), "docs", "ivf", 3)),
+            Box::new(SQLiteHNSWIndex::new(connection.clone(), "docs", "hnsw", 3)),
         ];
         for mut index in indexes {
             connection.begin_record_read().unwrap();

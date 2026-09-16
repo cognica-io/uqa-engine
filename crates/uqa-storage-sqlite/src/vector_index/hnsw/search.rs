@@ -18,6 +18,19 @@ impl SQLiteHNSWIndex {
         query: &[f32],
         k: usize,
     ) -> StorageBackendResult<PostingList> {
+        if let Some(snapshot) = self.native_snapshot()? {
+            return match snapshot
+                .persistent
+                .read_native(|read| snapshot.cached_native_graph(read))?
+                .flatten()
+            {
+                Some(graph) => graph.search_knn(query, k),
+                None if self.require_persisted_graph => {
+                    Err(super::mutation::missing_metadata(self))
+                }
+                None => snapshot.persistent.search_knn(query, k),
+            };
+        }
         if let Some(cached) = self.graph_snapshot()? {
             return cached.graph.search_knn(query, k);
         }

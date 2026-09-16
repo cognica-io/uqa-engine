@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use super::{loading::load_meta_from, CachedGraph, SQLiteHNSWIndex};
+use super::{loading::load_meta_from, CachedGraph, GraphIdentity, SQLiteHNSWIndex};
 use crate::connection::SnapshotIdentity;
 use crate::Result;
 use uqa_storage::hnsw_index::HNSWIndex;
@@ -36,14 +36,16 @@ impl SQLiteHNSWIndex {
         revision: u64,
     ) -> Result<CachedGraph> {
         if let Some(cached) = self.graph.read().as_ref() {
-            if cached.revision == revision && cached.identity.same_view(identity) {
+            if cached.revision == revision
+                && matches!(&cached.identity, GraphIdentity::Physical(view) if view.same_view(identity))
+            {
                 return Ok(cached.clone());
             }
         }
         let (revision, graph) = self.load_graph_from(connection)?;
         let loaded = CachedGraph {
             revision,
-            identity: identity.clone(),
+            identity: GraphIdentity::Physical(identity.clone()),
             graph: Arc::new(graph),
         };
         *self.graph.write() = Some(loaded.clone());
@@ -58,7 +60,7 @@ impl SQLiteHNSWIndex {
     ) {
         *self.graph.write() = Some(CachedGraph {
             revision,
-            identity,
+            identity: GraphIdentity::Physical(identity),
             graph: Arc::new(graph),
         });
     }

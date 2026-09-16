@@ -19,6 +19,7 @@ mod encoding;
 mod lifecycle;
 mod loading;
 mod mutation;
+mod native;
 mod persistence;
 mod search;
 mod writing;
@@ -37,8 +38,14 @@ pub struct SQLiteHNSWIndex {
 #[derive(Clone)]
 pub(super) struct CachedGraph {
     pub(super) revision: u64,
-    pub(super) identity: crate::connection::SnapshotIdentity,
+    pub(super) identity: GraphIdentity,
     pub(super) graph: Arc<HNSWIndex>,
+}
+
+#[derive(Clone)]
+pub(super) enum GraphIdentity {
+    Physical(crate::connection::SnapshotIdentity),
+    Native(native::GraphIdentity),
 }
 
 impl SQLiteHNSWIndex {

@@ -31,6 +31,8 @@ mod native_columns;
 mod native_documents;
 #[path = "mvcc/native_graph.rs"]
 mod native_graph;
+#[path = "mvcc/native_hnsw.rs"]
+mod native_hnsw;
 #[path = "mvcc/native_relations.rs"]
 mod native_relations;
 #[path = "mvcc/native_sequences.rs"]

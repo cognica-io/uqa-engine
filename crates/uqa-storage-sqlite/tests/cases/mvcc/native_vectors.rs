@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Exact and IVF public APIs retain canonical/derived views and publish atomic native batches.
+//! Exact, IVF and HNSW public APIs retain canonical/derived views and publish atomic native batches.
 
 use std::{sync::mpsc, time::Duration};
 
@@ -13,7 +13,8 @@ use uqa_storage::{
     mvcc::VersionedSessionOptions, read_control::StorageReadControl, vector_index::VectorIndex,
 };
 use uqa_storage_sqlite::{
-    Catalog, ManagedConnection, SQLiteIVFIndex, SQLiteRecordStore, SQLiteVectorIndex,
+    Catalog, ManagedConnection, SQLiteHNSWIndex, SQLiteIVFIndex, SQLiteRecordStore,
+    SQLiteVectorIndex,
 };
 
 const X: [f32; 3] = [1.0, 0.0, 0.0];
@@ -26,9 +27,23 @@ fn bind(connection: &ManagedConnection) {
         .unwrap();
 }
 
-fn index(connection: &ManagedConnection, ivf: bool, table: &str) -> Box<dyn VectorIndex> {
-    if ivf {
-        Box::new(SQLiteIVFIndex::with_params(
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IndexKind {
+    Exact,
+    Ivf,
+    Hnsw,
+}
+const KINDS: [IndexKind; 3] = [IndexKind::Exact, IndexKind::Ivf, IndexKind::Hnsw];
+
+fn index(connection: &ManagedConnection, kind: IndexKind, table: &str) -> Box<dyn VectorIndex> {
+    match kind {
+        IndexKind::Exact => Box::new(SQLiteVectorIndex::new(
+            connection.clone(),
+            table,
+            "embedding",
+            3,
+        )),
+        IndexKind::Ivf => Box::new(SQLiteIVFIndex::with_params(
             connection.clone(),
             table,
             "embedding",
@@ -36,14 +51,13 @@ fn index(connection: &ManagedConnection, ivf: bool, table: &str) -> Box<dyn Vect
             2,
             2,
             2,
-        ))
-    } else {
-        Box::new(SQLiteVectorIndex::new(
+        )),
+        IndexKind::Hnsw => Box::new(SQLiteHNSWIndex::new(
             connection.clone(),
             table,
             "embedding",
             3,
-        ))
+        )),
     }
 }
 
@@ -68,7 +82,7 @@ fn native_exact_writers_commit_independent_tensors_before_the_other_transaction_
             let connection = open(mode, &path);
             Catalog::open(connection.clone()).unwrap();
             // Handles predating native binding also join the selected logical session.
-            let mut a = index(&connection, false, "docs");
+            let mut a = index(&connection, IndexKind::Exact, "docs");
             a.add(1, X.to_vec()).unwrap();
             a.add(2, Y.to_vec()).unwrap();
             bind(&connection);
@@ -85,7 +99,7 @@ fn native_exact_writers_commit_independent_tensors_before_the_other_transaction_
                 let other = open(mode, &other_path);
                 bind(&other);
                 other.begin_transaction().unwrap();
-                let mut b = index(&other, false, "docs");
+                let mut b = index(&other, IndexKind::Exact, "docs");
                 b.add_many(2, vec![X.to_vec(), Y.to_vec()]).unwrap();
                 other.commit_transaction().unwrap();
                 sent.send(ids(&*b, &X)).unwrap();
@@ -118,7 +132,7 @@ fn native_exact_writers_commit_independent_tensors_before_the_other_transaction_
             drop((a, baseline, first, second, connection));
             let reopened = open(mode, &path);
             bind(&reopened);
-            let restored = index(&reopened, false, "docs");
+            let restored = index(&reopened, IndexKind::Exact, "docs");
             assert_eq!(ids(&*restored, &X), expected);
             assert_eq!(
                 restored.count().unwrap(),
@@ -131,20 +145,20 @@ fn native_exact_writers_commit_independent_tensors_before_the_other_transaction_
 #[test]
 fn native_vector_snapshots_keep_private_and_committed_generations_through_lifecycle() {
     for mode in MODES {
-        for ivf in [false, true] {
+        for kind in KINDS {
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("lifecycle.db");
             let connection = open(mode, &path);
             let catalog = Catalog::open(connection.clone()).unwrap();
             catalog.save_table(&schema("docs", 17, 18)).unwrap();
-            let mut vectors = index(&connection, ivf, "public.docs");
+            let mut vectors = index(&connection, kind, "public.docs");
             vectors.add_many(1, vec![X.to_vec(), Y.to_vec()]).unwrap();
             vectors.add(2, Z.to_vec()).unwrap();
             vectors.initialize().unwrap();
             bind(&connection);
             let old = vectors.snapshot().unwrap();
             let other = connection.new_session();
-            let observer = index(&other, ivf, "public.docs");
+            let observer = index(&other, kind, "public.docs");
             connection.begin_transaction().unwrap();
             vectors.add_many(1, vec![Z.to_vec()]).unwrap();
             connection.savepoint("changed").unwrap();
@@ -165,7 +179,7 @@ fn native_vector_snapshots_keep_private_and_committed_generations_through_lifecy
                 .rename_table_data("public.docs", "public.renamed")
                 .unwrap();
             assert_eq!(vectors.count().unwrap(), 0);
-            let renamed = index(&connection, ivf, "public.renamed");
+            let renamed = index(&connection, kind, "public.renamed");
             assert_eq!(ids(&*renamed, &Z), vec![1]);
             let before_drop = renamed.snapshot().unwrap();
             catalog.drop_table_and_data("public.renamed").unwrap();
@@ -185,7 +199,7 @@ fn native_vector_snapshots_keep_private_and_committed_generations_through_lifecy
             ));
             let reopened = open(mode, &path);
             bind(&reopened);
-            assert_eq!(index(&reopened, ivf, "public.renamed").count().unwrap(), 0);
+            assert_eq!(index(&reopened, kind, "public.renamed").count().unwrap(), 0);
         }
     }
 }
@@ -198,7 +212,7 @@ fn native_ivf_generations_publish_atomically_and_reopen_with_canonical_vectors()
         let connection = open(mode, &path);
         Catalog::open(connection.clone()).unwrap();
         bind(&connection);
-        let mut vectors = index(&connection, true, "new\0日本語");
+        let mut vectors = index(&connection, IndexKind::Ivf, "new\0日本語");
         let empty = vectors.snapshot().unwrap();
         vectors.initialize().unwrap();
         vectors.add(1, X.to_vec()).unwrap();
@@ -209,7 +223,7 @@ fn native_ivf_generations_publish_atomically_and_reopen_with_canonical_vectors()
         let private = vectors.snapshot().unwrap();
         let observer = connection.new_session();
         assert_eq!(
-            nearest(&*index(&observer, true, "new\0日本語"), &X),
+            nearest(&*index(&observer, IndexKind::Ivf, "new\0日本語"), &X),
             vec![1]
         );
         observer.with_physical(|sqlite| {
@@ -218,7 +232,12 @@ fn native_ivf_generations_publish_atomically_and_reopen_with_canonical_vectors()
         }).unwrap();
         assert!(connection.commit_transaction().is_err());
         assert!(connection.in_transaction());
-        assert_eq!(index(&observer, true, "new\0日本語").count().unwrap(), 3);
+        assert_eq!(
+            index(&observer, IndexKind::Ivf, "new\0日本語")
+                .count()
+                .unwrap(),
+            3
+        );
         assert!(vectors.add(3, X.to_vec()).is_err());
         observer
             .with_physical(|sqlite| {
@@ -236,7 +255,7 @@ fn native_ivf_generations_publish_atomically_and_reopen_with_canonical_vectors()
         drop((vectors, empty, old, private, observer, connection));
         let reopened = open(mode, &path);
         bind(&reopened);
-        let restored = index(&reopened, true, "new\0日本語");
+        let restored = index(&reopened, IndexKind::Ivf, "new\0日本語");
         assert_eq!(restored.count().unwrap(), 4);
         assert_eq!(nearest(&*restored, &Y), vec![1]);
         SQLiteIVFIndex::drop_metadata(&reopened, "new\0日本語", "embedding").unwrap();
@@ -247,12 +266,13 @@ fn native_ivf_generations_publish_atomically_and_reopen_with_canonical_vectors()
 
 #[test]
 fn native_vector_failures_preserve_prior_writes_and_retained_snapshots_are_read_only() {
-    for ivf in [false, true] {
+    for kind in KINDS {
         let connection = ManagedConnection::open_in_memory().unwrap();
         Catalog::open(connection.clone()).unwrap();
         bind(&connection);
-        let mut vectors = index(&connection, ivf, "docs");
+        let mut vectors = index(&connection, kind, "docs");
         vectors.add(1, X.to_vec()).unwrap();
+        vectors.initialize().unwrap();
         connection.begin_transaction().unwrap();
         vectors.add(2, Y.to_vec()).unwrap();
         for (doc, values) in [
@@ -269,7 +289,7 @@ fn native_vector_failures_preserve_prior_writes_and_retained_snapshots_are_read_
         assert!(writable.add(3, X.to_vec()).is_err());
         assert!(writable.delete(1).is_err());
         assert!(writable.clear().is_err());
-        if ivf {
+        if kind != IndexKind::Exact {
             assert!(writable.initialize().is_err());
         }
         connection.commit_transaction().unwrap();
@@ -315,7 +335,7 @@ fn native_ivf_reads_stored_assignments_and_only_selected_vector_payloads() {
 
 #[test]
 fn native_vector_budget_failures_do_not_leave_partial_private_replacements() {
-    for ivf in [false, true] {
+    for kind in KINDS {
         let connection = ManagedConnection::open_in_memory().unwrap();
         Catalog::open(connection.clone()).unwrap();
         connection
@@ -323,15 +343,16 @@ fn native_vector_budget_failures_do_not_leave_partial_private_replacements() {
                 retained_bytes: 64 << 10,
             })
             .unwrap();
-        let mut vectors = index(&connection, ivf, "docs");
+        let mut vectors = index(&connection, kind, "docs");
         vectors.add(1, X.to_vec()).unwrap();
+        vectors.initialize().unwrap();
         connection.begin_transaction().unwrap();
         vectors.add(2, Y.to_vec()).unwrap();
         assert!(vectors.add_many(1, vec![Z.to_vec(); 4096]).is_err());
         assert_eq!(vectors.count().unwrap(), 2);
         assert_eq!(ids(&*vectors, &X), vec![1]);
         connection.commit_transaction().unwrap();
-        let mut absent = index(&connection, ivf, "absent");
+        let mut absent = index(&connection, kind, "absent");
         assert!(absent.add_many(1, vec![Z.to_vec(); 4096]).is_err());
         assert!(!connection.in_transaction());
         assert_eq!(absent.count().unwrap(), 0);
@@ -367,14 +388,15 @@ fn native_exact_materialization_accounts_for_the_aggregate_vector_collection() {
 
 #[test]
 fn native_same_document_conflicts_preserve_committed_and_retained_vector_generations() {
-    for ivf in [false, true] {
+    for kind in KINDS {
         let connection = ManagedConnection::open_in_memory().unwrap();
         Catalog::open(connection.clone()).unwrap();
         bind(&connection);
-        let mut a = index(&connection, ivf, "docs");
+        let mut a = index(&connection, kind, "docs");
         a.add(1, X.to_vec()).unwrap();
+        a.initialize().unwrap();
         let other = connection.new_session();
-        let mut b = index(&other, ivf, "docs");
+        let mut b = index(&other, kind, "docs");
         connection.begin_transaction().unwrap();
         a.add_many(1, vec![Y.to_vec(), Z.to_vec()]).unwrap();
         let private = a.snapshot().unwrap();

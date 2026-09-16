@@ -51,12 +51,15 @@ impl SQLiteHNSWIndex {
     pub(super) fn load_meta(
         &self,
     ) -> SQLiteResult<Option<(u32, HNSWIndexParams, HNSWGraphMeta, u64)>> {
+        if let Some(meta) = self.persistent.read_native(super::native::load_meta)? {
+            return Ok(meta);
+        }
         self.persistent
             .conn
             .with(|connection| load_meta_from(connection, self))
     }
 
-    fn validate_header(
+    pub(super) fn validate_header(
         &self,
         dimensions: u32,
         params: HNSWIndexParams,
