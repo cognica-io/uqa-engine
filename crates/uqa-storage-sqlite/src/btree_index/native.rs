@@ -6,6 +6,8 @@
 
 //! Native B-tree definitions, repairs and evaluated per-document postings share the document transaction.
 
+pub(super) mod columns;
+
 use rusqlite::types::{FromSql, ValueRef};
 use uqa_storage::{KeyValueBatch, ValueIndexKey};
 

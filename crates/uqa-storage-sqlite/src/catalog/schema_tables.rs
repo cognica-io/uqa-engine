@@ -463,6 +463,12 @@ impl Catalog {
     }
 
     pub fn drop_column_data(&self, table_name: &str, column_name: &str) -> Result<()> {
+        if self
+            .change_native_column(table_name, column_name, None)?
+            .is_some()
+        {
+            return Ok(());
+        }
         let indexes = self.catalog_indexes_referencing_column(table_name, column_name)?;
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
@@ -491,6 +497,7 @@ impl Catalog {
                 "_hnsw_edges",
                 "_btree_index_entries",
                 "_btree_indexes",
+                "_btree_index_repairs",
             ] {
                 if matches!(
                     table,
@@ -532,6 +539,15 @@ impl Catalog {
     }
 
     pub fn rename_column_data(&self, table_name: &str, from: &str, to: &str) -> Result<()> {
+        if from == to {
+            return Ok(());
+        }
+        if self
+            .change_native_column(table_name, from, Some(to))?
+            .is_some()
+        {
+            return Ok(());
+        }
         let index_updates = self.catalog_index_column_renames(table_name, from, to)?;
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;

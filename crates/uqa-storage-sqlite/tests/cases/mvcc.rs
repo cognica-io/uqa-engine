@@ -23,6 +23,8 @@ mod key_value;
 mod native_btree;
 #[path = "mvcc/native_catalog.rs"]
 mod native_catalog;
+#[path = "mvcc/native_columns.rs"]
+mod native_columns;
 #[path = "mvcc/native_documents.rs"]
 mod native_documents;
 #[path = "mvcc/native_relations.rs"]

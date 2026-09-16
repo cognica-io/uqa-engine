@@ -16,7 +16,7 @@ use uqa_storage::{
 use uqa_storage_sqlite::{Catalog, ManagedConnection, SQLiteBTreeIndexStore, SQLiteDocumentStore};
 
 #[path = "native_tables/families.rs"]
-mod families;
+pub(super) mod families;
 #[path = "native_tables/rename.rs"]
 mod rename;
 #[path = "native_tables/security.rs"]
@@ -28,7 +28,7 @@ fn bind(connection: &ManagedConnection) {
         .unwrap();
 }
 
-fn schema(name: &str, identity: u8, generation: u8) -> TableSchema {
+pub(super) fn schema(name: &str, identity: u8, generation: u8) -> TableSchema {
     TableSchema {
         relation: RelationIdentity::new("public", name),
         role_owner: "owner".into(),
@@ -54,7 +54,7 @@ fn fields(n: i64) -> BTreeMap<String, Value> {
     ])
 }
 
-fn index(name: &str, table: &str) -> CatalogIndexRow {
+pub(super) fn index(name: &str, table: &str) -> CatalogIndexRow {
     CatalogIndexRow {
         relation: RelationIdentity::new("public", name),
         index_type: "btree".into(),

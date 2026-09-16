@@ -14,6 +14,9 @@ impl Catalog {
     /// `max_value` are stored as strings (JSON when the value isn't
     /// natively textual) so the column type is irrelevant.
     pub fn save_column_stats(&self, stats: ColumnStatsInput<'_>) -> Result<()> {
+        if self.save_native_column_stats(stats)?.is_some() {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "INSERT OR REPLACE INTO _column_stats
@@ -48,6 +51,12 @@ impl Catalog {
                 "column stats row for table `{}` cannot be stored in snapshot `{table_name}`",
                 row.table_name
             )));
+        }
+        if self
+            .replace_native_column_stats(table_name, stats)?
+            .is_some()
+        {
+            return Ok(());
         }
         self.conn.with_mut(|connection| {
             let transaction = connection.savepoint()?;
@@ -84,6 +93,9 @@ impl Catalog {
     }
 
     pub fn load_column_stats(&self, table_name: &str) -> Result<Vec<ColumnStatsRow>> {
+        if let Some(rows) = self.load_native_column_stats(table_name)? {
+            return Ok(rows);
+        }
         self.conn.with(|c| {
             let mut stmt = c.prepare(
                 "SELECT column_name, distinct_count, null_count,
@@ -115,6 +127,9 @@ impl Catalog {
     }
 
     pub fn delete_column_stats(&self, table_name: &str) -> Result<()> {
+        if self.delete_native_column_stats(table_name)?.is_some() {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "DELETE FROM _column_stats WHERE table_name = ?1",

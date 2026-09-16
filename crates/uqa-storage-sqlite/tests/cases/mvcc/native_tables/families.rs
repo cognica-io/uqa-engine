@@ -16,11 +16,15 @@ use uqa_storage_sqlite::{
     SQLiteRecordStore,
 };
 
-fn families() -> impl Iterator<Item = Family> {
+pub(in crate::mvcc) fn families() -> impl Iterator<Item = Family> {
     Family::all().filter(|family| family.layout().columns.contains(&"table_name"))
 }
 
-fn rows(connection: &ManagedConnection, family: Family, table: &str) -> Vec<Vec<SQLValue>> {
+pub(in crate::mvcc) fn rows(
+    connection: &ManagedConnection,
+    family: Family,
+    table: &str,
+) -> Vec<Vec<SQLValue>> {
     let layout = family.layout();
     connection
         .with_physical(|sqlite| {
@@ -46,7 +50,7 @@ fn rows(connection: &ManagedConnection, family: Family, table: &str) -> Vec<Vec<
         .unwrap()
 }
 
-fn seed_missing_families(connection: &ManagedConnection) {
+pub(in crate::mvcc) fn seed_missing_families(connection: &ManagedConnection) {
     // Parent markers precede child rows. Opaque payloads exercise transport, not search/index algorithm acceptance.
     let mut ordered: Vec<_> = families().collect();
     ordered.sort_by_key(|family| match family {

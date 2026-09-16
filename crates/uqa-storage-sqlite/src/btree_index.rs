@@ -22,6 +22,7 @@ use super::{ManagedConnection, Result, SQLiteError};
 use crate::value_index_key::SQLiteValueIndexKey;
 
 mod native;
+pub(crate) use native::columns::change_column as change_native_column;
 pub(crate) use native::delete_document as delete_native_document_entries;
 
 fn encode_doc_id(doc_id: DocId) -> Result<i64> {

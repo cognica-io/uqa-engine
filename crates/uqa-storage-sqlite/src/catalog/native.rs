@@ -7,9 +7,11 @@
 //! Native catalog records use the managed session's committed/private view and atomic staging boundary.
 
 mod analyzers;
+mod columns;
 mod foreign;
 mod indexes;
 mod relations;
+mod stats;
 mod tables;
 mod views;
 pub(super) use analyzers::FieldWrite;

@@ -127,8 +127,42 @@ pub(super) fn rename_btree_field_rows_or_keep_existing(
     from: &str,
     to: &str,
 ) -> Result<()> {
+    let target_exists = table_exists(conn, "_btree_indexes")?
+        && conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM _btree_indexes WHERE table_name = ?1 AND field = ?2)",
+            params![table_name, to],
+            |row| row.get::<_, bool>(0),
+        )?;
     rename_field_rows_or_keep_existing(conn, "_btree_indexes", "field", table_name, from, to)?;
-    rename_field_rows_or_keep_existing(conn, "_btree_index_entries", "field", table_name, from, to)
+    if target_exists {
+        // A retained destination parent owns its existing postings, even when foreign-key cascades are disabled.
+        for table in ["_btree_index_entries", "_btree_index_repairs"] {
+            if table_exists(conn, table)? {
+                conn.execute(
+                    &format!("DELETE FROM {table} WHERE table_name = ?1 AND field = ?2"),
+                    params![table_name, from],
+                )?;
+            }
+        }
+        Ok(())
+    } else {
+        rename_field_rows_or_keep_existing(
+            conn,
+            "_btree_index_entries",
+            "field",
+            table_name,
+            from,
+            to,
+        )?;
+        rename_field_rows_or_keep_existing(
+            conn,
+            "_btree_index_repairs",
+            "field",
+            table_name,
+            from,
+            to,
+        )
+    }
 }
 
 pub(super) fn delete_table_rows_if_exists(
