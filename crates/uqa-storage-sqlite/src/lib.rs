@@ -12,6 +12,7 @@ pub mod catalog;
 mod catalog_lifecycle;
 pub mod compressed_vfs;
 pub mod connection;
+mod connection_lease;
 pub mod detect;
 pub mod document_store;
 pub mod inverted_index;
@@ -24,6 +25,7 @@ pub use compressed_vfs::{
     SQLiteCompressionOptions,
 };
 pub use connection::{ManagedConnection, Result, SQLiteError};
+pub use connection_lease::SQLiteConnectionLease;
 pub use detect::{detect_database_file_format, DatabaseFileFormat};
 pub use document_store::SQLiteDocumentStore;
 pub use inverted_index::SQLiteInvertedIndex;

@@ -8,6 +8,8 @@
 
 #[path = "sql_notifications/cross_process.rs"]
 mod cross_process;
+#[path = "sql_notifications/encryption.rs"]
+mod encryption;
 
 use tempfile::TempDir;
 use uqa_core::Value;

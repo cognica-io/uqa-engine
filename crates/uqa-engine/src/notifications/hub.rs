@@ -27,7 +27,10 @@ impl NotificationHub {
     }
 
     #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
-    pub(super) fn for_database_file(path: &std::path::Path) -> Arc<Self> {
+    pub(super) fn for_database_file(
+        path: &std::path::Path,
+        encryption_key: Option<uqa_storage::StorageEncryptionKey>,
+    ) -> Arc<Self> {
         let database_path = path.to_path_buf();
         Arc::new_cyclic(|hub| Self {
             commit_gate: Mutex::new(()),
@@ -35,6 +38,8 @@ impl NotificationHub {
             max_queue_pages: MAX_NOTIFICATION_QUEUE_PAGES,
             cross: Some(CrossProcessState {
                 database_path,
+                encryption_key,
+                registry: Mutex::new(None),
                 hub: hub.clone(),
                 coordinator: Mutex::new(None),
             }),
@@ -43,7 +48,10 @@ impl NotificationHub {
     }
 
     #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
-    pub(super) fn for_database_file(_path: &std::path::Path) -> Arc<Self> {
+    pub(super) fn for_database_file(
+        _path: &std::path::Path,
+        _encryption_key: Option<uqa_storage::StorageEncryptionKey>,
+    ) -> Arc<Self> {
         Arc::new(Self::default())
     }
 
