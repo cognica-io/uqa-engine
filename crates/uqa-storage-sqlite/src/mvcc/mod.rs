@@ -8,6 +8,7 @@
 
 mod codec;
 mod key_value;
+pub mod native;
 mod read;
 mod schema;
 #[cfg(test)]
