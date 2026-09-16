@@ -16,6 +16,7 @@ exclude.workspace = true
 uqa-storage = { workspace = true }
 parking_lot = { workspace = true }
 redb = { workspace = true }
+getrandom = { workspace = true }
 
 [dev-dependencies]
 uqa-core = { workspace = true }

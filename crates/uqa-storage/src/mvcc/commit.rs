@@ -9,13 +9,14 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use sha2::{Digest, Sha256};
 use uqa_core::memory::{BudgetedVec, MemoryError};
 use uqa_core::CancellationToken;
 
 use crate::read_control::StorageReadControl;
 
 use super::key::RecordKey;
-use super::{CommitSequence, RecordWrite, VersionError, VersionResult};
+use super::{CommitFingerprint, CommitSequence, RecordWrite, VersionError, VersionResult};
 
 #[derive(Clone)]
 pub struct PreparedRecordWrite {
@@ -49,6 +50,7 @@ impl PreparedRecordWrite {
 /// Immutable prepared replacements. Construct before opening a physical writer.
 pub struct PreparedRecordCommit {
     writes: BudgetedVec<PreparedRecordWrite>,
+    fingerprint: CommitFingerprint,
 }
 
 impl PreparedRecordCommit {
@@ -92,7 +94,7 @@ impl PreparedRecordCommit {
             })?;
         }
         control.cancellation().check()?;
-        Ok(Self { writes: prepared })
+        Self::from_unique_owned(prepared, control)
     }
 
     pub fn records(&self) -> &[PreparedRecordWrite] {
@@ -100,8 +102,41 @@ impl PreparedRecordCommit {
     }
 
     /// The caller supplies exactly one final replacement for each identity.
-    pub(super) fn from_unique_owned(writes: BudgetedVec<PreparedRecordWrite>) -> Self {
-        Self { writes }
+    pub(super) fn from_unique_owned(
+        writes: BudgetedVec<PreparedRecordWrite>,
+        control: &StorageReadControl,
+    ) -> VersionResult<Self> {
+        let mut digest = Sha256::new();
+        digest.update(b"UQA prepared records 1");
+        digest.update((writes.len() as u64).to_be_bytes());
+        for write in writes.iter() {
+            control.cancellation().check()?;
+            digest.update((write.key().len() as u64).to_be_bytes());
+            hash_bytes(&mut digest, write.key(), control)?;
+            digest.update(
+                write
+                    .expected()
+                    .map_or(0, CommitSequence::as_u64)
+                    .to_be_bytes(),
+            );
+            digest.update([
+                u8::from(write.expected().is_some()),
+                u8::from(write.value().is_some()),
+            ]);
+            if let Some(value) = write.value() {
+                digest.update((value.len() as u64).to_be_bytes());
+                hash_bytes(&mut digest, value, control)?;
+            }
+        }
+        control.cancellation().check()?;
+        Ok(Self {
+            writes,
+            fingerprint: digest.finalize().into(),
+        })
+    }
+
+    pub fn fingerprint(&self) -> CommitFingerprint {
+        self.fingerprint
     }
 
     /// Check all preconditions under the provider's exclusive commit boundary. The callback reads current committed heads, not the caller's old snapshot.
@@ -125,4 +160,16 @@ impl PreparedRecordCommit {
         cancellation.check()?;
         Ok(())
     }
+}
+
+fn hash_bytes(
+    digest: &mut Sha256,
+    bytes: &[u8],
+    control: &StorageReadControl,
+) -> VersionResult<()> {
+    for chunk in bytes.chunks(65536) {
+        control.cancellation().check()?;
+        digest.update(chunk);
+    }
+    Ok(())
 }

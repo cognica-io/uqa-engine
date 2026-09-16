@@ -282,5 +282,8 @@ fn redb_rolls_back_legacy_posting_migration_after_staged_writes() {
 #[path = "store_contract/controlled.rs"]
 mod controlled;
 
+#[path = "store_contract/mvcc.rs"]
+mod mvcc;
+
 #[path = "store_contract/japanese.rs"]
 mod japanese;

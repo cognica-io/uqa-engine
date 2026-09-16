@@ -21,10 +21,10 @@ serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
 parking_lot = { workspace = true }
 thiserror = { workspace = true }
+sha2 = { workspace = true }
 
 [dev-dependencies]
 allocation-counter = "=0.8.1"
-sha2 = { workspace = true }
 tempfile = "3.13"
 criterion = { workspace = true }
 proptest = { workspace = true }

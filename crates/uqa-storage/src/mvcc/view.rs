@@ -9,7 +9,7 @@
 use std::cmp::Ordering;
 use std::sync::Arc;
 
-use uqa_core::memory::BudgetedVec;
+use uqa_core::memory::{BudgetedVec, MemoryReservation};
 
 use crate::read_control::StorageReadControl;
 
@@ -37,6 +37,48 @@ pub trait CommittedRecordSnapshot: Send + Sync {
         limit: usize,
         control: &StorageReadControl,
     ) -> VersionResult<BudgetedVec<ScannedRecord>>;
+}
+
+struct RetainedSnapshot<T> {
+    snapshot: T,
+    _memory: MemoryReservation,
+}
+
+/// Charge a provider snapshot's retained metadata before allocating its shared owner. The provider snapshot itself owns any version-retention lease required by its format.
+pub fn retain_record_snapshot<T: CommittedRecordSnapshot + 'static>(
+    snapshot: T,
+    control: &StorageReadControl,
+) -> VersionResult<Arc<dyn CommittedRecordSnapshot>> {
+    control.cancellation().check()?;
+    let memory = control
+        .memory()
+        .reserve(std::mem::size_of::<RetainedSnapshot<T>>())?;
+    Ok(Arc::new(RetainedSnapshot {
+        snapshot,
+        _memory: memory,
+    }))
+}
+
+impl<T: CommittedRecordSnapshot> CommittedRecordSnapshot for RetainedSnapshot<T> {
+    fn sequence(&self) -> CommitSequence {
+        self.snapshot.sequence()
+    }
+    fn get(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<RecordVersion<SharedRecordValue>>> {
+        self.snapshot.get(key, control)
+    }
+    fn scan(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<ScannedRecord>> {
+        self.snapshot.scan(prefix, after, limit, control)
+    }
 }
 
 /// Visible payload plus its original committed precondition. Private deletions remain observable as tombstones rather than falling back to the committed value.

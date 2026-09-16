@@ -95,6 +95,7 @@ impl MemoryVersionStore {
         control: &StorageReadControl,
     ) -> VersionResult<CommitSequence> {
         control.cancellation().check()?;
+        let values = self.retain_values(commit, control)?;
         let mut state = self.database.state.lock();
         let writes = commit.records();
         if writes.is_empty() {
@@ -110,10 +111,10 @@ impl MemoryVersionStore {
         })?;
         let mut prepared = BudgetedVec::new(&self.database.memory);
         prepared.reserve(writes.len())?;
-        for write in writes {
+        for (write, value) in writes.iter().zip(values.iter()) {
             control.cancellation().check()?;
             let key = RecordKey::new(write.key(), &self.database.memory)?;
-            let value = write.shared_value();
+            let value = value.clone();
             let history = if let Some(entry) = state.records.get(write.key()) {
                 entry.history.fork_appending(sequence, value)?
             } else {
@@ -141,6 +142,33 @@ impl MemoryVersionStore {
         }
         state.sequence = sequence;
         Ok(sequence)
+    }
+
+    fn retain_values(
+        &self,
+        commit: &PreparedRecordCommit,
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<Option<SharedRecordValue>>> {
+        let mut values = BudgetedVec::new(&self.database.memory);
+        values.reserve(commit.records().len())?;
+        for write in commit.records() {
+            control.cancellation().check()?;
+            let mut value = write.shared_value();
+            if let Some(source) = value
+                .as_ref()
+                .filter(|value| !value.budget().shares_allowance(&self.database.memory))
+            {
+                let mut owned = BudgetedVec::new(&self.database.memory);
+                owned.reserve(source.len())?;
+                for chunk in source.chunks(65536) {
+                    control.cancellation().check()?;
+                    owned.extend_from_slice(chunk)?;
+                }
+                value = Some(Arc::new(owned));
+            }
+            values.push(value)?;
+        }
+        Ok(values)
     }
 
     /// Reclaim histories under the same gate that admits new snapshots.

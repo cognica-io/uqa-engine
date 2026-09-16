@@ -256,7 +256,7 @@ impl PrivateRecordChanges {
                 writes.push(write.clone())?;
             }
         }
-        Ok(PreparedRecordCommit::from_unique_owned(writes))
+        PreparedRecordCommit::from_unique_owned(writes, control)
     }
 }
 

@@ -51,6 +51,20 @@ pub enum VersionError {
     PrivateRevisionExhausted,
     #[error("private record savepoint {0:?} does not exist")]
     SavepointMissing(crate::StorageSavepointId),
+    #[error("transaction allocation must not be zero")]
+    InvalidTransactionId,
+    #[error("transaction belongs to another database incarnation")]
+    WrongDatabase,
+    #[error("transaction allocation space exhausted")]
+    TransactionIdsExhausted,
+    #[error("no retained transaction allocation or outcome")]
+    UnknownTransaction,
+    #[error("transaction has already ended")]
+    TransactionFinished,
+    #[error("transaction was committed with a different prepared batch")]
+    CommitMismatch,
+    #[error("invalid versioned record encoding: {0}")]
+    InvalidEncoding(&'static str),
     #[error(transparent)]
     Memory(#[from] uqa_core::memory::MemoryError),
     #[error(transparent)]

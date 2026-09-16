@@ -1,0 +1,340 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Short redb transactions persist versioned records and authoritative commit receipts.
+
+mod codec;
+mod read;
+#[cfg(test)]
+mod tests;
+
+use std::sync::Arc;
+
+use redb::{
+    Database, Durability, ReadableDatabase, ReadableTable, TableDefinition, TableHandle,
+    WriteTransaction,
+};
+use uqa_storage::mvcc::{
+    resolve_prepared_receipt, CommitFailure, CommitReceipt, CommitResult, CommitSequence,
+    CommitStatus, CommittedRecordSnapshot, DatabaseId, PreparedRecordCommit, StorageTransactionId,
+    VersionError, VersionResult, VersionedPersistence,
+};
+use uqa_storage::read_control::StorageReadControl;
+
+use crate::error::redb_error;
+use codec::{read_u64, receipt_bytes, status};
+
+const METADATA: TableDefinition<&str, &[u8]> = TableDefinition::new("uqa_mvcc_metadata");
+const HEADS: TableDefinition<&[u8], u64> = TableDefinition::new("uqa_mvcc_heads");
+const VERSIONS: TableDefinition<(&[u8], u64), &[u8]> = TableDefinition::new("uqa_mvcc_versions");
+const TRANSACTIONS: TableDefinition<u64, &[u8]> = TableDefinition::new("uqa_mvcc_transactions");
+
+/// Physical record persistence over one shared redb file owner. Reads retain logical sequence boundaries, and native writers exist only inside allocation, commit and abort calls.
+///
+/// This adapter preserves all historical versions and receipts. Provider reclamation and legacy Key/Value/catalog mapping remain separate integration work; opening this adapter does not advertise concurrent Engine SQL transactions.
+#[derive(Clone)]
+pub struct RedbRecordStore {
+    database: Arc<Database>,
+    identity: DatabaseId,
+}
+
+impl RedbRecordStore {
+    pub(crate) fn new(database: Arc<Database>) -> VersionResult<Self> {
+        let transaction = physical_writer(&database)?;
+        let names = [
+            METADATA.name(),
+            HEADS.name(),
+            VERSIONS.name(),
+            TRANSACTIONS.name(),
+        ];
+        let mut present = 0_u8;
+        for table in transaction.list_tables().map_err(redb_error)? {
+            if let Some(position) = names.iter().position(|name| *name == table.name()) {
+                present |= 1 << position;
+            }
+        }
+        if present != 0 && present != 15 {
+            return Err(VersionError::InvalidEncoding("incomplete record table set"));
+        }
+        let identity = {
+            let mut metadata = transaction.open_table(METADATA).map_err(redb_error)?;
+            let heads = transaction.open_table(HEADS).map_err(redb_error)?;
+            let versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
+            let receipts = transaction.open_table(TRANSACTIONS).map_err(redb_error)?;
+            let initialized = metadata
+                .get("format")
+                .map_err(redb_error)?
+                .map(|value| codec::decode_u64(value.value()))
+                .transpose()?;
+            if let Some(format) = initialized {
+                if format != 1 {
+                    return Err(VersionError::InvalidEncoding("unknown record format"));
+                }
+                read_u64(&metadata, "allocated")?;
+                read_u64(&metadata, "sequence")?;
+                let bytes = metadata
+                    .get("database")
+                    .map_err(redb_error)?
+                    .ok_or(VersionError::InvalidEncoding("missing database identity"))?;
+                DatabaseId::from_bytes(
+                    bytes
+                        .value()
+                        .try_into()
+                        .map_err(|_| VersionError::InvalidEncoding("invalid database identity"))?,
+                )
+            } else {
+                if metadata
+                    .iter()
+                    .map_err(redb_error)?
+                    .next()
+                    .transpose()
+                    .map_err(redb_error)?
+                    .is_some()
+                    || heads
+                        .iter()
+                        .map_err(redb_error)?
+                        .next()
+                        .transpose()
+                        .map_err(redb_error)?
+                        .is_some()
+                    || versions
+                        .iter()
+                        .map_err(redb_error)?
+                        .next()
+                        .transpose()
+                        .map_err(redb_error)?
+                        .is_some()
+                    || receipts
+                        .iter()
+                        .map_err(redb_error)?
+                        .next()
+                        .transpose()
+                        .map_err(redb_error)?
+                        .is_some()
+                {
+                    return Err(VersionError::InvalidEncoding(
+                        "uninitialized metadata has record data",
+                    ));
+                }
+                let mut bytes = [0; 16];
+                getrandom::fill(&mut bytes)
+                    .map_err(|error| redb_error(std::io::Error::other(error.to_string())))?;
+                metadata
+                    .insert("database", bytes.as_slice())
+                    .map_err(redb_error)?;
+                metadata
+                    .insert("format", 1_u64.to_be_bytes().as_slice())
+                    .map_err(redb_error)?;
+                metadata
+                    .insert("allocated", 0_u64.to_be_bytes().as_slice())
+                    .map_err(redb_error)?;
+                metadata
+                    .insert("sequence", 0_u64.to_be_bytes().as_slice())
+                    .map_err(redb_error)?;
+                DatabaseId::from_bytes(bytes)
+            }
+        };
+        transaction.commit().map_err(redb_error)?;
+        Ok(Self { database, identity })
+    }
+
+    fn check_identity(&self, transaction: StorageTransactionId) -> VersionResult<()> {
+        if transaction.database() != self.identity {
+            return Err(VersionError::WrongDatabase);
+        }
+        Ok(())
+    }
+
+    fn prepare_commit(
+        transaction: &WriteTransaction,
+        id: StorageTransactionId,
+        prepared: &PreparedRecordCommit,
+        control: &StorageReadControl,
+    ) -> VersionResult<(CommitReceipt, bool)> {
+        let mut receipts = transaction.open_table(TRANSACTIONS).map_err(redb_error)?;
+        if let Some(receipt) =
+            resolve_prepared_receipt(status(&receipts, id)?, id, prepared.fingerprint())?
+        {
+            return Ok((receipt, false));
+        }
+        let mut heads = transaction.open_table(HEADS).map_err(redb_error)?;
+        prepared.validate(control.cancellation(), |key| {
+            Ok(heads
+                .get(key)
+                .map_err(redb_error)?
+                .map(|version| CommitSequence::from_u64(version.value())))
+        })?;
+        let mut metadata = transaction.open_table(METADATA).map_err(redb_error)?;
+        let current = CommitSequence::from_u64(read_u64(&metadata, "sequence")?);
+        let sequence = if prepared.records().is_empty() {
+            current
+        } else {
+            current.successor()?
+        };
+        let mut versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
+        for write in prepared.records() {
+            control.cancellation().check()?;
+            let value = write.value();
+            let size = value
+                .map_or(0, <[u8]>::len)
+                .checked_add(1)
+                .ok_or(VersionError::InvalidEncoding("record size overflow"))?;
+            // The provider's writable page is borrowed; no transaction-sized payload copy is built here.
+            let mut encoded = versions
+                .insert_reserve((write.key(), sequence.as_u64()), size)
+                .map_err(redb_error)?;
+            encoded.as_mut()[0] = u8::from(value.is_some());
+            if let Some(value) = value {
+                for (target, source) in encoded.as_mut()[1..]
+                    .chunks_mut(65536)
+                    .zip(value.chunks(65536))
+                {
+                    control.cancellation().check()?;
+                    target.copy_from_slice(source);
+                }
+            }
+            drop(encoded);
+            heads
+                .insert(write.key(), sequence.as_u64())
+                .map_err(redb_error)?;
+        }
+        let receipt = CommitReceipt {
+            transaction: id,
+            sequence,
+            fingerprint: prepared.fingerprint(),
+        };
+        receipts
+            .insert(id.allocation(), receipt_bytes(receipt).as_slice())
+            .map_err(redb_error)?;
+        metadata
+            .insert("sequence", sequence.as_u64().to_be_bytes().as_slice())
+            .map_err(redb_error)?;
+        control.cancellation().check()?;
+        Ok((receipt, true))
+    }
+}
+
+impl VersionedPersistence for RedbRecordStore {
+    fn database_id(&self) -> DatabaseId {
+        self.identity
+    }
+
+    fn allocate_transaction(
+        &self,
+        control: &StorageReadControl,
+    ) -> VersionResult<StorageTransactionId> {
+        control.cancellation().check()?;
+        let transaction = physical_writer(&self.database)?;
+        let id = {
+            let mut metadata = transaction.open_table(METADATA).map_err(redb_error)?;
+            let allocation = read_u64(&metadata, "allocated")?
+                .checked_add(1)
+                .ok_or(VersionError::TransactionIdsExhausted)?;
+            let id = StorageTransactionId::new(self.identity, allocation)?;
+            transaction
+                .open_table(TRANSACTIONS)
+                .map_err(redb_error)?
+                .insert(allocation, [0].as_slice())
+                .map_err(redb_error)?;
+            metadata
+                .insert("allocated", allocation.to_be_bytes().as_slice())
+                .map_err(redb_error)?;
+            id
+        };
+        control.cancellation().check()?;
+        transaction.commit().map_err(redb_error)?;
+        Ok(id)
+    }
+
+    fn snapshot(
+        &self,
+        control: &StorageReadControl,
+    ) -> VersionResult<Arc<dyn CommittedRecordSnapshot>> {
+        control.cancellation().check()?;
+        let transaction = self.database.begin_read().map_err(redb_error)?;
+        let sequence = read_u64(
+            &transaction.open_table(METADATA).map_err(redb_error)?,
+            "sequence",
+        )?;
+        drop(transaction);
+        uqa_storage::mvcc::retain_record_snapshot(
+            read::Snapshot {
+                database: Arc::clone(&self.database),
+                sequence: CommitSequence::from_u64(sequence),
+            },
+            control,
+        )
+    }
+
+    fn commit(
+        &self,
+        id: StorageTransactionId,
+        prepared: &PreparedRecordCommit,
+        control: &StorageReadControl,
+    ) -> CommitResult {
+        control.cancellation().check().map_err(VersionError::from)?;
+        self.check_identity(id)?;
+        let transaction = physical_writer(&self.database)?;
+        let (receipt, changed) = Self::prepare_commit(&transaction, id, prepared, control)?;
+        if !changed {
+            return Ok(receipt);
+        }
+        if let Err(error) = transaction.commit() {
+            return Err(CommitFailure::Indeterminate {
+                transaction: id,
+                source: redb_error(error),
+            });
+        }
+        Ok(receipt)
+    }
+
+    fn commit_status(
+        &self,
+        id: StorageTransactionId,
+        control: &StorageReadControl,
+    ) -> VersionResult<CommitStatus> {
+        control.cancellation().check()?;
+        self.check_identity(id)?;
+        let transaction = self.database.begin_read().map_err(redb_error)?;
+        status(
+            &transaction.open_table(TRANSACTIONS).map_err(redb_error)?,
+            id,
+        )
+    }
+
+    fn abort(
+        &self,
+        id: StorageTransactionId,
+        control: &StorageReadControl,
+    ) -> VersionResult<CommitStatus> {
+        control.cancellation().check()?;
+        self.check_identity(id)?;
+        let transaction = physical_writer(&self.database)?;
+        let outcome = {
+            let mut receipts = transaction.open_table(TRANSACTIONS).map_err(redb_error)?;
+            match status(&receipts, id)? {
+                CommitStatus::Pending => {
+                    receipts
+                        .insert(id.allocation(), [1].as_slice())
+                        .map_err(redb_error)?;
+                    CommitStatus::Aborted
+                }
+                outcome => return Ok(outcome),
+            }
+        };
+        control.cancellation().check()?;
+        transaction.commit().map_err(redb_error)?;
+        Ok(outcome)
+    }
+}
+
+fn physical_writer(database: &Database) -> VersionResult<WriteTransaction> {
+    let mut transaction = database.begin_write().map_err(redb_error)?;
+    transaction
+        .set_durability(Durability::Immediate)
+        .map_err(redb_error)?;
+    Ok(transaction)
+}

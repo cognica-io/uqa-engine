@@ -25,6 +25,14 @@ pub struct RecordVersion<T> {
 }
 
 impl<T> RecordVersion<T> {
+    pub fn new(sequence: CommitSequence, value: Option<T>) -> VersionResult<Self> {
+        if sequence == CommitSequence::INITIAL {
+            return Err(VersionError::InvalidEncoding(
+                "record version has the initial sequence",
+            ));
+        }
+        Ok(Self { sequence, value })
+    }
     pub fn sequence(&self) -> CommitSequence {
         self.sequence
     }
@@ -36,6 +44,42 @@ impl<T> RecordVersion<T> {
 
     pub fn into_parts(self) -> (CommitSequence, Option<T>) {
         (self.sequence, self.value)
+    }
+}
+
+impl RecordVersion<SharedRecordValue> {
+    /// Own provider bytes under the read allowance before closing a physical read window.
+    pub fn copy_bytes(
+        sequence: CommitSequence,
+        value: Option<&[u8]>,
+        control: &crate::read_control::StorageReadControl,
+    ) -> VersionResult<Self> {
+        control.cancellation().check()?;
+        let mut record = Self::new(sequence, None)?;
+        record.value = value
+            .map(|bytes| {
+                let mut value = BudgetedVec::new(control.memory());
+                value.extend_from_slice(bytes)?;
+                Ok::<_, VersionError>(Arc::new(value))
+            })
+            .transpose()?;
+        Ok(record)
+    }
+}
+
+impl ScannedRecord {
+    pub fn copy_key(
+        key: &[u8],
+        version: RecordVersion<SharedRecordValue>,
+        control: &crate::read_control::StorageReadControl,
+    ) -> VersionResult<Self> {
+        control.cancellation().check()?;
+        let mut owned = BudgetedVec::new(control.memory());
+        owned.extend_from_slice(key)?;
+        Ok(Self {
+            key: owned,
+            version,
+        })
     }
 }
 

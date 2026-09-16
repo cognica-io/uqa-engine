@@ -418,6 +418,41 @@ fn prepared_values_survive_their_inputs_and_discard_does_not_restore_old_state()
 }
 
 #[test]
+fn committed_values_move_to_the_store_budget_when_prepared_elsewhere() {
+    let store_memory = MemoryBudget::new(1 << 20);
+    let caller = control();
+    let store = MemoryVersionStore::new(&store_memory);
+    let payload = vec![7; 4096];
+    let prepared = PreparedRecordCommit::new(&[write(b"key", None, &payload)], &caller).unwrap();
+    store.commit_prepared(&prepared, &caller).unwrap();
+    assert!(store_memory.used() >= payload.len());
+    drop(prepared);
+    assert_eq!(caller.memory().used(), 0);
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(value(&snapshot, b"key").unwrap(), payload);
+    drop(snapshot);
+    drop(store);
+    assert_eq!(store_memory.used(), 0);
+}
+
+#[test]
+fn a_foreign_preparation_cannot_bypass_the_store_payload_limit() {
+    let store_memory = MemoryBudget::new(1024);
+    let caller = control();
+    let store = MemoryVersionStore::new(&store_memory);
+    let prepared = PreparedRecordCommit::new(&[write(b"key", None, &[7; 4096])], &caller).unwrap();
+    assert!(matches!(
+        store.commit_prepared(&prepared, &caller),
+        Err(VersionError::Memory(_))
+    ));
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(snapshot.sequence(), CommitSequence::INITIAL);
+    assert!(snapshot.get(b"key").is_none());
+    drop(snapshot);
+    assert_eq!(store_memory.used(), 0);
+}
+
+#[test]
 fn allocation_failure_during_publication_preparation_keeps_the_commit_atomic() {
     let memory = MemoryBudget::new(16384);
     let store = MemoryVersionStore::new(&memory);

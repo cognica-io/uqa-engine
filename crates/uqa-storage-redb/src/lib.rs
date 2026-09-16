@@ -13,6 +13,7 @@
 
 mod batch;
 mod error;
+mod mvcc;
 mod store;
 mod transaction;
 
@@ -26,6 +27,7 @@ use uqa_storage::{
     PersistentStorageSession, StorageBackendError, StorageBackendResult,
 };
 
+pub use mvcc::RedbRecordStore;
 pub use store::RedbKeyValueStore;
 
 use error::redb_error;
@@ -59,6 +61,11 @@ impl RedbStorage {
     /// Create a transaction-isolated physical store session.
     pub fn store(&self) -> RedbKeyValueStore {
         RedbKeyValueStore::new(Arc::clone(&self.database), self.identity.clone())
+    }
+
+    /// Open the versioned-record persistence adapter over this database owner. Existing catalog/KeyValue sessions are not yet mapped to these records.
+    pub fn record_store(&self) -> uqa_storage::mvcc::VersionResult<RedbRecordStore> {
+        RedbRecordStore::new(Arc::clone(&self.database))
     }
 }
 
