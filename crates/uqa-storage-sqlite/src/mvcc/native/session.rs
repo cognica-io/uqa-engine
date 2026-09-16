@@ -1,0 +1,128 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Native row addressing over a retained common committed/private view.
+
+use rusqlite::types::ValueRef;
+use uqa_storage::mvcc::{DatabaseId, MergedRecordSnapshot, VersionedKeyValueStore};
+use uqa_storage::read_control::StorageReadControl;
+use uqa_storage::KeyValueBatch;
+
+use super::{
+    decode_record, invalid, owners, NativeRecord, NativeRecordFamily as Family,
+    NativeRecordIdentity, NativeRecordOwner,
+};
+use crate::connection::Result;
+
+pub(crate) struct NativeSnapshot {
+    pub(crate) view: MergedRecordSnapshot,
+    pub(crate) control: StorageReadControl,
+    pub(crate) database: DatabaseId,
+}
+
+impl NativeSnapshot {
+    pub(crate) fn capture(store: &VersionedKeyValueStore, database: DatabaseId) -> Result<Self> {
+        Ok(Self {
+            view: store.record_snapshot()?,
+            control: store.retention_control(),
+            database,
+        })
+    }
+
+    pub(crate) fn read_row<R>(
+        &self,
+        family: Family,
+        owner: NativeRecordOwner,
+        components: &[ValueRef<'_>],
+        read: impl FnOnce(&[ValueRef<'_>]) -> Result<R>,
+    ) -> Result<Option<R>> {
+        let key =
+            NativeRecordIdentity::new(family, owner)?.encode_key(components, &self.control)?;
+        let record = self.view.get(&key, &self.control)?;
+        let Some(bytes) = record.as_ref().and_then(|record| record.value()) else {
+            return Ok(None);
+        };
+        let (_, row) = decode_record(&key, bytes, &self.control)?;
+        read(&row).map(Some)
+    }
+
+    pub(crate) fn table_owner(&self, table: &str) -> Result<Option<NativeRecordOwner>> {
+        self.read_row(
+            Family::TableOwners,
+            NativeRecordOwner::Database(self.database),
+            &[ValueRef::Text(table.as_bytes())],
+            |values| {
+                let id = |value: ValueRef<'_>| {
+                    value
+                        .as_blob()
+                        .ok()
+                        .and_then(|bytes| bytes.try_into().ok())
+                        .ok_or_else(|| invalid("native table owner must have a 16-byte identity"))
+                };
+                let owner = NativeRecordOwner::Object {
+                    identity: id(values[1])?,
+                    generation: id(values[2])?,
+                };
+                NativeRecordIdentity::new(Family::Documents, owner)?;
+                Ok(owner)
+            },
+        )
+    }
+
+    pub(crate) fn ensure_table_owner(
+        &self,
+        table: &str,
+        batch: &mut dyn KeyValueBatch,
+    ) -> Result<NativeRecordOwner> {
+        if let Some(owner) = self.table_owner(table)? {
+            return Ok(owner);
+        }
+        let allocate =
+            || owners::allocate(ValueRef::Blob(&[])).map_err(crate::mvcc::Error::into_version);
+        let identity = allocate()?;
+        let generation = allocate()?;
+        self.put_row(
+            batch,
+            Family::TableOwners,
+            NativeRecordOwner::Database(self.database),
+            &[
+                ValueRef::Text(table.as_bytes()),
+                ValueRef::Blob(&identity),
+                ValueRef::Blob(&generation),
+                ValueRef::Integer(0),
+            ],
+        )?;
+        Ok(NativeRecordOwner::Object {
+            identity,
+            generation,
+        })
+    }
+
+    pub(crate) fn put_row(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        family: Family,
+        owner: NativeRecordOwner,
+        row: &[ValueRef<'_>],
+    ) -> Result<()> {
+        let record = NativeRecord::encode(family, owner, row, &self.control)?;
+        batch.put(record.key(), record.row())?;
+        Ok(())
+    }
+
+    pub(crate) fn delete_prefix(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        family: Family,
+        owner: NativeRecordOwner,
+        prefix: &[ValueRef<'_>],
+    ) -> Result<()> {
+        batch.delete_prefix(
+            &NativeRecordIdentity::new(family, owner)?.encode_prefix(prefix, &self.control)?,
+        )?;
+        Ok(())
+    }
+}

@@ -23,6 +23,7 @@ use uqa_storage::{mvcc::VersionedKeyValueStore, KeyValueStore};
 use crate::compressed_vfs::{self, SQLiteCompressedContainerAnchor, SQLiteCompressionOptions};
 
 mod logical;
+mod native;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SQLiteError {
@@ -77,10 +78,12 @@ pub enum SQLiteError {
     SessionCleanupFailed(String),
     #[error("sqlite connection-pool checkout lost its connection")]
     MissingCheckedOutConnection,
-    #[error("versioned KeyValue storage requires its logical session; use with_physical only for explicit physical maintenance")]
+    #[error("versioned storage requires its logical session; use with_physical only for explicit physical maintenance")]
     LogicalSessionRequired,
     #[error("the SQLite session already has a different retention limit")]
     SessionOptionsMismatch,
+    #[error("the SQLite session is bound to a different record mapping")]
+    SessionMappingMismatch,
 }
 
 pub type Result<T> = std::result::Result<T, SQLiteError>;
@@ -254,7 +257,7 @@ struct SessionState {
     transaction: Mutex<Option<PooledConnection>>,
     transaction_failure: Mutex<Option<String>>,
     cleanup_failure: Mutex<Option<String>>,
-    logical: OnceLock<Arc<VersionedKeyValueStore>>,
+    logical: OnceLock<Arc<logical::BoundRecordSession>>,
 }
 
 impl SessionState {
@@ -821,6 +824,12 @@ fn default_pool_connections() -> usize {
 
 #[cfg(test)]
 mod tests;
+
+impl From<uqa_storage::mvcc::VersionError> for SQLiteError {
+    fn from(error: uqa_storage::mvcc::VersionError) -> Self {
+        Self::from(error.into_storage_error())
+    }
+}
 
 impl From<SQLiteError> for uqa_storage::StorageBackendError {
     fn from(source: SQLiteError) -> Self {

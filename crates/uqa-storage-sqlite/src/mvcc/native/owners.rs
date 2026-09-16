@@ -33,7 +33,7 @@ fn nonzero(value: ValueRef<'_>) -> PhysicalResult<[u8; 16]> {
     Ok(bytes)
 }
 
-fn allocate(value: ValueRef<'_>) -> PhysicalResult<[u8; 16]> {
+pub(super) fn allocate(value: ValueRef<'_>) -> PhysicalResult<[u8; 16]> {
     if let ValueRef::Blob(bytes) = value {
         if !bytes.is_empty() && bytes != [0; 16] {
             return nonzero(value);

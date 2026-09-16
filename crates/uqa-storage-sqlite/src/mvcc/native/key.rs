@@ -189,10 +189,19 @@ impl NativeRecordIdentity {
 
     /// Validate every ordered component, including keys for an absent tombstone.
     pub(super) fn decode_full(key: &[u8], control: &StorageReadControl) -> VersionResult<Self> {
+        Self::visit_key_components(key, control, |_, _| Ok(()))
+    }
+
+    /// Decode ordered keys without loading row payloads. Borrowed component buffers are valid only during the callback.
+    pub(crate) fn visit_key_components(
+        key: &[u8],
+        control: &StorageReadControl,
+        mut visit: impl FnMut(usize, ValueRef<'_>) -> VersionResult<()>,
+    ) -> VersionResult<Self> {
         let identity = Self::decode(key)?;
         let header = identity.encode_prefix(&[], control)?;
         let mut input = &key[header.len()..];
-        for &column in identity.family.layout().identity_columns {
+        for (component, &column) in identity.family.layout().identity_columns.iter().enumerate() {
             control.cancellation().check()?;
             let (&tag, rest) = input
                 .split_first()
@@ -241,6 +250,7 @@ impl NativeRecordIdentity {
             if !identity.family.layout().column_types[column].accepts(value) {
                 return Err(invalid("native key component does not match its layout"));
             }
+            visit(component, value)?;
         }
         if !input.is_empty() {
             return Err(invalid("native key has trailing components"));

@@ -79,6 +79,16 @@ impl VersionedKeyValueStore {
         self.options
     }
 
+    /// Retain the current committed and private boundaries for a compound provider read. Later session mutations, rollback and commit do not advance this view.
+    pub fn record_snapshot(&self) -> VersionResult<MergedRecordSnapshot> {
+        self.view()
+    }
+
+    /// Share this session's retention allowance with provider codecs and retained record readers. Creating a control clone does not create another allowance.
+    pub fn retention_control(&self) -> StorageReadControl {
+        self.control.clone()
+    }
+
     pub fn session_affinity(&self) -> StorageSessionAffinity {
         self.affinity.clone()
     }

@@ -32,6 +32,7 @@ type EncodedDocument = (Document, Vec<(String, Vec<u8>)>);
 
 mod batching;
 mod blob;
+mod native;
 mod store;
 mod trait_impl;
 mod typed_value;
@@ -54,6 +55,7 @@ use typed_value::{
 pub struct SQLiteDocumentStore {
     conn: ManagedConnection,
     table: String,
+    retained: Option<Arc<crate::mvcc::native::NativeSnapshot>>,
 }
 
 #[cfg(test)]

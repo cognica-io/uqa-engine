@@ -17,6 +17,19 @@ use super::{
 
 impl DocumentStore for SQLiteDocumentStore {
     fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
+        if self
+            .write_native(|read, batch| {
+                read.put(
+                    batch,
+                    doc_id,
+                    &document,
+                    read.metadata(doc_id)?.unwrap_or_default(),
+                )
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         let metadata = self.get_metadata(doc_id)?.unwrap_or_default();
         self.put_stored_inner(doc_id, &document, metadata)?;
         Ok(())
@@ -40,6 +53,9 @@ impl DocumentStore for SQLiteDocumentStore {
         &self,
         doc_ids: &[DocId],
     ) -> StorageBackendResult<BTreeMap<DocId, StoredDocument>> {
+        if let Some(documents) = self.read_native(|read| read.stored_many(doc_ids))? {
+            return Ok(documents);
+        }
         let mut out = BTreeMap::new();
         if doc_ids.is_empty() {
             return Ok(out);
@@ -115,6 +131,9 @@ impl DocumentStore for SQLiteDocumentStore {
     }
 
     fn get_metadata(&self, doc_id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
+        if let Some(metadata) = self.read_native(|read| read.metadata(doc_id))? {
+            return Ok(metadata);
+        }
         let sqlite_doc_id = sqlite_doc_id(doc_id)?;
         let tuple_xmin = self.conn.with(|connection| {
             Ok(connection
@@ -148,6 +167,9 @@ impl DocumentStore for SQLiteDocumentStore {
     }
 
     fn contains_doc_id(&self, doc_id: DocId) -> StorageBackendResult<bool> {
+        if let Some(found) = self.read_native(|read| read.contains(doc_id))? {
+            return Ok(found);
+        }
         let sqlite_doc_id = sqlite_doc_id(doc_id)?;
         Ok(self.conn.with(|c| {
             let found: Option<i64> = c
@@ -178,11 +200,92 @@ impl DocumentStore for SQLiteDocumentStore {
         Ok(self.find_doc_id_by_field_inner(field, value)?)
     }
 
+    fn has_value(&self, field: &str, value: &Value) -> StorageBackendResult<bool> {
+        if let Some(found) = self.read_native(|read| read.find(field, value))? {
+            return Ok(found.is_some());
+        }
+        for id in self.doc_ids()? {
+            if self.get_field(id, field)?.as_ref() == Some(value) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn find_doc_id_by_fields(
+        &self,
+        fields: &[String],
+        values: &[Value],
+    ) -> StorageBackendResult<Option<DocId>> {
+        if let Some(found) = self.read_native(|read| read.find_fields(fields, values))? {
+            return Ok(found);
+        }
+        if fields.is_empty() || fields.len() != values.len() {
+            return Ok(None);
+        }
+        for id in self.doc_ids()? {
+            let mut matches = true;
+            for (field, value) in fields.iter().zip(values) {
+                if self.get_field(id, field)?.unwrap_or(Value::Null) != *value {
+                    matches = false;
+                    break;
+                }
+            }
+            if matches {
+                return Ok(Some(id));
+            }
+        }
+        Ok(None)
+    }
+
+    fn for_each_fields_multi_ref_with_presence(
+        &self,
+        doc_ids: &[DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
+    ) -> StorageBackendResult<()> {
+        let snapshot = self.snapshot()?;
+        if fields.is_empty() {
+            for &id in doc_ids {
+                if !visitor(id, snapshot.contains_doc_id(id)?, &[]) {
+                    break;
+                }
+            }
+        } else {
+            let projected = snapshot.get_fields_multi(doc_ids, fields)?;
+            let missing = vec![&Value::Null; fields.len()];
+            for &id in doc_ids {
+                let keep_going = match projected.get(&id) {
+                    Some(values) => visitor(id, true, &values.iter().collect::<Vec<_>>()),
+                    None => visitor(id, false, &missing),
+                };
+                if !keep_going {
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn iter_all(&self) -> StorageBackendResult<Box<dyn Iterator<Item = (DocId, Document)> + '_>> {
+        let snapshot = self.snapshot()?;
+        let mut rows = Vec::new();
+        for id in snapshot.doc_ids()? {
+            if let Some(document) = snapshot.get(id)? {
+                rows.push((id, document));
+            }
+        }
+        Ok(Box::new(rows.into_iter()))
+    }
+
     fn get_fields_bulk(
         &self,
         doc_ids: &[DocId],
         field: &str,
     ) -> StorageBackendResult<BTreeMap<DocId, Value>> {
+        if let Some(values) = self.read_native(|read| read.fields_bulk(doc_ids, field))? {
+            return Ok(values);
+        }
         let mut out: BTreeMap<DocId, Value> = doc_ids
             .iter()
             .copied()
@@ -259,6 +362,9 @@ impl DocumentStore for SQLiteDocumentStore {
         doc_ids: &[DocId],
         fields: &[&str],
     ) -> StorageBackendResult<BTreeMap<DocId, Vec<Value>>> {
+        if let Some(values) = self.read_native(|read| read.fields_multi(doc_ids, fields))? {
+            return Ok(values);
+        }
         let mut out: BTreeMap<DocId, Vec<Value>> = BTreeMap::new();
         if doc_ids.is_empty() || fields.is_empty() {
             return Ok(out);
@@ -354,6 +460,12 @@ impl DocumentStore for SQLiteDocumentStore {
     }
 
     fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
+        if self
+            .write_native(|read, batch| read.delete(batch, doc_id))?
+            .is_some()
+        {
+            return Ok(());
+        }
         let sqlite_doc_id = sqlite_doc_id(doc_id)?;
         self.conn.with(|c| {
             c.prepare_cached(&format!(
@@ -369,6 +481,12 @@ impl DocumentStore for SQLiteDocumentStore {
     }
 
     fn clear(&mut self) -> StorageBackendResult<()> {
+        if self
+            .write_native(|read, batch| read.clear(batch))?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 &format!("DELETE FROM {DOCUMENT_BLOBS_TABLE} WHERE table_name = ?1"),
@@ -384,6 +502,9 @@ impl DocumentStore for SQLiteDocumentStore {
     }
 
     fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {
+        if let Some(ids) = self.read_native(|read| read.ids(None, usize::MAX))? {
+            return Ok(ids);
+        }
         Ok(self.conn.with(|c| {
             let mut stmt = c.prepare_cached(
                 "SELECT doc_id FROM _documents WHERE table_name = ?1 ORDER BY doc_id",
@@ -398,6 +519,9 @@ impl DocumentStore for SQLiteDocumentStore {
     }
 
     fn next_doc_id(&self, after: Option<DocId>) -> StorageBackendResult<Option<DocId>> {
+        if let Some(ids) = self.read_native(|read| read.ids(after, 1))? {
+            return Ok(ids.first().copied());
+        }
         let after = after.map(sqlite_doc_id).transpose()?;
         Ok(self.conn.with(|connection| {
             let doc_id: Option<i64> = match after {
@@ -423,6 +547,9 @@ impl DocumentStore for SQLiteDocumentStore {
     }
 
     fn next_doc_ids(&self, after: Option<DocId>, limit: usize) -> StorageBackendResult<Vec<DocId>> {
+        if let Some(ids) = self.read_native(|read| read.ids(after, limit))? {
+            return Ok(ids);
+        }
         if limit == 0 {
             return Ok(Vec::new());
         }
@@ -466,7 +593,14 @@ impl DocumentStore for SQLiteDocumentStore {
         SQLiteDocumentStore::max_doc_id(self)
     }
 
+    #[expect(
+        clippy::redundant_closure_for_method_calls,
+        reason = "a method item cannot satisfy the borrowed reader's higher-ranked lifetimes"
+    )]
     fn len(&self) -> StorageBackendResult<usize> {
+        if let Some(count) = self.read_native(|read| read.len())? {
+            return Ok(count);
+        }
         Ok(self.conn.with(|c| {
             let n: i64 = c
                 .prepare_cached("SELECT COUNT(*) FROM _documents WHERE table_name = ?1")?
@@ -480,6 +614,10 @@ impl DocumentStore for SQLiteDocumentStore {
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>> {
-        Ok(Arc::new(self.clone()))
+        let mut snapshot = self.clone();
+        if snapshot.retained.is_none() {
+            snapshot.retained = self.conn.native_snapshot()?;
+        }
+        Ok(Arc::new(snapshot))
     }
 }

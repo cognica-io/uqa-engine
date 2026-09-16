@@ -6,7 +6,7 @@
 
 //! Connection clones and store handles share one logical transaction context.
 
-use uqa_storage::mvcc::{VersionError, VersionedSessionOptions};
+use uqa_storage::mvcc::{DatabaseId, VersionError, VersionedSessionOptions};
 use uqa_storage::read_control::StorageReadControl;
 use uqa_storage::{PersistentStorageIdentity, StorageBackendResult};
 
@@ -14,6 +14,28 @@ use super::{
     Arc, Connection, KeyValueStore, ManagedConnection, Result, SQLiteError, SessionState,
     VersionedKeyValueStore,
 };
+
+pub(super) struct BoundRecordSession {
+    pub(super) store: Arc<VersionedKeyValueStore>,
+    pub(super) native: Option<DatabaseId>,
+}
+
+impl std::ops::Deref for BoundRecordSession {
+    type Target = VersionedKeyValueStore;
+
+    fn deref(&self) -> &Self::Target {
+        &self.store
+    }
+}
+
+impl BoundRecordSession {
+    pub(super) fn new_session(&self) -> Self {
+        Self {
+            store: Arc::new(self.store.new_session()),
+            native: self.native,
+        }
+    }
+}
 
 impl ManagedConnection {
     pub(crate) fn record_connection(&self) -> Self {
@@ -31,10 +53,13 @@ impl ManagedConnection {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.write();
         if let Some(logical) = self.session.logical.get() {
+            if logical.native.is_some() {
+                return Err(SQLiteError::SessionMappingMismatch);
+            }
             if logical.options().retained_bytes != options.retained_bytes {
                 return Err(SQLiteError::SessionOptionsMismatch);
             }
-            return Ok(Arc::clone(logical));
+            return Ok(Arc::clone(&logical.store));
         }
         if self.session.transaction.lock().is_some() {
             return Err(SQLiteError::TransactionAlreadyActive);
@@ -55,7 +80,10 @@ impl ManagedConnection {
         ));
         self.session
             .logical
-            .set(Arc::clone(&logical))
+            .set(Arc::new(BoundRecordSession {
+                store: Arc::clone(&logical),
+                native: None,
+            }))
             .map_err(|_| SQLiteError::SessionOptionsMismatch)?;
         Ok(logical)
     }
@@ -71,6 +99,9 @@ impl ManagedConnection {
             .logical
             .get()
             .ok_or(SQLiteError::LogicalSessionRequired)?;
+        if logical.native.is_some() {
+            return Err(SQLiteError::SessionMappingMismatch.into());
+        }
         operation(logical)
     }
 
