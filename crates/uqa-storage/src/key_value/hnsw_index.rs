@@ -6,30 +6,18 @@
 
 //! HNSW readers and evaluated mutations use one logical Key/Value visibility boundary.
 
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
-
-use parking_lot::Mutex;
+use std::sync::Arc;
 use uqa_core::{DocId, PostingList};
 
 use super::codec::{other_error, vector_field_prefix};
 use super::hnsw_persistence;
 use super::index_keys::{hnsw_metadata_key, hnsw_node_prefix};
-use super::{
-    KeyValueBatch, KeyValueRead, KeyValueReadRevision, KeyValueStore, KeyValueVectorIndex,
-};
+use super::{KeyValueBatch, KeyValueRead, KeyValueStore, KeyValueVectorIndex};
 use crate::hnsw_index::{HNSWIndex, HNSWPersistenceDelta};
 use crate::vector_index::{HNSWIndexParams, VectorIndex};
 use crate::{StorageBackendError, StorageBackendResult};
 
-#[derive(Clone)]
-struct CachedHNSW {
-    graph: Arc<HNSWIndex>,
-    revision: Option<u64>,
-    identity: KeyValueReadRevision,
-}
+use super::index_view::{read_view, IndexState, IndexView};
 
 pub struct KeyValueHNSWIndex {
     store: Arc<dyn KeyValueStore>,
@@ -39,8 +27,7 @@ pub struct KeyValueHNSWIndex {
     dimensions: u32,
     params: HNSWIndexParams,
     require_persisted: bool,
-    preparing_definition: AtomicBool,
-    cached: Mutex<Option<CachedHNSW>>,
+    view: IndexView<HNSWIndex>,
 }
 
 impl KeyValueHNSWIndex {
@@ -52,19 +39,7 @@ impl KeyValueHNSWIndex {
         params: HNSWIndexParams,
     ) -> StorageBackendResult<Self> {
         let index = Self::new(store, table.into(), field.into(), dimensions, params, false)?;
-        // Creation may replace an existing physical definition; build the candidate from canonical values with the requested parameters.
-        index.store.with_read_view(&mut |read| {
-            let graph = index.build_from_canonical(read)?;
-            *index.cached.lock() = Some(CachedHNSW {
-                graph: Arc::new(graph),
-                revision: hnsw_persistence::load_revision(read, &index.table, &index.field)?,
-                identity: index.identity(read)?,
-            });
-            Ok(())
-        })?;
-        if index.cached.lock().is_none() {
-            return Err(other_error("KeyValue provider did not evaluate the read"));
-        }
+        index.read_graph()?;
         Ok(index)
     }
 
@@ -96,87 +71,49 @@ impl KeyValueHNSWIndex {
             dimensions,
             params: params.validate()?,
             require_persisted,
-            preparing_definition: AtomicBool::new(!require_persisted),
-            cached: Mutex::new(None),
+            view: IndexView::new(!require_persisted),
         })
     }
 
-    fn identity(&self, read: &dyn KeyValueRead) -> StorageBackendResult<KeyValueReadRevision> {
-        read.revision(&[
-            &hnsw_metadata_key(&self.table, &self.field)?,
-            &hnsw_node_prefix(&self.table, &self.field)?,
-            &vector_field_prefix(&self.table, &self.field)?,
-        ])
+    fn graph_at(&self, read: &dyn KeyValueRead) -> StorageBackendResult<IndexState<HNSWIndex>> {
+        self.view.load(
+            read,
+            &[
+                &hnsw_metadata_key(&self.table, &self.field)?,
+                &hnsw_node_prefix(&self.table, &self.field)?,
+                &vector_field_prefix(&self.table, &self.field)?,
+            ],
+            |creating| {
+                let revision = hnsw_persistence::load_revision(read, &self.table, &self.field)?;
+                let graph = if creating || (revision.is_none() && !self.require_persisted) {
+                    self.build_from_canonical(read)?
+                } else {
+                    hnsw_persistence::restore_graph(
+                        read,
+                        &self.raw,
+                        &self.table,
+                        &self.field,
+                        self.dimensions,
+                        self.params,
+                    )?
+                    .0
+                };
+                Ok((graph, revision))
+            },
+        )
     }
 
-    fn graph_at(&self, read: &dyn KeyValueRead) -> StorageBackendResult<CachedHNSW> {
-        let identity = self.identity(read)?;
-        if let Some(cached) = self.cached.lock().as_ref() {
-            if cached.identity == identity {
-                return Ok(cached.clone());
-            }
-        }
-        let revision = hnsw_persistence::load_revision(read, &self.table, &self.field)?;
-        let graph = if self.preparing_definition.load(Ordering::Acquire)
-            || (revision.is_none() && !self.require_persisted)
-        {
-            self.build_from_canonical(read)?
-        } else {
-            hnsw_persistence::restore_graph(
-                read,
-                &self.raw,
-                &self.table,
-                &self.field,
-                self.dimensions,
-                self.params,
-            )?
-            .0
-        };
-        let cached = CachedHNSW {
-            graph: Arc::new(graph),
-            revision,
-            identity,
-        };
-        *self.cached.lock() = Some(cached.clone());
-        Ok(cached)
-    }
-
-    fn read_graph(&self) -> StorageBackendResult<CachedHNSW> {
-        let mut graph = None;
-        self.store.with_read_view(&mut |read| {
-            graph = Some(self.graph_at(read)?);
-            Ok(())
-        })?;
-        graph.ok_or_else(|| other_error("KeyValue provider did not evaluate the read"))
-    }
-
-    fn evaluate(
-        &self,
-        operation: impl FnOnce(&dyn KeyValueRead, &mut dyn KeyValueBatch) -> StorageBackendResult<()>,
-    ) -> StorageBackendResult<()> {
-        let mut operation = Some(operation);
-        self.store.with_mutation(&mut |read, batch| {
-            operation.take().ok_or_else(|| {
-                other_error("KeyValue provider attempted to replay mutation evaluation")
-            })?(read, batch)
-        })?;
-        if operation.is_some() {
-            return Err(other_error(
-                "KeyValue provider did not evaluate the mutation",
-            ));
-        }
-        // Until the first successful staging, creation owns the requested parameters even if an unrelated write invalidates its initial cache.
-        self.preparing_definition.store(false, Ordering::Release);
-        Ok(())
+    fn read_graph(&self) -> StorageBackendResult<IndexState<HNSWIndex>> {
+        read_view(self.store.as_ref(), |read| self.graph_at(read))
     }
 
     fn mutate_graph(
         &self,
         mutate: impl FnOnce(&mut HNSWIndex, &mut dyn KeyValueBatch) -> StorageBackendResult<()>,
     ) -> StorageBackendResult<()> {
-        self.evaluate(|read, batch| {
+        self.view.evaluate(self.store.as_ref(), |read, batch| {
             let cached = self.graph_at(read)?;
-            let mut graph = cached.graph.as_ref().clone();
+            let mut graph = cached.value.as_ref().clone();
             mutate(&mut graph, batch)?;
             // Only a later reader publishes the graph with its actual committed/private identity.
             self.stage_delta(
@@ -188,7 +125,7 @@ impl KeyValueHNSWIndex {
     }
 
     fn rebuild_graph(&self) -> StorageBackendResult<()> {
-        self.evaluate(|read, batch| {
+        self.view.evaluate(self.store.as_ref(), |read, batch| {
             let revision = hnsw_persistence::load_revision(read, &self.table, &self.field)?;
             if revision.is_none() && self.require_persisted {
                 return Err(other_error(format!(
@@ -268,19 +205,19 @@ impl VectorIndex for KeyValueHNSWIndex {
         })
     }
     fn search_knn(&self, query: &[f32], k: usize) -> StorageBackendResult<PostingList> {
-        self.read_graph()?.graph.search_knn(query, k)
+        self.read_graph()?.value.search_knn(query, k)
     }
     fn search_threshold(&self, query: &[f32], threshold: f32) -> StorageBackendResult<PostingList> {
-        self.read_graph()?.graph.search_threshold(query, threshold)
+        self.read_graph()?.value.search_threshold(query, threshold)
     }
     fn count(&self) -> StorageBackendResult<usize> {
-        self.read_graph()?.graph.count()
+        self.read_graph()?.value.count()
     }
     fn initialize(&mut self) -> StorageBackendResult<()> {
         self.rebuild_graph()
     }
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
-        Ok(self.read_graph()?.graph)
+        Ok(self.read_graph()?.snapshot)
     }
 }
 

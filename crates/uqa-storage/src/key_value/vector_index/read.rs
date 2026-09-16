@@ -18,7 +18,7 @@ use super::super::{
 use super::KeyValueVectorIndex;
 use crate::StorageBackendResult;
 
-type Entries = Vec<(DocId, u32, Vec<f32>)>;
+pub(super) type Entries = Vec<(DocId, u32, Vec<f32>)>;
 
 impl KeyValueVectorIndex {
     pub(in crate::key_value) fn load_all_from(

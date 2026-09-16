@@ -23,7 +23,7 @@ use crate::backend::{PersistentStorageBackend, PersistentStorageIdentity};
 use crate::document_store::{Document, DocumentMetadata, DocumentStore, StoredDocument};
 use crate::inverted_index::{AnalyzerPhase, InvertedIndex};
 use crate::vector_index::{
-    cosine_similarity, validate_vector_values, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
+    validate_vector_values, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
 };
 use crate::{StorageBackendError, StorageBackendResult};
 
@@ -31,6 +31,7 @@ mod catalog;
 pub use catalog::KeyValueCatalog;
 mod graph_commit;
 pub use graph_commit::KeyValueGraphRecords;
+mod index_view;
 mod view;
 pub use view::{KeyValueMutation, KeyValueRead, KeyValueReadRevision, KeyValueReadScope};
 
@@ -130,7 +131,7 @@ pub trait KeyValueBatch {
 
 /// Ordered byte-key storage used by Key/Value catalog and index backends.
 pub trait KeyValueStore: Send + Sync {
-    /// Evaluate a compound read against one fixed committed/private view. The callback must use the supplied reader and must not reenter this session. Stores without this capability reject it explicitly.
+    /// Evaluate a compound read once against one fixed committed/private view. The callback must use the supplied reader and must not reenter this session. Stores without this capability reject it explicitly.
     fn with_read_view(&self, _read: &mut KeyValueReadScope<'_>) -> StorageBackendResult<()> {
         Err(StorageBackendError::Other(
             "compound KeyValue reads are not supported by this store".into(),

@@ -51,3 +51,35 @@ fn key_value_hnsw_independent_commits_and_reopen_in_every_sqlite_mode() {
         verify_hnsw_reopen(reopened).unwrap();
     }
 }
+
+#[test]
+fn key_value_ivf_undo_and_tensor_snapshots_in_every_sqlite_mode() {
+    for mode in MODES {
+        let directory = tempfile::tempdir().unwrap();
+        let store: Arc<dyn KeyValueStore> = Arc::new(
+            SQLiteKeyValueStore::new(open(mode, &directory.path().join("ivf-undo.db"))).unwrap(),
+        );
+        verify_ivf_undo(store.clone()).unwrap();
+        verify_vector_snapshots(&store).unwrap();
+    }
+}
+
+#[test]
+fn key_value_ivf_and_exact_independent_commits_and_reopen_in_every_sqlite_mode() {
+    for mode in MODES {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("ivf.db");
+        {
+            let a: Arc<dyn KeyValueStore> =
+                Arc::new(SQLiteKeyValueStore::new(open(mode, &path)).unwrap());
+            let b: Arc<dyn KeyValueStore> =
+                Arc::new(SQLiteKeyValueStore::new(open(mode, &path)).unwrap());
+            verify_ivf_concurrency(&a, &b).unwrap();
+            verify_exact_snapshot_concurrency(&a, &b).unwrap();
+        }
+        verify_ivf_reopen(Arc::new(
+            SQLiteKeyValueStore::new(open(mode, &path)).unwrap(),
+        ))
+        .unwrap();
+    }
+}

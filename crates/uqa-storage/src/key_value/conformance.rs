@@ -20,8 +20,13 @@ mod graph_retry;
 pub use graph_retry::verify_graph_admission_retry;
 mod compound;
 pub use compound::{verify_compound_concurrency, verify_compound_mutations};
-mod hnsw;
-pub use hnsw::{verify_hnsw_concurrency, verify_hnsw_reopen, verify_hnsw_undo};
+mod physical_vectors;
+pub use physical_vectors::{
+    verify_hnsw_concurrency, verify_hnsw_reopen, verify_hnsw_undo, verify_ivf_concurrency,
+    verify_ivf_reopen, verify_ivf_undo,
+};
+mod vector_snapshots;
+pub use vector_snapshots::{verify_exact_snapshot_concurrency, verify_vector_snapshots};
 
 const PREFIX: &[u8] = b"\0uqa-key-value-conformance/v1/";
 
