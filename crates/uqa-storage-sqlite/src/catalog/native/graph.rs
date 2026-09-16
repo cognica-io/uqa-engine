@@ -6,8 +6,12 @@
 
 //! Point graph reads and selective identity pages use one retained native record view.
 
+pub(in crate::catalog) mod lifecycle;
+pub(in crate::catalog) mod paths;
 mod restore;
 mod selection;
+mod write;
+pub(in crate::catalog) use write::{membership, named_graph, source};
 
 #[cfg(test)]
 mod tests;

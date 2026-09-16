@@ -9,6 +9,7 @@
 mod capture;
 mod family;
 mod format;
+mod graph_cache;
 mod graph_lookup;
 mod key;
 mod layout;
@@ -20,6 +21,7 @@ mod row;
 mod sequences;
 mod session;
 
+pub(super) use graph_cache::NativeGraphRecords;
 pub(crate) use session::NativeSnapshot;
 
 pub(super) use format::{check_mapping, initialize, reject_mapped};

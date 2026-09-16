@@ -21,8 +21,10 @@ mod graph_lookup_upgrade;
 
 const LEGACY_FORMAT: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 1), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))";
 
+const FORMAT_TWO: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 2), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))";
+
 const TABLES: [(&str, &str); 4] = [
-    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 2), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))"),
+    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 3), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))"),
     ("_uqa_mvcc_native_owners", "CREATE TABLE _uqa_mvcc_native_owners (name TEXT PRIMARY KEY NOT NULL, object_id BLOB NOT NULL CHECK(typeof(object_id) = 'blob' AND length(object_id) = 16 AND object_id != zeroblob(16)), generation BLOB NOT NULL CHECK(typeof(generation) = 'blob' AND length(generation) = 16 AND generation != zeroblob(16)), catalog_owned INTEGER NOT NULL CHECK(catalog_owned IN (0, 1))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_expected", "CREATE TABLE _uqa_mvcc_native_expected (family INTEGER NOT NULL, physical_key BLOB NOT NULL, old_key BLOB, new_key BLOB, new_value BLOB, PRIMARY KEY(family, physical_key), CHECK((new_key IS NULL) = (new_value IS NULL))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_changes", "CREATE TABLE _uqa_mvcc_native_changes (family INTEGER NOT NULL, physical_key BLOB NOT NULL, PRIMARY KEY(family, physical_key)) WITHOUT ROWID"),
@@ -51,7 +53,7 @@ pub(in crate::mvcc) fn check_mapping(connection: &Connection, native: bool) -> P
     if !native {
         return reject_mapped(connection);
     }
-    check_mapping_version(connection, 2)
+    check_mapping_version(connection, 3)
 }
 
 fn check_mapping_version(connection: &Connection, version: u32) -> PhysicalResult<()> {
@@ -150,7 +152,7 @@ pub(in crate::mvcc) fn initialize(
         "UPDATE _uqa_mvcc_metadata SET sequence = ?1 WHERE singleton = 1",
         params![baseline.as_u64().to_be_bytes().as_slice()],
     )?;
-    transaction.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1, 2, 49)", [])?;
+    transaction.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1, 3, 49)", [])?;
     install_guards(&transaction)?;
     let invalid_foreign_key = transaction
         .prepare("PRAGMA foreign_key_check")?
@@ -166,8 +168,15 @@ pub(in crate::mvcc) fn initialize(
 }
 
 fn reopen(connection: &Connection, control: &StorageReadControl) -> PhysicalResult<DatabaseId> {
-    let legacy = schema::definition_matches(connection, TABLES[0].0, LEGACY_FORMAT)? == Some(true);
-    validate_format(connection, legacy)?;
+    let version =
+        if schema::definition_matches(connection, TABLES[0].0, LEGACY_FORMAT)? == Some(true) {
+            1
+        } else if schema::definition_matches(connection, TABLES[0].0, FORMAT_TWO)? == Some(true) {
+            2
+        } else {
+            3
+        };
+    validate_format(connection, version)?;
     let (identity, created) = schema::initialize_in(connection)?;
     if created {
         return Err(invalid("native mapping has no record history format").into());
@@ -175,10 +184,10 @@ fn reopen(connection: &Connection, control: &StorageReadControl) -> PhysicalResu
     if codec::header(connection, identity)?.key_value_mapping {
         return Err(invalid("mixed native and KeyValue mappings").into());
     }
-    check_mapping_version(connection, if legacy { 1 } else { 2 })?;
+    check_mapping_version(connection, version)?;
     super::sequences::validate_source(connection)?;
-    if legacy {
-        graph_lookup_upgrade::upgrade(connection, identity, control)?;
+    if version < 3 {
+        graph_lookup_upgrade::upgrade(connection, identity, version, control)?;
     }
     Ok(identity)
 }
@@ -208,10 +217,15 @@ fn install_family_guards(transaction: &Connection, family: Family) -> PhysicalRe
     Ok(())
 }
 
-fn validate_format(connection: &Connection, legacy: bool) -> PhysicalResult<()> {
+fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> {
+    let legacy = version == 1;
     for (name, sql) in TABLES {
-        let sql = if legacy && name == TABLES[0].0 {
-            LEGACY_FORMAT
+        let sql = if name == TABLES[0].0 {
+            match version {
+                1 => LEGACY_FORMAT,
+                2 => FORMAT_TWO,
+                _ => sql,
+            }
         } else {
             sql
         };
@@ -236,7 +250,12 @@ fn validate_format(connection: &Connection, legacy: bool) -> PhysicalResult<()> 
             Family::GraphLookups.layout().table,
             graph_lookup::SQL,
         )?;
-        for (name, sql) in graph_lookup::triggers() {
+        let sources = if version == 2 {
+            &graph_lookup::SOURCES[..3]
+        } else {
+            &graph_lookup::SOURCES[..]
+        };
+        for (name, sql) in graph_lookup::source_triggers(sources) {
             require_definition(connection, &name, &sql)?;
         }
     }

@@ -151,7 +151,7 @@ impl VersionedPersistence for SQLiteRecordStore {
     }
     fn graph_record_layout(&self) -> Option<&dyn uqa_storage::mvcc::GraphRecordLayout> {
         if self.native {
-            None
+            Some(&native::NativeGraphRecords)
         } else {
             Some(&uqa_storage::key_value::KeyValueGraphRecords)
         }

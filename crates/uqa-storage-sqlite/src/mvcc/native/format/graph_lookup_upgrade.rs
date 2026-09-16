@@ -21,32 +21,55 @@ use crate::mvcc::{
 pub(super) fn upgrade(
     connection: &Connection,
     database: DatabaseId,
+    version: u32,
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
-    validate_sources(connection, database, control)?;
-    connection.execute_batch(graph_lookup::SQL)?;
-    graph_lookup::backfill(connection, database, control)?;
-    graph_lookup::seed(connection, control)?;
+    let sources = if version == 1 {
+        &graph_lookup::SOURCES[..]
+    } else {
+        &[Family::GraphPathIndexState]
+    };
+    validate_sources(connection, database, sources, control)?;
+    if version == 1 {
+        connection.execute_batch(graph_lookup::SQL)?;
+    }
+    graph_lookup::backfill(connection, database, sources, version == 2, control)?;
+    // Backfill supplies the complete history itself. Suppress ordinary commit capture only while installing the new current projections, inside this same schema transaction.
+    if version == 2 {
+        for action in ["INSERT", "UPDATE", "DELETE"] {
+            let (name, _) = super::capture::trigger(Family::GraphLookups, action);
+            connection.execute_batch(&format!("DROP TRIGGER {name}"))?;
+        }
+    }
+    graph_lookup::seed_sources(connection, sources, control)?;
+    if version == 2 {
+        for action in ["INSERT", "UPDATE", "DELETE"] {
+            connection.execute_batch(&super::capture::trigger(Family::GraphLookups, action).1)?;
+        }
+    }
     connection.execute_batch("DROP TABLE _uqa_mvcc_native_format")?;
     connection.execute_batch(TABLES[0].1)?;
-    connection.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1, 2, 49)", [])?;
+    connection.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1, 3, 49)", [])?;
     for action in ["INSERT", "UPDATE", "DELETE"] {
         connection.execute_batch(&schema::trigger(TABLES[0].0, action).1)?;
     }
-    install_family_guards(connection, Family::GraphLookups)?;
-    for (_, sql) in graph_lookup::triggers() {
+    if version == 1 {
+        install_family_guards(connection, Family::GraphLookups)?;
+    }
+    for (_, sql) in graph_lookup::source_triggers(sources) {
         connection.execute_batch(&sql)?;
     }
-    super::validate_format(connection, false)?;
-    super::check_mapping_version(connection, 2)
+    super::validate_format(connection, 3)?;
+    super::check_mapping_version(connection, 3)
 }
 
 fn validate_sources(
     connection: &Connection,
     database: DatabaseId,
+    sources: &[Family],
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
-    for family in graph_lookup::SOURCES {
+    for &family in sources {
         physical::visit(connection, family.layout(), control, |values| {
             let encoded = NativeRecord::encode(
                 family,

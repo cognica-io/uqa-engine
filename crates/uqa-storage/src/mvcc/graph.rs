@@ -20,6 +20,7 @@ use super::{CommitSequence, DatabaseId, MergedRecordSnapshot, VersionResult};
 #[derive(Clone, Copy)]
 pub enum GraphMutation<'a> {
     InvalidateGraph(&'a str),
+    InvalidatePath(&'a str),
     InvalidateEntity(GraphEntityKind, u64),
     PublishPath {
         index: &'a str,
@@ -58,7 +59,11 @@ pub trait GraphRecordLayout: Send + Sync {
         control: &StorageReadControl,
     ) -> VersionResult<BudgetedVec<u8>>;
 
-    fn membership_entity(&self, key: &[u8]) -> VersionResult<(GraphEntityKind, u64)>;
+    fn membership_entity(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<(GraphEntityKind, u64)>;
 
     /// Decode one path-directory entry; return its validity key only when it belongs to the selected graph.
     fn path_validity_key(
@@ -103,6 +108,7 @@ type Text = Arc<BudgetedVec<u8>>;
 #[derive(Clone)]
 pub(super) enum OwnedGraphMutation {
     InvalidateGraph(Text),
+    InvalidatePath(Text),
     InvalidateEntity(GraphEntityKind, u64),
     PublishPath {
         index: Text,
@@ -123,6 +129,7 @@ impl OwnedGraphMutation {
         };
         Ok(match value {
             GraphMutation::InvalidateGraph(graph) => Self::InvalidateGraph(text(graph)?),
+            GraphMutation::InvalidatePath(index) => Self::InvalidatePath(text(index)?),
             GraphMutation::InvalidateEntity(kind, id) => Self::InvalidateEntity(kind, id),
             GraphMutation::PublishPath {
                 index,
@@ -142,6 +149,7 @@ impl OwnedGraphMutation {
         }
         match self {
             Self::InvalidateGraph(graph) => GraphMutation::InvalidateGraph(text(graph)),
+            Self::InvalidatePath(index) => GraphMutation::InvalidatePath(text(index)),
             Self::InvalidateEntity(kind, id) => GraphMutation::InvalidateEntity(*kind, *id),
             Self::PublishPath {
                 index,

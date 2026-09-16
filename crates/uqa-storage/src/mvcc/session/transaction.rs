@@ -107,6 +107,12 @@ impl Transaction {
             }],
             control,
         )?;
+        let kind = if kind == RecordWriteKind::GraphPreview {
+            // A later preview must retain an earlier explicit replacement or canonical write to the same private record.
+            self.changes.write_kind(key, control)?.unwrap_or(kind)
+        } else {
+            kind
+        };
         let write = prepared.records()[0].clone().with_kind(kind);
         self.changes.apply_owned(&[write], control)
     }

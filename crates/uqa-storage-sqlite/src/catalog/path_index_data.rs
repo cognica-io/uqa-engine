@@ -6,12 +6,20 @@
 
 //! Bounded physical path-index records; no reachability map is loaded at open.
 
+use super::native::graph::paths;
 use super::{decode_catalog_id, encode_catalog_id, Catalog, Result, SQLiteError};
 use rusqlite::{params, params_from_iter, types::Value as SQLValue};
 use uqa_storage::MAX_GRAPH_ID_PAGE;
 
 impl Catalog {
     pub fn clear_path_index_data(&self, index: &str) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| paths::clear(snapshot, batch, index))?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with_mut(|conn| {
             let checkpoint = conn.savepoint()?;
             checkpoint.execute(
@@ -46,6 +54,15 @@ impl Catalog {
                 ))
             })
             .collect::<Result<Vec<_>>>()?;
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                paths::save_pairs(snapshot, batch, index, sequence, &pairs)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with_mut(|conn| {
             let checkpoint = conn.savepoint()?;
             {
@@ -57,6 +74,15 @@ impl Catalog {
         })
     }
     pub fn finish_path_index_data(&self, index: &str, graph: &str, definition: &str) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                paths::finish(snapshot, batch, index, graph, definition)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|conn| {
             let written = conn.execute("INSERT INTO _graph_path_index_state(index_key, graph_name, definition_json, valid) SELECT ?1, ?2, ?3, 1 WHERE EXISTS(SELECT 1 FROM _path_indexes WHERE graph_name = ?1 AND label_sequences = ?3) ON CONFLICT(index_key) DO UPDATE SET graph_name = excluded.graph_name, definition_json = excluded.definition_json, valid = 1", params![index, graph, definition])?;
             if written == 0 { return Err(SQLiteError::StorageBackend(format!("path index {index:?} definition changed during build"))); }
@@ -64,6 +90,11 @@ impl Catalog {
         })
     }
     pub fn path_index_data_is_current(&self, index: &str, definition: &str) -> Result<bool> {
+        if let Some(current) =
+            self.read_native(|snapshot| paths::current(snapshot, index, definition))?
+        {
+            return Ok(current);
+        }
         self.conn.with(|conn| Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM _graph_path_index_state WHERE index_key = ?1 AND definition_json = ?2 AND valid = 1)", params![index, definition], |row| row.get(0))?))
     }
     pub fn path_index_pairs(
@@ -75,6 +106,11 @@ impl Catalog {
     ) -> Result<Vec<(u64, u64)>> {
         uqa_storage::catalog::validate_graph_page(limit)
             .map_err(|error| SQLiteError::StorageBackend(error.to_string()))?;
+        if let Some(pairs) =
+            self.read_native(|snapshot| paths::pairs(snapshot, index, sequence, after, limit))?
+        {
+            return Ok(pairs);
+        }
         let mut values = vec![
             SQLValue::Text(index.to_owned()),
             SQLValue::Text(sequence.to_owned()),

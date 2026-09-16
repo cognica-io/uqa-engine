@@ -19,10 +19,11 @@ pub(super) use migration::backfill;
 pub(super) use validation::{validate_deletions, validate_row};
 
 pub(super) const SQL: &str = "CREATE TABLE _uqa_mvcc_native_graph_lookup (kind TEXT NOT NULL, text_key TEXT NOT NULL, integer_key INTEGER NOT NULL, entity_type TEXT NOT NULL, entity_id INTEGER NOT NULL, PRIMARY KEY(kind, text_key, integer_key, entity_type, entity_id)) WITHOUT ROWID";
-pub(super) const SOURCES: [Family; 3] = [
+pub(super) const SOURCES: [Family; 4] = [
     Family::GraphVertices,
     Family::GraphEdges,
     Family::GraphMembership,
+    Family::GraphPathIndexState,
 ];
 
 #[derive(Clone, Copy)]
@@ -60,6 +61,7 @@ fn projections(family: Family) -> &'static [[Part; 5]] {
             [T("target"), T(""), C(2), T("edge"), C(0)],
         ],
         Family::GraphMembership => &[[T("member"), C(2), Z, C(0), C(1)]],
+        Family::GraphPathIndexState => &[[T("path"), C(1), Z, C(0), Z]],
         _ => &[],
     }
 }
@@ -75,7 +77,7 @@ pub(super) fn rows(
     Ok(())
 }
 
-fn records(
+pub(super) fn records(
     database: DatabaseId,
     family: Family,
     source: &[ValueRef<'_>],
@@ -94,7 +96,15 @@ fn records(
 }
 
 pub(super) fn seed(connection: &Connection, control: &StorageReadControl) -> PhysicalResult<()> {
-    for family in SOURCES {
+    seed_sources(connection, &SOURCES, control)
+}
+
+pub(super) fn seed_sources(
+    connection: &Connection,
+    sources: &[Family],
+    control: &StorageReadControl,
+) -> PhysicalResult<()> {
+    for &family in sources {
         physical::visit(connection, family.layout(), control, |source| {
             rows(family, source, |row| {
                 physical::upsert(connection, Family::GraphLookups.layout(), row, control)
@@ -106,9 +116,13 @@ pub(super) fn seed(connection: &Connection, control: &StorageReadControl) -> Phy
 
 /// SQL triggers and prepared-record validation use the same selector definitions as history backfill.
 pub(super) fn triggers() -> Vec<(String, String)> {
+    source_triggers(&SOURCES)
+}
+
+pub(super) fn source_triggers(sources: &[Family]) -> Vec<(String, String)> {
     let mut result = Vec::new();
     let table = Family::GraphLookups.layout().table;
-    for family in SOURCES {
+    for &family in sources {
         for (slot, projection) in projections(family).iter().enumerate() {
             let old = projection.map(|part| part.sql(family, "OLD"));
             let new = projection.map(|part| part.sql(family, "NEW"));

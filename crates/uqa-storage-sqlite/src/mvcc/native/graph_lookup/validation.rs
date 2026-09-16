@@ -44,9 +44,12 @@ fn source_projects(
         ("label", "vertex") => Family::GraphVertices,
         ("label" | "source" | "target", "edge") => Family::GraphEdges,
         ("member", _) => Family::GraphMembership,
+        ("path", _) => Family::GraphPathIndexState,
         _ => return Err(invalid("unknown native graph lookup kind").into()),
     };
-    let key = if source == Family::GraphMembership {
+    let key = if source == Family::GraphPathIndexState {
+        encode_row(&[lookup[3]], control)?
+    } else if source == Family::GraphMembership {
         encode_row(&[lookup[3], lookup[4], lookup[1]], control)?
     } else {
         encode_row(&[lookup[4]], control)?

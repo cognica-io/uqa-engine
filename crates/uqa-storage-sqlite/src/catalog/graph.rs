@@ -6,11 +6,13 @@
 
 //! Named graph entities, membership, and snapshot replacement.
 
-use super::native::graph;
+use super::native::{graph, text};
 use super::{
     decode_catalog_id, encode_catalog_id, params, Catalog, EdgeRow, GraphSnapshot,
     OptionalExtension, Result, SQLiteError,
 };
+use rusqlite::types::ValueRef;
+use uqa_storage::GraphEntityKind;
 
 impl Catalog {
     /// Indexed, graph-scoped hydration. LEFT JOIN retains invalid memberships
@@ -75,6 +77,13 @@ impl Catalog {
 
     /// Register the existence of a named graph in the catalog.
     pub fn save_named_graph(&self, name: &str) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| graph::named_graph(snapshot, batch, name, true))?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "INSERT OR IGNORE INTO _named_graphs (name) VALUES (?1)",
@@ -90,6 +99,13 @@ impl Catalog {
     /// orphan; call [`Catalog::purge_orphan_graph_entities`] afterwards to
     /// collect them. The engine performs that sweep on the catalog's behalf.
     pub fn drop_named_graph(&self, name: &str) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| graph::named_graph(snapshot, batch, name, false))?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute("DELETE FROM _named_graphs WHERE name = ?1", params![name])?;
             c.execute(
@@ -119,6 +135,25 @@ impl Catalog {
     /// Persist a vertex by global id, label, and JSON-encoded property map.
     pub fn save_vertex(&self, vertex_id: u64, label: &str, properties_json: &str) -> Result<()> {
         let vertex_id = encode_catalog_id("vertex", vertex_id)?;
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                graph::source(
+                    snapshot,
+                    batch,
+                    GraphEntityKind::Vertex,
+                    vertex_id,
+                    Some(&[
+                        ValueRef::Integer(vertex_id),
+                        text(label),
+                        text(properties_json),
+                    ]),
+                )
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "INSERT OR REPLACE INTO _graph_vertices (vertex_id, label, properties_json) \
@@ -132,6 +167,15 @@ impl Catalog {
     /// Delete a vertex by global id.
     pub fn delete_vertex(&self, vertex_id: u64) -> Result<()> {
         let vertex_id = encode_catalog_id("vertex", vertex_id)?;
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                graph::source(snapshot, batch, GraphEntityKind::Vertex, vertex_id, None)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "DELETE FROM _graph_vertices WHERE vertex_id = ?1",
@@ -181,6 +225,27 @@ impl Catalog {
         let edge_id = encode_catalog_id("edge", edge_id)?;
         let source_id = encode_catalog_id("edge source vertex", source_id)?;
         let target_id = encode_catalog_id("edge target vertex", target_id)?;
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                graph::source(
+                    snapshot,
+                    batch,
+                    GraphEntityKind::Edge,
+                    edge_id,
+                    Some(&[
+                        ValueRef::Integer(edge_id),
+                        ValueRef::Integer(source_id),
+                        ValueRef::Integer(target_id),
+                        text(label),
+                        text(properties_json),
+                    ]),
+                )
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "INSERT OR REPLACE INTO _graph_edges \
@@ -195,6 +260,15 @@ impl Catalog {
     /// Delete an edge by global id.
     pub fn delete_edge(&self, edge_id: u64) -> Result<()> {
         let edge_id = encode_catalog_id("edge", edge_id)?;
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                graph::source(snapshot, batch, GraphEntityKind::Edge, edge_id, None)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "DELETE FROM _graph_edges WHERE edge_id = ?1",
@@ -249,6 +323,15 @@ impl Catalog {
         graph_name: &str,
     ) -> Result<()> {
         let entity_id = encode_catalog_id("graph membership entity", entity_id)?;
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                graph::membership(snapshot, batch, entity_type, entity_id, graph_name, true)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "INSERT OR IGNORE INTO _graph_membership \
@@ -268,6 +351,15 @@ impl Catalog {
         graph_name: &str,
     ) -> Result<()> {
         let entity_id = encode_catalog_id("graph membership entity", entity_id)?;
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                graph::membership(snapshot, batch, entity_type, entity_id, graph_name, false)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "DELETE FROM _graph_membership \
@@ -281,6 +373,15 @@ impl Catalog {
     /// Detach every entity from `graph_name`. Used as the prelude to a
     /// full graph drop / Cypher resync.
     pub fn delete_graph_membership_for_graph(&self, graph_name: &str) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                graph::lifecycle::detach(snapshot, batch, graph_name)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "DELETE FROM _graph_membership WHERE graph_name = ?1",
@@ -319,6 +420,15 @@ impl Catalog {
     /// Drop vertex / edge rows that no membership row still references.
     /// Run after a detach / drop to garbage-collect orphaned entities.
     pub fn purge_orphan_graph_entities(&self) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                graph::lifecycle::purge(snapshot, batch, None, |_, _| false)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "DELETE FROM _graph_vertices \
@@ -339,6 +449,15 @@ impl Catalog {
     }
 
     pub fn replace_named_graph(&self, graph_name: &str, snapshot: &GraphSnapshot) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|view, batch| {
+                graph::lifecycle::replace(view, batch, graph_name, snapshot)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
             tx.execute(
@@ -403,6 +522,15 @@ impl Catalog {
     }
 
     pub fn drop_named_graph_data(&self, graph_name: &str) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                graph::lifecycle::drop_data(snapshot, batch, graph_name)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
             tx.execute(

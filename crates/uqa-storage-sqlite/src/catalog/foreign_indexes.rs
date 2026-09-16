@@ -432,6 +432,20 @@ impl Catalog {
     // -- Path indexes ------------------------------------------------------
 
     pub fn save_path_index(&self, graph_name: &str, label_sequences_json: &str) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                super::native::graph::paths::definition(
+                    snapshot,
+                    batch,
+                    graph_name,
+                    Some(label_sequences_json),
+                )
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "INSERT OR REPLACE INTO _path_indexes (graph_name, label_sequences) \
@@ -443,6 +457,15 @@ impl Catalog {
     }
 
     pub fn drop_path_index(&self, graph_name: &str) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                super::native::graph::paths::definition(snapshot, batch, graph_name, None)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "DELETE FROM _path_indexes WHERE graph_name = ?1",
@@ -454,6 +477,13 @@ impl Catalog {
 
     /// `(graph_name, label_sequences_json)` for every persisted path index.
     pub fn load_path_indexes(&self) -> Result<Vec<(String, String)>> {
+        if let Some(rows) = self.load_native_named(
+            crate::mvcc::native::NativeRecordFamily::PathIndexes,
+            1,
+            false,
+        )? {
+            return Ok(rows);
+        }
         self.conn.with(|c| {
             let mut stmt = c.prepare(
                 "SELECT graph_name, label_sequences FROM _path_indexes ORDER BY graph_name",

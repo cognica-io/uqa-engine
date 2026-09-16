@@ -12,7 +12,7 @@ use uqa_storage::{
     read_control::StorageReadControl,
 };
 
-use super::{records, Family, NativeRecord, SOURCES};
+use super::{records, Family, NativeRecord};
 use crate::mvcc::{
     codec,
     native::{decode_record, invalid, physical, NativeRecordIdentity, NativeRecordOwner},
@@ -22,9 +22,16 @@ use crate::mvcc::{
 pub(in crate::mvcc::native) fn backfill(
     connection: &Connection,
     database: DatabaseId,
+    sources: &[Family],
+    paths_only: bool,
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
-    let lookup = NativeRecordIdentity::family_prefix(Family::GraphLookups, control)?;
+    let lookup = if paths_only {
+        NativeRecordIdentity::new(Family::GraphLookups, NativeRecordOwner::Database(database))?
+            .encode_prefix(&[rusqlite::types::ValueRef::Text(b"path")], control)?
+    } else {
+        NativeRecordIdentity::family_prefix(Family::GraphLookups, control)?
+    };
     require_history_heads(connection, &lookup, control)?;
     let mut present = false;
     read::keys(connection, &lookup, None, 1, control, &mut |_| {
@@ -35,7 +42,7 @@ pub(in crate::mvcc::native) fn backfill(
         return Err(invalid("native graph lookup history already exists before migration").into());
     }
     let boundary = codec::header(connection, database)?.sequence;
-    for family in SOURCES {
+    for &family in sources {
         let prefix = NativeRecordIdentity::family_prefix(family, control)?;
         require_history_heads(connection, &prefix, control)?;
         read::keys(connection, &prefix, None, usize::MAX, control, &mut |key| {

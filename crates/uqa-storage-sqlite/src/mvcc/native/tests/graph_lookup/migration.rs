@@ -15,7 +15,7 @@ use crate::mvcc::schema;
 const OLD_FORMAT: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 1), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))";
 
 // Source/history encodings are unchanged. Remove only the new derived records/table from a populated file and pin the predecessor's exact marker and guards.
-fn restore_format_one(connection: &ManagedConnection, control: &StorageReadControl) {
+pub(super) fn restore_format_one(connection: &ManagedConnection, control: &StorageReadControl) {
     with(connection, |connection| {
         let _permit = schema::WritePermit::acquire(connection)?;
         let transaction = schema::begin(connection)?;
@@ -43,7 +43,7 @@ fn restore_format_one(connection: &ManagedConnection, control: &StorageReadContr
     });
 }
 
-fn dump(connection: &ManagedConnection, sql: &str) -> Vec<Vec<Value>> {
+pub(super) fn dump(connection: &ManagedConnection, sql: &str) -> Vec<Vec<Value>> {
     with(connection, |connection| {
         let mut statement = connection.prepare(sql)?;
         let count = statement.column_count();
@@ -58,7 +58,7 @@ fn dump(connection: &ManagedConnection, sql: &str) -> Vec<Vec<Value>> {
     })
 }
 
-fn preserved(connection: &ManagedConnection) -> Vec<Vec<Vec<Value>>> {
+pub(super) fn preserved(connection: &ManagedConnection) -> Vec<Vec<Vec<Value>>> {
     [
         "SELECT * FROM _uqa_mvcc_metadata",
         "SELECT * FROM _uqa_mvcc_transactions ORDER BY allocation",
@@ -67,7 +67,7 @@ fn preserved(connection: &ManagedConnection) -> Vec<Vec<Vec<Value>>> {
     ].map(|sql| dump(connection, sql)).into()
 }
 
-fn commit(
+pub(super) fn commit(
     store: &SQLiteRecordStore,
     deletes: &[&NativeRecord],
     puts: &[&NativeRecord],

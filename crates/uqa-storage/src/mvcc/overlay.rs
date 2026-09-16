@@ -105,6 +105,20 @@ pub struct PrivateRecordChanges {
 }
 
 impl PrivateRecordChanges {
+    pub(super) fn write_kind(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<super::commit::RecordWriteKind>> {
+        let state = self.owner.state.lock();
+        let Some(head) = state.heads.get(key) else {
+            return Ok(None);
+        };
+        Ok(state
+            .visible(head.position, state.revision, control.cancellation())?
+            .map(PreparedRecordWrite::kind))
+    }
+
     pub fn new(memory: &MemoryBudget) -> Self {
         Self {
             owner: Arc::new(Owner {

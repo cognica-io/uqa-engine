@@ -6,6 +6,8 @@
 
 //! Native row addressing over a retained common committed/private view.
 
+mod graph;
+
 use rusqlite::types::ValueRef;
 use uqa_storage::mvcc::{DatabaseId, MergedRecordSnapshot, VersionError, VersionedKeyValueStore};
 use uqa_storage::read_control::StorageReadControl;
@@ -24,6 +26,39 @@ pub(crate) struct NativeSnapshot {
 }
 
 impl NativeSnapshot {
+    /// Release each physical read before visiting decoded rows, allowing callbacks to probe other records on this retained boundary.
+    pub(crate) fn visit_paged_rows(
+        &self,
+        family: Family,
+        components: &[ValueRef<'_>],
+        mut visit: impl FnMut(&[ValueRef<'_>]) -> Result<bool>,
+    ) -> Result<()> {
+        let prefix = NativeRecordIdentity::new(family, NativeRecordOwner::Database(self.database))?
+            .encode_prefix(components, &self.control)?;
+        let mut after = uqa_core::memory::BudgetedVec::new(self.control.memory());
+        loop {
+            let page = self.view.scan(
+                &prefix,
+                (!after.is_empty()).then_some(&*after),
+                64,
+                &self.control,
+            )?;
+            let Some(last) = page.last() else {
+                return Ok(());
+            };
+            after.clear();
+            after.extend_from_slice(&last.key)?;
+            for entry in page.iter() {
+                if let Some(value) = entry.record.value() {
+                    let (_, row) = decode_record(&entry.key, value, &self.control)?;
+                    if !visit(&row)? {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+
     pub(crate) fn capture(store: &VersionedKeyValueStore, database: DatabaseId) -> Result<Self> {
         Ok(Self {
             view: store.record_snapshot()?,

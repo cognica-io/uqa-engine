@@ -91,6 +91,9 @@ pub(in crate::mvcc) fn resolve(
         control.cancellation().check()?;
         match operation.borrowed() {
             GraphMutation::InvalidateGraph(graph) => resolver.invalidate_graph(graph)?,
+            GraphMutation::InvalidatePath(index) => {
+                resolver.invalidate_key(&resolver.key(GraphRecordKey::PathValidity(index))?)?;
+            }
             GraphMutation::InvalidateEntity(kind, id) => {
                 let prefix = resolver.key(GraphRecordKey::EntityMemberships(kind, id))?;
                 visit(&resolver.final_view, &prefix, control, |entry| {
@@ -156,15 +159,20 @@ impl Resolver<'_> {
             else {
                 return Ok(true);
             };
-            let view = MergedRecordSnapshot::new(self.committed.clone(), self.changes.snapshot()?);
-            if let Some(row) = view.get(&key, self.control)? {
-                if let Some(value) = row.value() {
-                    let invalid = self.layout.invalidate(&key, value, self.control)?;
-                    self.replace(&key, invalid.as_deref())?;
-                }
-            }
+            self.invalidate_key(&key)?;
             Ok(true)
         })
+    }
+
+    fn invalidate_key(&self, key: &[u8]) -> VersionResult<()> {
+        let view = MergedRecordSnapshot::new(self.committed.clone(), self.changes.snapshot()?);
+        if let Some(row) = view.get(key, self.control)? {
+            if let Some(value) = row.value() {
+                let invalid = self.layout.invalidate(key, value, self.control)?;
+                self.replace(key, invalid.as_deref())?;
+            }
+        }
+        Ok(())
     }
 
     fn publish_path(
@@ -234,7 +242,7 @@ impl Resolver<'_> {
             if self.changed(&entry.key, base)? {
                 changed = true;
             } else if entry.record.value().is_some() {
-                let (kind, id) = self.layout.membership_entity(&entry.key)?;
+                let (kind, id) = self.layout.membership_entity(&entry.key, self.control)?;
                 changed = self.changed(&self.key(GraphRecordKey::Entity(kind, id))?, base)?;
             }
             Ok(!changed)

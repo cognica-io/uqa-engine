@@ -27,6 +27,8 @@ mod native_catalog;
 mod native_columns;
 #[path = "mvcc/native_documents.rs"]
 mod native_documents;
+#[path = "mvcc/native_graph.rs"]
+mod native_graph;
 #[path = "mvcc/native_relations.rs"]
 mod native_relations;
 #[path = "mvcc/native_sequences.rs"]

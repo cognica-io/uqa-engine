@@ -57,6 +57,15 @@ impl Catalog {
         row: &[ValueRef<'_>],
     ) -> Result<Option<()>> {
         self.conn.with_native_write(|snapshot, batch| {
+            if family == Family::Metadata {
+                if let Some(graph) = row[0]
+                    .as_str()
+                    .ok()
+                    .and_then(|name| name.strip_prefix("graph_label_registry::"))
+                {
+                    graph::paths::invalidate_graph(snapshot, batch, graph)?;
+                }
+            }
             if family == Family::Metadata && row[0] == text("schema_version") {
                 let existing = snapshot.read_row(
                     family,

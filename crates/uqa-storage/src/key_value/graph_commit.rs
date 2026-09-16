@@ -159,7 +159,11 @@ impl GraphRecordLayout for KeyValueGraphRecords {
         Ok(result)
     }
 
-    fn membership_entity(&self, key: &[u8]) -> VersionResult<(GraphEntityKind, u64)> {
+    fn membership_entity(
+        &self,
+        key: &[u8],
+        _: &StorageReadControl,
+    ) -> VersionResult<(GraphEntityKind, u64)> {
         if key.first() != Some(&TAG_GRAPH_MEMBERSHIP) {
             return Err(VersionError::InvalidEncoding(
                 "invalid graph membership key",

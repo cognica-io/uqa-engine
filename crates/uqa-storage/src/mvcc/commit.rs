@@ -210,6 +210,10 @@ impl PreparedRecordCommit {
                     text(b"graph")?;
                     text(graph.as_bytes())?;
                 }
+                GraphMutation::InvalidatePath(index) => {
+                    text(b"invalidate-path")?;
+                    text(index.as_bytes())?;
+                }
                 GraphMutation::InvalidateEntity(kind, id) => {
                     text(b"entity")?;
                     text(kind.as_str().as_bytes())?;

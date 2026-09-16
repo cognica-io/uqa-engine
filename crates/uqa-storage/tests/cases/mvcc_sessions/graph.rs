@@ -304,3 +304,41 @@ fn graph_only_effects_cannot_write_in_a_read_transaction() {
     a.commit_transaction().unwrap();
     assert_eq!(persistence.state.lock().next, 0);
 }
+
+#[test]
+fn a_path_definition_effect_invalidates_a_later_cache_build() {
+    let (a, first, _, second) = catalogs();
+    a.begin_transaction().unwrap();
+    let mut batch = a.batch();
+    batch
+        .graph_mutation(GraphMutation::InvalidatePath("paths"))
+        .unwrap();
+    batch.commit().unwrap();
+    build(&second, "paths", "g");
+    a.commit_transaction().unwrap();
+    assert!(!first.path_index_data_is_current("paths", "[]").unwrap());
+}
+
+#[test]
+fn an_invalidation_preview_preserves_an_earlier_canonical_write_precondition() {
+    let persistence = Persistence::new();
+    let a = persistence.session(1 << 20);
+    let b = a.open_session().unwrap();
+    let key = validity_key(&persistence);
+    a.put(&key, b"[]").unwrap();
+    a.begin_transaction().unwrap();
+    a.put(&key, b"private").unwrap();
+    let mut batch = a.batch();
+    batch.preview_graph_invalidation(&key, None).unwrap();
+    batch
+        .graph_mutation(GraphMutation::InvalidatePath("paths"))
+        .unwrap();
+    batch.commit().unwrap();
+    b.put(&key, b"newer").unwrap();
+    let error = a.commit_transaction().unwrap_err();
+    assert!(
+        matches!(error,StorageBackendError::Backend{source,..} if matches!(source.downcast_ref::<VersionError>(),Some(VersionError::WriteConflict{..})))
+    );
+    a.rollback_transaction().unwrap();
+    assert_eq!(b.get(&key).unwrap().as_deref(), Some(b"newer".as_slice()));
+}
