@@ -55,8 +55,9 @@ pub trait PostingCursor: Send {
 mod controlled_cursor;
 mod positions;
 mod read_cursor;
-pub(crate) use controlled_cursor::open as open_controlled_cursor;
-pub use controlled_cursor::{EncodedScoreClusterRef, ScoreClusterVisitor};
+pub use controlled_cursor::{
+    open as open_controlled_cursor, EncodedScoreClusterRef, ScoreClusterVisitor,
+};
 pub use read_cursor::{BudgetedPostingReadCursor, OwnedPostingReadCursor, PostingReadCursor};
 
 impl Clone for Box<dyn PostingCursor> {

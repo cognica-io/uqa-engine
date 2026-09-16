@@ -92,9 +92,16 @@ pub(super) fn read_view<T>(
     store: &dyn KeyValueStore,
     operation: impl FnOnce(&dyn KeyValueRead) -> StorageBackendResult<T>,
 ) -> StorageBackendResult<T> {
+    read_scope(|read| store.with_read_view(read), operation)
+}
+
+pub(super) fn read_scope<T>(
+    scope: impl FnOnce(&mut super::KeyValueReadScope<'_>) -> StorageBackendResult<()>,
+    operation: impl FnOnce(&dyn KeyValueRead) -> StorageBackendResult<T>,
+) -> StorageBackendResult<T> {
     let mut operation = Some(operation);
     let mut result = None;
-    store.with_read_view(&mut |read| {
+    scope(&mut |read| {
         result = Some(operation.take().ok_or_else(|| {
             other_error("KeyValue provider attempted to replay read evaluation")
         })?(read)?);
@@ -107,8 +114,15 @@ pub(super) fn evaluate_mutation(
     store: &dyn KeyValueStore,
     operation: impl FnOnce(&dyn KeyValueRead, &mut dyn KeyValueBatch) -> StorageBackendResult<()>,
 ) -> StorageBackendResult<()> {
+    mutation_scope(|mutate| store.with_mutation(mutate), operation)
+}
+
+pub(super) fn mutation_scope(
+    scope: impl FnOnce(&mut super::KeyValueMutation<'_>) -> StorageBackendResult<()>,
+    operation: impl FnOnce(&dyn KeyValueRead, &mut dyn KeyValueBatch) -> StorageBackendResult<()>,
+) -> StorageBackendResult<()> {
     let mut operation = Some(operation);
-    store.with_mutation(&mut |read, batch| {
+    scope(&mut |read, batch| {
         operation.take().ok_or_else(|| {
             other_error("KeyValue provider attempted to replay mutation evaluation")
         })?(read, batch)

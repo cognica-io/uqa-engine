@@ -78,8 +78,8 @@ fn retain(
     })
 }
 
-struct ControlledCursor<'a, T: InvertedIndex + ?Sized> {
-    index: &'a T,
+struct ControlledCursor<'a, T> {
+    index: T,
     field: &'a str,
     term: &'a TokenTermKey,
     control: StorageReadControl,
@@ -90,12 +90,17 @@ struct ControlledCursor<'a, T: InvertedIndex + ?Sized> {
     position: usize,
 }
 
-pub(crate) fn open<'a, T: InvertedIndex + ?Sized>(
-    index: &'a T,
+/// Open a bounded score cursor over a borrowed index or an owned retained snapshot. The supplied handle must preserve one read boundary throughout traversal.
+pub fn open<'a, T>(
+    index: T,
     field: &'a str,
     term: &'a TokenTermKey,
     control: &StorageReadControl,
-) -> StorageBackendResult<BudgetedPostingReadCursor<'a>> {
+) -> StorageBackendResult<BudgetedPostingReadCursor<'a>>
+where
+    T: std::ops::Deref + Send + 'a,
+    T::Target: InvertedIndex,
+{
     let mut first = None;
     let mut previous = None;
     let mut doc_freq = 0u64;
@@ -166,7 +171,11 @@ fn decode_block(
     Ok(())
 }
 
-impl<T: InvertedIndex + ?Sized> ControlledCursor<'_, T> {
+impl<T> ControlledCursor<'_, T>
+where
+    T: std::ops::Deref,
+    T::Target: InvertedIndex,
+{
     fn load_after(&mut self, after: u64) -> StorageBackendResult<bool> {
         let mut next = None;
         self.index.visit_score_clusters(
@@ -205,7 +214,11 @@ impl<T: InvertedIndex + ?Sized> ControlledCursor<'_, T> {
     }
 }
 
-impl<T: InvertedIndex + ?Sized> PostingReadCursor for ControlledCursor<'_, T> {
+impl<T> PostingReadCursor for ControlledCursor<'_, T>
+where
+    T: std::ops::Deref + Send,
+    T::Target: InvertedIndex,
+{
     fn doc_freq(&self) -> u64 {
         self.doc_freq
     }

@@ -281,7 +281,7 @@ pub struct MergedRecordSnapshot {
 
 impl MergedRecordSnapshot {
     /// Share the committed owner and retain the original private revision under its existing allowance.
-    pub(crate) fn try_clone(&self) -> VersionResult<Self> {
+    pub fn try_clone(&self) -> VersionResult<Self> {
         Ok(Self {
             committed: Arc::clone(&self.committed),
             private: self.private.try_clone()?,

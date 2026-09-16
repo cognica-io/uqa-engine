@@ -7,7 +7,7 @@
 //! One reader owns an occurrence operation; retained indexes own their selected bytes.
 
 use super::{AnalyzerBindings, Arc, DocId, FieldName, InvertedIndex, KeyValueInvertedIndex};
-use crate::key_value::{index_view, KeyValueBatch, KeyValueRead, KeyValueStore};
+use crate::key_value::{index_view, KeyValueBatch, KeyValueRead, OccurrenceStorage};
 use crate::StorageBackendResult;
 use uqa_core::memory::BudgetedVec;
 
@@ -15,7 +15,7 @@ type Entry = (BudgetedVec<u8>, BudgetedVec<u8>);
 
 #[derive(Clone)]
 pub(super) enum OccurrenceSource {
-    Live(Arc<dyn KeyValueStore>),
+    Live(Arc<dyn OccurrenceStorage>),
     Retained(Arc<dyn KeyValueRead + Send + Sync>),
 }
 
@@ -63,7 +63,9 @@ impl KeyValueInvertedIndex {
             })
         };
         match &self.source {
-            OccurrenceSource::Live(store) => index_view::read_view(store.as_ref(), evaluate),
+            OccurrenceSource::Live(store) => {
+                index_view::read_scope(|operation| store.read(operation), evaluate)
+            }
             OccurrenceSource::Retained(read) => {
                 read.control().check()?;
                 evaluate(read.as_ref())
@@ -88,16 +90,19 @@ impl KeyValueInvertedIndex {
         let OccurrenceSource::Live(store) = &self.source else {
             unreachable!()
         };
-        index_view::evaluate_mutation(store.as_ref(), |read, batch| {
-            operation(
-                &OccurrenceRead {
-                    store: read,
-                    table: &self.table,
-                    bindings: &self.bindings,
-                },
-                batch,
-            )
-        })
+        index_view::mutation_scope(
+            |operation| store.mutate(operation),
+            |read, batch| {
+                operation(
+                    &OccurrenceRead {
+                        store: read,
+                        table: &self.table,
+                        bindings: &self.bindings,
+                    },
+                    batch,
+                )
+            },
+        )
     }
 
     pub(super) fn add_documents(

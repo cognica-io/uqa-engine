@@ -13,6 +13,16 @@ use super::{
 };
 
 impl InvertedIndex for KeyValueInvertedIndex {
+    fn posting_read_cursor_key_budgeted<'a>(
+        &'a self,
+        field: &'a str,
+        term: &'a TokenTermKey,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::clustered_postings::BudgetedPostingReadCursor<'a>> {
+        control.check()?;
+        crate::clustered_postings::open_controlled_cursor(self.snapshot()?, field, term, control)
+    }
+
     fn visit_score_clusters(
         &self,
         field: &str,
@@ -465,6 +475,18 @@ impl InvertedIndex for KeyValueInvertedIndex {
                 total = total
                     .checked_add(view.get_doc_length(doc_id, &field)?)
                     .ok_or_else(|| super::other_error("document length overflow"))?;
+            }
+            Ok(total)
+        })
+    }
+
+    fn get_total_term_freq(&self, doc_id: DocId, term: &str) -> StorageBackendResult<u64> {
+        self.read(|view| {
+            let mut total = 0_u64;
+            for field in view.field_names()? {
+                total = total
+                    .checked_add(view.get_term_freq(doc_id, &field, term)?)
+                    .ok_or_else(|| super::other_error("term frequency overflow"))?;
             }
             Ok(total)
         })

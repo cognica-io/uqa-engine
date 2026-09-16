@@ -42,6 +42,11 @@ impl OccurrenceRead<'_> {
             self.store
                 .visit_value_budgeted(&key, control, &mut |bytes| {
                     marker = bytes.is_some();
+                    if bytes == Some(b"source-rebuild") {
+                        return Err(other_error(
+                            "legacy positional data requires an atomic source rebuild",
+                        ));
+                    }
                     if bytes.is_some_and(|bytes| bytes != keys::FORMAT_NAME) {
                         return Err(other_error("unsupported occurrence index format"));
                     }

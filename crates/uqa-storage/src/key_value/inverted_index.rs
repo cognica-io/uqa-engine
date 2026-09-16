@@ -35,8 +35,10 @@ mod mutation;
 mod queries;
 mod read_impl;
 mod rebuild;
+mod storage;
 mod trait_impl;
 mod view;
+pub use storage::OccurrenceStorage;
 use view::{OccurrenceRead, OccurrenceSource};
 
 use migration::{migrate_legacy_forward_postings, migrate_legacy_reverse_postings};
@@ -77,11 +79,29 @@ impl KeyValueInvertedIndex {
         table: impl Into<String>,
         analyzer: Analyzer,
     ) -> Self {
+        Self::from_storage(
+            Arc::new(storage::KeyValueOccurrences(store)),
+            table,
+            AnalyzerBindings::new(analyzer),
+        )
+    }
+
+    /// Bind the common occurrence algorithms to a provider's native row projection while preserving the already compiled analyzer revisions.
+    pub fn from_storage(
+        storage: Arc<dyn OccurrenceStorage>,
+        table: impl Into<String>,
+        bindings: AnalyzerBindings,
+    ) -> Self {
         Self {
-            source: OccurrenceSource::Live(store),
+            source: OccurrenceSource::Live(storage),
             table: table.into(),
-            bindings: AnalyzerBindings::new(analyzer),
+            bindings,
         }
+    }
+
+    /// Compiled bindings used by this index, including successful native-provider binding changes.
+    pub fn analyzer_bindings(&self) -> &AnalyzerBindings {
+        &self.bindings
     }
 
     pub(crate) fn migrate_legacy_storage(store: &dyn KeyValueStore) -> StorageBackendResult<()> {

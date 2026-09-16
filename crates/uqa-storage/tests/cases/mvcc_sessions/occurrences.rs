@@ -213,6 +213,69 @@ fn compound_occurrence_queries_keep_original_rows_during_an_intervening_commit()
 }
 
 #[test]
+fn total_term_frequency_retains_one_view_across_fields() {
+    let persistence = Persistence::new();
+    let a = Arc::new(InterleavedStore::new(Arc::new(
+        persistence.session(1 << 20),
+    )));
+    let b = Arc::new(persistence.session(1 << 20));
+    let mut writer = KeyValueInvertedIndex::new(b, "docs", uqa_analysis::whitespace_analyzer());
+    let fields = |left: &str, right: &str| {
+        BTreeMap::from([("a".into(), left.into()), ("body".into(), right.into())])
+    };
+    writer
+        .add_document(1, fields("alpha", "alpha alpha"))
+        .unwrap();
+    *a.after_second_point.lock() = Some(Box::new(move || {
+        writer
+            .add_document(
+                1,
+                fields("alpha alpha alpha alpha", "alpha alpha alpha alpha"),
+            )
+            .unwrap();
+    }));
+    let index = KeyValueInvertedIndex::new(a.clone(), "docs", uqa_analysis::whitespace_analyzer());
+    assert_eq!(index.get_total_term_freq(1, "alpha").unwrap(), 3);
+    assert!(a.after_second_point.lock().is_none());
+    assert_eq!(index.get_total_term_freq(1, "alpha").unwrap(), 8);
+}
+
+#[test]
+fn controlled_occurrence_cursors_keep_their_view_between_cluster_pages() {
+    use uqa_storage::clustered_postings::PostingReadCursor;
+    let persistence = Persistence::new();
+    let a = Arc::new(persistence.session(1 << 20));
+    let b = Arc::new(persistence.session(1 << 20));
+    let mut writer = KeyValueInvertedIndex::new(b, "docs", uqa_analysis::whitespace_analyzer());
+    writer
+        .try_add_documents(vec![
+            (1, fields("alpha")),
+            (65_536, fields("alpha alpha")),
+            (131_072, fields("alpha alpha alpha")),
+        ])
+        .unwrap();
+    let reader = KeyValueInvertedIndex::new(a, "docs", uqa_analysis::whitespace_analyzer());
+    let term = TokenTermKey::from_text("alpha");
+    let control = StorageReadControl::with_limit(1 << 20);
+    let mut cursor = reader
+        .posting_read_cursor_key_budgeted("body", &term, &control)
+        .unwrap();
+    writer
+        .try_rebuild_documents(vec![
+            (1, fields("alpha")),
+            (65_536, fields("alpha alpha alpha alpha")),
+        ])
+        .unwrap();
+    assert_eq!(cursor.doc_freq(), 3);
+    assert_eq!(cursor.advance().unwrap().unwrap().term_freq, 2);
+    assert_eq!(cursor.advance_to(131_072).unwrap().unwrap().term_freq, 3);
+    assert_eq!(cursor.advance().unwrap(), None);
+    drop(cursor);
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(reader.doc_count().unwrap(), 2);
+}
+
+#[test]
 fn occurrence_evaluation_retains_original_preconditions_and_never_replays() {
     let persistence = Persistence::new();
     let a = Arc::new(InterleavedStore::new(Arc::new(

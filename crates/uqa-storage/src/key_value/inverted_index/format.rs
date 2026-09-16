@@ -30,6 +30,9 @@ impl OccurrenceRead<'_> {
         let format = self
             .store
             .get(&keys::kind_prefix(self.table, keys::FORMAT)?)?;
+        if format.as_deref() == Some(b"source-rebuild") {
+            return Ok(true);
+        }
         if format
             .as_deref()
             .is_some_and(|format| format != keys::FORMAT_NAME)
