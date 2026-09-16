@@ -24,6 +24,9 @@ use crate::compressed_vfs::{self, SQLiteCompressedContainerAnchor, SQLiteCompres
 
 mod logical;
 mod native;
+mod snapshot;
+use snapshot::PhysicalConnection;
+pub(crate) use snapshot::SnapshotIdentity;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SQLiteError {
@@ -144,7 +147,7 @@ impl ConnectionSpec {
 }
 
 struct PoolState {
-    idle: Vec<Connection>,
+    idle: Vec<PhysicalConnection>,
     open: usize,
 }
 
@@ -166,7 +169,7 @@ impl ConnectionPool {
             spec,
             max_connections: max_connections.max(1),
             state: Mutex::new(PoolState {
-                idle: vec![initial],
+                idle: vec![PhysicalConnection::new(initial)],
                 open: 1,
             }),
             available: Condvar::new(),
@@ -189,7 +192,7 @@ impl ConnectionPool {
                 return match self.spec.open(false) {
                     Ok(connection) => Ok(PooledConnection {
                         pool: Arc::clone(self),
-                        connection: Some(connection),
+                        connection: Some(PhysicalConnection::new(connection)),
                     }),
                     Err(error) => {
                         let mut state = self.state.lock();
@@ -203,7 +206,7 @@ impl ConnectionPool {
         }
     }
 
-    fn checkin(&self, connection: Connection) {
+    fn checkin(&self, connection: PhysicalConnection) {
         self.state.lock().idle.push(connection);
         self.available.notify_one();
     }
@@ -217,17 +220,18 @@ impl ConnectionPool {
 
 struct PooledConnection {
     pool: Arc<ConnectionPool>,
-    connection: Option<Connection>,
+    connection: Option<PhysicalConnection>,
 }
 
 impl PooledConnection {
     fn connection(&self) -> Result<&Connection> {
         self.connection
             .as_ref()
+            .map(|physical| &physical.connection)
             .ok_or(SQLiteError::MissingCheckedOutConnection)
     }
 
-    fn connection_mut(&mut self) -> Result<&mut Connection> {
+    fn physical_mut(&mut self) -> Result<&mut PhysicalConnection> {
         self.connection
             .as_mut()
             .ok_or(SQLiteError::MissingCheckedOutConnection)
@@ -239,7 +243,8 @@ impl Drop for PooledConnection {
         let Some(connection) = self.connection.take() else {
             return;
         };
-        let reusable = connection.is_autocommit() || connection.execute_batch("ROLLBACK").is_ok();
+        let reusable = connection.connection.is_autocommit()
+            || connection.connection.execute_batch("ROLLBACK").is_ok();
         if reusable {
             self.pool.checkin(connection);
         } else {
@@ -258,6 +263,7 @@ struct SessionState {
     transaction_failure: Mutex<Option<String>>,
     cleanup_failure: Mutex<Option<String>>,
     logical: OnceLock<Arc<logical::BoundRecordSession>>,
+    snapshot_branch: Mutex<Arc<()>>,
 }
 
 impl SessionState {
@@ -269,6 +275,7 @@ impl SessionState {
             transaction_failure: Mutex::new(None),
             cleanup_failure: Mutex::new(None),
             logical: OnceLock::new(),
+            snapshot_branch: Mutex::new(Arc::new(())),
         }
     }
 }
@@ -612,6 +619,13 @@ impl ManagedConnection {
     }
 
     pub fn with_mut<R>(&self, f: impl FnOnce(&mut Connection) -> Result<R>) -> Result<R> {
+        self.with_physical_mut(|physical| f(&mut physical.connection))
+    }
+
+    fn with_physical_mut<R>(
+        &self,
+        f: impl FnOnce(&mut PhysicalConnection) -> Result<R>,
+    ) -> Result<R> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.read();
         if self.session.logical.get().is_some() {
@@ -623,7 +637,7 @@ impl ManagedConnection {
                 return Err(SQLiteError::TransactionAborted(error.clone()));
             }
             self.check_native_access(connection.connection()?)?;
-            let result = f(connection.connection_mut()?);
+            let result = f(connection.physical_mut()?);
             if let Err(error) = &result {
                 let mut failure = self.session.transaction_failure.lock();
                 if failure.is_none() {
@@ -635,7 +649,7 @@ impl ManagedConnection {
         drop(transaction);
         let mut connection = self.pool.checkout()?;
         self.check_native_access(connection.connection()?)?;
-        f(connection.connection_mut()?)
+        f(connection.physical_mut()?)
     }
 
     /// Rewrite the `SQLite` database into its minimum-sized file. `SQLite` requires `VACUUM` to run in autocommit mode, so the session write gate makes the transaction check and maintenance command one atomic session operation.
@@ -734,6 +748,7 @@ impl ManagedConnection {
         let connection = transaction
             .as_ref()
             .ok_or(SQLiteError::NoActiveTransaction)?;
+        *self.session.snapshot_branch.lock() = Arc::new(());
         if statement == "COMMIT" {
             // Materialize the failure before entering the branch. Holding the
             // mutex guard created by an `if let` scrutinee until the end of
@@ -810,6 +825,7 @@ impl ManagedConnection {
                 let stmt = format!("ROLLBACK TO SAVEPOINT \"{}\"", name.replace('"', "\"\""));
                 connection.execute_batch(&stmt)?;
                 self.session.transaction_failure.lock().take();
+                *self.session.snapshot_branch.lock() = Arc::new(());
                 Ok(())
             },
         )

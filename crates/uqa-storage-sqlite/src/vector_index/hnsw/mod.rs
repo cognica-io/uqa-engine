@@ -37,6 +37,7 @@ pub struct SQLiteHNSWIndex {
 #[derive(Clone)]
 pub(super) struct CachedGraph {
     pub(super) revision: u64,
+    pub(super) identity: crate::connection::SnapshotIdentity,
     pub(super) graph: Arc<HNSWIndex>,
 }
 

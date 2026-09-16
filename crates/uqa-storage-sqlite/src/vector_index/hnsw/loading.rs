@@ -30,25 +30,17 @@ impl SQLiteHNSWIndex {
         self.validate_header(dimensions, params)
     }
 
-    pub(super) fn load_graph(&self) -> StorageBackendResult<(u64, HNSWIndex)> {
-        let (dimensions, params, meta, revision, nodes) =
-            self.persistent.conn.with_mut(|connection| {
-                let transaction = connection.savepoint()?;
-                let Some((dimensions, params, meta, revision)) =
-                    load_meta_from(&transaction, self)?
-                else {
-                    return Err(SQLiteError::StorageBackend(format!(
-                        "missing persisted HNSW metadata for {}.{}",
-                        self.persistent.table, self.persistent.field
-                    )));
-                };
-                let mut nodes = load_nodes_from(&transaction, self)?;
-                load_edges_into(&transaction, self, &mut nodes)?;
-                let canonical = self.persistent.load_all_with_ordinals_from(&transaction)?;
-                validate_canonical_vectors(&canonical, &nodes)?;
-                transaction.commit()?;
-                Ok((dimensions, params, meta, revision, nodes))
-            })?;
+    pub(super) fn load_graph_from(
+        &self,
+        connection: &Connection,
+    ) -> SQLiteResult<(u64, HNSWIndex)> {
+        let Some((dimensions, params, meta, revision)) = load_meta_from(connection, self)? else {
+            return Err(super::mutation::missing_metadata(self).into());
+        };
+        let mut nodes = load_nodes_from(connection, self)?;
+        load_edges_into(connection, self, &mut nodes)?;
+        let canonical = self.persistent.load_all_with_ordinals_from(connection)?;
+        validate_canonical_vectors(&canonical, &nodes)?;
         self.validate_header(dimensions, params)?;
         Ok((
             revision,
@@ -85,7 +77,7 @@ impl SQLiteHNSWIndex {
     }
 }
 
-fn load_meta_from(
+pub(super) fn load_meta_from(
     connection: &Connection,
     index: &SQLiteHNSWIndex,
 ) -> SQLiteResult<Option<(u32, HNSWIndexParams, HNSWGraphMeta, u64)>> {

@@ -18,6 +18,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Prevent SQLite HNSW searches from reusing discarded graphs after rollback or same-revision index recreation. Cache selection, candidate evaluation and persistence now share one physical view; intervening rebuilds cannot publish an obsolete candidate.
 - Preserve embedded NUL characters in metadata-derived cache names and atomically repair the known prior triggers. Native conversion and reopen now reject missing or changed catalog cache tracking.
 - Preserve graph path-cache validity across overlapping development SQLite Key/Value and redb transactions: merge source invalidations, include late graph dependencies, reject stale builds and preserve caches reassigned to another graph. Savepoints and receipt-based commit retry retain these effects without repeating graph evaluation; native relational graph writes and concurrent Engine SQL remain in progress.
 - Reject duplicate sequence incarnations during native SQLite record conversion and competing live definition generations at commit, including aliases created concurrently by independent sessions. Native sequence catalog and value operations now share the selected logical session; complete concurrent Engine SQL integration remains in progress.

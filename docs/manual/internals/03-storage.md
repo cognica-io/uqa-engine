@@ -143,6 +143,8 @@ A vector field begins with exact brute-force access. `CREATE INDEX USING ivf` or
 
 Mutation maintains the selected physical index according to its contract. Index creation, replacement, and failure must publish catalog identity only after the physical candidate is durable and validated.
 
+On the physical SQLite path, HNSW cache identity includes its connection, rollback branch, local change count and observed database version as well as the stored graph revision. This prevents a repeated revision after rollback or index recreation from naming a different cached graph. Cache selection, canonical validation, candidate evaluation and optional persistence share one SQLite snapshot; publication uses the identity captured with the evaluated result. A stable view reuses its immutable graph, while retained graph snapshots survive later recreation. A competing commit during evaluation rejects the obsolete write without replaying graph mutation. Bound native HNSW record routing remains part of the concurrent-storage work above.
+
 ## Graph storage
 
 Named graphs have explicit durable identity. Vertex, edge, property, membership, temporal delta, and path-index state is restored with the catalog. Graph and relational mutations enter the same engine transaction coordinator when they occur in one statement or explicit transaction.
