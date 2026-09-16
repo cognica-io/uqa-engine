@@ -13,6 +13,56 @@ use super::{
 };
 
 impl InvertedIndex for KeyValueInvertedIndex {
+    fn persisted_block_max_scores_keys_bulk(
+        &self,
+        field: &str,
+        terms: &[TokenTermKey],
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<Vec<Option<Vec<f64>>>> {
+        if scorer_fingerprint.is_empty() {
+            return Ok(vec![None; terms.len()]);
+        }
+        self.get_versioned_block_max_scores_keys_bulk(field, terms, scorer_fingerprint)
+    }
+
+    fn persisted_block_max_scores_bulk(
+        &self,
+        field: &str,
+        terms: &[String],
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<Vec<Option<Vec<f64>>>> {
+        let terms = terms
+            .iter()
+            .map(|term| TokenTermKey::from_text(term))
+            .collect::<Vec<_>>();
+        self.persisted_block_max_scores_keys_bulk(field, &terms, scorer_fingerprint)
+    }
+
+    fn persisted_block_max_scores(
+        &self,
+        field: &str,
+        term: &str,
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<Option<Vec<f64>>> {
+        Ok(self
+            .persisted_block_max_scores_keys_bulk(
+                field,
+                &[TokenTermKey::from_text(term)],
+                scorer_fingerprint,
+            )?
+            .pop()
+            .expect("one term"))
+    }
+
+    fn rebuild_persisted_block_max(
+        &mut self,
+        field: &str,
+        scorer: &dyn crate::block_max_index::BlockMaxScorer,
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<bool> {
+        self.rebuild_block_max(field, scorer, scorer_fingerprint)
+    }
+
     fn posting_read_cursor_key_budgeted<'a>(
         &'a self,
         field: &'a str,

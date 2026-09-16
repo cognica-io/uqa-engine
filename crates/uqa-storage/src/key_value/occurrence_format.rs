@@ -19,9 +19,12 @@ use super::{
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 use uqa_core::memory::BudgetedVec;
 use OccurrenceProjection::{
-    Document, Field, Format, LegacyDocument, LegacyField, LegacyLength, LegacyPositions,
-    LegacyPosting, LegacyReverse, LegacyScore, Length, Metadata, Positions, Score,
+    BlockMax, Document, Field, Format, LegacyDocument, LegacyField, LegacyLength, LegacyPositions,
+    LegacyPosting, LegacyReverse, LegacyScore, Length, Metadata, Positions, Score, Skip,
 };
+
+mod accelerators;
+pub use accelerators::BlockMaxValue;
 
 /// A value projection or a predecessor namespace whose presence requires a source rebuild.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,6 +36,8 @@ pub enum OccurrenceProjection {
     Metadata,
     Field,
     Format,
+    Skip,
+    BlockMax,
     LegacyPosting,
     LegacyReverse,
     LegacyScore,
@@ -52,6 +57,8 @@ impl OccurrenceProjection {
             Metadata => (TAG_OCCURRENCE_INDEX, Some(keys::METADATA)),
             Field => (TAG_OCCURRENCE_INDEX, Some(keys::FIELD)),
             Format => (TAG_OCCURRENCE_INDEX, Some(keys::FORMAT)),
+            Skip => (TAG_OCCURRENCE_INDEX, Some(keys::SKIP)),
+            BlockMax => (TAG_OCCURRENCE_INDEX, Some(keys::BLOCK_MAX)),
             LegacyPosting => (TAG_POSTING, None),
             LegacyReverse => (TAG_REVERSE_POSTING, None),
             LegacyScore => (TAG_POSTING_CLUSTER_SCORE, None),
@@ -75,6 +82,7 @@ pub struct OccurrenceAddress<'a> {
     pub term: Option<&'a [u8]>,
     pub document: Option<u64>,
     pub cluster: Option<u64>,
+    pub ordinal: Option<u64>,
 }
 
 impl<'a> OccurrenceAddress<'a> {
@@ -86,6 +94,7 @@ impl<'a> OccurrenceAddress<'a> {
             term: None,
             document: None,
             cluster: None,
+            ordinal: None,
         }
     }
 
@@ -106,6 +115,8 @@ impl<'a> OccurrenceAddress<'a> {
                 Some(&keys::METADATA) => Some(Metadata),
                 Some(&keys::FIELD) => Some(Field),
                 Some(&keys::FORMAT) => Some(Format),
+                Some(&keys::SKIP) => Some(Skip),
+                Some(&keys::BLOCK_MAX) => Some(BlockMax),
                 _ => return Err(other_error("unknown occurrence projection")),
             },
             TAG_POSTING => Some(LegacyPosting),
@@ -124,13 +135,18 @@ impl<'a> OccurrenceAddress<'a> {
             return Ok(address);
         }
         match address.projection {
-            Some(Score | Positions) => {
+            Some(Score | Positions | Skip | BlockMax) => {
                 address.field = Some(text(read_segment(key, &mut offset)?)?);
                 if offset < key.len() {
                     address.term = Some(read_segment(key, &mut offset)?);
                 }
                 if offset < key.len() {
-                    address.cluster = Some(read_u64(key, &mut offset)?);
+                    let number = Some(read_u64(key, &mut offset)?);
+                    match address.projection {
+                        Some(Skip) => address.document = number,
+                        Some(BlockMax) => address.ordinal = number,
+                        _ => address.cluster = number,
+                    }
                 }
             }
             Some(Document | Length) => {
@@ -158,6 +174,8 @@ impl<'a> OccurrenceAddress<'a> {
             Some(Score | Positions) => {
                 self.field.is_some() && self.term.is_some() && self.cluster.is_some()
             }
+            Some(Skip) => self.field.is_some() && self.term.is_some() && self.document.is_some(),
+            Some(BlockMax) => self.field.is_some() && self.term.is_some() && self.ordinal.is_some(),
             Some(Document | Length | Metadata) => self.document.is_some() && self.field.is_some(),
             Some(Field) => self.field.is_some(),
             Some(Format) => true,
@@ -174,15 +192,19 @@ impl<'a> OccurrenceAddress<'a> {
             len += 1;
         };
         match self.projection {
-            Some(Score | Positions) => {
+            Some(Score | Positions | Skip | BlockMax) => {
                 if let Some(field) = self.field {
                     push(Part::Segment(field.as_bytes()));
                 }
                 if let Some(term) = self.term {
                     push(Part::Segment(term));
                 }
-                if let Some(cluster) = self.cluster {
-                    push(Part::Number(cluster));
+                if let Some(number) = match self.projection {
+                    Some(Skip) => self.document,
+                    Some(BlockMax) => self.ordinal,
+                    _ => self.cluster,
+                } {
+                    push(Part::Number(number));
                 }
             }
             Some(Document | Length) => {

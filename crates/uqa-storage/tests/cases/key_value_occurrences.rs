@@ -22,6 +22,52 @@ fn fields(text: &str) -> BTreeMap<String, String> {
     BTreeMap::from([("body".into(), text.into())])
 }
 
+#[test]
+fn column_lifecycle_invalidates_occurrence_bounds_without_changing_retained_views() {
+    struct Frequency;
+    impl uqa_storage::block_max_index::BlockMaxScorer for Frequency {
+        fn score(&self, frequency: u64, _: u64, _: u64) -> f64 {
+            frequency as f64
+        }
+    }
+    let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(store.clone());
+    let mut index = KeyValueInvertedIndex::new(store, "docs", whitespace_analyzer());
+    index.add_document(1, fields("alpha alpha")).unwrap();
+    index
+        .rebuild_persisted_block_max("body", &Frequency, "old")
+        .unwrap();
+    let retained = index.snapshot().unwrap();
+    catalog
+        .rename_column_data("docs", "body", "caption")
+        .unwrap();
+    assert_eq!(index.get_doc_length(1, "caption").unwrap(), 2);
+    for field in ["body", "caption"] {
+        assert_eq!(
+            index
+                .persisted_block_max_scores(field, "alpha", "old")
+                .unwrap(),
+            None
+        );
+    }
+    index
+        .rebuild_persisted_block_max("caption", &Frequency, "new")
+        .unwrap();
+    catalog.drop_column_data("docs", "caption").unwrap();
+    assert_eq!(
+        index
+            .persisted_block_max_scores("caption", "alpha", "new")
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        retained
+            .persisted_block_max_scores("body", "alpha", "old")
+            .unwrap(),
+        Some(vec![2.0])
+    );
+}
+
 fn config() -> Analyzer {
     serde_json::from_str(r#"{"tokenizer":{"type":"whitespace"},"token_filters":[{"type":"stop","language":"","custom_words":["gap"]},{"type":"synonym","synonyms":{"a":["a","a"]}}]}"#).unwrap()
 }

@@ -20,6 +20,8 @@ pub(super) const LENGTH: u8 = b'l';
 pub(super) const METADATA: u8 = b'm';
 pub(super) const FIELD: u8 = b'f';
 pub(super) const FORMAT: u8 = b'v';
+pub(super) const SKIP: u8 = b'k';
+pub(super) const BLOCK_MAX: u8 = b'b';
 pub(super) const FORMAT_NAME: &[u8] = b"occurrences-v2";
 
 pub(super) fn table_prefix(table: &str) -> StorageBackendResult<Vec<u8>> {

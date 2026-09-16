@@ -117,5 +117,6 @@ fn occurrence_snapshots_and_independent_indexes_share_the_session_boundary() {
     let b = a.open_session().unwrap();
     verify_occurrence_snapshots(&a).unwrap();
     verify_occurrence_concurrency(&a, &b).unwrap();
+    verify_occurrence_accelerators(&a, &b).unwrap();
     verify_occurrence_reopen(b).unwrap();
 }

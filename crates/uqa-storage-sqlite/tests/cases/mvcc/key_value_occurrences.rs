@@ -24,6 +24,7 @@ fn key_value_occurrence_snapshots_independent_commits_and_reopen_in_every_mode()
                 Arc::new(SQLiteKeyValueStore::new(open(mode, &path)).unwrap());
             verify_occurrence_snapshots(&a).unwrap();
             verify_occurrence_concurrency(&a, &b).unwrap();
+            verify_occurrence_accelerators(&a, &b).unwrap();
         }
         verify_occurrence_reopen(Arc::new(
             SQLiteKeyValueStore::new(open(mode, &path)).unwrap(),

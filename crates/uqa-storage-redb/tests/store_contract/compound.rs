@@ -73,6 +73,7 @@ fn occurrence_snapshots_independent_commits_and_reopen() {
         let b: Arc<dyn KeyValueStore> = Arc::new(storage.store());
         verify_occurrence_snapshots(&a).unwrap();
         verify_occurrence_concurrency(&a, &b).unwrap();
+        verify_occurrence_accelerators(&a, &b).unwrap();
     }
     let storage = RedbStorage::open(&path).unwrap();
     verify_occurrence_reopen(Arc::new(storage.store())).unwrap();

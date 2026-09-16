@@ -18,6 +18,7 @@ pub(super) fn drop_occurrence_field(
     table: &str,
     field: &str,
 ) -> StorageBackendResult<()> {
+    invalidate_accelerators(store, batch, table, field, None)?;
     for kind in [keys::SCORE, keys::POSITIONS, keys::METADATA, keys::FIELD] {
         batch.delete_prefix(&keys::field_prefix(table, kind, field)?)?;
     }
@@ -41,6 +42,7 @@ pub(super) fn rename_occurrence_field(
     if from == to {
         return Ok(());
     }
+    invalidate_accelerators(store, batch, table, from, Some(to))?;
     for kind in [keys::SCORE, keys::POSITIONS, keys::METADATA, keys::FIELD] {
         batch_rekey_prefix_or_keep_existing(
             store,
@@ -62,6 +64,25 @@ pub(super) fn rename_occurrence_field(
                 batch.delete(&key)?;
             }
         }
+    }
+    Ok(())
+}
+
+fn invalidate_accelerators(
+    store: &dyn KeyValueStore,
+    batch: &mut dyn KeyValueBatch,
+    table: &str,
+    from: &str,
+    to: Option<&str>,
+) -> StorageBackendResult<()> {
+    for field in std::iter::once(from).chain(to) {
+        for kind in [keys::SKIP, keys::BLOCK_MAX] {
+            batch.delete_prefix(&keys::field_prefix(table, kind, field)?)?;
+        }
+    }
+    let format = keys::kind_prefix(table, keys::FORMAT)?;
+    if let Some(value) = store.get(&format)? {
+        batch.put(&format, &value)?;
     }
     Ok(())
 }

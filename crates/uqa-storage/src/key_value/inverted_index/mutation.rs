@@ -187,6 +187,7 @@ impl OccurrenceRead<'_> {
         if totals.is_empty() {
             return Ok(());
         }
+        self.invalidate_accelerators(batch)?;
         for ((field, term, cluster), updates) in changes {
             let merged = merge_cluster_changes(self.load_cluster(&field, &term, cluster)?, updates);
             self.put_cluster(batch, &field, &term, cluster, &merged)?;

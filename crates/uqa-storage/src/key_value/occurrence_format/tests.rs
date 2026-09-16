@@ -17,7 +17,7 @@ fn projected_addresses_preserve_existing_current_and_legacy_key_bytes() {
     let field = "field\0é";
     let term = TokenTermKey::from_text("α");
     let mut expected = vec![keys::table_prefix(table).unwrap()];
-    for kind in [keys::SCORE, keys::POSITIONS] {
+    for kind in [keys::SCORE, keys::POSITIONS, keys::SKIP, keys::BLOCK_MAX] {
         expected.push(keys::kind_prefix(table, kind).unwrap());
         expected.push(keys::field_prefix(table, kind, field).unwrap());
         expected.push(keys::term_prefix(table, kind, field, &term).unwrap());

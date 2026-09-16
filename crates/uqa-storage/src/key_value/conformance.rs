@@ -27,7 +27,9 @@ pub use physical_vectors::{
 };
 mod vector_snapshots;
 pub use vector_snapshots::{verify_exact_snapshot_concurrency, verify_vector_snapshots};
+mod occurrence_accelerators;
 mod occurrences;
+pub use occurrence_accelerators::verify_occurrence_accelerators;
 pub use occurrences::{
     verify_occurrence_concurrency, verify_occurrence_reopen, verify_occurrence_snapshots,
 };
