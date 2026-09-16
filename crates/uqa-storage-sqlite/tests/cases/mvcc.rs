@@ -37,6 +37,8 @@ mod native_relations;
 mod native_sequences;
 #[path = "mvcc/native_tables.rs"]
 mod native_tables;
+#[path = "mvcc/native_vectors.rs"]
+mod native_vectors;
 
 #[derive(Clone, Copy, Debug)]
 enum Mode {

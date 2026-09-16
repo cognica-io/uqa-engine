@@ -129,6 +129,9 @@ impl VectorIndex for SQLiteIVFIndex {
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
-        Ok(Arc::new(self.clone()))
+        Ok(Arc::new(Self {
+            persistent: self.persistent.retained_snapshot()?,
+            params: self.params,
+        }))
     }
 }

@@ -24,6 +24,12 @@ impl SQLiteIVFIndex {
         if k == 0 {
             return Ok(PostingList::new());
         }
+        if let Some(result) = self
+            .persistent
+            .read_native(|read| self.search_native(read, query, k))?
+        {
+            return Ok(result);
+        }
         let Some(meta) = self.ready_meta()? else {
             return self.persistent.search_knn(query, k);
         };
@@ -39,6 +45,12 @@ impl SQLiteIVFIndex {
         if candidates.is_empty() {
             return Ok(PostingList::new());
         }
-        Ok(scored_posting_list(query, &candidates, k))
+        Ok(scored_posting_list(
+            query,
+            candidates
+                .iter()
+                .map(|(doc, vector)| (*doc, vector.as_slice())),
+            k,
+        ))
     }
 }

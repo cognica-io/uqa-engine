@@ -35,6 +35,22 @@ impl SQLiteIVFIndex {
     }
 
     pub(super) fn initialize_metadata(&self) -> StorageBackendResult<()> {
+        if self
+            .persistent
+            .write_native(|read, batch| {
+                let read = read.owned(batch)?;
+                let entries = read.vectors()?;
+                let snapshot = self.metadata_for_entries(&entries)?;
+                super::native::write_metadata(
+                    &read,
+                    batch,
+                    &encode_metadata(self.params, &snapshot)?,
+                )
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         if self.persistent.count()? >= self.params.train_threshold {
             self.train_metadata()
         } else {

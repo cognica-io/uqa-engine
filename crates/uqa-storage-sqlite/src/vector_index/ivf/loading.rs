@@ -9,16 +9,16 @@
 use rusqlite::{params, OptionalExtension};
 use uqa_core::DocId;
 
-use super::metadata::{
-    invalid_metadata, parse_state, positive_i64_to_usize, usize_to_i64, SQLiteIVFMeta,
-};
+use super::metadata::{usize_to_i64, SQLiteIVFMeta};
 use super::SQLiteIVFIndex;
-use crate::vector_index::codec::{blob_to_vector, decode_doc_id, i64_to_usize};
+use crate::vector_index::codec::{blob_to_vector, decode_doc_id};
 use crate::Result as SQLiteResult;
-use uqa_storage::vector_index::IVFIndexParams;
 
 impl SQLiteIVFIndex {
     pub(super) fn load_meta(&self) -> SQLiteResult<Option<SQLiteIVFMeta>> {
+        if let Some(meta) = self.persistent.read_native(super::native::load_metadata)? {
+            return Ok(meta);
+        }
         let row = self.persistent.conn.with(|conn| {
             Ok(conn
                 .query_row(
@@ -42,23 +42,7 @@ impl SQLiteIVFIndex {
                 )
                 .optional()?)
         })?;
-        let Some((dimensions, nlist, nprobe, threshold, state, trained, deleted, count)) = row
-        else {
-            return Ok(None);
-        };
-        i64_to_usize("IVF trained_size", trained)?;
-        i64_to_usize("IVF deletes_since_train", deleted)?;
-        Ok(Some(SQLiteIVFMeta {
-            dimensions: u32::try_from(dimensions)
-                .map_err(|_| invalid_metadata("dimensions", dimensions))?,
-            params: IVFIndexParams {
-                nlist: positive_i64_to_usize("nlist", nlist)?,
-                nprobe: positive_i64_to_usize("nprobe", nprobe)?,
-                train_threshold: positive_i64_to_usize("train_threshold", threshold)?,
-            },
-            state: parse_state(&state)?,
-            vector_count: i64_to_usize("IVF vector_count", count)?,
-        }))
+        row.map(super::metadata::decode_metadata).transpose()
     }
 
     pub(super) fn load_centroids(&self) -> SQLiteResult<Vec<Vec<f32>>> {

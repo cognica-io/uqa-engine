@@ -15,6 +15,7 @@ mod loading;
 mod math;
 mod metadata;
 mod mutation;
+mod native;
 mod search;
 mod training;
 mod writing;

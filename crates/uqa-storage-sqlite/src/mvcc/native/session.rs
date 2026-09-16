@@ -31,10 +31,25 @@ impl NativeSnapshot {
         &self,
         family: Family,
         components: &[ValueRef<'_>],
+        visit: impl FnMut(&[ValueRef<'_>]) -> Result<bool>,
+    ) -> Result<()> {
+        self.visit_paged_owned_rows(
+            family,
+            NativeRecordOwner::Database(self.database),
+            components,
+            visit,
+        )
+    }
+
+    pub(crate) fn visit_paged_owned_rows(
+        &self,
+        family: Family,
+        owner: NativeRecordOwner,
+        components: &[ValueRef<'_>],
         mut visit: impl FnMut(&[ValueRef<'_>]) -> Result<bool>,
     ) -> Result<()> {
-        let prefix = NativeRecordIdentity::new(family, NativeRecordOwner::Database(self.database))?
-            .encode_prefix(components, &self.control)?;
+        let prefix =
+            NativeRecordIdentity::new(family, owner)?.encode_prefix(components, &self.control)?;
         let mut after = uqa_core::memory::BudgetedVec::new(self.control.memory());
         loop {
             let page = self.view.scan(
