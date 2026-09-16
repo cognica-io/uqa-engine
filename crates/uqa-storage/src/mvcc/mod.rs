@@ -13,6 +13,7 @@ mod graph;
 mod history;
 mod key;
 mod memory;
+mod occurrence;
 mod overlay;
 mod persistence;
 mod projection;
@@ -24,6 +25,9 @@ pub use commit::{PreparedRecordCommit, PreparedRecordWrite};
 pub use graph::{GraphMutation, GraphRecordKey, GraphRecordLayout};
 pub use history::{RecordHistory, RecordVersion, ScannedRecord, SharedRecordValue};
 pub use memory::{MemoryRecordSnapshot, MemoryVersionStore};
+pub use occurrence::{
+    OccurrenceRecordKind, OccurrenceRecordLayout, OccurrenceRecordValue, OccurrenceRelatedKey,
+};
 pub use overlay::{
     PrivateRecordChanges, PrivateRecordKey, PrivateRecordRevision, PrivateRecordSnapshot,
 };

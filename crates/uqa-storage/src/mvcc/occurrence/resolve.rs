@@ -4,15 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Merge evaluated common-format occurrence records without repeating analysis or scoring.
+//! Resolve evaluated occurrence changes against one fresh committed view without replaying analysis or scoring.
 
-mod clusters;
-mod statistics;
-
-use super::occurrence_format::{OccurrenceAddress, OccurrenceProjection};
-use super::occurrence_keys::{
-    self as keys,
-    encoding::{controlled, Part},
+use super::{
+    OccurrenceRecordKind as Kind, OccurrenceRecordLayout, OccurrenceRecordValue as Value,
+    OccurrenceRelatedKey as Related,
 };
 use crate::mvcc::{
     commit::RecordWriteKind, CommitSequence, CommittedRecordSnapshot, PreparedRecordCommit,
@@ -22,40 +18,11 @@ use crate::read_control::StorageReadControl;
 use std::collections::BTreeMap;
 use uqa_core::memory::{BudgetedVec, MemoryError};
 
-// Keep guards outside the data namespace so drop/recreation cannot reuse a structural boundary.
-const GUARDS: u8 = b'z';
-
-pub(crate) fn guard(
-    table: &str,
-    document: Option<u64>,
-    control: &StorageReadControl,
-) -> VersionResult<BudgetedVec<u8>> {
-    Ok(match document {
-        Some(document) => controlled(
-            table,
-            GUARDS,
-            Some(b'd'),
-            &[Part::Number(document)],
-            control,
-        )?,
-        None => controlled(table, GUARDS, Some(b's'), &[], control)?,
-    })
-}
-
-pub(crate) fn format(table: &str, control: &StorageReadControl) -> VersionResult<BudgetedVec<u8>> {
-    Ok(controlled(
-        table,
-        super::TAG_OCCURRENCE_INDEX,
-        Some(keys::FORMAT),
-        &[],
-        control,
-    )?)
-}
-
 pub(crate) fn resolve(
     original: &PreparedRecordCommit,
     base: &dyn CommittedRecordSnapshot,
     current: &dyn CommittedRecordSnapshot,
+    layout: &dyn OccurrenceRecordLayout,
     control: &StorageReadControl,
 ) -> VersionResult<PreparedRecordCommit> {
     let changes = PrivateRecordChanges::new(control.memory());
@@ -74,6 +41,7 @@ pub(crate) fn resolve(
     let resolver = Resolver {
         base,
         current,
+        layout,
         changes: &changes,
         control,
     };
@@ -98,14 +66,15 @@ pub(crate) fn resolve(
         .resolved(original, current.sequence()))
 }
 
-struct Resolver<'a> {
-    base: &'a dyn CommittedRecordSnapshot,
-    current: &'a dyn CommittedRecordSnapshot,
-    changes: &'a PrivateRecordChanges,
-    control: &'a StorageReadControl,
+pub(super) struct Resolver<'a> {
+    pub(super) base: &'a dyn CommittedRecordSnapshot,
+    pub(super) current: &'a dyn CommittedRecordSnapshot,
+    pub(super) layout: &'a dyn OccurrenceRecordLayout,
+    pub(super) changes: &'a PrivateRecordChanges,
+    pub(super) control: &'a StorageReadControl,
 }
 
-fn revision(
+pub(super) fn revision(
     snapshot: &dyn CommittedRecordSnapshot,
     key: &[u8],
     control: &StorageReadControl,
@@ -127,14 +96,13 @@ impl Resolver<'_> {
         let base = self.base;
         let current = self.current;
 
-        let address = OccurrenceAddress::decode(write.key())?;
-        if !address.complete() {
-            return Err(VersionError::InvalidEncoding(
-                "incomplete occurrence replacement",
-            ));
-        }
-        let fence = guard(address.table, None, control)?;
-        let marker = format(address.table, control)?;
+        let kind = self.layout.kind(write.key(), control)?;
+        let fence = self
+            .layout
+            .related_key(write.key(), Related::Structure, control)?;
+        let marker = self
+            .layout
+            .related_key(write.key(), Related::Format, control)?;
         let source = writes.get(&*marker).ok_or(VersionError::InvalidEncoding(
             "occurrence changes lack their source marker",
         ))?;
@@ -146,7 +114,8 @@ impl Resolver<'_> {
             )?;
             return Ok(());
         }
-        if source.kind() != RecordWriteKind::Occurrence || source.value() != Some(keys::FORMAT_NAME)
+        if source.kind() != RecordWriteKind::Occurrence
+            || !self.is_format(&marker, source.value())?
         {
             return Err(VersionError::InvalidEncoding(
                 "invalid occurrence source marker",
@@ -161,39 +130,31 @@ impl Resolver<'_> {
                 actual,
             });
         }
-        match (write.kind(), address.projection) {
-            (
-                RecordWriteKind::OccurrenceCache,
-                Some(OccurrenceProjection::Skip | OccurrenceProjection::BlockMax),
-            ) => {}
-            (RecordWriteKind::Occurrence, Some(OccurrenceProjection::Format)) => {
+        match (write.kind(), kind) {
+            (RecordWriteKind::OccurrenceCache, Kind::Cache) => {}
+            (RecordWriteKind::Occurrence, Kind::Format) => {
                 for snapshot in [base, current] {
-                    if snapshot
-                        .get(&marker, control)?
-                        .as_ref()
-                        .and_then(|row| row.value())
-                        .is_some_and(|value| &***value != keys::FORMAT_NAME)
-                    {
+                    let row = snapshot.get(&marker, control)?;
+                    let value = bytes(row.as_ref());
+                    if value.is_some() && !self.is_format(&marker, value)? {
                         return Err(VersionError::InvalidEncoding(
                             "occurrence format changed during source replacement",
                         ));
                     }
                 }
                 self.replace(&marker, write.value())?;
-                self.invalidate(address.table)?;
+                self.invalidate(&marker)?;
             }
-            (
-                RecordWriteKind::Occurrence,
-                Some(OccurrenceProjection::Score | OccurrenceProjection::Positions),
-            ) => {
-                let mut peer = address;
-                peer.projection =
-                    Some(if address.projection == Some(OccurrenceProjection::Score) {
-                        OccurrenceProjection::Positions
+            (RecordWriteKind::Occurrence, Kind::Score(_) | Kind::Positions) => {
+                let peer_key = self.layout.related_key(
+                    write.key(),
+                    if kind == Kind::Positions {
+                        Related::Score
                     } else {
-                        OccurrenceProjection::Score
-                    });
-                let peer_key = peer.encode(control)?;
+                        Related::Positions
+                    },
+                    control,
+                )?;
                 let paired = writes.get(&*peer_key).ok_or(VersionError::InvalidEncoding(
                     "unpaired occurrence cluster replacement",
                 ))?;
@@ -203,16 +164,14 @@ impl Resolver<'_> {
                         &[write.clone().with_kind(RecordWriteKind::Canonical)],
                         control,
                     )?;
-                } else if address.projection == Some(OccurrenceProjection::Score) {
-                    self.merge_cluster(
-                        mutation,
-                        write,
-                        paired,
-                        address.cluster.expect("complete cluster"),
-                    )?;
+                } else if let Kind::Score(cluster) = kind {
+                    self.merge_cluster(mutation, write, Some(paired), cluster)?;
                 }
             }
-            (RecordWriteKind::Occurrence, Some(OccurrenceProjection::Field)) => {
+            (RecordWriteKind::Occurrence, Kind::Cluster(cluster)) => {
+                self.merge_cluster(mutation, write, None, cluster)?;
+            }
+            (RecordWriteKind::Occurrence, Kind::Statistics) => {
                 self.merge_statistics(mutation, write)?;
             }
             _ => {
@@ -222,6 +181,26 @@ impl Resolver<'_> {
             }
         }
         Ok(())
+    }
+
+    fn is_format(&self, key: &[u8], value: Option<&[u8]>) -> VersionResult<bool> {
+        Ok(match value {
+            Some(value) => matches!(
+                self.layout.decode(key, value, self.control)?,
+                Value::Format(b"occurrences-v2")
+            ),
+            None => false,
+        })
+    }
+
+    pub(super) fn encode_replace(
+        &self,
+        key: &[u8],
+        template: &[u8],
+        value: Value<'_>,
+    ) -> VersionResult<()> {
+        let bytes = self.layout.encode(key, template, value, self.control)?;
+        self.replace(key, Some(&bytes))
     }
 
     fn validate(&self, mutation: usize, write: &PreparedRecordWrite) -> VersionResult<()> {
@@ -235,7 +214,7 @@ impl Resolver<'_> {
         }
         Ok(())
     }
-    fn replace(&self, key: &[u8], value: Option<&[u8]>) -> VersionResult<()> {
+    pub(super) fn replace(&self, key: &[u8], value: Option<&[u8]>) -> VersionResult<()> {
         self.changes.apply(
             &[RecordWrite {
                 key,
@@ -245,15 +224,9 @@ impl Resolver<'_> {
             self.control,
         )
     }
-    fn invalidate(&self, table: &str) -> VersionResult<()> {
-        for kind in [keys::SKIP, keys::BLOCK_MAX] {
-            let prefix = controlled(
-                table,
-                super::TAG_OCCURRENCE_INDEX,
-                Some(kind),
-                &[],
-                self.control,
-            )?;
+    fn invalidate(&self, marker: &[u8]) -> VersionResult<()> {
+        for kind in [Related::Skips, Related::BlockMax] {
+            let prefix = self.layout.related_key(marker, kind, self.control)?;
             let mut after = BudgetedVec::new(self.control.memory());
             loop {
                 let page = self.current.scan(
@@ -279,7 +252,7 @@ impl Resolver<'_> {
     }
 }
 
-fn bytes(
+pub(super) fn bytes(
     record: Option<&crate::mvcc::RecordVersion<crate::mvcc::SharedRecordValue>>,
 ) -> Option<&[u8]> {
     record

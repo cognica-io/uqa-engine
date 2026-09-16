@@ -32,7 +32,8 @@ pub use catalog::KeyValueCatalog;
 mod graph_commit;
 pub use graph_commit::KeyValueGraphRecords;
 mod index_view;
-pub(crate) mod occurrence_commit;
+pub(crate) mod occurrence_records;
+pub use occurrence_records::KeyValueOccurrenceRecords;
 mod view;
 pub use view::{KeyValueMutation, KeyValueRead, KeyValueReadRevision, KeyValueReadScope};
 
@@ -119,6 +120,10 @@ pub trait KeyValueBatch {
     }
     /// Fence a structural occurrence change, including an empty rebuild, drop, purge or rename. Serialized projections already retain their native mutation boundary.
     fn reset_occurrences(&mut self, _table: &str) -> StorageBackendResult<()> {
+        Ok(())
+    }
+    /// Retain the original precondition and current value of a record, including an absent tombstone, before later replacements. Concurrent wrappers must forward this call; serialized stores already exclude intervening writers.
+    fn fence_record(&mut self, _key: &[u8]) -> StorageBackendResult<()> {
         Ok(())
     }
     /// Record graph-cache dependencies in the same atomic batch. Concurrent MVCC stores must resolve these logical effects before admitting a commit; serialized legacy stores use the ordinary preview writes already included by the catalog.

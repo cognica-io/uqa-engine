@@ -338,10 +338,11 @@ impl Transaction {
         if (prepared.graph.is_some() || occurrences) && self.materialized.is_none() {
             let current = persistence.snapshot(control)?;
             let merged = if occurrences {
-                Some(crate::key_value::occurrence_commit::resolve(
+                Some(crate::mvcc::occurrence::resolve(
                     prepared,
                     &*self.committed,
                     &*current,
+                    persistence.occurrence_record_layout(),
                     control,
                 )?)
             } else {

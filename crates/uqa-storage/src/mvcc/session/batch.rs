@@ -19,6 +19,7 @@ enum Operation {
     Delete(BudgetedVec<u8>),
     DeletePrefix(BudgetedVec<u8>, RecordWriteKind),
     OccurrenceReset(BudgetedVec<u8>),
+    Fence(BudgetedVec<u8>),
     Graph(OwnedGraphMutation),
     TypedRecord {
         key: BudgetedVec<u8>,
@@ -71,16 +72,17 @@ impl<'a> Batch<'a> {
                 Operation::OccurrenceReset(table) => {
                     let table = std::str::from_utf8(table)
                         .map_err(|_| VersionError::InvalidEncoding("invalid occurrence table"))?;
-                    let key = crate::key_value::occurrence_commit::guard(
+                    let key = crate::key_value::occurrence_records::guard(
                         table,
                         None,
                         &self.store.control,
                     )?;
                     transaction.replace(&key, Some(b""), &self.store.control)?;
                     let key =
-                        crate::key_value::occurrence_commit::format(table, &self.store.control)?;
+                        crate::key_value::occurrence_records::format(table, &self.store.control)?;
                     transaction.fence_record(&key, &self.store.control)?;
                 }
+                Operation::Fence(key) => transaction.fence_record(key, &self.store.control)?,
                 Operation::Graph(mutation) => transaction.graph_mutation(mutation)?,
                 Operation::TypedRecord { key, value, kind } => {
                     transaction.write_record(key, value.as_deref(), *kind, &self.store.control)?;
@@ -124,13 +126,17 @@ impl KeyValueBatch for Batch<'_> {
     }
     fn occurrence_document(&mut self, table: &str, document: u64) -> StorageBackendResult<()> {
         let key =
-            crate::key_value::occurrence_commit::guard(table, Some(document), &self.store.control)
+            crate::key_value::occurrence_records::guard(table, Some(document), &self.store.control)
                 .map_err(VersionError::into_storage_error)?;
         self.put(&key, b"")
     }
     fn reset_occurrences(&mut self, table: &str) -> StorageBackendResult<()> {
         self.operations
             .push(Operation::OccurrenceReset(self.copy(table.as_bytes())?))?;
+        Ok(())
+    }
+    fn fence_record(&mut self, key: &[u8]) -> StorageBackendResult<()> {
+        self.operations.push(Operation::Fence(self.copy(key)?))?;
         Ok(())
     }
     fn graph_mutation(

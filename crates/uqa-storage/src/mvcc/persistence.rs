@@ -131,6 +131,11 @@ pub trait VersionedPersistence: Send + Sync {
         None
     }
 
+    /// Common Key/Value addressing is the default. Native record adapters and their wrappers must return their own physical occurrence layout.
+    fn occurrence_record_layout(&self) -> &dyn super::OccurrenceRecordLayout {
+        &crate::key_value::KeyValueOccurrenceRecords
+    }
+
     /// Persist a new transaction allocation before returning it, without advancing record visibility.
     fn allocate_transaction(
         &self,

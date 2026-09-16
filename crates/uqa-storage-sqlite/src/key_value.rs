@@ -265,6 +265,9 @@ impl KeyValueBatch for SQLiteKeyValueBatch<'_> {
     fn reset_occurrences(&mut self, table: &str) -> StorageBackendResult<()> {
         self.batch.reset_occurrences(table)
     }
+    fn fence_record(&mut self, key: &[u8]) -> StorageBackendResult<()> {
+        self.batch.fence_record(key)
+    }
     fn graph_mutation(
         &mut self,
         mutation: uqa_storage::mvcc::GraphMutation<'_>,
