@@ -48,6 +48,7 @@ mod graph;
 mod graph_access;
 mod migration;
 mod models_scoring;
+mod native;
 mod path_index_data;
 mod schema_tables;
 mod sequences_views;

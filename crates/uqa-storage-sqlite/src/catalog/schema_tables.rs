@@ -6,6 +6,7 @@
 
 //! Metadata, schema, table, and column lifecycle.
 
+use super::native::{optional_text, text, NativeLookup};
 use super::{
     columns_json_references, delete_table_rows_if_exists, drop_fts_aux_tables_for_field,
     drop_fts_aux_tables_for_table, migration_relation, params,
@@ -15,10 +16,17 @@ use super::{
     OptionalExtension, RelationIdentity, RelationKind, Result, SQLiteError, SchemaRow, TableSchema,
     VectorFieldSchema,
 };
+use crate::mvcc::native::NativeRecordFamily as Family;
 
 impl Catalog {
     /// Store an arbitrary key/value pair in the `_metadata` table.
     pub fn set_metadata(&self, key: &str, value: &str) -> Result<()> {
+        if self
+            .put_native_named(Family::Metadata, &[text(key), text(value)])?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "INSERT OR REPLACE INTO _metadata (key, value) VALUES (?1, ?2)",
@@ -30,6 +38,9 @@ impl Catalog {
 
     /// Read a key/value pair from the `_metadata` table.
     pub fn get_metadata(&self, key: &str) -> Result<Option<String>> {
+        if let NativeLookup::Value(value) = self.get_native_named(Family::Metadata, key, 1)? {
+            return Ok(value);
+        }
         self.conn.with(|c| {
             let v: Option<String> = c
                 .query_row(
@@ -48,6 +59,19 @@ impl Catalog {
 
     pub fn save_schema_row(&self, schema: &SchemaRow) -> Result<()> {
         let acl_json = schema.acl.as_ref().map(serde_json::to_string).transpose()?;
+        if self
+            .put_native_named(
+                Family::Schemas,
+                &[
+                    text(&schema.name),
+                    text(&schema.role_owner),
+                    optional_text(acl_json.as_deref()),
+                ],
+            )?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "INSERT INTO _schemas (name, role_owner, acl_json) VALUES (?1, ?2, ?3)
@@ -59,6 +83,9 @@ impl Catalog {
     }
 
     pub fn drop_schema(&self, name: &str) -> Result<()> {
+        if self.drop_native_schema(name)?.is_some() {
+            return Ok(());
+        }
         self.conn.with(|c| {
             let relation_count: i64 = c.query_row(
                 "SELECT COUNT(*) FROM _relations WHERE schema_name = ?1",
@@ -84,6 +111,9 @@ impl Catalog {
     }
 
     pub fn load_schema_rows(&self) -> Result<Vec<SchemaRow>> {
+        if let Some(schemas) = self.load_native_schemas()? {
+            return Ok(schemas);
+        }
         self.conn.with(|c| {
             let mut stmt =
                 c.prepare("SELECT name, role_owner, acl_json FROM _schemas ORDER BY name")?;

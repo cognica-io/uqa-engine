@@ -25,6 +25,11 @@ impl Catalog {
     }
 
     pub(in crate::catalog) fn initialize_storage(&self) -> Result<()> {
+        if self.conn.is_native_record_session() {
+            // Binding already validated the complete mapped format. Never run legacy physical migrations inside a logical session.
+            self.conn.native_snapshot()?;
+            return Ok(());
+        }
         self.run_migrations()
     }
 

@@ -21,6 +21,8 @@ use uqa_storage_sqlite::{ManagedConnection, SQLiteCompressionOptions, SQLiteReco
 mod key_value;
 #[path = "mvcc/native_btree.rs"]
 mod native_btree;
+#[path = "mvcc/native_catalog.rs"]
+mod native_catalog;
 #[path = "mvcc/native_documents.rs"]
 mod native_documents;
 
