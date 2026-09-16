@@ -17,11 +17,11 @@ use crate::read_control::StorageReadControl;
 
 use super::key::RecordKey;
 use super::{
-    CommitSequence, PreparedRecordCommit, RecordHistory, RecordVersion, RecordWrite, VersionResult,
+    CommitSequence, CommittedRecordSnapshot, PreparedRecordCommit, RecordHistory, RecordVersion,
+    RecordWrite, ScannedRecord, SharedRecordValue, VersionResult,
 };
 
-type SharedValue = Arc<BudgetedVec<u8>>;
-type History = RecordHistory<SharedValue>;
+type History = RecordHistory<SharedRecordValue>;
 
 struct RecordEntry {
     history: History,
@@ -144,17 +144,15 @@ impl MemoryVersionStore {
     }
 
     /// Reclaim histories under the same gate that admits new snapshots.
-    pub fn reclaim(&self) -> usize {
+    pub fn reclaim(&self) -> VersionResult<usize> {
         let mut state = self.database.state.lock();
         let horizon = state
             .snapshots
             .first_key_value()
             .map_or(state.sequence, |(sequence, _)| *sequence);
-        state
-            .records
-            .values_mut()
-            .map(|entry| entry.history.reclaim_before(horizon))
-            .sum()
+        state.records.values_mut().try_fold(0, |removed, entry| {
+            Ok(removed + entry.history.reclaim_before(horizon)?)
+        })
     }
 }
 
@@ -171,7 +169,7 @@ impl MemoryRecordSnapshot {
     }
 
     /// Return a revision even if its payload is a tombstone.
-    pub fn get(&self, key: &[u8]) -> Option<RecordVersion<SharedValue>> {
+    pub fn get(&self, key: &[u8]) -> Option<RecordVersion<SharedRecordValue>> {
         self.database
             .state
             .lock()
@@ -223,6 +221,31 @@ impl MemoryRecordSnapshot {
     }
 }
 
+impl CommittedRecordSnapshot for MemoryRecordSnapshot {
+    fn sequence(&self) -> CommitSequence {
+        Self::sequence(self)
+    }
+
+    fn get(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<RecordVersion<SharedRecordValue>>> {
+        control.cancellation().check()?;
+        Ok(Self::get(self, key))
+    }
+
+    fn scan(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<ScannedRecord>> {
+        Self::scan(self, prefix, after, limit, control)
+    }
+}
+
 impl Drop for MemoryRecordSnapshot {
     fn drop(&mut self) {
         let mut state = self.database.state.lock();
@@ -235,11 +258,6 @@ impl Drop for MemoryRecordSnapshot {
             state.snapshots.remove(&self.sequence);
         }
     }
-}
-
-pub struct ScannedRecord {
-    pub key: BudgetedVec<u8>,
-    pub version: RecordVersion<SharedValue>,
 }
 
 fn copy_bytes(value: &[u8], memory: &MemoryBudget) -> VersionResult<BudgetedVec<u8>> {

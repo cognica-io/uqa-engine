@@ -31,3 +31,6 @@ mod mvcc;
 
 #[path = "cases/mvcc_private.rs"]
 mod mvcc_private;
+
+#[path = "cases/mvcc_reads.rs"]
+mod mvcc_reads;

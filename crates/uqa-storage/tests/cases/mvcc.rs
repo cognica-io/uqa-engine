@@ -59,17 +59,64 @@ fn historical_reads_preserve_deletion_and_recreation_boundaries() {
         history.visible_at(sequence(30)).unwrap().value(),
         Some(&"recreated")
     );
-    assert_eq!(history.reclaim_before(sequence(25)), 1);
+    assert_eq!(history.reclaim_before(sequence(25)).unwrap(), 1);
     assert_eq!(history.len(), 2);
     assert_eq!(
         history.visible_at(sequence(25)).unwrap().sequence(),
         sequence(20)
     );
     assert!(history.visible_at(sequence(25)).unwrap().value().is_none());
-    assert_eq!(history.reclaim_before(sequence(100)), 1);
+    assert_eq!(history.reclaim_before(sequence(100)).unwrap(), 1);
     assert_eq!(history.head().unwrap().value(), Some(&"recreated"));
     drop(history);
     assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn reclaimed_history_returns_header_memory_and_retains_its_anchor() {
+    let memory = MemoryBudget::new(8192);
+    let mut history = RecordHistory::new(&memory);
+    for revision in 1..=64 {
+        history.append(sequence(revision), Some(revision)).unwrap();
+    }
+    let retained_bytes = std::mem::size_of::<uqa_storage::mvcc::RecordVersion<u64>>();
+    assert!(memory.used() >= retained_bytes * 64);
+    let held = memory
+        .reserve(memory.limit() - memory.used() - 2 * retained_bytes)
+        .unwrap();
+    assert!(matches!(
+        history.fork_appending(sequence(65), Some(65)),
+        Err(VersionError::Memory(_))
+    ));
+    assert_eq!(history.reclaim_before(sequence(64)).unwrap(), 63);
+    assert_eq!(memory.used(), held.bytes() + retained_bytes);
+    assert_eq!(history.visible_at(sequence(64)).unwrap().value(), Some(&64));
+    let next = history.fork_appending(sequence(65), Some(65)).unwrap();
+    assert_eq!(next.head().unwrap().value(), Some(&65));
+}
+
+#[test]
+fn failed_history_shrinking_preserves_retained_versions_and_can_be_retried() {
+    let memory = MemoryBudget::new(4096);
+    let mut history = RecordHistory::<u64>::new(&memory);
+    for revision in 1..=8 {
+        history.append(sequence(revision), None).unwrap();
+    }
+    let used = memory.used();
+    let held = memory.reserve(memory.limit() - used).unwrap();
+    assert!(matches!(
+        history.reclaim_before(sequence(8)),
+        Err(VersionError::Memory(_))
+    ));
+    assert_eq!(history.len(), 1);
+    assert_eq!(history.head().unwrap().sequence(), sequence(8));
+    assert!(history.head().unwrap().value().is_none());
+    drop(held);
+    assert_eq!(history.reclaim_before(sequence(8)).unwrap(), 0);
+    assert_eq!(
+        memory.used(),
+        std::mem::size_of::<uqa_storage::mvcc::RecordVersion<u64>>()
+    );
 }
 
 #[test]
@@ -189,7 +236,7 @@ fn tombstones_prevent_an_absent_key_from_hiding_intervening_writes() {
         )
         .unwrap();
     drop(before);
-    assert_eq!(store.reclaim(), 1);
+    assert_eq!(store.reclaim().unwrap(), 1);
     assert!(
         matches!(store.commit(&[write(b"record", None, b"stale")], &control()), Err(VersionError::WriteConflict { actual: Some(actual), .. }) if actual == deleted)
     );
@@ -280,7 +327,7 @@ fn pinned_pages_and_reclamation_keep_their_original_record_versions() {
     store
         .commit(&[write(b"p/1", Some(second), b"latest")], &control())
         .unwrap();
-    assert_eq!(store.reclaim(), 0);
+    assert_eq!(store.reclaim().unwrap(), 0);
     let read = control();
     let page = pinned.scan(b"p/", None, 1, &read).unwrap();
     assert_eq!(&*page[0].key, b"p/1");
@@ -293,7 +340,7 @@ fn pinned_pages_and_reclamation_keep_their_original_record_versions() {
         .unwrap()
         .is_empty());
     drop(pinned);
-    assert_eq!(store.reclaim(), 2);
+    assert_eq!(store.reclaim().unwrap(), 2);
     assert_eq!(&***page[0].version.value().unwrap(), b"old");
     drop((page, following));
     assert_eq!(read.memory().used(), 0);
@@ -467,7 +514,7 @@ fn snapshot_admission_and_collection_cannot_lose_a_visible_revision() {
     });
     let collector = std::thread::spawn(move || {
         for _ in 0..256 {
-            collector_store.reclaim();
+            collector_store.reclaim().unwrap();
         }
     });
     for _ in 0..256 {

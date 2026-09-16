@@ -6,9 +6,17 @@
 
 //! Ordered immutable revisions with one retained predecessor at the horizon.
 
+use std::sync::Arc;
 use uqa_core::memory::{BudgetedVec, MemoryBudget};
 
 use super::{CommitSequence, VersionError, VersionResult};
+
+pub type SharedRecordValue = Arc<BudgetedVec<u8>>;
+
+pub struct ScannedRecord {
+    pub key: BudgetedVec<u8>,
+    pub version: RecordVersion<SharedRecordValue>,
+}
 
 #[derive(Debug, Clone)]
 pub struct RecordVersion<T> {
@@ -24,6 +32,10 @@ impl<T> RecordVersion<T> {
     /// A missing payload denotes deletion; the revision itself remains present.
     pub fn value(&self) -> Option<&T> {
         self.value.as_ref()
+    }
+
+    pub fn into_parts(self) -> (CommitSequence, Option<T>) {
+        (self.sequence, self.value)
     }
 }
 
@@ -83,7 +95,9 @@ impl<T> RecordHistory<T> {
     /// Retain the newest revision at/before the horizon and every later one.
     ///
     /// The caller must hold snapshot admission while choosing and applying the horizon. Tombstones are retained as revisions, including at the head.
-    pub fn reclaim_before(&mut self, horizon: CommitSequence) -> usize {
+    ///
+    /// Eligible revisions are already removed if shrinking fails; the retained versions stay valid and a later call can retry releasing excess capacity.
+    pub fn reclaim_before(&mut self, horizon: CommitSequence) -> VersionResult<usize> {
         let removed = self
             .versions
             .partition_point(|version| version.sequence <= horizon)
@@ -93,7 +107,8 @@ impl<T> RecordHistory<T> {
             self.versions.rotate_left(removed);
             self.versions.truncate(retained);
         }
-        removed
+        self.versions.shrink_to_fit()?;
+        Ok(removed)
     }
 }
 

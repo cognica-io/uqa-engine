@@ -14,9 +14,13 @@ mod key;
 mod memory;
 mod overlay;
 mod types;
+mod view;
 
 pub use commit::{PreparedRecordCommit, PreparedRecordWrite};
-pub use history::{RecordHistory, RecordVersion};
-pub use memory::{MemoryRecordSnapshot, MemoryVersionStore, ScannedRecord};
+pub use history::{RecordHistory, RecordVersion, ScannedRecord, SharedRecordValue};
+pub use memory::{MemoryRecordSnapshot, MemoryVersionStore};
 pub use overlay::{PrivateRecordChanges, PrivateRecordSnapshot};
 pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};
+pub use view::{
+    CommittedRecordSnapshot, MergedRecordSnapshot, ScannedVisibleRecord, VisibleRecord,
+};

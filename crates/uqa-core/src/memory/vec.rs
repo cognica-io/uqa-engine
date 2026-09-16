@@ -4,9 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Fallible vectors charge both buffers while moving to a larger allocation.
+//! Fallible vectors charge both buffers while moving between allocations.
 
-use super::{replacement, MemoryBudget, MemoryError, MemoryReservation};
+use super::{buffer_bytes, replacement, MemoryBudget, MemoryError, MemoryReservation};
 
 #[derive(Debug)]
 pub struct BudgetedVec<T> {
@@ -63,6 +63,21 @@ impl<T> BudgetedVec<T> {
         self.values.truncate(len);
     }
 
+    /// Replace excess capacity with an exact-sized buffer, charging both buffers until the move finishes. A failed reservation or allocation preserves the original values, buffer and reservation.
+    pub fn shrink_to_fit(&mut self) -> Result<(), MemoryError> {
+        let capacity = self.values.len();
+        if capacity == self.values.capacity() {
+            return Ok(());
+        }
+        let memory = self.memory.budget().reserve(buffer_bytes::<T>(capacity)?)?;
+        let mut values = Vec::new();
+        values.try_reserve_exact(capacity)?;
+        values.append(&mut self.values);
+        self.values = values;
+        self.memory = memory;
+        Ok(())
+    }
+
     pub fn pop(&mut self) -> Option<T> {
         self.values.pop()
     }
@@ -116,6 +131,71 @@ mod tests {
         assert_eq!(&*values, &[1, 2, 3, 4, 5, 6]);
         assert_eq!(budget.used(), values.capacity());
         drop(values);
+        assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn shrinking_releases_excess_capacity_after_charging_both_buffers() {
+        let budget = MemoryBudget::new(32);
+        let mut values = BudgetedVec::new(&budget);
+        values
+            .extend_from_slice(&[1_u8, 2, 3, 4, 5, 6, 7, 8])
+            .unwrap();
+        values.truncate(2);
+        values.shrink_to_fit().unwrap();
+        assert_eq!(&*values, &[1, 2]);
+        assert_eq!(values.capacity(), 2);
+        assert_eq!(budget.used(), 2);
+        assert_eq!(budget.peak(), 10);
+        values.shrink_to_fit().unwrap();
+        assert_eq!(budget.used(), 2);
+    }
+
+    #[test]
+    fn failed_shrinking_preserves_the_buffer_and_empty_shrinking_needs_no_headroom() {
+        let budget = MemoryBudget::new(8);
+        let mut values = BudgetedVec::new(&budget);
+        values
+            .extend_from_slice(&[1_u8, 2, 3, 4, 5, 6, 7, 8])
+            .unwrap();
+        values.truncate(2);
+        assert!(matches!(
+            values.shrink_to_fit(),
+            Err(MemoryError::Limit { .. })
+        ));
+        assert_eq!(&*values, &[1, 2]);
+        assert_eq!(values.capacity(), 8);
+        assert_eq!(budget.used(), 8);
+        values.clear();
+        values.shrink_to_fit().unwrap();
+        assert_eq!(values.capacity(), 0);
+        assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn shrinking_moves_owned_values_without_copying_or_dropping_survivors() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        struct Item(Arc<AtomicUsize>);
+        impl Drop for Item {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        let budget = MemoryBudget::new(1024);
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let mut values = BudgetedVec::new(&budget);
+        for _ in 0..4 {
+            values.push(Item(Arc::clone(&dropped))).unwrap();
+        }
+        values.truncate(1);
+        assert_eq!(dropped.load(Ordering::Relaxed), 3);
+        values.shrink_to_fit().unwrap();
+        assert_eq!(dropped.load(Ordering::Relaxed), 3);
+        drop(values);
+        assert_eq!(dropped.load(Ordering::Relaxed), 4);
         assert_eq!(budget.used(), 0);
     }
 }
