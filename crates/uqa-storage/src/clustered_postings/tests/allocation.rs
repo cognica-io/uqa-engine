@@ -13,6 +13,44 @@ use uqa_core::{
 mod reference;
 
 #[test]
+fn occurrence_encoding_preserves_wire_bytes_across_varint_widths() {
+    let entries = vec![
+        OccurrencePosting {
+            doc_id: 2,
+            doc_length: 128,
+            occurrences: vec![TokenOccurrence {
+                position: 0,
+                position_length: 1,
+                offsets: None,
+            }],
+        },
+        OccurrencePosting {
+            doc_id: 16_384,
+            doc_length: u64::MAX,
+            occurrences: vec![TokenOccurrence {
+                position: 128,
+                position_length: 2,
+                offsets: None,
+            }],
+        },
+    ];
+    let expected_scores = b"UQCS\x02\0\0\0\x02\0\0\0\x01\0\0\0\x02\0\0\x40\x2c\0\0\0\x2f\0\0\0\x2f\0\0\0\x31\0\0\0\x31\0\0\0\x3d\0\0\0\x02\xfe\x7f\x01\x01\x80\x01\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01";
+    let expected_positions =
+        b"UQCP\x02\0\0\0\x02\0\0\0\x03\0\0\0\0\0\0\0\x03\0\0\0\x07\0\0\0\0\x01\0\x80\x01\x02\0";
+    let control = crate::read_control::StorageReadControl::with_limit(4096);
+    let (scores, positions) =
+        encode_occurrence_cluster_controlled(entries.iter(), &control).unwrap();
+    assert_eq!(&*scores, expected_scores);
+    assert_eq!(&*positions, expected_positions);
+    assert_eq!(
+        reference::decode_occurrence_cluster(0, &scores, &positions).unwrap(),
+        entries
+    );
+    drop((scores, positions));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn occurrence_encoding_retains_and_releases_its_complete_budget() {
     let entries = graph_fixture(0, 129);
     let mut failures = 0;

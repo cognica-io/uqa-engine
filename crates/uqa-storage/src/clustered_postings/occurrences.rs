@@ -10,7 +10,8 @@ use uqa_core::TokenOffsets;
 
 use super::{
     cluster_id, corrupt, read_varint, validate_header, validate_scores, DocId, PostingScore,
-    StorageBackendResult, TokenOccurrence, OCCURRENCE_FORMAT_VERSION, POSITIONS_MAGIC, SCORE_MAGIC,
+    StorageBackendResult, TokenOccurrence, HEADER_LEN, OCCURRENCE_FORMAT_VERSION, POSITIONS_MAGIC,
+    SCORE_MAGIC,
 };
 
 mod allocation;
@@ -107,6 +108,13 @@ pub fn encode_occurrence_cluster_controlled<'a>(
     let score_blob =
         super::scores::encode_scores_controlled(&scores, OCCURRENCE_FORMAT_VERSION, control)?;
     let mut blob = BudgetedVec::new(control.memory());
+    let blob_len = offsets
+        .len()
+        .checked_mul(size_of::<u32>())
+        .and_then(|directory| HEADER_LEN.checked_add(directory))
+        .and_then(|header| header.checked_add(payload.len()))
+        .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+    blob.reserve(blob_len)?;
     blob.extend_from_slice(POSITIONS_MAGIC)?;
     blob.extend_from_slice(&[OCCURRENCE_FORMAT_VERSION, 0, 0, 0])?;
     put_u32(&mut blob, count, "occurrence posting count")?;

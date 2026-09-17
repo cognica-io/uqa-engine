@@ -48,6 +48,10 @@ pub(super) fn encode_scores_controlled(
         let mut docs = BudgetedVec::new(control.memory());
         let mut term_freqs = BudgetedVec::new(control.memory());
         let mut doc_lengths = BudgetedVec::new(control.memory());
+        // Every encoded value occupies at least one byte. Reserve that known stream size before appending variable-width values.
+        docs.reserve(chunk.len())?;
+        term_freqs.reserve(chunk.len())?;
+        doc_lengths.reserve(chunk.len())?;
         let mut previous = 0_u16;
         for (index, entry) in chunk.iter().enumerate() {
             control.cancellation().check()?;
