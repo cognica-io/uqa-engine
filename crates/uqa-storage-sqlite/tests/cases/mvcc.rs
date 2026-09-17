@@ -32,6 +32,8 @@ mod identifiers;
 mod key_value;
 #[path = "mvcc/key_value_occurrences.rs"]
 mod key_value_occurrences;
+#[path = "mvcc/key_value_sequences.rs"]
+mod key_value_sequences;
 #[path = "mvcc/key_value_vectors.rs"]
 mod key_value_vectors;
 #[path = "mvcc/native_btree.rs"]

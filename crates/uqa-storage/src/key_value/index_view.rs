@@ -110,27 +110,24 @@ pub(super) fn read_scope<T>(
     result.ok_or_else(|| other_error("KeyValue provider did not evaluate the read"))
 }
 
-pub(super) fn evaluate_mutation(
+pub(super) fn evaluate_mutation<T>(
     store: &dyn KeyValueStore,
-    operation: impl FnOnce(&dyn KeyValueRead, &mut dyn KeyValueBatch) -> StorageBackendResult<()>,
-) -> StorageBackendResult<()> {
+    operation: impl FnOnce(&dyn KeyValueRead, &mut dyn KeyValueBatch) -> StorageBackendResult<T>,
+) -> StorageBackendResult<T> {
     mutation_scope(|mutate| store.with_mutation(mutate), operation)
 }
 
-pub(super) fn mutation_scope(
+pub(super) fn mutation_scope<T>(
     scope: impl FnOnce(&mut super::KeyValueMutation<'_>) -> StorageBackendResult<()>,
-    operation: impl FnOnce(&dyn KeyValueRead, &mut dyn KeyValueBatch) -> StorageBackendResult<()>,
-) -> StorageBackendResult<()> {
+    operation: impl FnOnce(&dyn KeyValueRead, &mut dyn KeyValueBatch) -> StorageBackendResult<T>,
+) -> StorageBackendResult<T> {
     let mut operation = Some(operation);
+    let mut result = None;
     scope(&mut |read, batch| {
-        operation.take().ok_or_else(|| {
+        result = Some(operation.take().ok_or_else(|| {
             other_error("KeyValue provider attempted to replay mutation evaluation")
-        })?(read, batch)
+        })?(read, batch)?);
+        Ok(())
     })?;
-    if operation.is_some() {
-        return Err(other_error(
-            "KeyValue provider did not evaluate the mutation",
-        ));
-    }
-    Ok(())
+    result.ok_or_else(|| other_error("KeyValue provider did not evaluate the mutation"))
 }

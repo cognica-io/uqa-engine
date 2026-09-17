@@ -13,6 +13,8 @@ mod documents;
 mod graph_identifiers;
 #[path = "store_contract/guards.rs"]
 mod guards;
+#[path = "store_contract/sequences.rs"]
+mod sequences;
 
 fn push_legacy_string(key: &mut Vec<u8>, value: &str) {
     key.extend_from_slice(&u32::try_from(value.len()).unwrap().to_be_bytes());

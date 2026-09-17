@@ -21,6 +21,7 @@ pub(super) struct InterleavedStore {
     inner: Arc<VersionedKeyValueStore>,
     pub(super) point_reads: AtomicUsize,
     pub(super) evaluations: AtomicUsize,
+    pub(super) after_point: Hook,
     pub(super) after_second_point: Hook,
     pub(super) after_evaluation: Hook,
     pub(super) after_keys: Hook,
@@ -31,12 +32,14 @@ impl InterleavedStore {
             inner,
             point_reads: AtomicUsize::new(0),
             evaluations: AtomicUsize::new(0),
+            after_point: Mutex::new(None),
             after_second_point: Mutex::new(None),
             after_evaluation: Mutex::new(None),
             after_keys: Mutex::new(None),
         }
     }
     fn point_read(&self) {
+        fire(&self.after_point);
         if self.point_reads.fetch_add(1, Ordering::Relaxed) == 1 {
             fire(&self.after_second_point);
         }

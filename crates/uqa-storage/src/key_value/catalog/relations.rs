@@ -107,13 +107,6 @@ impl KeyValueCatalog {
         self.store
             .with_read_view(&mut |read| require_relation_kind(read, relation, expected))
     }
-    pub(super) fn require_schema_exists(
-        &self,
-        relation: &RelationIdentity,
-    ) -> StorageBackendResult<()> {
-        self.store
-            .with_read_view(&mut |read| require_schema_exists(read, relation))
-    }
     pub(super) fn claim_relation(
         &self,
         batch: &mut dyn KeyValueBatch,

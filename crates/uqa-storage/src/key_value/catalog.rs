@@ -79,7 +79,6 @@ use records::{
 #[derive(Clone)]
 pub struct KeyValueCatalog {
     store: Arc<dyn KeyValueStore>,
-    sequence_lock: Arc<Mutex<()>>,
     graph_indexes_lock: Arc<Mutex<()>>,
 }
 
@@ -87,7 +86,6 @@ impl KeyValueCatalog {
     pub fn new(store: Arc<dyn KeyValueStore>) -> Self {
         Self {
             store,
-            sequence_lock: Arc::new(Mutex::new(())),
             graph_indexes_lock: Arc::new(Mutex::new(())),
         }
     }
