@@ -102,6 +102,12 @@ enum KeyValueBatchOperation {
 
 /// Atomic mutation buffer for a [`KeyValueStore`].
 pub trait KeyValueBatch {
+    /// Stage a durable identifier observation before publishing this batch's records. Successful observations survive later transaction/savepoint rollback. Dropping an unevaluated batch consumes nothing. Stores without autonomous allocation reject this operation; capable wrappers must forward it.
+    fn observe_identifier(&mut self, _namespace: &[u8], _value: u64) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "durable identifier observations are not supported".into(),
+        ))
+    }
     fn put(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()>;
     fn delete(&mut self, key: &[u8]) -> StorageBackendResult<()>;
     fn delete_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()>;

@@ -13,6 +13,27 @@ use uqa_storage::KeyValueStore;
 use uqa_storage_redb::RedbStorage;
 
 #[test]
+fn identifier_batches_survive_private_undo_and_closed_file_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("identifier-batches.redb");
+    let last = {
+        let storage = RedbStorage::open(&path).unwrap();
+        uqa_storage::mvcc::verify_identifier_batches(&storage.store(), &storage.store()).unwrap()
+    };
+    let reopened = RedbStorage::open(&path).unwrap();
+    assert_eq!(
+        reopened
+            .store()
+            .identifier_allocator()
+            .unwrap()
+            .allocate_identifiers(b"identifier-batches", request())
+            .unwrap()
+            .watermark(),
+        last + 1
+    );
+}
+
+#[test]
 fn document_id_backends_reserve_independently_and_reopen() {
     use uqa_storage::document_store::identifiers::{
         conformance::verify_document_id_sessions, DocumentIdAllocator,

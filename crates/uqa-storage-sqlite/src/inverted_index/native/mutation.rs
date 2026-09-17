@@ -145,6 +145,9 @@ impl<'a> ProjectionBatch<'a> {
 }
 
 impl KeyValueBatch for ProjectionBatch<'_> {
+    fn observe_identifier(&mut self, namespace: &[u8], value: u64) -> StorageBackendResult<()> {
+        self.native.observe_identifier(namespace, value)
+    }
     fn put(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
         self.change(key, Some(value), false)
     }

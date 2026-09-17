@@ -455,6 +455,13 @@ struct CancellingStore {
 
 struct BorrowedBatch<'a>(&'a mut dyn uqa_storage::key_value::KeyValueBatch);
 impl uqa_storage::key_value::KeyValueBatch for BorrowedBatch<'_> {
+    fn observe_identifier(
+        &mut self,
+        namespace: &[u8],
+        value: u64,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.0.observe_identifier(namespace, value)
+    }
     fn put(&mut self, key: &[u8], value: &[u8]) -> uqa_storage::StorageBackendResult<()> {
         self.0.put(key, value)
     }
@@ -475,6 +482,13 @@ struct CancellingBatch<'a> {
 }
 
 impl uqa_storage::key_value::KeyValueBatch for CancellingBatch<'_> {
+    fn observe_identifier(
+        &mut self,
+        namespace: &[u8],
+        value: u64,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.observe_identifier(namespace, value)
+    }
     fn put(&mut self, key: &[u8], value: &[u8]) -> uqa_storage::StorageBackendResult<()> {
         self.inner.put(key, value)?;
         let count = self

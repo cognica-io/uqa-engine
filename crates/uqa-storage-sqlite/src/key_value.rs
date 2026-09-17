@@ -255,6 +255,9 @@ struct SQLiteKeyValueBatch<'a> {
 }
 
 impl KeyValueBatch for SQLiteKeyValueBatch<'_> {
+    fn observe_identifier(&mut self, namespace: &[u8], value: u64) -> StorageBackendResult<()> {
+        self.batch.observe_identifier(namespace, value)
+    }
     fn ivf_mutation(
         &mut self,
         metadata: &[u8],

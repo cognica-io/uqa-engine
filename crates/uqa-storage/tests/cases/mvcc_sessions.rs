@@ -85,6 +85,7 @@ enum AbortFault {
 struct State {
     next: u64,
     identifiers: BTreeMap<Vec<u8>, u64>,
+    identifier_fault: bool,
     receipts: BTreeMap<u64, CommitStatus>,
     commit_fault: CommitFault,
     abort_fault: AbortFault,
@@ -102,6 +103,7 @@ impl Persistence {
             state: Mutex::new(State {
                 next: 0,
                 identifiers: BTreeMap::new(),
+                identifier_fault: false,
                 receipts: BTreeMap::new(),
                 commit_fault: CommitFault::None,
                 abort_fault: AbortFault::None,
@@ -133,6 +135,9 @@ impl VersionedPersistence for Persistence {
     ) -> VersionResult<IdentifierAllocation> {
         let _workspace = request.reserve_workspace(namespace, control)?;
         let mut state = self.state.lock();
+        if state.identifier_fault {
+            return Err(StorageBackendError::Other("injected identifier failure".into()).into());
+        }
         let allocation = request.prepare(state.identifiers.get(namespace).copied())?;
         state
             .identifiers

@@ -16,6 +16,7 @@ use super::transaction::Transaction;
 use super::VersionedKeyValueStore;
 
 enum Operation {
+    IdentifierObservation(BudgetedVec<u8>, u64),
     Put(BudgetedVec<u8>, BudgetedVec<u8>),
     Delete(BudgetedVec<u8>),
     DeletePrefix(BudgetedVec<u8>, RecordWriteKind),
@@ -63,8 +64,10 @@ impl<'a> Batch<'a> {
     }
 
     pub(super) fn apply(&self, transaction: &mut Transaction) -> Result<(), VersionError> {
+        transaction.writable()?;
         for operation in self.operations.iter() {
             match operation {
+                Operation::IdentifierObservation(_, _) => {}
                 Operation::Put(key, value) => {
                     transaction.replace(key, Some(value), &self.store.control)?;
                 }
@@ -132,11 +135,31 @@ impl<'a> Batch<'a> {
                 }
             }
         }
+        // Validate and stage every record first. Allocation uses persistence directly because the session's mutation boundary already holds its active-transaction lock.
+        for operation in self.operations.iter() {
+            if let Operation::IdentifierObservation(namespace, value) = operation {
+                self.store.persistence.allocate_identifiers(
+                    namespace,
+                    crate::mvcc::IdentifierRequest::Observe(*value),
+                    &self.store.control,
+                )?;
+            }
+        }
         Ok(())
     }
 }
 
 impl KeyValueBatch for Batch<'_> {
+    fn observe_identifier(&mut self, namespace: &[u8], value: u64) -> StorageBackendResult<()> {
+        crate::mvcc::IdentifierRequest::Observe(value)
+            .reserve_workspace(namespace, &self.store.control)
+            .map_err(VersionError::into_storage_error)?;
+        self.operations.push(Operation::IdentifierObservation(
+            self.copy(namespace)?,
+            value,
+        ))?;
+        Ok(())
+    }
     fn ivf_mutation(
         &mut self,
         metadata: &[u8],

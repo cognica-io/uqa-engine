@@ -195,6 +195,17 @@ mod tests {
         assert!(!connection.transaction_has_written().unwrap());
         connection.commit_transaction().unwrap();
         assert!(!documents.contains_doc_id(1).unwrap());
+        connection
+            .with_physical(|sqlite| {
+                assert_eq!(
+                    sqlite.query_row("SELECT count(*) FROM _uqa_mvcc_identifiers", [], |row| {
+                        row.get::<_, i64>(0)
+                    })?,
+                    0
+                );
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]

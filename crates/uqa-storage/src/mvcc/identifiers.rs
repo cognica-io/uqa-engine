@@ -7,7 +7,7 @@
 //! Monotonic identifier reservations are independent of record visibility and transaction undo.
 
 mod conformance;
-pub use conformance::verify_identifier_allocations;
+pub use conformance::{verify_identifier_allocations, verify_identifier_batches};
 
 use std::{num::NonZeroU64, ops::RangeInclusive};
 

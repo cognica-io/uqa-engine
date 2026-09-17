@@ -6,6 +6,9 @@
 
 //! Public native document APIs use the connection's common logical transaction and retained snapshots.
 
+#[path = "native_documents/identifiers.rs"]
+mod identifiers;
+
 use super::{open, MODES};
 use std::{collections::BTreeMap, sync::mpsc, time::Duration};
 use uqa_core::Value;

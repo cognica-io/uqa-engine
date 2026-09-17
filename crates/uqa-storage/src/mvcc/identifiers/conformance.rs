@@ -9,6 +9,7 @@
 use std::{num::NonZeroU64, sync::Barrier};
 
 use crate::read_control::StorageReadControl;
+use crate::{KeyValueStore, StorageBackendResult};
 
 use super::IdentifierRequest;
 use crate::mvcc::{VersionError, VersionResult, VersionedPersistence};
@@ -27,6 +28,60 @@ fn require(valid: bool, reason: &'static str) -> VersionResult<()> {
     } else {
         Err(VersionError::InvalidEncoding(reason))
     }
+}
+
+/// Exercise the evaluated batch boundary through two sessions of one disposable byte store. The returned watermark belongs to namespace `identifier-batches` and must survive close/reopen.
+pub fn verify_identifier_batches(
+    a: &dyn KeyValueStore,
+    b: &dyn KeyValueStore,
+) -> StorageBackendResult<u64> {
+    let ids = b.identifier_allocator().expect("durable byte store");
+    let namespace = b"identifier-batches";
+    let mut dropped = a.batch();
+    dropped.observe_identifier(namespace, 999)?;
+    drop(dropped);
+    a.begin_transaction()?;
+    a.put(b"batch-prior", b"private")?;
+    a.savepoint("before-observation")?;
+    a.with_mutation(&mut |read, batch| {
+        assert_eq!(read.get(b"batch-prior")?.as_deref(), Some(&b"private"[..]));
+        batch.observe_identifier(namespace, 100)?;
+        batch.put(b"batch-row", b"private")
+    })?;
+    assert_eq!(
+        ids.allocate_identifiers(namespace, reserve(1, u64::MAX, 1))?
+            .watermark(),
+        101
+    );
+    assert!(b.get(b"batch-row")?.is_none());
+    b.put(b"batch-other", b"committed")?;
+    assert!(a.in_transaction());
+    a.rollback_to_savepoint("before-observation")?;
+    assert!(a.get(b"batch-row")?.is_none());
+    assert_eq!(a.get(b"batch-prior")?.as_deref(), Some(&b"private"[..]));
+    assert_eq!(
+        ids.allocate_identifiers(namespace, reserve(1, u64::MAX, 1))?
+            .watermark(),
+        102
+    );
+    a.rollback_transaction()?;
+    assert!(a.get(b"batch-prior")?.is_none());
+    a.begin_read_transaction()?;
+    let mut rejected = a.batch();
+    rejected.observe_identifier(namespace, 999)?;
+    assert!(rejected.commit().is_err());
+    a.rollback_transaction()?;
+    let last = ids
+        .allocate_identifiers(namespace, reserve(1, u64::MAX, 1))?
+        .watermark();
+    assert_eq!(last, 103);
+    let mut full = a.batch();
+    full.observe_identifier(b"identifier-batches-full", u64::MAX)?;
+    full.commit()?;
+    assert!(ids
+        .allocate_identifiers(b"identifier-batches-full", reserve(1, u64::MAX, 1))
+        .is_err());
+    Ok(last)
 }
 
 /// Exercise two owners of the same fresh, disposable database. Reserved conformance namespaces are intentionally retained, because rolling back or clearing record data must never recycle identifiers.

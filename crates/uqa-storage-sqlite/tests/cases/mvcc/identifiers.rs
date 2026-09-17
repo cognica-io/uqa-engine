@@ -12,6 +12,29 @@ use uqa_storage::PersistentStorageBackend;
 use uqa_storage_sqlite::{Catalog, SQLiteKeyValueStore, SQLiteStorageBackend};
 
 #[test]
+fn identifier_batches_are_forwarded_and_reopen_in_every_file_mode() {
+    for mode in MODES {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("identifier-batches.db");
+        let last = {
+            let a = SQLiteKeyValueStore::new(open(mode, &path)).unwrap();
+            let b = SQLiteKeyValueStore::new(open(mode, &path)).unwrap();
+            uqa_storage::mvcc::verify_identifier_batches(&a, &b).unwrap()
+        };
+        let reopened = SQLiteKeyValueStore::new(open(mode, &path)).unwrap();
+        assert_eq!(
+            reopened
+                .identifier_allocator()
+                .unwrap()
+                .allocate_identifiers(b"identifier-batches", request(1, 1))
+                .unwrap()
+                .watermark(),
+            last + 1
+        );
+    }
+}
+
+#[test]
 fn document_id_backends_reserve_independently_and_reopen_in_every_file_mode() {
     use uqa_storage::document_store::identifiers::{
         conformance::verify_document_id_sessions, DocumentIdAllocator,

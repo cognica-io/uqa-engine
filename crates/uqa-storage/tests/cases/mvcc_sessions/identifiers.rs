@@ -9,6 +9,146 @@
 use super::*;
 
 #[test]
+fn identifier_batches_preserve_durable_observations_across_private_undo() {
+    let persistence = Persistence::new();
+    verify_identifier_batches(&persistence.session(1 << 20), &persistence.session(1 << 20))
+        .unwrap();
+}
+
+#[test]
+fn failed_or_unwound_batch_evaluation_cannot_observe_an_identifier() {
+    let persistence = Persistence::new();
+    let store = persistence.session(1 << 20);
+    store.begin_transaction().unwrap();
+    store.put(b"prior", b"kept").unwrap();
+    assert!(store
+        .with_mutation(&mut |_, batch| {
+            batch.observe_identifier(b"observed", 999)?;
+            batch.put(b"discarded", b"row")?;
+            Err(StorageBackendError::Other("rejected evaluation".into()))
+        })
+        .is_err());
+    let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        store.with_mutation(&mut |_, batch| {
+            batch.observe_identifier(b"observed", 999)?;
+            panic!("unwound evaluation");
+        })
+    }));
+    assert!(unwind.is_err());
+    assert!(persistence.state.lock().identifiers.is_empty());
+    assert_eq!(store.get(b"prior").unwrap().as_deref(), Some(&b"kept"[..]));
+    assert!(store.get(b"discarded").unwrap().is_none());
+    store.rollback_transaction().unwrap();
+}
+
+#[test]
+fn failed_batch_observation_restores_its_rows_and_preserves_earlier_private_writes() {
+    let persistence = Persistence::new();
+    let store = persistence.session(1 << 20);
+    store.begin_transaction().unwrap();
+    store.put(b"prior", b"kept").unwrap();
+    persistence.state.lock().identifier_fault = true;
+    let error = store
+        .with_mutation(&mut |_, batch| {
+            batch.observe_identifier(b"observed", 100)?;
+            batch.put(b"discarded", b"row")
+        })
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("injected identifier failure"),
+        "{error}"
+    );
+    assert_eq!(store.get(b"prior").unwrap().as_deref(), Some(&b"kept"[..]));
+    assert!(store.get(b"discarded").unwrap().is_none());
+    assert!(persistence.state.lock().identifiers.is_empty());
+    assert_eq!(persistence.state.lock().next, 0);
+    persistence.state.lock().identifier_fault = false;
+    store.rollback_transaction().unwrap();
+    assert_eq!(
+        store
+            .allocate_identifiers(b"observed", one())
+            .unwrap()
+            .watermark(),
+        1
+    );
+}
+
+#[test]
+fn batch_observations_finish_before_record_publication_and_are_not_replayed_on_retry() {
+    let persistence = Persistence::new();
+    let store = persistence.session(1 << 20);
+    let other = persistence.session(1 << 20);
+    persistence.state.lock().commit_fault = CommitFault::Reject;
+    let mut batch = store.batch();
+    batch.observe_identifier(b"observed", 100).unwrap();
+    batch.put(b"row", b"pending").unwrap();
+    assert!(batch.commit().is_err());
+    assert!(other.get(b"row").unwrap().is_none());
+    assert_eq!(
+        other
+            .allocate_identifiers(b"observed", one())
+            .unwrap()
+            .watermark(),
+        101
+    );
+    let mut sealed = store.batch();
+    sealed.observe_identifier(b"observed", 999).unwrap();
+    assert!(sealed.commit().unwrap_err().to_string().contains("sealed"));
+    // A sealed record retry must not resubmit the already durable observation.
+    {
+        let mut state = persistence.state.lock();
+        state.commit_fault = CommitFault::None;
+        state.identifier_fault = true;
+    }
+    store.commit_transaction().unwrap();
+    assert_eq!(other.get(b"row").unwrap().as_deref(), Some(&b"pending"[..]));
+    assert_eq!(
+        persistence.state.lock().identifiers[b"observed".as_slice()],
+        101
+    );
+}
+
+#[test]
+fn rejected_record_staging_does_not_consume_queued_identifiers() {
+    let persistence = Persistence::new();
+    let mut failures = 0;
+    let mut successes = 0;
+    for limit in (8192..32768).step_by(512) {
+        let store = persistence.session(limit);
+        store.begin_transaction().unwrap();
+        store.put(b"prior", b"kept").unwrap();
+        let mut batch = store.batch();
+        let namespace = limit.to_be_bytes();
+        batch.observe_identifier(&namespace, 100).unwrap();
+        batch.put(b"small", b"row").unwrap();
+        batch.put(b"large", &[7; 4096]).unwrap();
+        match batch.commit() {
+            Ok(()) => {
+                successes += 1;
+                assert_eq!(
+                    persistence.state.lock().identifiers[namespace.as_slice()],
+                    100
+                );
+            }
+            Err(StorageBackendError::Memory(_)) => {
+                failures += 1;
+                assert!(!persistence
+                    .state
+                    .lock()
+                    .identifiers
+                    .contains_key(namespace.as_slice()));
+                assert!(store.get(b"small").unwrap().is_none());
+                assert!(store.get(b"large").unwrap().is_none());
+            }
+            Err(error) => panic!("unexpected staging failure: {error}"),
+        }
+        assert_eq!(store.get(b"prior").unwrap().as_deref(), Some(&b"kept"[..]));
+        store.rollback_transaction().unwrap();
+    }
+    assert!(failures > 0 && successes > 0);
+}
+
+#[test]
 fn document_allocations_use_the_backend_capability_across_private_undo() {
     use uqa_storage::{KeyValueCatalog, KeyValueStorageBackend, PersistentStorageSession};
     let persistence = Persistence::new();

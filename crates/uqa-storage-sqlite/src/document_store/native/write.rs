@@ -94,6 +94,21 @@ impl NativeDocumentRead<'_> {
         metadata: DocumentMetadata,
     ) -> SQLiteResult<()> {
         let body = serde_json::to_string(fields)?;
+        let NativeRecordOwner::Object {
+            identity,
+            generation,
+        } = owner
+        else {
+            return Err(crate::SQLiteError::StorageBackend(
+                "document allocation requires a table owner".into(),
+            ));
+        };
+        uqa_storage::document_store::identifiers::observe_document_id(
+            batch,
+            identity,
+            generation,
+            super::super::document_id_from_sqlite(id)?,
+        )?;
         self.snapshot.put_row(
             batch,
             Family::Documents,

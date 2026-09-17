@@ -9,7 +9,7 @@
 use std::num::NonZeroU64;
 
 use crate::mvcc::{IdentifierAllocator, IdentifierRequest};
-use crate::{CatalogFacade, StorageBackendError, StorageBackendResult};
+use crate::{CatalogFacade, KeyValueBatch, StorageBackendError, StorageBackendResult};
 
 pub mod conformance;
 
@@ -28,15 +28,10 @@ impl<'a> DocumentIdAllocator<'a> {
         object: [u8; 16],
         generation: [u8; 16],
     ) -> StorageBackendResult<Self> {
-        if durable.is_some() && (object == [0; 16] || generation == [0; 16]) {
-            return Err(StorageBackendError::Other(
-                "document allocation requires nonzero table and storage identities".into(),
-            ));
+        if durable.is_some() {
+            validate_identity(object, generation)?;
         }
-        let mut namespace = [0; 41];
-        namespace[..9].copy_from_slice(b"document\x01");
-        namespace[9..25].copy_from_slice(&object);
-        namespace[25..].copy_from_slice(&generation);
+        let namespace = document_namespace(object, generation);
         Ok(Self { durable, namespace })
     }
 
@@ -108,6 +103,34 @@ impl<'a> DocumentIdAllocator<'a> {
             catalog.set_metadata(&key, &next.to_string())
         }
     }
+}
+
+/// Include a supplied identity in the batch evaluated by its document owner. The batch makes the observation durable before its rows can be published, without reentering the selected storage session.
+pub fn observe_document_id(
+    batch: &mut dyn KeyValueBatch,
+    object: [u8; 16],
+    generation: [u8; 16],
+    id: u64,
+) -> StorageBackendResult<()> {
+    validate_identity(object, generation)?;
+    batch.observe_identifier(&document_namespace(object, generation), id)
+}
+
+fn validate_identity(object: [u8; 16], generation: [u8; 16]) -> StorageBackendResult<()> {
+    if object == [0; 16] || generation == [0; 16] {
+        return Err(StorageBackendError::Other(
+            "document allocation requires nonzero table and storage identities".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn document_namespace(object: [u8; 16], generation: [u8; 16]) -> [u8; 41] {
+    let mut namespace = [0; 41];
+    namespace[..9].copy_from_slice(b"document\x01");
+    namespace[9..25].copy_from_slice(&object);
+    namespace[25..].copy_from_slice(&generation);
+    namespace
 }
 
 pub fn legacy_document_id_metadata_key(table: &str) -> String {
