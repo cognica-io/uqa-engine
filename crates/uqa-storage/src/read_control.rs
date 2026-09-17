@@ -11,6 +11,7 @@ use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 pub type ValueReadVisitor<'a> = dyn FnMut(Option<&[u8]>) -> StorageBackendResult<()> + 'a;
 pub type KeyValueReadVisitor<'a> = dyn FnMut(&[u8], &[u8]) -> StorageBackendResult<()> + 'a;
+pub type KeyReadVisitor<'a> = dyn FnMut(&[u8]) -> StorageBackendResult<()> + 'a;
 
 #[derive(Clone, Debug)]
 pub struct StorageReadControl {

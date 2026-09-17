@@ -28,7 +28,7 @@ pub(super) fn allocate(
         if codec::database_id(&metadata)? != store.identity {
             return Err(VersionError::WrongDatabase);
         }
-        if codec::read_u64(&metadata, "format")? != 5 {
+        if codec::read_u64(&metadata, "format")? != 6 {
             return Err(VersionError::InvalidEncoding("unknown record format"));
         }
         let mut present = false;

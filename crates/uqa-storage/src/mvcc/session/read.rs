@@ -7,7 +7,7 @@
 use crate::key_value::{KeyValueRead, KeyValueReadRevision};
 use crate::mvcc::{DatabaseId, VersionError};
 use crate::mvcc::{MergedRecordSnapshot, VersionResult};
-use crate::read_control::{KeyValueReadVisitor, StorageReadControl};
+use crate::read_control::{KeyReadVisitor, KeyValueReadVisitor, StorageReadControl};
 use crate::{read_control::ValueReadVisitor, StorageBackendResult};
 use uqa_core::memory::BudgetedVec;
 
@@ -110,6 +110,30 @@ impl KeyValueRead for RecordRead<'_> {
         visit: &mut KeyValueReadVisitor<'_>,
     ) -> StorageBackendResult<()> {
         visit_live(self.view, prefix, after, limit, control, visit)
+            .map_err(VersionError::into_storage_error)
+    }
+
+    fn visit_keys_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut KeyReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        if limit == 0 {
+            return Ok(());
+        }
+        let mut count = 0;
+        self.view
+            .visit_keys(prefix, after, usize::MAX, control, &mut |key, record| {
+                if record.live {
+                    visit(key)?;
+                    count += 1;
+                }
+                Ok(count < limit)
+            })
             .map_err(VersionError::into_storage_error)
     }
 
@@ -219,5 +243,17 @@ impl KeyValueRead for RetainedRecordRead {
         control: &StorageReadControl,
     ) -> StorageBackendResult<bool> {
         self.read().contains_prefix_budgeted(prefix, control)
+    }
+
+    fn visit_keys_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut KeyReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.read()
+            .visit_keys_after(prefix, after, limit, control, visit)
     }
 }

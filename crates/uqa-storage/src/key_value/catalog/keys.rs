@@ -12,7 +12,10 @@ use super::{
     TAG_COLUMN_STATS, TAG_EDGE, TAG_GRAPH_MEMBERSHIP, TAG_TABLE_FIELD_ANALYZER, TAG_VERTEX,
 };
 
-pub(super) fn relation_key(tag: u8, relation: &RelationIdentity) -> StorageBackendResult<Vec<u8>> {
+pub(in crate::key_value) fn relation_key(
+    tag: u8,
+    relation: &RelationIdentity,
+) -> StorageBackendResult<Vec<u8>> {
     let mut key = key_with_tag(tag);
     push_str(&mut key, &relation.schema)?;
     push_str(&mut key, &relation.name)?;
@@ -164,13 +167,43 @@ pub(super) fn batch_rekey_prefix(
     old_prefix: &[u8],
     new_prefix: &[u8],
 ) -> StorageBackendResult<()> {
-    for (key, value) in store.scan_prefix(old_prefix)? {
-        let mut new_key = new_prefix.to_vec();
-        new_key.extend_from_slice(&key[old_prefix.len()..]);
-        batch.put(&new_key, &value)?;
-        batch.delete(&key)?;
+    store.with_read_view(&mut |read| rekey_prefix(read, batch, old_prefix, new_prefix))
+}
+
+pub(super) fn rekey_prefix(
+    read: &dyn crate::key_value::KeyValueRead,
+    batch: &mut dyn KeyValueBatch,
+    old_prefix: &[u8],
+    new_prefix: &[u8],
+) -> StorageBackendResult<()> {
+    if old_prefix == new_prefix {
+        return Ok(());
     }
-    Ok(())
+    crate::key_value::view::for_each_key(read, old_prefix, &mut |key| {
+        let mut destination = uqa_core::memory::BudgetedVec::new(read.control().memory());
+        destination.extend_from_slice(new_prefix)?;
+        destination.extend_from_slice(&key[old_prefix.len()..])?;
+        let mut exists = false;
+        read.visit_keys_after(&destination, None, 1, read.control(), &mut |candidate| {
+            exists = candidate == &*destination;
+            Ok(())
+        })?;
+        if exists {
+            return Err(StorageBackendError::Other(
+                "table rename would overwrite existing data".into(),
+            ));
+        }
+        read.visit_value(key, &mut |value| {
+            let value = value.ok_or_else(|| {
+                StorageBackendError::Other(
+                    "table rename source disappeared within its read view".into(),
+                )
+            })?;
+            batch.put(&destination, value)
+        })?;
+        batch.delete(key)?;
+        Ok(true)
+    })
 }
 
 pub(super) fn batch_rekey_prefix_or_keep_existing(

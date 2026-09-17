@@ -42,7 +42,7 @@ mod foreign;
 mod graph_access;
 mod graphs;
 mod indexes;
-mod keys;
+pub(super) mod keys;
 mod migration;
 mod models;
 mod occurrence_lifecycle;
@@ -52,6 +52,8 @@ mod records;
 mod relations;
 mod schema_table;
 mod sequences;
+mod table_data;
+mod tables;
 mod views;
 
 use keys::{

@@ -18,6 +18,7 @@ use crate::backend::{StorageBackendError, StorageBackendResult};
 mod cache_revisions;
 mod graph_access;
 mod graph_snapshot;
+mod identity;
 mod relation;
 mod schema;
 
@@ -26,6 +27,7 @@ pub use graph_access::validate_graph_page;
 pub use graph_access::{
     GraphEntityFilter, GraphEntityKind, GraphEntitySelector, MAX_GRAPH_ID_PAGE,
 };
+pub use identity::new_nonzero_catalog_identity;
 pub use relation::RelationIdentity;
 mod table;
 

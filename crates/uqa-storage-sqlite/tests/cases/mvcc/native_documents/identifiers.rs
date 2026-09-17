@@ -240,3 +240,41 @@ fn failed_native_record_publication_retains_identifiers_and_retries_without_obse
         .unwrap();
     assert_eq!(next(&other, &row), 102);
 }
+
+#[test]
+fn adoption_and_generation_transfers_preserve_deleted_document_reservations() {
+    let (connection, _) = memory();
+    let catalog = Catalog::open(connection.clone()).unwrap();
+    let mut raw = SQLiteDocumentStore::new(connection.clone(), "docs");
+    raw.put(700, fields(700)).unwrap();
+    raw.delete(700).unwrap();
+    catalog.save_table(&schema("docs", 51, 52)).unwrap();
+    catalog.rename_table_data("docs", "public.renamed").unwrap();
+    let mut renamed = catalog.load_tables().unwrap().remove(0);
+    assert_eq!(next(&connection, &renamed), 701);
+    renamed.object_id = [53; 16];
+    renamed.storage_generation = [54; 16];
+    catalog.save_table(&renamed).unwrap();
+    assert_eq!(next(&connection, &renamed), 702);
+}
+
+#[test]
+fn new_native_generations_seed_live_rows_and_can_restart_after_removal() {
+    let (connection, _) = memory();
+    let catalog = Catalog::open(connection.clone()).unwrap();
+    let original = schema("docs", 61, 62);
+    catalog.save_table(&original).unwrap();
+    let mut documents = SQLiteDocumentStore::new(connection.clone(), "public.docs");
+    documents.put(50, fields(50)).unwrap();
+    documents.put(100, fields(100)).unwrap();
+    documents.delete(100).unwrap();
+    let mut changed = original.clone();
+    changed.storage_generation = [63; 16];
+    catalog.save_table(&changed).unwrap();
+    assert_eq!(next(&connection, &changed), 51);
+    documents.clear().unwrap();
+    changed.storage_generation = [64; 16];
+    catalog.save_table(&changed).unwrap();
+    assert_eq!(next(&connection, &changed), 1);
+    assert_eq!(next(&connection, &original), 101);
+}

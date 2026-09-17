@@ -11,7 +11,9 @@ use uqa_core::memory::{Budgeted, BudgetedVec};
 
 type Entry = (BudgetedVec<u8>, BudgetedVec<u8>);
 use crate::key_value::{KeyValueRead, KeyValueReadRevision};
-use crate::read_control::{KeyValueReadVisitor, StorageReadControl, ValueReadVisitor};
+use crate::read_control::{
+    KeyReadVisitor, KeyValueReadVisitor, StorageReadControl, ValueReadVisitor,
+};
 use crate::StorageBackendResult;
 
 struct RetainedRead {
@@ -129,5 +131,27 @@ impl KeyValueRead for RetainedRead {
             .rows
             .get(start)
             .is_some_and(|(key, _)| key.starts_with(prefix)))
+    }
+
+    fn visit_keys_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut KeyReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        let start = self.rows.partition_point(|(key, _)| {
+            &**key < prefix || after.is_some_and(|after| &**key <= after)
+        });
+        for (key, _) in self.rows[start..].iter().take(limit) {
+            if !key.starts_with(prefix) {
+                break;
+            }
+            control.check()?;
+            visit(key)?;
+        }
+        control.check()
     }
 }

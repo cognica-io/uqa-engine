@@ -20,7 +20,7 @@ use uqa_analysis::Analyzer;
 use uqa_core::{DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList, Value};
 
 use crate::backend::{PersistentStorageBackend, PersistentStorageIdentity};
-use crate::document_store::{Document, DocumentMetadata, DocumentStore, StoredDocument};
+use crate::document_store::{Document, DocumentStore};
 use crate::inverted_index::{AnalyzerPhase, InvertedIndex};
 use crate::vector_index::{
     validate_vector_values, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
@@ -30,6 +30,7 @@ use crate::{StorageBackendError, StorageBackendResult};
 mod catalog;
 pub use catalog::KeyValueCatalog;
 mod graph_commit;
+mod table_owners;
 pub use graph_commit::KeyValueGraphRecords;
 mod hnsw_records;
 mod index_view;
@@ -118,6 +119,12 @@ pub trait KeyValueBatch {
     fn observe_identifier(&mut self, _namespace: &[u8], _value: u64) -> StorageBackendResult<()> {
         Err(StorageBackendError::Other(
             "durable identifier observations are not supported".into(),
+        ))
+    }
+    /// Carry the source's durable identifier watermark into the target before this batch publishes its records. Successful watermark updates survive undo, just like observations. Owning lifecycle code must coordinate the accompanying definition change with data writers. Capable wrappers must forward this namespace operation.
+    fn inherit_identifiers(&mut self, _from: &[u8], _to: &[u8]) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "durable identifier inheritance is not supported".into(),
         ))
     }
     fn put(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()>;

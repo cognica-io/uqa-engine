@@ -116,6 +116,20 @@ pub fn observe_document_id(
     batch.observe_identifier(&document_namespace(object, generation), id)
 }
 
+/// Preserve already reserved document identities when table data adopts a different object or storage generation. Observations happen before the evaluated rows are published and survive private rollback.
+pub fn inherit_document_ids(
+    batch: &mut dyn KeyValueBatch,
+    from: ([u8; 16], [u8; 16]),
+    to: ([u8; 16], [u8; 16]),
+) -> StorageBackendResult<()> {
+    validate_identity(from.0, from.1)?;
+    validate_identity(to.0, to.1)?;
+    batch.inherit_identifiers(
+        &document_namespace(from.0, from.1),
+        &document_namespace(to.0, to.1),
+    )
+}
+
 fn validate_identity(object: [u8; 16], generation: [u8; 16]) -> StorageBackendResult<()> {
     if object == [0; 16] || generation == [0; 16] {
         return Err(StorageBackendError::Other(

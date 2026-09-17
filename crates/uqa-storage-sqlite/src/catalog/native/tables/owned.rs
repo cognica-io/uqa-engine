@@ -73,9 +73,32 @@ impl NativeSnapshot {
         self.reset_occurrence_rows(batch, from)?;
         self.fence_vector_definitions(batch, from, None)?;
         if from != to {
+            let (
+                NativeRecordOwner::Object {
+                    identity: from_id,
+                    generation: from_generation,
+                },
+                NativeRecordOwner::Object {
+                    identity: to_id,
+                    generation: to_generation,
+                },
+            ) = (from, to)
+            else {
+                return Err(SQLiteError::StorageBackend(
+                    "table data requires object owners".into(),
+                ));
+            };
+            if from_id != to_id {
+                uqa_storage::document_store::identifiers::inherit_document_ids(
+                    batch,
+                    (from_id, from_generation),
+                    (to_id, to_generation),
+                )?;
+            }
             self.reset_occurrence_rows(batch, to)?;
             self.fence_vector_definitions(batch, to, None)?;
         }
+        let mut maximum_document = 0;
         for family in Family::all() {
             let Some(column) = family
                 .layout()
@@ -86,6 +109,13 @@ impl NativeSnapshot {
                 continue;
             };
             self.visit_rows(family, Some(from), &[], |row| {
+                if family == Family::Documents {
+                    let id = row[1].as_i64().map_err(|_| {
+                        SQLiteError::StorageBackend("invalid native document identity".into())
+                    })?;
+                    maximum_document =
+                        maximum_document.max(crate::document_store::document_id_from_sqlite(id)?);
+                }
                 let mut updated = BudgetedVec::new(self.control.memory());
                 updated.extend_from_slice(row).map_err(VersionError::from)?;
                 updated[column] = text(name);
@@ -94,6 +124,23 @@ impl NativeSnapshot {
             if from != to {
                 self.delete_prefix(batch, family, from, &[])?;
             }
+        }
+        if maximum_document != 0 {
+            let NativeRecordOwner::Object {
+                identity,
+                generation,
+            } = to
+            else {
+                return Err(SQLiteError::StorageBackend(
+                    "table data requires an object owner".into(),
+                ));
+            };
+            uqa_storage::document_store::identifiers::observe_document_id(
+                batch,
+                identity,
+                generation,
+                maximum_document,
+            )?;
         }
         Ok(())
     }

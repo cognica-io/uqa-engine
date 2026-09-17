@@ -19,7 +19,7 @@ pub(super) fn sqlite_doc_id(doc_id: DocId) -> SQLiteResult<i64> {
     })
 }
 
-pub(super) fn document_id_from_sqlite(raw: i64) -> SQLiteResult<DocId> {
+pub(crate) fn document_id_from_sqlite(raw: i64) -> SQLiteResult<DocId> {
     DocId::try_from(raw).map_err(|_| {
         SQLiteError::StorageBackend(format!("negative SQLite document id {raw} is invalid"))
     })

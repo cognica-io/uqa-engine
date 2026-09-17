@@ -264,6 +264,9 @@ impl KeyValueBatch for SQLiteKeyValueBatch<'_> {
     fn observe_identifier(&mut self, namespace: &[u8], value: u64) -> StorageBackendResult<()> {
         self.batch.observe_identifier(namespace, value)
     }
+    fn inherit_identifiers(&mut self, from: &[u8], to: &[u8]) -> StorageBackendResult<()> {
+        self.batch.inherit_identifiers(from, to)
+    }
     fn ivf_mutation(
         &mut self,
         metadata: &[u8],

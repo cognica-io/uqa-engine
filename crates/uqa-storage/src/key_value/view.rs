@@ -11,10 +11,42 @@ use std::sync::Arc;
 use uqa_core::memory::BudgetedVec;
 
 use crate::mvcc::{CommitSequence, DatabaseId, PrivateRecordRevision};
-use crate::read_control::{KeyValueReadVisitor, StorageReadControl, ValueReadVisitor};
+use crate::read_control::{
+    KeyReadVisitor, KeyValueReadVisitor, StorageReadControl, ValueReadVisitor,
+};
 use crate::{KeyValueBatch, StorageBackendResult};
 
 mod snapshot;
+
+/// Copy a bounded key page before calling code that may read this same boundary again. Provider visitors can hold physical locks while lending their key bytes.
+pub(crate) fn for_each_key(
+    read: &dyn KeyValueRead,
+    prefix: &[u8],
+    visit: &mut dyn FnMut(&[u8]) -> StorageBackendResult<bool>,
+) -> StorageBackendResult<()> {
+    let mut after = None::<BudgetedVec<u8>>;
+    loop {
+        let mut keys = BudgetedVec::new(read.control().memory());
+        read.visit_keys_after(prefix, after.as_deref(), 128, read.control(), &mut |key| {
+            let mut owned = BudgetedVec::new(read.control().memory());
+            owned.extend_from_slice(key)?;
+            keys.push(owned)?;
+            Ok(())
+        })?;
+        let Some(last) = keys.last() else {
+            return Ok(());
+        };
+        let mut next = BudgetedVec::new(read.control().memory());
+        next.extend_from_slice(last)?;
+        after = Some(next);
+        for key in keys.iter() {
+            read.control().check()?;
+            if !visit(key)? {
+                return Ok(());
+            }
+        }
+    }
+}
 
 pub type KeyValueReadScope<'a> = dyn FnMut(&dyn KeyValueRead) -> StorageBackendResult<()> + 'a;
 pub type KeyValueMutation<'a> =
@@ -64,6 +96,21 @@ pub trait KeyValueRead {
         control.check()?;
         Err(super::codec::other_error(
             "controlled compound prefix reads are not supported",
+        ))
+    }
+
+    /// Visit at most `limit` live keys in ascending order, strictly after `after`, without reading their values or advancing this boundary. Capable wrappers must preserve this key-only contract.
+    fn visit_keys_after(
+        &self,
+        _prefix: &[u8],
+        _after: Option<&[u8]>,
+        _limit: usize,
+        control: &StorageReadControl,
+        _visit: &mut KeyReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        Err(super::codec::other_error(
+            "compound key-only scans are not supported",
         ))
     }
 

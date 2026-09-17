@@ -7,6 +7,8 @@
 use uqa_storage::{KeyValueStore, PersistentStorageProvider};
 use uqa_storage_redb::RedbStorage;
 
+#[path = "store_contract/documents.rs"]
+mod documents;
 #[path = "store_contract/guards.rs"]
 mod guards;
 

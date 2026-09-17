@@ -468,6 +468,13 @@ impl uqa_storage::key_value::KeyValueBatch for BorrowedBatch<'_> {
     ) -> uqa_storage::StorageBackendResult<()> {
         self.0.observe_identifier(namespace, value)
     }
+    fn inherit_identifiers(
+        &mut self,
+        from: &[u8],
+        to: &[u8],
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.0.inherit_identifiers(from, to)
+    }
     fn put(&mut self, key: &[u8], value: &[u8]) -> uqa_storage::StorageBackendResult<()> {
         self.0.put(key, value)
     }
@@ -500,6 +507,13 @@ impl uqa_storage::key_value::KeyValueBatch for CancellingBatch<'_> {
         value: u64,
     ) -> uqa_storage::StorageBackendResult<()> {
         self.inner.observe_identifier(namespace, value)
+    }
+    fn inherit_identifiers(
+        &mut self,
+        from: &[u8],
+        to: &[u8],
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.inherit_identifiers(from, to)
     }
     fn put(&mut self, key: &[u8], value: &[u8]) -> uqa_storage::StorageBackendResult<()> {
         self.inner.put(key, value)?;

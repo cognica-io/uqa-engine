@@ -17,15 +17,15 @@ use uqa_storage::{
 };
 
 type Hook = Mutex<Option<Box<dyn FnOnce() + Send>>>;
-struct InterleavedStore {
+pub(super) struct InterleavedStore {
     inner: Arc<VersionedKeyValueStore>,
-    point_reads: AtomicUsize,
-    evaluations: AtomicUsize,
-    after_second_point: Hook,
-    after_evaluation: Hook,
+    pub(super) point_reads: AtomicUsize,
+    pub(super) evaluations: AtomicUsize,
+    pub(super) after_second_point: Hook,
+    pub(super) after_evaluation: Hook,
 }
 impl InterleavedStore {
-    fn new(inner: Arc<VersionedKeyValueStore>) -> Self {
+    pub(super) fn new(inner: Arc<VersionedKeyValueStore>) -> Self {
         Self {
             inner,
             point_reads: AtomicUsize::new(0),
@@ -93,6 +93,17 @@ impl KeyValueRead for InterleavedRead<'_> {
     ) -> StorageBackendResult<()> {
         self.inner
             .visit_prefix_after(prefix, after, limit, control, visit)
+    }
+    fn visit_keys_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut uqa_storage::read_control::KeyReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.inner
+            .visit_keys_after(prefix, after, limit, control, visit)
     }
     fn contains_prefix_budgeted(
         &self,

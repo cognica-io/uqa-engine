@@ -61,33 +61,40 @@ fn failed_identifier_sync_recovers_one_complete_watermark_without_reusing_return
 }
 
 #[test]
-fn a_missing_identifier_table_is_not_recreated_for_a_current_format() {
-    let database = Arc::new(
-        Database::builder()
-            .create_with_backend(InMemoryBackend::new())
-            .unwrap(),
-    );
-    let retained = RedbRecordStore::new(database.clone()).unwrap();
-    let transaction = database.begin_write().unwrap();
-    transaction
-        .delete_table(super::super::identifiers::TABLE)
-        .unwrap();
-    transaction.commit().unwrap();
-    assert!(matches!(
-        retained.allocate_identifiers(
-            b"entities",
-            reserve(1),
-            &StorageReadControl::with_limit(1 << 20)
-        ),
-        Err(VersionError::InvalidEncoding(_))
-    ));
-    assert!(matches!(
-        RedbRecordStore::new(database.clone()),
-        Err(VersionError::InvalidEncoding(_))
-    ));
-    assert!(database
-        .begin_read()
-        .unwrap()
-        .open_table(super::super::identifiers::TABLE)
-        .is_err());
+fn a_missing_identifier_table_is_not_recreated_when_the_format_requires_allocations() {
+    for format in [5_u64, 6] {
+        let database = Arc::new(
+            Database::builder()
+                .create_with_backend(InMemoryBackend::new())
+                .unwrap(),
+        );
+        let retained = RedbRecordStore::new(database.clone()).unwrap();
+        let transaction = database.begin_write().unwrap();
+        transaction
+            .open_table(METADATA)
+            .unwrap()
+            .insert("format", format.to_be_bytes().as_slice())
+            .unwrap();
+        transaction
+            .delete_table(super::super::identifiers::TABLE)
+            .unwrap();
+        transaction.commit().unwrap();
+        assert!(matches!(
+            retained.allocate_identifiers(
+                b"entities",
+                reserve(1),
+                &StorageReadControl::with_limit(1 << 20)
+            ),
+            Err(VersionError::InvalidEncoding(_))
+        ));
+        assert!(matches!(
+            RedbRecordStore::new(database.clone()),
+            Err(VersionError::InvalidEncoding(_))
+        ));
+        assert!(database
+            .begin_read()
+            .unwrap()
+            .open_table(super::super::identifiers::TABLE)
+            .is_err());
+    }
 }

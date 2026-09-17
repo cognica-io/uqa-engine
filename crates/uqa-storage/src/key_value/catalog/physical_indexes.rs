@@ -6,14 +6,14 @@
 
 //! Owned K/V physical-index namespaces for table and column lifecycle changes.
 
-use super::keys::{batch_rekey_prefix, batch_rekey_prefix_or_keep_existing};
+use super::keys::{batch_rekey_prefix_or_keep_existing, rekey_prefix};
 use crate::key_value::index_keys::{
     btree_entry_field_prefix, btree_entry_key_prefix, btree_index_key, btree_index_key_prefix,
     hnsw_metadata_key, hnsw_metadata_table_prefix, hnsw_node_prefix, hnsw_node_table_prefix,
     ivf_assignment_prefix, ivf_assignment_table_prefix, ivf_centroid_prefix,
     ivf_centroid_table_prefix, ivf_metadata_key, ivf_metadata_table_prefix,
 };
-use crate::key_value::{KeyValueBatch, KeyValueStore};
+use crate::key_value::{KeyValueBatch, KeyValueRead, KeyValueStore};
 use crate::StorageBackendResult;
 
 pub(super) fn drop_table_indexes(
@@ -29,7 +29,7 @@ pub(super) fn drop_table_indexes(
 }
 
 pub(super) fn rename_table_indexes(
-    store: &dyn KeyValueStore,
+    read: &dyn KeyValueRead,
     batch: &mut dyn KeyValueBatch,
     from: &str,
     to: &str,
@@ -42,7 +42,7 @@ pub(super) fn rename_table_indexes(
         .into_iter()
         .zip(table_index_prefixes(to)?)
     {
-        batch_rekey_prefix(store, batch, &old_prefix, &new_prefix)?;
+        rekey_prefix(read, batch, &old_prefix, &new_prefix)?;
     }
     Ok(())
 }

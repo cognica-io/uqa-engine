@@ -67,10 +67,6 @@ pub(super) fn encode_stored_document_value(
     Ok(encoded)
 }
 
-pub(super) fn decode_document_value(bytes: &[u8]) -> StorageBackendResult<Document> {
-    decode_stored_document_value(bytes).map(StoredDocument::into_fields)
-}
-
 pub(super) fn decode_stored_document_value(bytes: &[u8]) -> StorageBackendResult<StoredDocument> {
     if let Some(body) = bytes.strip_prefix(DOCUMENT_VALUE_V2_PREFIX) {
         let stored: StoredDocumentV2 = decode_value(body)?;

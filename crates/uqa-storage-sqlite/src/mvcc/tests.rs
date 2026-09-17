@@ -139,11 +139,13 @@ fn downgrade_record_format(store: &SQLiteRecordStore, format: i64) {
     store.with(|connection| {
         let _permit = schema::WritePermit::acquire(connection)?;
         let definition: String = connection.query_row("SELECT sql FROM sqlite_schema WHERE name = '_uqa_mvcc_metadata'", [], |row| row.get(0))?;
-        assert!(definition.contains("CHECK(format = 5)"));
-        assert_eq!(connection.query_row("SELECT count(*) FROM _uqa_mvcc_identifiers", [], |row| row.get::<_, i64>(0))?, 0);
-        connection.execute_batch("DROP TABLE _uqa_mvcc_identifiers")?;
+        assert!(definition.contains("CHECK(format = 6)"));
+        if format < 5 {
+            assert_eq!(connection.query_row("SELECT count(*) FROM _uqa_mvcc_identifiers", [], |row| row.get::<_, i64>(0))?, 0);
+            connection.execute_batch("DROP TABLE _uqa_mvcc_identifiers")?;
+        }
         connection.execute_batch("ALTER TABLE _uqa_mvcc_metadata RENAME TO saved_metadata")?;
-        connection.execute_batch(&definition.replace("CHECK(format = 5)", &format!("CHECK(format = {format})")))?;
+        connection.execute_batch(&definition.replace("CHECK(format = 6)", &format!("CHECK(format = {format})")))?;
         connection.execute_batch(&format!("INSERT INTO _uqa_mvcc_metadata SELECT singleton, {format}, database_id, allocated, sequence, mapping FROM saved_metadata; DROP TABLE saved_metadata;"))?;
         for action in ["INSERT", "UPDATE", "DELETE"] { connection.execute_batch(&schema::trigger("_uqa_mvcc_metadata", action).1)?; }
         Ok(())
@@ -151,9 +153,59 @@ fn downgrade_record_format(store: &SQLiteRecordStore, format: i64) {
 }
 
 #[test]
+fn allocated_predecessor_formats_reject_missing_identifier_state_or_guards() {
+    for sql in [
+        "DROP TABLE _uqa_mvcc_identifiers",
+        "DROP TRIGGER _uqa_mvcc_identifiers_INSERT_guard",
+    ] {
+        let connection = ManagedConnection::open_in_memory().unwrap();
+        let store = SQLiteRecordStore::new(&connection).unwrap();
+        store
+            .allocate_identifiers(
+                b"reserved",
+                uqa_storage::mvcc::IdentifierRequest::Observe(999),
+                &control(),
+            )
+            .unwrap();
+        downgrade_record_format(&store, 5);
+        store
+            .with(|connection| {
+                let _permit = schema::WritePermit::acquire(connection)?;
+                connection.execute_batch(sql)?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(SQLiteRecordStore::new(&connection).is_err());
+        store
+            .with(|connection| {
+                assert_eq!(
+                    connection.query_row("SELECT format FROM _uqa_mvcc_metadata", [], |row| row
+                        .get::<_, i64>(0))?,
+                    5
+                );
+                let name = if sql.starts_with("DROP TABLE") {
+                    "_uqa_mvcc_identifiers"
+                } else {
+                    "_uqa_mvcc_identifiers_INSERT_guard"
+                };
+                assert_eq!(
+                    connection.query_row(
+                        "SELECT count(*) FROM sqlite_schema WHERE name=?1",
+                        [name],
+                        |row| row.get::<_, i64>(0)
+                    )?,
+                    0
+                );
+                Ok(())
+            })
+            .unwrap();
+    }
+}
+
+#[test]
 fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
     let control = control();
-    for (mode, format) in (0..3).flat_map(|mode| [1, 2, 3, 4].map(|format| (mode, format))) {
+    for (mode, format) in (0..3).flat_map(|mode| [1, 2, 3, 4, 5].map(|format| (mode, format))) {
         let connection = ManagedConnection::open_in_memory().unwrap();
         if mode == 2 {
             crate::Catalog::open(connection.clone()).unwrap();
@@ -174,8 +226,30 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
         let pending = store.allocate_transaction(&control).unwrap();
         let snapshot = store.snapshot(&control).unwrap();
         let before = snapshot.scan(b"", None, 64, &control).unwrap();
+        if format == 5 {
+            store
+                .allocate_identifiers(
+                    b"migration-identities",
+                    uqa_storage::mvcc::IdentifierRequest::Observe(999),
+                    &control,
+                )
+                .unwrap();
+        }
         downgrade_record_format(&store, format);
         let upgraded = open().unwrap();
+        if format == 5 {
+            assert_eq!(
+                upgraded
+                    .allocate_identifiers(
+                        b"migration-identities",
+                        uqa_storage::mvcc::IdentifierRequest::Observe(0),
+                        &control
+                    )
+                    .unwrap()
+                    .watermark(),
+                999
+            );
+        }
         assert_eq!(upgraded.database_id(), store.database_id());
         assert_eq!(
             upgraded.snapshot(&control).unwrap().sequence(),
@@ -215,7 +289,7 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
                 assert_eq!(
                     connection.query_row("SELECT format FROM _uqa_mvcc_metadata", [], |row| row
                         .get::<_, i64>(0))?,
-                    5
+                    6
                 );
                 Ok(())
             })
@@ -226,7 +300,7 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
 
 #[test]
 fn failed_record_format_upgrade_restores_the_old_schema_and_allows_repair() {
-    for format in [1, 2, 3, 4] {
+    for format in [1, 2, 3, 4, 5] {
         let connection = ManagedConnection::open_in_memory().unwrap();
         let store = SQLiteRecordStore::new(&connection).unwrap();
         downgrade_record_format(&store, format);
@@ -249,7 +323,7 @@ fn failed_record_format_upgrade_restores_the_old_schema_and_allows_repair() {
                     [],
                     |row| row.get::<_, i64>(0)
                 )?,
-                0
+                i64::from(format >= 5)
             );
                 let _permit = schema::WritePermit::acquire(connection)?;
                 connection.execute_batch("UPDATE _uqa_mvcc_metadata SET mapping = 0")?;
@@ -263,7 +337,7 @@ fn failed_record_format_upgrade_restores_the_old_schema_and_allows_repair() {
 #[test]
 fn closed_record_format_files_upgrade_in_every_sqlite_mode() {
     let control = control();
-    for (mode, format) in (0..4).flat_map(|mode| [1, 2, 3, 4].map(|format| (mode, format))) {
+    for (mode, format) in (0..4).flat_map(|mode| [1, 2, 3, 4, 5].map(|format| (mode, format))) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("record-upgrade.db");
         let open = || {

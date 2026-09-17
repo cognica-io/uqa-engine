@@ -277,7 +277,11 @@ fn verify_catalog_lifecycle(
                 role_owner: "uqa".into(),
                 acl: None,
                 column_acls: std::collections::BTreeMap::new(),
-                object_id: [case + 1; 16],
+                object_id: [1
+                    + case * 4
+                    + u8::from(reverse) * 2
+                    + u8::from(matches!(kind, VectorMergeKind::HNSW));
+                    16],
                 storage_generation: [case + 1; 16],
                 analyzer_json: serde_json::to_string(&uqa_analysis::whitespace_analyzer())?,
                 fts_fields: vec![],

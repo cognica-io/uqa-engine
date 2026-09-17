@@ -8,6 +8,8 @@
 
 #[path = "mvcc_sessions/compound.rs"]
 mod compound;
+#[path = "mvcc_sessions/documents.rs"]
+mod documents;
 #[path = "mvcc_sessions/graph.rs"]
 mod graph;
 #[path = "mvcc_sessions/guards.rs"]

@@ -7,7 +7,9 @@
 //! Memory readers borrow one locked map; graph snapshots own their evaluated data afterward.
 
 use crate::key_value::{KeyValueRead, KeyValueReadRevision};
-use crate::read_control::{KeyValueReadVisitor, StorageReadControl, ValueReadVisitor};
+use crate::read_control::{
+    KeyReadVisitor, KeyValueReadVisitor, StorageReadControl, ValueReadVisitor,
+};
 use crate::StorageBackendResult;
 
 pub(super) struct MemoryRead<'a> {
@@ -94,5 +96,34 @@ impl KeyValueRead for MemoryRead<'_> {
             .range::<[u8], _>((Included(prefix), Unbounded))
             .next()
             .is_some_and(|(key, _)| key.starts_with(prefix)))
+    }
+
+    fn visit_keys_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut KeyReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        use std::ops::Bound::{Excluded, Included, Unbounded};
+        control.check()?;
+        let lower = match after {
+            Some(after) if after >= prefix => Excluded(after),
+            _ => Included(prefix),
+        };
+        for (key, _) in self
+            .state
+            .map
+            .range::<[u8], _>((lower, Unbounded))
+            .take(limit)
+        {
+            if !key.starts_with(prefix) {
+                break;
+            }
+            control.check()?;
+            visit(key)?;
+        }
+        control.check()
     }
 }

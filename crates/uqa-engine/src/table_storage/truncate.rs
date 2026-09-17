@@ -89,13 +89,6 @@ impl Engine {
                     SQLError::Internal(format!("retain TRUNCATE document watermark: {error}"))
                 })?;
         }
-        *t.storage_generation.write() = crate::new_table_storage_generation().map_err(|error| {
-            SQLError::Internal(format!("rotate TRUNCATE storage generation: {error}"))
-        })?;
-        self.try_save_table_schema(table_name, &t)
-            .map_err(|error| {
-                SQLError::Internal(format!("persist TRUNCATE storage generation: {error}"))
-            })?;
         // Snapshot the doc id set before grabbing any write locks so
         // we do not deadlock against the read guard inside the loop.
         let ids: Vec<DocId> = t
@@ -120,6 +113,14 @@ impl Engine {
             }
             self.note_row_deleted(table_name, doc_id)?;
         }
+        // Retire old rows under their original generation before selecting the new allocator namespace.
+        *t.storage_generation.write() = crate::new_table_storage_generation().map_err(|error| {
+            SQLError::Internal(format!("rotate TRUNCATE storage generation: {error}"))
+        })?;
+        self.try_save_table_schema(table_name, &t)
+            .map_err(|error| {
+                SQLError::Internal(format!("persist TRUNCATE storage generation: {error}"))
+            })?;
         if restart_identity {
             *t.next_id.lock() = 1;
             self.persist_next_id(table_name).map_err(|error| {

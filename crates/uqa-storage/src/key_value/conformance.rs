@@ -14,6 +14,8 @@
 use super::KeyValueStore;
 use crate::{StorageBackendError, StorageBackendResult};
 
+mod documents;
+pub use documents::{verify_document_ownership, verify_document_reopen};
 mod graph;
 pub use graph::{verify_graph_cache_concurrency, verify_graph_cache_reopen};
 mod graph_retry;

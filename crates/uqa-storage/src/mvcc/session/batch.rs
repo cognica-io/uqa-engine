@@ -18,6 +18,7 @@ use super::VersionedKeyValueStore;
 enum Operation {
     Requirement(BudgetedVec<u8>),
     IdentifierObservation(BudgetedVec<u8>, u64),
+    IdentifierInheritance(BudgetedVec<u8>, BudgetedVec<u8>),
     Put(BudgetedVec<u8>, BudgetedVec<u8>),
     Delete(BudgetedVec<u8>),
     DeletePrefix(BudgetedVec<u8>, RecordWriteKind),
@@ -71,7 +72,8 @@ impl<'a> Batch<'a> {
                 Operation::Requirement(key) => {
                     transaction.require_unchanged(key, &self.store.control)?;
                 }
-                Operation::IdentifierObservation(_, _) => {}
+                Operation::IdentifierObservation(_, _) | Operation::IdentifierInheritance(_, _) => {
+                }
                 Operation::Put(key, value) => {
                     transaction.replace(key, Some(value), &self.store.control)?;
                 }
@@ -141,12 +143,27 @@ impl<'a> Batch<'a> {
         }
         // Validate and stage every record first. Allocation uses persistence directly because the session's mutation boundary already holds its active-transaction lock.
         for operation in self.operations.iter() {
-            if let Operation::IdentifierObservation(namespace, value) = operation {
-                self.store.persistence.allocate_identifiers(
-                    namespace,
-                    crate::mvcc::IdentifierRequest::Observe(*value),
-                    &self.store.control,
-                )?;
+            match operation {
+                Operation::IdentifierObservation(namespace, value) => {
+                    self.store.persistence.allocate_identifiers(
+                        namespace,
+                        crate::mvcc::IdentifierRequest::Observe(*value),
+                        &self.store.control,
+                    )?;
+                }
+                Operation::IdentifierInheritance(from, to) => {
+                    let source = self.store.persistence.allocate_identifiers(
+                        from,
+                        crate::mvcc::IdentifierRequest::Observe(0),
+                        &self.store.control,
+                    )?;
+                    self.store.persistence.allocate_identifiers(
+                        to,
+                        crate::mvcc::IdentifierRequest::Observe(source.watermark()),
+                        &self.store.control,
+                    )?;
+                }
+                _ => {}
             }
         }
         Ok(())
@@ -169,6 +186,18 @@ impl KeyValueBatch for Batch<'_> {
         self.operations.push(Operation::IdentifierObservation(
             self.copy(namespace)?,
             value,
+        ))?;
+        Ok(())
+    }
+    fn inherit_identifiers(&mut self, from: &[u8], to: &[u8]) -> StorageBackendResult<()> {
+        for namespace in [from, to] {
+            crate::mvcc::IdentifierRequest::Observe(0)
+                .reserve_workspace(namespace, &self.store.control)
+                .map_err(VersionError::into_storage_error)?;
+        }
+        self.operations.push(Operation::IdentifierInheritance(
+            self.copy(from)?,
+            self.copy(to)?,
         ))?;
         Ok(())
     }
