@@ -45,7 +45,14 @@ fn migration_adds_the_sequence_log_counter_without_changing_values() {
     assert!(row.called);
     assert_eq!(row.log_count, 0);
     upgraded
-        .set_sequence_value("public.legacy_log_count", [41; 16], 13, true, 17)
+        .set_sequence_value(
+            "public.legacy_log_count",
+            [41; 16],
+            row.definition_generation,
+            13,
+            true,
+            17,
+        )
         .unwrap();
     let row = upgraded.load_sequence_rows().unwrap().remove(0);
     assert_eq!(row.current, 13);

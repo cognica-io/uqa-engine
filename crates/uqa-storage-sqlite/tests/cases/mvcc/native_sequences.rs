@@ -95,7 +95,7 @@ fn independent_native_sequence_writers_publish_before_the_other_transaction_ends
             documents.put(1, fields(3)).unwrap();
             connection.savepoint("keep").unwrap();
             catalog
-                .set_sequence_value("a", a.object_id, 40, false, 0)
+                .set_sequence_value("a", a.object_id, a.definition_generation, 40, false, 0)
                 .unwrap();
             assert_eq!(reserve(&catalog, &a).last_value, 42);
             documents.put(1, fields(42)).unwrap();
@@ -190,9 +190,16 @@ fn native_sequence_session_commits_values_while_another_session_has_private_docu
             assert_eq!(reserve(&catalog, &row).first_value, 1);
             assert_eq!(
                 catalog
-                    .set_sequence_value("s", row.object_id, 200, false, 0)
+                    .set_sequence_value(
+                        "s",
+                        row.object_id,
+                        row.definition_generation,
+                        200,
+                        false,
+                        0
+                    )
                     .unwrap(),
-                Some(200)
+                uqa_storage::SequenceSetValueResult::Set(200)
             );
             assert_eq!(reserve(&catalog, &row).first_value, 200);
             sent.send(()).unwrap();

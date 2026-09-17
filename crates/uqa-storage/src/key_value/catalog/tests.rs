@@ -436,10 +436,21 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
     );
     assert_eq!(
         catalog
-            .set_sequence_value("public.controlled", object_id, 7, false, 0)
+            .set_sequence_value("public.controlled", object_id, object_id, 7, false, 0)
             .unwrap(),
-        Some(7)
+        crate::SequenceSetValueResult::Set(7)
     );
+    let unchanged = catalog.load_sequence_rows().unwrap();
+    assert_eq!(
+        catalog
+            .set_sequence_value("public.controlled", object_id, [8; 16], 75, true, 0)
+            .unwrap(),
+        crate::SequenceSetValueResult::DefinitionChanged
+    );
+    assert!(catalog
+        .set_sequence_value("public.controlled", object_id, object_id, 75, true, -1)
+        .is_err());
+    assert_eq!(catalog.load_sequence_rows().unwrap(), unchanged);
     let uncalled = catalog.load_sequence_rows().unwrap().remove(0);
     assert_eq!(uncalled.current, 7);
     assert!(!uncalled.called);
@@ -460,9 +471,9 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
     );
     assert_eq!(
         catalog
-            .set_sequence_value("public.controlled", object_id, 20, true, 0)
+            .set_sequence_value("public.controlled", object_id, object_id, 20, true, 0)
             .unwrap(),
-        Some(20)
+        crate::SequenceSetValueResult::Set(20)
     );
     assert_eq!(
         catalog

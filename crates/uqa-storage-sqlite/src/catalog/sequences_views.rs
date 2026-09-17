@@ -8,7 +8,8 @@
 
 use super::{
     migration_relation, params, Catalog, OptionalExtension, RelationIdentity, RelationKind, Result,
-    SQLiteError, SequenceOptions, SequenceReservationResult, SequenceRow, ViewRow,
+    SQLiteError, SequenceOptions, SequenceReservationResult, SequenceRow, SequenceSetValueResult,
+    ViewRow,
 };
 use uqa_storage::catalog::{sequence_value_reservation, SequenceValuePosition};
 
@@ -17,6 +18,25 @@ use codec::{
     concrete_sequence_options, decode_raw_sequence_row, decode_sequence_identity,
     read_raw_sequence_row,
 };
+
+fn with_sequence_value_write<T>(
+    connection: &crate::ManagedConnection,
+    operation: impl FnOnce(&rusqlite::Connection) -> Result<T>,
+) -> Result<T> {
+    connection.with_mut(|connection| {
+        if connection.is_autocommit() {
+            let transaction =
+                connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let result = operation(&transaction)?;
+            transaction.commit()?;
+            return Ok(result);
+        }
+        let transaction = connection.savepoint()?;
+        let result = operation(&transaction)?;
+        transaction.commit()?;
+        Ok(result)
+    })
+}
 
 fn reserve_sequence_values_in_connection(
     connection: &rusqlite::Connection,
@@ -331,28 +351,13 @@ impl Catalog {
         {
             return Ok(result);
         }
-        self.conn.with_mut(|connection| {
-            if connection.is_autocommit() {
-                let tx = connection
-                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-                let result = reserve_sequence_values_in_connection(
-                    &tx,
-                    &relation,
-                    object_id,
-                    definition_generation,
-                )?;
-                tx.commit()?;
-                return Ok(result);
-            }
-            let tx = connection.savepoint()?;
-            let result = reserve_sequence_values_in_connection(
-                &tx,
+        with_sequence_value_write(&self.conn, |connection| {
+            reserve_sequence_values_in_connection(
+                connection,
                 &relation,
                 object_id,
                 definition_generation,
-            )?;
-            tx.commit()?;
-            Ok(result)
+            )
         })
     }
 
@@ -360,32 +365,53 @@ impl Catalog {
         &self,
         name: &str,
         object_id: [u8; 16],
+        definition_generation: [u8; 16],
         value: i64,
         called: bool,
         log_count: i64,
-    ) -> Result<Option<i64>> {
+    ) -> Result<SequenceSetValueResult> {
         let relation = migration_relation(name)?;
-        if let super::native::NativeLookup::Value(result) =
-            self.set_native_sequence_value(&relation, object_id, value, called, log_count)?
-        {
+        if let Some(result) = self.set_native_sequence_value(
+            &relation,
+            object_id,
+            definition_generation,
+            value,
+            called,
+            log_count,
+        )? {
             return Ok(result);
         }
-        self.conn.with(|connection| {
-            Ok(connection
+        with_sequence_value_write(&self.conn, |connection| {
+            let stored = connection
                 .query_row(
-                    "UPDATE _sequences SET current = ?4, called = ?5, log_count = ?6
-                     WHERE schema_name = ?1 AND relation_name = ?2 AND object_id = ?3 RETURNING current",
-                    params![
-                        relation.schema,
-                        relation.name,
-                        object_id.as_slice(),
-                        value,
-                        called,
-                        log_count,
-                    ],
-                    |row| row.get(0),
+                    "SELECT object_id, definition_generation FROM _sequences
+                  WHERE schema_name = ?1 AND relation_name = ?2",
+                    params![relation.schema, relation.name],
+                    |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?)),
                 )
-                .optional()?)
+                .optional()?;
+            let Some((identity, generation)) = stored else {
+                return Ok(SequenceSetValueResult::Missing);
+            };
+            if decode_sequence_identity(&relation, "object identity", identity)? != object_id {
+                return Ok(SequenceSetValueResult::Missing);
+            }
+            if decode_sequence_identity(&relation, "definition generation", generation)?
+                != definition_generation
+            {
+                return Ok(SequenceSetValueResult::DefinitionChanged);
+            }
+            let updated = connection.execute(
+                "UPDATE _sequences SET current = ?5, called = ?6, log_count = ?7
+                  WHERE schema_name = ?1 AND relation_name = ?2 AND object_id = ?3 AND definition_generation = ?4",
+                params![relation.schema, relation.name, object_id.as_slice(), definition_generation.as_slice(), value, called, log_count],
+            )?;
+            if updated != 1 {
+                return Err(SQLiteError::StorageBackend(format!(
+                    "sequence `{name}` changed while setting its value"
+                )));
+            }
+            Ok(SequenceSetValueResult::Set(value))
         })
     }
 

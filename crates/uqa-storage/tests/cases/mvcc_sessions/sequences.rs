@@ -97,7 +97,7 @@ fn sequence_value_mutations_cannot_overwrite_an_intervening_definition() {
         let result = match operation {
             "reserve" => reserve(&catalog).map(|_| ()),
             "set" => catalog
-                .set_sequence_value("ids", [1; 16], 50, false, 0)
+                .set_sequence_value("ids", [1; 16], [2; 16], 50, false, 0)
                 .map(|_| ()),
             _ => catalog.replace_sequence_row(&sequence()).map(|_| ()),
         };
@@ -136,9 +136,9 @@ fn sequence_lifecycle_keeps_original_claim_and_value_preconditions() {
             } else {
                 assert_eq!(
                     other
-                        .set_sequence_value("ids", [1; 16], 100, false, 0)
+                        .set_sequence_value("ids", [1; 16], [2; 16], 100, false, 0)
                         .unwrap(),
-                    Some(100)
+                    uqa_storage::SequenceSetValueResult::Set(100)
                 );
             }
         }));

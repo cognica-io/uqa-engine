@@ -39,6 +39,9 @@ impl SequenceSessionWrite for SessionWrite<'_> {
     }
 }
 impl SequenceValueRuntime for Engine {
+    fn cancellation(&self) -> &uqa_core::CancellationToken {
+        &self.runtime.cancellation
+    }
     fn persistence(&self) -> SequencePersistenceRead<'_> {
         Box::new(self.durable.sequence_persistence.read())
     }

@@ -77,4 +77,7 @@ fn sequence_security_and_internal_errors_keep_their_original_variants() {
     assert!(
         matches!(internal.into_sql_error(), SQLError::Internal(message) if message == "storage detail")
     );
+    let cancelled = SequenceValueError::from(uqa_core::QueryCancelled).into_sql_error();
+    assert_eq!(cancelled.sqlstate(), Some("57014"));
+    assert!(matches!(cancelled, SQLError::Cancelled(_)));
 }

@@ -9,8 +9,8 @@
 use super::{
     decode_relation_key, decode_value, encode_value, relation_key, relations, single_str_key,
     KeyValueCatalog, RelationIdentity, RelationKind, SequenceOptions, SequenceReservationResult,
-    SequenceRow, StorageBackendError, StorageBackendResult, StoredSequence, TAG_RELATION,
-    TAG_SCHEMA, TAG_SEQUENCE,
+    SequenceRow, SequenceSetValueResult, StorageBackendError, StorageBackendResult, StoredSequence,
+    TAG_RELATION, TAG_SCHEMA, TAG_SEQUENCE,
 };
 use crate::catalog::{sequence_value_reservation, SequenceValuePosition};
 use crate::key_value::index_view::{evaluate_mutation, read_view};
@@ -233,26 +233,35 @@ impl KeyValueCatalog {
         &self,
         name: &str,
         object_id: [u8; 16],
+        definition_generation: [u8; 16],
         value: i64,
         called: bool,
         log_count: i64,
-    ) -> StorageBackendResult<Option<i64>> {
+    ) -> StorageBackendResult<SequenceSetValueResult> {
         let relation =
             RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?;
         let key = relation_key(TAG_SEQUENCE, &relation)?;
         evaluate_mutation(self.store.as_ref(), |read, batch| {
             let Some(encoded) = read.get(&key)? else {
-                return Ok(None);
+                return Ok(SequenceSetValueResult::Missing);
             };
             let mut stored: StoredSequence = decode_value(&encoded)?;
             if stored.object_id != object_id {
-                return Ok(None);
+                return Ok(SequenceSetValueResult::Missing);
+            }
+            if stored.definition_generation != definition_generation {
+                return Ok(SequenceSetValueResult::DefinitionChanged);
+            }
+            if log_count < 0 {
+                return Err(StorageBackendError::Other(
+                    "sequence log count cannot be negative".into(),
+                ));
             }
             stored.current = value;
             stored.called = called;
             stored.log_count = log_count;
             batch.put(&key, &encode_value(&stored)?)?;
-            Ok(Some(value))
+            Ok(SequenceSetValueResult::Set(value))
         })
     }
 }

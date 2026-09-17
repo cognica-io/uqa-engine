@@ -63,50 +63,24 @@ impl SequenceValueContext<'_> {
         &self,
         target: &NextvalTarget,
     ) -> Result<Option<(uqa_storage::SequenceValueReservation, bool)>, SequenceValueError> {
-        let sequence_session = if target.temporary {
-            None
-        } else {
-            self.runtime
-                .open_nontransactional_sequence_session()
-                .map_err(|error| {
-                    SequenceValueError::Internal(format!("open sequence session: {error}"))
-                })?
-        };
-        let autonomous = sequence_session.is_some();
-        if !target.temporary && sequence_session.is_none() {
-            self.runtime
-                .prepare_explicit_transaction_writer()
-                .map_err(|error| {
-                    SequenceValueError::Internal(format!("prepare sequence writer: {error}"))
-                })?;
-        }
-        let catalog = (!target.temporary)
-            .then(|| {
-                sequence_session
-                    .as_ref()
-                    .map(|session| session.catalog.as_ref())
-                    .or(self.storage)
-            })
-            .flatten();
-        if let Some(catalog) = catalog {
-            return match catalog.reserve_sequence_values(
-                &target.name,
-                target.object_id,
-                target.state.definition_generation,
-            ) {
-                Ok(SequenceReservationResult::Reserved(reservation)) => {
+        if let Some((result, autonomous)) =
+            self.mutate_persistent_value(target.temporary, "reserve sequence values", |catalog| {
+                catalog.reserve_sequence_values(
+                    &target.name,
+                    target.object_id,
+                    target.state.definition_generation,
+                )
+            })?
+        {
+            return match result {
+                SequenceReservationResult::Reserved(reservation) => {
                     Ok(Some((reservation, autonomous)))
                 }
-                Ok(SequenceReservationResult::DefinitionChanged) => Ok(None),
-                Ok(SequenceReservationResult::Missing) => {
+                SequenceReservationResult::DefinitionChanged => Ok(None),
+                SequenceReservationResult::Missing => {
                     Err(SequenceValueError::Undefined(target.name.clone()))
                 }
-                Ok(SequenceReservationResult::Exhausted) => {
-                    Err(exhausted(&target.name, target.state))
-                }
-                Err(error) => Err(SequenceValueError::Internal(format!(
-                    "reserve sequence values: {error}"
-                ))),
+                SequenceReservationResult::Exhausted => Err(exhausted(&target.name, target.state)),
             };
         }
         let mut sequences = self.runtime.states_write();
@@ -132,7 +106,7 @@ impl SequenceValueContext<'_> {
         sequence.current = reservation.last_value;
         sequence.called = true;
         sequence.log_count = reservation.log_count;
-        Ok(Some((reservation, autonomous)))
+        Ok(Some((reservation, false)))
     }
     pub(super) fn install_nextval_reservation(
         &self,

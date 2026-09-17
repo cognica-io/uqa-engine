@@ -149,7 +149,14 @@ fn sequence_catalog_rejects_name_and_constraint_errors_without_partial_changes()
             );
         }
         reject(&connection, native, || {
-            catalog.set_sequence_value("s", original.object_id, 10, true, -1)
+            catalog.set_sequence_value(
+                "s",
+                original.object_id,
+                original.definition_generation,
+                10,
+                true,
+                -1,
+            )
         });
         assert_eq!(
             catalog.load_sequence_rows().unwrap(),
@@ -157,9 +164,16 @@ fn sequence_catalog_rejects_name_and_constraint_errors_without_partial_changes()
         );
         assert_eq!(
             catalog
-                .set_sequence_value("missing", original.object_id, 10, true, -1)
+                .set_sequence_value(
+                    "missing",
+                    original.object_id,
+                    original.definition_generation,
+                    10,
+                    true,
+                    -1
+                )
                 .unwrap(),
-            None
+            uqa_storage::SequenceSetValueResult::Missing
         );
         let rejected = sequence("rejected", 3);
         assert!(catalog.create_sequence_row(&rejected).unwrap());

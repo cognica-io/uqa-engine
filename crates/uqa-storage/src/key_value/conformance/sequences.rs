@@ -67,7 +67,14 @@ pub fn verify_sequence_concurrency(
     first.save_model("sequence_private", "kept")?;
     assert_eq!(reserve(&first, &row)?.first_value, 1);
     a.savepoint("sequence_position")?;
-    first.set_sequence_value("sequence_a", row.object_id, 40, false, 0)?;
+    first.set_sequence_value(
+        "sequence_a",
+        row.object_id,
+        row.definition_generation,
+        40,
+        false,
+        0,
+    )?;
     assert_eq!(reserve(&first, &row)?.last_value, 42);
     b.begin_transaction()?;
     assert_eq!(reserve(&second, &independent)?.last_value, 3);
@@ -129,8 +136,15 @@ fn verify_sequence_conflicts(
             match change {
                 "reserve" => assert_eq!(reserve(second, &row)?.first_value, 1),
                 "set" => assert_eq!(
-                    second.set_sequence_value("sequence_conflict", row.object_id, 100, false, 0)?,
-                    Some(100)
+                    second.set_sequence_value(
+                        "sequence_conflict",
+                        row.object_id,
+                        row.definition_generation,
+                        100,
+                        false,
+                        0
+                    )?,
+                    crate::SequenceSetValueResult::Set(100)
                 ),
                 "replace" => {
                     let mut changed = row.clone();

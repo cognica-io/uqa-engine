@@ -7,6 +7,7 @@
 //! Execute SQL sequence value functions against retained runtime and provider inputs.
 mod allocation;
 pub mod context;
+mod persistence;
 mod resolution;
 use super::{
     session::{NontransactionalSequenceValue, SessionSequenceValue},
@@ -26,6 +27,7 @@ struct NextvalTarget {
 impl SequenceValueContext<'_> {
     pub fn nextval(&self, name: &str) -> Result<i64, SequenceValueError> {
         loop {
+            self.runtime.cancellation().check()?;
             let target = self.resolve_nextval_target(name)?;
             let mut caches = self.runtime.caches();
             if let Some((current, autonomous)) = Self::take_cached_nextval(&target, &mut caches)? {
@@ -99,52 +101,57 @@ impl SequenceValueContext<'_> {
         value: i64,
         is_called: bool,
     ) -> Result<i64, SequenceValueError> {
-        let (name, relation, object_id) = self.resolve_sequence_value_target(name)?;
-        let previous = self
-            .sequences
-            .states()
-            .get(&relation)
-            .copied()
-            .ok_or_else(|| SequenceValueError::Undefined(name.clone()))?;
-        let temporary = self
-            .runtime
-            .persistence()
-            .get(&relation)
-            .is_some_and(|persistence| {
-                *persistence == uqa_sql::ast::RelationPersistence::Temporary
-            });
-        self.privileges
-            .ensure_sequence_setval_privilege(&name, &relation)?;
-        if self.runtime.current_transaction_is_read_only() && !temporary {
-            return Err(SequenceValueError::ReadOnly("setval"));
-        }
-        let (min, max) = (previous.min_value, previous.max_value);
-        if !(min..=max).contains(&value) {
-            return Err(SequenceValueError::SetvalOutOfBounds {
-                name,
+        loop {
+            self.runtime.cancellation().check()?;
+            let (name, relation, object_id) = self.resolve_sequence_value_target(name)?;
+            let previous = self
+                .sequences
+                .states()
+                .get(&relation)
+                .copied()
+                .ok_or_else(|| SequenceValueError::Undefined(name.clone()))?;
+            let temporary = self
+                .runtime
+                .persistence()
+                .get(&relation)
+                .is_some_and(|persistence| {
+                    *persistence == uqa_sql::ast::RelationPersistence::Temporary
+                });
+            self.privileges
+                .ensure_sequence_setval_privilege(&name, &relation)?;
+            if self.runtime.current_transaction_is_read_only() && !temporary {
+                return Err(SequenceValueError::ReadOnly("setval"));
+            }
+            let (min, max) = (previous.min_value, previous.max_value);
+            if !(min..=max).contains(&value) {
+                return Err(SequenceValueError::SetvalOutOfBounds {
+                    name,
+                    value,
+                    min,
+                    max,
+                });
+            }
+            if let Some(value) = self.setval_target(
+                NextvalTarget {
+                    name,
+                    relation,
+                    object_id,
+                    state: previous,
+                    temporary,
+                },
                 value,
-                min,
-                max,
-            });
+                is_called,
+            )? {
+                return Ok(value);
+            }
         }
-        self.setval_target(
-            NextvalTarget {
-                name,
-                relation,
-                object_id,
-                state: previous,
-                temporary,
-            },
-            value,
-            is_called,
-        )
     }
     fn setval_target(
         &self,
         target: NextvalTarget,
         value: i64,
         is_called: bool,
-    ) -> Result<i64, SequenceValueError> {
+    ) -> Result<Option<i64>, SequenceValueError> {
         let NextvalTarget {
             name,
             relation,
@@ -152,46 +159,36 @@ impl SequenceValueContext<'_> {
             state: previous,
             temporary,
         } = target;
-        let sequence_session = if temporary {
-            None
-        } else {
-            self.runtime
-                .open_nontransactional_sequence_session()
-                .map_err(|error| {
-                    SequenceValueError::Internal(format!("open sequence session: {error}"))
-                })?
+        let persisted =
+            self.mutate_persistent_value(temporary, "persist sequence value", |catalog| {
+                catalog.set_sequence_value(
+                    &name,
+                    object_id,
+                    previous.definition_generation,
+                    value,
+                    is_called,
+                    0,
+                )
+            })?;
+        let autonomous = match persisted {
+            Some((uqa_storage::SequenceSetValueResult::Set(_), autonomous)) => Some(autonomous),
+            Some((uqa_storage::SequenceSetValueResult::DefinitionChanged, _)) => return Ok(None),
+            Some((uqa_storage::SequenceSetValueResult::Missing, _)) => {
+                return Err(SequenceValueError::Undefined(name))
+            }
+            None => None,
         };
-        let autonomous = sequence_session.is_some();
-        if !temporary && sequence_session.is_none() {
-            self.runtime
-                .prepare_explicit_transaction_writer()
-                .map_err(|error| {
-                    SequenceValueError::Internal(format!("prepare sequence writer: {error}"))
-                })?;
-        }
-        let catalog = if temporary {
-            None
-        } else {
-            sequence_session
-                .as_ref()
-                .map(|session| session.catalog.as_ref())
-                .or(self.storage)
-        };
-        if let Some(catalog) = catalog {
-            catalog
-                .set_sequence_value(&name, object_id, value, is_called, 0)
-                .map_err(|error| {
-                    SequenceValueError::Internal(format!("persist sequence value: {error}"))
-                })?
-                .ok_or_else(|| SequenceValueError::Undefined(name.clone()))?;
-        }
         let mut seqs = self.runtime.states_write();
         let seq = seqs
             .get_mut(&relation)
             .ok_or(SequenceValueError::Undefined(name))?;
-        seq.current = value;
-        seq.called = is_called;
-        seq.log_count = 0;
+        if seq.definition_generation == previous.definition_generation {
+            seq.current = value;
+            seq.called = is_called;
+            seq.log_count = 0;
+        } else if autonomous.is_none() {
+            return Ok(None);
+        }
         drop(seqs);
         self.runtime
             .caches()
@@ -212,10 +209,10 @@ impl SequenceValueContext<'_> {
                 current: value,
                 called: is_called,
                 log_count: 0,
-                autonomous,
+                autonomous: autonomous.unwrap_or(false),
             },
             false,
         );
-        Ok(value)
+        Ok(Some(value))
     }
 }

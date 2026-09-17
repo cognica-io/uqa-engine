@@ -9,8 +9,8 @@
 use super::{
     Catalog, CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow,
     ForeignTableRow, GraphSnapshot, OptionalExtension, RelationIdentity, Result, SQLiteError,
-    SequenceReservationResult, SequenceRow, StorageBackendError, StorageBackendResult,
-    TableAclEntry, TableSchema, ViewRow,
+    SequenceReservationResult, SequenceRow, SequenceSetValueResult, StorageBackendError,
+    StorageBackendResult, TableAclEntry, TableSchema, ViewRow,
 };
 
 fn into_storage_result<T>(result: Result<T>) -> StorageBackendResult<T> {
@@ -320,12 +320,19 @@ impl CatalogFacade for Catalog {
         &self,
         name: &str,
         object_id: [u8; 16],
+        definition_generation: [u8; 16],
         value: i64,
         called: bool,
         log_count: i64,
-    ) -> StorageBackendResult<Option<i64>> {
+    ) -> StorageBackendResult<SequenceSetValueResult> {
         into_storage_result(Catalog::set_sequence_value(
-            self, name, object_id, value, called, log_count,
+            self,
+            name,
+            object_id,
+            definition_generation,
+            value,
+            called,
+            log_count,
         ))
     }
 

@@ -49,8 +49,8 @@ pub use catalog::{
     GraphSnapshot, GraphVertexRow, RelationIdentity, RelationKind, SchemaAclEntry,
     SchemaPrivileges, SchemaRow, SequenceAclEntry, SequenceOptions, SequenceOwner,
     SequenceOwnerDependency, SequencePrivileges, SequenceReservationResult, SequenceRow,
-    SequenceValuePosition, SequenceValueReservation, TableAclEntry, TablePrivileges, TableSchema,
-    VectorFieldSchema, ViewRow, MAX_GRAPH_ID_PAGE,
+    SequenceSetValueResult, SequenceValuePosition, SequenceValueReservation, TableAclEntry,
+    TablePrivileges, TableSchema, VectorFieldSchema, ViewRow, MAX_GRAPH_ID_PAGE,
 };
 pub use clustered_postings::{
     MaterializedPostingCursor, PostingCursor, PostingScore, POSTING_CLUSTER_DOCS,

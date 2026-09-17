@@ -309,6 +309,14 @@ pub enum SequenceReservationResult {
     Reserved(SequenceValueReservation),
 }
 
+/// A value update applies only to the definition whose bounds the caller validated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SequenceSetValueResult {
+    Missing,
+    DefinitionChanged,
+    Set(i64),
+}
+
 /// Reserve up to `cache_size` values without crossing a sequence bound. Cycling is applied when selecting the first value of a new reservation, matching `PostgreSQL`'s boundary-truncated cache blocks.
 #[must_use]
 pub fn sequence_value_reservation(
@@ -485,10 +493,11 @@ pub trait CatalogFacade: Send + Sync {
         &self,
         name: &str,
         object_id: [u8; 16],
+        definition_generation: [u8; 16],
         value: i64,
         called: bool,
         log_count: i64,
-    ) -> StorageBackendResult<Option<i64>>;
+    ) -> StorageBackendResult<SequenceSetValueResult>;
 
     fn save_view(&self, view: &ViewRow) -> StorageBackendResult<()>;
     /// Atomically move one view catalog row and its shared relation claim.

@@ -67,16 +67,16 @@ fn sequence_reservations_keep_cached_bounds_cycles_and_full_width_values() {
         catalog.replace_sequence_row(&row).unwrap();
         assert_eq!(
             catalog
-                .set_sequence_value("s", row.object_id, 20, false, 0)
+                .set_sequence_value("s", row.object_id, row.definition_generation, 20, false, 0)
                 .unwrap(),
-            Some(20)
+            uqa_storage::SequenceSetValueResult::Set(20)
         );
         assert_eq!(reserve(&catalog, &row).first_value, 20);
         assert_eq!(
             catalog
-                .set_sequence_value("s", row.object_id, 30, true, 0)
+                .set_sequence_value("s", row.object_id, row.definition_generation, 30, true, 0)
                 .unwrap(),
-            Some(30)
+            uqa_storage::SequenceSetValueResult::Set(30)
         );
         assert_eq!(reserve(&catalog, &row).first_value, 31);
         for id in [[0; 16], [2; 16]] {
@@ -87,8 +87,10 @@ fn sequence_reservations_keep_cached_bounds_cycles_and_full_width_values() {
                 SequenceReservationResult::Missing
             );
             assert_eq!(
-                catalog.set_sequence_value("s", id, 100, false, 0).unwrap(),
-                None
+                catalog
+                    .set_sequence_value("s", id, row.definition_generation, 100, false, 0)
+                    .unwrap(),
+                uqa_storage::SequenceSetValueResult::Missing
             );
         }
         assert_eq!(
@@ -106,6 +108,23 @@ fn sequence_reservations_keep_cached_bounds_cycles_and_full_width_values() {
         assert_eq!(catalog.load_sequence_rows().unwrap()[0].current, 7);
         connection.rollback_transaction().unwrap();
         assert_eq!(catalog.load_sequence_rows().unwrap()[0].current, 31);
+    }
+}
+
+#[test]
+fn sequence_value_updates_reject_stale_definitions_without_writes() {
+    for native in [false, true] {
+        let (_connection, catalog) = memory(native);
+        let row = sequence("s", 1);
+        catalog.create_sequence_row(&row).unwrap();
+        let unchanged = catalog.load_sequence_rows().unwrap();
+        assert_eq!(
+            catalog
+                .set_sequence_value("s", row.object_id, [90; 16], 75, true, 0)
+                .unwrap(),
+            uqa_storage::SequenceSetValueResult::DefinitionChanged
+        );
+        assert_eq!(catalog.load_sequence_rows().unwrap(), unchanged);
     }
 }
 
@@ -180,9 +199,16 @@ fn native_sequence_value_access_does_not_load_unrelated_catalog_payloads() {
     assert_eq!(reserve(&catalog, &selected).first_value, 1);
     assert_eq!(
         catalog
-            .set_sequence_value("small", selected.object_id, 50, false, 0)
+            .set_sequence_value(
+                "small",
+                selected.object_id,
+                selected.definition_generation,
+                50,
+                false,
+                0
+            )
             .unwrap(),
-        Some(50)
+        uqa_storage::SequenceSetValueResult::Set(50)
     );
     assert_eq!(reserve(&catalog, &selected).last_value, 52);
     assert_eq!(

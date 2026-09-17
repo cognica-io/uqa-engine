@@ -604,8 +604,14 @@ impl Engine {
                     }
                     let generation = sequences.get(relation)?.definition_generation;
                     let value = history.values_by_definition.get(&generation).copied()?;
-                    (value.object_id == *object_id && !value.autonomous)
-                        .then(|| (relation.qualified_name(), value.object_id, value))
+                    (value.object_id == *object_id && !value.autonomous).then(|| {
+                        (
+                            relation.qualified_name(),
+                            value.object_id,
+                            generation,
+                            value,
+                        )
+                    })
                 })
                 .collect::<Vec<_>>()
         };
@@ -613,20 +619,23 @@ impl Engine {
             return Ok(());
         }
         let persist = |catalog: &dyn uqa_storage::CatalogFacade| -> StorageBackendResult<()> {
-            for (name, object_id, value) in &persistent {
-                if catalog
+            for (name, object_id, generation, value) in &persistent {
+                match catalog
                     .set_sequence_value(
                         name,
                         *object_id,
+                        *generation,
                         value.current,
                         value.called,
                         value.log_count,
-                    )?
-                    .is_none()
-                {
-                    return Err(StorageBackendError::Other(format!(
+                    )? {
+                    uqa_storage::SequenceSetValueResult::Set(_) => {}
+                    uqa_storage::SequenceSetValueResult::Missing => return Err(StorageBackendError::Other(format!(
                         "sequence `{name}` disappeared while restoring its nontransactional value"
-                    )));
+                    ))),
+                    uqa_storage::SequenceSetValueResult::DefinitionChanged => return Err(StorageBackendError::Other(format!(
+                        "sequence `{name}` definition changed while restoring its nontransactional value"
+                    ))),
                 }
             }
             Ok(())

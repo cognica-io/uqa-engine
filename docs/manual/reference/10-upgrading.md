@@ -8,6 +8,12 @@ The 0.3.0 release added native Korean Nori analysis, durable analyzer revisions 
 
 The 0.2 series includes SQL object and privilege lifecycle changes, durable expression and unique indexes, expanded sequences and PL/pgSQL, native cross-process notifications, and a Node.js HTTP client that runs without native addons. These changes were introduced in [0.2.0](../../../HISTORY.md#020---2026-09-05); the [compatibility guide](../sql/09-compatibility.md) defines the verified PostgreSQL 18 surface and the behavior still being implemented.
 
+## Unreleased Rust sequence value updates
+
+`CatalogFacade::set_sequence_value` and the native SQLite catalog method now require the expected `definition_generation` after `object_id`. They return `SequenceSetValueResult::Set(value)`, `Missing` or `DefinitionChanged`. Implementations and wrappers must check the identity and generation in the same atomic boundary as the value write. A generation mismatch must leave the stored value untouched so execution can resolve the definition again and repeat bounds validation; execution publishes the successful value to its session cache and history only after the update succeeds. Rollback restoration supplies the surviving generation too. This API change does not alter the durable record encoding.
+
+Implementations of `uqa_execution::catalog::sequence::values::context::SequenceValueRuntime` must expose their session cancellation token through `cancellation()`. Execution checks it while resolving changing definitions and retrying known rejected autonomous value mutations. A caller's transaction is never rolled back for an internal value retry, and uncertain outcomes are never replayed. Complete concurrent SQL sequences still require definition locking and the new Engine transaction model.
+
 ## Unreleased Rust Key/Value compound operations
 
 Common `KeyValueCatalog` sequence consumers now require `with_read_view` for reads and `with_mutation` for creation, replacement, rename, removal, reservation and set-value operations. Wrappers must forward both methods and use the supplied reader inside the callback; a per-catalog mutex cannot coordinate independent sessions. Durable creation/rename also retain the destination schema through `KeyValueBatch::require_unchanged`. Run `key_value::conformance::verify_sequence_concurrency` with two independent sessions, then `verify_sequence_reopen` after closing and reopening their disposable database. These consumer changes do not alter the record encoding or enable concurrent Engine SQL.

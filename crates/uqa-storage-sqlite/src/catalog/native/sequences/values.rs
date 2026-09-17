@@ -9,10 +9,10 @@
 use super::{
     owner_id, records::row_values, Catalog, Family, RelationIdentity, Result, SQLiteError,
 };
-use crate::catalog::native::NativeLookup;
 use rusqlite::types::ValueRef;
 use uqa_storage::catalog::{
-    sequence_value_reservation, SequenceReservationResult, SequenceValuePosition,
+    sequence_value_reservation, SequenceReservationResult, SequenceSetValueResult,
+    SequenceValuePosition,
 };
 
 fn integer(value: ValueRef<'_>) -> i64 {
@@ -72,28 +72,32 @@ impl Catalog {
         &self,
         relation: &RelationIdentity,
         object_id: [u8; 16],
+        definition_generation: [u8; 16],
         value: i64,
         called: bool,
         log_count: i64,
-    ) -> Result<NativeLookup<Option<i64>>> {
-        let result = self.conn.with_native_write(|snapshot, batch| {
+    ) -> Result<Option<SequenceSetValueResult>> {
+        self.conn.with_native_write(|snapshot, batch| {
             let Some(owner) = snapshot.sequence_incarnation(relation, object_id)? else {
-                return Ok(None);
+                return Ok(SequenceSetValueResult::Missing);
             };
+            if owner_id(owner).1 != definition_generation {
+                return Ok(SequenceSetValueResult::DefinitionChanged);
+            }
             if log_count < 0 {
                 return Err(SQLiteError::StorageBackend(
                     "sequence log count cannot be negative".into(),
                 ));
             }
-            snapshot.read_row(Family::Sequences, owner, &[], |row| {
+            let updated = snapshot.read_row(Family::Sequences, owner, &[], |row| {
                 let mut updated = row_values(row);
                 updated[5] = ValueRef::Integer(value);
                 updated[6] = ValueRef::Integer(i64::from(called));
                 updated[20] = ValueRef::Integer(log_count);
                 snapshot.put_row(batch, Family::Sequences, owner, &updated)?;
-                Ok(value)
-            })
-        })?;
-        Ok(result.map_or(NativeLookup::Unbound, NativeLookup::Value))
+                Ok(SequenceSetValueResult::Set(value))
+            })?;
+            Ok(updated.expect("resolved sequence on retained snapshot"))
+        })
     }
 }

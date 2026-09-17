@@ -33,6 +33,8 @@ pub enum SequenceValueError {
     ReadOnly(&'static str),
     #[error(transparent)]
     Security(#[from] SQLError),
+    #[error(transparent)]
+    Cancelled(#[from] uqa_core::QueryCancelled),
     #[error("{0}")]
     Internal(String),
 }
@@ -47,6 +49,7 @@ impl SequenceValueError {
             Self::Exhausted { .. } => "2200H",
             Self::ReadOnly(_) => "25006",
             Self::Security(error) => return error,
+            Self::Cancelled(error) => return SQLError::Cancelled(error),
             Self::Internal(message) => return SQLError::Internal(message),
         };
         SQLError::Routine {

@@ -34,6 +34,7 @@ pub trait SequenceSessionWrite {
     fn last_mut(&mut self) -> &mut Option<SessionLastSequenceReference>;
 }
 pub trait SequenceValueRuntime {
+    fn cancellation(&self) -> &uqa_core::CancellationToken;
     fn persistence(&self) -> SequencePersistenceRead<'_>;
     fn states_write(&self) -> SequenceStatesWrite<'_>;
     fn caches(&self) -> SequenceCachesWrite<'_>;
