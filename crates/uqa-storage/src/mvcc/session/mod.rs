@@ -155,7 +155,7 @@ impl VersionedKeyValueStore {
         let mut active = self.active.lock();
         let transaction = active.as_mut().ok_or_else(no_transaction)?;
         transaction
-            .writable()
+            .unsealed()
             .map_err(VersionError::into_storage_error)?;
         operation(transaction).map_err(VersionError::into_storage_error)
     }

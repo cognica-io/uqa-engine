@@ -74,6 +74,10 @@ impl Transaction {
             )
             .into());
         }
+        self.unsealed()
+    }
+
+    pub(super) fn unsealed(&self) -> VersionResult<()> {
         if self.prepared.is_some() {
             return Err(VersionError::TransactionSealed);
         }

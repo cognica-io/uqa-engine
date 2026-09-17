@@ -544,3 +544,49 @@ fn batch_allocation_failure_restores_only_its_private_changes() {
     }
     assert!(failures > 0 && successes > 0);
 }
+
+#[test]
+fn read_only_savepoints_preserve_the_snapshot_without_admitting_writes_or_allocations() {
+    let persistence = Persistence::new();
+    let a = persistence.session(1 << 20);
+    let b = persistence.session(1 << 20);
+    b.put(b"row", b"before").unwrap();
+    a.begin_read_transaction().unwrap();
+    a.savepoint("same").unwrap();
+    a.savepoint("same").unwrap();
+    b.put(b"row", b"after").unwrap();
+    a.rollback_to_savepoint("same").unwrap();
+    a.release_savepoint("same").unwrap();
+    assert_eq!(a.get(b"row").unwrap().unwrap(), b"before");
+    assert!(a.put(b"row", b"forbidden").is_err());
+    a.savepoint("after-error").unwrap();
+    a.rollback_to_savepoint("same").unwrap();
+    a.release_savepoint("same").unwrap();
+    assert!(!a.transaction_has_written().unwrap());
+    let allocations = persistence.state.lock().next;
+    a.commit_transaction().unwrap();
+    assert_eq!(persistence.state.lock().next, allocations);
+    assert_eq!(a.get(b"row").unwrap().unwrap(), b"after");
+}
+
+#[test]
+fn sealed_transactions_reject_savepoint_changes_until_the_commit_is_resolved() {
+    let persistence = Persistence::new();
+    let session = persistence.session(1 << 20);
+    session.begin_transaction().unwrap();
+    session.savepoint("before").unwrap();
+    session.put(b"row", b"private").unwrap();
+    persistence.state.lock().commit_fault = CommitFault::Reject;
+    assert!(session.commit_transaction().is_err());
+    for result in [
+        session.savepoint("after"),
+        session.rollback_to_savepoint("before"),
+        session.release_savepoint("before"),
+    ] {
+        let error = result.unwrap_err();
+        assert!(error.to_string().contains("sealed"), "{error}");
+    }
+    persistence.state.lock().commit_fault = CommitFault::None;
+    session.commit_transaction().unwrap();
+    assert_eq!(session.get(b"row").unwrap().unwrap(), b"private");
+}
