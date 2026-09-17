@@ -401,6 +401,17 @@ pub trait CatalogFacade: Send + Sync {
 
     fn set_metadata(&self, key: &str, value: &str) -> StorageBackendResult<()>;
     fn get_metadata(&self, key: &str) -> StorageBackendResult<Option<String>>;
+    /// Persist evaluated maintenance state. Concurrent providers merge its counters under their existing record-publication boundary; serialized providers use an ordinary metadata replacement.
+    fn save_statistics_maintenance(
+        &self,
+        table: &str,
+        state: &crate::statistics_maintenance::StatisticsMaintenance,
+    ) -> StorageBackendResult<()> {
+        self.set_metadata(
+            &crate::statistics_maintenance::StatisticsMaintenance::key(table),
+            &serde_json::to_string(state)?,
+        )
+    }
     fn fts_storage_was_reset(&self) -> bool {
         false
     }

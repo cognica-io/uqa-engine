@@ -194,6 +194,13 @@ impl VersionedPersistence for SQLiteRecordStore {
             &uqa_storage::key_value::KeyValueOccurrenceRecords
         }
     }
+    fn maintenance_record_layout(&self) -> &dyn uqa_storage::mvcc::MaintenanceRecordLayout {
+        if self.native {
+            &native::NativeMaintenanceRecords
+        } else {
+            &uqa_storage::key_value::KeyValueMaintenanceRecords
+        }
+    }
     fn ivf_record_layout(&self) -> &dyn uqa_storage::mvcc::IVFRecordLayout {
         if self.native {
             &crate::vector_index::NativeIVFRecords

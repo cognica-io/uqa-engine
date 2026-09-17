@@ -212,14 +212,13 @@ impl Engine {
                 "column `{column}` of relation `{canonical_table_name}` does not exist"
             )));
         }
-        let stats_out = build_analyze_stats(
+        let inputs = self.collect_hierarchy_analyze_inputs(
+            canonical_table_name,
             &columns,
-            self.collect_hierarchy_analyze_inputs(
-                canonical_table_name,
-                &columns,
-                include_descendants,
-            )?,
+            include_descendants,
         )?;
+        let row_count = inputs.row_count;
+        let stats_out = build_analyze_stats(&columns, inputs)?;
 
         let stats_out = if requested_columns.is_some() {
             let mut combined = t.column_stats.read().clone();
@@ -230,13 +229,19 @@ impl Engine {
         };
         if persist && t.persistence != uqa_sql::ast::RelationPersistence::Temporary {
             if let Some(catalog) = self.storage.catalog.as_ref() {
-                Self::persist_column_stats(catalog.as_ref(), canonical_table_name, &stats_out)?;
+                Self::persist_column_stats(
+                    catalog.as_ref(),
+                    canonical_table_name,
+                    &stats_out,
+                    t.object_id(),
+                    row_count,
+                )?;
             }
         }
         *t.column_stats.write() = stats_out;
         t.column_stats_loaded.store(true, Ordering::Release);
         t.column_stats_dirty.store(false, Ordering::Release);
-        self.clear_pending_statistics_changes(canonical_table_name);
+        self.clear_pending_statistics_changes(canonical_table_name, t.object_id());
         Ok(())
     }
 
@@ -311,6 +316,8 @@ impl Engine {
         catalog: &dyn CatalogFacade,
         table_name: &str,
         stats: &BTreeMap<String, uqa_planner::ColumnStats>,
+        object_id: [u8; 16],
+        row_count: u64,
     ) -> StorageBackendResult<()> {
         struct EncodedColumnStats {
             column_name: String,
@@ -367,10 +374,12 @@ impl Engine {
             })
             .collect::<Vec<_>>();
         catalog.replace_column_stats(table_name, &rows)?;
-        crate::statistics::MaintenanceState::analyzed(
+        crate::statistics::MaintenanceState::analyzed_for(
             catalog,
             table_name,
-            stats.values().next().map_or(0, |stats| stats.row_count),
+            object_id,
+            row_count,
+            crate::statistics::value_size::FORMAT_VERSION,
         )
     }
 

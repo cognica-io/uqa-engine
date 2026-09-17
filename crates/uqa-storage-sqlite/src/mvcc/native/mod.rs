@@ -15,6 +15,8 @@ mod graph_lifetimes;
 mod graph_lookup;
 mod key;
 mod layout;
+mod maintenance;
+pub(super) use maintenance::NativeMaintenanceRecords;
 mod occurrence_guards;
 mod owners;
 mod physical;

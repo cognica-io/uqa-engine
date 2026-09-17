@@ -117,3 +117,30 @@ fn read_only_analysis_commits_and_rolls_back_with_its_catalog_transaction() {
         assert_eq!(persisted_rows(&writer), 2);
     }
 }
+
+#[test]
+fn nested_analysis_resets_parent_maintenance_only_when_the_child_commits() {
+    for provider in 0..3 {
+        for commit_child in [false, true] {
+            let (_directory, writer, reader) = sessions(provider);
+            writer.begin().unwrap();
+            writer.sql("INSERT INTO t VALUES (20)", &[]).unwrap();
+            writer.begin().unwrap();
+            writer.run_analyze(Some("t")).unwrap();
+            if commit_child {
+                writer.commit().unwrap();
+            } else {
+                writer.rollback().unwrap();
+            }
+            writer.commit().unwrap();
+            let state = crate::statistics::MaintenanceState::load(
+                reader.storage.catalog.as_deref().unwrap(),
+                "public.t",
+            )
+            .unwrap();
+            assert_eq!(state.dirty(), !commit_child);
+            assert_eq!(persisted_rows(&reader), if commit_child { 2 } else { 1 });
+            assert_eq!(reader.column_stats("t").unwrap()["v"].row_count, 2);
+        }
+    }
+}

@@ -151,6 +151,10 @@ pub trait VersionedPersistence: Send + Sync {
         &crate::key_value::KeyValueOccurrenceRecords
     }
 
+    fn maintenance_record_layout(&self) -> &dyn super::MaintenanceRecordLayout {
+        &crate::key_value::KeyValueMaintenanceRecords
+    }
+
     fn ivf_record_layout(&self) -> &dyn super::IVFRecordLayout {
         &crate::key_value::KeyValueIVFRecords
     }

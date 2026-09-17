@@ -143,6 +143,36 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::get_metadata(self, key))
     }
 
+    fn save_statistics_maintenance(
+        &self,
+        table: &str,
+        state: &uqa_storage::statistics_maintenance::StatisticsMaintenance,
+    ) -> StorageBackendResult<()> {
+        use crate::mvcc::native::{NativeRecord, NativeRecordFamily, NativeRecordOwner};
+        use rusqlite::types::ValueRef;
+        use uqa_storage::mvcc::VersionError;
+        let key = uqa_storage::statistics_maintenance::StatisticsMaintenance::key(table);
+        let native = self.conn.with_native_write(|snapshot, batch| {
+            let json = state
+                .encode(&snapshot.control)
+                .map_err(VersionError::into_storage_error)?;
+            let record = NativeRecord::encode(
+                NativeRecordFamily::Metadata,
+                NativeRecordOwner::Database(snapshot.database),
+                &[ValueRef::Text(key.as_bytes()), ValueRef::Text(&json)],
+                &snapshot.control,
+            )
+            .map_err(VersionError::into_storage_error)?;
+            batch
+                .replace_statistics_maintenance(record.key(), record.row())
+                .map_err(Into::into)
+        });
+        if into_storage_result(native)?.is_some() {
+            return Ok(());
+        }
+        into_storage_result(self.set_metadata(&key, &serde_json::to_string(state)?))
+    }
+
     fn migrate_relation_namespace(&self) -> StorageBackendResult<()> {
         if self
             .read_native(crate::mvcc::native::NativeSnapshot::validate_catalog_namespace)?

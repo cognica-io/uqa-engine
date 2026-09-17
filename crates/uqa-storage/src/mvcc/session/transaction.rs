@@ -138,6 +138,7 @@ impl Transaction {
                 | RecordWriteKind::IVFPreview
                 | RecordWriteKind::HNSWPreview
                 | RecordWriteKind::Marker
+                | RecordWriteKind::StatisticsMaintenance
         ) && self.changes.write_kind(key, control)? == Some(RecordWriteKind::Canonical)
         {
             RecordWriteKind::Canonical

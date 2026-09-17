@@ -323,6 +323,13 @@ impl KeyValueBatch for SQLiteKeyValueBatch<'_> {
     fn put(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
         self.batch.put(key, value)
     }
+    fn replace_statistics_maintenance(
+        &mut self,
+        key: &[u8],
+        value: &[u8],
+    ) -> StorageBackendResult<()> {
+        self.batch.replace_statistics_maintenance(key, value)
+    }
     fn delete(&mut self, key: &[u8]) -> StorageBackendResult<()> {
         self.batch.delete(key)
     }

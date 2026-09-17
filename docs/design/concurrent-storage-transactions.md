@@ -244,6 +244,8 @@ LISTEN/NOTIFY effects remain transaction-bound. Notification order and delivery 
 
 ANALYZE column statistics belong to the caller's catalog transaction, including when SQL access is read-only. Their private values must not bypass visibility through a process-wide cache, and rollback must restore the prior statistics without an autonomous rewrite. PostgreSQL 18 updates relation estimates such as pg_class.reltuples separately from transactional pg_statistic rows; relation-estimate publication must therefore have its own ownership and identity checks. Maintenance counters must preserve concurrent committed data changes while statistics publication retains the analyzed relation's lifetime.
 
+Common storage owns evaluated statistics-maintenance changes. Publication and command refresh merge row-change increments with the analyzed baseline without collecting statistics again or replaying SQL; deletion, object replacement, canonical writes and explicit revision requirements retain their conflicts. The SQLite provider supplies only its native metadata-row codec. Engine retains per-frame pending counts and applies an analysis reset to the parent only when the child commits. Complete relation-mode coordination must serialize competing analyses while allowing ordinary row writes to proceed.
+
 ## Provider and platform requirements
 
 | Path | Required integration |

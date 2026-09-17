@@ -230,6 +230,23 @@ impl CatalogFacade for KeyValueCatalog {
         self.get_metadata_impl(key)
     }
 
+    fn save_statistics_maintenance(
+        &self,
+        table: &str,
+        state: &crate::statistics_maintenance::StatisticsMaintenance,
+    ) -> StorageBackendResult<()> {
+        let key = single_str_key(
+            TAG_METADATA,
+            &crate::statistics_maintenance::StatisticsMaintenance::key(table),
+        )?;
+        self.store.with_mutation(&mut |read, batch| {
+            let value = state
+                .encode(read.control())
+                .map_err(crate::mvcc::VersionError::into_storage_error)?;
+            batch.replace_statistics_maintenance(&key, &value)
+        })
+    }
+
     fn migrate_relation_namespace(&self) -> StorageBackendResult<()> {
         self.migrate_relation_namespace_impl()?;
         self.ensure_graph_lookup_indexes()

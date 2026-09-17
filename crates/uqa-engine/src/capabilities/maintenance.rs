@@ -97,7 +97,16 @@ impl VacuumStatistics for SavedVacuumStatistics<'_> {
     }
     fn persist(&self, table: &str) -> StorageBackendResult<()> {
         if let Some(catalog) = self.engine.storage.catalog.as_ref() {
-            Engine::persist_column_stats(catalog.as_ref(), table, &self.statistics)?;
+            Engine::persist_column_stats(
+                catalog.as_ref(),
+                table,
+                &self.statistics,
+                self.table.object_id(),
+                self.statistics
+                    .values()
+                    .next()
+                    .map_or(0, |stats| stats.row_count),
+            )?;
         }
         Ok(())
     }

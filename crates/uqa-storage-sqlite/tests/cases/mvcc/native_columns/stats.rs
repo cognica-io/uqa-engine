@@ -107,3 +107,67 @@ fn native_statistics_reject_competing_updates_to_the_same_column() {
         3
     );
 }
+
+#[test]
+fn native_statistics_maintenance_preserves_concurrent_changes_and_closed_reopen() {
+    use uqa_storage::statistics_maintenance::StatisticsMaintenance;
+
+    let object = [11; 16];
+    for mode in MODES {
+        for analysis_first in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("maintenance.db");
+            let expected = {
+                let connection = open(mode, &path);
+                let catalog = Catalog::open(connection.clone()).unwrap();
+                bind(&connection);
+                StatisticsMaintenance::analyzed_for(&catalog, TABLE, object, 100, 1).unwrap();
+                let mut pending = StatisticsMaintenance::load(&catalog, TABLE).unwrap();
+                pending.record_changes(object, 5, Some(100), 100).unwrap();
+                pending.save(&catalog, TABLE).unwrap();
+                let other = connection.new_session();
+                let writer = Catalog::open(other.clone()).unwrap();
+                connection.begin_transaction().unwrap();
+                other.begin_transaction().unwrap();
+                catalog
+                    .save_column_stats(statistic(TABLE, "n", 10))
+                    .unwrap();
+                StatisticsMaintenance::analyzed_for(&catalog, TABLE, object, 105, 1).unwrap();
+                let mut pending = StatisticsMaintenance::load(&writer, TABLE).unwrap();
+                pending.record_changes(object, 2, Some(100), 200).unwrap();
+                pending.save(&writer, TABLE).unwrap();
+                if analysis_first {
+                    connection.commit_transaction().unwrap();
+                    other.commit_transaction().unwrap();
+                } else {
+                    other.commit_transaction().unwrap();
+                    connection.commit_transaction().unwrap();
+                }
+                let json = writer
+                    .get_metadata(&StatisticsMaintenance::key(TABLE))
+                    .unwrap()
+                    .unwrap();
+                let state: serde_json::Value = serde_json::from_str(&json).unwrap();
+                assert_eq!(state["changes"], 2);
+                assert_eq!(state["generation"], 4);
+                assert_eq!(state["analyzed_rows"], 105);
+                assert_eq!(writer.load_column_stats(TABLE).unwrap()[0].row_count, 100);
+                json
+            };
+            let connection = open(mode, &path);
+            bind(&connection);
+            let catalog = Catalog::open(connection.clone()).unwrap();
+            assert_eq!(
+                catalog
+                    .get_metadata(&StatisticsMaintenance::key(TABLE))
+                    .unwrap()
+                    .unwrap(),
+                expected
+            );
+            assert!(StatisticsMaintenance::load(&catalog, TABLE)
+                .unwrap()
+                .dirty());
+            assert_eq!(catalog.load_column_stats(TABLE).unwrap()[0].row_count, 100);
+        }
+    }
+}

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Controlled JSON record buffers shared by vector persistence codecs.
+//! Controlled JSON record buffers shared by persistence codecs.
 
 use crate::{
     mvcc::{VersionError, VersionResult},
@@ -16,7 +16,7 @@ use serde::{
 };
 use uqa_core::memory::BudgetedVec;
 
-pub(super) fn encode(
+pub(crate) fn encode(
     value: &impl Serialize,
     control: &StorageReadControl,
 ) -> VersionResult<BudgetedVec<u8>> {
@@ -102,7 +102,7 @@ impl std::io::Write for Writer<'_> {
             });
         if let Err(error) = result {
             self.failure = Some(error);
-            return Err(std::io::Error::other("vector encoding interrupted"));
+            return Err(std::io::Error::other("record encoding interrupted"));
         }
         Ok(bytes.len())
     }

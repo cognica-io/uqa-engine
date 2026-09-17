@@ -56,3 +56,6 @@ pub use view::{
     RecordKeyVisitor, RecordMetadata, RecordScanVisitor, RecordValueVisitor, ScannedVisibleRecord,
     VisibleRecord,
 };
+
+mod maintenance;
+pub use maintenance::MaintenanceRecordLayout;

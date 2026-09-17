@@ -97,6 +97,20 @@ pub(super) fn resolve(
     if prepared
         .records()
         .iter()
+        .any(|write| write.kind() == RecordWriteKind::StatisticsMaintenance)
+    {
+        resolved = Some(super::maintenance::resolve(
+            resolved.as_ref().unwrap_or(prepared),
+            base,
+            current.as_ref(),
+            persistence.maintenance_record_layout(),
+            mode,
+            control,
+        )?);
+    }
+    if prepared
+        .records()
+        .iter()
         .any(|write| write.kind() == RecordWriteKind::Marker)
     {
         resolved = Some(super::markers::resolve(

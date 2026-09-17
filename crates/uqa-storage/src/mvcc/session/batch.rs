@@ -179,6 +179,13 @@ impl KeyValueBatch for Batch<'_> {
     fn touch_marker(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
         self.typed_record(key, Some(value), RecordWriteKind::Marker)
     }
+    fn replace_statistics_maintenance(
+        &mut self,
+        key: &[u8],
+        value: &[u8],
+    ) -> StorageBackendResult<()> {
+        self.typed_record(key, Some(value), RecordWriteKind::StatisticsMaintenance)
+    }
     fn observe_identifier(&mut self, namespace: &[u8], value: u64) -> StorageBackendResult<()> {
         crate::mvcc::IdentifierRequest::Observe(value)
             .reserve_workspace(namespace, &self.store.control)

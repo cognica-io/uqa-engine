@@ -106,15 +106,17 @@ fn initial_writes(
     writes.reserve(original.records().len())?;
     for (mutation, write) in original.records().iter().enumerate() {
         control.cancellation().check()?;
-        if write.kind() == RecordWriteKind::Marker
-            || (mode == ResolutionMode::Command
-                && matches!(
-                    write.kind(),
-                    RecordWriteKind::Occurrence
-                        | RecordWriteKind::OccurrenceCache
-                        | RecordWriteKind::IVFPreview
-                        | RecordWriteKind::HNSWPreview
-                ))
+        if matches!(
+            write.kind(),
+            RecordWriteKind::Marker | RecordWriteKind::StatisticsMaintenance
+        ) || (mode == ResolutionMode::Command
+            && matches!(
+                write.kind(),
+                RecordWriteKind::Occurrence
+                    | RecordWriteKind::OccurrenceCache
+                    | RecordWriteKind::IVFPreview
+                    | RecordWriteKind::HNSWPreview
+            ))
         {
             writes.push(write.clone())?;
             continue;

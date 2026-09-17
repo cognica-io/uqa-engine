@@ -42,6 +42,7 @@ pub(crate) enum RecordWriteKind {
     IVFPreview,
     HNSWPreview,
     Marker,
+    StatisticsMaintenance,
 }
 
 impl PreparedRecordWrite {
@@ -75,6 +76,11 @@ impl PreparedRecordWrite {
     }
     pub(crate) fn with_kind(mut self, kind: RecordWriteKind) -> Self {
         self.kind = kind;
+        self
+    }
+
+    pub(super) fn with_value(mut self, value: BudgetedVec<u8>) -> Self {
+        self.value = Some(Arc::new(value));
         self
     }
 }
@@ -165,6 +171,7 @@ impl PreparedRecordCommit {
                     RecordWriteKind::IVFPreview => 5,
                     RecordWriteKind::HNSWPreview => 6,
                     RecordWriteKind::Marker => 7,
+                    RecordWriteKind::StatisticsMaintenance => 8,
                 }]);
             }
             digest.update((write.key().len() as u64).to_be_bytes());

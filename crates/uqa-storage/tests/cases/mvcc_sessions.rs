@@ -22,6 +22,8 @@ mod guards;
 mod hnsw_merging;
 #[path = "mvcc_sessions/identifiers.rs"]
 mod identifiers;
+#[path = "mvcc_sessions/maintenance.rs"]
+mod maintenance;
 #[path = "mvcc_sessions/occurrence_merging.rs"]
 mod occurrence_merging;
 #[path = "mvcc_sessions/occurrences.rs"]

@@ -80,7 +80,11 @@ impl Engine {
         };
         let maintenance = MaintenanceState::load_for(catalog, name, table.object_id())?;
         let missing = maintenance.missing(table.column_stats.read().is_empty());
-        if !maintenance.due(missing, now_ms()) {
+        if !maintenance.due(
+            missing,
+            now_ms(),
+            crate::statistics::value_size::FORMAT_VERSION,
+        ) {
             return Ok(None);
         }
         let columns = table
@@ -125,8 +129,13 @@ impl Engine {
             {
                 return Ok(false);
             }
-            Self::persist_column_stats(catalog, name, &analysis.statistics)?;
-            MaintenanceState::analyzed_for(catalog, name, table.object_id(), analysis.row_count)?;
+            Self::persist_column_stats(
+                catalog,
+                name,
+                &analysis.statistics,
+                table.object_id(),
+                analysis.row_count,
+            )?;
             *table.column_stats.write() = analysis.statistics;
             table.column_stats_loaded.store(true, Ordering::Release);
             table.column_stats_dirty.store(false, Ordering::Release);

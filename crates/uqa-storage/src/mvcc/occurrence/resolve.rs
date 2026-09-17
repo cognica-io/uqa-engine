@@ -59,7 +59,8 @@ pub(in crate::mvcc) fn resolve(
             | RecordWriteKind::GraphPreview
             | RecordWriteKind::IVFPreview
             | RecordWriteKind::HNSWPreview
-            | RecordWriteKind::Marker => {
+            | RecordWriteKind::Marker
+            | RecordWriteKind::StatisticsMaintenance => {
                 changes.apply_owned(std::slice::from_ref(write), control)?;
             }
             RecordWriteKind::Occurrence | RecordWriteKind::OccurrenceCache => {

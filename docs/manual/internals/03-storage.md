@@ -27,6 +27,8 @@ flowchart TD
 
 ## Logical storage contracts
 
+Statistics-maintenance state and its evaluated counter merge belong to `uqa-storage::statistics_maintenance`. `CatalogFacade::save_statistics_maintenance` retains typed changes in versioned sessions; command refresh and publication preserve concurrent row-change increments when an analysis clears its observed baseline. Ordinary metadata replacements and explicit revision requirements remain conditional, and an older transaction cannot recreate maintenance state deleted or replaced by another object. Native SQLite supplies its metadata-row codec; Key/Value providers share the common codec. Engine supplies relation identity, collected row count, time and pending transaction-frame state. The persisted maintenance JSON fields and key remain unchanged.
+
 `uqa-storage` defines backend-neutral traits for document rows, inverted postings, vector and tensor values, B-tree values, block-max metadata, spatial data, catalog records, and ordered Key/Value operations.
 
 `uqa-storage-sqlite` implements those contracts and the graph persistence contract from `uqa-graph`. It owns managed connections, catalog migrations, physical indexes, transactions, SQLCipher integration, and the compressed VFS. Neither common storage nor graph algorithms depend on the SQLite provider or driver, including their tests and benchmarks. Cross-provider graph conformance tests and SQLite persistence benchmarks live in `uqa-storage-sqlite`. Concrete Rust imports and provider error handling are described in the [Rust migration notes](../reference/10-upgrading.md#sqlite-provider-ownership).

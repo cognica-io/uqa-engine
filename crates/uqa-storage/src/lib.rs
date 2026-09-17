@@ -32,6 +32,7 @@ pub mod key_value;
 pub mod mvcc;
 pub mod read_control;
 pub mod spatial_index;
+pub mod statistics_maintenance;
 pub mod term_key;
 pub mod transaction;
 pub mod vector_index;

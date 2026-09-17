@@ -35,7 +35,9 @@ pub use graph_commit::KeyValueGraphRecords;
 mod hnsw_records;
 mod index_view;
 mod ivf_records;
-mod record_json;
+mod maintenance_records;
+pub(crate) mod record_json;
+pub use maintenance_records::KeyValueMaintenanceRecords;
 mod vector_records;
 pub use hnsw_records::KeyValueHNSWRecords;
 pub use ivf_records::KeyValueIVFRecords;
@@ -204,6 +206,14 @@ pub trait KeyValueBatch {
     /// Retain the original precondition and current value of a record, including an absent tombstone, before later replacements. Concurrent wrappers must forward this call; serialized stores already exclude intervening writers.
     fn fence_record(&mut self, _key: &[u8]) -> StorageBackendResult<()> {
         Ok(())
+    }
+    /// Stage an evaluated statistics-maintenance replacement using the provider's declared layout. Keep ordinary metadata writes canonical.
+    fn replace_statistics_maintenance(
+        &mut self,
+        key: &[u8],
+        value: &[u8],
+    ) -> StorageBackendResult<()> {
+        self.put(key, value)
     }
     /// Record graph-cache dependencies in the same atomic batch. Concurrent MVCC stores must resolve these logical effects before admitting a commit; serialized legacy stores use the ordinary preview writes already included by the catalog.
     fn graph_mutation(
