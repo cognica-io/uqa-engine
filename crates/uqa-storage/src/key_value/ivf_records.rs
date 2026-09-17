@@ -152,10 +152,11 @@ impl IVFRecordLayout for KeyValueIVFRecords {
             trained_size: usize_value(meta.trained_size)?,
             deletes_since_train: usize_value(meta.deletes_since_train)?,
             vector_count: usize_value(meta.vector_count)?,
-            revision: meta.revision,
+            revision: Some(meta.revision),
         })
     }
-    fn vector_id(&self, key: &[u8]) -> VersionResult<(DocId, u32)> {
+    fn vector_id(&self, key: &[u8], control: &StorageReadControl) -> VersionResult<(DocId, u32)> {
+        control.cancellation().check()?;
         let (_, [document, order]) = tail(key, TAG_VECTOR, 2)?;
         Ok((document, ordinal(order)?))
     }
@@ -165,7 +166,7 @@ impl IVFRecordLayout for KeyValueIVFRecords {
         value: &[u8],
         control: &StorageReadControl,
     ) -> VersionResult<(DocId, u32, BudgetedVec<f32>)> {
-        let (document, order) = self.vector_id(key)?;
+        let (document, order) = self.vector_id(key, control)?;
         Ok((document, order, vector_bytes(value, control)?))
     }
     fn centroid(
@@ -203,8 +204,14 @@ impl IVFRecordLayout for KeyValueIVFRecords {
         match value {
             IVFRecordValue::Header { snapshot, revision } => {
                 let header = self.header(key, template, control)?;
-                let meta =
-                    metadata_from_snapshot(header.dimensions, header.params, snapshot, revision)?;
+                let meta = metadata_from_snapshot(
+                    header.dimensions,
+                    header.params,
+                    snapshot,
+                    revision.ok_or(VersionError::InvalidEncoding(
+                        "missing IVF mutation counter",
+                    ))?,
+                )?;
                 let mut writer = JsonWriter {
                     output,
                     control,

@@ -58,7 +58,7 @@ fn restore_format_two(
             [],
         )?;
         transaction.execute_batch(&capture_sql)?;
-        transaction.execute_batch("DROP TABLE _uqa_mvcc_native_occurrence_guards; DROP TABLE _occurrence_skips; DROP TABLE _occurrence_block_max; DROP TABLE _uqa_mvcc_native_format; CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 2), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49)); INSERT INTO _uqa_mvcc_native_format VALUES (1, 2, 49);")?;
+        transaction.execute_batch("DROP TABLE _uqa_mvcc_native_ivf_guards; DROP TABLE _uqa_mvcc_native_occurrence_guards; DROP TABLE _occurrence_skips; DROP TABLE _occurrence_block_max; DROP TABLE _uqa_mvcc_native_format; CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 2), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49)); INSERT INTO _uqa_mvcc_native_format VALUES (1, 2, 49);")?;
         for action in ["INSERT", "UPDATE", "DELETE"] {
             transaction.execute_batch(&schema::trigger("_uqa_mvcc_native_format", action).1)?;
         }
@@ -148,7 +148,7 @@ fn native_path_lookup_upgrade_preserves_sources_and_old_selectors_in_every_file_
             }
             assert_eq!(
                 dump(&connection, "SELECT format FROM _uqa_mvcc_native_format"),
-                vec![vec![rusqlite::types::Value::Integer(5)]]
+                vec![vec![rusqlite::types::Value::Integer(6)]]
             );
             assert_eq!(
                 SQLiteRecordStore::for_native(&connection, &control)

@@ -49,7 +49,7 @@ impl SQLiteIVFIndex {
                     &snapshot,
                     &read.snapshot.control,
                 )?;
-                super::native::write_metadata(&read, batch, &encoded)
+                super::native::write_metadata(&read, batch, &encoded, false)
             })?
             .is_some()
         {

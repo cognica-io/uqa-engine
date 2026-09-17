@@ -8,6 +8,8 @@
 
 #[path = "native_vectors/ivf.rs"]
 mod ivf;
+#[path = "native_vectors/ivf_merging.rs"]
+mod ivf_merging;
 
 use std::{sync::mpsc, time::Duration};
 

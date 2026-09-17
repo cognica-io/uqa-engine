@@ -25,6 +25,7 @@ mod native;
 
 pub use brute_force::SQLiteVectorIndex;
 pub use hnsw::SQLiteHNSWIndex;
+pub(crate) use ivf::NativeIVFRecords;
 pub use ivf::SQLiteIVFIndex;
 
 use codec::{

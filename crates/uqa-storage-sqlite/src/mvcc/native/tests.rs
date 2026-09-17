@@ -16,6 +16,7 @@ use crate::{Catalog, ManagedConnection};
 mod accelerators;
 mod generations;
 mod graph_lookup;
+mod ivf_guards;
 mod materialization;
 mod migration;
 mod occurrence_guards;
@@ -39,13 +40,13 @@ fn native_layout_inventory_covers_every_current_catalog_table_and_primary_key() 
                 .query_map([], |row| row.get::<_, String>(0))?
                 .collect::<Result<BTreeSet<_>, _>>()?;
             let expected: BTreeSet<_> = NativeRecordFamily::all()
-                .filter(|family| !matches!(family, NativeRecordFamily::TableOwners | NativeRecordFamily::GraphLookups | NativeRecordFamily::OccurrenceSkips | NativeRecordFamily::OccurrenceBlockMax | NativeRecordFamily::OccurrenceGuards))
+                .filter(|family| !matches!(family, NativeRecordFamily::TableOwners | NativeRecordFamily::GraphLookups | NativeRecordFamily::OccurrenceSkips | NativeRecordFamily::OccurrenceBlockMax | NativeRecordFamily::OccurrenceGuards | NativeRecordFamily::IVFGuards))
                 .map(|family| family.layout().table.to_owned())
                 .collect();
             assert_eq!(actual, expected);
             for family in NativeRecordFamily::all() {
                 assert_eq!(NativeRecordFamily::from_id(family.id()), Some(family));
-                if matches!(family, NativeRecordFamily::TableOwners | NativeRecordFamily::GraphLookups | NativeRecordFamily::OccurrenceSkips | NativeRecordFamily::OccurrenceBlockMax | NativeRecordFamily::OccurrenceGuards) { continue; }
+                if matches!(family, NativeRecordFamily::TableOwners | NativeRecordFamily::GraphLookups | NativeRecordFamily::OccurrenceSkips | NativeRecordFamily::OccurrenceBlockMax | NativeRecordFamily::OccurrenceGuards | NativeRecordFamily::IVFGuards) { continue; }
                 let layout = family.layout();
                 let mut statement = connection.prepare(&format!("PRAGMA table_info({})", layout.table))?;
                 let columns = statement.query_map([], |row| {

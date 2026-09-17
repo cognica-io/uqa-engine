@@ -6,19 +6,22 @@
 
 //! IVF canonical values and persisted metadata share one native read and mutation boundary.
 
-use rusqlite::types::ValueRef;
 use uqa_core::{memory::Budgeted, DocId, PostingList};
 use uqa_storage::{
     ivf_index::{IVFMutation, IVFState},
-    KeyValueBatch, VectorIndex,
+    KeyValueBatch,
 };
 
+mod publication;
+mod records;
 mod state;
+pub(super) use publication::{drop_metadata, write_metadata};
+pub(crate) use records::NativeIVFRecords;
 pub(super) use state::{encode_controlled, load_state};
 
 use super::{
     math::{nearest_centroids, scored_posting_list},
-    metadata::{decode_metadata, state_to_str, EncodedIVFMetadata, SQLiteIVFMeta},
+    metadata::{decode_metadata, SQLiteIVFMeta},
     SQLiteIVFIndex,
 };
 use crate::mvcc::native::NativeRecordFamily as Family;
@@ -49,78 +52,6 @@ pub(super) fn load_metadata(read: &NativeVectorRead<'_>) -> Result<Option<SQLite
         })
 }
 
-pub(super) fn write_metadata(
-    read: &NativeVectorRead<'_>,
-    batch: &mut dyn KeyValueBatch,
-    metadata: &EncodedIVFMetadata,
-) -> Result<()> {
-    let owner = read.owner.ok_or_else(|| {
-        SQLiteError::StorageBackend("IVF publication requires a native table owner".into())
-    })?;
-    let table = ValueRef::Text(read.index.table.as_bytes());
-    read.snapshot.put_row(
-        batch,
-        Family::IVFIndexes,
-        owner,
-        &[
-            table,
-            read.field(),
-            ValueRef::Integer(i64::from(read.index.dimensions)),
-            ValueRef::Integer(metadata.nlist),
-            ValueRef::Integer(metadata.nprobe),
-            ValueRef::Integer(metadata.train_threshold),
-            ValueRef::Text(state_to_str(metadata.state).as_bytes()),
-            ValueRef::Integer(metadata.trained_size),
-            ValueRef::Integer(metadata.deletes_since_train),
-            ValueRef::Integer(metadata.vector_count),
-        ],
-    )?;
-    read.clear_family(batch, Family::IVFCentroids)?;
-    read.clear_family(batch, Family::IVFAssignments)?;
-    for (centroid, vector) in &metadata.centroids {
-        read.snapshot.put_row(
-            batch,
-            Family::IVFCentroids,
-            owner,
-            &[
-                table,
-                read.field(),
-                ValueRef::Integer(*centroid),
-                ValueRef::Blob(vector),
-            ],
-        )?;
-    }
-    for (doc, ordinal, centroid) in &metadata.assignments {
-        read.snapshot.put_row(
-            batch,
-            Family::IVFAssignments,
-            owner,
-            &[
-                table,
-                read.field(),
-                ValueRef::Integer(*doc),
-                ValueRef::Integer(*ordinal),
-                ValueRef::Integer(*centroid),
-            ],
-        )?;
-    }
-    Ok(())
-}
-
-pub(super) fn drop_metadata(
-    read: &NativeVectorRead<'_>,
-    batch: &mut dyn KeyValueBatch,
-) -> Result<()> {
-    for family in [
-        Family::IVFAssignments,
-        Family::IVFCentroids,
-        Family::IVFIndexes,
-    ] {
-        read.clear_family(batch, family)?;
-    }
-    Ok(())
-}
-
 impl SQLiteIVFIndex {
     pub(super) fn replace_native(
         &self,
@@ -142,7 +73,15 @@ impl SQLiteIVFIndex {
         )?;
         let metadata = encode_controlled(self.params, &snapshot, &read.snapshot.control)?;
         read.replace(batch, doc, encoded)?;
-        write_metadata(&read, batch, &metadata)
+        publication::write_input(
+            &read,
+            batch,
+            &metadata,
+            IVFMutation::Replace {
+                document: doc_id,
+                vectors,
+            },
+        )
     }
 
     pub(super) fn delete_native(
@@ -155,12 +94,12 @@ impl SQLiteIVFIndex {
         let index = load_state(read, self.params, false)?;
         let snapshot =
             index.prepare_metadata(IVFMutation::Delete(doc_id), &read.snapshot.control)?;
-        if read.owner.is_none() || snapshot.vector_count == index.count()? {
+        if read.owner.is_none() {
             return Ok(());
         }
         let metadata = encode_controlled(self.params, &snapshot, &read.snapshot.control)?;
         read.delete(batch, doc)?;
-        write_metadata(read, batch, &metadata)
+        publication::write_input(read, batch, &metadata, IVFMutation::Delete(doc_id))
     }
 
     pub(super) fn search_native(

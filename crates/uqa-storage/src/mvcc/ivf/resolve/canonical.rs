@@ -58,7 +58,7 @@ pub(super) fn validate(
         if write.kind() != RecordWriteKind::Canonical {
             return Err(invalid());
         }
-        let (document, ordinal) = layout.vector_id(key)?;
+        let (document, ordinal) = layout.vector_id(key, control)?;
         let expected = latest(document).ok_or_else(invalid)?;
         match write.value() {
             Some(value) => {
@@ -94,7 +94,7 @@ pub(super) fn validate(
     // Deleted tail rows must be in the sealed write set, even when their payloads were not needed by the mutation.
     base.visit_keys(&prefix, None, usize::MAX, control, &mut |key, record| {
         if record.live {
-            let (document, ordinal) = layout.vector_id(key)?;
+            let (document, ordinal) = layout.vector_id(key, control)?;
             if latest(document).is_some_and(|vectors| ordinal as usize >= vectors.len())
                 && writes.get(key).is_none_or(|write| write.value().is_some())
             {

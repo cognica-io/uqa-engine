@@ -171,7 +171,9 @@ fn validate_scope(
             actual: revision(current, key, control)?,
         });
     }
-    if before.revision.checked_add(scope.operations.len() as u64) != Some(evaluated.revision) {
+    if before.revision.is_some_and(|revision| {
+        revision.checked_add(scope.operations.len() as u64) != evaluated.revision
+    }) {
         return Err(VersionError::InvalidEncoding(
             "IVF preview does not match its ordered input journal",
         ));
@@ -199,8 +201,12 @@ fn merge_scope(
     let snapshot = index.prepare_metadata_changes(&scope.operations, control)?;
     let next = header
         .revision
-        .checked_add(scope.operations.len() as u64)
-        .ok_or(VersionError::InvalidEncoding("IVF revision exhausted"))?;
+        .map(|revision| {
+            revision
+                .checked_add(scope.operations.len() as u64)
+                .ok_or(VersionError::InvalidEncoding("IVF revision exhausted"))
+        })
+        .transpose()?;
     for address in [Key::Centroids, Key::Assignments] {
         let prefix = layout.key(key, address, control)?;
         current.visit_keys(&prefix, None, usize::MAX, control, &mut |key, record| {
@@ -241,7 +247,9 @@ fn merge_scope(
 }
 
 fn same_definition(a: IVFRecordHeader, b: IVFRecordHeader) -> bool {
-    a.dimensions == b.dimensions && a.params == b.params
+    a.dimensions == b.dimensions
+        && a.params == b.params
+        && a.revision.is_some() == b.revision.is_some()
 }
 fn revision(
     view: &dyn CommittedRecordSnapshot,

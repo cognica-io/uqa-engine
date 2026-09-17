@@ -25,7 +25,8 @@ pub struct IVFRecordHeader {
     pub trained_size: usize,
     pub deletes_since_train: usize,
     pub vector_count: usize,
-    pub revision: u64,
+    /// Optional persisted mutation counter; native layouts without that column rely on record revisions and input validation.
+    pub revision: Option<u64>,
 }
 
 #[derive(Clone, Copy)]
@@ -42,7 +43,7 @@ pub enum IVFRecordKey {
 pub enum IVFRecordValue<'a> {
     Header {
         snapshot: &'a IVFMetadataSnapshot,
-        revision: u64,
+        revision: Option<u64>,
     },
     Centroid(&'a [f32]),
     Assignment(usize),
@@ -69,7 +70,7 @@ pub trait IVFRecordLayout: Send + Sync {
         control: &StorageReadControl,
     ) -> VersionResult<IVFRecordHeader>;
     /// Decode a canonical vector identity without hydrating its payload.
-    fn vector_id(&self, key: &[u8]) -> VersionResult<(DocId, u32)>;
+    fn vector_id(&self, key: &[u8], control: &StorageReadControl) -> VersionResult<(DocId, u32)>;
     fn vector(
         &self,
         key: &[u8],

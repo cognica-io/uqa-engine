@@ -29,8 +29,11 @@ impl Catalog {
                 return Ok(());
             };
             snapshot.reset_occurrence_rows(batch, owner)?;
+            for field in std::iter::once(from).chain(to) {
+                snapshot.fence_ivf_definitions(batch, owner, Some(field))?;
+            }
             for family in Family::all() {
-                if family == Family::OccurrenceFormats {
+                if matches!(family, Family::OccurrenceFormats | Family::IVFGuards) {
                     continue;
                 }
                 if matches!(family, Family::OccurrenceSkips | Family::OccurrenceBlockMax) {

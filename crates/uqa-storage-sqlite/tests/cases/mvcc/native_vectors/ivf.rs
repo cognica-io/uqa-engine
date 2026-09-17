@@ -9,7 +9,7 @@
 use super::*;
 use uqa_storage::ivf_index::{IVFIndex, IVFMetadataSnapshot, IVFState};
 
-fn matches_metadata(connection: &ManagedConnection, expected: &IVFMetadataSnapshot) {
+pub(super) fn matches_metadata(connection: &ManagedConnection, expected: &IVFMetadataSnapshot) {
     connection.with_physical(|sql| {
         let actual = sql.query_row("SELECT trained_size, deletes_since_train, vector_count FROM _ivf_indexes WHERE table_name = 'docs' AND field = 'embedding'", [], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))

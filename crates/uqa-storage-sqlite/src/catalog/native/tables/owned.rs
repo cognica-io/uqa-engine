@@ -71,8 +71,10 @@ impl NativeSnapshot {
         name: &str,
     ) -> Result<()> {
         self.reset_occurrence_rows(batch, from)?;
+        self.fence_ivf_definitions(batch, from, None)?;
         if from != to {
             self.reset_occurrence_rows(batch, to)?;
+            self.fence_ivf_definitions(batch, to, None)?;
         }
         for family in Family::all() {
             let Some(column) = family
@@ -103,6 +105,7 @@ impl NativeSnapshot {
         analyzers: bool,
     ) -> Result<()> {
         self.reset_occurrence_rows(batch, owner)?;
+        self.fence_ivf_definitions(batch, owner, None)?;
         for family in Family::all() {
             if family.layout().columns.contains(&"table_name")
                 && (analyzers || family != Family::TableFieldAnalyzers)

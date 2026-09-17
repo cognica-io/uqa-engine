@@ -16,6 +16,7 @@ mod math;
 mod metadata;
 mod mutation;
 mod native;
+pub(crate) use native::NativeIVFRecords;
 mod search;
 mod training;
 mod writing;

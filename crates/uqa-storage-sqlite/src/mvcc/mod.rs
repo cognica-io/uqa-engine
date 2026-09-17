@@ -163,6 +163,13 @@ impl VersionedPersistence for SQLiteRecordStore {
             &uqa_storage::key_value::KeyValueOccurrenceRecords
         }
     }
+    fn ivf_record_layout(&self) -> &dyn uqa_storage::mvcc::IVFRecordLayout {
+        if self.native {
+            &crate::vector_index::NativeIVFRecords
+        } else {
+            &uqa_storage::key_value::KeyValueIVFRecords
+        }
+    }
     fn allocate_transaction(
         &self,
         control: &StorageReadControl,

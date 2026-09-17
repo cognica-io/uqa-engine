@@ -11,6 +11,7 @@ mod family;
 mod format;
 mod graph_cache;
 mod graph_lookup;
+mod ivf_guards;
 mod key;
 mod layout;
 mod occurrence_guards;

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Adding native occurrence guards preserves old data, identities and transaction receipts atomically.
+//! Adding native IVF guards preserves old data, identities and transaction receipts atomically.
 
 use super::{
     materialization::{initialize, with},
@@ -15,17 +15,17 @@ use crate::{mvcc::schema, SQLiteRecordStore};
 use rusqlite::types::Value;
 use uqa_storage::mvcc::{CommitStatus, PreparedRecordCommit, VersionedPersistence};
 
-const PREVIOUS: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 4), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))";
+const PREVIOUS: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 5), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))";
 
 fn downgrade(connection: &ManagedConnection) {
     with(connection, |sqlite| {
         let _permit = schema::WritePermit::acquire(sqlite)?;
         let transaction = schema::begin(sqlite)?;
         transaction.execute_batch(
-            "DROP TABLE _uqa_mvcc_native_ivf_guards; DROP TABLE _uqa_mvcc_native_occurrence_guards; DROP TABLE _uqa_mvcc_native_format",
+            "DROP TABLE _uqa_mvcc_native_ivf_guards; DROP TABLE _uqa_mvcc_native_format",
         )?;
         transaction.execute_batch(PREVIOUS)?;
-        transaction.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1, 4, 49)", [])?;
+        transaction.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1, 5, 49)", [])?;
         for action in ["INSERT", "UPDATE", "DELETE"] {
             transaction.execute_batch(&schema::trigger("_uqa_mvcc_native_format", action).1)?;
         }
@@ -34,17 +34,33 @@ fn downgrade(connection: &ManagedConnection) {
     });
 }
 
-fn history(connection: &ManagedConnection) -> Vec<Vec<Value>> {
+fn history(connection: &ManagedConnection) -> Vec<Vec<Vec<Value>>> {
     with(connection, |sqlite| {
-        Ok(sqlite
-            .prepare("SELECT key,sequence,value FROM _uqa_mvcc_versions ORDER BY key,sequence")?
-            .query_map([], |row| Ok(vec![row.get(0)?, row.get(1)?, row.get(2)?]))?
-            .collect::<Result<_, _>>()?)
+        let mut tables = Vec::new();
+        for query in [
+            "SELECT * FROM _uqa_mvcc_metadata ORDER BY singleton",
+            "SELECT * FROM _uqa_mvcc_heads ORDER BY key",
+            "SELECT * FROM _uqa_mvcc_versions ORDER BY key,sequence",
+            "SELECT * FROM _uqa_mvcc_transactions ORDER BY allocation",
+        ] {
+            let mut statement = sqlite.prepare(query)?;
+            let columns = statement.column_count();
+            tables.push(
+                statement
+                    .query_map([], |row| {
+                        (0..columns)
+                            .map(|column| row.get(column))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?,
+            );
+        }
+        Ok(tables)
     })
 }
 
 #[test]
-fn native_occurrence_guard_upgrade_preserves_closed_files_and_receipts() {
+fn native_ivf_guard_upgrade_preserves_closed_files_and_receipts() {
     for mode in 0..4 {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("upgrade.db");
@@ -87,7 +103,7 @@ fn native_occurrence_guard_upgrade_preserves_closed_files_and_receipts() {
             );
             assert_eq!(
                 sqlite.query_row(
-                    "SELECT count(*) FROM _uqa_mvcc_native_occurrence_guards",
+                    "SELECT count(*) FROM _uqa_mvcc_native_ivf_guards",
                     [],
                     |row| row.get::<_, i64>(0)
                 )?,
@@ -103,7 +119,7 @@ fn native_occurrence_guard_upgrade_preserves_closed_files_and_receipts() {
 }
 
 #[test]
-fn failed_native_occurrence_guard_upgrade_rolls_back_its_new_table() {
+fn failed_native_ivf_guard_upgrade_rolls_back_its_new_table() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     initialize(&connection);
     let control = StorageReadControl::with_limit(1 << 24);
@@ -111,7 +127,7 @@ fn failed_native_occurrence_guard_upgrade_rolls_back_its_new_table() {
     let before = history(&connection);
     downgrade(&connection);
     with(&connection, |sqlite| {
-        sqlite.execute_batch("CREATE TRIGGER _uqa_mvcc_native_occurrence_guards_INSERT_guard BEFORE INSERT ON _metadata BEGIN SELECT 1; END")?;
+        sqlite.execute_batch("CREATE TRIGGER _uqa_mvcc_native_ivf_guards_INSERT_guard BEFORE INSERT ON _metadata BEGIN SELECT 1; END")?;
         Ok(())
     });
     assert!(SQLiteRecordStore::for_native(&connection, &control).is_err());
@@ -122,10 +138,17 @@ fn failed_native_occurrence_guard_upgrade_rolls_back_its_new_table() {
                 .get::<_, i64>(
                 0
             ))?,
-            4
+            5
         );
-        assert_eq!(sqlite.query_row("SELECT count(*) FROM sqlite_schema WHERE name='_uqa_mvcc_native_occurrence_guards'", [], |row| row.get::<_, i64>(0))?, 0);
-        sqlite.execute_batch("DROP TRIGGER _uqa_mvcc_native_occurrence_guards_INSERT_guard")?;
+        assert_eq!(
+            sqlite.query_row(
+                "SELECT count(*) FROM sqlite_schema WHERE name='_uqa_mvcc_native_ivf_guards'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )?,
+            0
+        );
+        sqlite.execute_batch("DROP TRIGGER _uqa_mvcc_native_ivf_guards_INSERT_guard")?;
         Ok(())
     });
     let repaired = SQLiteRecordStore::for_native(&connection, &control).unwrap();

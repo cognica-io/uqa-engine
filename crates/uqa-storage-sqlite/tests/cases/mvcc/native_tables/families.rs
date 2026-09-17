@@ -8,7 +8,10 @@
 
 use super::*;
 use rusqlite::{params_from_iter, types::Value as SQLValue};
-use uqa_storage::{mvcc::VersionedPersistence, read_control::StorageReadControl};
+use uqa_storage::{
+    mvcc::{CommittedRecordSnapshot, RecordWrite, VersionedPersistence},
+    read_control::StorageReadControl,
+};
 use uqa_storage_sqlite::{
     mvcc::native::{
         NativeColumnType, NativeRecord, NativeRecordFamily as Family, NativeRecordOwner,
@@ -17,7 +20,47 @@ use uqa_storage_sqlite::{
 };
 
 pub(in crate::mvcc) fn families() -> impl Iterator<Item = Family> {
-    Family::all().filter(|family| family.layout().columns.contains(&"table_name"))
+    // IVF guard tombstones retain their old identities and have no transferable row payload.
+    Family::all().filter(|family| {
+        *family != Family::IVFGuards && family.layout().columns.contains(&"table_name")
+    })
+}
+
+fn ivf_guard(generation: u8, field: &str, control: &StorageReadControl) -> NativeRecord {
+    use rusqlite::types::ValueRef;
+    NativeRecord::encode(
+        Family::IVFGuards,
+        NativeRecordOwner::Object {
+            identity: [1; 16],
+            generation: [generation; 16],
+        },
+        &[
+            ValueRef::Text(b"public.docs"),
+            ValueRef::Text(field.as_bytes()),
+            ValueRef::Integer(1),
+        ],
+        control,
+    )
+    .unwrap()
+}
+
+pub(in crate::mvcc) fn assert_ivf_guard_history(
+    before: &dyn CommittedRecordSnapshot,
+    after: &dyn CommittedRecordSnapshot,
+    control: &StorageReadControl,
+) {
+    let guard = ivf_guard(1, "n", control);
+    let original = before.get(guard.key(), control).unwrap().unwrap();
+    let retained = after.get(guard.key(), control).unwrap().unwrap();
+    assert!(original.value().is_none());
+    assert!(retained.value().is_none());
+    assert_eq!(original.sequence(), retained.sequence());
+    for (generation, field) in [(2, "n"), (1, "renamed")] {
+        assert!(after
+            .get(ivf_guard(generation, field, control).key(), control)
+            .unwrap()
+            .is_none());
+    }
 }
 
 pub(in crate::mvcc) fn rows(
@@ -158,8 +201,17 @@ pub(in crate::mvcc) fn seed_native_families(
         control,
     )
     .unwrap();
+    let ivf = ivf_guard(1, "n", control);
     let batch = PreparedRecordCommit::new(
-        &[skips.write(None), bounds.write(None), guard.write(None)],
+        &[
+            skips.write(None),
+            bounds.write(None),
+            guard.write(None),
+            RecordWrite {
+                value: None,
+                ..ivf.write(None)
+            },
+        ],
         control,
     )
     .unwrap();
@@ -200,6 +252,7 @@ fn table_rename_and_generation_transfer_preserve_every_native_owned_payload_and_
     schema.storage_generation = [2; 16];
     catalog.save_table(&schema).unwrap();
     let latest = store.snapshot(&control).unwrap();
+    assert_ivf_guard_history(&*old, &*latest, &control);
     for (family, before) in original {
         let column = family
             .layout()
@@ -266,6 +319,7 @@ fn table_rename_and_generation_transfer_preserve_every_native_owned_payload_and_
         }
     }
     catalog.drop_table_and_data("public.renamed").unwrap();
+    assert_ivf_guard_history(&*old, &*store.snapshot(&control).unwrap(), &control);
     for family in families() {
         assert!(rows(&connection, family, "public.renamed").is_empty());
     }

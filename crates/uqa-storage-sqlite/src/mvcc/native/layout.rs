@@ -738,6 +738,16 @@ pub(super) const LAYOUTS: &[NativeRecordLayout] = &[
         identity_columns: &[1],
         object_owned: true,
     },
+    NativeRecordLayout {
+        family: NativeRecordFamily::IVFGuards,
+        table: "_uqa_mvcc_native_ivf_guards",
+        columns: &["table_name", "field", "document_id"],
+        column_types: &[Text, Text, Integer],
+        nullable: &[false, false, false],
+        primary_key: &[0, 1, 2],
+        identity_columns: &[1, 2],
+        object_owned: true,
+    },
 ];
 
 impl NativeRecordLayout {

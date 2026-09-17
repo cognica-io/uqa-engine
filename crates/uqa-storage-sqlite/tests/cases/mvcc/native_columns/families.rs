@@ -8,7 +8,7 @@
 
 use super::*;
 use crate::mvcc::native_tables::families::{
-    families, rows, seed_missing_families, seed_native_families,
+    assert_ivf_guard_history, families, rows, seed_missing_families, seed_native_families,
 };
 use rusqlite::types::Value as SQLValue;
 use uqa_storage::{mvcc::VersionedPersistence, read_control::StorageReadControl};
@@ -50,6 +50,7 @@ fn native_column_rename_and_drop_preserve_every_fixed_field_family_and_old_histo
     bind(&connection);
     catalog.rename_column_data(TABLE, "n", "renamed").unwrap();
     let renamed = records.snapshot(&control).unwrap();
+    assert_ivf_guard_history(&*old, &*renamed, &control);
     for (family, column, before) in &original {
         let mut expected = before.clone();
         if matches!(family, Family::OccurrenceSkips | Family::OccurrenceBlockMax) {
@@ -98,6 +99,7 @@ fn native_column_rename_and_drop_preserve_every_fixed_field_family_and_old_histo
         "[\"renamed\"]"
     );
     catalog.drop_column_data(TABLE, "renamed").unwrap();
+    assert_ivf_guard_history(&*old, &*records.snapshot(&control).unwrap(), &control);
     for (family, _, _) in original {
         assert!(
             rows(&connection, family, TABLE).is_empty(),

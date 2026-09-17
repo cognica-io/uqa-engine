@@ -31,7 +31,7 @@ pub(super) fn restore_format_one(connection: &ManagedConnection, control: &Stora
             )?;
         }
         transaction.execute_batch(
-            "DROP TABLE _uqa_mvcc_native_graph_lookup; DROP TABLE _uqa_mvcc_native_format; DROP TABLE _uqa_mvcc_native_occurrence_guards; DROP TABLE _occurrence_skips; DROP TABLE _occurrence_block_max;",
+            "DROP TABLE _uqa_mvcc_native_graph_lookup; DROP TABLE _uqa_mvcc_native_format; DROP TABLE _uqa_mvcc_native_ivf_guards; DROP TABLE _uqa_mvcc_native_occurrence_guards; DROP TABLE _occurrence_skips; DROP TABLE _occurrence_block_max;",
         )?;
         transaction.execute_batch(OLD_FORMAT)?;
         transaction.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1, 1, 49)", [])?;
