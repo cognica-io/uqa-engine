@@ -138,6 +138,8 @@ Repeating COMMIT resolves the same evaluated storage batch and does not rerun th
 
 An unresolved result must not be treated as proof of rollback or a reason to replay application operations. Session receipt resolution does not provide crash-safe publication recovery or exactly-once acknowledgement after process loss.
 
+The development transaction adapter preserves typed storage diagnostics: a rejected MVCC row or definition conflict reports `40001`, cancellation reports `57014` as `SQLError::Cancelled`, and memory exhaustion reports `53200`. Embedded SQL diagnostics, including constraint errors, retain their SQLSTATE; an unrelated provider error is not classified as a serialization failure. An indeterminate outer commit remains `08007` even when its underlying diagnostic describes a conflict. A rejected commit restores the session after storage rollback, preserves independently committed data, and does not replay application callbacks. These diagnostics do not enable the unfinished concurrent SQL transaction model.
+
 `Engine::sql_batch` executes a slice of SQL statement and parameter pairs in one transaction. A statement failure rolls the batch back; an indeterminate commit follows the resolution contract above.
 
 ```rust

@@ -6,6 +6,9 @@
 
 //! Engine receipt resolution preserves the prepared SQL effects over real provider records.
 
+#[path = "commit_resolution/conflicts.rs"]
+mod conflicts;
+
 use std::sync::{
     atomic::{AtomicU8, AtomicUsize, Ordering},
     Arc, Mutex,
@@ -30,6 +33,35 @@ const UNAVAILABLE: u8 = 2;
 const LOSE_UNCOMMITTED_REPLY: u8 = 3;
 const LOSE_ABORT_REPLY: u8 = 4;
 const HIDE_AFTER_ABORT_RECEIPT: u8 = 5;
+const REJECT_MEMORY: u8 = 6;
+const REJECT_CANCELLED: u8 = 7;
+const REJECT_CONSTRAINT: u8 = 8;
+const REJECT_OTHER: u8 = 9;
+const REJECT_DEPENDENCY: u8 = 10;
+const LOSE_CONFLICT_REPLY: u8 = 11;
+
+fn rejected_commit_error(fault: u8) -> Option<uqa_storage::mvcc::VersionError> {
+    use uqa_storage::mvcc::{CommitSequence, VersionError};
+    Some(match fault {
+        REJECT_MEMORY => uqa_core::memory::MemoryError::SizeOverflow.into(),
+        REJECT_CANCELLED => uqa_core::QueryCancelled.into(),
+        REJECT_CONSTRAINT => StorageBackendError::backend(
+            "fixture",
+            SQLError::Routine {
+                sqlstate: "23505".into(),
+                message: "injected unique constraint violation".into(),
+            },
+        )
+        .into(),
+        REJECT_OTHER => StorageBackendError::Other("injected storage failure".into()).into(),
+        REJECT_DEPENDENCY => VersionError::ReadConflict {
+            dependency: 0,
+            expected: Some(CommitSequence::from_u64(1)),
+            actual: Some(CommitSequence::from_u64(2)),
+        },
+        _ => return None,
+    })
+}
 
 struct FaultPersistence {
     inner: Arc<dyn VersionedPersistence>,
@@ -101,12 +133,15 @@ impl VersionedPersistence for FaultPersistence {
         control: &StorageReadControl,
     ) -> CommitResult {
         let fault = self.fault_for(transaction);
+        if let Some(error) = rejected_commit_error(fault) {
+            return Err(CommitFailure::Rejected(error));
+        }
         if fault == UNAVAILABLE {
             return Err(CommitFailure::Rejected(
                 StorageBackendError::Other("injected unavailable receipt read".into()).into(),
             ));
         }
-        if fault != LOSE_UNCOMMITTED_REPLY {
+        if !matches!(fault, LOSE_UNCOMMITTED_REPLY | LOSE_CONFLICT_REPLY) {
             let receipt = self.inner.commit(transaction, prepared, control)?;
             if fault == HEALTHY {
                 return Ok(receipt);
@@ -115,7 +150,13 @@ impl VersionedPersistence for FaultPersistence {
         self.fault.store(UNAVAILABLE, Ordering::Release);
         Err(CommitFailure::Indeterminate {
             transaction,
-            source: StorageBackendError::Other("injected lost native commit reply".into()),
+            source: if fault == LOSE_CONFLICT_REPLY {
+                rejected_commit_error(REJECT_DEPENDENCY)
+                    .unwrap()
+                    .into_storage_error()
+            } else {
+                StorageBackendError::Other("injected lost native commit reply".into())
+            },
         })
     }
     fn commit_status(

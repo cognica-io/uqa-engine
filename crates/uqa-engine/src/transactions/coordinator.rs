@@ -516,17 +516,52 @@ impl Engine {
         }
     }
     pub(super) fn storage_tx_error(action: &str, err: &StorageBackendError) -> SQLError {
-        if let Some(uqa_storage::mvcc::CommitErrorOutcome::Aborted(transaction)) =
-            err.commit_outcome()
-        {
-            return SQLError::Routine {
-                sqlstate: "25000".into(),
-                message: format!(
-                    "{action} cannot commit transaction {transaction:?}: it was already aborted"
-                ),
-            };
+        use uqa_storage::mvcc::{CommitErrorOutcome, VersionError};
+        match err.commit_outcome() {
+            Some(CommitErrorOutcome::Aborted(transaction)) => {
+                return SQLError::Routine {
+                    sqlstate: "25000".into(),
+                    message: format!(
+                        "{action} cannot commit transaction {transaction:?}: it was already aborted"
+                    ),
+                };
+            }
+            Some(CommitErrorOutcome::Indeterminate(transaction)) => {
+                return Self::pending_commit_error(transaction, err);
+            }
+            Some(CommitErrorOutcome::Committed(_)) => {
+                return SQLError::Internal(format!(
+                    "{action} failed after storage committed: {err}"
+                ));
+            }
+            None => {}
         }
-        SQLError::Internal(format!("{action} failed in storage backend: {err}"))
+        let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(err);
+        while let Some(error) = cause {
+            match error.downcast_ref::<StorageBackendError>() {
+                Some(StorageBackendError::Cancelled(_)) => {
+                    return SQLError::Cancelled(uqa_core::QueryCancelled);
+                }
+                Some(StorageBackendError::Memory(_)) => {
+                    return SQLError::Routine {
+                        sqlstate: "53200".into(),
+                        message: format!("{action}: {err}"),
+                    };
+                }
+                _ => {}
+            }
+            if matches!(
+                error.downcast_ref::<VersionError>(),
+                Some(VersionError::WriteConflict { .. } | VersionError::ReadConflict { .. })
+            ) {
+                return SQLError::Routine {
+                    sqlstate: "40001".into(),
+                    message: format!("{action} could not serialize storage changes: {err}"),
+                };
+            }
+            cause = error.source();
+        }
+        uqa_sql::catalog::errors::storage_error(action, err)
     }
 
     pub(super) fn transaction_status_error(status: TransactionStatus) -> Option<SQLError> {
