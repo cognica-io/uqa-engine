@@ -217,6 +217,14 @@ impl RedbRecordStore {
 }
 
 impl VersionedPersistence for RedbRecordStore {
+    fn identifier_watermark(
+        &self,
+        namespace: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<u64>> {
+        identifiers::read(self, namespace, control)
+    }
+
     fn allocate_identifiers(
         &self,
         namespace: &[u8],

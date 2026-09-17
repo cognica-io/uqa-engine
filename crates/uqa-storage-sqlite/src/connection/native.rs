@@ -15,6 +15,18 @@ use super::{Arc, KeyValueStore, ManagedConnection, Result, SQLiteError, Versione
 use crate::mvcc::native::NativeSnapshot;
 
 impl ManagedConnection {
+    pub(crate) fn native_identifier_watermark(&self, namespace: &[u8]) -> Result<Option<u64>> {
+        self.surface_cleanup_failure()?;
+        let _gate = self.session.gate.read();
+        let logical = self
+            .session
+            .logical
+            .get()
+            .filter(|session| session.native.is_some())
+            .ok_or(SQLiteError::SessionMappingMismatch)?;
+        logical.identifier_watermark(namespace).map_err(Into::into)
+    }
+
     pub(crate) fn allocate_native_identifiers(
         &self,
         namespace: &[u8],

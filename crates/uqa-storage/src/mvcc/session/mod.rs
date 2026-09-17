@@ -51,6 +51,13 @@ pub struct VersionedKeyValueStore {
 }
 
 impl VersionedKeyValueStore {
+    /// Autonomous watermark visibility follows physical reservations, including reservations made after this session pinned its record snapshot. No write capability is required and no logical transaction is started or finished.
+    pub fn identifier_watermark(&self, namespace: &[u8]) -> StorageBackendResult<Option<u64>> {
+        self.persistence
+            .identifier_watermark(namespace, &self.control)
+            .map_err(VersionError::into_storage_error)
+    }
+
     /// Reserve identities without publishing this session's private records. Read-only sessions and unresolved sealed commits cannot allocate; rollback never reclaims a successful reservation.
     pub fn allocate_identifiers(
         &self,
@@ -179,6 +186,10 @@ impl VersionedKeyValueStore {
 }
 
 impl super::IdentifierAllocator for VersionedKeyValueStore {
+    fn identifier_watermark(&self, namespace: &[u8]) -> StorageBackendResult<Option<u64>> {
+        Self::identifier_watermark(self, namespace)
+    }
+
     fn allocate_identifiers(
         &self,
         namespace: &[u8],

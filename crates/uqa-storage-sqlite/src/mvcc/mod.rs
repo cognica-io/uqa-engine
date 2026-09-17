@@ -147,6 +147,17 @@ impl SQLiteRecordStore {
 }
 
 impl VersionedPersistence for SQLiteRecordStore {
+    fn identifier_watermark(
+        &self,
+        namespace: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<u64>> {
+        control.cancellation().check()?;
+        self.with(|connection| {
+            identifiers::read(connection, self.identity, self.native, namespace, control)
+        })
+    }
+
     fn allocate_identifiers(
         &self,
         namespace: &[u8],

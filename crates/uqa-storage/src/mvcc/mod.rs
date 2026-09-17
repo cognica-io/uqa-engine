@@ -33,8 +33,8 @@ pub use guards::verify_revision_guards;
 pub use history::{RecordHistory, RecordVersion, ScannedRecord, SharedRecordValue};
 pub use hnsw::{HNSWRecordHeader, HNSWRecordKey, HNSWRecordLayout, HNSWRecordValue};
 pub use identifiers::{
-    verify_identifier_allocations, verify_identifier_batches, IdentifierAllocation,
-    IdentifierAllocator, IdentifierRequest,
+    reserve_identifier_workspace, verify_identifier_allocations, verify_identifier_batches,
+    IdentifierAllocation, IdentifierAllocator, IdentifierRequest,
 };
 pub use ivf::{IVFRecordHeader, IVFRecordKey, IVFRecordLayout, IVFRecordValue};
 pub use memory::{MemoryRecordSnapshot, MemoryVersionStore};

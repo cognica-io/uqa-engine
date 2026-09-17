@@ -26,6 +26,14 @@ fn identifier_batches_are_forwarded_and_reopen_in_every_file_mode() {
             reopened
                 .identifier_allocator()
                 .unwrap()
+                .identifier_watermark(b"identifier-batches")
+                .unwrap(),
+            Some(last)
+        );
+        assert_eq!(
+            reopened
+                .identifier_allocator()
+                .unwrap()
                 .allocate_identifiers(b"identifier-batches", request(1, 1))
                 .unwrap()
                 .watermark(),
@@ -129,6 +137,10 @@ fn identifier_reservations_coordinate_all_sqlite_layouts_and_reopen_in_every_fil
             let reopened = records(mode, &path, layout, false);
             assert_eq!(reopened.database_id(), identity);
             assert_eq!(
+                reopened.identifier_watermark(b"reopen", &control).unwrap(),
+                Some(43)
+            );
+            assert_eq!(
                 reopened
                     .allocate_identifiers(b"reopen", request(0, 1), &control)
                     .unwrap()
@@ -183,6 +195,15 @@ fn native_identifier_reservations_do_not_publish_or_undo_private_catalog_changes
             .get_metadata("private-identifier-fixture")
             .unwrap()
             .is_none());
+        assert_eq!(
+            backend
+                .identifier_allocator()
+                .unwrap()
+                .identifier_watermark(b"entities")
+                .unwrap(),
+            Some(4)
+        );
+        assert!(backend.in_transaction());
         backend.rollback_to_savepoint(checkpoint).unwrap();
         backend.rollback_transaction().unwrap();
         assert!(catalog

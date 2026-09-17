@@ -94,6 +94,9 @@ fn batch_observations_finish_before_record_publication_and_are_not_replayed_on_r
     let mut sealed = store.batch();
     sealed.observe_identifier(b"observed", 999).unwrap();
     assert!(sealed.commit().unwrap_err().to_string().contains("sealed"));
+    assert_eq!(store.identifier_watermark(b"observed").unwrap(), Some(101));
+    assert!(store.in_transaction());
+    assert!(other.get(b"row").unwrap().is_none());
     // A sealed record retry must not resubmit the already durable observation.
     {
         let mut state = persistence.state.lock();

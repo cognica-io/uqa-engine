@@ -91,10 +91,56 @@ fn a_missing_identifier_table_is_not_recreated_when_the_format_requires_allocati
             RedbRecordStore::new(database.clone()),
             Err(VersionError::InvalidEncoding(_))
         ));
+        assert!(retained
+            .identifier_watermark(b"entities", &StorageReadControl::with_limit(1 << 20))
+            .is_err());
         assert!(database
             .begin_read()
             .unwrap()
             .open_table(super::super::identifiers::TABLE)
             .is_err());
     }
+}
+
+#[test]
+fn watermark_reads_do_not_synchronize_or_publish_identifier_state() {
+    let backend = FaultBackend::default();
+    let database = Arc::new(
+        Database::builder()
+            .create_with_backend(backend.clone())
+            .unwrap(),
+    );
+    let store = RedbRecordStore::new(database).unwrap();
+    let control = StorageReadControl::with_limit(1 << 20);
+    store
+        .allocate_identifiers(b"entities", reserve(2), &control)
+        .unwrap();
+    backend.fail_sync.store(true, Ordering::Relaxed);
+    assert_eq!(
+        store.identifier_watermark(b"entities", &control).unwrap(),
+        Some(2)
+    );
+    assert_eq!(
+        store
+            .identifier_watermark(b"unallocated", &control)
+            .unwrap(),
+        None
+    );
+    assert!(backend.fail_sync.load(Ordering::Relaxed));
+    backend.fail_sync.store(false, Ordering::Relaxed);
+    assert_eq!(
+        store
+            .allocate_identifiers(b"unallocated", reserve(1), &control)
+            .unwrap()
+            .watermark(),
+        1
+    );
+    let mut wrong = store.clone();
+    let mut identity = store.identity.as_bytes();
+    identity[0] ^= 1;
+    wrong.identity = uqa_storage::mvcc::DatabaseId::from_bytes(identity);
+    assert!(matches!(
+        wrong.identifier_watermark(b"entities", &control),
+        Err(VersionError::WrongDatabase)
+    ));
 }

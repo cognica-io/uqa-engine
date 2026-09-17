@@ -37,6 +37,9 @@ pub fn verify_identifier_batches(
 ) -> StorageBackendResult<u64> {
     let ids = b.identifier_allocator().expect("durable byte store");
     let namespace = b"identifier-batches";
+    let reader = a.identifier_allocator().expect("durable byte store");
+    assert_eq!(reader.identifier_watermark(namespace)?, None);
+    assert!(!a.in_transaction());
     let mut dropped = a.batch();
     dropped.observe_identifier(namespace, 999)?;
     drop(dropped);
@@ -67,6 +70,14 @@ pub fn verify_identifier_batches(
     a.rollback_transaction()?;
     assert!(a.get(b"batch-prior")?.is_none());
     a.begin_read_transaction()?;
+    assert_eq!(reader.identifier_watermark(namespace)?, Some(102));
+    assert_eq!(reader.identifier_watermark(b"absent-watermark")?, None);
+    ids.allocate_identifiers(b"read-only-watermark", reserve(0, u64::MAX, 1))?;
+    assert_eq!(
+        reader.identifier_watermark(b"read-only-watermark")?,
+        Some(0)
+    );
+    assert!(a.in_transaction());
     let mut rejected = a.batch();
     rejected.observe_identifier(namespace, 999)?;
     assert!(rejected.commit().is_err());
@@ -102,6 +113,7 @@ pub fn verify_identifier_allocations(
     verify_limits(a, b, control)?;
     verify_admission(a, b, control)?;
     verify_contended_reservations(a, b, control)?;
+    verify_watermark_reads(a, b, control)?;
     require(
         control.memory().used() == retained,
         "identifier allocation leaked its workspace",
@@ -117,6 +129,54 @@ pub fn verify_identifier_allocations(
     )?;
     b.abort(after, control)?;
     Ok(())
+}
+
+fn verify_watermark_reads(
+    a: &dyn VersionedPersistence,
+    b: &dyn VersionedPersistence,
+    control: &StorageReadControl,
+) -> VersionResult<()> {
+    let namespace = b"\0uqa-identifier-conformance\0reads";
+    require(
+        a.identifier_watermark(namespace, control)?.is_none()
+            && b.identifier_watermark(namespace, control)?.is_none(),
+        "absent identifier read created a namespace",
+    )?;
+    require(
+        b.allocate_identifiers(namespace, reserve(0, u64::MAX, 1), control)?
+            .watermark()
+            == 0,
+        "watermark read consumed the first identity",
+    )?;
+    require(
+        a.identifier_watermark(namespace, control)? == Some(0),
+        "zero watermark was confused with absence",
+    )?;
+    b.allocate_identifiers(namespace, IdentifierRequest::Observe(u64::MAX), control)?;
+    require(
+        a.identifier_watermark(namespace, control)? == Some(u64::MAX),
+        "watermark read missed an independent reservation or truncated its value",
+    )?;
+    require(
+        a.identifier_watermark(b"", control).is_err(),
+        "empty identifier read namespace was accepted",
+    )?;
+    require(
+        matches!(
+            a.identifier_watermark(namespace, &StorageReadControl::with_limit(1)),
+            Err(VersionError::Memory(_))
+        ),
+        "watermark read ignored its memory allowance",
+    )?;
+    let cancelled = StorageReadControl::with_limit(1 << 20);
+    cancelled.cancellation().cancel();
+    require(
+        matches!(
+            a.identifier_watermark(namespace, &cancelled),
+            Err(VersionError::Cancelled(_))
+        ),
+        "watermark read ignored cancellation",
+    )
 }
 
 fn verify_ranges(

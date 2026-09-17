@@ -92,6 +92,12 @@ impl PersistentStorageProvider for SQLiteStorageProvider {
 }
 
 impl uqa_storage::mvcc::IdentifierAllocator for SQLiteStorageBackend {
+    fn identifier_watermark(&self, namespace: &[u8]) -> StorageBackendResult<Option<u64>> {
+        self.conn
+            .native_identifier_watermark(namespace)
+            .map_err(Into::into)
+    }
+
     fn allocate_identifiers(
         &self,
         namespace: &[u8],

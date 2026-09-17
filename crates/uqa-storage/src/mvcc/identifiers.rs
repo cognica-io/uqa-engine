@@ -19,6 +19,9 @@ use super::{VersionError, VersionResult};
 
 /// Session-bound access to durable, nontransactional identifier reservations. Implementations retain their session's cancellation, memory and read-only checks; forwarding storage wrappers must preserve this capability.
 pub trait IdentifierAllocator: Send + Sync {
+    /// Read the current autonomous watermark without reserving an identity or creating a namespace. This read is independent of the logical record snapshot and remains available to read-only sessions.
+    fn identifier_watermark(&self, namespace: &[u8]) -> StorageBackendResult<Option<u64>>;
+
     fn allocate_identifiers(
         &self,
         namespace: &[u8],
@@ -90,18 +93,26 @@ impl IdentifierRequest {
         namespace: &[u8],
         control: &StorageReadControl,
     ) -> VersionResult<MemoryReservation> {
-        control.cancellation().check()?;
-        if namespace.is_empty() {
-            return Err(VersionError::InvalidEncoding("empty identifier namespace"));
-        }
         self.prepare(None)?;
-        let bytes = namespace
-            .len()
-            .checked_mul(2)
-            .and_then(|bytes| bytes.checked_add(64))
-            .ok_or(MemoryError::SizeOverflow)?;
-        Ok(control.memory().reserve(bytes)?)
+        reserve_identifier_workspace(namespace, control)
     }
+}
+
+/// Charge namespace bindings for either a reservation or a read without retaining the caller's bytes.
+pub fn reserve_identifier_workspace(
+    namespace: &[u8],
+    control: &StorageReadControl,
+) -> VersionResult<MemoryReservation> {
+    control.cancellation().check()?;
+    if namespace.is_empty() {
+        return Err(VersionError::InvalidEncoding("empty identifier namespace"));
+    }
+    let bytes = namespace
+        .len()
+        .checked_mul(2)
+        .and_then(|bytes| bytes.checked_add(64))
+        .ok_or(MemoryError::SizeOverflow)?;
+    Ok(control.memory().reserve(bytes)?)
 }
 
 #[cfg(test)]

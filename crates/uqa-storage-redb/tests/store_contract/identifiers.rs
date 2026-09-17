@@ -26,6 +26,15 @@ fn identifier_batches_survive_private_undo_and_closed_file_reopen() {
             .store()
             .identifier_allocator()
             .unwrap()
+            .identifier_watermark(b"identifier-batches")
+            .unwrap(),
+        Some(last)
+    );
+    assert_eq!(
+        reopened
+            .store()
+            .identifier_allocator()
+            .unwrap()
             .allocate_identifiers(b"identifier-batches", request())
             .unwrap()
             .watermark(),
@@ -105,6 +114,10 @@ fn identifier_reservations_survive_private_undo_and_closed_file_reopen() {
     let reopened = RedbStorage::open(&path).unwrap();
     let records = reopened.record_store().unwrap();
     assert_eq!(records.database_id(), identity);
+    assert_eq!(
+        records.identifier_watermark(b"entities", &control).unwrap(),
+        Some(3)
+    );
     assert!(reopened.store().get(b"private").unwrap().is_none());
     assert_eq!(
         records

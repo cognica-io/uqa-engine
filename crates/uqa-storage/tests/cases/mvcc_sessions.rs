@@ -127,6 +127,15 @@ impl Persistence {
 }
 
 impl VersionedPersistence for Persistence {
+    fn identifier_watermark(
+        &self,
+        namespace: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<u64>> {
+        let _workspace = uqa_storage::mvcc::reserve_identifier_workspace(namespace, control)?;
+        Ok(self.state.lock().identifiers.get(namespace).copied())
+    }
+
     fn database_id(&self) -> DatabaseId {
         DatabaseId::from_bytes([9; 16])
     }

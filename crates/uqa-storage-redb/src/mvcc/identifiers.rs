@@ -6,14 +6,51 @@
 
 //! Independent identifier reservations use the same redb write admission as record commits.
 
-use redb::{ReadableTable, TableDefinition, TableHandle};
-use uqa_storage::mvcc::{IdentifierAllocation, IdentifierRequest, VersionError, VersionResult};
+use redb::{ReadableDatabase, ReadableTable, TableDefinition, TableHandle};
+use uqa_storage::mvcc::{
+    reserve_identifier_workspace, IdentifierAllocation, IdentifierRequest, VersionError,
+    VersionResult,
+};
 use uqa_storage::read_control::StorageReadControl;
 
 use super::{codec, physical_writer, redb_error, RedbRecordStore, METADATA};
 
 pub(super) const TABLE: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("uqa_mvcc_identifiers");
+
+fn validate_metadata(
+    store: &RedbRecordStore,
+    metadata: &impl ReadableTable<&'static str, &'static [u8]>,
+) -> VersionResult<()> {
+    if codec::database_id(metadata)? != store.identity {
+        return Err(VersionError::WrongDatabase);
+    }
+    if codec::read_u64(metadata, "format")? != 6 {
+        return Err(VersionError::InvalidEncoding("unknown record format"));
+    }
+    Ok(())
+}
+
+pub(super) fn read(
+    store: &RedbRecordStore,
+    namespace: &[u8],
+    control: &StorageReadControl,
+) -> VersionResult<Option<u64>> {
+    let _workspace = reserve_identifier_workspace(namespace, control)?;
+    let transaction = store.database.begin_read().map_err(redb_error)?;
+    validate_metadata(
+        store,
+        &transaction.open_table(METADATA).map_err(redb_error)?,
+    )?;
+    let identifiers = transaction.open_table(TABLE).map_err(redb_error)?;
+    let watermark = identifiers
+        .get(namespace)
+        .map_err(redb_error)?
+        .map(|value| codec::decode_u64(value.value()))
+        .transpose()?;
+    control.cancellation().check()?;
+    Ok(watermark)
+}
 
 pub(super) fn allocate(
     store: &RedbRecordStore,
@@ -25,12 +62,7 @@ pub(super) fn allocate(
     let transaction = physical_writer(&store.database)?;
     let allocation = {
         let metadata = transaction.open_table(METADATA).map_err(redb_error)?;
-        if codec::database_id(&metadata)? != store.identity {
-            return Err(VersionError::WrongDatabase);
-        }
-        if codec::read_u64(&metadata, "format")? != 6 {
-            return Err(VersionError::InvalidEncoding("unknown record format"));
-        }
+        validate_metadata(store, &metadata)?;
         let mut present = false;
         for table in transaction.list_tables().map_err(redb_error)? {
             present |= table.name() == TABLE.name();

@@ -35,6 +35,14 @@ struct InterleavingPersistence {
 }
 
 impl VersionedPersistence for InterleavingPersistence {
+    fn identifier_watermark(
+        &self,
+        namespace: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<u64>> {
+        self.inner.identifier_watermark(namespace, control)
+    }
+
     fn database_id(&self) -> DatabaseId {
         self.inner.database_id()
     }

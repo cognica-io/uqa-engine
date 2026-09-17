@@ -76,6 +76,10 @@ fn stale_database_identity_cannot_consume_identifiers() {
         store.allocate_identifiers(b"entities", reserve(1), &control()),
         Err(VersionError::WrongDatabase)
     ));
+    assert!(matches!(
+        store.identifier_watermark(b"entities", &control()),
+        Err(VersionError::WrongDatabase)
+    ));
     store.identity = identity;
     assert_eq!(
         store
@@ -84,4 +88,47 @@ fn stale_database_identity_cannot_consume_identifiers() {
             .range(),
         Some(1..=1)
     );
+}
+
+#[test]
+fn watermark_reads_work_on_query_only_connections_without_acquiring_write_permission() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let control = control();
+    store
+        .allocate_identifiers(b"entities", reserve(2), &control)
+        .unwrap();
+    store
+        .with(|connection| {
+            connection.pragma_update(None, "query_only", true)?;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        store.identifier_watermark(b"entities", &control).unwrap(),
+        Some(2)
+    );
+    assert_eq!(
+        store
+            .identifier_watermark(b"unallocated", &control)
+            .unwrap(),
+        None
+    );
+    store
+        .with(|connection| {
+            assert_eq!(
+                connection.query_row("SELECT __uqa_mvcc_write_permit()", [], |row| row
+                    .get::<_, i64>(0))?,
+                0
+            );
+            assert_eq!(
+                connection.query_row("SELECT count(*) FROM _uqa_mvcc_identifiers", [], |row| {
+                    row.get::<_, i64>(0)
+                })?,
+                1
+            );
+            assert!(connection.is_autocommit());
+            Ok(())
+        })
+        .unwrap();
 }

@@ -127,6 +127,13 @@ pub type CommitResult = Result<CommitReceipt, CommitFailure>;
 pub trait VersionedPersistence: Send + Sync {
     fn database_id(&self) -> DatabaseId;
 
+    /// Read the latest autonomous watermark in one physical read transaction. Absence must remain absent; this must not acquire write admission, create records or change allocation state. Validate the database incarnation and retain the caller's resource and cancellation controls.
+    fn identifier_watermark(
+        &self,
+        namespace: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<u64>>;
+
     /// Atomically observe or reserve identifiers under the database's physical admission. Persist the high watermark before returning; an error may consume identifiers but must never permit their reuse. This operation advances neither record visibility nor transaction allocation, publishes no private records, and survives transaction/savepoint rollback. Implementations and wrappers must preserve the caller's resource/cancellation control and reject a different database incarnation.
     fn allocate_identifiers(
         &self,
