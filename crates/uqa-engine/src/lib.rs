@@ -208,9 +208,7 @@ type SessionPortalCatalogSnapshot = Arc<DurableCatalogSnapshot>;
 type SessionPortalTransactionOverlay =
     Arc<BTreeMap<String, BTreeMap<DocId, Option<StoredDocument>>>>;
 type ColumnStatsMap = BTreeMap<String, uqa_planner::ColumnStats>;
-type TransactionRelationStates = BTreeMap<RelationIdentity, u64>;
 type FixedTransactionCatalogBaseline = BTreeMap<[u8; 16], (RelationIdentity, Vec<u8>)>;
-type NontransactionalColumnStats = Vec<NontransactionalColumnStatsEntry>;
 type NontransactionalSequenceValues = BTreeMap<[u8; 16], NontransactionalSequenceHistory>;
 
 #[derive(Clone, Default)]
@@ -219,15 +217,6 @@ struct NontransactionalSequenceHistory {
     object_id: [u8; 16],
     session_currval: Option<SessionSequenceValue>,
     defines_lastval: bool,
-}
-
-#[derive(Clone)]
-struct NontransactionalColumnStatsEntry {
-    table_name: String,
-    table_lifecycle_id: u64,
-    stats: ColumnStatsMap,
-    persistent: bool,
-    autonomous: bool,
 }
 
 /// Unified query engine composed from explicit storage, durable-catalog,
@@ -333,7 +322,6 @@ struct TransactionFrame {
     savepoints: Vec<TransactionSavepoint>,
     session_snapshot: SessionStateSnapshot,
     data_snapshot: Option<EngineDataSnapshot>,
-    relation_states_at_begin: TransactionRelationStates,
     dirty_at_begin: TransactionDirtyState,
     /// Lock mark this frame started with. Rolling the whole frame back releases every acquisition at or above it, independent of the savepoint marks the frame allocated later.
     begin_lock_mark: u32,
@@ -348,8 +336,6 @@ struct TransactionFrame {
     pending_listen_actions: Vec<PendingListenAction>,
     pending_notifications: Vec<PendingNotification>,
     constraint_modes: ConstraintModeState,
-    /// Statistics written by ANALYZE are nontransactional in `PostgreSQL`. Keep the latest values outside savepoint snapshots so any rollback can restore them after transactional storage state is rolled back.
-    nontransactional_column_stats: NontransactionalColumnStats,
     /// Values allocated by `nextval` or installed by `setval` are not rolled back in `PostgreSQL`, except that allocations made against a transactionally changed sequence definition roll back with that definition. Every active frame records values by definition generation so transaction, savepoint, and PL/pgSQL exception rollback can reapply exactly the generation owned by the rollback target while preserving the latest session `currval` and `lastval` effects.
     nontransactional_sequence_values: NontransactionalSequenceValues,
 }
@@ -403,7 +389,6 @@ struct TransactionSavepoint {
     characteristics: TransactionCharacteristicsState,
     session_snapshot: SessionStateSnapshot,
     data_snapshot: Option<EngineDataSnapshot>,
-    relation_states_at_begin: TransactionRelationStates,
     dirty: TransactionDirtyState,
     lock_mark: u32,
     row_changes: Vec<TransactionRowChange>,

@@ -10,10 +10,10 @@
 
 use super::{
     failed_transaction_error, BackendTransactionMode, ConstraintModeState, Engine,
-    EngineDataSnapshot, NontransactionalColumnStats, NontransactionalSequenceValues, SQLError,
-    SessionStateSnapshot, StorageBackendError, StorageSavepointId, TransactionCharacteristicsState,
+    EngineDataSnapshot, NontransactionalSequenceValues, SQLError, SessionStateSnapshot,
+    StorageBackendError, StorageSavepointId, TransactionCharacteristicsState,
     TransactionDirtyState, TransactionFrame, TransactionFrameKind, TransactionIntent,
-    TransactionRelationStates, TransactionStatus,
+    TransactionStatus,
 };
 
 impl Engine {
@@ -35,15 +35,6 @@ impl Engine {
                 .dirty
                 .load(std::sync::atomic::Ordering::Acquire),
         }
-    }
-
-    pub(super) fn transaction_relation_states(&self) -> TransactionRelationStates {
-        self.storage
-            .tables
-            .read()
-            .iter()
-            .map(|(relation, table)| (relation.clone(), table.lifecycle_id()))
-            .collect()
     }
 
     pub(super) fn restore_transaction_dirty_state(&self, state: TransactionDirtyState) {
@@ -311,7 +302,6 @@ impl Engine {
         } else {
             BackendTransactionMode::Writer
         };
-        let relation_states_at_begin = self.transaction_relation_states();
         let (implicit_statement, explicit_transaction_block) = match kind {
             TransactionFrameKind::ExplicitBlock => (false, true),
             TransactionFrameKind::ImplicitStatement => (true, false),
@@ -337,7 +327,6 @@ impl Engine {
             savepoints: Vec::new(),
             session_snapshot,
             data_snapshot,
-            relation_states_at_begin,
             dirty_at_begin: self.transaction_dirty_state(),
             begin_lock_mark: lock_mark,
             lock_mark,
@@ -350,7 +339,6 @@ impl Engine {
             pending_listen_actions: Vec::new(),
             pending_notifications: Vec::new(),
             constraint_modes,
-            nontransactional_column_stats: NontransactionalColumnStats::new(),
             nontransactional_sequence_values: NontransactionalSequenceValues::new(),
         });
         self.update_statement_row_lock_baseline(snapshot_change_baseline);

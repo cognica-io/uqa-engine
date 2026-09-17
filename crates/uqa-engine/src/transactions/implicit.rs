@@ -161,9 +161,16 @@ impl Engine {
         &self,
         f: impl FnOnce(&Self) -> StorageBackendResult<R>,
     ) -> StorageBackendResult<R> {
+        let _statement = self.runtime.statement_gate.lock();
         if self.transaction_depth() != 0 && self.current_transaction_is_read_only() {
             self.ensure_transaction_usable()
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            self.prepare_explicit_transaction_writer()
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            // SQL access remains read-only. The retained physical transaction may write maintenance metadata, which must obey the caller's COMMIT and savepoints.
+            for frame in self.session.transactions.lock().iter_mut() {
+                frame.intent = TransactionIntent::ReadWrite;
+            }
             return f(self);
         }
         self.with_implicit_storage_transaction_inner(true, f)

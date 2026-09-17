@@ -7,6 +7,8 @@
 //! Column-statistics collection, persistence, and lazy refresh.
 
 mod automatic;
+#[cfg(test)]
+mod tests;
 
 use super::analyze_helpers::ColumnAnalyzeValues;
 use super::{
@@ -162,7 +164,6 @@ impl Engine {
             .hierarchy_ancestor_tables(canonical_table_name)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         for name in ancestors {
-            self.statistics.invalidate_column_stats(&name);
             let state = if name == canonical_table_name {
                 Arc::clone(table)
             } else {
@@ -227,59 +228,15 @@ impl Engine {
         } else {
             stats_out
         };
-        let mut persisted_autonomously = false;
         if persist && t.persistence != uqa_sql::ast::RelationPersistence::Temporary {
-            let backend_has_written = self
-                .storage
-                .backend
-                .as_ref()
-                .map(|backend| backend.transaction_has_written())
-                .transpose()?
-                .unwrap_or(false);
-            if self.transaction_depth() != 0
-                && self.current_transaction_is_read_only()
-                && !backend_has_written
-                && self.storage.backend.is_some()
-            {
-                if self
-                    .storage
-                    .backend
-                    .as_ref()
-                    .is_some_and(|backend| !backend.supports_concurrent_pinned_read_and_write())
-                {
-                    self.release_backend_reader_for_independent_maintenance()
-                        .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-                }
-                self.persist_column_stats_independently(canonical_table_name, &stats_out)?;
-                persisted_autonomously = true;
-            } else if let Some(catalog) = self.storage.catalog.as_ref() {
+            if let Some(catalog) = self.storage.catalog.as_ref() {
                 Self::persist_column_stats(catalog.as_ref(), canonical_table_name, &stats_out)?;
             }
         }
-        *t.column_stats.write() = stats_out.clone();
+        *t.column_stats.write() = stats_out;
         t.column_stats_loaded.store(true, Ordering::Release);
         t.column_stats_dirty.store(false, Ordering::Release);
         self.clear_pending_statistics_changes(canonical_table_name);
-        if persist {
-            if t.persistence != uqa_sql::ast::RelationPersistence::Temporary {
-                self.statistics
-                    .publish_column_stats(canonical_table_name.to_string(), stats_out.clone());
-            }
-            if let Some(frame) = self.session.transactions.lock().first_mut() {
-                frame
-                    .nontransactional_column_stats
-                    .retain(|entry| entry.table_lifecycle_id != t.lifecycle_id());
-                frame
-                    .nontransactional_column_stats
-                    .push(crate::NontransactionalColumnStatsEntry {
-                        table_name: canonical_table_name.to_string(),
-                        table_lifecycle_id: t.lifecycle_id(),
-                        stats: stats_out,
-                        persistent: t.persistence != uqa_sql::ast::RelationPersistence::Temporary,
-                        autonomous: persisted_autonomously,
-                    });
-            }
-        }
         Ok(())
     }
 
@@ -348,30 +305,6 @@ impl Engine {
             values: col_values,
             null_counts: col_nulls,
         })
-    }
-
-    pub(crate) fn persist_column_stats_independently(
-        &self,
-        table_name: &str,
-        stats: &BTreeMap<String, uqa_planner::ColumnStats>,
-    ) -> StorageBackendResult<()> {
-        let provider = self.storage.provider.as_ref().ok_or_else(|| {
-            StorageBackendError::Other(
-                "read-only ANALYZE requires an independent persistent session".into(),
-            )
-        })?;
-        let session = provider.open_session()?;
-        session.backend.begin_transaction()?;
-        let result = Self::persist_column_stats(session.catalog.as_ref(), table_name, stats);
-        match result {
-            Ok(()) => session.backend.commit_transaction(),
-            Err(error) => match session.backend.rollback_transaction() {
-                Ok(()) => Err(error),
-                Err(rollback_error) => Err(StorageBackendError::Other(format!(
-                    "persist ANALYZE statistics failed: {error}; rollback also failed: {rollback_error}"
-                ))),
-            },
-        }
     }
 
     pub(crate) fn persist_column_stats(
@@ -478,12 +411,6 @@ impl Engine {
         let t = self
             .try_table(&canonical_name)?
             .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` does not exist")))?;
-        if let Some(stats) = self.statistics.published_column_stats(&canonical_name) {
-            *t.column_stats.write() = stats.clone();
-            t.column_stats_loaded.store(true, Ordering::Release);
-            t.column_stats_dirty.store(false, Ordering::Release);
-            return Ok(stats);
-        }
         if t.column_stats_dirty.load(Ordering::Acquire) {
             if self.storage.catalog.is_none() {
                 // Memory-only lazy collection has no durable publication and

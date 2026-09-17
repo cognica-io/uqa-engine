@@ -9,7 +9,7 @@
 use super::{
     ConstraintModeState, Engine, EngineDataSnapshot, SQLError, SessionStateSnapshot,
     StorageSavepointId, TransactionCharacteristicsState, TransactionDirtyState, TransactionFrame,
-    TransactionIntent, TransactionRelationStates, TransactionRowChange, TransactionStatus,
+    TransactionIntent, TransactionRowChange, TransactionStatus,
 };
 
 pub(super) fn panic_description(payload: &(dyn std::any::Any + Send)) -> &str {
@@ -24,7 +24,6 @@ struct StatementAbortSnapshot {
     storage_savepoint: Option<StorageSavepointId>,
     session: SessionStateSnapshot,
     data: Option<EngineDataSnapshot>,
-    relation_states: TransactionRelationStates,
     dirty: TransactionDirtyState,
     keep_mark: Option<u32>,
     row_changes: Vec<TransactionRowChange>,
@@ -46,7 +45,6 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
             storage_savepoint: Some(savepoint.storage_savepoint),
             session: savepoint.session_snapshot.clone(),
             data: savepoint.data_snapshot.clone(),
-            relation_states: savepoint.relation_states_at_begin.clone(),
             dirty: savepoint.dirty,
             keep_mark: Some(savepoint.lock_mark),
             row_changes: savepoint.row_changes.clone(),
@@ -68,7 +66,6 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
         storage_savepoint: None,
         session: frame.session_snapshot.clone(),
         data: frame.data_snapshot.clone(),
-        relation_states: frame.relation_states_at_begin.clone(),
         dirty: frame.dirty_at_begin,
         keep_mark: frame
             .storage_savepoint
@@ -101,17 +98,7 @@ impl Engine {
         let rollback_state = statement_abort_snapshot(frame);
         let frame_storage_savepoint = frame.storage_savepoint;
         let outer_frame = &stack[0];
-        let raw_nontransactional_column_stats = outer_frame.nontransactional_column_stats.clone();
         let nontransactional_sequence_values = outer_frame.nontransactional_sequence_values.clone();
-        let nontransactional_column_stats = self.nontransactional_column_stats_after_rollback(
-            &raw_nontransactional_column_stats,
-            &rollback_state.relation_states,
-        );
-        if let Some(frame) = stack.first_mut() {
-            frame
-                .nontransactional_column_stats
-                .clone_from(&nontransactional_column_stats);
-        }
         // A nested frame owns a backend savepoint of its own; aborting the statement rolls the storage back to that savepoint so the outer frames' writes and locks survive, exactly like a PostgreSQL subtransaction abort. Only the outermost frame aborts the whole backend transaction.
         let savepoints_deferred = Self::backend_savepoints_deferred(&stack);
         let mut cleanup_errors = Vec::new();
@@ -146,12 +133,6 @@ impl Engine {
             }
         }
         self.restore_transaction_dirty_state(rollback_state.dirty);
-        if let Err(restore_error) = self.persist_nontransactional_column_stats_after_rollback(
-            &nontransactional_column_stats,
-            backend_aborted,
-        ) {
-            cleanup_errors.push(format!("ANALYZE statistics restore: {restore_error}"));
-        }
         if let Err(restore_error) = self.reload_persistent_value_indexes() {
             cleanup_errors.push(format!("btree restore: {restore_error}"));
         }
@@ -162,11 +143,6 @@ impl Engine {
             if let Err(restore_error) = self.reload_catalog_registries_after_rollback() {
                 cleanup_errors.push(format!("registry restore: {restore_error}"));
             }
-        }
-        if let Err(restore_error) =
-            self.apply_nontransactional_column_stats(&nontransactional_column_stats)
-        {
-            cleanup_errors.push(format!("ANALYZE statistics cache restore: {restore_error}"));
         }
         self.restore_session_state_preserving_sequences(
             &rollback_state.session,

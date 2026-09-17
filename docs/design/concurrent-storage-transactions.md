@@ -242,6 +242,8 @@ The common identifier reservation primitive is now implemented through `Versione
 
 LISTEN/NOTIFY effects remain transaction-bound. Notification order and delivery cannot precede durable commit, and a rollback must discard its pending publication. Sequence allocation, notifications, automatic statistics, model persistence, initial restore and background maintenance are mandatory participants in the access-path audit.
 
+ANALYZE column statistics belong to the caller's catalog transaction, including when SQL access is read-only. Their private values must not bypass visibility through a process-wide cache, and rollback must restore the prior statistics without an autonomous rewrite. PostgreSQL 18 updates relation estimates such as pg_class.reltuples separately from transactional pg_statistic rows; relation-estimate publication must therefore have its own ownership and identity checks. Maintenance counters must preserve concurrent committed data changes while statistics publication retains the analyzed relation's lifetime.
+
 ## Provider and platform requirements
 
 | Path | Required integration |

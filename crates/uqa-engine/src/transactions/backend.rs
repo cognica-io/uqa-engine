@@ -188,15 +188,6 @@ impl Engine {
         Ok(())
     }
 
-    /// Release an unwritten backend reader before an autonomous maintenance write. The replacement is a bare deferred transaction, so the SQL transaction remains open without retaining a rollback-journal read lock.
-    pub(crate) fn release_backend_reader_for_independent_maintenance(
-        &self,
-    ) -> Result<(), SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
-        let mut stack = self.session.transactions.lock();
-        self.restart_unwritten_backend_reader(&mut stack)
-    }
-
     pub(crate) fn open_independent_pinned_read_snapshot(&self) -> Result<Box<Engine>, SQLError> {
         let snapshot = self.new_session().map_err(|error| {
             SQLError::Internal(format!("open fixed transaction snapshot session: {error}"))

@@ -448,7 +448,6 @@ impl Engine {
                 catalog.set_metadata(&table_next_id_metadata_key(&from), "")?;
             }
         }
-        self.statistics.invalidate_column_stats(&from);
         self.mark_column_stats_dirty(&to, &state)?;
         self.refresh_value_indexes_for_table(&to)?;
         self.rename_constraint_transaction_relation(&from_relation, &to_relation);

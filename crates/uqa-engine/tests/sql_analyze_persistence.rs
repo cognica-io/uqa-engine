@@ -385,7 +385,7 @@ fn truncate_invalidates_stats_under_the_resolved_schema_name() {
 }
 
 #[test]
-fn analyze_after_a_transactional_write_is_immediately_visible_and_survives_rollback() {
+fn analyze_column_statistics_remain_private_and_roll_back_with_the_transaction() {
     let dir = tempdir().unwrap();
     let db_path = dir.path().join("analyze-after-write.sqlite3");
     {
@@ -402,14 +402,27 @@ fn analyze_after_a_transactional_write_is_immediately_visible_and_survives_rollb
         exec(&engine, "INSERT INTO t VALUES (2, 20)");
         exec(&engine, "SET TRANSACTION READ ONLY");
         exec(&engine, "ANALYZE t");
-        assert_eq!(observer.column_stats("t").unwrap()["val"].row_count, 2);
+        assert_eq!(engine.column_stats("t").unwrap()["val"].row_count, 2);
+        assert_eq!(
+            engine.column_stats("t").unwrap()["val"].max_value,
+            Some(Value::Int(20))
+        );
+        assert_eq!(observer.column_stats("t").unwrap()["val"].row_count, 1);
+        assert_eq!(
+            observer.column_stats("t").unwrap()["val"].max_value,
+            Some(Value::Int(10))
+        );
         exec(&engine, "ROLLBACK");
         let count = engine.sql("SELECT count(*) AS n FROM t", &[]).unwrap();
         assert_eq!(count.rows[0]["n"], Value::Int(1));
     }
 
     let reopened = Engine::open(&db_path).unwrap();
-    assert_eq!(reopened.column_stats("t").unwrap()["val"].row_count, 2);
+    assert_eq!(reopened.column_stats("t").unwrap()["val"].row_count, 1);
+    assert_eq!(
+        reopened.column_stats("t").unwrap()["val"].max_value,
+        Some(Value::Int(10))
+    );
 }
 
 #[test]
@@ -444,11 +457,11 @@ fn compressed_read_only_analyze_and_analyze_after_write_do_not_self_block() {
         uqa_storage_sqlite::SQLiteCompressionOptions::default(),
     )
     .unwrap();
-    assert_eq!(reopened.column_stats("t").unwrap()["val"].row_count, 2);
+    assert_eq!(reopened.column_stats("t").unwrap()["val"].row_count, 1);
 }
 
 #[test]
-fn analyze_statistics_survive_savepoint_rollback() {
+fn analyze_column_statistics_roll_back_to_the_savepoint() {
     let dir = tempdir().unwrap();
     let db_path = dir.path().join("analyze-savepoint.sqlite3");
     {
@@ -458,18 +471,27 @@ fn analyze_statistics_survive_savepoint_rollback() {
             "CREATE TABLE t (id INTEGER PRIMARY KEY, val INTEGER)",
         );
         exec(&engine, "INSERT INTO t VALUES (1, 10)");
+        exec(&engine, "ANALYZE t");
         exec(&engine, "BEGIN");
         exec(&engine, "SAVEPOINT before_rows");
         exec(&engine, "INSERT INTO t VALUES (2, 20), (3, 30)");
         exec(&engine, "ANALYZE t");
+        assert_eq!(
+            engine.column_stats("t").unwrap()["val"].max_value,
+            Some(Value::Int(30))
+        );
         exec(&engine, "ROLLBACK TO SAVEPOINT before_rows");
+        assert_eq!(
+            engine.column_stats("t").unwrap()["val"].max_value,
+            Some(Value::Int(10))
+        );
         exec(&engine, "COMMIT");
         let count = engine.sql("SELECT count(*) AS n FROM t", &[]).unwrap();
         assert_eq!(count.rows[0]["n"], Value::Int(1));
     }
 
     let reopened = Engine::open(&db_path).unwrap();
-    assert_eq!(reopened.column_stats("t").unwrap()["val"].row_count, 3);
+    assert_eq!(reopened.column_stats("t").unwrap()["val"].row_count, 1);
 }
 
 #[test]

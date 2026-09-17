@@ -4,13 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! COMMIT, ROLLBACK, and nontransactional statistics restoration.
+//! COMMIT, ROLLBACK, and retained nontransactional sequence effects.
 
 use super::{
-    Engine, NontransactionalColumnStats, NontransactionalSequenceValues, SQLError,
-    SessionLastSequenceReference, SessionStateSnapshot, StorageBackendError, StorageBackendResult,
-    StorageSavepointId, TransactionDirtyState, TransactionFrame, TransactionIntent,
-    TransactionRelationStates, TransactionStatus,
+    Engine, NontransactionalSequenceValues, SQLError, SessionLastSequenceReference,
+    SessionStateSnapshot, StorageBackendError, StorageBackendResult, StorageSavepointId,
+    TransactionDirtyState, TransactionFrame, TransactionIntent, TransactionStatus,
 };
 use crate::notifications::NotificationCommitGuard;
 use uqa_storage::mvcc::CommitErrorOutcome;
@@ -189,22 +188,10 @@ impl Engine {
         nested: bool,
         finish_error: SQLError,
     ) -> SQLError {
-        let raw_nontransactional_column_stats = stack
-            .first()
-            .map(|frame| frame.nontransactional_column_stats.clone())
-            .unwrap_or_default();
         let nontransactional_sequence_values = stack
             .first()
             .map(|frame| frame.nontransactional_sequence_values.clone())
             .unwrap_or_default();
-        let rollback_relation_states = stack
-            .first()
-            .map(|frame| frame.relation_states_at_begin.clone())
-            .unwrap_or_default();
-        let nontransactional_column_stats = self.nontransactional_column_stats_after_rollback(
-            &raw_nontransactional_column_stats,
-            &rollback_relation_states,
-        );
         let session_snapshot = stack.first().map(|frame| frame.session_snapshot.clone());
         let snapshot = stack.first().and_then(|frame| frame.data_snapshot.clone());
         let dirty_at_begin = stack
@@ -237,16 +224,6 @@ impl Engine {
             if let Err(error) = self.reload_catalog_registries_after_rollback() {
                 cleanup_errors.push(format!("registry restore: {error}"));
             }
-        }
-        if let Err(error) = self.persist_nontransactional_column_stats_after_rollback(
-            &nontransactional_column_stats,
-            true,
-        ) {
-            cleanup_errors.push(format!("ANALYZE statistics restore: {error}"));
-        }
-        if let Err(error) = self.apply_nontransactional_column_stats(&nontransactional_column_stats)
-        {
-            cleanup_errors.push(format!("ANALYZE statistics cache restore: {error}"));
         }
         if session_snapshot.is_some() {
             if let Err(error) = self.persist_nontransactional_sequence_values_after_rollback(
@@ -309,27 +286,6 @@ impl Engine {
             }
         }
         Ok(cleanup_error)
-    }
-
-    pub(super) fn retain_nontransactional_stats_for_rollback(
-        &self,
-        stack: &mut [TransactionFrame],
-        relation_states: &TransactionRelationStates,
-    ) -> NontransactionalColumnStats {
-        let raw_nontransactional_column_stats = stack
-            .first()
-            .map(|frame| frame.nontransactional_column_stats.clone())
-            .unwrap_or_default();
-        let nontransactional_column_stats = self.nontransactional_column_stats_after_rollback(
-            &raw_nontransactional_column_stats,
-            relation_states,
-        );
-        if let Some(frame) = stack.first_mut() {
-            frame
-                .nontransactional_column_stats
-                .clone_from(&nontransactional_column_stats);
-        }
-        nontransactional_column_stats
     }
 
     pub(super) fn rollback_backend_transaction_frame(
@@ -420,12 +376,6 @@ impl Engine {
             .last()
             .map(|frame| frame.nontransactional_sequence_values.clone())
             .unwrap_or_default();
-        let rollback_relation_states = stack
-            .last()
-            .map(|frame| frame.relation_states_at_begin.clone())
-            .unwrap_or_default();
-        let nontransactional_column_stats =
-            self.retain_nontransactional_stats_for_rollback(stack, &rollback_relation_states);
         let storage_savepoint = stack
             .last()
             .ok_or_else(|| SQLError::Internal("ROLLBACK without an open transaction".into()))?
@@ -448,12 +398,6 @@ impl Engine {
             .last()
             .map_or_else(TransactionDirtyState::default, |frame| frame.dirty_at_begin);
         self.restore_transaction_dirty_state(dirty_at_begin);
-        if let Err(error) = self.persist_nontransactional_column_stats_after_rollback(
-            &nontransactional_column_stats,
-            storage_savepoint.is_none(),
-        ) {
-            cleanup_errors.push(format!("ANALYZE statistics restore: {error}"));
-        }
         if let Err(error) = self.reload_persistent_value_indexes() {
             cleanup_errors.push(format!("btree restore: {error}"));
         }
@@ -464,10 +408,6 @@ impl Engine {
             if let Err(error) = self.reload_catalog_registries_after_rollback() {
                 cleanup_errors.push(format!("registry restore: {error}"));
             }
-        }
-        if let Err(error) = self.apply_nontransactional_column_stats(&nontransactional_column_stats)
-        {
-            cleanup_errors.push(format!("ANALYZE statistics cache restore: {error}"));
         }
         if let Err(error) = self.persist_nontransactional_sequence_values_after_rollback(
             &nontransactional_sequence_values,
@@ -500,83 +440,6 @@ impl Engine {
                 cleanup_errors.join("; ")
             )))
         }
-    }
-
-    pub(super) fn persist_nontransactional_column_stats_after_rollback(
-        &self,
-        stats: &NontransactionalColumnStats,
-        outer: bool,
-    ) -> StorageBackendResult<()> {
-        if !stats
-            .iter()
-            .any(|entry| entry.persistent && !entry.autonomous)
-        {
-            return Ok(());
-        }
-        if !outer {
-            let catalog = self.storage.catalog.as_ref().ok_or_else(|| {
-                StorageBackendError::Other("persistent ANALYZE statistics require a catalog".into())
-            })?;
-            for entry in stats
-                .iter()
-                .filter(|entry| entry.persistent && !entry.autonomous)
-            {
-                Self::persist_column_stats(catalog.as_ref(), &entry.table_name, &entry.stats)?;
-            }
-            return Ok(());
-        }
-        let provider = self.storage.provider.as_ref().ok_or_else(|| {
-            StorageBackendError::Other(
-                "nontransactional ANALYZE statistics require an independent session".into(),
-            )
-        })?;
-        let session = provider.open_session()?;
-        session.backend.begin_transaction()?;
-        let result = (|| {
-            for entry in stats
-                .iter()
-                .filter(|entry| entry.persistent && !entry.autonomous)
-            {
-                Self::persist_column_stats(
-                    session.catalog.as_ref(),
-                    &entry.table_name,
-                    &entry.stats,
-                )?;
-            }
-            Ok(())
-        })();
-        match result {
-            Ok(()) => session.backend.commit_transaction(),
-            Err(error) => match session.backend.rollback_transaction() {
-                Ok(()) => Err(error),
-                Err(rollback_error) => Err(StorageBackendError::Other(format!(
-                    "restore nontransactional ANALYZE statistics failed: {error}; rollback also failed: {rollback_error}"
-                ))),
-            },
-        }
-    }
-
-    pub(super) fn apply_nontransactional_column_stats(
-        &self,
-        stats: &NontransactionalColumnStats,
-    ) -> StorageBackendResult<()> {
-        for entry in stats {
-            let Some(table) = self.try_table(&entry.table_name)? else {
-                continue;
-            };
-            *table.column_stats.write() = entry.stats.clone();
-            table
-                .column_stats_loaded
-                .store(true, std::sync::atomic::Ordering::Release);
-            table
-                .column_stats_dirty
-                .store(false, std::sync::atomic::Ordering::Release);
-            if entry.persistent {
-                self.statistics
-                    .publish_column_stats(entry.table_name.clone(), entry.stats.clone());
-            }
-        }
-        Ok(())
     }
 
     pub(super) fn persist_nontransactional_sequence_values_after_rollback(
@@ -732,25 +595,5 @@ impl Engine {
         }
         self.restore_session_state(snapshot);
         self.apply_nontransactional_sequence_values(values);
-    }
-
-    pub(super) fn nontransactional_column_stats_after_rollback(
-        &self,
-        stats: &NontransactionalColumnStats,
-        relation_states: &TransactionRelationStates,
-    ) -> NontransactionalColumnStats {
-        for entry in stats {
-            self.statistics.invalidate_column_stats(&entry.table_name);
-        }
-        stats
-            .iter()
-            .filter(|entry| {
-                relation_states.iter().any(|(relation, lifecycle_id)| {
-                    relation.qualified_name() == entry.table_name
-                        && *lifecycle_id == entry.table_lifecycle_id
-                })
-            })
-            .cloned()
-            .collect()
     }
 }
