@@ -25,9 +25,10 @@ pub use physical_vectors::{
     verify_hnsw_concurrency, verify_hnsw_reopen, verify_hnsw_undo, verify_ivf_concurrency,
     verify_ivf_reopen, verify_ivf_undo,
 };
-mod ivf_merging;
-pub use ivf_merging::{
-    verify_ivf_document_merges, verify_ivf_merge_conflicts, verify_ivf_merge_reopen,
+mod vector_merging;
+pub use vector_merging::{
+    verify_vector_document_merges, verify_vector_merge_conflicts, verify_vector_merge_reopen,
+    VectorMergeKind,
 };
 mod vector_snapshots;
 pub use vector_snapshots::{verify_exact_snapshot_concurrency, verify_vector_snapshots};

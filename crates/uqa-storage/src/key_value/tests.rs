@@ -28,6 +28,7 @@ mod catalog;
 mod compound;
 mod controlled;
 mod controlled_index;
+mod hnsw_records;
 mod indexes;
 mod occurrences;
 mod tuple_metadata;

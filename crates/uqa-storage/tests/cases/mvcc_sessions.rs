@@ -10,12 +10,14 @@
 mod compound;
 #[path = "mvcc_sessions/graph.rs"]
 mod graph;
-#[path = "mvcc_sessions/ivf_merging.rs"]
-mod ivf_merging;
+#[path = "mvcc_sessions/hnsw_merging.rs"]
+mod hnsw_merging;
 #[path = "mvcc_sessions/occurrence_merging.rs"]
 mod occurrence_merging;
 #[path = "mvcc_sessions/occurrences.rs"]
 mod occurrences;
+#[path = "mvcc_sessions/vector_merging.rs"]
+mod vector_merging;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

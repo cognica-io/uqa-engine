@@ -37,6 +37,7 @@ pub(crate) enum RecordWriteKind {
     Occurrence,
     OccurrenceCache,
     IVFPreview,
+    HNSWPreview,
 }
 
 impl PreparedRecordWrite {
@@ -79,7 +80,7 @@ pub struct PreparedRecordCommit {
     writes: BudgetedVec<PreparedRecordWrite>,
     fingerprint: CommitFingerprint,
     pub(super) graph: Option<GraphEffects>,
-    pub(super) ivf: Option<super::ivf::IVFEffects>,
+    pub(super) vector: Option<super::vector::VectorEffects>,
     pub(super) resolved_at: Option<CommitSequence>,
 }
 
@@ -157,6 +158,7 @@ impl PreparedRecordCommit {
                     RecordWriteKind::Occurrence => 3,
                     RecordWriteKind::OccurrenceCache => 4,
                     RecordWriteKind::IVFPreview => 5,
+                    RecordWriteKind::HNSWPreview => 6,
                 }]);
             }
             digest.update((write.key().len() as u64).to_be_bytes());
@@ -181,7 +183,7 @@ impl PreparedRecordCommit {
             writes,
             fingerprint: digest.finalize().into(),
             graph: None,
-            ivf: None,
+            vector: None,
             resolved_at: None,
         })
     }
@@ -256,13 +258,13 @@ impl PreparedRecordCommit {
         self
     }
 
-    pub(super) fn seal_ivf_effects(
+    pub(super) fn seal_vector_effects(
         &mut self,
         fingerprint: CommitFingerprint,
-        effects: super::ivf::IVFEffects,
+        effects: super::vector::VectorEffects,
     ) {
         self.fingerprint = fingerprint;
-        self.ivf = Some(effects);
+        self.vector = Some(effects);
     }
 
     pub(crate) fn retain_graph_effects(
@@ -279,7 +281,7 @@ impl PreparedRecordCommit {
     /// Check the snapshot used to discover derived dependencies under exclusive admission, after resolving any existing receipt and before validating record heads. A mismatch proves this pending attempt has not published and permits pure effect preparation to restart.
     pub fn validate_snapshot(&self, current: CommitSequence) -> VersionResult<()> {
         if self.graph.is_some()
-            || self.ivf.is_some()
+            || self.vector.is_some()
             || self
                 .writes
                 .iter()
@@ -312,6 +314,7 @@ impl PreparedRecordCommit {
     ) -> VersionResult<()> {
         cancellation.check()?;
         if self.graph.is_some()
+            || self.vector.is_some()
             || self
                 .writes
                 .iter()

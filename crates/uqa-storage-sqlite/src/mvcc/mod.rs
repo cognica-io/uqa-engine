@@ -170,6 +170,13 @@ impl VersionedPersistence for SQLiteRecordStore {
             &uqa_storage::key_value::KeyValueIVFRecords
         }
     }
+    fn hnsw_record_layout(&self) -> Option<&dyn uqa_storage::mvcc::HNSWRecordLayout> {
+        if self.native {
+            None
+        } else {
+            Some(&uqa_storage::key_value::KeyValueHNSWRecords)
+        }
+    }
     fn allocate_transaction(
         &self,
         control: &StorageReadControl,

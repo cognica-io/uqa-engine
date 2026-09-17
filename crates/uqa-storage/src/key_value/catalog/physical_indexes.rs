@@ -21,6 +21,7 @@ pub(super) fn drop_table_indexes(
     table: &str,
 ) -> StorageBackendResult<()> {
     batch.fence_ivf_prefix(&ivf_metadata_table_prefix(table)?)?;
+    batch.fence_hnsw_prefix(&hnsw_metadata_table_prefix(table)?)?;
     for prefix in table_index_prefixes(table)? {
         batch.delete_prefix(&prefix)?;
     }
@@ -34,7 +35,9 @@ pub(super) fn rename_table_indexes(
     to: &str,
 ) -> StorageBackendResult<()> {
     batch.fence_ivf_prefix(&ivf_metadata_table_prefix(from)?)?;
+    batch.fence_hnsw_prefix(&hnsw_metadata_table_prefix(from)?)?;
     batch.fence_ivf_prefix(&ivf_metadata_table_prefix(to)?)?;
+    batch.fence_hnsw_prefix(&hnsw_metadata_table_prefix(to)?)?;
     for (old_prefix, new_prefix) in table_index_prefixes(from)?
         .into_iter()
         .zip(table_index_prefixes(to)?)
@@ -50,6 +53,7 @@ pub(super) fn drop_field_indexes(
     field: &str,
 ) -> StorageBackendResult<()> {
     batch.fence_ivf_prefix(&ivf_metadata_key(table, field)?)?;
+    batch.fence_hnsw_prefix(&hnsw_metadata_key(table, field)?)?;
     batch.delete(&btree_index_key(table, &field.into())?)?;
     for prefix in field_index_prefixes(table, field)? {
         batch.delete_prefix(&prefix)?;
@@ -65,7 +69,9 @@ pub(super) fn rename_field_indexes(
     to: &str,
 ) -> StorageBackendResult<()> {
     batch.fence_ivf_prefix(&ivf_metadata_key(table, from)?)?;
+    batch.fence_hnsw_prefix(&hnsw_metadata_key(table, from)?)?;
     batch.fence_ivf_prefix(&ivf_metadata_key(table, to)?)?;
+    batch.fence_hnsw_prefix(&hnsw_metadata_key(table, to)?)?;
     batch_rekey_prefix_or_keep_existing(
         store,
         batch,

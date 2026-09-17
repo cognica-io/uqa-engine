@@ -54,7 +54,8 @@ pub(crate) fn resolve(
             }
             RecordWriteKind::GraphCache
             | RecordWriteKind::GraphPreview
-            | RecordWriteKind::IVFPreview => {
+            | RecordWriteKind::IVFPreview
+            | RecordWriteKind::HNSWPreview => {
                 changes.apply_owned(std::slice::from_ref(write), control)?;
             }
             RecordWriteKind::Occurrence | RecordWriteKind::OccurrenceCache => {

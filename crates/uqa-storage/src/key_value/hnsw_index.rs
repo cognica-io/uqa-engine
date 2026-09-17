@@ -9,9 +9,10 @@
 use std::sync::Arc;
 use uqa_core::{DocId, PostingList};
 
+use super::codec::encode_value;
 use super::codec::{other_error, vector_field_prefix};
-use super::hnsw_persistence;
-use super::index_keys::{hnsw_metadata_key, hnsw_node_prefix};
+use super::hnsw_persistence::{self, metadata_from_graph, PersistedHNSWNode};
+use super::index_keys::{hnsw_metadata_key, hnsw_node_key, hnsw_node_prefix};
 use super::{KeyValueBatch, KeyValueRead, KeyValueStore, KeyValueVectorIndex};
 use crate::hnsw_index::{HNSWIndex, HNSWMutation, HNSWPersistenceDelta};
 use crate::vector_index::{HNSWIndexParams, VectorIndex};
@@ -116,8 +117,14 @@ impl KeyValueHNSWIndex {
             let cached = self.graph_at(read)?;
             let delta = cached.value.prepare_delta(mutation, read.control())?;
             canonical(batch)?;
+            let preview = !cached.definition_candidate
+                && cached.revision.is_some()
+                && !matches!(mutation, HNSWMutation::Clear);
+            if preview {
+                batch.hnsw_mutation(&hnsw_metadata_key(&self.table, &self.field)?, mutation)?;
+            }
             // Only a later reader publishes the graph with its actual committed/private identity.
-            self.stage_delta(batch, &delta, next_revision(cached.revision)?)
+            self.stage_delta(batch, &delta, next_revision(cached.revision)?, preview)
         })
     }
 
@@ -137,7 +144,7 @@ impl KeyValueHNSWIndex {
                 &vectors,
                 read.control(),
             )?;
-            self.stage_delta(batch, &delta, next_revision(revision)?)
+            self.stage_delta(batch, &delta, next_revision(revision)?, false)
         })
     }
 
@@ -162,16 +169,39 @@ impl KeyValueHNSWIndex {
         batch: &mut dyn KeyValueBatch,
         delta: &HNSWPersistenceDelta,
         revision: u64,
+        preview: bool,
     ) -> StorageBackendResult<()> {
-        hnsw_persistence::stage_delta(
-            batch,
-            &self.table,
-            &self.field,
+        let metadata = hnsw_metadata_key(&self.table, &self.field)?;
+        let value = encode_value(&metadata_from_graph(
             self.dimensions,
             self.params,
-            delta,
+            delta.meta,
             revision,
-        )
+        )?)?;
+        if preview {
+            batch.preview_hnsw_record(&metadata, Some(&value))?;
+        } else {
+            batch.fence_hnsw_prefix(&metadata)?;
+            batch.put(&metadata, &value)?;
+        }
+        if delta.full_rewrite {
+            let prefix = hnsw_node_prefix(&self.table, &self.field)?;
+            if preview {
+                batch.preview_hnsw_prefix(&prefix)?;
+            } else {
+                batch.delete_prefix(&prefix)?;
+            }
+        }
+        for node in &delta.nodes {
+            let key = hnsw_node_key(&self.table, &self.field, node.node_id)?;
+            let value = encode_value(&PersistedHNSWNode::try_from(node)?)?;
+            if preview {
+                batch.preview_hnsw_record(&key, Some(&value))?;
+            } else {
+                batch.put(&key, &value)?;
+            }
+        }
+        Ok(())
     }
 }
 

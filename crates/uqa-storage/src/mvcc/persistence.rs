@@ -140,6 +140,11 @@ pub trait VersionedPersistence: Send + Sync {
         &crate::key_value::KeyValueIVFRecords
     }
 
+    /// Native adapters must override this when their physical node and edge families differ.
+    fn hnsw_record_layout(&self) -> Option<&dyn super::HNSWRecordLayout> {
+        Some(&crate::key_value::KeyValueHNSWRecords)
+    }
+
     /// Persist a new transaction allocation before returning it, without advancing record visibility.
     fn allocate_transaction(
         &self,

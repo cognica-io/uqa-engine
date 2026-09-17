@@ -6,10 +6,9 @@
 
 //! Retained immutable document inputs and their sealed transaction fingerprint.
 
-use crate::mvcc::{
-    key::RecordKey, CommitSequence, PreparedRecordCommit, VersionError, VersionResult,
-};
-use crate::{ivf_index::IVFMutation, read_control::StorageReadControl};
+use super::{IndexKind, Mutation};
+use crate::mvcc::{key::RecordKey, CommitSequence, PreparedRecordCommit, VersionResult};
+use crate::read_control::StorageReadControl;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use uqa_core::{
@@ -18,21 +17,23 @@ use uqa_core::{
 };
 
 #[derive(Clone)]
-pub(in crate::mvcc) struct OwnedIVFMutation {
+pub(in crate::mvcc) struct OwnedVectorMutation {
+    pub(in crate::mvcc) kind: IndexKind,
     pub(in crate::mvcc) metadata: RecordKey,
     pub(in crate::mvcc) document: DocId,
     vectors: Option<Arc<Budgeted<Vec<Vec<f32>>>>>,
 }
 
-impl OwnedIVFMutation {
+impl OwnedVectorMutation {
     pub(in crate::mvcc) fn retain(
+        kind: IndexKind,
         metadata: &[u8],
-        mutation: IVFMutation<'_>,
+        mutation: Mutation<'_>,
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
         control.cancellation().check()?;
         let (document, vectors) = match mutation {
-            IVFMutation::Replace { document, vectors } => {
+            Mutation::Replace { document, vectors } => {
                 let mut bytes = vectors
                     .len()
                     .checked_mul(size_of::<Vec<f32>>())
@@ -56,24 +57,20 @@ impl OwnedIVFMutation {
                 }
                 (document, Some(Budgeted::new(owned, memory).into_shared()?))
             }
-            IVFMutation::Delete(document) => (document, None),
-            IVFMutation::Clear | IVFMutation::Train => {
-                return Err(VersionError::InvalidEncoding(
-                    "structural IVF changes require conditional publication",
-                ))
-            }
+            Mutation::Delete(document) => (document, None),
         };
         Ok(Self {
+            kind,
             metadata: RecordKey::new(metadata, control.memory())?,
             document,
             vectors,
         })
     }
-    pub(in crate::mvcc) fn borrowed(&self) -> IVFMutation<'_> {
+    pub(in crate::mvcc) fn borrowed(&self) -> Mutation<'_> {
         self.vectors
             .as_ref()
-            .map_or(IVFMutation::Delete(self.document), |vectors| {
-                IVFMutation::Replace {
+            .map_or(Mutation::Delete(self.document), |vectors| {
+                Mutation::Replace {
                     document: self.document,
                     vectors,
                 }
@@ -81,15 +78,15 @@ impl OwnedIVFMutation {
     }
 }
 
-pub(in crate::mvcc) struct IVFEffects {
-    pub(in crate::mvcc) operations: BudgetedVec<OwnedIVFMutation>,
+pub(in crate::mvcc) struct VectorEffects {
+    pub(in crate::mvcc) operations: BudgetedVec<OwnedVectorMutation>,
 }
 
 impl PreparedRecordCommit {
-    pub(in crate::mvcc) fn with_ivf_effects(
+    pub(in crate::mvcc) fn with_vector_effects(
         mut self,
         base: CommitSequence,
-        operations: &[OwnedIVFMutation],
+        operations: &[OwnedVectorMutation],
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
         if operations.is_empty() {
@@ -98,12 +95,13 @@ impl PreparedRecordCommit {
         let mut owned = BudgetedVec::new(control.memory());
         owned.reserve(operations.len())?;
         let mut digest = Sha256::new();
-        digest.update(b"UQA prepared IVF effects 1");
+        digest.update(b"UQA prepared vector effects 1");
         digest.update(self.fingerprint());
         digest.update(base.as_u64().to_be_bytes());
         digest.update((operations.len() as u64).to_be_bytes());
         for operation in operations {
             control.cancellation().check()?;
+            digest.update([operation.kind.fingerprint_tag()]);
             let key = operation.metadata.bytes();
             digest.update((key.len() as u64).to_be_bytes());
             for part in key.chunks(4096) {
@@ -126,7 +124,10 @@ impl PreparedRecordCommit {
             }
             owned.push(operation.clone())?;
         }
-        self.seal_ivf_effects(digest.finalize().into(), IVFEffects { operations: owned });
+        self.seal_vector_effects(
+            digest.finalize().into(),
+            VectorEffects { operations: owned },
+        );
         Ok(self)
     }
 }

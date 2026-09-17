@@ -8,11 +8,11 @@
 
 use std::collections::BTreeMap;
 
+use super::super::{layout::Layout, Key, Mutation};
 use crate::{
-    ivf_index::IVFMutation,
     mvcc::{
-        commit::RecordWriteKind, CommittedRecordSnapshot, IVFRecordKey, IVFRecordLayout,
-        PreparedRecordWrite, VersionError, VersionResult,
+        commit::RecordWriteKind, CommittedRecordSnapshot, PreparedRecordWrite, VersionError,
+        VersionResult,
     },
     read_control::StorageReadControl,
 };
@@ -20,20 +20,19 @@ use uqa_core::{memory::BudgetedVec, DocId};
 
 pub(super) fn validate(
     metadata: &[u8],
-    operations: &[IVFMutation<'_>],
+    operations: &[Mutation<'_>],
     writes: &BTreeMap<&[u8], &PreparedRecordWrite>,
     base: &dyn CommittedRecordSnapshot,
-    layout: &dyn IVFRecordLayout,
+    layout: Layout<'_>,
     control: &StorageReadControl,
 ) -> VersionResult<()> {
-    let invalid = || VersionError::InvalidEncoding("IVF inputs disagree with canonical tensors");
+    let invalid = || VersionError::InvalidEncoding("vector inputs disagree with canonical tensors");
     let mut ordered = BudgetedVec::new(control.memory());
     for (position, operation) in operations.iter().enumerate() {
         control.cancellation().check()?;
         let (document, vectors): (DocId, &[Vec<f32>]) = match operation {
-            IVFMutation::Replace { document, vectors } => (*document, vectors),
-            IVFMutation::Delete(document) => (*document, &[]),
-            _ => return Err(invalid()),
+            Mutation::Replace { document, vectors } => (*document, vectors),
+            Mutation::Delete(document) => (*document, &[]),
         };
         ordered.push((document, position, vectors))?;
     }
@@ -45,7 +44,7 @@ pub(super) fn validate(
             .filter(|(id, _, _)| *id == document)
             .map(|(_, _, vectors)| *vectors)
     };
-    let prefix = layout.key(metadata, IVFRecordKey::Vectors, control)?;
+    let prefix = layout.key(metadata, Key::Vectors, control)?;
     let mut count = 0;
     for (key, write) in writes.range::<[u8], _>((
         std::ops::Bound::Included(&*prefix),

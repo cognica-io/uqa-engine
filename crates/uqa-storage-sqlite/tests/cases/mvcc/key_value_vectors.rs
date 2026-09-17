@@ -85,7 +85,7 @@ fn key_value_ivf_and_exact_independent_commits_and_reopen_in_every_sqlite_mode()
 }
 
 #[test]
-fn merged_ivf_generations_conflicts_and_reopen_in_every_sqlite_mode() {
+fn merged_vector_generations_conflicts_and_reopen_in_every_sqlite_mode() {
     for mode in MODES {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("ivf-merges.db");
@@ -94,11 +94,14 @@ fn merged_ivf_generations_conflicts_and_reopen_in_every_sqlite_mode() {
                 Arc::new(SQLiteKeyValueStore::new(open(mode, &path)).unwrap());
             let b: Arc<dyn KeyValueStore> =
                 Arc::new(SQLiteKeyValueStore::new(open(mode, &path)).unwrap());
-            verify_ivf_document_merges(&a, &b).unwrap();
-            verify_ivf_merge_conflicts(&a, &b).unwrap();
+            verify_vector_document_merges(&a, &b, VectorMergeKind::IVF).unwrap();
+            verify_vector_document_merges(&a, &b, VectorMergeKind::HNSW).unwrap();
+            verify_vector_merge_conflicts(&a, &b, VectorMergeKind::IVF).unwrap();
+            verify_vector_merge_conflicts(&a, &b, VectorMergeKind::HNSW).unwrap();
         }
         let reopened: Arc<dyn KeyValueStore> =
             Arc::new(SQLiteKeyValueStore::new(open(mode, &path)).unwrap());
-        verify_ivf_merge_reopen(&reopened).unwrap();
+        verify_vector_merge_reopen(&reopened, VectorMergeKind::IVF).unwrap();
+        verify_vector_merge_reopen(&reopened, VectorMergeKind::HNSW).unwrap();
     }
 }

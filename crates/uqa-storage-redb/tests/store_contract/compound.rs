@@ -80,17 +80,20 @@ fn occurrence_snapshots_independent_commits_and_reopen() {
 }
 
 #[test]
-fn merged_ivf_generations_conflicts_and_reopen() {
+fn merged_vector_generations_conflicts_and_reopen() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("ivf-merges.redb");
     {
         let storage = RedbStorage::open(&path).unwrap();
         let a: Arc<dyn KeyValueStore> = Arc::new(storage.store());
         let b: Arc<dyn KeyValueStore> = Arc::new(storage.store());
-        verify_ivf_document_merges(&a, &b).unwrap();
-        verify_ivf_merge_conflicts(&a, &b).unwrap();
+        verify_vector_document_merges(&a, &b, VectorMergeKind::IVF).unwrap();
+        verify_vector_document_merges(&a, &b, VectorMergeKind::HNSW).unwrap();
+        verify_vector_merge_conflicts(&a, &b, VectorMergeKind::IVF).unwrap();
+        verify_vector_merge_conflicts(&a, &b, VectorMergeKind::HNSW).unwrap();
     }
     let reopened = RedbStorage::open(&path).unwrap();
     let store: Arc<dyn KeyValueStore> = Arc::new(reopened.store());
-    verify_ivf_merge_reopen(&store).unwrap();
+    verify_vector_merge_reopen(&store, VectorMergeKind::IVF).unwrap();
+    verify_vector_merge_reopen(&store, VectorMergeKind::HNSW).unwrap();
 }

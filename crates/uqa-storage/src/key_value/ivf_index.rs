@@ -85,6 +85,7 @@ impl KeyValueIVFIndex {
     ) -> StorageBackendResult<()> {
         let mut batch = store.batch();
         batch.fence_ivf_prefix(&ivf_metadata_key(table, field)?)?;
+        batch.fence_hnsw_prefix(&hnsw_metadata_key(table, field)?)?;
         batch.delete(&ivf_metadata_key(table, field)?)?;
         batch.delete_prefix(&ivf_centroid_prefix(table, field)?)?;
         batch.delete_prefix(&ivf_assignment_prefix(table, field)?)?;

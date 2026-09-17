@@ -6,7 +6,6 @@
 
 //! Evaluated IVF document changes and provider-owned record codecs.
 
-mod effects;
 mod resolve;
 
 use super::VersionResult;
@@ -98,5 +97,4 @@ pub trait IVFRecordLayout: Send + Sync {
     ) -> VersionResult<BudgetedVec<u8>>;
 }
 
-pub(super) use effects::{IVFEffects, OwnedIVFMutation};
-pub(super) use resolve::resolve;
+pub(super) use resolve::merge;

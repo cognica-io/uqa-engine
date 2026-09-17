@@ -7,7 +7,7 @@
 //! Key/Value IVF wire records; numerical preparation belongs to the common index owner.
 
 use super::{
-    codec::{decode_u64_value, decode_value, read_segment, read_u64},
+    codec::{decode_u64_value, decode_value},
     ivf_persistence::{metadata_from_snapshot, PersistedIVFMetadata, IVF_FORMAT_VERSION},
     TAG_IVF_ASSIGNMENT, TAG_IVF_CENTROID, TAG_IVF_METADATA, TAG_VECTOR,
 };
@@ -19,54 +19,8 @@ use crate::{
 };
 use uqa_core::{memory::BudgetedVec, DocId};
 
-// These tombstone fences are outside canonical/index data, so drop/recreation cannot recycle them.
-const GUARD: u8 = b'y';
+use super::vector_records::{ordinal, tail, usize_value, vector_bytes, GUARD};
 pub struct KeyValueIVFRecords;
-
-fn field_end(key: &[u8]) -> VersionResult<usize> {
-    let mut offset = 1;
-    for _ in 0..2 {
-        let name = read_segment(key, &mut offset)?;
-        std::str::from_utf8(name).map_err(|_| VersionError::InvalidEncoding("invalid IVF name"))?;
-    }
-    Ok(offset)
-}
-fn tail(key: &[u8], tag: u8, numbers: usize) -> VersionResult<(usize, [u64; 2])> {
-    if key.first() != Some(&tag) {
-        return Err(VersionError::InvalidEncoding("wrong IVF record family"));
-    }
-    let end = field_end(key)?;
-    let mut offset = end;
-    let mut output = [0; 2];
-    for number in output.iter_mut().take(numbers) {
-        *number = read_u64(key, &mut offset)?;
-    }
-    if offset != key.len() {
-        return Err(VersionError::InvalidEncoding("invalid IVF key suffix"));
-    }
-    Ok((end, output))
-}
-fn usize_value(value: u64) -> VersionResult<usize> {
-    usize::try_from(value)
-        .map_err(|_| VersionError::InvalidEncoding("IVF counter exceeds addressable memory"))
-}
-fn ordinal(value: u64) -> VersionResult<u32> {
-    u32::try_from(value).map_err(|_| VersionError::InvalidEncoding("invalid IVF vector ordinal"))
-}
-fn vector_bytes(value: &[u8], control: &StorageReadControl) -> VersionResult<BudgetedVec<f32>> {
-    if !value.len().is_multiple_of(4) {
-        return Err(VersionError::InvalidEncoding("invalid IVF vector payload"));
-    }
-    let mut output = BudgetedVec::new(control.memory());
-    output.reserve(value.len() / 4)?;
-    for bytes in value.chunks_exact(4) {
-        control.cancellation().check()?;
-        output.push(f32::from_le_bytes(
-            bytes.try_into().expect("four-byte chunk"),
-        ))?;
-    }
-    Ok(output)
-}
 
 impl IVFRecordLayout for KeyValueIVFRecords {
     fn metadata_key(
@@ -212,17 +166,7 @@ impl IVFRecordLayout for KeyValueIVFRecords {
                         "missing IVF mutation counter",
                     ))?,
                 )?;
-                let mut writer = JsonWriter {
-                    output,
-                    control,
-                    failure: None,
-                };
-                let encoded = serde_json::to_writer(&mut writer, &meta);
-                if let Some(error) = writer.failure {
-                    return Err(error);
-                }
-                encoded.map_err(crate::StorageBackendError::from)?;
-                return Ok(writer.output);
+                return super::record_json::encode(&meta, control);
             }
             IVFRecordValue::Centroid(vector) => {
                 tail(key, TAG_IVF_CENTROID, 1)?;
@@ -237,33 +181,5 @@ impl IVFRecordLayout for KeyValueIVFRecords {
             }
         }
         Ok(output)
-    }
-}
-
-struct JsonWriter<'a> {
-    output: BudgetedVec<u8>,
-    control: &'a StorageReadControl,
-    failure: Option<VersionError>,
-}
-impl std::io::Write for JsonWriter<'_> {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        let result = self
-            .control
-            .cancellation()
-            .check()
-            .map_err(VersionError::from)
-            .and_then(|()| {
-                self.output
-                    .extend_from_slice(bytes)
-                    .map_err(VersionError::from)
-            });
-        if let Err(error) = result {
-            self.failure = Some(error);
-            return Err(std::io::Error::other("IVF encoding interrupted"));
-        }
-        Ok(bytes.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
     }
 }
