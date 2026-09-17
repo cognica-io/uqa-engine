@@ -119,7 +119,11 @@ impl RowLockManager {
 
     #[doc(hidden)]
     pub fn waiting_for_backend_writer(&self, session_id: u64) -> bool {
-        let key = self.backend_writer_key();
+        self.waiting_for_relation(session_id, self.backend_writer_key())
+    }
+
+    #[doc(hidden)]
+    pub fn waiting_for_relation(&self, session_id: u64, key: u64) -> bool {
         self.state
             .lock()
             .waiting_relations

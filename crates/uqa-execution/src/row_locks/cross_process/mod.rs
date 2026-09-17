@@ -61,6 +61,8 @@ const ROW_BASE: u64 = 1 << 21;
 const CHANGE_GATE_BYTE: u64 = 9;
 /// Row byte pairs occupy `[ROW_BASE, ROW_BASE + 2 * ROW_SPAN)`. Record-lock offsets travel through `off_t`, so the span is sized to the platform's `off_t` width: 2^40 rows on 64-bit `off_t`, and the largest power of two that keeps every offset below `i32::MAX` where `off_t` is 32 bits.
 const ROW_SPAN: u64 = row_span_for_offset_width(std::mem::size_of::<OffsetWidth>());
+const RELATION_MODE_BASE: u64 = ROW_BASE + 2 * ROW_SPAN;
+const RELATION_WAIT_BASE: u64 = RELATION_MODE_BASE + 8 * RELATION_SPAN;
 
 #[cfg(all(unix, not(target_os = "emscripten")))]
 type OffsetWidth = libc::off_t;
@@ -81,6 +83,16 @@ const fn row_span_for_offset_width(bytes: usize) -> u64 {
 pub(super) struct ByteClaim {
     pub offset: u64,
     pub write: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    not(any(windows, all(unix, not(target_os = "emscripten")))),
+    allow(dead_code)
+)]
+pub(super) enum RelationClaimWait {
+    AdmissionBusy,
+    Conflict(ByteClaim),
 }
 
 pub(super) const fn change_gate_claim(write: bool) -> ByteClaim {
@@ -122,12 +134,60 @@ pub(super) fn row_byte_claims(
     }
 }
 
-pub(super) fn relation_byte_claims(relation: &[u8], mode: RelationLockMode) -> Vec<ByteClaim> {
+pub(super) fn relation_byte_claims(relation: &[u8], mode: RelationLockMode) -> [ByteClaim; 2] {
     let offset = RELATION_BASE + stable_hash(&[relation]) % RELATION_SPAN;
-    vec![ByteClaim {
-        offset,
-        write: matches!(mode, RelationLockMode::AccessExclusive),
-    }]
+    [
+        ByteClaim {
+            offset,
+            write: matches!(mode, RelationLockMode::AccessExclusive),
+        },
+        relation_mode_claim(relation, mode, false),
+    ]
+}
+
+/// Each held mode occupies its own shared byte. Admission checks incompatible bytes exclusively before publishing a new holder; this also represents mutually conflicting modes that are individually self-compatible.
+pub(super) fn relation_mode_claim(
+    relation: &[u8],
+    mode: RelationLockMode,
+    write: bool,
+) -> ByteClaim {
+    ByteClaim {
+        offset: RELATION_MODE_BASE + (stable_hash(&[relation]) % RELATION_SPAN) * 8 + mode as u64,
+        write,
+    }
+}
+
+/// A wait descriptor names the complete requested mode, including every conflicting holder. This address is metadata only and is never claimed as a native lock byte.
+pub(super) fn relation_wait_claim(relation: &[u8], mode: RelationLockMode) -> ByteClaim {
+    ByteClaim {
+        offset: RELATION_WAIT_BASE + (stable_hash(&[relation]) % RELATION_SPAN) * 8 + mode as u64,
+        write: true,
+    }
+}
+
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(super) fn wait_blocking_claims(wanted: ByteClaim) -> impl Iterator<Item = ByteClaim> + Clone {
+    let mut claims = [None; 9];
+    if (RELATION_WAIT_BASE..RELATION_WAIT_BASE + 8 * RELATION_SPAN).contains(&wanted.offset) {
+        let position = wanted.offset - RELATION_WAIT_BASE;
+        let mode = RelationLockMode::ALL[(position % 8) as usize];
+        let relation = position / 8;
+        claims[0] = Some(ByteClaim {
+            offset: RELATION_BASE + relation,
+            write: mode == RelationLockMode::AccessExclusive,
+        });
+        for (index, held) in RelationLockMode::ALL.into_iter().enumerate() {
+            if mode.conflicts_with(held) {
+                claims[index + 1] = Some(ByteClaim {
+                    offset: RELATION_MODE_BASE + relation * 8 + index as u64,
+                    write: true,
+                });
+            }
+        }
+    } else {
+        claims[0] = Some(wanted);
+    }
+    claims.into_iter().flatten()
 }
 
 /// Stable identity of a structural relation lock target shared by every process.
@@ -164,7 +224,7 @@ pub(super) use fallback::FileLockCoordinator;
 mod fallback {
     use std::path::Path;
 
-    use super::ByteClaim;
+    use super::{ByteClaim, RelationClaimWait, RelationLockMode};
 
     /// Sandboxed targets without native processes retain process-local lock semantics instead of rejecting every persistent mutation.
     pub(in crate::row_locks) struct FileLockCoordinator {}
@@ -179,6 +239,15 @@ mod fallback {
             _session: u64,
             _claims: &[ByteClaim],
         ) -> Result<Result<(), ByteClaim>, String> {
+            Ok(Ok(()))
+        }
+
+        pub(in crate::row_locks) fn try_relation_claim(
+            &self,
+            _session: u64,
+            _relation: &[u8],
+            _mode: RelationLockMode,
+        ) -> Result<Result<(), RelationClaimWait>, String> {
             Ok(Ok(()))
         }
 

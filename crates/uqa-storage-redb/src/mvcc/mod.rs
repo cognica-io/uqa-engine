@@ -45,7 +45,7 @@ pub struct RedbRecordStore {
 
 impl RedbRecordStore {
     pub(crate) fn migrate_key_value(&self) -> VersionResult<()> {
-        migration::migrate(&self.database)
+        migration::migrate(&self.database, self.identity)
     }
 
     pub(crate) fn new(database: Arc<Database>) -> VersionResult<Self> {
@@ -65,7 +65,7 @@ impl RedbRecordStore {
                 .map(|value| codec::decode_u64(value.value()))
                 .transpose()?;
             if let Some(format) = initialized {
-                if !matches!(format, 1..=9) {
+                if !matches!(format, 1..=10) {
                     return Err(VersionError::InvalidEncoding("unknown record format"));
                 }
                 if present != if format < 5 { 15 } else { 31 } {
@@ -76,9 +76,9 @@ impl RedbRecordStore {
                 read_u64(&metadata, "allocated")?;
                 read_u64(&metadata, "sequence")?;
                 let identity = codec::database_id(&metadata)?;
-                if format < 9 {
+                if format < 10 {
                     metadata
-                        .insert("format", 9_u64.to_be_bytes().as_slice())
+                        .insert("format", 10_u64.to_be_bytes().as_slice())
                         .map_err(redb_error)?;
                 }
                 identity
@@ -124,7 +124,7 @@ impl RedbRecordStore {
                     .insert("database", bytes.as_slice())
                     .map_err(redb_error)?;
                 metadata
-                    .insert("format", 9_u64.to_be_bytes().as_slice())
+                    .insert("format", 10_u64.to_be_bytes().as_slice())
                     .map_err(redb_error)?;
                 metadata
                     .insert("allocated", 0_u64.to_be_bytes().as_slice())
@@ -152,6 +152,8 @@ impl RedbRecordStore {
         prepared: &PreparedRecordCommit,
         control: &StorageReadControl,
     ) -> VersionResult<(CommitReceipt, bool)> {
+        let mut metadata = transaction.open_table(METADATA).map_err(redb_error)?;
+        codec::validate_metadata(&metadata, id.database())?;
         let mut receipts = transaction.open_table(TRANSACTIONS).map_err(redb_error)?;
         if let Some(receipt) =
             resolve_prepared_receipt(status(&receipts, id)?, id, prepared.fingerprint())?
@@ -159,7 +161,6 @@ impl RedbRecordStore {
             return Ok((receipt, false));
         }
         let mut heads = transaction.open_table(HEADS).map_err(redb_error)?;
-        let mut metadata = transaction.open_table(METADATA).map_err(redb_error)?;
         let current = CommitSequence::from_u64(read_u64(&metadata, "sequence")?);
         prepared.validate_snapshot(current)?;
         prepared.validate(control.cancellation(), |key| {
@@ -250,6 +251,7 @@ impl VersionedPersistence for RedbRecordStore {
         let transaction = physical_writer(&self.database)?;
         let id = {
             let mut metadata = transaction.open_table(METADATA).map_err(redb_error)?;
+            codec::validate_metadata(&metadata, self.identity)?;
             let allocation = read_u64(&metadata, "allocated")?
                 .checked_add(1)
                 .ok_or(VersionError::TransactionIdsExhausted)?;
@@ -275,14 +277,15 @@ impl VersionedPersistence for RedbRecordStore {
     ) -> VersionResult<Arc<dyn CommittedRecordSnapshot>> {
         control.cancellation().check()?;
         let transaction = self.database.begin_read().map_err(redb_error)?;
-        let sequence = read_u64(
-            &transaction.open_table(METADATA).map_err(redb_error)?,
-            "sequence",
-        )?;
+        let metadata = transaction.open_table(METADATA).map_err(redb_error)?;
+        codec::validate_metadata(&metadata, self.identity)?;
+        let sequence = read_u64(&metadata, "sequence")?;
+        drop(metadata);
         drop(transaction);
         uqa_storage::mvcc::retain_record_snapshot(
             read::Snapshot {
                 database: Arc::clone(&self.database),
+                identity: self.identity,
                 sequence: CommitSequence::from_u64(sequence),
             },
             control,
@@ -319,6 +322,10 @@ impl VersionedPersistence for RedbRecordStore {
         control.cancellation().check()?;
         self.check_identity(id)?;
         let transaction = self.database.begin_read().map_err(redb_error)?;
+        codec::validate_metadata(
+            &transaction.open_table(METADATA).map_err(redb_error)?,
+            self.identity,
+        )?;
         status(
             &transaction.open_table(TRANSACTIONS).map_err(redb_error)?,
             id,
@@ -333,6 +340,10 @@ impl VersionedPersistence for RedbRecordStore {
         control.cancellation().check()?;
         self.check_identity(id)?;
         let transaction = physical_writer(&self.database)?;
+        codec::validate_metadata(
+            &transaction.open_table(METADATA).map_err(redb_error)?,
+            self.identity,
+        )?;
         let outcome = {
             let mut receipts = transaction.open_table(TRANSACTIONS).map_err(redb_error)?;
             match status(&receipts, id)? {

@@ -9,7 +9,7 @@
 use super::{lock_would_block, ByteClaim, CoordinatorState, FileLockCoordinator};
 
 impl FileLockCoordinator {
-    fn release_one(&self, state: &mut CoordinatorState, session: u64, claim: ByteClaim) {
+    pub(super) fn release_one(&self, state: &mut CoordinatorState, session: u64, claim: ByteClaim) {
         self.clear_holder_slot(state, session, claim);
         if let Some(holders) = state.holders.get_mut(&claim.offset) {
             if let Some(position) = holders.iter().position(|holder| *holder == session) {
@@ -45,6 +45,15 @@ impl FileLockCoordinator {
         claims: &[ByteClaim],
     ) -> Result<Result<(), ByteClaim>, String> {
         let mut state = self.state.lock();
+        self.try_claim_in(&mut state, session, claims)
+    }
+
+    pub(super) fn try_claim_in(
+        &self,
+        state: &mut CoordinatorState,
+        session: u64,
+        claims: &[ByteClaim],
+    ) -> Result<Result<(), ByteClaim>, String> {
         let mut applied: Vec<ByteClaim> = Vec::with_capacity(claims.len());
         for claim in claims {
             let counts = state.claims.entry(claim.offset).or_default();
@@ -68,7 +77,7 @@ impl FileLockCoordinator {
                         state.claims.remove(&claim.offset);
                     }
                     for undo in applied.iter().rev() {
-                        self.release_one(&mut state, session, *undo);
+                        self.release_one(state, session, *undo);
                     }
                     if lock_would_block(&error) {
                         return Ok(Err(*claim));
@@ -77,7 +86,7 @@ impl FileLockCoordinator {
                 }
             }
             state.holders.entry(claim.offset).or_default().push(session);
-            self.register_holder_slot(&mut state, session, *claim);
+            self.register_holder_slot(state, session, *claim);
             applied.push(*claim);
         }
         Ok(Ok(()))

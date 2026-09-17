@@ -87,6 +87,7 @@ pub(in crate::row_locks) struct FileLockCoordinator {
 mod claims;
 mod journal;
 mod platform;
+mod relations;
 mod waits;
 mod xids;
 

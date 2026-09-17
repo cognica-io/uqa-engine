@@ -7,7 +7,7 @@
 //! Atomically replace the legacy byte table with versioned records and a typed old-writer guard.
 
 use redb::{Database, ReadableTable, TableDefinition, TableHandle, WriteTransaction};
-use uqa_storage::mvcc::{CommitSequence, VersionError, VersionResult};
+use uqa_storage::mvcc::{CommitSequence, DatabaseId, VersionError, VersionResult};
 
 use super::{codec::read_u64, physical_writer, HEADS, METADATA, VERSIONS};
 use crate::error::redb_error;
@@ -16,10 +16,11 @@ const LEGACY: TableDefinition<&[u8], &[u8]> = TableDefinition::new("uqa_key_valu
 const LEGACY_METADATA: TableDefinition<&str, u64> = TableDefinition::new("uqa_storage_metadata");
 const GUARD: TableDefinition<u8, u8> = TableDefinition::new("uqa_key_value");
 
-pub(super) fn migrate(database: &Database) -> VersionResult<()> {
+pub(super) fn migrate(database: &Database, identity: DatabaseId) -> VersionResult<()> {
     let transaction = physical_writer(database)?;
     {
         let mut metadata = transaction.open_table(METADATA).map_err(redb_error)?;
+        super::codec::validate_metadata(&metadata, identity)?;
         if metadata
             .get("key_value_format")
             .map_err(redb_error)?

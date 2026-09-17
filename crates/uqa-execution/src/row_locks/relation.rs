@@ -6,17 +6,43 @@
 
 //! Relation-lock grants and acquisition lifecycle.
 
+use super::cross_process::{relation_wait_claim, RelationClaimWait};
 use super::{
     deadlock_detected, relation_byte_claims, relation_deadlock_exists, CrossAttachment,
     CrossWaitGuard, LockTable, RowLockManager, SQLError, WAIT_SLICE,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
 pub enum RelationLockMode {
     AccessShare,
     RowShare,
     RowExclusive,
+    ShareUpdateExclusive,
+    Share,
+    ShareRowExclusive,
+    Exclusive,
     AccessExclusive,
+}
+
+impl RelationLockMode {
+    #[cfg(any(test, windows, all(unix, not(target_os = "emscripten"))))]
+    pub(super) const ALL: [Self; 8] = [
+        Self::AccessShare,
+        Self::RowShare,
+        Self::RowExclusive,
+        Self::ShareUpdateExclusive,
+        Self::Share,
+        Self::ShareRowExclusive,
+        Self::Exclusive,
+        Self::AccessExclusive,
+    ];
+
+    /// The `PostgreSQL` table-lock conflict sets are not an ordering of strengths.
+    pub fn conflicts_with(self, other: Self) -> bool {
+        const CONFLICTS: [u8; 8] = [0x80, 0xc0, 0xf0, 0xf8, 0xec, 0xfc, 0xfe, 0xff];
+        CONFLICTS[self as usize] & (1 << other as u8) != 0
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -32,12 +58,11 @@ pub(super) struct RelationLockGrant {
 }
 
 impl RelationLockGrant {
-    pub(super) fn effective_mode(&self) -> RelationLockMode {
+    pub(super) fn conflicting_mode(&self, requested: RelationLockMode) -> Option<RelationLockMode> {
         self.acquisitions
             .iter()
             .map(|acquisition| acquisition.mode)
-            .max()
-            .expect("relation-lock grant must retain an acquisition")
+            .find(|mode| mode.conflicts_with(requested))
     }
 }
 
@@ -64,9 +89,6 @@ impl RowLockManager {
     ) -> Result<(), SQLError> {
         let coordinator = self.coordinator()?;
         let relation = self.relation_bytes(table);
-        let claims = coordinator
-            .map(|_| relation_byte_claims(&relation, mode))
-            .unwrap_or_default();
         let cross_wait = CrossWaitGuard::new(self, coordinator, session_id);
         loop {
             let mut state = self.state.lock();
@@ -79,7 +101,7 @@ impl RowLockManager {
             let contended_claim =
                 match try_grant_relation(&mut state, session_id, table, mode, mark) {
                     RelationGrantAttempt::Conflict => {
-                        coordinator.and_then(|_| claims.first().copied())
+                        coordinator.map(|_| relation_wait_claim(&relation, mode))
                     }
                     RelationGrantAttempt::AlreadyHeld => {
                         state.waiting_relations.remove(&session_id);
@@ -87,16 +109,27 @@ impl RowLockManager {
                     }
                     RelationGrantAttempt::Granted => {
                         let foreign_conflict = match coordinator {
-                            Some(coordinator) => match coordinator.try_claim(session_id, &claims) {
-                                Ok(Ok(())) => None,
-                                Ok(Err(contended)) => Some(contended),
-                                Err(error) => {
-                                    rollback_relation_grant(&mut state, session_id, table);
-                                    drop(state);
-                                    self.wake.notify_all();
-                                    return Err(SQLError::Internal(error));
+                            Some(coordinator) => {
+                                match coordinator.try_relation_claim(session_id, &relation, mode) {
+                                    Ok(Ok(())) => None,
+                                    Ok(Err(RelationClaimWait::Conflict(_))) => {
+                                        Some(relation_wait_claim(&relation, mode))
+                                    }
+                                    Ok(Err(RelationClaimWait::AdmissionBusy)) => {
+                                        rollback_relation_grant(&mut state, session_id, table);
+                                        state.waiting_relations.remove(&session_id);
+                                        cross_wait.clear(&mut state);
+                                        self.wake.wait_for(&mut state, WAIT_SLICE);
+                                        continue;
+                                    }
+                                    Err(error) => {
+                                        rollback_relation_grant(&mut state, session_id, table);
+                                        drop(state);
+                                        self.wake.notify_all();
+                                        return Err(SQLError::Internal(error));
+                                    }
                                 }
-                            },
+                            }
                             None => None,
                         };
                         match foreign_conflict {
@@ -166,16 +199,21 @@ fn try_grant_relation(
     mark: u32,
 ) -> RelationGrantAttempt {
     let grants = state.relations.entry(table).or_default();
-    if grants.iter().any(|grant| {
-        grant.session_id != session_id && relation_modes_conflict(grant.effective_mode(), mode)
-    }) {
+    if grants
+        .iter()
+        .any(|grant| grant.session_id != session_id && grant.conflicting_mode(mode).is_some())
+    {
         return RelationGrantAttempt::Conflict;
     }
     if let Some(existing) = grants
         .iter_mut()
         .find(|grant| grant.session_id == session_id)
     {
-        if mode <= existing.effective_mode() {
+        if existing
+            .acquisitions
+            .iter()
+            .any(|acquisition| acquisition.mode == mode)
+        {
             return RelationGrantAttempt::AlreadyHeld;
         }
         existing
@@ -190,6 +228,5 @@ fn try_grant_relation(
     RelationGrantAttempt::Granted
 }
 
-pub(super) fn relation_modes_conflict(left: RelationLockMode, right: RelationLockMode) -> bool {
-    left == RelationLockMode::AccessExclusive || right == RelationLockMode::AccessExclusive
-}
+#[cfg(test)]
+mod tests;

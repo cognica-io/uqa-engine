@@ -60,8 +60,8 @@ use grants::{rollback_grant, try_grant, GrantAttempt, LockGrant, LockTable};
 pub use identity::RowLockKey;
 use identity::{LockRelationIdentity, ManagerIdentity};
 pub use registry::{shared_backend_manager, shared_provider_manager};
+use relation::RelationLockGrant;
 pub use relation::RelationLockMode;
-use relation::{relation_modes_conflict, RelationLockGrant};
 #[cfg(test)]
 use waits::deadlock_exists;
 use waits::{deadlock_detected, relation_deadlock_exists, CrossWaitGuard};

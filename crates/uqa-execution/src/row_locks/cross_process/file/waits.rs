@@ -6,6 +6,7 @@
 
 //! Holder and waiter slots plus cross-process wait-graph traversal.
 
+use super::super::wait_blocking_claims;
 use super::{
     process_alive, read_exact_at, write_all_at, ByteClaim, CoordinatorState, FileLockCoordinator,
     HOLDER_SLOT_BASE, HOLDER_SLOT_COUNT, HOLDER_SLOT_SIZE, SLOT_METADATA_LOCK_BYTE, WAIT_SLOT_BASE,
@@ -168,56 +169,64 @@ impl FileLockCoordinator {
         local_wait: &dyn Fn(u64) -> Option<ByteClaim>,
     ) -> bool {
         let own_pid = std::process::id();
-        let mut pending = vec![wanted];
-        let mut seen_claims: Vec<ByteClaim> = Vec::new();
-        while let Some(current) = pending.pop() {
-            if seen_claims.contains(&current) {
+        let mut pending = vec![(own_pid, session, wanted)];
+        let mut seen_sessions = std::collections::HashSet::new();
+        while let Some((requester_pid, requester, current)) = pending.pop() {
+            if !seen_sessions.insert((requester_pid, requester)) {
                 continue;
             }
-            seen_claims.push(current);
             for holder in self.local_holders_conflicting(current) {
+                if requester_pid == own_pid && holder == requester {
+                    continue;
+                }
                 if holder == session {
                     return true;
                 }
                 if let Some(next) = local_wait(holder) {
-                    pending.push(next);
+                    pending.push((own_pid, holder, next));
                 }
             }
             for holder in self.holder_sessions(current) {
-                if holder.pid == own_pid {
+                if holder.pid == own_pid
+                    || (holder.pid == requester_pid && holder.session == requester)
+                {
                     continue;
                 }
                 if let Some(wait) = self.wait_of(holder.pid, holder.session) {
-                    pending.push(wait);
+                    pending.push((holder.pid, holder.session, wait));
                 }
             }
         }
         false
     }
 
-    /// Local sessions whose claims of `claim.offset` conflict with the requested claim.
+    /// Local sessions holding a conflicting physical byte or relation mode.
     fn local_holders_conflicting(&self, claim: ByteClaim) -> Vec<u64> {
         let state = self.state.lock();
-        let Some(counts) = state.claims.get(&claim.offset) else {
-            return Vec::new();
-        };
-        let conflicts = counts.exclusive > 0 || (claim.write && counts.shared > 0);
-        if !conflicts {
-            return Vec::new();
+        let mut holders = Vec::new();
+        for blocking in wait_blocking_claims(claim) {
+            let Some(counts) = state.claims.get(&blocking.offset) else {
+                continue;
+            };
+            if counts.exclusive > 0 || (blocking.write && counts.shared > 0) {
+                if let Some(sessions) = state.holders.get(&blocking.offset) {
+                    holders.extend(sessions.iter().copied());
+                }
+            }
         }
-        state
-            .holders
-            .get(&claim.offset)
-            .cloned()
-            .unwrap_or_default()
+        holders.sort_unstable();
+        holders.dedup();
+        holders
     }
 
     fn holder_sessions(&self, claim: ByteClaim) -> Vec<HolderSlot> {
         let mut holders = Vec::new();
+        let blocking = wait_blocking_claims(claim);
         for index in 0..HOLDER_SLOT_COUNT {
             if let Some(holder) = self.read_holder_slot(index) {
-                if holder.offset == claim.offset
-                    && (holder.write || claim.write)
+                if blocking
+                    .clone()
+                    .any(|claim| holder.offset == claim.offset && (holder.write || claim.write))
                     && process_alive(holder.pid)
                 {
                     holders.push(holder);

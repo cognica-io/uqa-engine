@@ -206,6 +206,8 @@ Inject failure before persistence, during provider write, during callback execut
 
 A failure test must verify absence of partial rows, indexes, graph objects, models, registry entries, or epoch publication. Merely checking that an error was returned is insufficient.
 
+For development record-format changes, run `python3 scripts/verify-record-format-upgrade.py --old-ref <previous-format-commit>`. The verifier builds actual previous and current provider binaries using each source revision's locked dependencies. It verifies native SQLite and SQLite Key/Value in all four file modes, plus redb after its previous file owner closes. SQLite also keeps an old connection and logical snapshot alive across the upgrade. Every case checks prior-writer rejection and exact preservation of fixture records, database identity, committed sequence and committed/pending receipts. Probe databases and compact state files are temporary; build output stays under ignored `target/record-format-probe`.
+
 ## Documentation verification
 
 Manual changes should check:

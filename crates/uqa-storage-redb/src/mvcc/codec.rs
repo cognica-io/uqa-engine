@@ -14,6 +14,19 @@ use uqa_storage::mvcc::{
 
 use crate::error::redb_error;
 
+pub(super) fn validate_metadata(
+    table: &impl ReadableTable<&'static str, &'static [u8]>,
+    expected: DatabaseId,
+) -> VersionResult<()> {
+    if read_u64(table, "format")? != 10 {
+        return Err(VersionError::InvalidEncoding("unknown record format"));
+    }
+    if database_id(table)? != expected {
+        return Err(VersionError::WrongDatabase);
+    }
+    Ok(())
+}
+
 pub(super) fn database_id(
     table: &impl ReadableTable<&'static str, &'static [u8]>,
 ) -> VersionResult<DatabaseId> {

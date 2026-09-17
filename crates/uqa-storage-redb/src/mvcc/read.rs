@@ -10,17 +10,32 @@ use std::sync::Arc;
 
 use redb::{Database, ReadableDatabase, ReadableTable};
 use uqa_storage::mvcc::{
-    BorrowedRecord, CommitSequence, CommittedRecordSnapshot, RecordPage, RecordVersion,
+    BorrowedRecord, CommitSequence, CommittedRecordSnapshot, DatabaseId, RecordPage, RecordVersion,
     ScannedRecord, SharedRecordValue, VersionError, VersionResult,
 };
 use uqa_storage::read_control::StorageReadControl;
 
-use super::{codec::value_bytes, HEADS, VERSIONS};
+use super::{
+    codec::{validate_metadata, value_bytes},
+    HEADS, METADATA, VERSIONS,
+};
 use crate::error::redb_error;
 
 pub(super) struct Snapshot {
     pub(super) database: Arc<Database>,
+    pub(super) identity: DatabaseId,
     pub(super) sequence: CommitSequence,
+}
+
+impl Snapshot {
+    fn begin_read(&self) -> VersionResult<redb::ReadTransaction> {
+        let transaction = self.database.begin_read().map_err(redb_error)?;
+        validate_metadata(
+            &transaction.open_table(METADATA).map_err(redb_error)?,
+            self.identity,
+        )?;
+        Ok(transaction)
+    }
 }
 
 impl CommittedRecordSnapshot for Snapshot {
@@ -35,7 +50,7 @@ impl CommittedRecordSnapshot for Snapshot {
         visit: &mut uqa_storage::mvcc::RecordValueVisitor<'_>,
     ) -> VersionResult<()> {
         control.cancellation().check()?;
-        let transaction = self.database.begin_read().map_err(redb_error)?;
+        let transaction = self.begin_read()?;
         let versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
         let entry = versions
             .range((key, 0)..=(key, self.sequence.as_u64()))
@@ -64,7 +79,7 @@ impl CommittedRecordSnapshot for Snapshot {
         if limit == 0 {
             return Ok(());
         }
-        let transaction = self.database.begin_read().map_err(redb_error)?;
+        let transaction = self.begin_read()?;
         let heads = transaction.open_table(HEADS).map_err(redb_error)?;
         let versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
         let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
@@ -104,7 +119,7 @@ impl CommittedRecordSnapshot for Snapshot {
         control: &StorageReadControl,
     ) -> VersionResult<Option<RecordVersion<SharedRecordValue>>> {
         control.cancellation().check()?;
-        let transaction = self.database.begin_read().map_err(redb_error)?;
+        let transaction = self.begin_read()?;
         let versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
         visible(&versions, key, self.sequence, control)
     }
@@ -121,7 +136,7 @@ impl CommittedRecordSnapshot for Snapshot {
         if limit == 0 {
             return Ok(result);
         }
-        let transaction = self.database.begin_read().map_err(redb_error)?;
+        let transaction = self.begin_read()?;
         let heads = transaction.open_table(HEADS).map_err(redb_error)?;
         let versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
         let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
