@@ -45,6 +45,20 @@ impl RelationLockMode {
     }
 }
 
+/// A temporary acquisition above a caller-owned mark. The session must not acquire unrelated locks until this guard is dropped.
+pub struct ScopedRelationLock<'a> {
+    manager: &'a RowLockManager,
+    session_id: u64,
+    keep_mark: u32,
+}
+
+impl Drop for ScopedRelationLock<'_> {
+    fn drop(&mut self) {
+        self.manager
+            .release_mark_above(self.session_id, self.keep_mark);
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(super) struct MarkedRelationMode {
     pub(super) mode: RelationLockMode,
@@ -67,6 +81,28 @@ impl RelationLockGrant {
 }
 
 impl RowLockManager {
+    pub fn acquire_scoped_relation(
+        &self,
+        session_id: u64,
+        table: u64,
+        mode: RelationLockMode,
+        marks: (u32, u32),
+        cancel: &uqa_core::CancellationToken,
+    ) -> Result<ScopedRelationLock<'_>, SQLError> {
+        let (keep_mark, mark) = marks;
+        if mark <= keep_mark {
+            return Err(SQLError::Internal(
+                "temporary relation lock requires a newer mark".into(),
+            ));
+        }
+        self.acquire_relation(session_id, table, mode, mark, cancel)?;
+        Ok(ScopedRelationLock {
+            manager: self,
+            session_id,
+            keep_mark,
+        })
+    }
+
     pub(super) fn release_relation_claims(
         &self,
         session_id: u64,

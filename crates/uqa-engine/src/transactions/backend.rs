@@ -209,6 +209,28 @@ impl Engine {
         Ok(())
     }
 
+    pub(crate) fn prepare_transaction_lock_wait(&self) -> Result<(), SQLError> {
+        self.release_backend_reader_before_lock_wait(&mut self.session.transactions.lock())
+    }
+
+    pub(super) fn temporary_relation_lock_marks(&self) -> Result<(u32, u32), SQLError> {
+        let mut stack = self.session.transactions.lock();
+        let frame = stack.last_mut().ok_or_else(|| {
+            SQLError::Internal("temporary relation lock requires an open transaction".into())
+        })?;
+        let keep_mark = frame.lock_mark;
+        let mark = frame.next_lock_mark;
+        frame.next_lock_mark = mark
+            .checked_add(1)
+            .ok_or_else(|| SQLError::Internal("transaction lock mark exhausted".into()))?;
+        if mark <= keep_mark {
+            return Err(SQLError::Internal(
+                "temporary relation lock requires a newer mark".into(),
+            ));
+        }
+        Ok((keep_mark, mark))
+    }
+
     fn release_backend_reader_before_lock_wait(
         &self,
         stack: &mut Vec<TransactionFrame>,
@@ -316,24 +338,8 @@ impl Engine {
         if !self.backend_transaction_is_deferred() {
             return Ok(());
         }
-        let (keep_mark, fence_mark) = {
-            let mut stack = self.session.transactions.lock();
-            self.release_backend_reader_before_lock_wait(&mut stack)?;
-            let frame = stack.last_mut().ok_or_else(|| {
-                SQLError::Internal("catalog writer fence requires an open transaction".into())
-            })?;
-            let keep_mark = frame.lock_mark;
-            let fence_mark = frame.next_lock_mark;
-            frame.next_lock_mark = fence_mark
-                .checked_add(1)
-                .ok_or_else(|| SQLError::Internal("transaction lock mark exhausted".into()))?;
-            if fence_mark <= keep_mark {
-                return Err(SQLError::Internal(
-                    "catalog writer fence did not allocate a newer lock mark".into(),
-                ));
-            }
-            (keep_mark, fence_mark)
-        };
+        self.prepare_transaction_lock_wait()?;
+        let (keep_mark, fence_mark) = self.temporary_relation_lock_marks()?;
         let fence = self.row_locks.acquire_relation(
             self.session_id,
             self.row_locks.backend_writer_key(),

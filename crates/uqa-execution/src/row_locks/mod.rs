@@ -61,7 +61,7 @@ pub use identity::RowLockKey;
 use identity::{LockRelationIdentity, ManagerIdentity};
 pub use registry::{shared_backend_manager, shared_provider_manager};
 use relation::RelationLockGrant;
-pub use relation::RelationLockMode;
+pub use relation::{RelationLockMode, ScopedRelationLock};
 #[cfg(test)]
 use waits::deadlock_exists;
 use waits::{deadlock_detected, relation_deadlock_exists, CrossWaitGuard};

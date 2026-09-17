@@ -220,6 +220,22 @@ impl Engine {
         )
     }
 
+    pub(crate) fn temporary_relation_lock(
+        &self,
+        table: &str,
+        mode: crate::row_locks::RelationLockMode,
+    ) -> Result<crate::row_locks::ScopedRelationLock<'_>, SQLError> {
+        let canonical = self.row_lock_table_name(table)?;
+        self.prepare_transaction_lock_wait()?;
+        self.row_locks.acquire_scoped_relation(
+            self.session_id,
+            self.row_locks.table_key(&canonical),
+            mode,
+            self.temporary_relation_lock_marks()?,
+            &self.runtime.cancellation,
+        )
+    }
+
     /// Whether the open transaction of this session already changed or rewrote the row itself. Such a row's current image is authoritative for this session, so cross-process verification must not replace it with the older committed image.
     pub(crate) fn row_changed_in_open_transaction(
         &self,

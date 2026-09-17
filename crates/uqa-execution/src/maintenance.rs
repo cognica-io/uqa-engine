@@ -8,6 +8,7 @@
 use std::collections::BTreeSet;
 use uqa_sql::{ast::VacuumStmt, maintenance::ResolvedVacuumTarget, SQLError, SQLResult};
 use uqa_storage::StorageBackendError;
+pub mod analyze;
 mod context;
 pub use context::*;
 fn vacuum_storage_error(context: &str, error: impl std::fmt::Display) -> StorageBackendError {
@@ -143,7 +144,7 @@ pub fn run_vacuum(
                     .statistics
                     .analyze_target(&table, &[], true)
                     .map_err(|error| {
-                        SQLError::Internal(format!("VACUUM ANALYZE failed: {error}"))
+                        uqa_sql::catalog::errors::storage_error("VACUUM ANALYZE", &error)
                     })?;
             }
         } else {
@@ -152,7 +153,7 @@ pub fn run_vacuum(
                     .statistics
                     .analyze_target(&target.table, &target.columns, target.include_descendants)
                     .map_err(|error| {
-                        SQLError::Internal(format!("VACUUM ANALYZE failed: {error}"))
+                        uqa_sql::catalog::errors::storage_error("VACUUM ANALYZE", &error)
                     })?;
             }
         }

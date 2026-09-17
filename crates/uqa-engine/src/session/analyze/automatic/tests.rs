@@ -112,6 +112,39 @@ fn compressed_statistics_publication_can_finish_during_an_uncommitted_row_write(
 }
 
 #[test]
+fn statistics_publication_waits_for_table_retirement_and_rechecks_its_identity() {
+    for commit in [false, true] {
+        let (_directory, writer, worker) = sessions();
+        let backend = worker.storage.backend.as_ref().unwrap();
+        backend.begin_read_transaction().unwrap();
+        worker.refresh_pinned_transaction_snapshot().unwrap();
+        let sampled = worker
+            .collect_automatic_analysis("public.t")
+            .unwrap()
+            .unwrap();
+        backend.rollback_transaction().unwrap();
+        writer.sql("BEGIN; DROP TABLE t", &[]).unwrap();
+        let worker_id = worker.session_id;
+        let relation = writer.row_locks.table_key("public.t");
+        let publish =
+            std::thread::spawn(move || worker.publish_automatic_analysis("public.t", sampled));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !writer.row_locks.waiting_for_relation(worker_id, relation)
+            && !publish.is_finished()
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::yield_now();
+        }
+        let waited = writer.row_locks.waiting_for_relation(worker_id, relation);
+        let completion = writer.sql(if commit { "COMMIT" } else { "ROLLBACK" }, &[]);
+        let published = publish.join().unwrap();
+        assert!(waited, "publication did not protect the table's lifetime");
+        completion.unwrap();
+        assert_eq!(published.unwrap(), !commit);
+    }
+}
+
+#[test]
 fn sampling_cannot_publish_into_a_same_name_replacement() {
     let (_directory, writer, worker) = sessions();
     let backend = worker.storage.backend.as_ref().unwrap();

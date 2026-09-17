@@ -9,6 +9,57 @@
 use super::*;
 
 #[test]
+fn temporary_binding_locks_release_only_their_new_acquisition_even_on_unwind() {
+    for held in [
+        RelationLockMode::AccessShare,
+        RelationLockMode::RowExclusive,
+    ] {
+        let manager = RowLockManager::new();
+        let table = manager.table_key("t");
+        let cancel = uqa_core::CancellationToken::new();
+        manager
+            .acquire_relation(1, table, held, 0, &cancel)
+            .unwrap();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _binding = manager
+                .acquire_scoped_relation(1, table, RelationLockMode::AccessShare, (0, 1), &cancel)
+                .unwrap();
+            panic!("abort relation binding");
+        }));
+        assert!(result.is_err());
+        let state = manager.state.lock();
+        let grants = &state.relations[&table];
+        assert_eq!(grants.len(), 1);
+        assert_eq!(grants[0].acquisitions.len(), 1);
+        assert_eq!(grants[0].acquisitions[0].mode, held);
+    }
+}
+
+#[test]
+fn cancelled_or_invalid_temporary_binding_does_not_change_existing_locks() {
+    let manager = RowLockManager::new();
+    let table = manager.table_key("t");
+    let cancel = uqa_core::CancellationToken::new();
+    manager
+        .acquire_relation(1, table, RelationLockMode::RowExclusive, 0, &cancel)
+        .unwrap();
+    assert!(manager
+        .acquire_scoped_relation(1, table, RelationLockMode::AccessShare, (1, 1), &cancel)
+        .is_err());
+    cancel.cancel();
+    assert!(matches!(
+        manager.acquire_scoped_relation(1, table, RelationLockMode::AccessShare, (0, 1), &cancel),
+        Err(SQLError::Cancelled(_))
+    ));
+    let state = manager.state.lock();
+    assert_eq!(state.relations[&table][0].acquisitions.len(), 1);
+    assert_eq!(
+        state.relations[&table][0].acquisitions[0].mode,
+        RelationLockMode::RowExclusive
+    );
+}
+
+#[test]
 fn all_eight_relation_modes_match_postgresql_table_13_2() {
     // https://www.postgresql.org/docs/18/explicit-locking.html#LOCKING-TABLES
     let conflicts = [

@@ -153,7 +153,7 @@ impl Engine {
                 "cannot execute storage mutation in a read-only transaction".into(),
             ));
         }
-        self.with_implicit_storage_transaction_inner(false, f)
+        self.with_implicit_storage_transaction_inner(false, true, f)
     }
 
     /// Run storage maintenance that `PostgreSQL` permits in a read-only transaction. The transaction remains logically read-only, while its physical backend is allowed to persist maintenance metadata such as ANALYZE statistics.
@@ -161,36 +161,50 @@ impl Engine {
         &self,
         f: impl FnOnce(&Self) -> StorageBackendResult<R>,
     ) -> StorageBackendResult<R> {
-        let _statement = self.runtime.statement_gate.lock();
-        if self.transaction_depth() != 0 && self.current_transaction_is_read_only() {
-            self.ensure_transaction_usable()
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            self.prepare_explicit_transaction_writer()
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            // SQL access remains read-only. The retained physical transaction may write maintenance metadata, which must obey the caller's COMMIT and savepoints.
+        self.with_storage_maintenance_scope(|engine| {
+            engine.prepare_storage_maintenance_writer()?;
+            f(engine)
+        })
+    }
+
+    /// Establish the maintenance transaction before execution acquires logical locks or samples rows. Physical write admission is deferred until the caller has finished every required logical wait.
+    pub(crate) fn with_storage_maintenance_scope<R>(
+        &self,
+        f: impl FnOnce(&Self) -> StorageBackendResult<R>,
+    ) -> StorageBackendResult<R> {
+        self.with_implicit_storage_transaction_inner(true, false, f)
+    }
+
+    pub(crate) fn prepare_storage_maintenance_writer(&self) -> StorageBackendResult<()> {
+        self.prepare_explicit_transaction_writer()
+            .map_err(|error| StorageBackendError::backend("maintenance transaction", error))?;
+        if self.current_transaction_is_read_only() {
+            // SQL access remains read-only. Physical maintenance admission is retained until the transaction ends, including after savepoint undo.
             for frame in self.session.transactions.lock().iter_mut() {
                 frame.intent = TransactionIntent::ReadWrite;
             }
-            return f(self);
         }
-        self.with_implicit_storage_transaction_inner(true, f)
+        Ok(())
     }
 
     fn with_implicit_storage_transaction_inner<R>(
         &self,
         maintenance_can_override_default_read_only: bool,
+        promote_writer: bool,
         f: impl FnOnce(&Self) -> StorageBackendResult<R>,
     ) -> StorageBackendResult<R> {
         let _statement = self.runtime.statement_gate.lock();
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            self.prepare_explicit_transaction_writer()
-                .map_err(|error| {
-                    StorageBackendError::Other(format!(
-                        "promote explicit engine transaction failed: {error}"
-                    ))
-                })?;
+            if promote_writer {
+                self.prepare_explicit_transaction_writer()
+                    .map_err(|error| {
+                        StorageBackendError::Other(format!(
+                            "promote explicit engine transaction failed: {error}"
+                        ))
+                    })?;
+            }
             return f(self);
         }
         let mut scope = TransactionScope::begin(self).map_err(|error| {
@@ -202,7 +216,10 @@ impl Engine {
                 frame.characteristics.read_only = false;
             }
         }
-        if let Err(error) = self.prepare_explicit_transaction_writer() {
+        if let Err(error) = promote_writer
+            .then(|| self.prepare_explicit_transaction_writer())
+            .transpose()
+        {
             let error = StorageBackendError::Other(format!(
                 "promote implicit engine transaction failed: {error}"
             ));

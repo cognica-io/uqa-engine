@@ -702,7 +702,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                         return Err(SQLError::UnknownTable(requested.to_string()));
                     };
                     context.privileges.ensure_maintain(&canonical)?;
-                    vec![canonical]
+                    vec![requested.to_string()]
                 } else {
                     context.statistics.table_names("analyze")?
                 };
@@ -710,7 +710,9 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                     context
                         .statistics
                         .analyze_target(&target, &[], true)
-                        .map_err(|err| SQLError::Internal(format!("ANALYZE failed: {err}")))?;
+                        .map_err(|error| {
+                            uqa_sql::catalog::errors::storage_error("ANALYZE", &error)
+                        })?;
                 }
                 Ok(SQLResult::empty())
             }

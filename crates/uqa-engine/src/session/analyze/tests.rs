@@ -8,6 +8,8 @@
 
 use super::*;
 
+mod locking;
+
 fn sessions(provider: usize) -> (tempfile::TempDir, Engine, Engine) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("statistics.db");

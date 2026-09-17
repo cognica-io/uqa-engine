@@ -13,8 +13,8 @@ mod tests;
 use super::analyze_helpers::ColumnAnalyzeValues;
 use super::{
     build_histogram, build_mcv, collect_analyze_values, distinct_count, Arc, BTreeMap,
-    CatalogFacade, ColumnStatsInput, DocId, Engine, Ordering, RelationIdentity,
-    StorageBackendError, StorageBackendResult, TableState, Value,
+    CatalogFacade, ColumnStatsInput, DocId, Engine, Ordering, StorageBackendError,
+    StorageBackendResult, TableState, Value,
 };
 
 struct HierarchyAnalyzeInputs {
@@ -85,9 +85,7 @@ impl Engine {
     /// frequency), and stores the result on the per-table state so the
     /// cardinality estimator can read it on subsequent queries.
     pub fn run_analyze(&self, table: Option<&str>) -> StorageBackendResult<()> {
-        self.with_read_only_compatible_storage_transaction(|engine| {
-            engine.run_analyze_inner(table, None, true)
-        })
+        self.analyze_targets(table, None, true, false)
     }
 
     pub(crate) fn run_analyze_target(
@@ -96,52 +94,48 @@ impl Engine {
         columns: &[String],
         include_descendants: bool,
     ) -> StorageBackendResult<()> {
-        let columns = (!columns.is_empty()).then_some(columns);
-        self.with_read_only_compatible_storage_transaction(|engine| {
-            engine.run_analyze_inner(Some(table), columns, include_descendants)
-        })
+        self.analyze_targets(
+            Some(table),
+            (!columns.is_empty()).then_some(columns),
+            include_descendants,
+            true,
+        )
     }
 
-    fn run_analyze_inner(
+    fn analyze_targets(
         &self,
         table: Option<&str>,
         columns: Option<&[String]>,
         include_descendants: bool,
+        check_privileges: bool,
     ) -> StorageBackendResult<()> {
-        if let Some(name) = table {
-            let Some(canonical_name) = self.try_resolve_table_name(name)? else {
-                return Err(StorageBackendError::Other(format!(
-                    "ANALYZE target table `{name}` does not exist"
-                )));
-            };
-            let Some(table) = self.try_table(&canonical_name)? else {
-                return Err(StorageBackendError::Other(format!(
-                    "ANALYZE target table `{name}` does not exist"
-                )));
-            };
-            self.analyze_table(&canonical_name, &table, true, columns, include_descendants)?;
-        } else {
-            // The catalog can change between collecting the names and opening
-            // each table in another session. Missing entries are only benign
-            // for the catalog-wide form; an explicitly named table above is
-            // always an error.
-            let names: Vec<String> = self
-                .storage
-                .tables
-                .read()
-                .keys()
-                .map(RelationIdentity::qualified_name)
-                .collect();
-            for name in names {
-                let Some(table) = self.table(&name)? else {
-                    continue;
-                };
-                self.analyze_table(&name, &table, true, None, true)?;
+        self.with_storage_maintenance_scope(|engine| {
+            let targets = uqa_execution::maintenance::analyze::prepare_targets(
+                &engine.analyze_execution_context(check_privileges),
+                table,
+                include_descendants,
+            )
+            .map_err(|error| StorageBackendError::backend("ANALYZE locking", error))?;
+            if targets.is_empty() {
+                return Ok(());
             }
-        }
-        // Persisted statistics participate in DPccp join ordering and every
-        // cached optimized statement. Publish the same commit-delayed data
-        // generation even when ANALYZE did not change document contents.
+            engine.prepare_storage_maintenance_writer()?;
+            uqa_execution::maintenance::analyze::run_locked_targets(&targets, |name| {
+                engine.analyze_locked_table(name, columns, include_descendants)
+            })
+        })
+    }
+
+    fn analyze_locked_table(
+        &self,
+        name: &str,
+        columns: Option<&[String]>,
+        include_descendants: bool,
+    ) -> StorageBackendResult<()> {
+        let table = self.try_table(name)?.ok_or_else(|| {
+            StorageBackendError::Other(format!("locked ANALYZE target `{name}` does not exist"))
+        })?;
+        self.analyze_table(name, &table, true, columns, include_descendants)?;
         self.note_table_data_changed();
         Ok(())
     }
