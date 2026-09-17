@@ -184,19 +184,21 @@ impl SQLiteInvertedIndex {
                 tx.commit()?;
                 return Ok(());
             }
-            for (doc_id, fields) in &staged {
-                add_statistics(&mut totals, fields)?;
+            for (doc_id, fields) in staged {
+                add_statistics(&mut totals, &fields)?;
+                self.write_document_on(&tx, doc_id, &fields)?;
+                // The document metadata is now staged in this savepoint. Transfer its evaluated occurrences into cluster changes instead of retaining a second complete copy until publication.
                 for (field, snapshot) in fields {
-                    for (term, occurrences) in &snapshot.postings {
+                    for (term, occurrences) in snapshot.postings {
                         changes
-                            .entry((field.clone(), term.clone(), cluster_id(*doc_id)))
+                            .entry((field.clone(), term, cluster_id(doc_id)))
                             .or_default()
                             .insert(
-                                *doc_id,
+                                doc_id,
                                 Some(OccurrencePosting {
-                                    doc_id: *doc_id,
+                                    doc_id,
                                     doc_length: snapshot.metadata.length,
-                                    occurrences: occurrences.clone(),
+                                    occurrences,
                                 }),
                             );
                     }
@@ -208,9 +210,6 @@ impl SQLiteInvertedIndex {
                     updates,
                 );
                 write_cluster(&tx, &self.table, &field, &term, cluster, &merged)?;
-            }
-            for (doc_id, fields) in &staged {
-                self.write_document_on(&tx, *doc_id, fields)?;
             }
             self.write_statistics_on(&tx, &totals)?;
             for field in totals.keys() {

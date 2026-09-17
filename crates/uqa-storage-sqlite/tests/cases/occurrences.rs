@@ -370,6 +370,25 @@ fn stored_graph(conn: &ManagedConnection) -> Vec<Vec<rusqlite::types::Value>> {
 }
 
 #[test]
+fn cluster_publication_failure_restores_already_staged_document_metadata() {
+    let conn = ManagedConnection::open_in_memory().unwrap();
+    Catalog::open(conn.clone()).unwrap();
+    let mut index = SQLiteInvertedIndex::new(conn.clone(), "docs", config());
+    index.add_document(1, fields("a a")).unwrap();
+    let before = stored_graph(&conn);
+    conn.with(|db| {
+        db.execute_batch("CREATE TRIGGER reject_cluster_publication BEFORE INSERT ON _occurrence_clusters BEGIN SELECT RAISE(ABORT, 'forced cluster publication failure'); END;")?;
+        Ok(())
+    }).unwrap();
+    assert!(index
+        .try_add_documents(vec![(1, fields("changed")), (2, fields("new"))])
+        .unwrap_err()
+        .to_string()
+        .contains("forced cluster publication failure"));
+    assert_eq!(stored_graph(&conn), before);
+}
+
+#[test]
 fn graph_batch_and_rebuild_failures_restore_every_persisted_value() {
     let conn = ManagedConnection::open_in_memory().unwrap();
     Catalog::open(conn.clone()).unwrap();
