@@ -11,6 +11,7 @@ use std::fmt::Write as _;
 
 use super::{quote_sql_identifier, Catalog, OptionalExtension, Result, SQLiteError};
 use crate::mvcc::native::NativeSnapshot;
+use uqa_storage::catalog::graph_guards::METADATA_PREFIX as GRAPH_GUARD_PREFIX;
 use uqa_storage::CatalogCacheRevisions;
 
 const METADATA_SCOPES: [(&str, &str); 3] = [
@@ -19,11 +20,20 @@ const METADATA_SCOPES: [(&str, &str); 3] = [
     ("graph_label_registry::", "graph"),
 ];
 
+#[derive(Clone, Copy)]
+enum MetadataTriggerFormat {
+    TextNames,
+    BinaryNames,
+    AllocationGuards,
+    GraphLifetimes,
+}
+
 pub(super) fn metadata_scope(name: &str) -> Option<(&'static str, &str)> {
     if matches!(
         name,
         "graph_identifier_generation" | "graph_identifier_data_revision"
     ) || name.starts_with("graph_definition_data_revision::")
+        || name.starts_with(GRAPH_GUARD_PREFIX)
     {
         return None;
     }
@@ -61,7 +71,12 @@ impl Catalog {
         has_table_name: bool,
         event: &str,
     ) -> (String, String) {
-        cache_trigger(table, has_table_name, event, true, true)
+        cache_trigger(
+            table,
+            has_table_name,
+            event,
+            MetadataTriggerFormat::GraphLifetimes,
+        )
     }
 
     /// Upgrade known metadata trigger encodings and exclude internal allocation state without altering data or revision history. The caller owns the schema transaction.
@@ -78,10 +93,25 @@ impl Catalog {
             if current.as_deref() == Some(expected.as_str()) {
                 continue;
             }
-            let previous = cache_trigger("_metadata", false, event, false, false).1;
-            let binary = cache_trigger("_metadata", false, event, true, false).1;
+            let previous =
+                cache_trigger("_metadata", false, event, MetadataTriggerFormat::TextNames).1;
+            let binary = cache_trigger(
+                "_metadata",
+                false,
+                event,
+                MetadataTriggerFormat::BinaryNames,
+            )
+            .1;
+            let allocations = cache_trigger(
+                "_metadata",
+                false,
+                event,
+                MetadataTriggerFormat::AllocationGuards,
+            )
+            .1;
             if current.as_deref() != Some(previous.as_str())
                 && current.as_deref() != Some(binary.as_str())
+                && current.as_deref() != Some(allocations.as_str())
             {
                 return Err(SQLiteError::StorageBackend(
                     "missing or changed metadata cache trigger".into(),
@@ -157,8 +187,7 @@ fn cache_trigger(
     table: &str,
     has_table_name: bool,
     event: &str,
-    binary_names: bool,
-    exclude_allocations: bool,
+    encoding: MetadataTriggerFormat,
 ) -> (String, String) {
     let name = format!("uqa_cache_{table}_{event}");
     let images: &[&str] = match event {
@@ -183,13 +212,25 @@ fn cache_trigger(
             )
             .expect("write graph revision trigger");
         } else {
-            let (kind, name) = revision_scope(table, has_table_name, image, binary_names);
-            let values = if table == "_metadata" && exclude_allocations {
+            let (kind, name) = revision_scope(
+                table,
+                has_table_name,
+                image,
+                !matches!(encoding, MetadataTriggerFormat::TextNames),
+            );
+            let mut values = if table == "_metadata"
+                && matches!(
+                    encoding,
+                    MetadataTriggerFormat::AllocationGuards | MetadataTriggerFormat::GraphLifetimes
+                ) {
                 let prefix = "graph_definition_data_revision::";
                 format!("SELECT {kind}, {name}, 1 WHERE {image}.key NOT IN ('graph_identifier_generation', 'graph_identifier_data_revision') AND substr(CAST({image}.key AS BLOB), 1, {}) != CAST('{prefix}' AS BLOB)", prefix.len())
             } else {
                 format!("VALUES ({kind}, {name}, 1)")
             };
+            if table == "_metadata" && matches!(encoding, MetadataTriggerFormat::GraphLifetimes) {
+                write!(values, " AND substr(CAST({image}.key AS BLOB), 1, {}) != CAST('{GRAPH_GUARD_PREFIX}' AS BLOB)", GRAPH_GUARD_PREFIX.len()).expect("write graph guard exclusion");
+            }
             write!(
                 body,
                 "INSERT INTO _cache_revisions(kind, name, generation) {values} \

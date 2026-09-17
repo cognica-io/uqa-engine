@@ -17,6 +17,7 @@ use crate::backend::{StorageBackendError, StorageBackendResult};
 
 mod cache_revisions;
 mod graph_access;
+pub mod graph_guards;
 pub mod graph_identifiers;
 pub(crate) mod graph_snapshot;
 mod identity;

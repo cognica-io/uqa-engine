@@ -60,6 +60,18 @@ fn metadata_cache_names_preserve_embedded_zero_and_unicode() {
         let revisions = catalog.cache_revisions().unwrap();
         assert!(revisions.table_data.contains_key(graph));
         assert!(revisions.statistics_maintenance.contains_key(graph));
+        let guard = uqa_storage::catalog::graph_guards::GraphRecordGuard::new(
+            uqa_storage::GraphEntityKind::Vertex,
+            1,
+        );
+        for name in [
+            guard.lifetime(),
+            guard.references(),
+            guard.membership_references(graph),
+        ] {
+            catalog.set_metadata(&name, "1").unwrap();
+        }
+        assert_eq!(catalog.cache_revisions().unwrap(), revisions);
     }
 }
 
@@ -69,7 +81,7 @@ const LEGACY_METADATA_INSERT: &str = "CREATE TRIGGER \"uqa_cache__metadata_INSER
 #[test]
 fn cache_trigger_upgrade_preserves_counters_and_native_history_and_is_idempotent() {
     use uqa_storage::{mvcc::VersionedPersistence, read_control::StorageReadControl};
-    for binary_names in [false, true] {
+    for encoding in [0, 1, 2] {
         for native in [false, true] {
             let connection = ManagedConnection::open_in_memory().unwrap();
             let catalog = Catalog::open(connection.clone()).unwrap();
@@ -91,13 +103,18 @@ fn cache_trigger_upgrade_preserves_counters_and_native_history_and_is_idempotent
                 .with(|conn| {
                     conn.execute_batch("DROP TRIGGER uqa_cache__metadata_INSERT")?;
                     let mut previous = LEGACY_METADATA_INSERT.to_owned();
-                    if binary_names {
+                    if encoding != 0 {
                         for offset in [31, 22, 23] {
                             previous = previous.replace(
                                 &format!("substr(NEW.key, {offset})"),
                                 &format!("CAST(substr(CAST(NEW.key AS BLOB), {offset}) AS TEXT)"),
                             );
                         }
+                    }
+                    if encoding == 2 {
+                        previous = previous.replacen("VALUES (", "SELECT ", 1).replace(
+                            ", 1) ON CONFLICT", ", 1 WHERE NEW.key NOT IN ('graph_identifier_generation', 'graph_identifier_data_revision') AND substr(CAST(NEW.key AS BLOB), 1, 32) != CAST('graph_definition_data_revision::' AS BLOB) ON CONFLICT"
+                        );
                     }
                     conn.execute_batch(&previous)?;
                     Ok(())

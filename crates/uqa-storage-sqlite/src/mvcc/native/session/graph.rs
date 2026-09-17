@@ -21,6 +21,7 @@ impl NativeSnapshot {
         row: Option<&[ValueRef<'_>]>,
         cache: bool,
     ) -> Result<()> {
+        self.guard_graph_row_lifetimes(batch, family, components, row)?;
         let owner = NativeRecordOwner::Database(self.database);
         let old = self
             .read_row(family, owner, components, |values| {

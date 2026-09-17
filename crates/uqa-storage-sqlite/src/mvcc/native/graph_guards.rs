@@ -83,7 +83,11 @@ impl NativeSnapshot {
         Ok(())
     }
 
-    fn graph_guard_metadata(&self, scope: Option<&str>, key: &str) -> Result<NativeRecord> {
+    pub(super) fn graph_guard_metadata(
+        &self,
+        scope: Option<&str>,
+        key: &str,
+    ) -> Result<NativeRecord> {
         let owner = NativeRecordOwner::Database(self.database);
         Ok(match scope {
             None => NativeRecord::encode(

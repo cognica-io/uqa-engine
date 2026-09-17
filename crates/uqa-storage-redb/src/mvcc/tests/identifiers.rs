@@ -62,7 +62,7 @@ fn failed_identifier_sync_recovers_one_complete_watermark_without_reusing_return
 
 #[test]
 fn a_missing_identifier_table_is_not_recreated_when_the_format_requires_allocations() {
-    for format in [5_u64, 6, 7, 8] {
+    for format in [5_u64, 6, 7, 8, 9] {
         let database = Arc::new(
             Database::builder()
                 .create_with_backend(InMemoryBackend::new())

@@ -6,10 +6,64 @@
 
 //! Graph consumers share redb's common transaction and independent reservation contracts.
 
-use uqa_core::Vertex;
+use uqa_core::{Edge, Vertex};
 use uqa_graph::{GraphStore, LabelKind, PersistentGraphStore};
 use uqa_storage::PersistentStorageProvider;
 use uqa_storage_redb::RedbStorage;
+
+#[test]
+fn graph_lifetimes_reject_endpoint_removal_and_preserve_independent_edges() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("graph-lifetimes.redb");
+    let storage = RedbStorage::open(&path).unwrap();
+    let a = storage.open_session().unwrap();
+    let b = storage.open_session().unwrap();
+    let mut left = PersistentGraphStore::from_catalog(a.catalog.clone(), a.backend.clone());
+    let mut right = PersistentGraphStore::from_catalog(b.catalog.clone(), b.backend.clone());
+    for shared in [false, true] {
+        for reference_wins in [false, true] {
+            let slot = 2 * u64::from(shared) + u64::from(reference_wins);
+            let name = format!("g_{slot}");
+            let source = slot * 10 + 1;
+            let target = source + 1;
+            left.create_graph(&name).unwrap();
+            left.add_vertex(Vertex::new(source, "node"), &name).unwrap();
+            left.add_vertex(Vertex::new(target, "node"), &name).unwrap();
+            if shared {
+                left.create_graph("other").unwrap();
+                left.add_vertex(Vertex::new(source, "node"), "other")
+                    .unwrap();
+            }
+            a.backend.begin_transaction().unwrap();
+            b.backend.begin_transaction().unwrap();
+            left.add_edge(Edge::new(100 + slot, source, target, "link"), &name)
+                .unwrap();
+            right.remove_vertex(source, &name).unwrap();
+            let (winner, loser) = if reference_wins { (&a, &b) } else { (&b, &a) };
+            winner.backend.commit_transaction().unwrap();
+            assert!(loser.backend.commit_transaction().is_err());
+            loser.backend.rollback_transaction().unwrap();
+            assert_eq!(
+                right.edges_in_graph(&name).unwrap().len(),
+                usize::from(reference_wins)
+            );
+        }
+    }
+    a.backend.begin_transaction().unwrap();
+    b.backend.begin_transaction().unwrap();
+    left.add_edge(Edge::new(110, 11, 12, "link"), "g_1")
+        .unwrap();
+    right
+        .add_edge(Edge::new(111, 11, 12, "link"), "g_1")
+        .unwrap();
+    b.backend.commit_transaction().unwrap();
+    a.backend.commit_transaction().unwrap();
+    drop((left, right, a, b, storage));
+    let storage = RedbStorage::open(&path).unwrap();
+    let session = storage.open_session().unwrap();
+    let graph = PersistentGraphStore::from_catalog(session.catalog, session.backend);
+    assert_eq!(graph.edges_in_graph("g_1").unwrap().len(), 3);
+}
 
 #[test]
 fn raw_graph_catalog_reservations_and_replacement_use_the_shared_session() {

@@ -11,6 +11,118 @@ use uqa_storage::{CatalogFacade, KeyValueCatalog};
 use super::*;
 
 #[test]
+fn graph_lifetime_dependencies_distinguish_topology_from_properties_and_follow_undo() {
+    use uqa_storage::GraphEntityKind;
+    let (a, first, b, second) = catalogs();
+    a.begin_transaction().unwrap();
+    b.begin_transaction().unwrap();
+    first.save_edge(10, 1, 2, "link", "{}").unwrap();
+    first.save_graph_membership("edge", 10, "g").unwrap();
+    second.save_edge(11, 1, 2, "link", "{}").unwrap();
+    second.save_graph_membership("edge", 11, "g").unwrap();
+    b.commit_transaction().unwrap();
+    a.commit_transaction().unwrap();
+    for property_wins in [false, true] {
+        a.begin_transaction().unwrap();
+        b.begin_transaction().unwrap();
+        first.save_edge(12, 1, 2, "link", "{}").unwrap();
+        first.save_graph_membership("edge", 12, "g").unwrap();
+        second.save_vertex(1, "node", "{\"updated\":true}").unwrap();
+        second.save_graph_membership("vertex", 1, "g").unwrap();
+        let (winner, next) = if property_wins { (&b, &a) } else { (&a, &b) };
+        winner.commit_transaction().unwrap();
+        next.commit_transaction().unwrap();
+    }
+    a.begin_transaction().unwrap();
+    a.savepoint("before-edge").unwrap();
+    first.save_edge(13, 1, 2, "link", "{}").unwrap();
+    first.save_graph_membership("edge", 13, "g").unwrap();
+    a.rollback_to_savepoint("before-edge").unwrap();
+    second.delete_graph_membership("vertex", 1, "g").unwrap();
+    second.delete_vertex(1).unwrap();
+    first.save_vertex(5, "independent", "{}").unwrap();
+    a.commit_transaction().unwrap();
+    assert!(first.graph_edge(13).unwrap().is_none());
+    assert!(!first
+        .graph_has_membership(GraphEntityKind::Vertex, 1, "g")
+        .unwrap());
+}
+
+#[test]
+fn graph_edge_endpoint_changes_and_new_memberships_conflict_in_both_orders() {
+    for topology_wins in [false, true] {
+        let (a, first, b, second) = catalogs();
+        first.save_named_graph("other").unwrap();
+        first.save_vertex(3, "node", "{}").unwrap();
+        first.save_graph_membership("vertex", 3, "g").unwrap();
+        for id in [1, 2] {
+            first.save_graph_membership("vertex", id, "other").unwrap();
+        }
+        first.save_edge(10, 1, 2, "link", "{}").unwrap();
+        first.save_graph_membership("edge", 10, "g").unwrap();
+        a.begin_transaction().unwrap();
+        b.begin_transaction().unwrap();
+        first.save_edge(10, 3, 2, "link", "{}").unwrap();
+        second.save_graph_membership("edge", 10, "other").unwrap();
+        let (winner, loser) = if topology_wins { (&a, &b) } else { (&b, &a) };
+        winner.commit_transaction().unwrap();
+        assert!(loser.commit_transaction().is_err());
+        loser.rollback_transaction().unwrap();
+        assert_eq!(
+            first.graph_edge(10).unwrap().unwrap().source_id,
+            if topology_wins { 3 } else { 1 }
+        );
+    }
+}
+
+#[test]
+fn graph_endpoint_and_orphan_lifetimes_reject_both_commit_orders() {
+    for membership_only in [false, true] {
+        for reference_wins in [false, true] {
+            let (a, first, b, second) = catalogs();
+            a.begin_transaction().unwrap();
+            b.begin_transaction().unwrap();
+            first.save_edge(10, 1, 2, "link", "{}").unwrap();
+            first.save_graph_membership("edge", 10, "g").unwrap();
+            second.delete_graph_membership("vertex", 1, "g").unwrap();
+            if !membership_only {
+                second.delete_vertex(1).unwrap();
+            }
+            let (winner, loser) = if reference_wins { (&a, &b) } else { (&b, &a) };
+            winner.commit_transaction().unwrap();
+            assert!(
+                loser.commit_transaction().is_err(),
+                "membership_only={membership_only}, reference_wins={reference_wins}"
+            );
+            loser.rollback_transaction().unwrap();
+            assert_eq!(first.graph_edge(10).unwrap().is_some(), reference_wins);
+            assert_eq!(
+                first
+                    .graph_has_membership(uqa_storage::GraphEntityKind::Vertex, 1, "g")
+                    .unwrap(),
+                reference_wins
+            );
+        }
+    }
+    for reference_wins in [false, true] {
+        let (a, first, b, second) = catalogs();
+        first.save_vertex(3, "orphan", "{}").unwrap();
+        a.begin_transaction().unwrap();
+        b.begin_transaction().unwrap();
+        first.save_graph_membership("vertex", 3, "g").unwrap();
+        second.purge_orphan_graph_entities().unwrap();
+        let (winner, loser) = if reference_wins { (&a, &b) } else { (&b, &a) };
+        winner.commit_transaction().unwrap();
+        assert!(
+            loser.commit_transaction().is_err(),
+            "orphan reference_wins={reference_wins}"
+        );
+        loser.rollback_transaction().unwrap();
+        assert_eq!(first.graph_vertex(3).unwrap().is_some(), reference_wins);
+    }
+}
+
+#[test]
 fn graph_count_and_maximum_keep_one_view_across_identity_pages() {
     use super::occurrences::InterleavedStore;
     use uqa_storage::{GraphEntityFilter, GraphEntityKind};

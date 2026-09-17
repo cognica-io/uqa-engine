@@ -41,7 +41,7 @@ impl KeyValueCatalog {
         self.with_graph_mutation(|read, batch| {
             read.fence_definition(batch, name)?;
             batch.delete(&single_str_key(TAG_NAMED_GRAPH, name)?)?;
-            read.delete_graph_memberships_into(batch, name)
+            read.delete_graph_memberships_into(batch, name, |_, _| false)
         })
     }
 
@@ -163,7 +163,7 @@ impl KeyValueCatalog {
         self.with_graph_mutation(|read, batch| {
             read.fence_definition(batch, graph)?;
             batch.fence_record(&single_str_key(TAG_NAMED_GRAPH, graph)?)?;
-            read.delete_graph_memberships_into(batch, graph)
+            read.delete_graph_memberships_into(batch, graph, |_, _| false)
         })
     }
 
@@ -206,7 +206,11 @@ impl KeyValueCatalog {
             };
             read.fence_definition(batch, graph)?;
             batch.put(&single_str_key(TAG_NAMED_GRAPH, graph)?, &[])?;
-            read.delete_graph_memberships_into(batch, graph)?;
+            read.delete_graph_memberships_into(batch, graph, |kind, id| match kind {
+                "vertex" => keep(GraphEntityKind::Vertex, id),
+                "edge" => keep(GraphEntityKind::Edge, id),
+                _ => false,
+            })?;
             for &(id, slot) in vertices.iter() {
                 let row = &snapshot.vertices[slot];
                 read.save_vertex(batch, id, &row.label, &row.properties_json)?;
@@ -231,7 +235,7 @@ impl KeyValueCatalog {
         self.with_graph_mutation(|read, batch| {
             read.fence_definition(batch, graph)?;
             batch.delete(&single_str_key(TAG_NAMED_GRAPH, graph)?)?;
-            read.delete_graph_memberships_into(batch, graph)?;
+            read.delete_graph_memberships_into(batch, graph, |_, _| false)?;
             batch.delete(&single_str_key(
                 TAG_METADATA,
                 &format!("graph_label_registry::{graph}"),
@@ -282,6 +286,33 @@ impl GraphRead<'_> {
         self.guard_definition(batch, Some(graph))?;
         let forward = graph_membership_key(kind, id, graph)?;
         let reverse = reverse_membership_key(kind, id, graph)?;
+        if present {
+            let entity_kind = match kind {
+                "vertex" => Some(GraphEntityKind::Vertex),
+                "edge" => Some(GraphEntityKind::Edge),
+                _ => None,
+            };
+            if let Some(entity_kind) = entity_kind {
+                self.guard_entity_reference(batch, entity_kind, id, None)?;
+                if entity_kind == GraphEntityKind::Edge {
+                    if let Some(edge) = self.edge(id)? {
+                        for endpoint in [edge.source_id, edge.target_id] {
+                            self.guard_entity_reference(
+                                batch,
+                                GraphEntityKind::Vertex,
+                                endpoint,
+                                Some(graph),
+                            )?;
+                        }
+                    }
+                }
+            }
+        } else {
+            self.fence_membership_references(batch, kind, id, graph)?;
+        }
+        if self.read.get(&forward)?.is_some() == present {
+            return Ok(());
+        }
         if present {
             batch.put(&forward, &[])?;
             batch.put(&reverse, &[])?;

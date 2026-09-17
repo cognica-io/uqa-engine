@@ -21,6 +21,8 @@ use uqa_storage_sqlite::{ManagedConnection, SQLiteCompressionOptions, SQLiteReco
 mod documents;
 #[path = "mvcc/graph_identifiers.rs"]
 mod graph_identifiers;
+#[path = "mvcc/graph_lifetimes.rs"]
+mod graph_lifetimes;
 #[path = "mvcc/guards.rs"]
 mod guards;
 

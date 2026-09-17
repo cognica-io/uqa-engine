@@ -8,10 +8,66 @@
 
 use super::graph_view::GraphRead;
 use super::{single_str_key, string_value, TAG_METADATA, TAG_NAMED_GRAPH};
+use crate::catalog::graph_guards::GraphRecordGuard;
 use crate::catalog::graph_identifiers::GraphIdentifierNamespace;
 use crate::{GraphEntityKind, KeyValueBatch, StorageBackendResult};
 
 impl GraphRead<'_> {
+    pub(super) fn guard_entity_reference(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        kind: GraphEntityKind,
+        id: u64,
+        graph: Option<&str>,
+    ) -> StorageBackendResult<()> {
+        if !self.identifiers {
+            return Ok(());
+        }
+        let guard = GraphRecordGuard::new(kind, id);
+        batch.require_unchanged(&single_str_key(TAG_METADATA, &guard.lifetime())?)?;
+        batch.touch_marker(&single_str_key(TAG_METADATA, &guard.references())?, b"1")?;
+        if let Some(graph) = graph {
+            batch.require_unchanged(&super::graph_membership_key(kind.as_str(), id, graph)?)?;
+            batch.touch_marker(
+                &single_str_key(TAG_METADATA, &guard.membership_references(graph))?,
+                b"1",
+            )?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn fence_entity_lifetime(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        kind: GraphEntityKind,
+        id: u64,
+    ) -> StorageBackendResult<()> {
+        if self.identifiers {
+            let guard = GraphRecordGuard::new(kind, id);
+            batch.fence_record(&single_str_key(TAG_METADATA, &guard.lifetime())?)?;
+            batch.fence_record(&single_str_key(TAG_METADATA, &guard.references())?)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn fence_membership_references(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        kind: &str,
+        id: u64,
+        graph: &str,
+    ) -> StorageBackendResult<()> {
+        if self.identifiers {
+            if let Some(guard) = GraphRecordGuard::from_kind_name(kind, id) {
+                batch.fence_record(&single_str_key(
+                    TAG_METADATA,
+                    &guard.membership_references(graph),
+                )?)?;
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn identifier_namespace(&self) -> StorageBackendResult<GraphIdentifierNamespace> {
         if !self.identifiers {
             return Ok(GraphIdentifierNamespace::new(None, [0; 16]));

@@ -17,7 +17,12 @@ use uqa_storage::{
 };
 use uqa_storage_sqlite::{Catalog, SQLiteKeyValueStore, SQLiteStorageBackend};
 
-fn session(mode: Mode, path: &Path, native: bool, initialize: bool) -> PersistentStorageSession {
+pub(super) fn session(
+    mode: Mode,
+    path: &Path,
+    native: bool,
+    initialize: bool,
+) -> PersistentStorageSession {
     let connection = open(mode, path);
     if native {
         if initialize {
@@ -39,7 +44,7 @@ fn session(mode: Mode, path: &Path, native: bool, initialize: bool) -> Persisten
     }
 }
 
-fn graph(session: &PersistentStorageSession) -> PersistentGraphStore {
+pub(super) fn graph(session: &PersistentStorageSession) -> PersistentGraphStore {
     PersistentGraphStore::from_catalog(session.catalog.clone(), session.backend.clone())
 }
 

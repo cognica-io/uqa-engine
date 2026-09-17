@@ -85,6 +85,7 @@ impl GraphRead<'_> {
         &self,
         batch: &mut dyn KeyValueBatch,
         graph: &str,
+        keep: impl Fn(&str, u64) -> bool,
     ) -> StorageBackendResult<()> {
         KeyValueCatalog::invalidate_graph_path_data(self.read, batch, graph)?;
         let prefix = graph_membership_graph_prefix(graph)?;
@@ -99,10 +100,15 @@ impl GraphRead<'_> {
                 let mut offset = prefix.len();
                 let kind = read_str(key, &mut offset)?;
                 let id = read_u64(key, &mut offset)?;
+                if keep(&kind, id) {
+                    continue;
+                }
+                self.fence_membership_references(batch, &kind, id, graph)?;
                 batch.delete(&reverse_membership_key(&kind, id, graph)?)?;
+                batch.delete(key)?;
             }
         }
-        batch.delete_prefix(&prefix)
+        Ok(())
     }
 
     pub(super) fn vertex(&self, id: u64) -> StorageBackendResult<Option<GraphVertexRow>> {
@@ -257,6 +263,10 @@ impl GraphRead<'_> {
         row: Option<&StoredVertex>,
     ) -> StorageBackendResult<()> {
         self.guard_definition(batch, None)?;
+        let previous = self.read.get(&vertex_key(id))?;
+        if previous.is_none() || row.is_none() {
+            self.fence_entity_lifetime(batch, GraphEntityKind::Vertex, id)?;
+        }
         batch.graph_mutation(crate::mvcc::GraphMutation::InvalidateEntity(
             GraphEntityKind::Vertex,
             id,
@@ -265,7 +275,7 @@ impl GraphRead<'_> {
             self.guard_definition(batch, Some(&graph))?;
             KeyValueCatalog::invalidate_graph_path_data(self.read, batch, &graph)?;
         }
-        if let Some(old) = self.read.get(&vertex_key(id))? {
+        if let Some(old) = previous {
             for key in vertex_lookup_keys(id, &decode_value(&old)?)? {
                 batch.delete(&key)?;
             }
@@ -285,16 +295,41 @@ impl GraphRead<'_> {
         row: Option<&StoredEdge>,
     ) -> StorageBackendResult<()> {
         self.guard_definition(batch, None)?;
+        let previous: Option<StoredEdge> = self
+            .read
+            .get(&edge_key(id))?
+            .map(|bytes| decode_value(&bytes))
+            .transpose()?;
+        if previous.as_ref().zip(row).is_none_or(|(old, new)| {
+            old.source_id != new.source_id || old.target_id != new.target_id
+        }) {
+            self.fence_entity_lifetime(batch, GraphEntityKind::Edge, id)?;
+        }
+        if let Some(row) = row {
+            for endpoint in [row.source_id, row.target_id] {
+                self.guard_entity_reference(batch, GraphEntityKind::Vertex, endpoint, None)?;
+            }
+        }
         batch.graph_mutation(crate::mvcc::GraphMutation::InvalidateEntity(
             GraphEntityKind::Edge,
             id,
         ))?;
         for graph in self.memberships(GraphEntityKind::Edge, id)? {
             self.guard_definition(batch, Some(&graph))?;
+            if let Some(row) = row {
+                for endpoint in [row.source_id, row.target_id] {
+                    self.guard_entity_reference(
+                        batch,
+                        GraphEntityKind::Vertex,
+                        endpoint,
+                        Some(&graph),
+                    )?;
+                }
+            }
             KeyValueCatalog::invalidate_graph_path_data(self.read, batch, &graph)?;
         }
-        if let Some(old) = self.read.get(&edge_key(id))? {
-            for key in edge_lookup_keys(id, &decode_value(&old)?)? {
+        if let Some(old) = previous {
+            for key in edge_lookup_keys(id, &old)? {
                 batch.delete(&key)?;
             }
         }

@@ -11,6 +11,7 @@ mod family;
 mod format;
 mod graph_cache;
 mod graph_guards;
+mod graph_lifetimes;
 mod graph_lookup;
 mod key;
 mod layout;
