@@ -11,6 +11,7 @@
 pub(crate) mod commit;
 mod graph;
 mod history;
+mod ivf;
 mod key;
 mod memory;
 mod occurrence;
@@ -24,6 +25,7 @@ mod view;
 pub use commit::{PreparedRecordCommit, PreparedRecordWrite};
 pub use graph::{GraphMutation, GraphRecordKey, GraphRecordLayout};
 pub use history::{RecordHistory, RecordVersion, ScannedRecord, SharedRecordValue};
+pub use ivf::{IVFRecordHeader, IVFRecordKey, IVFRecordLayout, IVFRecordValue};
 pub use memory::{MemoryRecordSnapshot, MemoryVersionStore};
 pub use occurrence::{
     OccurrenceRecordKind, OccurrenceRecordLayout, OccurrenceRecordValue, OccurrenceRelatedKey,

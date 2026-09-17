@@ -32,6 +32,8 @@ pub use catalog::KeyValueCatalog;
 mod graph_commit;
 pub use graph_commit::KeyValueGraphRecords;
 mod index_view;
+mod ivf_records;
+pub use ivf_records::KeyValueIVFRecords;
 pub(crate) mod occurrence_records;
 pub use occurrence_records::KeyValueOccurrenceRecords;
 mod view;
@@ -99,6 +101,28 @@ pub trait KeyValueBatch {
     fn put(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()>;
     fn delete(&mut self, key: &[u8]) -> StorageBackendResult<()>;
     fn delete_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()>;
+    /// Retain already evaluated document input in the same atomic batch as its canonical values and IVF preview. Concurrent wrappers must forward this call.
+    fn ivf_mutation(
+        &mut self,
+        _metadata: &[u8],
+        _mutation: crate::ivf_index::IVFMutation<'_>,
+    ) -> StorageBackendResult<()> {
+        Ok(())
+    }
+    /// The immutable preview serves private reads; concurrent commit preparation may replace it with an internally recalculated generation.
+    fn preview_ivf_record(&mut self, key: &[u8], value: Option<&[u8]>) -> StorageBackendResult<()> {
+        match value {
+            Some(value) => self.put(key, value),
+            None => self.delete(key),
+        }
+    }
+    fn preview_ivf_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
+        self.delete_prefix(prefix)
+    }
+    /// Fence each existing IVF definition under this metadata prefix, including definitions with no vectors. Serialized stores already exclude competing writers.
+    fn fence_ivf_prefix(&mut self, _prefix: &[u8]) -> StorageBackendResult<()> {
+        Ok(())
+    }
     /// Stage an evaluated occurrence cluster, field total or source marker using the persistence's declared record layout. Source mutations must include their format marker and document guards. Concurrent stores merge only these explicitly typed replacements; ordinary byte writes remain conditional replacements.
     fn replace_occurrence_record(
         &mut self,

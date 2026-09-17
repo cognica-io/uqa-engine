@@ -84,6 +84,7 @@ impl KeyValueIVFIndex {
         field: &str,
     ) -> StorageBackendResult<()> {
         let mut batch = store.batch();
+        batch.fence_ivf_prefix(&ivf_metadata_key(table, field)?)?;
         batch.delete(&ivf_metadata_key(table, field)?)?;
         batch.delete_prefix(&ivf_centroid_prefix(table, field)?)?;
         batch.delete_prefix(&ivf_assignment_prefix(table, field)?)?;
@@ -144,12 +145,18 @@ impl KeyValueIVFIndex {
                 || cached.revision.is_none()
                 || !cached.value.centroids_match(&after);
             canonical(batch)?;
+            let preview =
+                !cached.definition_candidate && cached.revision.is_some() && changed_doc.is_some();
+            if preview {
+                batch.ivf_mutation(&ivf_metadata_key(&self.table, &self.field)?, mutation)?;
+            }
             self.stage_snapshot(
                 batch,
                 &after,
                 next_revision(cached.revision)?,
                 full_rewrite,
                 changed_doc,
+                preview,
             )
         })
     }
@@ -192,6 +199,7 @@ impl KeyValueIVFIndex {
                 next_revision(revision)?,
                 true,
                 None,
+                false,
             )
         })
     }
@@ -203,6 +211,7 @@ impl KeyValueIVFIndex {
         revision: u64,
         full_rewrite: bool,
         changed_doc: Option<DocId>,
+        preview: bool,
     ) -> StorageBackendResult<()> {
         ivf_persistence::stage_snapshot(
             batch,
@@ -214,6 +223,7 @@ impl KeyValueIVFIndex {
             revision,
             full_rewrite,
             changed_doc,
+            preview,
         )
     }
 }

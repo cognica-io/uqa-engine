@@ -75,15 +75,15 @@ impl RedbRecordStore {
                 .map(|value| codec::decode_u64(value.value()))
                 .transpose()?;
             if let Some(format) = initialized {
-                if !matches!(format, 1 | 2) {
+                if !matches!(format, 1..=3) {
                     return Err(VersionError::InvalidEncoding("unknown record format"));
                 }
                 read_u64(&metadata, "allocated")?;
                 read_u64(&metadata, "sequence")?;
                 let identity = codec::database_id(&metadata)?;
-                if format == 1 {
+                if format < 3 {
                     metadata
-                        .insert("format", 2_u64.to_be_bytes().as_slice())
+                        .insert("format", 3_u64.to_be_bytes().as_slice())
                         .map_err(redb_error)?;
                 }
                 identity
@@ -128,7 +128,7 @@ impl RedbRecordStore {
                     .insert("database", bytes.as_slice())
                     .map_err(redb_error)?;
                 metadata
-                    .insert("format", 2_u64.to_be_bytes().as_slice())
+                    .insert("format", 3_u64.to_be_bytes().as_slice())
                     .map_err(redb_error)?;
                 metadata
                     .insert("allocated", 0_u64.to_be_bytes().as_slice())

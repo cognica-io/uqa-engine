@@ -25,25 +25,25 @@ use crate::ivf_index::{IVFIndex, IVFMetadataSnapshot, IVFState};
 use crate::vector_index::IVFIndexParams;
 use crate::StorageBackendResult;
 
-const IVF_FORMAT_VERSION: u32 = 1;
+pub(super) const IVF_FORMAT_VERSION: u32 = 1;
 
 #[derive(Debug, Serialize, Deserialize)]
-struct PersistedIVFMetadata {
-    format_version: u32,
-    dimensions: u32,
-    nlist: u64,
-    nprobe: u64,
-    train_threshold: u64,
-    state: PersistedIVFState,
-    trained_size: u64,
-    deletes_since_train: u64,
-    vector_count: u64,
-    revision: u64,
+pub(super) struct PersistedIVFMetadata {
+    pub(super) format_version: u32,
+    pub(super) dimensions: u32,
+    pub(super) nlist: u64,
+    pub(super) nprobe: u64,
+    pub(super) train_threshold: u64,
+    pub(super) state: PersistedIVFState,
+    pub(super) trained_size: u64,
+    pub(super) deletes_since_train: u64,
+    pub(super) vector_count: u64,
+    pub(super) revision: u64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum PersistedIVFState {
+pub(super) enum PersistedIVFState {
     Untrained,
     Trained,
     Stale,
@@ -115,33 +115,45 @@ pub(super) fn stage_snapshot(
     revision: u64,
     full_rewrite: bool,
     changed_doc: Option<DocId>,
+    preview: bool,
 ) -> StorageBackendResult<()> {
-    batch.put(
+    if !preview {
+        batch.fence_ivf_prefix(&ivf_metadata_key(table, field)?)?;
+    }
+    put_record(
+        batch,
+        preview,
         &ivf_metadata_key(table, field)?,
         &encode_value(&metadata_from_snapshot(
             dimensions, params, snapshot, revision,
         )?)?,
     )?;
     if full_rewrite {
-        batch.delete_prefix(&ivf_centroid_prefix(table, field)?)?;
-        batch.delete_prefix(&ivf_assignment_prefix(table, field)?)?;
+        delete_prefix(batch, preview, &ivf_centroid_prefix(table, field)?)?;
+        delete_prefix(batch, preview, &ivf_assignment_prefix(table, field)?)?;
         for (centroid, vector) in snapshot.centroids.iter().enumerate() {
-            batch.put(
+            put_record(
+                batch,
+                preview,
                 &ivf_centroid_key(table, field, centroid)?,
                 &vector_to_blob(vector)?,
             )?;
         }
         for (doc_id, ordinal, centroid) in &snapshot.assignments {
-            put_assignment(batch, table, field, *doc_id, *ordinal, *centroid)?;
+            put_assignment(batch, table, field, *doc_id, *ordinal, *centroid, preview)?;
         }
     } else if let Some(doc_id) = changed_doc {
-        batch.delete_prefix(&ivf_assignment_doc_prefix(table, field, doc_id)?)?;
+        delete_prefix(
+            batch,
+            preview,
+            &ivf_assignment_doc_prefix(table, field, doc_id)?,
+        )?;
         for (_, ordinal, centroid) in snapshot
             .assignments
             .iter()
             .filter(|(candidate, _, _)| *candidate == doc_id)
         {
-            put_assignment(batch, table, field, doc_id, *ordinal, *centroid)?;
+            put_assignment(batch, table, field, doc_id, *ordinal, *centroid, preview)?;
         }
     }
     Ok(())
@@ -154,8 +166,11 @@ fn put_assignment(
     doc_id: DocId,
     ordinal: u32,
     centroid: usize,
+    preview: bool,
 ) -> StorageBackendResult<()> {
-    batch.put(
+    put_record(
+        batch,
+        preview,
         &ivf_assignment_key(table, field, doc_id, ordinal)?,
         &usize_to_u64(centroid, "IVF centroid assignment")?.to_be_bytes(),
     )
@@ -224,7 +239,7 @@ fn load_assignments(
     Ok(Budgeted::new(assignments, memory))
 }
 
-fn metadata_from_snapshot(
+pub(super) fn metadata_from_snapshot(
     dimensions: u32,
     params: IVFIndexParams,
     snapshot: &IVFMetadataSnapshot,
@@ -288,5 +303,29 @@ impl From<PersistedIVFState> for IVFState {
             PersistedIVFState::Trained => Self::Trained,
             PersistedIVFState::Stale => Self::Stale,
         }
+    }
+}
+
+fn put_record(
+    batch: &mut dyn KeyValueBatch,
+    preview: bool,
+    key: &[u8],
+    value: &[u8],
+) -> StorageBackendResult<()> {
+    if preview {
+        batch.preview_ivf_record(key, Some(value))
+    } else {
+        batch.put(key, value)
+    }
+}
+fn delete_prefix(
+    batch: &mut dyn KeyValueBatch,
+    preview: bool,
+    prefix: &[u8],
+) -> StorageBackendResult<()> {
+    if preview {
+        batch.preview_ivf_prefix(prefix)
+    } else {
+        batch.delete_prefix(prefix)
     }
 }

@@ -115,6 +115,18 @@ impl IVFIndex {
         if assignments.keys().any(|key| !seen.contains(key)) {
             return Err(corrupt("assignment references a missing canonical vector"));
         }
+        let mut previous = None;
+        for &(document, ordinal) in &seen {
+            super::prepare::check(control)?;
+            let expected = match previous {
+                Some((prior, order)) if prior == document => u64::from(order) + 1,
+                _ => 0,
+            };
+            if u64::from(ordinal) != expected {
+                return Err(corrupt("canonical tensor has non-contiguous ordinals"));
+            }
+            previous = Some((document, ordinal));
+        }
         let mut inverted_lists = vec![Vec::new(); snapshot.centroids.len()];
         for (key, vector) in &persisted {
             super::prepare::check(control)?;

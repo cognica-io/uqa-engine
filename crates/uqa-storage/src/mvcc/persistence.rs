@@ -136,6 +136,10 @@ pub trait VersionedPersistence: Send + Sync {
         &crate::key_value::KeyValueOccurrenceRecords
     }
 
+    fn ivf_record_layout(&self) -> &dyn super::IVFRecordLayout {
+        &crate::key_value::KeyValueIVFRecords
+    }
+
     /// Persist a new transaction allocation before returning it, without advancing record visibility.
     fn allocate_transaction(
         &self,

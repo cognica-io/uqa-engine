@@ -132,3 +132,19 @@ fn prepared_deletion_retrains_only_after_crossing_the_stale_threshold() {
     assert_eq!(deleted.vector_count, 7);
     assert_eq!(source.metadata_snapshot(), before);
 }
+
+#[test]
+fn restoration_rejects_missing_tensor_ordinals_and_accepts_unsorted_complete_tensors() {
+    let mut index = IVFIndex::with_params(2, 2, 2, 100);
+    index
+        .add_many(1, vec![vec![1.0, 0.0], vec![0.0, 1.0]])
+        .unwrap();
+    for ordinals in [[0, 2], [1, 2], [0, 0], [1, 0]] {
+        let vectors = ordinals
+            .into_iter()
+            .map(|ordinal| (1, ordinal, vec![1.0, 0.0]))
+            .collect();
+        let restored = IVFIndex::from_persistence(2, 2, 2, 100, vectors, index.metadata_snapshot());
+        assert_eq!(restored.is_ok(), ordinals == [1, 0]);
+    }
+}

@@ -10,6 +10,7 @@ use uqa_core::memory::BudgetedVec;
 
 use crate::mvcc::commit::RecordWriteKind;
 use crate::mvcc::graph::OwnedGraphMutation;
+use crate::mvcc::ivf::OwnedIVFMutation;
 use crate::mvcc::key::RecordKey;
 use crate::mvcc::{
     CommitErrorOutcome, CommitFailure, CommitStatus, CommittedRecordSnapshot, MergedRecordSnapshot,
@@ -23,6 +24,7 @@ struct Savepoint {
     name: BudgetedVec<u8>,
     id: StorageSavepointId,
     graph_position: usize,
+    ivf_position: usize,
 }
 
 pub(super) struct Transaction {
@@ -33,6 +35,7 @@ pub(super) struct Transaction {
     prepared: Option<PreparedRecordCommit>,
     materialized: Option<PreparedRecordCommit>,
     graph: BudgetedVec<OwnedGraphMutation>,
+    ivf: BudgetedVec<OwnedIVFMutation>,
     outcome: Option<CommitErrorOutcome>,
     savepoints: BudgetedVec<Savepoint>,
 }
@@ -51,6 +54,7 @@ impl Transaction {
             prepared: None,
             materialized: None,
             graph: BudgetedVec::new(control.memory()),
+            ivf: BudgetedVec::new(control.memory()),
             outcome: None,
             savepoints: BudgetedVec::new(control.memory()),
         })
@@ -118,7 +122,9 @@ impl Transaction {
             self.changes.write_kind(key, control)?.unwrap_or(kind)
         } else if matches!(
             kind,
-            RecordWriteKind::Occurrence | RecordWriteKind::OccurrenceCache
+            RecordWriteKind::Occurrence
+                | RecordWriteKind::OccurrenceCache
+                | RecordWriteKind::IVFPreview
         ) && self.changes.write_kind(key, control)? == Some(RecordWriteKind::Canonical)
         {
             RecordWriteKind::Canonical
@@ -135,8 +141,14 @@ impl Transaction {
         Ok(())
     }
 
-    pub(super) fn has_graph_changes(&self) -> bool {
-        !self.graph.is_empty()
+    pub(super) fn has_derived_changes(&self) -> bool {
+        !self.graph.is_empty() || !self.ivf.is_empty()
+    }
+
+    pub(super) fn ivf_mutation(&mut self, mutation: &OwnedIVFMutation) -> VersionResult<()> {
+        self.writable()?;
+        self.ivf.push(mutation.clone())?;
+        Ok(())
     }
 
     pub(super) fn delete_prefix(
@@ -195,10 +207,12 @@ impl Transaction {
         let id = StorageSavepointId::allocate();
         self.changes.savepoint(id)?;
         let graph_position = self.graph.len();
+        let ivf_position = self.ivf.len();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(self)));
         if !matches!(&result, Ok(Ok(_))) {
             self.changes.rollback_to_savepoint(id)?;
             self.graph.truncate(graph_position);
+            self.ivf.truncate(ivf_position);
         }
         self.changes.release_savepoint(id)?;
         match result {
@@ -221,6 +235,7 @@ impl Transaction {
             name: owned,
             id,
             graph_position: self.graph.len(),
+            ivf_position: self.ivf.len(),
         })?;
         Ok(())
     }
@@ -248,6 +263,7 @@ impl Transaction {
             .rollback_to_savepoint(self.savepoints[position].id)?;
         self.graph
             .truncate(self.savepoints[position].graph_position);
+        self.ivf.truncate(self.savepoints[position].ivf_position);
         self.savepoints.truncate(position + 1);
         Ok(())
     }
@@ -265,14 +281,15 @@ impl Transaction {
             None | Some(CommitErrorOutcome::Indeterminate(_)) => {}
         }
         if self.prepared.is_none() {
-            self.prepared = Some(self.changes.prepare(control)?.with_graph_effects(
-                self.committed.sequence(),
-                &self.graph,
-                control,
-            )?);
+            self.prepared = Some(
+                self.changes
+                    .prepare(control)?
+                    .with_graph_effects(self.committed.sequence(), &self.graph, control)?
+                    .with_ivf_effects(self.committed.sequence(), &self.ivf, control)?,
+            );
         }
         let prepared = self.prepared.as_ref().expect("prepared once");
-        if prepared.records().is_empty() && prepared.graph.is_none() {
+        if prepared.records().is_empty() && prepared.graph.is_none() && prepared.ivf.is_none() {
             return Ok(());
         }
         let allocation = if let Some(id) = self.allocation {
@@ -335,18 +352,32 @@ impl Transaction {
                 RecordWriteKind::Occurrence | RecordWriteKind::OccurrenceCache
             )
         });
-        if (prepared.graph.is_some() || occurrences) && self.materialized.is_none() {
+        if (prepared.graph.is_some() || prepared.ivf.is_some() || occurrences)
+            && self.materialized.is_none()
+        {
             let current = persistence.snapshot(control)?;
+            let ivf = if prepared.ivf.is_some() {
+                Some(crate::mvcc::ivf::resolve(
+                    prepared,
+                    &*self.committed,
+                    &*current,
+                    persistence.ivf_record_layout(),
+                    control,
+                )?)
+            } else {
+                None
+            };
+            let input = ivf.as_ref().unwrap_or(prepared);
             let merged = if occurrences {
                 Some(crate::mvcc::occurrence::resolve(
-                    prepared,
+                    input,
                     &*self.committed,
                     &*current,
                     persistence.occurrence_record_layout(),
                     control,
                 )?)
             } else {
-                None
+                ivf
             };
             let input = merged.as_ref().unwrap_or(prepared);
             self.materialized = if input.graph.is_some() {

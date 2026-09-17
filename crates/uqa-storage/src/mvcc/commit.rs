@@ -36,6 +36,7 @@ pub(crate) enum RecordWriteKind {
     GraphPreview,
     Occurrence,
     OccurrenceCache,
+    IVFPreview,
 }
 
 impl PreparedRecordWrite {
@@ -78,6 +79,7 @@ pub struct PreparedRecordCommit {
     writes: BudgetedVec<PreparedRecordWrite>,
     fingerprint: CommitFingerprint,
     pub(super) graph: Option<GraphEffects>,
+    pub(super) ivf: Option<super::ivf::IVFEffects>,
     pub(super) resolved_at: Option<CommitSequence>,
 }
 
@@ -154,6 +156,7 @@ impl PreparedRecordCommit {
                     RecordWriteKind::GraphPreview => 2,
                     RecordWriteKind::Occurrence => 3,
                     RecordWriteKind::OccurrenceCache => 4,
+                    RecordWriteKind::IVFPreview => 5,
                 }]);
             }
             digest.update((write.key().len() as u64).to_be_bytes());
@@ -178,6 +181,7 @@ impl PreparedRecordCommit {
             writes,
             fingerprint: digest.finalize().into(),
             graph: None,
+            ivf: None,
             resolved_at: None,
         })
     }
@@ -252,6 +256,15 @@ impl PreparedRecordCommit {
         self
     }
 
+    pub(super) fn seal_ivf_effects(
+        &mut self,
+        fingerprint: CommitFingerprint,
+        effects: super::ivf::IVFEffects,
+    ) {
+        self.fingerprint = fingerprint;
+        self.ivf = Some(effects);
+    }
+
     pub(crate) fn retain_graph_effects(
         self,
         original: &Self,
@@ -266,6 +279,7 @@ impl PreparedRecordCommit {
     /// Check the snapshot used to discover derived dependencies under exclusive admission, after resolving any existing receipt and before validating record heads. A mismatch proves this pending attempt has not published and permits pure effect preparation to restart.
     pub fn validate_snapshot(&self, current: CommitSequence) -> VersionResult<()> {
         if self.graph.is_some()
+            || self.ivf.is_some()
             || self
                 .writes
                 .iter()

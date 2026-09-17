@@ -10,6 +10,8 @@
 mod compound;
 #[path = "mvcc_sessions/graph.rs"]
 mod graph;
+#[path = "mvcc_sessions/ivf_merging.rs"]
+mod ivf_merging;
 #[path = "mvcc_sessions/occurrence_merging.rs"]
 mod occurrence_merging;
 #[path = "mvcc_sessions/occurrences.rs"]

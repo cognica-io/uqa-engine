@@ -8,6 +8,7 @@ use uqa_core::memory::BudgetedVec;
 
 use crate::mvcc::commit::RecordWriteKind;
 use crate::mvcc::graph::OwnedGraphMutation;
+use crate::mvcc::ivf::OwnedIVFMutation;
 use crate::mvcc::VersionError;
 use crate::{KeyValueBatch, StorageBackendResult};
 
@@ -21,6 +22,8 @@ enum Operation {
     OccurrenceReset(BudgetedVec<u8>),
     Fence(BudgetedVec<u8>),
     Graph(OwnedGraphMutation),
+    IVFInput(OwnedIVFMutation),
+    IVFFence(BudgetedVec<u8>),
     TypedRecord {
         key: BudgetedVec<u8>,
         value: Option<BudgetedVec<u8>>,
@@ -84,6 +87,50 @@ impl<'a> Batch<'a> {
                 }
                 Operation::Fence(key) => transaction.fence_record(key, &self.store.control)?,
                 Operation::Graph(mutation) => transaction.graph_mutation(mutation)?,
+                Operation::IVFInput(mutation) => {
+                    let guard = self.store.persistence.ivf_record_layout().key(
+                        mutation.metadata.bytes(),
+                        crate::mvcc::IVFRecordKey::Document(mutation.document),
+                        &self.store.control,
+                    )?;
+                    transaction.fence_record(&guard, &self.store.control)?;
+                    transaction.ivf_mutation(mutation)?;
+                }
+                Operation::IVFFence(prefix) => {
+                    let view = transaction.view()?;
+                    let mut guards = BudgetedVec::new(self.store.control.memory());
+                    view.visit_keys(
+                        prefix,
+                        None,
+                        usize::MAX,
+                        &self.store.control,
+                        &mut |key, record| {
+                            if record.live {
+                                let layout = self.store.persistence.ivf_record_layout();
+                                let metadata = layout
+                                    .metadata_key(key, &self.store.control)?
+                                    .ok_or(VersionError::InvalidEncoding(
+                                        "invalid IVF metadata prefix",
+                                    ))?;
+                                if &*metadata != key {
+                                    return Err(VersionError::InvalidEncoding(
+                                        "IVF fence selected derived rows",
+                                    ));
+                                }
+                                let guard = layout.key(
+                                    key,
+                                    crate::mvcc::IVFRecordKey::Structure,
+                                    &self.store.control,
+                                )?;
+                                guards.push(guard)?;
+                            }
+                            Ok(true)
+                        },
+                    )?;
+                    for guard in guards.iter() {
+                        transaction.fence_record(guard, &self.store.control)?;
+                    }
+                }
                 Operation::TypedRecord { key, value, kind } => {
                     transaction.write_record(key, value.as_deref(), *kind, &self.store.control)?;
                 }
@@ -94,6 +141,32 @@ impl<'a> Batch<'a> {
 }
 
 impl KeyValueBatch for Batch<'_> {
+    fn ivf_mutation(
+        &mut self,
+        metadata: &[u8],
+        mutation: crate::ivf_index::IVFMutation<'_>,
+    ) -> StorageBackendResult<()> {
+        self.operations.push(Operation::IVFInput(
+            OwnedIVFMutation::retain(metadata, mutation, &self.store.control)
+                .map_err(VersionError::into_storage_error)?,
+        ))?;
+        Ok(())
+    }
+    fn preview_ivf_record(&mut self, key: &[u8], value: Option<&[u8]>) -> StorageBackendResult<()> {
+        self.typed_record(key, value, RecordWriteKind::IVFPreview)
+    }
+    fn preview_ivf_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
+        self.operations.push(Operation::DeletePrefix(
+            self.copy(prefix)?,
+            RecordWriteKind::IVFPreview,
+        ))?;
+        Ok(())
+    }
+    fn fence_ivf_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
+        self.operations
+            .push(Operation::IVFFence(self.copy(prefix)?))?;
+        Ok(())
+    }
     fn put(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
         self.operations
             .push(Operation::Put(self.copy(key)?, self.copy(value)?))?;

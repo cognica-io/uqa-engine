@@ -52,7 +52,9 @@ pub(crate) fn resolve(
                 resolver.validate(mutation, write)?;
                 changes.apply_owned(std::slice::from_ref(write), control)?;
             }
-            RecordWriteKind::GraphCache | RecordWriteKind::GraphPreview => {
+            RecordWriteKind::GraphCache
+            | RecordWriteKind::GraphPreview
+            | RecordWriteKind::IVFPreview => {
                 changes.apply_owned(std::slice::from_ref(write), control)?;
             }
             RecordWriteKind::Occurrence | RecordWriteKind::OccurrenceCache => {

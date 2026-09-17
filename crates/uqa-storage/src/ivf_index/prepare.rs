@@ -87,8 +87,16 @@ impl IVFIndex {
         mutation: IVFMutation<'_>,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Budgeted<IVFMetadataSnapshot>> {
+        self.prepare_metadata_changes(std::slice::from_ref(&mutation), control)
+    }
+
+    pub(crate) fn prepare_metadata_changes(
+        &self,
+        mutations: &[IVFMutation<'_>],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Budgeted<IVFMetadataSnapshot>> {
         control.check()?;
-        if matches!(mutation, IVFMutation::Clear) {
+        if matches!(mutations, [IVFMutation::Clear]) {
             return Self::with_params(
                 self.dimensions,
                 self.nlist,
@@ -97,45 +105,44 @@ impl IVFIndex {
             )
             .metadata_controlled(control);
         }
-        if let IVFMutation::Replace { vectors, .. } = mutation {
-            for vector in vectors {
-                control.check()?;
-                crate::vector_index::validate_vector_values(self.dimensions, vector)?;
+        let mut count = self.vectors.lock().len();
+        for mutation in mutations {
+            if let IVFMutation::Replace { vectors, .. } = mutation {
+                count = count
+                    .checked_add(vectors.len())
+                    .ok_or(MemoryError::SizeOverflow)?;
+                for vector in *vectors {
+                    control.check()?;
+                    crate::vector_index::validate_vector_values(self.dimensions, vector)?;
+                }
             }
         }
-        let additional = match mutation {
-            IVFMutation::Replace { vectors, .. } => vectors.len(),
-            _ => 0,
-        };
-        let count = self
-            .vectors
-            .lock()
-            .len()
-            .checked_add(additional)
-            .ok_or(MemoryError::SizeOverflow)?;
         let clusters = self.centroids.lock().len().max(self.nlist.min(count));
         let _workspace =
             control
                 .memory()
                 .reserve(workspace_bytes(self.dimensions, count, clusters)?)?;
         let mut candidate = self.clone_controlled(control)?;
-        match mutation {
-            IVFMutation::Replace { document, vectors } => {
-                let mut values = Vec::with_capacity(vectors.len());
-                for vector in vectors {
-                    control.check()?;
-                    values.push(vector.clone());
+        for mutation in mutations {
+            control.check()?;
+            match *mutation {
+                IVFMutation::Replace { document, vectors } => {
+                    let mut values = Vec::with_capacity(vectors.len());
+                    for vector in vectors {
+                        control.check()?;
+                        values.push(vector.clone());
+                    }
+                    candidate.replace_controlled(document, values, Some(control))?;
                 }
-                candidate.replace_controlled(document, values, Some(control))?;
+                IVFMutation::Delete(document) => {
+                    candidate.delete_controlled(document, Some(control))?;
+                }
+                IVFMutation::Clear => candidate.clear_index(),
+                IVFMutation::Train => candidate.train_controlled(Some(control))?,
             }
-            IVFMutation::Delete(document) => {
-                candidate.delete_controlled(document, Some(control))?;
+            if candidate.state() == IVFState::Stale {
+                candidate.train_controlled(Some(control))?;
             }
-            IVFMutation::Clear => candidate.clear_index(),
-            IVFMutation::Train => candidate.train_controlled(Some(control))?,
-        }
-        if candidate.state() == IVFState::Stale {
-            candidate.train_controlled(Some(control))?;
         }
         candidate.metadata_controlled(control)
     }

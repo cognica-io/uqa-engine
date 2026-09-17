@@ -83,3 +83,22 @@ fn key_value_ivf_and_exact_independent_commits_and_reopen_in_every_sqlite_mode()
         .unwrap();
     }
 }
+
+#[test]
+fn merged_ivf_generations_conflicts_and_reopen_in_every_sqlite_mode() {
+    for mode in MODES {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("ivf-merges.db");
+        {
+            let a: Arc<dyn KeyValueStore> =
+                Arc::new(SQLiteKeyValueStore::new(open(mode, &path)).unwrap());
+            let b: Arc<dyn KeyValueStore> =
+                Arc::new(SQLiteKeyValueStore::new(open(mode, &path)).unwrap());
+            verify_ivf_document_merges(&a, &b).unwrap();
+            verify_ivf_merge_conflicts(&a, &b).unwrap();
+        }
+        let reopened: Arc<dyn KeyValueStore> =
+            Arc::new(SQLiteKeyValueStore::new(open(mode, &path)).unwrap());
+        verify_ivf_merge_reopen(&reopened).unwrap();
+    }
+}

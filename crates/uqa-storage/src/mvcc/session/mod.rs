@@ -349,7 +349,7 @@ impl KeyValueStore for VersionedKeyValueStore {
     }
     fn transaction_has_written(&self) -> StorageBackendResult<bool> {
         Ok(self.active.lock().as_ref().is_some_and(|transaction| {
-            transaction.changes.has_written() || transaction.has_graph_changes()
+            transaction.changes.has_written() || transaction.has_derived_changes()
         }))
     }
     fn change_version(&self) -> StorageBackendResult<Option<u64>> {

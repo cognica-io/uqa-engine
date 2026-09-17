@@ -240,6 +240,22 @@ struct SQLiteKeyValueBatch<'a> {
 }
 
 impl KeyValueBatch for SQLiteKeyValueBatch<'_> {
+    fn ivf_mutation(
+        &mut self,
+        metadata: &[u8],
+        mutation: uqa_storage::ivf_index::IVFMutation<'_>,
+    ) -> StorageBackendResult<()> {
+        self.batch.ivf_mutation(metadata, mutation)
+    }
+    fn preview_ivf_record(&mut self, key: &[u8], value: Option<&[u8]>) -> StorageBackendResult<()> {
+        self.batch.preview_ivf_record(key, value)
+    }
+    fn preview_ivf_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
+        self.batch.preview_ivf_prefix(prefix)
+    }
+    fn fence_ivf_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
+        self.batch.fence_ivf_prefix(prefix)
+    }
     fn put(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
         self.batch.put(key, value)
     }
