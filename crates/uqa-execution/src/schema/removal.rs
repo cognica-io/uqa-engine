@@ -28,7 +28,9 @@ pub fn run_drop(
             if names.is_empty() {
                 return Ok(SQLResult::empty());
             }
-            context.locks.prepare_definition_write()?;
+            if !matches!(stmt.kind, DropKind::View | DropKind::MaterializedView) {
+                context.locks.prepare_definition_write()?;
+            }
             run_drop_inner(context, DropStmt { names, ..stmt })
         }))
 }

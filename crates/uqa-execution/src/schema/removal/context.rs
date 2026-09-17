@@ -31,6 +31,7 @@ pub trait RelationRemovalEvents {
         -> StorageBackendResult<()>;
 }
 pub trait RelationRemovalViews {
+    fn lock_dependent_views(&self, names: &[String]) -> Result<(), SQLError>;
     fn ensure_view_drop_authority(&self, name: &str) -> Result<(), SQLError>;
     fn drop_views(&self, names: &[String], cascade: bool, kind: &str) -> Result<(), SQLError>;
     fn drop_views_depending_on_relations(&self, names: &[String]) -> StorageBackendResult<()>;

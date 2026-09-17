@@ -160,3 +160,12 @@ fn rule_dependency_error_retains_target_and_dependent_order() {
     assert_eq!(sqlstate, "2BP01");
     assert_eq!(message, "cannot drop view public.first, public.second because other objects depend on it: rule rule_b on table app.owner_b, rule rule_a on table app.owner_a");
 }
+
+#[test]
+fn dependent_view_rejection_uses_the_dependency_sqlstate() {
+    let error =
+        ensure_no_view_dependents("public.source", &["public.dependent".into()]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("2BP01"));
+    assert!(error.to_string().contains("public.dependent"));
+    ensure_no_view_dependents("public.source", &[]).unwrap();
+}

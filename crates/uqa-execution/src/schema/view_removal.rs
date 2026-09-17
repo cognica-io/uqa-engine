@@ -6,6 +6,7 @@
 
 //! View deletion preflight and dependency scheduling.
 pub mod context;
+pub mod locking;
 mod publication;
 use super::view_dependencies;
 use crate::row_locks::{
@@ -65,6 +66,7 @@ pub fn drop_views(
 ) -> Result<(), SQLError> {
     transactions.with_view_removal(|_, context| {
         ensure_view_drop_authorities(context, names)?;
+        let dependents = locking::lock_dependent_views(context.registry, context.locks, names)?;
         context.locks.prepare_definition_write()?;
         context
             .routines
@@ -72,8 +74,9 @@ pub fn drop_views(
         if !cascade {
             return drop_views_inner(context, names, false);
         }
-        let remaining = remaining_view_drop_targets(context, names)?;
-        let closure = view_dependencies::cascade_view_closure(&context.dependencies, remaining)?;
+        let mut closure = names.to_vec();
+        closure.extend(dependents);
+        let closure = remaining_view_drop_targets(context, &closure)?;
         context
             .events
             .drop_rules_depending_on_relations_inner(&closure)

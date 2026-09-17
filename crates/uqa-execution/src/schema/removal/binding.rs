@@ -90,6 +90,12 @@ pub(super) fn bind_drop_targets(
             RelationLockMode::AccessExclusive,
             false,
         )?;
+        let (tables, _) = context
+            .tables
+            .hierarchy_drop_targets(&targets, statement.cascade);
+        context.views.lock_dependent_views(&tables)?;
+    } else if statement.kind == DropKind::ForeignTable {
+        context.views.lock_dependent_views(&targets)?;
     }
     Ok(targets)
 }

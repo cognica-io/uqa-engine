@@ -134,6 +134,10 @@ impl RelationRemovalEvents for Engine {
     }
 }
 impl RelationRemovalViews for Engine {
+    fn lock_dependent_views(&self, names: &[String]) -> Result<(), SQLError> {
+        uqa_execution::schema::view_removal::locking::lock_dependent_views(self, self, names)
+            .map(|_| ())
+    }
     fn ensure_view_drop_authority(&self, name: &str) -> Result<(), SQLError> {
         uqa_execution::schema::view_removal::ensure_view_drop_authorities(
             &self.view_removal_context(),

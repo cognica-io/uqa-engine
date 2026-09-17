@@ -237,3 +237,214 @@ fn drop_handles_duplicate_targets_and_reports_missing_schema_notices() {
     }
     error(&engine, "DROP FOREIGN TABLE missing", "42704");
 }
+
+const DEPENDENCY_ROOTS: [(&str, &str); 4] = [
+    ("TABLE", "CREATE TABLE a(v integer); INSERT INTO a VALUES (1)"),
+    ("VIEW", "CREATE VIEW a AS SELECT 1 AS v"),
+    ("MATERIALIZED VIEW", "CREATE MATERIALIZED VIEW a AS SELECT 1 AS v"),
+    ("FOREIGN TABLE", "CREATE SERVER source FOREIGN DATA WRAPPER memory_fdw; CREATE FOREIGN TABLE a(v integer) SERVER source"),
+];
+
+fn create_dependency_chain(engine: &Engine, create_root: &str) {
+    sql(engine, create_root);
+    sql(engine, "CREATE VIEW b AS SELECT 2 AS v; CREATE VIEW d AS SELECT * FROM a; CREATE VIEW outer_view AS SELECT * FROM d");
+}
+
+#[test]
+fn relation_drop_waits_for_view_dependencies_and_preserves_removed_edges() {
+    for provider in 0..3 {
+        for (kind, create) in DEPENDENCY_ROOTS {
+            for behavior in ["CASCADE", "RESTRICT"] {
+                let (_directory, first, second) = sessions(provider);
+                create_dependency_chain(&first, create);
+                sql(&first, "BEGIN; CREATE OR REPLACE VIEW d AS SELECT * FROM b");
+                let (second, result) = after_wait(
+                    &first,
+                    second,
+                    &format!("DROP {kind} a {behavior}"),
+                    "public.d",
+                    "COMMIT",
+                );
+                result.unwrap();
+                assert_eq!(
+                    sql(&second, "SELECT to_regclass('a') AS relation").rows[0]["relation"],
+                    Value::Null
+                );
+                assert_eq!(sql(&second, "SELECT * FROM d").rows[0]["v"], Value::Int(2));
+                assert_eq!(
+                    sql(&second, "SELECT * FROM outer_view").rows[0]["v"],
+                    Value::Int(2)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn relation_drop_waits_before_restrict_errors_or_transitive_cascade_publication() {
+    for provider in 0..3 {
+        for (kind, create) in DEPENDENCY_ROOTS {
+            for behavior in ["CASCADE", "RESTRICT"] {
+                let (_directory, first, second) = sessions(provider);
+                create_dependency_chain(&first, create);
+                sql(&first, "BEGIN; ALTER VIEW d SET (security_barrier=true)");
+                let (second, result) = after_wait(
+                    &first,
+                    second,
+                    &format!("DROP {kind} a {behavior}"),
+                    "public.d",
+                    "COMMIT",
+                );
+                if behavior == "RESTRICT" {
+                    assert_eq!(result.unwrap_err().sqlstate(), Some("2BP01"));
+                    for name in ["a", "d", "outer_view"] {
+                        assert_ne!(
+                            sql(
+                                &second,
+                                &format!("SELECT to_regclass('{name}') AS relation")
+                            )
+                            .rows[0]["relation"],
+                            Value::Null
+                        );
+                    }
+                } else {
+                    result.unwrap();
+                    for name in ["a", "d", "outer_view"] {
+                        assert_eq!(
+                            sql(
+                                &second,
+                                &format!("SELECT to_regclass('{name}') AS relation")
+                            )
+                            .rows[0]["relation"],
+                            Value::Null
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn cascading_relation_drop_follows_renamed_views_and_preserves_reused_names() {
+    for provider in 0..3 {
+        for (kind, create) in DEPENDENCY_ROOTS {
+            let (_directory, first, second) = sessions(provider);
+            create_dependency_chain(&first, create);
+            sql(
+                &first,
+                "BEGIN; ALTER VIEW d RENAME TO moved; CREATE VIEW d AS SELECT 2 AS v",
+            );
+            let (second, result) = after_wait(
+                &first,
+                second,
+                &format!("DROP {kind} a CASCADE"),
+                "public.d",
+                "COMMIT",
+            );
+            result.unwrap();
+            assert_eq!(sql(&second, "SELECT * FROM d").rows[0]["v"], Value::Int(2));
+            for name in ["a", "moved", "outer_view"] {
+                assert_eq!(
+                    sql(
+                        &second,
+                        &format!("SELECT to_regclass('{name}') AS relation")
+                    )
+                    .rows[0]["relation"],
+                    Value::Null
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn direct_view_and_inherited_table_drops_recheck_waited_view_dependencies() {
+    for provider in 0..3 {
+        let (_directory, first, second) = sessions(provider);
+        create_dependency_chain(&first, "CREATE VIEW a AS SELECT 1 AS v");
+        sql(&first, "BEGIN; CREATE OR REPLACE VIEW d AS SELECT * FROM b");
+        let (second, result) =
+            after_operation_wait(&first, second, "public.d", "COMMIT", |engine| {
+                engine.drop_view("a")
+            });
+        assert!(result.unwrap());
+        assert_eq!(
+            sql(&second, "SELECT * FROM outer_view").rows[0]["v"],
+            Value::Int(2)
+        );
+
+        let (_directory, first, second) = sessions(provider);
+        sql(
+            &first,
+            "CREATE TABLE parent(v integer); CREATE TABLE a() INHERITS(parent)",
+        );
+        create_dependency_chain(&first, "INSERT INTO a VALUES (1)");
+        sql(&first, "BEGIN; CREATE OR REPLACE VIEW d AS SELECT * FROM b");
+        let (second, result) = after_wait(
+            &first,
+            second,
+            "DROP TABLE parent CASCADE",
+            "public.d",
+            "COMMIT",
+        );
+        result.unwrap();
+        assert_eq!(
+            sql(&second, "SELECT to_regclass('a') AS relation").rows[0]["relation"],
+            Value::Null
+        );
+        assert_eq!(
+            sql(&second, "SELECT * FROM outer_view").rows[0]["v"],
+            Value::Int(2)
+        );
+    }
+}
+
+#[test]
+fn cancelling_a_dependency_wait_leaves_every_view_and_root_intact() {
+    for provider in 0..3 {
+        let (_directory, first, second) = sessions(provider);
+        create_dependency_chain(&first, "CREATE VIEW a AS SELECT 1 AS v");
+        sql(&first, "BEGIN; ALTER VIEW d SET (security_barrier=true)");
+        let session = second.session_id;
+        let cancel = second.runtime.cancellation.clone();
+        let task = thread::spawn(move || second.sql("DROP VIEW a CASCADE", &[]));
+        let waited = wait_for_relation(&first, session, "public.d", || task.is_finished());
+        cancel.cancel();
+        let result = task.join().unwrap();
+        sql(&first, "ROLLBACK");
+        assert!(waited);
+        assert_eq!(result.unwrap_err().sqlstate(), Some("57014"));
+        assert_eq!(
+            sql(&first, "SELECT * FROM outer_view").rows[0]["v"],
+            Value::Int(1)
+        );
+    }
+}
+
+#[test]
+fn relation_drop_rechecks_view_dependencies_after_a_fixed_data_snapshot() {
+    for provider in 0..3 {
+        for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
+            let (_directory, first, second) = sessions(provider);
+            create_dependency_chain(&first, "CREATE VIEW a AS SELECT 1 AS v");
+            sql(
+                &second,
+                &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT * FROM t"),
+            );
+            sql(&first, "BEGIN; CREATE OR REPLACE VIEW d AS SELECT * FROM b");
+            let (second, result) =
+                after_wait(&first, second, "DROP VIEW a CASCADE", "public.d", "COMMIT");
+            result.unwrap_or_else(|error| panic!("provider {provider}, {isolation}: {error}"));
+            assert_eq!(
+                sql(&second, "SELECT * FROM outer_view").rows[0]["v"],
+                Value::Int(2)
+            );
+            sql(&second, "COMMIT");
+            assert_eq!(
+                sql(&first, "SELECT to_regclass('a') AS relation").rows[0]["relation"],
+                Value::Null
+            );
+        }
+    }
+}
