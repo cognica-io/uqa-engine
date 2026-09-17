@@ -54,7 +54,8 @@ pub fn encode_occurrence_cluster(
     Ok((scores.into_parts().0, positions.into_parts().0))
 }
 
-pub(crate) fn encode_occurrence_cluster_controlled<'a>(
+/// Encode one cluster using the caller's shared allowance and cancellation. Scratch space is charged during encoding, and both output buffers retain their reservations until dropped. Batch callers can reuse one control without allocating a new allowance or cancellation state per cluster.
+pub fn encode_occurrence_cluster_controlled<'a>(
     entries: impl Clone + ExactSizeIterator<Item = &'a OccurrencePosting>,
     control: &crate::read_control::StorageReadControl,
 ) -> StorageBackendResult<(BudgetedVec<u8>, BudgetedVec<u8>)> {

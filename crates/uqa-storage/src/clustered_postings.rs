@@ -492,10 +492,10 @@ mod term_keys;
 
 use legacy::{decode_positions, encode_positions};
 pub use legacy::{decode_terms, encode_terms};
-pub(crate) use occurrences::encode_occurrence_cluster_controlled;
 pub use occurrences::{
     decode_occurrence_cluster, decode_occurrence_cluster_budgeted,
-    decode_occurrence_document_budgeted, encode_occurrence_cluster, OccurrencePosting,
+    decode_occurrence_document_budgeted, encode_occurrence_cluster,
+    encode_occurrence_cluster_controlled, OccurrencePosting,
 };
 use scores::{decode_score_block_into, encode_scores, parse_score_blob};
 pub use term_keys::{decode_term_keys, encode_term_keys};

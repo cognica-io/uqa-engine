@@ -43,6 +43,42 @@ fn occurrence_encoding_retains_and_releases_its_complete_budget() {
     assert_eq!(control.memory().used(), 0);
 }
 
+#[test]
+fn successive_cluster_encodings_share_the_allowance_and_cancellation() {
+    let entries = graph_fixture(0, 129);
+    let probe = crate::read_control::StorageReadControl::with_limit(1 << 24);
+    let (scores, positions) = encode_occurrence_cluster_controlled(entries.iter(), &probe).unwrap();
+    let required_peak = probe.memory().peak();
+    let retained = probe.memory().used();
+    drop((scores, positions));
+    assert_eq!(probe.memory().used(), 0);
+
+    let control = crate::read_control::StorageReadControl::with_limit(required_peak);
+    let first = encode_occurrence_cluster_controlled(entries.iter(), &control).unwrap();
+    assert_eq!(control.memory().used(), retained);
+    assert!(matches!(
+        encode_occurrence_cluster_controlled(entries.iter(), &control),
+        Err(StorageBackendError::Memory(_))
+    ));
+    assert_eq!(control.memory().used(), retained);
+    assert_eq!(
+        decode_occurrence_cluster(0, &first.0, &first.1).unwrap(),
+        entries
+    );
+    drop(first);
+    assert_eq!(control.memory().used(), 0);
+
+    let second = encode_occurrence_cluster_controlled(entries.iter(), &control).unwrap();
+    control.cancellation().cancel();
+    assert!(matches!(
+        encode_occurrence_cluster_controlled(entries.iter(), &control),
+        Err(StorageBackendError::Cancelled(_))
+    ));
+    assert_eq!(control.memory().used(), retained);
+    drop(second);
+    assert_eq!(control.memory().used(), 0);
+}
+
 fn graph_fixture(cluster: u64, count: usize) -> Vec<OccurrencePosting> {
     let base = cluster_base(cluster).unwrap();
     (0..count)

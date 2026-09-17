@@ -38,6 +38,63 @@ fn add_get_round_trip() {
 }
 
 #[test]
+fn cluster_encoding_preserves_typed_resource_errors_and_existing_postings() {
+    let mut index = idx();
+    index.add_document(1, fields([("body", "term")])).unwrap();
+    let entries = [OccurrencePosting {
+        doc_id: 2,
+        doc_length: 1,
+        occurrences: vec![uqa_core::TokenOccurrence {
+            position: 0,
+            position_length: 1,
+            offsets: None,
+        }],
+    }];
+    let control = uqa_storage::read_control::StorageReadControl::with_limit(0);
+    index
+        .conn
+        .with(|connection| {
+            let write = || {
+                write_cluster(
+                    connection,
+                    "articles",
+                    "body",
+                    &TokenTermKey::from_text("term"),
+                    0,
+                    &entries,
+                    &control,
+                )
+            };
+            assert!(matches!(write(), Err(SQLiteError::Memory(_))));
+            control.cancellation().cancel();
+            assert!(matches!(write(), Err(SQLiteError::Cancelled(_))));
+            assert!(matches!(
+                write_cluster(
+                    connection,
+                    "articles",
+                    "body",
+                    &TokenTermKey::from_text("term"),
+                    0,
+                    &[],
+                    &control,
+                ),
+                Err(SQLiteError::Cancelled(_))
+            ));
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(
+        index
+            .get_posting_list("body", "term")
+            .unwrap()
+            .doc_ids()
+            .collect::<Vec<_>>(),
+        [1]
+    );
+}
+
+#[test]
 fn doc_freq_and_term_freq() {
     let mut idx = idx();
     idx.add_document(1, fields([("title", "rust rust rust")]))
