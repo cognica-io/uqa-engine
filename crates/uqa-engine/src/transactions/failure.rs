@@ -9,7 +9,7 @@
 use super::{
     ConstraintModeState, Engine, EngineDataSnapshot, SQLError, SessionStateSnapshot,
     StorageSavepointId, TransactionCharacteristicsState, TransactionDirtyState, TransactionFrame,
-    TransactionIntent, TransactionRowChange, TransactionStatus,
+    TransactionRowChange, TransactionStatus,
 };
 
 pub(super) fn panic_description(payload: &(dyn std::any::Any + Send)) -> &str {
@@ -34,7 +34,6 @@ struct StatementAbortSnapshot {
     pending_listen_actions: Vec<crate::PendingListenAction>,
     pending_notifications: Vec<crate::PendingNotification>,
     constraint_modes: ConstraintModeState,
-    intent: TransactionIntent,
     characteristics: TransactionCharacteristicsState,
     first_snapshot_set: bool,
 }
@@ -56,7 +55,6 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
             pending_listen_actions: savepoint.pending_listen_actions.clone(),
             pending_notifications: savepoint.pending_notifications.clone(),
             constraint_modes: savepoint.constraint_modes.clone(),
-            intent: savepoint.intent,
             characteristics: savepoint.characteristics,
             // PostgreSQL's FirstSnapshotSet belongs to the top transaction, not to a subtransaction or savepoint. Once any statement has acquired a snapshot, error recovery must never make it false.
             first_snapshot_set: frame.first_snapshot_set,
@@ -78,7 +76,6 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
         pending_listen_actions: Vec::new(),
         pending_notifications: Vec::new(),
         constraint_modes: ConstraintModeState::default(),
-        intent: frame.intent,
         characteristics: frame.characteristics,
         first_snapshot_set: frame.first_snapshot_set,
     }
@@ -165,7 +162,6 @@ impl Engine {
             frame.pending_listen_actions = rollback_state.pending_listen_actions;
             frame.pending_notifications = rollback_state.pending_notifications;
             frame.constraint_modes = rollback_state.constraint_modes;
-            frame.intent = rollback_state.intent;
             frame.characteristics = rollback_state.characteristics;
             frame.first_snapshot_set = rollback_state.first_snapshot_set;
         }

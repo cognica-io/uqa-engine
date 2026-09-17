@@ -119,6 +119,61 @@ fn read_only_analysis_commits_and_rolls_back_with_its_catalog_transaction() {
 }
 
 #[test]
+fn read_only_analysis_preserves_write_admission_through_savepoint_completion() {
+    for provider in 0..3 {
+        for completion in ["release", "rollback", "recover"] {
+            let (_directory, writer, reader) = sessions(provider);
+            writer.sql("INSERT INTO t VALUES (20)", &[]).unwrap();
+            reader
+                .sql("BEGIN READ ONLY; SAVEPOINT analyzed; ANALYZE t", &[])
+                .unwrap();
+            assert_eq!(persisted_rows(&reader), 2);
+            if completion == "recover" {
+                let error = reader.sql("SELECT 1 / 0", &[]).unwrap_err();
+                assert_eq!(error.sqlstate(), Some("22012"));
+                assert!(reader.transaction_failed());
+            }
+            if completion != "release" {
+                reader.sql("ROLLBACK TO analyzed", &[]).unwrap();
+            }
+            reader.sql("RELEASE analyzed", &[]).unwrap();
+            assert!(reader.current_transaction_is_read_only());
+            reader.sql("COMMIT", &[]).unwrap();
+            assert_eq!(
+                persisted_rows(&writer),
+                if completion == "release" { 2 } else { 1 },
+                "provider {provider}, {completion}"
+            );
+            reader.sql("BEGIN READ ONLY", &[]).unwrap();
+            let error = reader.sql("INSERT INTO t VALUES (30)", &[]).unwrap_err();
+            assert_eq!(error.sqlstate(), Some("25006"));
+            reader.sql("ROLLBACK", &[]).unwrap();
+        }
+    }
+}
+
+#[test]
+fn read_only_analysis_preserves_write_admission_after_nested_transaction_completion() {
+    for provider in 0..3 {
+        for commit_child in [false, true] {
+            let (_directory, writer, reader) = sessions(provider);
+            writer.sql("INSERT INTO t VALUES (20)", &[]).unwrap();
+            reader.sql("BEGIN READ ONLY", &[]).unwrap();
+            reader.begin().unwrap();
+            reader.run_analyze(Some("t")).unwrap();
+            if commit_child {
+                reader.commit().unwrap();
+            } else {
+                reader.rollback().unwrap();
+            }
+            assert!(reader.current_transaction_is_read_only());
+            reader.commit().unwrap();
+            assert_eq!(persisted_rows(&writer), if commit_child { 2 } else { 1 });
+        }
+    }
+}
+
+#[test]
 fn nested_analysis_resets_parent_maintenance_only_when_the_child_commits() {
     for provider in 0..3 {
         for commit_child in [false, true] {

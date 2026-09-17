@@ -250,6 +250,7 @@ struct TransactionDirtyState {
     catalog_registry: bool,
 }
 
+/// Physical write admission for the lifetime of a transaction. Savepoint undo restores SQL access characteristics but cannot turn an already promoted physical writer back into an unwritten reader.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TransactionIntent {
     ReadOnly,
@@ -385,7 +386,6 @@ impl FixedTransactionSnapshot {
 struct TransactionSavepoint {
     name: String,
     storage_savepoint: StorageSavepointId,
-    intent: TransactionIntent,
     characteristics: TransactionCharacteristicsState,
     session_snapshot: SessionStateSnapshot,
     data_snapshot: Option<EngineDataSnapshot>,

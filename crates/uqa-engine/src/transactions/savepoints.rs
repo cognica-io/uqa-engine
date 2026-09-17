@@ -54,7 +54,6 @@ impl Engine {
         frame.savepoints.push(TransactionSavepoint {
             name,
             storage_savepoint,
-            intent: frame.intent,
             characteristics: frame.characteristics,
             session_snapshot,
             data_snapshot,
@@ -91,14 +90,12 @@ impl Engine {
                 message: format!("savepoint \"{name}\" does not exist"),
             })?;
         let storage_savepoint = frame.savepoints[position].storage_savepoint;
-        let intent = frame.savepoints[position].intent;
         let characteristics = frame.savepoints[position].characteristics;
         if let Some(backend) = self.storage.backend.as_ref().filter(|_| !deferred) {
             backend
                 .release_savepoint(storage_savepoint)
                 .map_err(|err| Self::storage_tx_error("RELEASE SAVEPOINT", &err))?;
         }
-        frame.intent = intent;
         frame.characteristics = characteristics;
         frame.savepoints.truncate(position);
         frame.xid_levels.truncate(position + 1);
@@ -197,7 +194,6 @@ impl TransactionFrame {
             .clone_from(&savepoint.deferred_constraint_trigger_events);
         self.constraint_modes
             .clone_from(&savepoint.constraint_modes);
-        self.intent = savepoint.intent;
         self.characteristics = savepoint.characteristics;
     }
 }
