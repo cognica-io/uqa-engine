@@ -6,6 +6,8 @@
 
 //! Session algorithms use a fault-injectable in-memory record owner, without provider dependencies.
 
+#[path = "mvcc_sessions/commands.rs"]
+mod commands;
 #[path = "mvcc_sessions/compound.rs"]
 mod compound;
 #[path = "mvcc_sessions/documents.rs"]

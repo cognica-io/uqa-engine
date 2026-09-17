@@ -11,18 +11,20 @@ use super::{
     OccurrenceRelatedKey as Related,
 };
 use crate::mvcc::{
-    commit::RecordWriteKind, CommitSequence, CommittedRecordSnapshot, PreparedRecordCommit,
-    PreparedRecordWrite, PrivateRecordChanges, RecordWrite, VersionError, VersionResult,
+    commit::RecordWriteKind, resolution::ResolutionMode, CommitSequence, CommittedRecordSnapshot,
+    PreparedRecordCommit, PreparedRecordWrite, PrivateRecordChanges, RecordWrite, VersionError,
+    VersionResult,
 };
 use crate::read_control::StorageReadControl;
 use std::collections::BTreeMap;
 use uqa_core::memory::{BudgetedVec, MemoryError};
 
-pub(crate) fn resolve(
+pub(in crate::mvcc) fn resolve(
     original: &PreparedRecordCommit,
     base: &dyn CommittedRecordSnapshot,
     current: &dyn CommittedRecordSnapshot,
     layout: &dyn OccurrenceRecordLayout,
+    mode: ResolutionMode,
     control: &StorageReadControl,
 ) -> VersionResult<PreparedRecordCommit> {
     let changes = PrivateRecordChanges::new(control.memory());
@@ -42,6 +44,7 @@ pub(crate) fn resolve(
         base,
         current,
         layout,
+        mode,
         changes: &changes,
         control,
     };
@@ -74,6 +77,7 @@ pub(super) struct Resolver<'a> {
     pub(super) base: &'a dyn CommittedRecordSnapshot,
     pub(super) current: &'a dyn CommittedRecordSnapshot,
     pub(super) layout: &'a dyn OccurrenceRecordLayout,
+    mode: ResolutionMode,
     pub(super) changes: &'a PrivateRecordChanges,
     pub(super) control: &'a StorageReadControl,
 }
@@ -219,12 +223,23 @@ impl Resolver<'_> {
         Ok(())
     }
     pub(super) fn replace(&self, key: &[u8], value: Option<&[u8]>) -> VersionResult<()> {
-        self.changes.apply(
+        let kind = if self.layout.kind(key, self.control)? == Kind::Cache {
+            RecordWriteKind::OccurrenceCache
+        } else {
+            RecordWriteKind::Occurrence
+        };
+        let prepared = PreparedRecordCommit::new(
             &[RecordWrite {
                 key,
                 expected: revision(self.current, key, self.control)?,
                 value,
             }],
+            self.control,
+        )?;
+        self.changes.apply_owned(
+            &[prepared.records()[0]
+                .clone()
+                .with_kind(self.mode.kind(kind))],
             self.control,
         )
     }

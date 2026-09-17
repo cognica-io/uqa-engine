@@ -11,6 +11,7 @@ use std::sync::Arc;
 use uqa_core::memory::BudgetedVec;
 
 use crate::mvcc::commit::RecordWriteKind;
+use crate::mvcc::resolution::ResolutionMode;
 use crate::mvcc::{
     CommitSequence, CommittedRecordSnapshot, DatabaseId, MergedRecordSnapshot,
     PreparedRecordCommit, PrivateRecordChanges, RecordWrite, ScannedVisibleRecord, VersionError,
@@ -28,6 +29,7 @@ struct Resolver<'a> {
     layout: &'a dyn GraphRecordLayout,
     database: DatabaseId,
     control: &'a StorageReadControl,
+    mode: ResolutionMode,
 }
 
 pub(in crate::mvcc) fn resolve(
@@ -35,6 +37,7 @@ pub(in crate::mvcc) fn resolve(
     committed: Arc<dyn CommittedRecordSnapshot>,
     layout: &dyn GraphRecordLayout,
     database: DatabaseId,
+    mode: ResolutionMode,
     control: &StorageReadControl,
 ) -> VersionResult<PreparedRecordCommit> {
     let effects = original
@@ -44,42 +47,7 @@ pub(in crate::mvcc) fn resolve(
     let changes = PrivateRecordChanges::new(control.memory());
     let preview = PrivateRecordChanges::new(control.memory());
     preview.apply_owned(original.records(), control)?;
-    let mut writes = BudgetedVec::new(control.memory());
-    writes.reserve(original.records().len())?;
-    for (mutation, write) in original.records().iter().enumerate() {
-        control.cancellation().check()?;
-        if write.kind() == RecordWriteKind::Marker {
-            writes.push(write.clone())?;
-            continue;
-        }
-        let actual = committed
-            .metadata(write.key(), control)?
-            .and_then(|head| head.revision);
-        if write.kind() == RecordWriteKind::Canonical {
-            if write.expected() != actual {
-                return Err(VersionError::WriteConflict {
-                    mutation,
-                    expected: write.expected(),
-                    actual,
-                });
-            }
-            writes.push(write.clone())?;
-        } else {
-            if !layout.is_validity_key(write.key())? {
-                return Err(VersionError::InvalidEncoding(
-                    "graph cache write targets a canonical record",
-                ));
-            }
-            if write.kind() == RecordWriteKind::GraphCache {
-                writes.push(
-                    write
-                        .clone()
-                        .rebase(actual)
-                        .with_kind(RecordWriteKind::Canonical),
-                )?;
-            }
-        }
-    }
+    let writes = initial_writes(original, &*committed, layout, mode, control)?;
     changes.apply_owned(&writes, control)?;
     drop(writes);
     let resolver = Resolver {
@@ -90,6 +58,7 @@ pub(in crate::mvcc) fn resolve(
         layout,
         database,
         control,
+        mode,
     };
     for operation in effects.operations.iter() {
         control.cancellation().check()?;
@@ -126,22 +95,93 @@ pub(in crate::mvcc) fn resolve(
         .resolved(original, resolver.committed.sequence()))
 }
 
+fn initial_writes(
+    original: &PreparedRecordCommit,
+    committed: &dyn CommittedRecordSnapshot,
+    layout: &dyn GraphRecordLayout,
+    mode: ResolutionMode,
+    control: &StorageReadControl,
+) -> VersionResult<BudgetedVec<crate::mvcc::PreparedRecordWrite>> {
+    let mut writes = BudgetedVec::new(control.memory());
+    writes.reserve(original.records().len())?;
+    for (mutation, write) in original.records().iter().enumerate() {
+        control.cancellation().check()?;
+        if write.kind() == RecordWriteKind::Marker
+            || (mode == ResolutionMode::Command
+                && matches!(
+                    write.kind(),
+                    RecordWriteKind::Occurrence
+                        | RecordWriteKind::OccurrenceCache
+                        | RecordWriteKind::IVFPreview
+                        | RecordWriteKind::HNSWPreview
+                ))
+        {
+            writes.push(write.clone())?;
+            continue;
+        }
+        let actual = committed
+            .metadata(write.key(), control)?
+            .and_then(|head| head.revision);
+        if write.kind() == RecordWriteKind::Canonical {
+            if write.expected() != actual {
+                return Err(VersionError::WriteConflict {
+                    mutation,
+                    expected: write.expected(),
+                    actual,
+                });
+            }
+            writes.push(write.clone())?;
+        } else {
+            if !layout.is_validity_key(write.key())? {
+                return Err(VersionError::InvalidEncoding(
+                    "graph cache write targets a canonical record",
+                ));
+            }
+            if write.kind() == RecordWriteKind::GraphCache {
+                writes.push(
+                    write
+                        .clone()
+                        .rebase(actual)
+                        .with_kind(mode.kind(RecordWriteKind::GraphCache)),
+                )?;
+            }
+        }
+    }
+    Ok(writes)
+}
+
 impl Resolver<'_> {
     fn key(&self, key: GraphRecordKey<'_>) -> VersionResult<BudgetedVec<u8>> {
         self.layout.key(self.database, key, self.control)
     }
 
-    fn replace(&self, key: &[u8], value: Option<&[u8]>) -> VersionResult<()> {
+    fn replace(
+        &self,
+        key: &[u8],
+        value: Option<&[u8]>,
+        kind: RecordWriteKind,
+    ) -> VersionResult<()> {
         let expected = self
             .committed
             .metadata(key, self.control)?
             .and_then(|record| record.revision);
-        self.changes.apply(
+        let prepared = PreparedRecordCommit::new(
             &[RecordWrite {
                 key,
                 expected,
                 value,
             }],
+            self.control,
+        )?;
+        let kind = if kind == RecordWriteKind::GraphPreview {
+            self.changes.write_kind(key, self.control)?.unwrap_or(kind)
+        } else {
+            kind
+        };
+        self.changes.apply_owned(
+            &[prepared.records()[0]
+                .clone()
+                .with_kind(self.mode.kind(kind))],
             self.control,
         )
     }
@@ -173,7 +213,7 @@ impl Resolver<'_> {
         if let Some(row) = view.get(key, self.control)? {
             if let Some(value) = row.value() {
                 let invalid = self.layout.invalidate(key, value, self.control)?;
-                self.replace(key, invalid.as_deref())?;
+                self.replace(key, invalid.as_deref(), RecordWriteKind::GraphPreview)?;
             }
         }
         Ok(())
@@ -216,10 +256,10 @@ impl Resolver<'_> {
             && !self.changed(&definition_key, base)?
             && !self.graph_changed(graph, base)?
         {
-            self.replace(&key, Some(value))
+            self.replace(&key, Some(value), RecordWriteKind::GraphCache)
         } else {
             let invalid = self.layout.invalidate(&key, value, self.control)?;
-            self.replace(&key, invalid.as_deref())
+            self.replace(&key, invalid.as_deref(), RecordWriteKind::GraphCache)
         }
     }
 

@@ -16,6 +16,8 @@ use crate::{StorageBackendError, StorageBackendResult};
 
 mod documents;
 pub use documents::{verify_document_ownership, verify_document_reopen};
+mod commands;
+pub use commands::{verify_command_refresh, verify_command_refresh_reopen};
 mod sequences;
 pub use sequences::{verify_sequence_concurrency, verify_sequence_reopen};
 mod graph;

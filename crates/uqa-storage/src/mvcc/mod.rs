@@ -22,6 +22,7 @@ mod occurrence;
 mod overlay;
 mod persistence;
 mod projection;
+mod resolution;
 mod session;
 mod types;
 mod vector;

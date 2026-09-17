@@ -119,6 +119,21 @@ impl ManagedConnection {
         logical.begin_read_transaction().map_err(Into::into)
     }
 
+    /// Advance a bound native or Key/Value command view through the common session, without opening a physical writer. Legacy physical transactions require their existing transaction boundary instead.
+    pub fn refresh_transaction_snapshot(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> Result<()> {
+        self.surface_cleanup_failure()?;
+        let _gate = self.session.gate.write();
+        self.session
+            .logical
+            .get()
+            .ok_or(SQLiteError::LogicalSessionRequired)?
+            .refresh_transaction_snapshot(cancellation)
+            .map_err(Into::into)
+    }
+
     pub(super) fn check_native_access(&self, connection: &Connection) -> Result<()> {
         if self.record_access {
             return Ok(());

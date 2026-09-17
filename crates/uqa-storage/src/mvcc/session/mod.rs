@@ -108,6 +108,21 @@ impl VersionedKeyValueStore {
         self.view()
     }
 
+    /// Advance an active transaction to the current committed boundary while retaining and rebasing its evaluated private changes. Retained readers keep their previous boundary; savepoint undo restores its matching private changes and committed base. SQL chooses when its isolation level allows this transition. A sealed commit cannot advance, and failed preparation leaves the active view unchanged.
+    pub fn refresh_transaction_snapshot(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<()> {
+        cancellation.check()?;
+        let control = StorageReadControl::new(self.control.memory(), cancellation);
+        let mut active = self.active.lock();
+        active
+            .as_mut()
+            .ok_or_else(no_transaction)?
+            .refresh(&*self.persistence, &control)
+            .map_err(VersionError::into_storage_error)
+    }
+
     /// Share this session's retention allowance with provider codecs and retained record readers. Creating a control clone does not create another allowance.
     pub fn retention_control(&self) -> StorageReadControl {
         self.control.clone()
@@ -200,6 +215,13 @@ impl super::IdentifierAllocator for VersionedKeyValueStore {
 }
 
 impl KeyValueStore for VersionedKeyValueStore {
+    fn refresh_transaction_snapshot(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<()> {
+        Self::refresh_transaction_snapshot(self, cancellation)
+    }
+
     fn identifier_allocator(&self) -> Option<&dyn super::IdentifierAllocator> {
         Some(self)
     }

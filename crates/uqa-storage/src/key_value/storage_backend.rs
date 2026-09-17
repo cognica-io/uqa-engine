@@ -191,6 +191,13 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         self.store.begin_upgradeable_transaction()
     }
 
+    fn refresh_transaction_snapshot(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<()> {
+        self.store.refresh_transaction_snapshot(cancellation)
+    }
+
     fn in_transaction(&self) -> bool {
         self.store.in_transaction()
     }

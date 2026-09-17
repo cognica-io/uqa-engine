@@ -4,6 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+mod refresh;
+
 use std::sync::Arc;
 
 use uqa_core::memory::BudgetedVec;
@@ -26,6 +28,8 @@ struct Savepoint {
     graph_position: usize,
     vector_position: usize,
     requirement_position: usize,
+    committed: Arc<dyn CommittedRecordSnapshot>,
+    changes: PrivateRecordChanges,
 }
 
 pub(super) struct Transaction {
@@ -272,6 +276,8 @@ impl Transaction {
             graph_position: self.graph.len(),
             vector_position: self.vector.len(),
             requirement_position: self.requirements.len(),
+            committed: Arc::clone(&self.committed),
+            changes: self.changes.share_owner(),
         })?;
         Ok(())
     }
@@ -287,16 +293,19 @@ impl Transaction {
 
     pub(super) fn release(&mut self, name: &str) -> VersionResult<()> {
         let position = self.savepoint_position(name)?;
-        self.changes
-            .release_savepoint(self.savepoints[position].id)?;
+        for savepoint in self.savepoints[position..].iter().rev() {
+            savepoint.changes.release_savepoint(savepoint.id)?;
+        }
         self.savepoints.truncate(position);
         Ok(())
     }
 
     pub(super) fn rollback_to(&mut self, name: &str) -> VersionResult<()> {
         let position = self.savepoint_position(name)?;
-        self.changes
-            .rollback_to_savepoint(self.savepoints[position].id)?;
+        let savepoint = &self.savepoints[position];
+        savepoint.changes.rollback_to_savepoint(savepoint.id)?;
+        self.changes = savepoint.changes.share_owner();
+        self.committed = Arc::clone(&savepoint.committed);
         self.graph
             .truncate(self.savepoints[position].graph_position);
         self.vector
@@ -320,13 +329,7 @@ impl Transaction {
             None | Some(CommitErrorOutcome::Indeterminate(_)) => {}
         }
         if self.prepared.is_none() {
-            self.prepared = Some(
-                self.changes
-                    .prepare(control)?
-                    .with_requirements(&self.requirements, control)?
-                    .with_graph_effects(self.committed.sequence(), &self.graph, control)?
-                    .with_vector_effects(self.committed.sequence(), &self.vector, control)?,
-            );
+            self.prepared = Some(self.prepare(control)?);
         }
         let prepared = self.prepared.as_ref().expect("prepared once");
         if prepared.records().is_empty()
@@ -383,82 +386,31 @@ impl Transaction {
         }
     }
 
+    fn prepare(&self, control: &StorageReadControl) -> VersionResult<PreparedRecordCommit> {
+        self.changes
+            .prepare(control)?
+            .with_requirements(&self.requirements, control)?
+            .with_graph_effects(self.committed.sequence(), &self.graph, control)?
+            .with_vector_effects(self.committed.sequence(), &self.vector, control)
+    }
+
     fn prepare_effects(
         &mut self,
         persistence: &dyn VersionedPersistence,
         control: &StorageReadControl,
     ) -> VersionResult<()> {
+        use crate::mvcc::resolution::{self, ResolutionMode};
         control.cancellation().check()?;
         let prepared = self.prepared.as_ref().expect("prepared once");
-        let occurrences = prepared.records().iter().any(|write| {
-            matches!(
-                write.kind(),
-                RecordWriteKind::Occurrence | RecordWriteKind::OccurrenceCache
-            )
-        });
-        let markers = prepared
-            .records()
-            .iter()
-            .any(|write| write.kind() == RecordWriteKind::Marker);
-        if (prepared.graph.is_some() || prepared.vector.is_some() || occurrences || markers)
-            && self.materialized.is_none()
-        {
-            let current = persistence.snapshot(control)?;
-            prepared.validate_requirements(control.cancellation(), |key| {
-                Ok(current
-                    .metadata(key, control)?
-                    .and_then(|record| record.revision))
-            })?;
-            let vector = if prepared.vector.is_some() {
-                Some(crate::mvcc::vector::resolve(
-                    prepared,
-                    &*self.committed,
-                    &*current,
-                    persistence,
-                    control,
-                )?)
-            } else {
-                None
-            };
-            let input = vector.as_ref().unwrap_or(prepared);
-            let merged = if occurrences {
-                Some(crate::mvcc::occurrence::resolve(
-                    input,
-                    &*self.committed,
-                    &*current,
-                    persistence.occurrence_record_layout(),
-                    control,
-                )?)
-            } else {
-                vector
-            };
-            let input = merged.as_ref().unwrap_or(prepared);
-            let merged = if input.graph.is_some() {
-                let layout =
-                    persistence
-                        .graph_record_layout()
-                        .ok_or(VersionError::InvalidEncoding(
-                            "provider has no graph record layout",
-                        ))?;
-                Some(crate::mvcc::graph::resolve(
-                    input,
-                    Arc::clone(&current),
-                    layout,
-                    persistence.database_id(),
-                    control,
-                )?)
-            } else {
-                merged
-            };
-            self.materialized = if markers {
-                Some(crate::mvcc::markers::resolve(
-                    merged.as_ref().unwrap_or(prepared),
-                    &*current,
-                    control,
-                )?)
-            } else {
-                merged
-            };
+        if resolution::has_effects(prepared) && self.materialized.is_none() {
+            self.materialized = resolution::resolve(
+                prepared,
+                &*self.committed,
+                &persistence.snapshot(control)?,
+                persistence,
+                ResolutionMode::Publication,
+                control,
+            )?;
         }
         Ok(())
     }

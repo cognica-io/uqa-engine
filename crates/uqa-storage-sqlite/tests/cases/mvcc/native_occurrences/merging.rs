@@ -9,6 +9,53 @@ use uqa_storage::InvertedIndex;
 use uqa_storage_sqlite::{Catalog, SQLiteInvertedIndex};
 
 #[test]
+fn native_occurrence_command_refresh_preserves_private_counts_and_savepoints() {
+    for mode in MODES {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("commands.db");
+        let connection = open(mode, &path);
+        Catalog::open(connection.clone())
+            .unwrap()
+            .save_table(&super::super::native_tables::schema("commands", 1, 1))
+            .unwrap();
+        bind(&connection);
+        let mut a = index(&connection, "public.commands");
+        a.add_document(1, fields("alpha")).unwrap();
+        let other = open(mode, &path);
+        bind(&other);
+        let mut b = index(&other, "public.commands");
+        connection.begin_transaction().unwrap();
+        a.add_document(2, fields("alpha alpha")).unwrap();
+        connection.savepoint("before").unwrap();
+        let retained = a.snapshot().unwrap();
+        b.add_document(3, fields("alpha alpha alpha")).unwrap();
+        connection
+            .refresh_transaction_snapshot(&uqa_core::CancellationToken::new())
+            .unwrap();
+        assert_eq!(a.total_field_length("body").unwrap(), 6);
+        a.add_document(4, fields("alpha alpha alpha alpha"))
+            .unwrap();
+        connection.rollback_to_savepoint("before").unwrap();
+        assert_eq!(a.total_field_length("body").unwrap(), 3);
+        connection
+            .refresh_transaction_snapshot(&uqa_core::CancellationToken::new())
+            .unwrap();
+        assert_eq!(a.total_field_length("body").unwrap(), 6);
+        b.add_document(5, fields("alpha")).unwrap();
+        connection.commit_transaction().unwrap();
+        assert_eq!(retained.total_field_length("body").unwrap(), 3);
+        assert_eq!(b.total_field_length("body").unwrap(), 7);
+        assert_eq!(b.doc_count().unwrap(), 4);
+        drop((a, b, retained, connection, other));
+        let reopened = open(mode, &path);
+        bind(&reopened);
+        let index = index(&reopened, "public.commands");
+        assert_eq!(index.total_field_length("body").unwrap(), 7);
+        assert_eq!(index.doc_count().unwrap(), 4);
+    }
+}
+
+#[test]
 fn independent_documents_merge_in_one_native_occurrence_cluster() {
     for seeded in [false, true] {
         let connection = memory();

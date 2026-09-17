@@ -333,6 +333,14 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         Ok(())
     }
 
+    fn refresh_transaction_snapshot(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<()> {
+        self.conn.refresh_transaction_snapshot(cancellation)?;
+        Ok(())
+    }
+
     fn in_transaction(&self) -> bool {
         self.conn.in_transaction()
     }

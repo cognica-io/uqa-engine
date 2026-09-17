@@ -9,14 +9,15 @@
 use uqa_core::memory::BudgetedVec;
 
 use super::{
-    commit::RecordWriteKind, CommittedRecordSnapshot, PreparedRecordCommit, RecordVersion,
-    VersionError, VersionResult,
+    commit::RecordWriteKind, resolution::ResolutionMode, CommittedRecordSnapshot,
+    PreparedRecordCommit, RecordVersion, VersionError, VersionResult,
 };
 use crate::read_control::StorageReadControl;
 
 pub(super) fn resolve(
     original: &PreparedRecordCommit,
     current: &dyn CommittedRecordSnapshot,
+    mode: ResolutionMode,
     control: &StorageReadControl,
 ) -> VersionResult<PreparedRecordCommit> {
     let mut writes = BudgetedVec::new(control.memory());
@@ -44,7 +45,7 @@ pub(super) fn resolve(
             write
                 .clone()
                 .rebase(record.as_ref().map(RecordVersion::sequence))
-                .with_kind(RecordWriteKind::Canonical),
+                .with_kind(mode.kind(RecordWriteKind::Marker)),
         )?;
     }
     Ok(PreparedRecordCommit::from_unique_owned(writes, control)?

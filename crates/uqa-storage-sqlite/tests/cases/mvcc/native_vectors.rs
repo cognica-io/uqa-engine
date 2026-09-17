@@ -6,6 +6,8 @@
 
 //! Exact, IVF and HNSW public APIs retain canonical/derived views and publish atomic native batches.
 
+#[path = "native_vectors/commands.rs"]
+mod commands;
 #[path = "native_vectors/conflicts.rs"]
 mod conflicts;
 #[path = "native_vectors/ivf.rs"]

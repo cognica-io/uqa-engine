@@ -72,7 +72,7 @@ type VectorFixture = (
     Box<dyn VectorIndex>,
 );
 
-fn fixture(persistence: &Arc<Persistence>, hnsw: bool) -> VectorFixture {
+pub(super) fn fixture(persistence: &Arc<Persistence>, hnsw: bool) -> VectorFixture {
     let a = Arc::new(persistence.session(1 << 20));
     let b = Arc::new(persistence.session(1 << 20));
     let params = IVFIndexParams {

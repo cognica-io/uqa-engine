@@ -405,6 +405,16 @@ pub trait KeyValueStore: Send + Sync {
         Ok(())
     }
 
+    /// Advance an active logical transaction's committed view while preserving its private writes and retained readers. The caller chooses command boundaries allowed by SQL isolation. Stores without this capability must reject the request; ending or replaying the caller's transaction is not a valid fallback.
+    fn refresh_transaction_snapshot(
+        &self,
+        _cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "transaction snapshot refresh is not supported by this KeyValue store".into(),
+        ))
+    }
+
     fn commit_transaction(&self) -> StorageBackendResult<()> {
         Err(StorageBackendError::Other(
             "KeyValue transaction commit is not implemented for this store".into(),

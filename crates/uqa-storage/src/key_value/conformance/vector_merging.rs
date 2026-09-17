@@ -29,7 +29,7 @@ pub enum VectorMergeKind {
     HNSW,
 }
 impl VectorMergeKind {
-    fn open(
+    pub(super) fn open(
         self,
         store: Arc<dyn KeyValueStore>,
         table: &str,

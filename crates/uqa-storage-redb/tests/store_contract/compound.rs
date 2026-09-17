@@ -11,6 +11,20 @@ use uqa_storage::KeyValueStore;
 use uqa_storage_redb::RedbStorage;
 
 #[test]
+fn command_refresh_preserves_index_generations_and_reopens() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("commands.redb");
+    {
+        let storage = RedbStorage::open(&path).unwrap();
+        let a: Arc<dyn KeyValueStore> = Arc::new(storage.store());
+        let b: Arc<dyn KeyValueStore> = Arc::new(storage.store());
+        verify_command_refresh(&a, &b).unwrap();
+    }
+    let reopened = RedbStorage::open(&path).unwrap();
+    verify_command_refresh_reopen(Arc::new(reopened.store())).unwrap();
+}
+
+#[test]
 fn compound_reads_and_mutations() {
     let directory = tempfile::tempdir().unwrap();
     let storage = RedbStorage::open(directory.path().join("compound.redb")).unwrap();

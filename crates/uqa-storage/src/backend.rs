@@ -417,6 +417,16 @@ pub trait PersistentStorageBackend: Send + Sync {
         self.begin_transaction()
     }
 
+    /// Advance command visibility without ending the active logical transaction or replaying its writes. SQL isolation controls when this is permitted. Providers without logical snapshot refresh reject the request.
+    fn refresh_transaction_snapshot(
+        &self,
+        _cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "transaction snapshot refresh is not supported by this backend".into(),
+        ))
+    }
+
     /// Whether this session currently owns a pinned storage transaction.
     fn in_transaction(&self) -> bool;
 

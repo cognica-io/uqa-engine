@@ -10,8 +10,9 @@ mod canonical;
 
 use super::{layout::Layout, IndexKind, Key, Mutation};
 use crate::mvcc::{
-    commit::RecordWriteKind, CommittedRecordSnapshot, PreparedRecordCommit, PreparedRecordWrite,
-    PrivateRecordChanges, RecordWrite, VersionError, VersionResult,
+    commit::RecordWriteKind, resolution::ResolutionMode, CommittedRecordSnapshot,
+    PreparedRecordCommit, PreparedRecordWrite, PrivateRecordChanges, RecordWrite, VersionError,
+    VersionResult,
 };
 use crate::read_control::StorageReadControl;
 use std::collections::BTreeMap;
@@ -30,6 +31,7 @@ pub(in crate::mvcc) fn resolve(
     base: &dyn CommittedRecordSnapshot,
     current: &dyn CommittedRecordSnapshot,
     persistence: &dyn crate::mvcc::VersionedPersistence,
+    mode: ResolutionMode,
     control: &StorageReadControl,
 ) -> VersionResult<PreparedRecordCommit> {
     let effects = original.vector.as_ref().expect("requested vector effects");
@@ -102,21 +104,43 @@ pub(in crate::mvcc) fn resolve(
             ))?;
         if !scope.rebase {
             validate(current, position, write, control)?;
-            changes.apply_owned(
-                &[write.clone().with_kind(RecordWriteKind::Canonical)],
-                control,
-            )?;
+            changes.apply_owned(&[write.clone().with_kind(mode.kind(write.kind()))], control)?;
         }
     }
     for ((_, key), scope) in scopes.iter().filter(|(_, scope)| scope.rebase) {
-        scope
-            .layout
-            .merge(key, &scope.operations, &changes, current, control)?;
+        scope.merge(key, &changes, current, mode, control)?;
     }
     Ok(changes
         .prepare(control)?
         .retain_graph_effects(original, control)?
         .resolved(original, current.sequence()))
+}
+
+impl Scope<'_> {
+    fn merge(
+        &self,
+        key: &[u8],
+        changes: &PrivateRecordChanges,
+        current: &dyn CommittedRecordSnapshot,
+        mode: ResolutionMode,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        if mode == ResolutionMode::Publication {
+            return self
+                .layout
+                .merge(key, &self.operations, changes, current, control);
+        }
+        let merged = PrivateRecordChanges::new(control.memory());
+        self.layout
+            .merge(key, &self.operations, &merged, current, control)?;
+        for write in merged.prepare(control)?.records() {
+            changes.apply_owned(
+                &[write.clone().with_kind(mode.kind(self.kind.preview()))],
+                control,
+            )?;
+        }
+        Ok(())
+    }
 }
 
 fn validate_scope(

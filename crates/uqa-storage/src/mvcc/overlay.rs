@@ -151,6 +151,12 @@ pub struct PrivateRecordChanges {
 }
 
 impl PrivateRecordChanges {
+    pub(super) fn share_owner(&self) -> Self {
+        Self {
+            owner: Arc::clone(&self.owner),
+        }
+    }
+
     pub(super) fn write_kind(
         &self,
         key: &[u8],
