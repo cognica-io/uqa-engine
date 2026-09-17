@@ -7,41 +7,10 @@
 //! View definition, read and refresh locks across persistent provider sessions.
 
 use super::{
-    relation_lock_support::{error, sessions, sql, wait_for_relation},
+    relation_lock_support::{after_wait, error, sessions, sql},
     *,
 };
 use std::{sync::mpsc, thread, time::Duration};
-
-fn after_wait(
-    holder: &Engine,
-    worker: Engine,
-    statement: &str,
-    relation: &str,
-    release: &str,
-) -> (Engine, Result<SQLResult, SQLError>) {
-    let statement = statement.to_string();
-    let session = worker.session_id;
-    let cancel = worker.runtime.cancellation.clone();
-    let (send, done) = mpsc::channel();
-    let task = thread::spawn(move || {
-        let result = worker.sql(&statement, &[]);
-        let _ = send.send(result);
-        worker
-    });
-    let waited = wait_for_relation(holder, session, relation, || task.is_finished());
-    let released = holder.sql(release, &[]);
-    if released.is_err() {
-        cancel.cancel();
-    }
-    let result = done.recv_timeout(Duration::from_secs(30));
-    if result.is_err() {
-        cancel.cancel();
-    }
-    let worker = task.join().unwrap();
-    released.unwrap();
-    assert!(waited, "expected a logical wait on {relation}");
-    (worker, result.unwrap())
-}
 
 #[test]
 fn view_reads_retain_definition_locks_until_transaction_or_savepoint_end() {

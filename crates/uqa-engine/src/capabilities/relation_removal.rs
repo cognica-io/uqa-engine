@@ -56,6 +56,7 @@ impl Engine {
             foreign_tables: self.foreign_removal_context(),
             views: self,
             sequences: self,
+            identities: self,
             locks: self,
             transactions: self,
             notices: self.query_runtime_view().notices,
@@ -133,6 +134,12 @@ impl RelationRemovalEvents for Engine {
     }
 }
 impl RelationRemovalViews for Engine {
+    fn ensure_view_drop_authority(&self, name: &str) -> Result<(), SQLError> {
+        uqa_execution::schema::view_removal::ensure_view_drop_authorities(
+            &self.view_removal_context(),
+            &[name.to_string()],
+        )
+    }
     fn drop_views(&self, names: &[String], cascade: bool, kind: &str) -> Result<(), SQLError> {
         Engine::drop_views(self, names, cascade, kind)
     }
@@ -148,6 +155,8 @@ impl RelationRemovalLocks for Engine {
 }
 impl RelationRemovalTransactions for Engine {
     fn with_relation_write(&self, write: RelationRemovalWrite<'_>) -> Result<SQLResult, SQLError> {
-        self.with_implicit_transaction(|engine| write(&engine.relation_removal_context()))
+        self.with_implicit_definition_transaction(|engine| {
+            write(&engine.relation_removal_context())
+        })
     }
 }

@@ -6,6 +6,7 @@
 
 //! Relation removal services and the session boundary that supplies fresh catalog inputs.
 use super::super::indexes::removal::IndexRemovalContext;
+use crate::row_locks::binding::{RelationDefinitionSession, RelationLockCatalog};
 use uqa_sql::{
     schema::removal::{ForeignTableDropDependencies, RelationDropCatalog},
     SQLError, SQLResult,
@@ -30,6 +31,7 @@ pub trait RelationRemovalEvents {
         -> StorageBackendResult<()>;
 }
 pub trait RelationRemovalViews {
+    fn ensure_view_drop_authority(&self, name: &str) -> Result<(), SQLError>;
     fn drop_views(&self, names: &[String], cascade: bool, kind: &str) -> Result<(), SQLError>;
     fn drop_views_depending_on_relations(&self, names: &[String]) -> StorageBackendResult<()>;
 }
@@ -52,7 +54,8 @@ pub struct RelationRemovalContext<'a> {
     pub foreign_tables: super::super::foreign_removal::ForeignTableRemovalContext<'a>,
     pub views: &'a dyn RelationRemovalViews,
     pub sequences: &'a dyn crate::schema::sequences::removal::SequenceRemovalInputs,
-    pub locks: &'a dyn RelationRemovalLocks,
+    pub identities: &'a dyn RelationLockCatalog,
+    pub locks: &'a dyn RelationDefinitionSession,
     pub transactions: &'a dyn RelationRemovalTransactions,
     pub notices: &'a parking_lot::Mutex<Vec<(String, String)>>,
     pub indexes: IndexRemovalContext<'a>,

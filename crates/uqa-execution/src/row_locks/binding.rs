@@ -19,6 +19,11 @@ pub trait RelationLockSession {
     fn refresh_after_wait(&self) -> Result<(), SQLError>;
 }
 
+/// Definition writers acquire and revalidate logical locks before physical write admission.
+pub trait RelationDefinitionSession: RelationLockSession {
+    fn prepare_definition_write(&self) -> Result<(), SQLError>;
+}
+
 pub trait RelationLockCatalog {
     fn relation_object_id(&self, name: &str) -> Result<Option<[u8; 16]>, SQLError>;
     fn table_name(&self, object_id: [u8; 16]) -> Option<String>;

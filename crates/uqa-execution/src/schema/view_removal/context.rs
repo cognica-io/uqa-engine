@@ -7,6 +7,7 @@
 //! Live inputs for view deletion within the existing transaction boundary.
 use crate::{
     catalog::view::ViewRegistryState,
+    row_locks::binding::RelationDefinitionSession,
     schema::{
         publication::dependencies::CatalogPublicationChanges, removal::RelationRemovalRoutines,
         view_dependencies::ViewDependencyContext,
@@ -36,6 +37,7 @@ pub struct ViewRemovalContext<'a> {
     pub publication: &'a dyn ViewRemovalPublication,
     pub changes: &'a dyn CatalogPublicationChanges,
     pub names: &'a dyn ViewRemovalNames,
+    pub locks: &'a dyn RelationDefinitionSession,
     pub events: &'a dyn ViewRemovalEvents,
     pub routines: &'a dyn RelationRemovalRoutines,
     pub dependencies: ViewDependencyContext<'a>,

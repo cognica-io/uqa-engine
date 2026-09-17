@@ -5,7 +5,6 @@
 //
 
 //! Execute view options, owner changes and renames within the caller's catalog transaction.
-use super::view_locking::ViewDefinitionSession;
 use super::{
     publication::dependencies::CatalogPublicationChanges,
     relation_alteration::{
@@ -15,7 +14,7 @@ use super::{
 };
 use crate::catalog::view::ViewPublication;
 use crate::catalog::view::{catalog_view_row, StoredView};
-use crate::row_locks::binding::{bind_relation, RelationBinding};
+use crate::row_locks::binding::{bind_relation, RelationBinding, RelationDefinitionSession};
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::{AlterViewAction, AlterViewKind, AlterViewStmt, RelationPersistence},
@@ -47,7 +46,7 @@ pub struct ViewAlterContext<'a> {
     pub names: &'a dyn RelationAlterNames,
     pub catalog: &'a dyn ViewAlterCatalog,
     pub access: &'a dyn ViewAlterAccess,
-    pub locks: &'a dyn ViewDefinitionSession,
+    pub locks: &'a dyn RelationDefinitionSession,
     pub roles: RoleTransferContext<'a>,
     pub dependencies: &'a dyn RelationRenameDependencies,
     pub publication: &'a dyn ViewAlterPublication,

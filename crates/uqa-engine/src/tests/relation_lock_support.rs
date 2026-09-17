@@ -8,6 +8,7 @@
 
 use super::*;
 use std::{
+    sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
@@ -68,4 +69,47 @@ pub(super) fn wait_for_relation(
         thread::yield_now();
     }
     first.row_locks.waiting_for_relation(session, key)
+}
+
+pub(super) fn after_wait(
+    holder: &Engine,
+    worker: Engine,
+    statement: &str,
+    relation: &str,
+    release: &str,
+) -> (Engine, Result<SQLResult, SQLError>) {
+    let statement = statement.to_string();
+    after_operation_wait(holder, worker, relation, release, move |worker| {
+        worker.sql(&statement, &[])
+    })
+}
+
+pub(super) fn after_operation_wait<T: Send + 'static>(
+    holder: &Engine,
+    worker: Engine,
+    relation: &str,
+    release: &str,
+    operation: impl FnOnce(&Engine) -> Result<T, SQLError> + Send + 'static,
+) -> (Engine, Result<T, SQLError>) {
+    let session = worker.session_id;
+    let cancel = worker.runtime.cancellation.clone();
+    let (send, done) = mpsc::channel();
+    let task = thread::spawn(move || {
+        let result = operation(&worker);
+        let _ = send.send(result);
+        worker
+    });
+    let waited = wait_for_relation(holder, session, relation, || task.is_finished());
+    let released = holder.sql(release, &[]);
+    if released.is_err() {
+        cancel.cancel();
+    }
+    let result = done.recv_timeout(Duration::from_secs(30));
+    if result.is_err() {
+        cancel.cancel();
+    }
+    let worker = task.join().unwrap();
+    released.unwrap();
+    assert!(waited, "expected a logical wait on {relation}");
+    (worker, result.unwrap())
 }

@@ -9,7 +9,7 @@
 use crate::Engine;
 use uqa_execution::{
     row_locks::{
-        binding::{RelationLockCatalog, RelationLockSession},
+        binding::{RelationDefinitionSession, RelationLockCatalog, RelationLockSession},
         RelationLockMode, ScopedRelationLock,
     },
     statement::table_locks::{
@@ -106,6 +106,12 @@ impl RelationLockSession for Engine {
     }
     fn refresh_after_wait(&self) -> Result<(), SQLError> {
         self.refresh_explicit_statement_snapshot()
+    }
+}
+
+impl RelationDefinitionSession for Engine {
+    fn prepare_definition_write(&self) -> Result<(), SQLError> {
+        self.prepare_explicit_transaction_writer().map(|_| ())
     }
 }
 

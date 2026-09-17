@@ -9,6 +9,7 @@ use uqa_sql::{
     ast::{DropKind, DropStmt},
     SQLError, SQLResult,
 };
+mod binding;
 mod context;
 pub use context::*;
 pub mod entry;
@@ -17,42 +18,19 @@ pub fn run_drop(
     context: &RelationRemovalContext<'_>,
     stmt: DropStmt,
 ) -> Result<SQLResult, SQLError> {
-    uqa_sql::schema::removal::validate_drop_table_label_targets(context.catalog, &stmt)?;
     if stmt.kind == DropKind::Index {
         return crate::schema::indexes::removal::run_drop_index(&context.indexes, stmt);
     }
-    let mut lock_targets = std::collections::BTreeSet::new();
-    match stmt.kind {
-        DropKind::Table | DropKind::ForeignTable | DropKind::View | DropKind::MaterializedView => {
-            let mut table_targets = Vec::new();
-            for name in &stmt.names {
-                if let Some((canonical, kind)) =
-                    context.catalog.resolve_relation_kind(name)?.into_found()
-                {
-                    if stmt.kind == DropKind::Table && kind == "table" {
-                        table_targets.push(canonical.clone());
-                    }
-                    lock_targets.insert(canonical);
-                }
-            }
-            if stmt.kind == DropKind::Table {
-                let (hierarchy_targets, _) = context
-                    .tables
-                    .hierarchy_drop_targets(&table_targets, stmt.cascade);
-                lock_targets.extend(hierarchy_targets);
-            }
-        }
-        DropKind::Index => unreachable!("DROP INDEX has a bound execution path"),
-        DropKind::Schema => unreachable!("DROP SCHEMA has a namespace dependency path"),
-        DropKind::Domain => unreachable!("DROP DOMAIN has a type dependency path"),
-        DropKind::Sequence => {}
-    }
-    for table in lock_targets {
-        context.locks.lock_exclusive(&table)?;
-    }
     context
         .transactions
-        .with_relation_write(Box::new(move |context| run_drop_inner(context, stmt)))
+        .with_relation_write(Box::new(move |context| {
+            let names = binding::bind_drop_targets(context, &stmt)?;
+            if names.is_empty() {
+                return Ok(SQLResult::empty());
+            }
+            context.locks.prepare_definition_write()?;
+            run_drop_inner(context, DropStmt { names, ..stmt })
+        }))
 }
 
 #[expect(
@@ -65,19 +43,7 @@ fn run_drop_inner(
 ) -> Result<SQLResult, SQLError> {
     match stmt.kind {
         DropKind::Table => {
-            let tables = uqa_sql::schema::removal::bind_table_drop_targets(
-                context.catalog,
-                &stmt,
-                &mut |message| {
-                    context
-                        .notices
-                        .lock()
-                        .push(("NOTICE".into(), message.into()));
-                },
-            )?;
-            for table in &tables {
-                context.privileges.ensure_table_drop_authority(table)?;
-            }
+            let tables = stmt.names;
             let (tables, dependents) = context.tables.hierarchy_drop_targets(&tables, stmt.cascade);
             if !dependents.is_empty() {
                 return Err(SQLError::Routine {
@@ -118,21 +84,7 @@ fn run_drop_inner(
                 .map_err(|err| ddl_storage_error("DROP TABLE", err))?;
         }
         DropKind::ForeignTable => {
-            let foreign_tables = uqa_sql::schema::removal::bind_foreign_table_drop_targets(
-                context.catalog,
-                &stmt,
-                &mut |message| {
-                    context
-                        .notices
-                        .lock()
-                        .push(("NOTICE".into(), message.into()));
-                },
-            )?;
-            for table in &foreign_tables {
-                context
-                    .privileges
-                    .ensure_foreign_table_drop_authority(table)?;
-            }
+            let foreign_tables = stmt.names;
             context.routines.drop_relation_routine_dependents(
                 &foreign_tables,
                 stmt.cascade,
@@ -198,27 +150,17 @@ fn run_drop_inner(
         }
         DropKind::Index => unreachable!("DROP INDEX has a bound execution path"),
         DropKind::View | DropKind::MaterializedView => {
-            let (views, expected_kind) =
-                uqa_sql::schema::removal::bind_view_drop_targets(context.catalog, &stmt)?;
-            context
-                .views
-                .drop_views(&views, stmt.cascade, expected_kind)?;
+            context.views.drop_views(
+                &stmt.names,
+                stmt.cascade,
+                uqa_sql::schema::removal::drop_relation_kind(stmt.kind),
+            )?;
         }
         DropKind::Sequence => {
-            let sequences = uqa_sql::schema::removal::bind_sequence_drop_targets(
-                context.catalog,
-                &stmt,
-                &mut |message| {
-                    context
-                        .notices
-                        .lock()
-                        .push(("NOTICE".into(), message.into()));
-                },
-            )?;
             context
                 .sequences
                 .sequence_removal_context()
-                .drop_sequences(&sequences, stmt.cascade)?;
+                .drop_sequences(&stmt.names, stmt.cascade)?;
         }
         DropKind::Schema => unreachable!("DROP SCHEMA has a namespace dependency path"),
         DropKind::Domain => unreachable!("DROP DOMAIN has a type dependency path"),

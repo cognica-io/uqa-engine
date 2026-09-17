@@ -38,11 +38,6 @@ impl ViewAlterTransactions for Engine {
         self.with_implicit_definition_transaction(|engine| write(&engine.view_alter_context()))
     }
 }
-impl uqa_execution::schema::view_locking::ViewDefinitionSession for Engine {
-    fn prepare_definition_write(&self) -> Result<(), SQLError> {
-        self.prepare_explicit_transaction_writer().map(|_| ())
-    }
-}
 impl ViewAlterCatalog for Engine {
     fn view(&self, relation: &RelationIdentity) -> Option<StoredView> {
         self.durable.views.read().get(relation).cloned()
