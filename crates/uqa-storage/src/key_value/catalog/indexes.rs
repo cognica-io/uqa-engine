@@ -115,10 +115,10 @@ impl KeyValueCatalog {
     }
 
     pub(super) fn drop_path_index_impl(&self, graph_name: &str) -> StorageBackendResult<()> {
-        let mut batch = self.store.batch();
-        self.clear_path_index_data_into(batch.as_mut(), graph_name)?;
-        batch.delete(&single_str_key(TAG_PATH_INDEX, graph_name)?)?;
-        batch.commit()
+        self.store.with_mutation(&mut |read, batch| {
+            Self::clear_path_index_data_into(read, batch, graph_name)?;
+            batch.delete(&single_str_key(TAG_PATH_INDEX, graph_name)?)
+        })
     }
 
     pub(super) fn load_path_indexes_impl(&self) -> StorageBackendResult<Vec<(String, String)>> {

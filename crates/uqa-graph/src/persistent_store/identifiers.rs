@@ -57,10 +57,6 @@ impl<'a> GraphIdentifierScope<'a> {
         }
     }
 
-    fn namespace(&self, tag: u8, kind: GraphEntityKind, prefix: u32, graph: [u8; 16]) -> [u8; 78] {
-        self.namespace.key(tag, kind, prefix, graph)
-    }
-
     fn legacy_graph_identity(&self, graph: &str) -> [u8; 16] {
         self.namespace.legacy_graph_identity(graph)
     }
@@ -97,11 +93,11 @@ impl<'a> GraphIdentifierScope<'a> {
     }
 
     fn entity_key(&self, kind: GraphEntityKind, prefix: u32) -> [u8; 78] {
-        self.namespace(b'e', kind, prefix, [0; 16])
+        self.namespace.entity_key(kind, prefix)
     }
 
     fn hint_key(&self, kind: GraphEntityKind) -> [u8; 78] {
-        self.namespace(b'h', kind, 0, [0; 16])
+        self.namespace.hint_key(kind)
     }
 
     fn sequence_key(&self, graph: [u8; 16], prefix: u32) -> [u8; 78] {
@@ -158,15 +154,20 @@ impl PersistentGraphStore {
         kind: GraphEntityKind,
         prefix: u32,
     ) -> GraphStoreResult<u64> {
-        if let Some(value) = identifiers.watermark(&identifiers.entity_key(kind, prefix))? {
-            return Ok(value);
+        let observed = identifiers.watermark(&identifiers.entity_key(kind, prefix))?;
+        if identifiers
+            .watermark(&identifiers.namespace.entity_seed_key(kind, prefix))?
+            .is_some()
+        {
+            return Ok(observed.unwrap_or(0));
         }
         let mut floor = self
             .storage
             .counter(kind)?
             .and_then(|next| next.checked_sub(1))
             .filter(|id| graphid_label_id(*id) == prefix)
-            .map_or(0, graphid_sequence);
+            .map_or(0, graphid_sequence)
+            .max(observed.unwrap_or(0));
         let mut after = (u64::from(prefix) << GRAPHID_LABEL_SHIFT).checked_sub(1);
         'pages: loop {
             let ids = self
@@ -191,6 +192,8 @@ impl PersistentGraphStore {
                 }
             }
         }
+        identifiers.observe(&identifiers.entity_key(kind, prefix), floor)?;
+        identifiers.observe(&identifiers.namespace.entity_seed_key(kind, prefix), 1)?;
         Ok(floor)
     }
 

@@ -7,7 +7,9 @@
 //! Native addresses for graph definition/data revision guards.
 
 use rusqlite::types::ValueRef;
-use uqa_storage::KeyValueBatch;
+use uqa_storage::{
+    catalog::graph_identifiers::GraphIdentifierNamespace, GraphEntityKind, KeyValueBatch,
+};
 
 use super::{
     NativeRecord, NativeRecordFamily as Family, NativeRecordIdentity, NativeRecordOwner,
@@ -20,6 +22,67 @@ fn text(value: &str) -> ValueRef<'_> {
 }
 
 impl NativeSnapshot {
+    pub(crate) fn graph_identifier_namespace(
+        &self,
+        scope: Option<&str>,
+    ) -> Result<GraphIdentifierNamespace> {
+        let owner = NativeRecordOwner::Database(self.database);
+        let value = match scope {
+            None => self.read_row(
+                Family::Metadata,
+                owner,
+                &[text("graph_identifier_generation")],
+                |row| {
+                    Ok(serde_json::from_str(row[1].as_str().map_err(|_| {
+                        crate::SQLiteError::StorageBackend(
+                            "invalid graph allocation generation".into(),
+                        )
+                    })?)?)
+                },
+            )?,
+            Some(scope) => self.read_row(
+                Family::StandaloneGraphMetadata,
+                owner,
+                &[text(scope), text("identifier_generation")],
+                |row| {
+                    Ok(serde_json::from_str(row[2].as_str().map_err(|_| {
+                        crate::SQLiteError::StorageBackend(
+                            "invalid graph allocation generation".into(),
+                        )
+                    })?)?)
+                },
+            )?,
+        };
+        Ok(GraphIdentifierNamespace::new(
+            scope,
+            value.unwrap_or([0; 16]),
+        ))
+    }
+
+    pub(crate) fn observe_graph_entity(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        scope: Option<&str>,
+        kind: GraphEntityKind,
+        id: u64,
+    ) -> Result<()> {
+        self.graph_identifier_namespace(scope)?
+            .observe_entity(batch, kind, id)?;
+        Ok(())
+    }
+
+    pub(crate) fn observe_graph_registry(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        scope: Option<&str>,
+        graph: &str,
+        registry: &str,
+    ) -> Result<()> {
+        self.graph_identifier_namespace(scope)?
+            .observe_registry(batch, graph, registry)?;
+        Ok(())
+    }
+
     fn graph_guard_metadata(&self, scope: Option<&str>, key: &str) -> Result<NativeRecord> {
         let owner = NativeRecordOwner::Database(self.database);
         Ok(match scope {
@@ -80,6 +143,7 @@ impl NativeSnapshot {
         scope: Option<&str>,
         graph: &str,
     ) -> Result<()> {
+        self.guard_graph_definition(batch, scope, None)?;
         batch.fence_record(
             self.graph_guard_metadata(scope, &format!("graph_definition_data_revision::{graph}"))?
                 .key(),

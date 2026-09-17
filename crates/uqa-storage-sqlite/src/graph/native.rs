@@ -57,6 +57,28 @@ fn family(kind: GraphEntityKind) -> Family {
 }
 
 impl NativeGraphStorage {
+    fn guard_entity(
+        &self,
+        snapshot: &NativeSnapshot,
+        batch: &mut dyn KeyValueBatch,
+        kind: GraphEntityKind,
+        id: u64,
+    ) -> Result<()> {
+        snapshot.guard_graph_definition(batch, Some(&self.scope), None)?;
+        snapshot.visit_paged_rows(
+            Family::StandaloneGraphMembership,
+            &[
+                text(&self.scope),
+                text(kind.as_str()),
+                ValueRef::Integer(encode_graph_id("entity", id)?),
+            ],
+            |row| {
+                snapshot.guard_graph_definition(batch, Some(&self.scope), Some(string(row[3])?))?;
+                Ok(true)
+            },
+        )
+    }
+
     fn snapshot(&self) -> Result<Arc<NativeSnapshot>> {
         self.connection
             .native_snapshot()?
@@ -131,6 +153,7 @@ impl NativeGraphStorage {
     fn delete_entity(&self, kind: GraphEntityKind, id: u64) -> GraphStoreResult<()> {
         let id = encode_graph_id("entity", id).map_err(|error| sqlite_graph_error(&error))?;
         self.write(|snapshot, batch| {
+            snapshot.guard_graph_definition(batch, Some(&self.scope), None)?;
             snapshot.visit_paged_rows(
                 Family::StandaloneGraphMembership,
                 &[
@@ -139,6 +162,11 @@ impl NativeGraphStorage {
                     ValueRef::Integer(id),
                 ],
                 |row| {
+                    snapshot.guard_graph_definition(
+                        batch,
+                        Some(&self.scope),
+                        Some(string(row[3])?),
+                    )?;
                     snapshot.replace_graph_row(
                         batch,
                         Family::StandaloneGraphMembership,
@@ -167,6 +195,7 @@ impl NativeGraphStorage {
     ) -> GraphStoreResult<()> {
         let id = encode_graph_id("entity", id).map_err(|error| sqlite_graph_error(&error))?;
         self.write(|snapshot, batch| {
+            snapshot.guard_graph_definition(batch, Some(&self.scope), Some(graph))?;
             let row = [
                 text(&self.scope),
                 text(kind.as_str()),
@@ -241,6 +270,7 @@ impl GraphStorage for NativeGraphStorage {
     }
     fn create_graph(&self, graph: &str) -> GraphStoreResult<()> {
         self.write(|snapshot, batch| {
+            snapshot.guard_graph_definition(batch, Some(&self.scope), None)?;
             if !snapshot.contains_row(
                 Family::StandaloneGraphCatalog,
                 owner(snapshot),
@@ -288,6 +318,7 @@ impl GraphStorage for NativeGraphStorage {
                 &[text(&self.scope), text(graph)],
             )? {
                 let json = serde_json::to_string(registry)?;
+                snapshot.observe_graph_registry(batch, Some(&self.scope), graph, &json)?;
                 snapshot.put_row(
                     batch,
                     Family::StandaloneGraphCatalog,
@@ -354,6 +385,13 @@ impl GraphStorage for NativeGraphStorage {
     }
     fn save_vertex(&self, vertex: &Vertex) -> GraphStoreResult<()> {
         self.write(|snapshot, batch| {
+            self.guard_entity(snapshot, batch, GraphEntityKind::Vertex, vertex.vertex_id)?;
+            snapshot.observe_graph_entity(
+                batch,
+                Some(&self.scope),
+                GraphEntityKind::Vertex,
+                vertex.vertex_id,
+            )?;
             let id = ValueRef::Integer(encode_graph_id("vertex", vertex.vertex_id)?);
             let json = serde_json::to_string(&vertex.properties)?;
             snapshot.replace_graph_row(
@@ -373,6 +411,13 @@ impl GraphStorage for NativeGraphStorage {
     }
     fn save_edge(&self, edge: &Edge) -> GraphStoreResult<()> {
         self.write(|snapshot, batch| {
+            self.guard_entity(snapshot, batch, GraphEntityKind::Edge, edge.edge_id)?;
+            snapshot.observe_graph_entity(
+                batch,
+                Some(&self.scope),
+                GraphEntityKind::Edge,
+                edge.edge_id,
+            )?;
             let id = ValueRef::Integer(encode_graph_id("edge", edge.edge_id)?);
             let json = serde_json::to_string(&edge.properties)?;
             snapshot.replace_graph_row(

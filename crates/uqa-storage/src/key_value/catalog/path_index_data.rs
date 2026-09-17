@@ -10,6 +10,8 @@ use super::{
     push_str, push_u64, read_str, read_u64, single_str_key, KeyValueBatch, KeyValueCatalog,
     StorageBackendError, StorageBackendResult, TAG_PATH_INDEX,
 };
+use crate::key_value::view::for_each_key;
+use crate::key_value::KeyValueRead;
 use crate::key_value::TAG_PATH_INDEX_DATA;
 use crate::MAX_GRAPH_ID_PAGE;
 
@@ -36,50 +38,39 @@ fn pair_key(mut prefix: Vec<u8>, source: u64, target: u64) -> Vec<u8> {
 
 impl KeyValueCatalog {
     pub(super) fn invalidate_graph_path_data(
-        &self,
+        read: &dyn KeyValueRead,
         batch: &mut dyn KeyValueBatch,
         graph: &str,
     ) -> StorageBackendResult<()> {
         batch.graph_mutation(crate::mvcc::GraphMutation::InvalidateGraph(graph))?;
         let prefix = key(b'g', graph)?;
-        let mut after = None;
-        loop {
-            let keys = self
-                .store
-                .scan_prefix_keys_after(&prefix, after.as_deref(), 256)?;
-            if keys.is_empty() {
-                break;
+        for_each_key(read, &prefix, &mut |stored_key| {
+            let mut offset = prefix.len();
+            let index = read_str(stored_key, &mut offset)?;
+            if read.get(&key(b's', &index)?)?.as_deref() == Some(graph.as_bytes()) {
+                batch.preview_graph_invalidation(&key(b'v', &index)?, None)?;
             }
-            after = keys.last().cloned();
-            for stored_key in keys {
-                let mut offset = prefix.len();
-                let index = read_str(&stored_key, &mut offset)?;
-                if self.store.get(&key(b's', &index)?)?.as_deref() == Some(graph.as_bytes()) {
-                    batch.preview_graph_invalidation(&key(b'v', &index)?, None)?;
-                }
-            }
-        }
-        Ok(())
+            Ok(true)
+        })
     }
     pub(super) fn clear_path_index_data_into(
-        &self,
+        read: &dyn KeyValueRead,
         batch: &mut dyn KeyValueBatch,
         index: &str,
     ) -> StorageBackendResult<()> {
         let state = key(b's', index)?;
-        if let Some(graph) = self.store.get(&state)? {
-            let graph = String::from_utf8(graph)
+        if let Some(graph) = read.get(&state)? {
+            let graph = std::str::from_utf8(&graph)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            batch.delete(&reverse_key(&graph, index)?)?;
+            batch.delete(&reverse_key(graph, index)?)?;
         }
         batch.delete_prefix(&key(b'p', index)?)?;
         batch.replace_graph_cache(&key(b'v', index)?, None)?;
         batch.delete(&state)
     }
     pub(super) fn clear_path_index_data_impl(&self, index: &str) -> StorageBackendResult<()> {
-        let mut batch = self.store.batch();
-        self.clear_path_index_data_into(batch.as_mut(), index)?;
-        batch.commit()
+        self.store
+            .with_mutation(&mut |read, batch| Self::clear_path_index_data_into(read, batch, index))
     }
     pub(super) fn invalidate_path_index_data_into(
         batch: &mut dyn KeyValueBatch,
@@ -111,34 +102,35 @@ impl KeyValueCatalog {
         graph: &str,
         definition: &str,
     ) -> StorageBackendResult<()> {
-        if self
-            .store
-            .get(&single_str_key(TAG_PATH_INDEX, index)?)?
-            .as_deref()
-            != Some(definition.as_bytes())
-        {
-            return Err(StorageBackendError::Other(format!(
-                "path index {index:?} definition changed during build"
-            )));
-        }
-        let mut batch = self.store.batch();
-        if let Some(previous) = self.store.get(&key(b's', index)?)? {
-            let previous = std::str::from_utf8(&previous)
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            if previous != graph {
-                batch.delete(&reverse_key(previous, index)?)?;
+        self.store.with_mutation(&mut |read, batch| {
+            if read
+                .get(&single_str_key(TAG_PATH_INDEX, index)?)?
+                .as_deref()
+                != Some(definition.as_bytes())
+            {
+                return Err(StorageBackendError::Other(format!(
+                    "path index {index:?} definition changed during build"
+                )));
             }
-        }
-        batch.put(&key(b's', index)?, graph.as_bytes())?;
-        batch.replace_graph_cache(&key(b'v', index)?, Some(definition.as_bytes()))?;
-        batch.put(&reverse_key(graph, index)?, &[])?;
-        batch.graph_mutation(crate::mvcc::GraphMutation::PublishPath {
-            index,
-            graph,
-            definition,
-        })?;
-        batch.commit()
+            if let Some(previous) = read.get(&key(b's', index)?)? {
+                let previous = std::str::from_utf8(&previous)
+                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+                if previous != graph {
+                    batch.delete(&reverse_key(previous, index)?)?;
+                }
+            }
+            batch.put(&key(b's', index)?, graph.as_bytes())?;
+            batch.replace_graph_cache(&key(b'v', index)?, Some(definition.as_bytes()))?;
+            batch.put(&reverse_key(graph, index)?, &[])?;
+            batch.graph_mutation(crate::mvcc::GraphMutation::PublishPath {
+                index,
+                graph,
+                definition,
+            })?;
+            Ok(())
+        })
     }
+
     pub(super) fn path_index_data_is_current_impl(
         &self,
         index: &str,

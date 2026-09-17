@@ -18,6 +18,7 @@ pub(in crate::catalog) fn source(
     id: i64,
     row: Option<&[ValueRef<'_>]>,
 ) -> Result<()> {
+    snapshot.guard_graph_definition(batch, None, None)?;
     if row.is_none()
         && !snapshot.contains_row(
             entity_family(kind),
@@ -28,6 +29,9 @@ pub(in crate::catalog) fn source(
         return Ok(());
     }
     let id = super::decode_catalog_id("graph entity", id)?;
+    if row.is_some() {
+        snapshot.observe_graph_entity(batch, None, kind, id)?;
+    }
     batch.graph_mutation(GraphMutation::InvalidateEntity(kind, id))?;
     snapshot.visit_paged_rows(
         Family::GraphMembership,
@@ -39,6 +43,7 @@ pub(in crate::catalog) fn source(
             let graph = row[2].as_str().map_err(|_| {
                 crate::SQLiteError::StorageBackend("invalid graph membership name".into())
             })?;
+            snapshot.guard_graph_definition(batch, None, Some(graph))?;
             paths::invalidate_graph(snapshot, batch, graph)?;
             Ok(true)
         },
@@ -63,6 +68,7 @@ pub(in crate::catalog) fn membership(
     graph: &str,
     present: bool,
 ) -> Result<()> {
+    snapshot.guard_graph_definition(batch, None, Some(graph))?;
     let row = [text(kind), ValueRef::Integer(id), text(graph)];
     if snapshot.contains_row(Family::GraphMembership, owner(snapshot), &row)? == present {
         return Ok(());
@@ -83,6 +89,7 @@ pub(in crate::catalog) fn named_graph(
     name: &str,
     present: bool,
 ) -> Result<()> {
+    snapshot.guard_graph_definition(batch, None, None)?;
     if !present {
         snapshot.fence_graph_definition(batch, None, name)?;
         remove_memberships(snapshot, batch, name, |_, _| false)?;

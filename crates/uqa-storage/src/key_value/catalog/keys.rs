@@ -257,22 +257,6 @@ pub(super) fn catalog_index_rename_column(
     )?)
 }
 
-pub(super) fn load_single_keys(
-    store: &dyn KeyValueStore,
-    tag: u8,
-) -> StorageBackendResult<Vec<String>> {
-    let mut rows = store
-        .scan_prefix(&key_with_tag(tag))?
-        .into_iter()
-        .map(|(key, _)| {
-            let mut offset = 1;
-            read_str(&key, &mut offset)
-        })
-        .collect::<StorageBackendResult<Vec<_>>>()?;
-    rows.sort();
-    Ok(rows)
-}
-
 pub(super) fn load_single_string_rows(
     store: &dyn KeyValueStore,
     tag: u8,

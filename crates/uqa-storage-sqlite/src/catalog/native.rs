@@ -66,6 +66,14 @@ impl Catalog {
                     .and_then(|name| name.strip_prefix("graph_label_registry::"))
                 {
                     snapshot.fence_graph_definition(batch, None, graph)?;
+                    snapshot.observe_graph_registry(
+                        batch,
+                        None,
+                        graph,
+                        row[1].as_str().map_err(|_| {
+                            SQLiteError::StorageBackend("invalid graph registry encoding".into())
+                        })?,
+                    )?;
                     graph::paths::invalidate_graph(snapshot, batch, graph)?;
                 }
                 if row[0] == text("graph_identifier_generation") {

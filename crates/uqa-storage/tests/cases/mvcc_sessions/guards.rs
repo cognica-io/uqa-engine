@@ -171,10 +171,18 @@ fn requirements_and_markers_survive_combined_graph_vector_and_occurrence_resolut
         .unwrap();
     concurrent.commit().unwrap();
     a.commit_transaction().unwrap();
-    assert_eq!(
-        persistence.state.lock().required_keys,
-        vec![b"definition".to_vec()]
-    );
+    let mut expected = vec![b"definition".to_vec()];
+    for (tag, name) in [
+        (b'm', "graph_identifier_generation"),
+        (b'g', "g"),
+        (b'm', "graph_label_registry::g"),
+    ] {
+        let mut key = vec![tag];
+        key.extend_from_slice(&u32::try_from(name.len()).unwrap().to_be_bytes());
+        key.extend_from_slice(name.as_bytes());
+        expected.push(key);
+    }
+    assert_eq!(persistence.state.lock().required_keys, expected);
     assert_eq!(vectors.count().unwrap(), 1);
     assert_eq!(occurrences.doc_count().unwrap(), 1);
     assert_eq!(

@@ -91,26 +91,26 @@ fn rename_document_scoped_fts_fields(
 
 impl KeyValueCatalog {
     pub(super) fn set_metadata_impl(&self, key: &str, value: &str) -> StorageBackendResult<()> {
+        let identifiers = self.store.identifier_allocator().is_some();
         if let Some(graph) = key.strip_prefix("graph_label_registry::") {
-            let mut batch = self.store.batch();
-            if self.store.identifier_allocator().is_some() {
+            return self.store.with_mutation(&mut |read, batch| {
+                if identifiers {
+                    let view = super::graph_view::GraphRead { read, identifiers };
+                    view.fence_definition(batch, graph)?;
+                    view.observe_registry(batch, graph, value)?;
+                }
+                Self::invalidate_graph_path_data(read, batch, graph)?;
+                batch.put(&single_str_key(TAG_METADATA, key)?, &string_value(value))
+            });
+        }
+        if key == "graph_identifier_generation" && identifiers {
+            return self.store.with_mutation(&mut |_, batch| {
                 batch.fence_record(&single_str_key(
                     TAG_METADATA,
-                    &format!("graph_definition_data_revision::{graph}"),
+                    "graph_identifier_data_revision",
                 )?)?;
-            }
-            self.invalidate_graph_path_data(batch.as_mut(), graph)?;
-            batch.put(&single_str_key(TAG_METADATA, key)?, &string_value(value))?;
-            return batch.commit();
-        }
-        if key == "graph_identifier_generation" && self.store.identifier_allocator().is_some() {
-            let mut batch = self.store.batch();
-            batch.fence_record(&single_str_key(
-                TAG_METADATA,
-                "graph_identifier_data_revision",
-            )?)?;
-            batch.put(&single_str_key(TAG_METADATA, key)?, &string_value(value))?;
-            return batch.commit();
+                batch.put(&single_str_key(TAG_METADATA, key)?, &string_value(value))
+            });
         }
         self.store
             .put(&single_str_key(TAG_METADATA, key)?, &string_value(value))

@@ -23,6 +23,7 @@ pub(super) struct InterleavedStore {
     pub(super) evaluations: AtomicUsize,
     pub(super) after_second_point: Hook,
     pub(super) after_evaluation: Hook,
+    pub(super) after_keys: Hook,
 }
 impl InterleavedStore {
     pub(super) fn new(inner: Arc<VersionedKeyValueStore>) -> Self {
@@ -32,6 +33,7 @@ impl InterleavedStore {
             evaluations: AtomicUsize::new(0),
             after_second_point: Mutex::new(None),
             after_evaluation: Mutex::new(None),
+            after_keys: Mutex::new(None),
         }
     }
     fn point_read(&self) {
@@ -103,7 +105,9 @@ impl KeyValueRead for InterleavedRead<'_> {
         visit: &mut uqa_storage::read_control::KeyReadVisitor<'_>,
     ) -> StorageBackendResult<()> {
         self.inner
-            .visit_keys_after(prefix, after, limit, control, visit)
+            .visit_keys_after(prefix, after, limit, control, visit)?;
+        fire(&self.store.after_keys);
+        Ok(())
     }
     fn contains_prefix_budgeted(
         &self,

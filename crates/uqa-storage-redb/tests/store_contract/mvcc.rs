@@ -25,7 +25,7 @@ fn control() -> StorageReadControl {
 fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
     use redb::{ReadableDatabase, ReadableTable, TableDefinition};
     const METADATA: TableDefinition<&str, &[u8]> = TableDefinition::new("uqa_mvcc_metadata");
-    for format in [1_u64, 2, 3, 4, 5, 6] {
+    for format in [1_u64, 2, 3, 4, 5, 6, 7] {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("old-record-format.redb");
         let (identity, receipt, pending) = {
@@ -49,7 +49,7 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
                 let mut metadata = transaction.open_table(METADATA).unwrap();
                 assert_eq!(
                     metadata.get("format").unwrap().unwrap().value(),
-                    7_u64.to_be_bytes()
+                    8_u64.to_be_bytes()
                 );
                 metadata
                     .insert("format", format.to_be_bytes().as_slice())
@@ -119,7 +119,7 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
                 .unwrap()
                 .unwrap()
                 .value(),
-            7_u64.to_be_bytes()
+            8_u64.to_be_bytes()
         );
     }
 }

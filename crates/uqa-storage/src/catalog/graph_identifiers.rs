@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 
 use sha2::{Digest, Sha256};
 
-use crate::{GraphEntityKind, StorageBackendResult};
+use crate::{GraphEntityKind, KeyValueBatch, StorageBackendResult};
 
 #[derive(Clone, Copy)]
 pub struct GraphIdentifierNamespace {
@@ -63,6 +63,109 @@ impl GraphIdentifierNamespace {
 
     pub fn sequence_key(&self, graph: [u8; 16], label: u32) -> [u8; 78] {
         self.key(b's', GraphEntityKind::Vertex, label, graph)
+    }
+
+    pub fn entity_key(&self, kind: GraphEntityKind, prefix: u32) -> [u8; 78] {
+        self.key(b'e', kind, prefix, [0; 16])
+    }
+
+    pub fn entity_seed_key(&self, kind: GraphEntityKind, prefix: u32) -> [u8; 78] {
+        self.key(b'i', kind, prefix, [0; 16])
+    }
+
+    pub fn hint_key(&self, kind: GraphEntityKind) -> [u8; 78] {
+        self.key(b'h', kind, 0, [0; 16])
+    }
+
+    /// Preserve a supplied physical identity before its evaluated record is published. The wire identity has a two-byte prefix and six-byte ordinal; observing one row does not certify that legacy rows were seeded.
+    pub fn observe_entity(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        kind: GraphEntityKind,
+        id: u64,
+    ) -> StorageBackendResult<()> {
+        let bytes = id.to_be_bytes();
+        let prefix = u32::from(u16::from_be_bytes([bytes[0], bytes[1]]));
+        let ordinal = id & (u64::MAX >> 16);
+        batch.observe_identifier(&self.entity_key(kind, prefix), ordinal)?;
+        batch.observe_identifier(&self.hint_key(kind), id)
+    }
+
+    /// Import durable counters encoded in a graph registry without assigning labels or evaluating graph behavior. Opaque legacy payloads retain their existing catalog contract.
+    pub fn observe_registry(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        graph: &str,
+        source: &str,
+    ) -> StorageBackendResult<()> {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(source) else {
+            return Ok(());
+        };
+        let Some(object) = value.as_object() else {
+            return Ok(());
+        };
+        let identity = object
+            .get("allocation_id")
+            .map(|value| serde_json::from_value::<[u8; 16]>(value.clone()))
+            .transpose()?
+            .filter(|id| *id != [0; 16])
+            .unwrap_or_else(|| self.legacy_graph_identity(graph));
+        if let Some(next) = object
+            .get("next_label_id")
+            .and_then(serde_json::Value::as_u64)
+        {
+            batch.observe_identifier(&self.label_key(identity), next.saturating_sub(1))?;
+        }
+        if let Some(sequences) = object
+            .get("sequences")
+            .and_then(serde_json::Value::as_object)
+        {
+            for (label, counter) in sequences {
+                let (Ok(label), Some(last)) = (label.parse::<u32>(), counter.as_u64()) else {
+                    continue;
+                };
+                batch.observe_identifier(&self.sequence_key(identity, label), last)?;
+                if let Ok(prefix) = u16::try_from(label) {
+                    if last != 0 && last <= (u64::MAX >> 16) {
+                        let mut bytes = last.to_be_bytes();
+                        bytes[..2].copy_from_slice(&prefix.to_be_bytes());
+                        let id = u64::from_be_bytes(bytes);
+                        let kind = registry_kind(&value, label);
+                        for candidate in [GraphEntityKind::Vertex, GraphEntityKind::Edge] {
+                            if kind.is_none_or(|kind| kind == candidate) {
+                                self.observe_entity(batch, candidate, id)?;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn registry_kind(value: &serde_json::Value, label: u32) -> Option<GraphEntityKind> {
+    match label {
+        1 => Some(GraphEntityKind::Vertex),
+        2 => Some(GraphEntityKind::Edge),
+        _ => value
+            .get("labels")?
+            .as_object()?
+            .iter()
+            .find_map(|(name, id)| {
+                if id.as_u64() != Some(u64::from(label)) {
+                    return None;
+                }
+                match value
+                    .get("kinds")
+                    .and_then(|kinds| kinds.get(name))
+                    .and_then(serde_json::Value::as_str)
+                {
+                    Some("v") => Some(GraphEntityKind::Vertex),
+                    Some("e") => Some(GraphEntityKind::Edge),
+                    _ => None,
+                }
+            }),
     }
 }
 

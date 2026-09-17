@@ -10,6 +10,144 @@ use uqa_storage::{CatalogFacade, KeyValueCatalog};
 
 use super::*;
 
+#[test]
+fn graph_count_and_maximum_keep_one_view_across_identity_pages() {
+    use super::occurrences::InterleavedStore;
+    use uqa_storage::{GraphEntityFilter, GraphEntityKind};
+    for maximum in [false, true] {
+        let persistence = Persistence::new();
+        let a = Arc::new(persistence.session(1 << 22));
+        let b = Arc::new(persistence.session(1 << 22));
+        let second = KeyValueCatalog::new(b.clone());
+        b.begin_transaction().unwrap();
+        for id in 1..=257 {
+            second.save_vertex(id, "item", "{}").unwrap();
+        }
+        b.commit_transaction().unwrap();
+        let wrapper = Arc::new(InterleavedStore::new(a));
+        let first = KeyValueCatalog::new(wrapper.clone());
+        *wrapper.after_keys.lock() = Some(Box::new(move || {
+            b.begin_transaction().unwrap();
+            second.delete_vertex(257).unwrap();
+            second.save_vertex(512, "item", "{}").unwrap();
+            second.save_vertex(513, "item", "{}").unwrap();
+            b.commit_transaction().unwrap();
+        }));
+        if maximum {
+            assert_eq!(
+                first.graph_entity_max_id(GraphEntityKind::Vertex).unwrap(),
+                Some(257)
+            );
+            assert_eq!(
+                first.graph_entity_max_id(GraphEntityKind::Vertex).unwrap(),
+                Some(513)
+            );
+        } else {
+            let filter = GraphEntityFilter::new(GraphEntityKind::Vertex, None);
+            assert_eq!(first.graph_entity_count(filter).unwrap(), 257);
+            assert_eq!(first.graph_entity_count(filter).unwrap(), 258);
+        }
+        assert!(wrapper.after_keys.lock().is_none());
+    }
+}
+
+#[test]
+fn graph_snapshot_keeps_entities_and_memberships_on_one_view() {
+    use super::occurrences::InterleavedStore;
+    use std::sync::atomic::Ordering;
+    let persistence = Persistence::new();
+    let a = Arc::new(persistence.session(1 << 22));
+    let b = Arc::new(persistence.session(1 << 22));
+    let second = KeyValueCatalog::new(b);
+    second.save_named_graph("g").unwrap();
+    second.save_vertex(1, "before", "{}").unwrap();
+    second.save_graph_membership("vertex", 1, "g").unwrap();
+    let wrapper = Arc::new(InterleavedStore::new(a));
+    let first = KeyValueCatalog::new(wrapper.clone());
+    *wrapper.after_second_point.lock() = Some(Box::new(move || {
+        second.delete_graph_membership("vertex", 1, "g").unwrap();
+        second.delete_vertex(1).unwrap();
+        second.save_vertex(2, "after", "{}").unwrap();
+        second.save_graph_membership("vertex", 2, "g").unwrap();
+    }));
+    let pinned = first.load_named_graph_snapshot("g").unwrap().unwrap();
+    assert!(wrapper.point_reads.load(Ordering::Relaxed) >= 2);
+    assert_eq!(pinned.vertices.len(), 1);
+    assert_eq!(pinned.vertices[0].vertex_id, 1);
+    assert_eq!(
+        first
+            .load_named_graph_snapshot("g")
+            .unwrap()
+            .unwrap()
+            .vertices[0]
+            .vertex_id,
+        2
+    );
+}
+
+#[test]
+fn graph_lookup_mutation_keeps_original_preconditions_without_replaying() {
+    use super::occurrences::InterleavedStore;
+    use std::sync::atomic::Ordering;
+    let persistence = Persistence::new();
+    let a = Arc::new(persistence.session(1 << 22));
+    let b = Arc::new(persistence.session(1 << 22));
+    let second = KeyValueCatalog::new(b);
+    second.save_vertex(1, "before", "{}").unwrap();
+    let wrapper = Arc::new(InterleavedStore::new(a.clone()));
+    let first = KeyValueCatalog::new(wrapper.clone());
+    *wrapper.after_evaluation.lock() = Some(Box::new(move || {
+        second.save_vertex(1, "winner", "{}").unwrap();
+    }));
+    assert!(first.save_vertex(1, "loser", "{}").is_err());
+    assert_eq!(wrapper.evaluations.load(Ordering::Relaxed), 1);
+    a.rollback_transaction().unwrap();
+    assert_eq!(first.graph_vertex(1).unwrap().unwrap().label, "winner");
+    for label in ["before", "loser"] {
+        let mut filter =
+            uqa_storage::GraphEntityFilter::new(uqa_storage::GraphEntityKind::Vertex, None);
+        filter.label = Some(label);
+        assert!(first.graph_entity_ids(filter, None, 10).unwrap().is_empty());
+    }
+}
+
+#[test]
+fn graph_replacement_uses_only_the_final_duplicate_entity_rows() {
+    use uqa_storage::{EdgeRow, GraphEntityFilter, GraphEntityKind, GraphSnapshot, GraphVertexRow};
+    let (a, first, _, _) = catalogs();
+    let replacement = GraphSnapshot {
+        label_registry_json: "{}".into(),
+        vertices: ["discarded", "final"]
+            .into_iter()
+            .map(|label| GraphVertexRow {
+                vertex_id: 7,
+                label: label.into(),
+                properties_json: "{}".into(),
+            })
+            .collect(),
+        edges: ["discarded", "final"]
+            .into_iter()
+            .map(|label| EdgeRow {
+                edge_id: 9,
+                source_id: 7,
+                target_id: 7,
+                label: label.into(),
+                properties_json: "{}".into(),
+            })
+            .collect(),
+    };
+    first.replace_named_graph("g", &replacement).unwrap();
+    first.delete_graph_membership_for_graph("g").unwrap();
+    first.delete_edge(9).unwrap();
+    first.delete_vertex(7).unwrap();
+    for kind in [GraphEntityKind::Vertex, GraphEntityKind::Edge] {
+        let mut filter = GraphEntityFilter::new(kind, None);
+        filter.label = Some("discarded");
+        assert!(first.graph_entity_ids(filter, None, 10).unwrap().is_empty());
+    }
+    assert!(!a.in_transaction());
+}
+
 fn catalogs() -> (
     Arc<dyn KeyValueStore>,
     KeyValueCatalog,

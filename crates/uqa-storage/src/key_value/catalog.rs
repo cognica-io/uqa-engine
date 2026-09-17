@@ -6,7 +6,7 @@
 
 //! Catalog facade implementation for key/value-backed persistence.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -40,6 +40,8 @@ use super::{
 mod analyzers;
 mod foreign;
 mod graph_access;
+mod graph_guards;
+mod graph_view;
 mod graphs;
 mod indexes;
 pub(super) mod keys;
@@ -61,9 +63,9 @@ use keys::{
     catalog_index_references_column, catalog_index_rename_column, column_stats_key,
     column_stats_prefix, decode_catalog_relation_key, decode_relation_key, edge_key,
     ensure_prefix_absent, graph_membership_graph_prefix, graph_membership_key,
-    graph_membership_prefix, load_single_keys, load_single_string_rows,
-    register_migration_relation, relation_key, table_field_analyzer_field_prefix,
-    table_field_analyzer_key, table_field_analyzer_prefix, vertex_key,
+    graph_membership_prefix, load_single_string_rows, register_migration_relation, relation_key,
+    table_field_analyzer_field_prefix, table_field_analyzer_key, table_field_analyzer_prefix,
+    vertex_key,
 };
 use migration::{
     apply_relation_migrations, collect_relation_migrations, validate_relation_parents,
@@ -161,36 +163,42 @@ impl CatalogFacade for KeyValueCatalog {
         &self,
         filter: crate::GraphEntityFilter<'_>,
     ) -> StorageBackendResult<u64> {
-        let mut after = None;
-        let mut count = 0_u64;
-        loop {
-            let ids = self.graph_entity_ids_impl(filter, after, 256)?;
-            if ids.is_empty() {
-                return Ok(count);
+        self.with_graph_read(|read| {
+            let mut after = None;
+            let mut count = 0_u64;
+            loop {
+                let ids = read.ids(filter, after, 256)?;
+                if ids.is_empty() {
+                    return Ok(count);
+                }
+                after = ids.last().copied();
+                count = count
+                    .checked_add(
+                        u64::try_from(ids.len())
+                            .map_err(|error| StorageBackendError::Other(error.to_string()))?,
+                    )
+                    .ok_or_else(|| {
+                        StorageBackendError::Other("graph entity count overflow".into())
+                    })?;
             }
-            after = ids.last().copied();
-            count = count
-                .checked_add(
-                    u64::try_from(ids.len())
-                        .map_err(|error| StorageBackendError::Other(error.to_string()))?,
-                )
-                .ok_or_else(|| StorageBackendError::Other("graph entity count overflow".into()))?;
-        }
+        })
     }
 
     fn graph_entity_max_id(
         &self,
         kind: crate::GraphEntityKind,
     ) -> StorageBackendResult<Option<u64>> {
-        let filter = crate::GraphEntityFilter::new(kind, None);
-        let mut after = None;
-        loop {
-            let ids = self.graph_entity_ids_impl(filter, after, 256)?;
-            if ids.is_empty() {
-                return Ok(after);
+        self.with_graph_read(|read| {
+            let filter = crate::GraphEntityFilter::new(kind, None);
+            let mut after = None;
+            loop {
+                let ids = read.ids(filter, after, 256)?;
+                if ids.is_empty() {
+                    return Ok(after);
+                }
+                after = ids.last().copied();
             }
-            after = ids.last().copied();
-        }
+        })
     }
 
     fn graph_entity_memberships(
@@ -372,19 +380,15 @@ impl CatalogFacade for KeyValueCatalog {
         self.guard_graph_definition_impl(graph)
     }
     fn load_named_graph_snapshot(&self, name: &str) -> StorageBackendResult<Option<GraphSnapshot>> {
-        let mut result = crate::catalog::graph_snapshot::load(self, name)?;
+        let (mut result, namespace) =
+            self.with_graph_read(|read| Ok((read.snapshot(name)?, read.identifier_namespace()?)))?;
         if let (Some(snapshot), Some(allocator)) =
             (result.as_mut(), self.store.identifier_allocator())
         {
-            let generation = self
-                .get_metadata("graph_identifier_generation")?
-                .map(|value| serde_json::from_str(&value))
-                .transpose()?
-                .unwrap_or([0; 16]);
             snapshot.label_registry_json = crate::catalog::graph_identifiers::export_registry(
                 &snapshot.label_registry_json,
                 name,
-                crate::catalog::graph_identifiers::GraphIdentifierNamespace::new(None, generation),
+                namespace,
                 |key| allocator.identifier_watermark(key),
             )?;
         }

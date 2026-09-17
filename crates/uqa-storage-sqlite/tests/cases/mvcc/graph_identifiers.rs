@@ -43,6 +43,132 @@ fn graph(session: &PersistentStorageSession) -> PersistentGraphStore {
     PersistentGraphStore::from_catalog(session.catalog.clone(), session.backend.clone())
 }
 
+#[test]
+fn raw_graph_catalog_ids_remain_reserved_after_rollback() {
+    for mode in MODES {
+        for native in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("raw-graph-identifiers.db");
+            let a = session(mode, &path, native, true);
+            let b = session(mode, &path, native, false);
+            let mut store = graph(&b);
+            store.create_graph("g").unwrap();
+            a.backend.begin_transaction().unwrap();
+            a.catalog.save_vertex(400, "item", "{}").unwrap();
+            a.catalog.save_edge(800, 400, 400, "link", "{}").unwrap();
+            a.backend.rollback_transaction().unwrap();
+            assert!(
+                store.next_vertex_id().unwrap() > 400,
+                "{mode:?}, native={native}"
+            );
+            assert!(
+                store.next_edge_id().unwrap() > 800,
+                "{mode:?}, native={native}"
+            );
+        }
+    }
+}
+
+#[test]
+fn raw_graph_catalog_import_reserves_unused_counters_before_rollback() {
+    for mode in MODES {
+        for native in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("raw-graph-import.db");
+            let a = session(mode, &path, native, true);
+            let mut store = graph(&a);
+            store.create_graph("g").unwrap();
+            store.create_graph("other").unwrap();
+            let label = store
+                .create_label("g", "item", LabelKind::Vertex)
+                .unwrap()
+                .unwrap();
+            store
+                .create_label("other", "item", LabelKind::Vertex)
+                .unwrap();
+            let mut snapshot = a.catalog.load_named_graph_snapshot("g").unwrap().unwrap();
+            let mut registry: uqa_graph::GraphLabelRegistry =
+                serde_json::from_str(&snapshot.label_registry_json).unwrap();
+            registry.sequences.insert(label, 900);
+            registry.next_label_id = 200;
+            snapshot.label_registry_json = serde_json::to_string(&registry).unwrap();
+            a.backend.begin_transaction().unwrap();
+            a.catalog.replace_named_graph("g", &snapshot).unwrap();
+            a.backend.rollback_transaction().unwrap();
+            assert!(graphid_sequence(store.allocate_vertex_id("item", "other").unwrap()) > 900);
+            assert!(graphid_sequence(store.allocate_vertex_id("item", "g").unwrap()) > 900);
+            assert!(
+                store
+                    .create_label("g", "later", LabelKind::Edge)
+                    .unwrap()
+                    .unwrap()
+                    >= 200
+            );
+        }
+    }
+}
+
+#[test]
+fn raw_graph_catalog_observation_does_not_hide_legacy_prefix_rows() {
+    for mode in MODES {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("legacy-graph-prefix.db");
+        let connection = open(mode, &path);
+        let catalog = Catalog::open(connection.clone()).unwrap();
+        let legacy = uqa_graph::make_graphid(1, 900).unwrap();
+        catalog.save_vertex(legacy, "", "{}").unwrap();
+        connection
+            .bind_native_records(VersionedSessionOptions::default())
+            .unwrap();
+        let a = PersistentStorageSession::new(
+            Arc::new(Catalog::open(connection.clone()).unwrap()),
+            Arc::new(SQLiteStorageBackend::new(connection)),
+        );
+        let mut store = graph(&a);
+        store.create_graph("g").unwrap();
+        a.catalog
+            .save_vertex(uqa_graph::make_graphid(1, 5).unwrap(), "", "{}")
+            .unwrap();
+        assert!(store.allocate_vertex_id("", "g").unwrap() > legacy);
+    }
+}
+
+#[test]
+fn raw_graph_catalog_writes_and_structural_changes_conflict_in_both_orders() {
+    for mode in MODES {
+        for native in [false, true] {
+            for action in ["replace", "detach", "drop"] {
+                for data_wins in [false, true] {
+                    let directory = tempfile::tempdir().unwrap();
+                    let path = directory.path().join("raw-graph-definition.db");
+                    let a = session(mode, &path, native, true);
+                    let b = session(mode, &path, native, false);
+                    graph(&a).create_graph("g").unwrap();
+                    let snapshot = a.catalog.load_named_graph_snapshot("g").unwrap().unwrap();
+                    a.backend.begin_transaction().unwrap();
+                    b.backend.begin_transaction().unwrap();
+                    a.catalog.save_vertex(400, "item", "{}").unwrap();
+                    a.catalog.save_graph_membership("vertex", 400, "g").unwrap();
+                    match action {
+                        "replace" => b.catalog.replace_named_graph("g", &snapshot).unwrap(),
+                        "detach" => b.catalog.delete_graph_membership_for_graph("g").unwrap(),
+                        "drop" => b.catalog.drop_named_graph_data("g").unwrap(),
+                        _ => unreachable!(),
+                    }
+                    let (winner, loser) = if data_wins { (&a, &b) } else { (&b, &a) };
+                    winner.backend.commit_transaction().unwrap();
+                    assert!(
+                        loser.backend.commit_transaction().is_err(),
+                        "{mode:?}, native={native}, action={action}, data_wins={data_wins}"
+                    );
+                    loser.backend.rollback_transaction().unwrap();
+                    assert_eq!(a.catalog.graph_vertex(400).unwrap().is_some(), data_wins);
+                }
+            }
+        }
+    }
+}
+
 fn verify_graph_export(
     source: &PersistentStorageSession,
     copied: &PersistentStorageSession,

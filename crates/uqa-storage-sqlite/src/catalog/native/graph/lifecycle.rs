@@ -43,6 +43,10 @@ pub(in crate::catalog) fn detach(
     batch: &mut dyn KeyValueBatch,
     graph: &str,
 ) -> Result<()> {
+    snapshot.fence_graph_definition(batch, None, graph)?;
+    let registration = NativeRecordIdentity::new(Family::NamedGraphs, owner(snapshot))?
+        .encode_key(&[text(graph)], &snapshot.control)?;
+    batch.fence_record(&registration)?;
     write::remove_memberships(snapshot, batch, graph, |_, _| false)
 }
 
@@ -139,6 +143,8 @@ pub(in crate::catalog) fn replace(
     replacement: &GraphSnapshot,
 ) -> Result<()> {
     let vertices = final_rows(snapshot, &replacement.vertices, |row| row.vertex_id)?;
+    snapshot.fence_graph_definition(batch, None, graph)?;
+    snapshot.observe_graph_registry(batch, None, graph, &replacement.label_registry_json)?;
     let edges = final_rows(snapshot, &replacement.edges, |row| row.edge_id)?;
     for edge in &replacement.edges {
         encode_catalog_id("edge source", edge.source_id)?;
