@@ -14,13 +14,21 @@ use super::super::{
     SQLiteHNSWIndex,
 };
 use crate::mvcc::native::NativeRecordFamily as Family;
-use crate::vector_index::{encode_doc_id, native::NativeVectorRead, vector_to_blob};
+use crate::vector_index::{
+    encode_doc_id,
+    native::{publication::VectorPublication, NativeVectorRead},
+    vector_to_blob,
+};
 use crate::{Result, SQLiteError};
 
 pub(in crate::vector_index::hnsw) fn drop_metadata(
     read: &NativeVectorRead<'_>,
     batch: &mut dyn KeyValueBatch,
 ) -> Result<()> {
+    if let Some(owner) = read.owner {
+        read.snapshot
+            .fence_vector_definitions(batch, owner, Some(&read.index.field))?;
+    }
     for family in [Family::HNSWEdges, Family::HNSWNodes, Family::HNSWIndexes] {
         read.clear_family(batch, family)?;
     }
@@ -33,18 +41,23 @@ pub(super) fn persist_delta(
     index: &SQLiteHNSWIndex,
     delta: &HNSWPersistenceDelta,
     revision: u64,
+    publication: VectorPublication,
 ) -> Result<()> {
     let owner = read.owner.ok_or_else(|| {
         SQLiteError::StorageBackend("HNSW publication requires a native table owner".into())
     })?;
+    if matches!(publication, VectorPublication::Canonical) {
+        read.snapshot
+            .fence_vector_definitions(batch, owner, Some(&read.index.field))?;
+    }
     let table = ValueRef::Text(read.index.table.as_bytes());
     let int = ValueRef::Integer;
     let seed = index.params.seed.to_string();
     let meta = delta.meta;
-    read.snapshot.put_row(
+    publication.put_row(
+        read,
         batch,
         Family::HNSWIndexes,
-        owner,
         &[
             table,
             read.field(),
@@ -73,17 +86,17 @@ pub(super) fn persist_delta(
         ],
     )?;
     if delta.full_rewrite {
-        read.clear_family(batch, Family::HNSWEdges)?;
-        read.clear_family(batch, Family::HNSWNodes)?;
+        publication.delete_prefix(read, batch, Family::HNSWEdges, &[read.field()])?;
+        publication.delete_prefix(read, batch, Family::HNSWNodes, &[read.field()])?;
     }
     for node in &delta.nodes {
         read.snapshot.control.check()?;
         let id = int(checked_i64_u64("node_id", node.node_id)?);
         let vector = vector_to_blob(&node.raw_vector)?;
-        read.snapshot.put_row(
+        publication.put_row(
+            read,
             batch,
             Family::HNSWNodes,
-            owner,
             &[
                 table,
                 read.field(),
@@ -95,14 +108,13 @@ pub(super) fn persist_delta(
                 ValueRef::Blob(&vector),
             ],
         )?;
-        read.snapshot
-            .delete_prefix(batch, Family::HNSWEdges, owner, &[read.field(), id])?;
+        publication.delete_prefix(read, batch, Family::HNSWEdges, &[read.field(), id])?;
         for (layer, neighbors) in node.neighbors.iter().enumerate() {
             for target in neighbors {
-                read.snapshot.put_row(
+                publication.put_row(
+                    read,
                     batch,
                     Family::HNSWEdges,
-                    owner,
                     &[
                         table,
                         read.field(),

@@ -739,7 +739,7 @@ pub(super) const LAYOUTS: &[NativeRecordLayout] = &[
         object_owned: true,
     },
     NativeRecordLayout {
-        family: NativeRecordFamily::IVFGuards,
+        family: NativeRecordFamily::VectorGuards,
         table: "_uqa_mvcc_native_ivf_guards",
         columns: &["table_name", "field", "document_id"],
         column_types: &[Text, Text, Integer],

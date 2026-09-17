@@ -24,6 +24,8 @@ mod persistence;
 mod search;
 mod writing;
 
+pub(crate) use native::NativeHNSWRecords;
+
 #[cfg(test)]
 mod tests;
 

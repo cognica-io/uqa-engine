@@ -59,7 +59,7 @@ pub enum NativeRecordFamily {
     OccurrenceSkips = 46,
     OccurrenceBlockMax = 47,
     OccurrenceGuards = 48,
-    IVFGuards = 49,
+    VectorGuards = 49,
 }
 
 impl NativeRecordFamily {

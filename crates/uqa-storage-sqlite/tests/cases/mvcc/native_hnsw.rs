@@ -8,7 +8,10 @@
 
 use std::{sync::mpsc, time::Duration};
 
-use super::{open, MODES};
+use super::{
+    native_vectors::{generation, IndexKind},
+    open, MODES,
+};
 use uqa_storage::{
     mvcc::VersionedSessionOptions,
     read_control::StorageReadControl,
@@ -28,6 +31,170 @@ fn bind(connection: &ManagedConnection) {
 
 fn nearest(index: &dyn VectorIndex, query: &[f32]) -> Vec<u64> {
     index.search_knn(query, 1).unwrap().doc_ids().collect()
+}
+
+#[test]
+fn independent_native_hnsw_documents_merge_shared_nodes_like_serial_execution() {
+    for mode in MODES {
+        for reverse in [false, true] {
+            for seed in [0, 8] {
+                let directory = tempfile::tempdir().unwrap();
+                let path = directory.path().join("shared-hnsw.db");
+                let connection = open(mode, &path);
+                let serial = ManagedConnection::open_in_memory().unwrap();
+                for source in [&connection, &serial] {
+                    Catalog::open(source.clone()).unwrap();
+                    let mut index = SQLiteHNSWIndex::new(source.clone(), "docs", "embedding", 3);
+                    for document in 1..=seed {
+                        index
+                            .add(document, vec![1.0, document as f32, 0.0])
+                            .unwrap();
+                    }
+                    index.initialize().unwrap();
+                    bind(source);
+                }
+                let other = open(mode, &path);
+                bind(&other);
+                let mut left = SQLiteHNSWIndex::new(connection.clone(), "docs", "embedding", 3);
+                let mut right = SQLiteHNSWIndex::new(other.clone(), "docs", "embedding", 3);
+                let mut reference = SQLiteHNSWIndex::new(serial.clone(), "docs", "embedding", 3);
+                let baseline = left.snapshot().unwrap();
+                connection.begin_transaction().unwrap();
+                other.begin_transaction().unwrap();
+                left.add_many(101, vec![X.to_vec(), Y.to_vec()]).unwrap();
+                right.add(102, Z.to_vec()).unwrap();
+                let private = left.snapshot().unwrap();
+                if reverse {
+                    connection.commit_transaction().unwrap();
+                    assert!(other.in_transaction());
+                    other.commit_transaction().unwrap();
+                    reference
+                        .add_many(101, vec![X.to_vec(), Y.to_vec()])
+                        .unwrap();
+                    reference.add(102, Z.to_vec()).unwrap();
+                } else {
+                    other.commit_transaction().unwrap();
+                    assert!(connection.in_transaction());
+                    connection.commit_transaction().unwrap();
+                    reference.add(102, Z.to_vec()).unwrap();
+                    reference
+                        .add_many(101, vec![X.to_vec(), Y.to_vec()])
+                        .unwrap();
+                }
+                assert_eq!(
+                    generation(&connection, IndexKind::Hnsw, "docs", "embedding"),
+                    generation(&serial, IndexKind::Hnsw, "docs", "embedding")
+                );
+                assert_eq!(left.count().unwrap(), seed as usize + 3);
+                assert_eq!(right.count().unwrap(), seed as usize + 3);
+                assert_eq!(baseline.count().unwrap(), seed as usize);
+                assert_eq!(private.count().unwrap(), seed as usize + 2);
+            }
+        }
+    }
+}
+
+#[test]
+fn native_hnsw_ordered_merges_compact_after_savepoint_rollback_and_publication_retry() {
+    for mode in MODES {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("ordered-hnsw.db");
+        let a = open(mode, &path);
+        let serial = ManagedConnection::open_in_memory().unwrap();
+        let params = HNSWIndexParams {
+            rebuild_threshold: 2,
+            ..HNSWIndexParams::default()
+        };
+        for source in [&a, &serial] {
+            Catalog::open(source.clone()).unwrap();
+            let mut index =
+                SQLiteHNSWIndex::with_params(source.clone(), "docs", "embedding", 3, params);
+            for document in 1..=8 {
+                index
+                    .add(document, vec![1.0, document as f32, 0.5])
+                    .unwrap();
+            }
+            index.initialize().unwrap();
+            bind(source);
+        }
+        let b = open(mode, &path);
+        bind(&b);
+        let mut left = SQLiteHNSWIndex::with_params(a.clone(), "docs", "embedding", 3, params);
+        let mut right = SQLiteHNSWIndex::with_params(b.clone(), "docs", "embedding", 3, params);
+        let mut reference =
+            SQLiteHNSWIndex::with_params(serial.clone(), "docs", "embedding", 3, params);
+        let baseline = left.snapshot().unwrap();
+        a.begin_transaction().unwrap();
+        a.savepoint("discard").unwrap();
+        left.add(99, X.to_vec()).unwrap();
+        let discarded = left.snapshot().unwrap();
+        a.rollback_to_savepoint("discard").unwrap();
+        a.release_savepoint("discard").unwrap();
+        left.delete(1).unwrap();
+        left.delete(2).unwrap();
+        for vectors in [
+            vec![X.to_vec(), Y.to_vec()],
+            vec![],
+            vec![Y.to_vec(), Z.to_vec()],
+        ] {
+            left.add_many(11, vectors).unwrap();
+        }
+        assert!(left.add_many(11, vec![vec![f32::NAN; 3]]).is_err());
+        let private = left.snapshot().unwrap();
+        right.add(12, Z.to_vec()).unwrap();
+        let before = generation(&b, IndexKind::Hnsw, "docs", "embedding");
+        b.with_physical(|sqlite| {
+            sqlite.execute_batch("CREATE TRIGGER fail_hnsw_merge BEFORE INSERT ON _hnsw_edges BEGIN SELECT RAISE(ABORT, 'injected HNSW merge failure'); END")?;
+            Ok(())
+        }).unwrap();
+        assert!(a.commit_transaction().is_err());
+        assert_eq!(generation(&b, IndexKind::Hnsw, "docs", "embedding"), before);
+        b.with_physical(|sqlite| {
+            sqlite.execute_batch("DROP TRIGGER fail_hnsw_merge")?;
+            Ok(())
+        })
+        .unwrap();
+        right.add(13, X.to_vec()).unwrap();
+        a.commit_transaction().unwrap();
+        reference.add(12, Z.to_vec()).unwrap();
+        reference.add(13, X.to_vec()).unwrap();
+        reference.delete(1).unwrap();
+        reference.delete(2).unwrap();
+        for vectors in [
+            vec![X.to_vec(), Y.to_vec()],
+            vec![],
+            vec![Y.to_vec(), Z.to_vec()],
+        ] {
+            reference.add_many(11, vectors).unwrap();
+        }
+        let expected = generation(&serial, IndexKind::Hnsw, "docs", "embedding");
+        assert_eq!(
+            generation(&a, IndexKind::Hnsw, "docs", "embedding"),
+            expected
+        );
+        assert_eq!(baseline.count().unwrap(), 8);
+        assert_eq!(discarded.count().unwrap(), 9);
+        assert_eq!(private.count().unwrap(), 8);
+        assert_eq!(left.count().unwrap(), 10);
+        assert_eq!(right.count().unwrap(), 10);
+        for query in [&X, &Y, &Z] {
+            let actual = left.search_knn(query, 20).unwrap();
+            let serial = reference.search_knn(query, 20).unwrap();
+            assert_eq!(
+                actual.doc_ids().collect::<Vec<_>>(),
+                serial.doc_ids().collect::<Vec<_>>()
+            );
+        }
+        drop((left, right, baseline, private, discarded, a, b));
+        let reopened = open(mode, &path);
+        bind(&reopened);
+        assert_eq!(
+            generation(&reopened, IndexKind::Hnsw, "docs", "embedding"),
+            expected
+        );
+        let restored = SQLiteHNSWIndex::open_existing(reopened, "docs", "embedding", 3, params);
+        assert_eq!(restored.count().unwrap(), 10);
+    }
 }
 
 #[test]

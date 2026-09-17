@@ -80,7 +80,7 @@ impl NativeSnapshot {
                     }
                     Family::TableOwners
                     | Family::OccurrenceGuards
-                    | Family::IVFGuards
+                    | Family::VectorGuards
                     | Family::GraphLookups
                     | Family::GraphPathPairs
                     | Family::GraphPathIndexState => {}

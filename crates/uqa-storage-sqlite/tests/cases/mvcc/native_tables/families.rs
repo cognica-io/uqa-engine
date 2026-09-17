@@ -22,14 +22,14 @@ use uqa_storage_sqlite::{
 pub(in crate::mvcc) fn families() -> impl Iterator<Item = Family> {
     // IVF guard tombstones retain their old identities and have no transferable row payload.
     Family::all().filter(|family| {
-        *family != Family::IVFGuards && family.layout().columns.contains(&"table_name")
+        *family != Family::VectorGuards && family.layout().columns.contains(&"table_name")
     })
 }
 
 fn ivf_guard(generation: u8, field: &str, control: &StorageReadControl) -> NativeRecord {
     use rusqlite::types::ValueRef;
     NativeRecord::encode(
-        Family::IVFGuards,
+        Family::VectorGuards,
         NativeRecordOwner::Object {
             identity: [1; 16],
             generation: [generation; 16],

@@ -70,126 +70,6 @@ fn independent_native_ivf_writers_merge_shared_training_generations() {
     }
 }
 
-type Generation = Vec<Vec<Vec<rusqlite::types::Value>>>;
-fn generation(connection: &ManagedConnection, table: &str, field: &str) -> Generation {
-    connection
-        .with_physical(|sqlite| {
-            let mut generation = Vec::new();
-            for (family, order) in [
-                ("_vectors", "doc_id,vector_ordinal"),
-                ("_ivf_indexes", "field"),
-                ("_ivf_centroids", "centroid_id"),
-                ("_ivf_assignments", "doc_id,vector_ordinal"),
-            ] {
-                let mut query = sqlite.prepare(&format!(
-                    "SELECT * FROM {family} WHERE table_name = ?1 AND field = ?2 ORDER BY {order}"
-                ))?;
-                let columns = query.column_count();
-                generation.push(
-                    query
-                        .query_map([table, field], |row| {
-                            (0..columns)
-                                .map(|column| row.get(column))
-                                .collect::<rusqlite::Result<Vec<_>>>()
-                        })?
-                        .collect::<rusqlite::Result<Vec<_>>>()?,
-                );
-            }
-            Ok(generation)
-        })
-        .unwrap()
-}
-
-#[test]
-fn native_ivf_document_and_catalog_conflicts_preserve_the_winner_in_both_orders() {
-    for mode in MODES {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("conflicts.db");
-        let a = open(mode, &path);
-        Catalog::open(a.clone()).unwrap();
-        bind(&a);
-        let b = open(mode, &path);
-        bind(&b);
-        let catalog = Catalog::open(b.clone()).unwrap();
-        for case in 0_u8..11 {
-            for reverse in [false, true] {
-                let name = format!("ivf_{case}_{reverse}");
-                let identity = case * 2 + u8::from(reverse) + 1;
-                let schema = schema(&name, identity, identity);
-                let table = schema.relation.qualified_name();
-                let destination = format!("{table}_renamed");
-                catalog.save_table(&schema).unwrap();
-                let mut left = index(&a, IndexKind::Ivf, &table);
-                left.add(1, X.to_vec()).unwrap();
-                left.add(2, Y.to_vec()).unwrap();
-                left.initialize().unwrap();
-                let mut right = index(&b, IndexKind::Ivf, &table);
-                a.begin_transaction().unwrap();
-                b.begin_transaction().unwrap();
-                match case {
-                    0 => left.add_many(11, vec![]).unwrap(),
-                    1 => left.delete(11).unwrap(),
-                    _ => left.add(11, Z.to_vec()).unwrap(),
-                }
-                match case {
-                    0 | 1 => right.add(11, X.to_vec()).unwrap(),
-                    2 => right.clear().unwrap(),
-                    3 => right.initialize().unwrap(),
-                    4 | 5 => {
-                        SQLiteIVFIndex::drop_metadata(&b, &table, "embedding").unwrap();
-                        let nlist = if case == 5 { 3 } else { 2 };
-                        let mut replacement = SQLiteIVFIndex::with_params(
-                            b.clone(),
-                            &table,
-                            "embedding",
-                            3,
-                            nlist,
-                            nlist,
-                            2,
-                        );
-                        replacement.initialize().unwrap();
-                    }
-                    6 | 7 => {
-                        if case == 6 {
-                            catalog.drop_table_and_data(&table).unwrap();
-                        } else {
-                            catalog.purge_table_data(&table).unwrap();
-                        }
-                        catalog.save_table(&schema).unwrap();
-                        right.add(1, X.to_vec()).unwrap();
-                        right.add(2, Y.to_vec()).unwrap();
-                        right.initialize().unwrap();
-                    }
-                    8 => catalog.rename_table_data(&table, &destination).unwrap(),
-                    9 => catalog.drop_column_data(&table, "embedding").unwrap(),
-                    _ => catalog
-                        .rename_column_data(&table, "embedding", "renamed")
-                        .unwrap(),
-                }
-                let (winner, loser) = if reverse { (&a, &b) } else { (&b, &a) };
-                winner.commit_transaction().unwrap();
-                let target_table = if !reverse && case == 8 {
-                    &destination
-                } else {
-                    &table
-                };
-                let target_field = if !reverse && case == 10 {
-                    "renamed"
-                } else {
-                    "embedding"
-                };
-                let before = generation(winner, target_table, target_field);
-                assert!(
-                    loser.commit_transaction().is_err(),
-                    "case {case}, reverse {reverse}"
-                );
-                loser.rollback_transaction().unwrap();
-                assert_eq!(generation(winner, target_table, target_field), before);
-            }
-        }
-    }
-}
-
 #[test]
 fn native_ivf_savepoints_and_publication_retry_preserve_intervening_writes() {
     for mode in MODES {
@@ -223,13 +103,13 @@ fn native_ivf_savepoints_and_publication_retry_preserve_intervening_writes() {
         left.add_many(11, vec![Y.to_vec(), Z.to_vec()]).unwrap();
         let private = left.snapshot().unwrap();
         right.add(12, Z.to_vec()).unwrap();
-        let before = generation(&b, "docs", "embedding");
+        let before = generation(&b, IndexKind::Ivf, "docs", "embedding");
         b.with_physical(|sqlite| {
             sqlite.execute_batch("CREATE TRIGGER fail_ivf_merge BEFORE INSERT ON _ivf_indexes BEGIN SELECT RAISE(ABORT, 'injected IVF merge failure'); END")?;
             Ok(())
         }).unwrap();
         assert!(a.commit_transaction().is_err());
-        assert_eq!(generation(&b, "docs", "embedding"), before);
+        assert_eq!(generation(&b, IndexKind::Ivf, "docs", "embedding"), before);
         b.with_physical(|sqlite| {
             sqlite.execute_batch("DROP TRIGGER fail_ivf_merge")?;
             Ok(())
@@ -255,10 +135,13 @@ fn native_ivf_savepoints_and_publication_retry_preserve_intervening_writes() {
         assert_eq!(discarded.count().unwrap(), 9);
         assert_eq!(private.count().unwrap(), 9);
         assert_eq!(left.count().unwrap(), 11);
-        let expected = generation(&a, "docs", "embedding");
+        let expected = generation(&a, IndexKind::Ivf, "docs", "embedding");
         drop((left, right, private, discarded, a, b));
         let reopened = open(mode, &path);
         bind(&reopened);
-        assert_eq!(generation(&reopened, "docs", "embedding"), expected);
+        assert_eq!(
+            generation(&reopened, IndexKind::Ivf, "docs", "embedding"),
+            expected
+        );
     }
 }

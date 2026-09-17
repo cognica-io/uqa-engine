@@ -40,7 +40,7 @@ pub(in crate::vector_index::hnsw) fn load_meta(
                 integer(row[4])?,
                 integer(row[5])?,
                 integer(row[6])?,
-                text(row[7])?.to_owned(),
+                text(row[7])?,
                 if row[8] == ValueRef::Null {
                     None
                 } else {

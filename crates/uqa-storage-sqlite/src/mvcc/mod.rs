@@ -172,7 +172,7 @@ impl VersionedPersistence for SQLiteRecordStore {
     }
     fn hnsw_record_layout(&self) -> Option<&dyn uqa_storage::mvcc::HNSWRecordLayout> {
         if self.native {
-            None
+            Some(&crate::vector_index::NativeHNSWRecords)
         } else {
             Some(&uqa_storage::key_value::KeyValueHNSWRecords)
         }

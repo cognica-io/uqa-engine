@@ -7,10 +7,8 @@
 //! Encode native private IVF previews and retain immutable document inputs in the same batch.
 
 use super::super::metadata::{state_to_str, EncodedIVFMetadata};
-use crate::mvcc::native::{
-    NativeRecord, NativeRecordFamily as Family, NativeRecordIdentity, NativeRecordOwner,
-};
-use crate::vector_index::native::NativeVectorRead;
+use crate::mvcc::native::NativeRecordFamily as Family;
+use crate::vector_index::native::{publication::VectorPublication, NativeVectorRead};
 use crate::{Result, SQLiteError};
 use rusqlite::types::ValueRef;
 use uqa_storage::{ivf_index::IVFMutation, KeyValueBatch};
@@ -33,23 +31,6 @@ pub(super) fn write_input(
     write_metadata(read, batch, metadata, preview)
 }
 
-fn put_row(
-    read: &NativeVectorRead<'_>,
-    batch: &mut dyn KeyValueBatch,
-    preview: bool,
-    family: Family,
-    owner: NativeRecordOwner,
-    values: &[ValueRef<'_>],
-) -> Result<()> {
-    let record = NativeRecord::encode(family, owner, values, &read.snapshot.control)?;
-    if preview {
-        batch.preview_ivf_record(record.key(), Some(record.row()))?;
-    } else {
-        batch.put(record.key(), record.row())?;
-    }
-    Ok(())
-}
-
 pub(in crate::vector_index::ivf) fn write_metadata(
     read: &NativeVectorRead<'_>,
     batch: &mut dyn KeyValueBatch,
@@ -61,15 +42,18 @@ pub(in crate::vector_index::ivf) fn write_metadata(
     })?;
     if !preview {
         read.snapshot
-            .fence_ivf_definitions(batch, owner, Some(&read.index.field))?;
+            .fence_vector_definitions(batch, owner, Some(&read.index.field))?;
     }
+    let publication = if preview {
+        VectorPublication::IVFPreview
+    } else {
+        VectorPublication::Canonical
+    };
     let table = ValueRef::Text(read.index.table.as_bytes());
-    put_row(
+    publication.put_row(
         read,
         batch,
-        preview,
         Family::IVFIndexes,
-        owner,
         &[
             table,
             read.field(),
@@ -84,21 +68,13 @@ pub(in crate::vector_index::ivf) fn write_metadata(
         ],
     )?;
     for family in [Family::IVFCentroids, Family::IVFAssignments] {
-        let prefix = NativeRecordIdentity::new(family, owner)?
-            .encode_prefix(&[read.field()], &read.snapshot.control)?;
-        if preview {
-            batch.preview_ivf_prefix(&prefix)?;
-        } else {
-            batch.delete_prefix(&prefix)?;
-        }
+        publication.delete_prefix(read, batch, family, &[read.field()])?;
     }
     for (centroid, vector) in &metadata.centroids {
-        put_row(
+        publication.put_row(
             read,
             batch,
-            preview,
             Family::IVFCentroids,
-            owner,
             &[
                 table,
                 read.field(),
@@ -108,12 +84,10 @@ pub(in crate::vector_index::ivf) fn write_metadata(
         )?;
     }
     for (doc, ordinal, centroid) in &metadata.assignments {
-        put_row(
+        publication.put_row(
             read,
             batch,
-            preview,
             Family::IVFAssignments,
-            owner,
             &[
                 table,
                 read.field(),
@@ -132,7 +106,7 @@ pub(in crate::vector_index::ivf) fn drop_metadata(
 ) -> Result<()> {
     if let Some(owner) = read.owner {
         read.snapshot
-            .fence_ivf_definitions(batch, owner, Some(&read.index.field))?;
+            .fence_vector_definitions(batch, owner, Some(&read.index.field))?;
     }
     for family in [
         Family::IVFAssignments,

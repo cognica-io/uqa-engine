@@ -83,7 +83,7 @@ fn native_occurrence_guard_upgrade_preserves_closed_files_and_receipts() {
                     .get::<_, i64>(
                     0
                 ))?,
-                6
+                7
             );
             assert_eq!(
                 sqlite.query_row(

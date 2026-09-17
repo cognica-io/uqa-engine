@@ -30,10 +30,10 @@ impl Catalog {
             };
             snapshot.reset_occurrence_rows(batch, owner)?;
             for field in std::iter::once(from).chain(to) {
-                snapshot.fence_ivf_definitions(batch, owner, Some(field))?;
+                snapshot.fence_vector_definitions(batch, owner, Some(field))?;
             }
             for family in Family::all() {
-                if matches!(family, Family::OccurrenceFormats | Family::IVFGuards) {
+                if matches!(family, Family::OccurrenceFormats | Family::VectorGuards) {
                     continue;
                 }
                 if matches!(family, Family::OccurrenceSkips | Family::OccurrenceBlockMax) {

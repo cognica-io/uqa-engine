@@ -11,7 +11,6 @@ mod family;
 mod format;
 mod graph_cache;
 mod graph_lookup;
-mod ivf_guards;
 mod key;
 mod layout;
 mod occurrence_guards;
@@ -22,6 +21,7 @@ mod queue;
 mod row;
 mod sequences;
 mod session;
+mod vector_guards;
 
 pub(super) use graph_cache::NativeGraphRecords;
 pub(crate) use session::NativeSnapshot;

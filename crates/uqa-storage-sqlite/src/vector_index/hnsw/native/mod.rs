@@ -15,11 +15,12 @@ use super::{
     mutation::{missing_metadata, next_revision},
     SQLiteHNSWIndex,
 };
-use crate::vector_index::native::NativeVectorRead;
+use crate::vector_index::native::{publication::VectorPublication, NativeVectorRead};
 use crate::Result;
 
 mod cache;
 mod loading;
+mod records;
 mod writing;
 
 #[cfg(test)]
@@ -27,6 +28,7 @@ mod tests;
 
 pub(super) use cache::GraphIdentity;
 pub(super) use loading::load_meta;
+pub(crate) use records::NativeHNSWRecords;
 pub(super) use writing::drop_metadata;
 
 impl SQLiteHNSWIndex {
@@ -55,7 +57,14 @@ impl SQLiteHNSWIndex {
             &entries,
             &read.snapshot.control,
         )?;
-        writing::persist_delta(&read, batch, self, &delta, next_revision(expected)?)
+        writing::persist_delta(
+            &read,
+            batch,
+            self,
+            &delta,
+            next_revision(expected)?,
+            VectorPublication::Canonical,
+        )
     }
 
     pub(in crate::vector_index::hnsw) fn mutate_native(
@@ -76,7 +85,25 @@ impl SQLiteHNSWIndex {
             .ok_or_else(|| missing_metadata(self))?;
         let delta = cached.prepare_delta(mutation, &read.snapshot.control)?;
         canonical(read, batch)?;
+        let publication = if matches!(mutation, HNSWMutation::Clear) {
+            VectorPublication::Canonical
+        } else {
+            let key = records::metadata_key(
+                read.owner.expect("persisted native HNSW owner"),
+                &read.index.field,
+                &read.snapshot.control,
+            )?;
+            batch.hnsw_mutation(&key, mutation)?;
+            VectorPublication::HNSWPreview
+        };
         // Cache publication is read-side only: a candidate must never be tagged with a later session view.
-        writing::persist_delta(read, batch, self, &delta, next_revision(Some(revision))?)
+        writing::persist_delta(
+            read,
+            batch,
+            self,
+            &delta,
+            next_revision(Some(revision))?,
+            publication,
+        )
     }
 }

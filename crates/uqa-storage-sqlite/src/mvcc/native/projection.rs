@@ -58,7 +58,7 @@ const ORDER: [Family; 49] = [
     Family::OccurrenceSkips,
     Family::OccurrenceBlockMax,
     Family::OccurrenceGuards,
-    Family::IVFGuards,
+    Family::VectorGuards,
     Family::PathIndexes,
     Family::GraphPathIndexState,
     Family::GraphLookups,

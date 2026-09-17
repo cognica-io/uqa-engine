@@ -6,6 +6,8 @@
 
 //! Exact, IVF and HNSW public APIs retain canonical/derived views and publish atomic native batches.
 
+#[path = "native_vectors/conflicts.rs"]
+mod conflicts;
 #[path = "native_vectors/ivf.rs"]
 mod ivf;
 #[path = "native_vectors/ivf_merging.rs"]
@@ -33,7 +35,7 @@ fn bind(connection: &ManagedConnection) {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum IndexKind {
+pub(super) enum IndexKind {
     Exact,
     Ivf,
     Hnsw,
@@ -64,6 +66,51 @@ fn index(connection: &ManagedConnection, kind: IndexKind, table: &str) -> Box<dy
             3,
         )),
     }
+}
+
+type Generation = Vec<Vec<Vec<rusqlite::types::Value>>>;
+pub(super) fn generation(
+    connection: &ManagedConnection,
+    kind: IndexKind,
+    table: &str,
+    field: &str,
+) -> Generation {
+    connection
+        .with_physical(|sqlite| {
+            let mut generation = Vec::new();
+            let families: &[(&str, &str)] = match kind {
+                IndexKind::Exact => &[("_vectors", "doc_id,vector_ordinal")],
+                IndexKind::Ivf => &[
+                    ("_vectors", "doc_id,vector_ordinal"),
+                    ("_ivf_indexes", "field"),
+                    ("_ivf_centroids", "centroid_id"),
+                    ("_ivf_assignments", "doc_id,vector_ordinal"),
+                ],
+                IndexKind::Hnsw => &[
+                    ("_vectors", "doc_id,vector_ordinal"),
+                    ("_hnsw_indexes", "field"),
+                    ("_hnsw_nodes", "node_id"),
+                    ("_hnsw_edges", "source_node_id,layer,target_node_id"),
+                ],
+            };
+            for (family, order) in families {
+                let mut query = sqlite.prepare(&format!(
+                    "SELECT * FROM {family} WHERE table_name = ?1 AND field = ?2 ORDER BY {order}"
+                ))?;
+                let columns = query.column_count();
+                generation.push(
+                    query
+                        .query_map([table, field], |row| {
+                            (0..columns)
+                                .map(|column| row.get(column))
+                                .collect::<rusqlite::Result<Vec<_>>>()
+                        })?
+                        .collect::<rusqlite::Result<Vec<_>>>()?,
+                );
+            }
+            Ok(generation)
+        })
+        .unwrap()
 }
 
 fn ids(index: &dyn VectorIndex, query: &[f32]) -> Vec<u64> {

@@ -23,6 +23,9 @@ use crate::mvcc::native::{
 };
 use crate::{Result, SQLiteError};
 
+pub(in crate::vector_index) mod publication;
+pub(in crate::vector_index) mod records;
+
 type VectorRows = Vec<(DocId, u32, Vec<f32>)>;
 
 // Payload allocations are destroyed before either of their reservations, including on failed reads.
