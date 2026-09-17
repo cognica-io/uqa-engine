@@ -21,18 +21,13 @@ use uqa_sql::{
 pub(super) fn bind_drop_targets(
     context: &RelationRemovalContext<'_>,
     statement: &DropStmt,
+    notice: &mut dyn FnMut(&str),
 ) -> Result<Vec<String>, SQLError> {
-    let mut notice = |message: &str| {
-        context
-            .notices
-            .lock()
-            .push(("NOTICE".into(), message.into()));
-    };
     if statement.kind == DropKind::Sequence {
         return uqa_sql::schema::removal::bind_relation_drop_targets(
             context.catalog,
             statement,
-            &mut notice,
+            notice,
         );
     }
     let mut targets = Vec::new();
@@ -48,7 +43,7 @@ pub(super) fn bind_drop_targets(
                     name,
                     statement.kind,
                     statement.if_exists,
-                    &mut notice,
+                    notice,
                 )?
                 else {
                     return Ok(None);

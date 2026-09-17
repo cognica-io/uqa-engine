@@ -12,6 +12,7 @@ use uqa_sql::{
 mod binding;
 mod context;
 pub use context::*;
+pub mod direct;
 pub mod entry;
 
 pub fn run_drop(
@@ -24,12 +25,14 @@ pub fn run_drop(
     context
         .transactions
         .with_relation_write(Box::new(move |context| {
-            let names = binding::bind_drop_targets(context, &stmt)?;
+            let names = binding::bind_drop_targets(context, &stmt, &mut |message| {
+                context
+                    .notices
+                    .lock()
+                    .push(("NOTICE".into(), message.into()));
+            })?;
             if names.is_empty() {
                 return Ok(SQLResult::empty());
-            }
-            if !matches!(stmt.kind, DropKind::View | DropKind::MaterializedView) {
-                context.locks.prepare_definition_write()?;
             }
             run_drop_inner(context, DropStmt { names, ..stmt })
         }))
@@ -43,6 +46,9 @@ fn run_drop_inner(
     context: &RelationRemovalContext<'_>,
     stmt: DropStmt,
 ) -> Result<SQLResult, SQLError> {
+    if !matches!(stmt.kind, DropKind::View | DropKind::MaterializedView) {
+        context.locks.prepare_definition_write()?;
+    }
     match stmt.kind {
         DropKind::Table => {
             let tables = stmt.names;

@@ -12,18 +12,9 @@ use crate::catalog::{
 use crate::schema::{
     events::context::EventLifecycleContext, foreign_table_alteration::ForeignTableAlterPublication,
     publication::dependencies::CatalogPublicationChanges,
-    sequences::removal::SequenceRemovalInputs,
 };
-use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
-pub trait ForeignSequenceDependents {
-    fn sequence_external_dependents_for_owner_drop(
-        &self,
-        sequence: &str,
-        targets: &BTreeSet<String>,
-    ) -> StorageBackendResult<Vec<String>>;
-}
 pub struct ForeignTableRemovalContext<'a> {
     pub lookup: ForeignLookupContext<'a>,
     pub publication: &'a dyn ForeignTableAlterPublication,
@@ -31,52 +22,8 @@ pub struct ForeignTableRemovalContext<'a> {
     pub changes: &'a dyn CatalogPublicationChanges,
     pub events: EventLifecycleContext<'a>,
     pub owners: &'a dyn SequenceIntrospectionCatalog,
-    pub dependencies: &'a dyn ForeignSequenceDependents,
-    pub sequences: &'a dyn SequenceRemovalInputs,
 }
 impl ForeignTableRemovalContext<'_> {
-    pub fn drop_foreign_table(&self, name: &str) -> Result<bool, String> {
-        self.lookup
-            .state
-            .synchronize_catalog_registries()
-            .map_err(|error| format!("refresh FDW catalog: {error}"))?;
-        let Some(canonical) = self
-            .lookup
-            .resolve_foreign_table_name(name)
-            .map_err(|error| format!("resolve foreign table: {error}"))?
-        else {
-            return Ok(false);
-        };
-        let tables = vec![canonical.clone()];
-        let targets = std::collections::BTreeSet::from([canonical.clone()]);
-        let owned_sequences = self
-            .foreign_table_owned_sequence_names(&tables)
-            .map_err(|error| format!("resolve owned sequences: {error}"))?;
-        for sequence in &owned_sequences {
-            let dependents = self
-                .dependencies
-                .sequence_external_dependents_for_owner_drop(sequence, &targets)
-                .map_err(|error| format!("inspect owned sequence `{sequence}`: {error}"))?;
-            if !dependents.is_empty() {
-                return Err(format!(
-                        "foreign table `{canonical}` has owned sequence `{sequence}` with dependent object(s) `{}`",
-                        dependents.join("`, `")
-                    ));
-            }
-        }
-        if !self.drop_foreign_table_inner(&canonical)? {
-            return Err(format!(
-                "foreign table `{canonical}` disappeared after DROP preflight"
-            ));
-        }
-        for sequence in owned_sequences {
-            self.sequences
-                .sequence_removal_context()
-                .drop_owned_sequence(&sequence, false)
-                .map_err(|error| format!("drop owned sequence `{sequence}`: {error}"))?;
-        }
-        Ok(true)
-    }
     pub fn drop_foreign_table_inner(&self, name: &str) -> Result<bool, String> {
         self.lookup
             .state

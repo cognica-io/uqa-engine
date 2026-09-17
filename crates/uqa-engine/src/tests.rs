@@ -42,6 +42,7 @@ mod prepared;
 mod queries;
 mod table_locks;
 
+mod direct_drop_locks;
 mod drop_locks;
 mod relation_lock_support;
 mod view_locks;
