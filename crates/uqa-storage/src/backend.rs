@@ -198,6 +198,21 @@ fn resolve_final_symlinks(path: &Path) -> StorageBackendResult<PathBuf> {
     }
 }
 
+/// How a catalog/backend pair retains writes between SQL commands. This contract is independent of the physical database's single-writer commit admission.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StorageTransactionModel {
+    #[default]
+    ProviderSerialized,
+    /// Private writes, retained readers and savepoints share this database incarnation. Command refresh must preserve evaluated writes and commit must validate their original revisions.
+    VersionedConcurrent { database: crate::mvcc::DatabaseId },
+}
+
+impl StorageTransactionModel {
+    pub fn is_versioned(self) -> bool {
+        matches!(self, Self::VersionedConcurrent { .. })
+    }
+}
+
 impl PersistentStorageSession {
     pub fn new(
         catalog: Arc<dyn CatalogFacade>,
@@ -206,9 +221,14 @@ impl PersistentStorageSession {
         Self { catalog, backend }
     }
 
-    /// Check affinity before restoration, migration or session attachment. Legacy pairs that both omit identity keep their existing contract; a reported identity must match on both handles.
+    /// Check the transaction model, database incarnation and session affinity before restoration, migration or attachment. Versioned pairs require a matching reported affinity; serialized pairs may both omit it.
     pub fn validate_transaction_affinity(&self) -> StorageBackendResult<()> {
-        if self.catalog.transaction_affinity() != self.backend.transaction_affinity() {
+        let affinity = self.backend.transaction_affinity();
+        let model = self.backend.transaction_model();
+        if self.catalog.transaction_affinity() != affinity
+            || self.catalog.transaction_model() != model
+            || (model.is_versioned() && affinity.is_none())
+        {
             return Err(StorageBackendError::backend(
                 "session",
                 StorageSessionMismatch,
@@ -246,6 +266,11 @@ pub trait PersistentStorageProvider: Send + Sync {
 
 /// Factory plus transaction surface for persistent table/index storage.
 pub trait PersistentStorageBackend: Send + Sync {
+    /// Transaction ownership shared with the paired catalog. Legacy providers retain serialized Engine writer admission; versioned providers keep private writes and support command refresh without ending the transaction.
+    fn transaction_model(&self) -> StorageTransactionModel {
+        StorageTransactionModel::ProviderSerialized
+    }
+
     /// Durable identifier allocation independent of logical transaction undo. A missing capability retains serialized allocation; it cannot establish support for concurrent writers. Wrappers must forward the underlying capability.
     fn identifier_allocator(&self) -> Option<&dyn crate::mvcc::IdentifierAllocator> {
         None

@@ -23,7 +23,7 @@ flowchart TD
 
 `PersistentStorageProvider` creates catalog and backend handles together for a new session. `Engine::from_persistent_provider` retains that factory and can create sibling sessions. `Engine::from_persistent_backends` accepts already-bound handles and retains the backend's session factory; independent sessions require that backend to implement `open_session`.
 
-Built-in persistent catalog and backend handles report a common `StorageSessionAffinity`. Connection/store clones share this process-local identity, while independent sessions receive different identities even over the same database. `PersistentStorageSession::validate_transaction_affinity` rejects different identities or a known identity paired with an omitted one. Engine validates initial restoration and sibling attachment before using their storage handles. Legacy custom pairs that both omit identity retain their existing caller-managed contract; wrappers around a reporting implementation must delegate the identity. This check establishes transaction affinity, not complete concurrent SQL support.
+`PersistentStorageSession::validate_transaction_affinity` checks both the transaction model and `StorageSessionAffinity` before Engine restoration or sibling attachment. `StorageTransactionModel::VersionedConcurrent { database }` requires matching database incarnations and a matching reported session affinity; equal file paths alone do not establish atomicity. Connection/store clones share affinity, while independent sessions receive different identities. Custom providers default to `ProviderSerialized`, preserving Engine writer admission; serialized pairs may both omit affinity. Wrappers must forward both contracts from their underlying session.
 
 ## Logical storage contracts
 

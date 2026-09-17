@@ -18,6 +18,10 @@ fn into_storage_result<T>(result: Result<T>) -> StorageBackendResult<T> {
 }
 
 impl CatalogFacade for Catalog {
+    fn transaction_model(&self) -> uqa_storage::StorageTransactionModel {
+        self.conn.transaction_model()
+    }
+
     fn guard_graph_definition(&self, graph: Option<&str>) -> StorageBackendResult<()> {
         into_storage_result(
             self.conn
@@ -300,6 +304,14 @@ impl CatalogFacade for Catalog {
 
     fn load_sequence_rows(&self) -> StorageBackendResult<Vec<SequenceRow>> {
         into_storage_result(Catalog::load_sequence_rows(self))
+    }
+
+    fn sequence_has_private_changes(
+        &self,
+        _relation: &RelationIdentity,
+        object_id: [u8; 16],
+    ) -> StorageBackendResult<bool> {
+        into_storage_result(self.native_sequence_has_private_changes(object_id))
     }
 
     fn reserve_sequence_values(

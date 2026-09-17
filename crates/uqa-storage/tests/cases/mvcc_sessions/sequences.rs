@@ -59,6 +59,45 @@ fn assert_conflict(error: StorageBackendError) {
 }
 
 #[test]
+fn private_sequence_provenance_follows_definition_changes_and_savepoint_undo() {
+    let persistence = Persistence::new();
+    let store = Arc::new(persistence.session(1 << 22));
+    let catalog = KeyValueCatalog::new(store.clone());
+    catalog.save_schema("public").unwrap();
+    let mut row = sequence();
+    catalog.create_sequence_row(&row).unwrap();
+    let private = || {
+        catalog
+            .sequence_has_private_changes(&row.relation, row.object_id)
+            .unwrap()
+    };
+    assert!(!private());
+    store.begin_transaction().unwrap();
+    store.savepoint("before_definition").unwrap();
+    assert!(!private());
+    let mut replacement = row.clone();
+    replacement.definition_generation = [3; 16];
+    catalog.replace_sequence_row(&replacement).unwrap();
+    assert!(private());
+    store.rollback_to_savepoint("before_definition").unwrap();
+    assert!(!private());
+    row.relation.name = "ids_suffix".into();
+    row.object_id = [4; 16];
+    catalog.create_sequence_row(&row).unwrap();
+    assert!(catalog
+        .sequence_has_private_changes(&row.relation, row.object_id)
+        .unwrap());
+    let original = sequence();
+    assert!(!catalog
+        .sequence_has_private_changes(&original.relation, original.object_id)
+        .unwrap());
+    store.rollback_transaction().unwrap();
+    assert!(!catalog
+        .sequence_has_private_changes(&row.relation, row.object_id)
+        .unwrap());
+}
+
+#[test]
 fn sequence_reservation_cannot_reuse_a_block_published_after_its_read() {
     let persistence = Persistence::new();
     let a = Arc::new(persistence.session(1 << 22));

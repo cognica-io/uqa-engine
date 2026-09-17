@@ -80,6 +80,10 @@ impl uqa_storage::mvcc::IdentifierAllocator for SQLiteKeyValueStore {
 }
 
 impl KeyValueStore for SQLiteKeyValueStore {
+    fn transaction_model(&self) -> uqa_storage::StorageTransactionModel {
+        self.records.transaction_model()
+    }
+
     fn refresh_transaction_snapshot(
         &self,
         cancellation: &uqa_core::CancellationToken,

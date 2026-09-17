@@ -97,6 +97,10 @@ impl KeyValueCatalog {
 }
 
 impl CatalogFacade for KeyValueCatalog {
+    fn transaction_model(&self) -> crate::StorageTransactionModel {
+        self.store.transaction_model()
+    }
+
     fn transaction_affinity(&self) -> Option<crate::StorageSessionAffinity> {
         self.store.transaction_affinity()
     }
@@ -330,6 +334,14 @@ impl CatalogFacade for KeyValueCatalog {
 
     fn load_sequence_rows(&self) -> StorageBackendResult<Vec<SequenceRow>> {
         self.load_sequence_rows_impl()
+    }
+
+    fn sequence_has_private_changes(
+        &self,
+        relation: &RelationIdentity,
+        _object_id: [u8; 16],
+    ) -> StorageBackendResult<bool> {
+        self.sequence_has_private_changes_impl(relation)
     }
 
     fn reserve_sequence_values(

@@ -64,6 +64,19 @@ fn stored_sequence(sequence: &SequenceRow) -> StoredSequence {
 }
 
 impl KeyValueCatalog {
+    pub(super) fn sequence_has_private_changes_impl(
+        &self,
+        relation: &RelationIdentity,
+    ) -> StorageBackendResult<bool> {
+        if !self.store.transaction_model().is_versioned() {
+            return Ok(false);
+        }
+        let key = relation_key(TAG_SEQUENCE, relation)?;
+        read_view(self.store.as_ref(), |read| {
+            Ok(read.revision(&[&key])?.has_private_changes())
+        })
+    }
+
     pub(super) fn create_sequence_row_impl(
         &self,
         sequence: &SequenceRow,

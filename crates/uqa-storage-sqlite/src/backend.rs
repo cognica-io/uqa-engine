@@ -110,6 +110,10 @@ impl uqa_storage::mvcc::IdentifierAllocator for SQLiteStorageBackend {
 }
 
 impl PersistentStorageBackend for SQLiteStorageBackend {
+    fn transaction_model(&self) -> uqa_storage::StorageTransactionModel {
+        self.conn.transaction_model()
+    }
+
     fn identifier_allocator(&self) -> Option<&dyn uqa_storage::mvcc::IdentifierAllocator> {
         self.conn.is_native_record_session().then_some(self)
     }

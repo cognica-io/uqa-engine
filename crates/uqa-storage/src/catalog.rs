@@ -378,6 +378,11 @@ pub fn sequence_value_reservation(
 
 /// Engine-facing catalog facade for persistent metadata.
 pub trait CatalogFacade: Send + Sync {
+    /// Transaction model and database incarnation shared with the paired backend. Wrappers must forward this with the session affinity.
+    fn transaction_model(&self) -> crate::StorageTransactionModel {
+        crate::StorageTransactionModel::ProviderSerialized
+    }
+
     /// Identity shared with the paired data backend's transaction context. Wrappers must delegate this when their underlying catalog reports an identity.
     fn transaction_affinity(&self) -> Option<crate::StorageSessionAffinity> {
         None
@@ -453,6 +458,20 @@ pub trait CatalogFacade: Send + Sync {
     fn rename_sequence_row(&self, from: &str, to: &str) -> StorageBackendResult<bool>;
     fn drop_sequence_row(&self, name: &str) -> StorageBackendResult<bool>;
     fn load_sequence_rows(&self) -> StorageBackendResult<Vec<SequenceRow>>;
+
+    /// Whether this sequence has transaction-private state that an autonomous value allocation must not bypass. Versioned catalogs must inspect their retained private records, including creation, rename and definition replacement.
+    fn sequence_has_private_changes(
+        &self,
+        _relation: &RelationIdentity,
+        _object_id: [u8; 16],
+    ) -> StorageBackendResult<bool> {
+        if self.transaction_model().is_versioned() {
+            return Err(StorageBackendError::Other(
+                "private sequence provenance is not supported by this catalog".into(),
+            ));
+        }
+        Ok(false)
+    }
     fn reserve_sequence_values(
         &self,
         name: &str,

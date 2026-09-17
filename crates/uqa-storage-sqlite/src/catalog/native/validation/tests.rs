@@ -18,6 +18,39 @@ fn text(value: &str) -> ValueRef<'_> {
     ValueRef::Text(value.as_bytes())
 }
 
+#[test]
+fn private_native_sequence_provenance_follows_generation_replacement_and_undo() {
+    let (connection, catalog) = fixture();
+    let mut row = catalog.load_sequence_rows().unwrap().remove(0);
+    assert!(!catalog
+        .sequence_has_private_changes(&row.relation, row.object_id)
+        .unwrap());
+    connection.begin_transaction().unwrap();
+    connection.savepoint("before_definition").unwrap();
+    row.definition_generation = [9; 16];
+    catalog.replace_sequence_row(&row).unwrap();
+    assert!(catalog
+        .sequence_has_private_changes(&row.relation, row.object_id)
+        .unwrap());
+    connection
+        .rollback_to_savepoint("before_definition")
+        .unwrap();
+    assert!(!catalog
+        .sequence_has_private_changes(&row.relation, row.object_id)
+        .unwrap());
+    catalog
+        .rename_sequence_row("app.ids", "app.renamed_ids")
+        .unwrap();
+    row.relation.name = "renamed_ids".into();
+    assert!(catalog
+        .sequence_has_private_changes(&row.relation, row.object_id)
+        .unwrap());
+    connection.rollback_transaction().unwrap();
+    assert!(!catalog
+        .sequence_has_private_changes(&row.relation, row.object_id)
+        .unwrap());
+}
+
 fn fixture() -> (ManagedConnection, Catalog) {
     let connection = ManagedConnection::open_in_memory().unwrap();
     let catalog = Catalog::open(connection.clone()).unwrap();

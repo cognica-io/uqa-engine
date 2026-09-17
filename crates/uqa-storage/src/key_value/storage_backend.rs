@@ -31,6 +31,14 @@ impl KeyValueStorageBackend {
 }
 
 impl PersistentStorageBackend for KeyValueStorageBackend {
+    fn transaction_model(&self) -> crate::StorageTransactionModel {
+        self.store.transaction_model()
+    }
+
+    fn supports_concurrent_pinned_read_and_write(&self) -> bool {
+        self.store.transaction_model().is_versioned()
+    }
+
     fn identifier_allocator(&self) -> Option<&dyn crate::mvcc::IdentifierAllocator> {
         self.store.identifier_allocator()
     }

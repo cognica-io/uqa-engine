@@ -155,6 +155,14 @@ enum Revision {
 }
 
 impl KeyValueReadRevision {
+    /// Whether the selected record prefixes include changes private to this transaction. Unversioned view identities conservatively report private state because they cannot prove committed provenance.
+    pub fn has_private_changes(&self) -> bool {
+        match &self.0 {
+            Revision::Memory(_) => true,
+            Revision::Records { private, .. } => private.is_some(),
+        }
+    }
+
     /// Allocate a distinct identity for a provider-owned view. Retain and clone it while that view is unchanged; allocate a fresh identity after writes or undo instead of reusing a numeric counter.
     pub fn fresh() -> Self {
         Self(Revision::Memory(Arc::new(())))

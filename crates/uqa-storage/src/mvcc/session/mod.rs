@@ -215,6 +215,12 @@ impl super::IdentifierAllocator for VersionedKeyValueStore {
 }
 
 impl KeyValueStore for VersionedKeyValueStore {
+    fn transaction_model(&self) -> crate::StorageTransactionModel {
+        crate::StorageTransactionModel::VersionedConcurrent {
+            database: self.persistence.database_id(),
+        }
+    }
+
     fn refresh_transaction_snapshot(
         &self,
         cancellation: &uqa_core::CancellationToken,

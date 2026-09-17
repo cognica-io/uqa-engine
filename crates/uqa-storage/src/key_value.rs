@@ -239,6 +239,11 @@ pub trait KeyValueBatch {
 
 /// Ordered byte-key storage used by Key/Value catalog and index backends.
 pub trait KeyValueStore: Send + Sync {
+    /// Whether writes remain private while independent sessions read and write. Versioned stores must provide command refresh, retained reads, savepoint undo and conditional publication under one reported affinity.
+    fn transaction_model(&self) -> crate::StorageTransactionModel {
+        crate::StorageTransactionModel::ProviderSerialized
+    }
+
     /// Durable reservations outside private record undo. Serialized custom stores may omit this capability; wrappers over a capable store must forward it.
     fn identifier_allocator(&self) -> Option<&dyn crate::mvcc::IdentifierAllocator> {
         None

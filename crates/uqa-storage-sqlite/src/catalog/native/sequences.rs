@@ -31,6 +31,25 @@ fn owner_id(owner: NativeRecordOwner) -> ([u8; 16], [u8; 16]) {
 }
 
 impl Catalog {
+    pub(in crate::catalog) fn native_sequence_has_private_changes(
+        &self,
+        object_id: [u8; 16],
+    ) -> Result<bool> {
+        Ok(self
+            .read_native(|snapshot| {
+                let prefix = crate::mvcc::native::NativeRecordIdentity::object_prefix(
+                    Family::Sequences,
+                    object_id,
+                    &snapshot.control,
+                )?;
+                Ok(!snapshot
+                    .view
+                    .private_keys(&prefix, None, 1, &snapshot.control)?
+                    .is_empty())
+            })?
+            .unwrap_or(false))
+    }
+
     pub(in crate::catalog) fn write_native_sequence(
         &self,
         sequence: &SequenceRow,

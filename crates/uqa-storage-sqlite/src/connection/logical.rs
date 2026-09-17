@@ -38,6 +38,15 @@ impl BoundRecordSession {
 }
 
 impl ManagedConnection {
+    /// Transaction ownership selected for this connection and inherited by its independent sessions.
+    pub fn transaction_model(&self) -> uqa_storage::StorageTransactionModel {
+        let _gate = self.session.gate.read();
+        self.session.logical.get().map_or(
+            uqa_storage::StorageTransactionModel::ProviderSerialized,
+            |logical| logical.transaction_model(),
+        )
+    }
+
     pub(crate) fn record_connection(&self) -> Self {
         Self {
             pool: Arc::clone(&self.pool),
