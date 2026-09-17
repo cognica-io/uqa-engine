@@ -174,6 +174,25 @@ fn read_only_analysis_preserves_write_admission_after_nested_transaction_complet
 }
 
 #[test]
+fn analysis_and_a_later_row_write_preserve_both_commits_and_pending_maintenance() {
+    for provider in 0..3 {
+        let (_directory, writer, analyst) = sessions(provider);
+        analyst.sql("BEGIN; ANALYZE t", &[]).unwrap();
+        // Fix the publication order: this INSERT commits after collection while ANALYZE still owns private catalog changes.
+        writer.sql("INSERT INTO t VALUES (20)", &[]).unwrap();
+        analyst.sql("COMMIT", &[]).unwrap();
+        assert_eq!(persisted_rows(&writer), 1);
+        assert!(crate::statistics::MaintenanceState::load(
+            writer.storage.catalog.as_deref().unwrap(),
+            "public.t"
+        )
+        .unwrap()
+        .invalidates_existing_statistics());
+        assert_eq!(writer.column_stats("t").unwrap()["v"].row_count, 2);
+    }
+}
+
+#[test]
 fn nested_analysis_resets_parent_maintenance_only_when_the_child_commits() {
     for provider in 0..3 {
         for commit_child in [false, true] {

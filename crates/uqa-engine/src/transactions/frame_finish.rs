@@ -44,7 +44,9 @@ impl Engine {
         if !resolving {
             self.validate_read_only_commit(stack, read_only, storage_savepoint.is_none())?;
         }
-        let change_publication = if storage_savepoint.is_none() && has_row_changes {
+        let change_publication = if storage_savepoint.is_none()
+            && (has_row_changes || (self.versioned_backend_transactions() && !read_only))
+        {
             Some(
                 self.row_locks
                     .begin_change_publication(&self.runtime.cancellation)
@@ -62,7 +64,21 @@ impl Engine {
             self.prepare_notification_commit(stack, storage_savepoint.is_none())?;
         let savepoints_deferred = Self::backend_savepoints_deferred(stack);
         if let Some(statistics_changes) = statistics_changes {
-            if let Err(error) = self.persist_statistics_changes(&statistics_changes) {
+            // Maintenance counters are derived at publication, after any earlier publisher. A savepoint can restore an older command base, and concurrent commands must not overwrite each other's accumulated maintenance state.
+            let refresh = if statistics_changes.is_empty() {
+                Ok(())
+            } else {
+                self.storage
+                    .backend
+                    .as_ref()
+                    .filter(|backend| backend.transaction_model().is_versioned())
+                    .map_or(Ok(()), |backend| {
+                        backend.refresh_transaction_snapshot(&self.runtime.cancellation)
+                    })
+            };
+            if let Err(error) =
+                refresh.and_then(|()| self.persist_statistics_changes(&statistics_changes))
+            {
                 drop(notification_commit);
                 drop(change_publication);
                 return Err(self.rollback_failed_statistics_preparation(stack, &error));

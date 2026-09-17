@@ -113,6 +113,8 @@ fn current_bindings_rebuild_legacy_positions_with_gaps_duplicates_and_tokenless_
     assert!(unready.source_rebuild_required().unwrap());
     assert!(unready.get_posting_list("body", "a").is_err());
     drop(open_engine(&path));
+    conn.bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+        .unwrap();
     let index = SQLiteInvertedIndex::new(
         conn.clone(),
         "public.docs",
@@ -138,7 +140,7 @@ fn current_bindings_rebuild_legacy_positions_with_gaps_duplicates_and_tokenless_
         (0, 2, 7)
     );
     assert!(index.indexed_field_metadata(3, "body").unwrap().is_some());
-    conn.with(|db| {
+    conn.with_physical(|db| {
         for table in [
             "_posting_clusters",
             "_posting_documents",
@@ -151,16 +153,18 @@ fn current_bindings_rebuild_legacy_positions_with_gaps_duplicates_and_tokenless_
                 0
             );
         }
-        let changed = std::collections::BTreeMap::from([
-            ("id", uqa_core::Value::Int(1)),
-            ("body", uqa_core::Value::Str("changed".into())),
-        ]);
-        db.execute(
-            "UPDATE _documents SET body = ?1 WHERE table_name = 'public.docs' AND doc_id = 1",
-            [serde_json::to_string(&changed).unwrap()],
-        )?;
         Ok(())
     })
+    .unwrap();
+    let changed = std::collections::BTreeMap::from([
+        ("id".into(), uqa_core::Value::Int(1)),
+        ("body".into(), uqa_core::Value::Str("changed".into())),
+    ]);
+    uqa_storage::DocumentStore::put(
+        &mut uqa_storage_sqlite::SQLiteDocumentStore::new(conn.clone(), "public.docs"),
+        1,
+        changed,
+    )
     .unwrap();
     let reopened = open_engine(&path);
     assert_eq!(
@@ -179,7 +183,7 @@ fn current_bindings_rebuild_legacy_positions_with_gaps_duplicates_and_tokenless_
 }
 
 fn legacy_source_fixture(path: &Path) -> ManagedConnection {
-    let engine = open_engine(path);
+    let engine = crate::native_storage::legacy_engine(path);
     engine.sql("CREATE TABLE docs (id INTEGER PRIMARY KEY, body TEXT); CREATE INDEX docs_fts ON docs USING gin (body)", &[]).unwrap();
     engine.register_named_analyzer("graph", r#"{"tokenizer":{"type":"whitespace"},"token_filters":[{"type":"stop","language":"","custom_words":["gap"]},{"type":"synonym","synonyms":{"a":["a","a"]}}]}"#).unwrap();
     engine

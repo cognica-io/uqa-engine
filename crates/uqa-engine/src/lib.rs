@@ -261,6 +261,7 @@ enum TransactionIntent {
 enum BackendTransactionMode {
     Deferred,
     Writer,
+    Versioned,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

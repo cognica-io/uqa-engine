@@ -296,8 +296,9 @@ impl Engine {
             frame.next_lock_mark = frame.next_lock_mark.saturating_add(1);
             (lock_mark, frame.next_lock_mark)
         });
-        let backend_mode = if stack.is_empty() && defer_write_lock && self.storage.backend.is_some()
-        {
+        let backend_mode = if self.versioned_backend_transactions() {
+            BackendTransactionMode::Versioned
+        } else if stack.is_empty() && defer_write_lock && self.storage.backend.is_some() {
             BackendTransactionMode::Deferred
         } else {
             BackendTransactionMode::Writer
@@ -413,7 +414,15 @@ impl Engine {
                 .map_err(|err| Self::storage_tx_error("BEGIN registry refresh", &err))?;
             return Ok((self.snapshot_transaction_data()?, snapshot_gate.baseline()?));
         };
-        let snapshot_gate = if read_only || defer_write_lock {
+        let snapshot_gate = if backend.transaction_model().is_versioned() {
+            let gate = self
+                .row_locks
+                .begin_change_snapshot(&self.runtime.cancellation)?;
+            backend
+                .begin_upgradeable_transaction()
+                .map_err(|err| Self::storage_tx_error("BEGIN logical transaction", &err))?;
+            gate
+        } else if read_only || defer_write_lock {
             let gate = self
                 .row_locks
                 .begin_change_snapshot(&self.runtime.cancellation)?;

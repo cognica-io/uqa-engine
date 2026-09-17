@@ -594,7 +594,7 @@ fn legacy_partition_foreign_key_ids_are_synchronized_before_detach() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("legacy-partition-foreign-key.db");
     {
-        let engine = Engine::open(&path).unwrap();
+        let engine = crate::native_storage::legacy_engine(&path);
         exec(
             &engine,
             "CREATE TABLE legacy_reference (id INTEGER PRIMARY KEY)",
@@ -668,7 +668,7 @@ fn reopen_repairs_a_legacy_dangling_hierarchy_parent() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("dangling-parent.db");
     {
-        let engine = Engine::open(&path).unwrap();
+        let engine = crate::native_storage::legacy_engine(&path);
         exec(&engine, "CREATE TABLE vanished_parent (a INTEGER)");
         exec(
             &engine,

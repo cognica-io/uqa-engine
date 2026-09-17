@@ -16,7 +16,7 @@ mod update_from_source;
 mod wait_schedules;
 
 #[test]
-fn writer_promoted_after_savepoint_keeps_its_deadlock_registration() {
+fn a_rolled_back_write_does_not_block_an_independent_writer_while_waiting_for_a_row() {
     let directory = tempfile::tempdir().unwrap();
     let root = Engine::open(&directory.path().join("savepoint-writer-lock.db")).unwrap();
     root.sql(
@@ -52,15 +52,8 @@ fn writer_promoted_after_savepoint_keeps_its_deadlock_registration() {
     let blocker_result = blocker.sql("UPDATE savepoint_writer SET value = 1 WHERE id = 3", &[]);
     blocker.sql("ROLLBACK", &[]).ok();
     let writer_result = writer_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-    assert!(
-        blocker_result
-            .as_ref()
-            .is_err_and(|error| sqlstate(error) == "40P01")
-            || writer_result
-                .as_ref()
-                .is_err_and(|error| sqlstate(error) == "40P01"),
-        "one participant must detect the writer/row-lock cycle; blocker: {blocker_result:?}, writer: {writer_result:?}"
-    );
+    assert_eq!(blocker_result.unwrap().affected_rows, 1);
+    assert_eq!(writer_result.unwrap().rows.len(), 1);
     writer_wait.join().unwrap();
 }
 

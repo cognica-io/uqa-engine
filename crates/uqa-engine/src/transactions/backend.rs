@@ -26,10 +26,18 @@ impl Engine {
             .map_or(0, |frame| frame.lock_mark)
     }
 
-    /// Select the storage snapshot for one explicit SQL statement. READ COMMITTED refreshes an unwritten deferred transaction per statement. REPEATABLE READ and SERIALIZABLE pin an independent read session at the first snapshot-bearing statement so later writer promotion cannot discard the fixed view.
+    /// Select the catalog/write view for an outermost SQL command. Versioned sessions retain private writes while advancing committed visibility. REPEATABLE READ and SERIALIZABLE retain a separate fixed data view at the first snapshot-bearing statement.
     pub(crate) fn prepare_explicit_statement_snapshot(
         &self,
         sets_transaction_snapshot: bool,
+    ) -> Result<(), SQLError> {
+        self.prepare_command_snapshot(sets_transaction_snapshot, true)
+    }
+
+    fn prepare_command_snapshot(
+        &self,
+        sets_transaction_snapshot: bool,
+        advance_statement_baseline: bool,
     ) -> Result<(), SQLError> {
         let Some(backend) = self.storage.backend.as_ref() else {
             return Ok(());
@@ -40,21 +48,26 @@ impl Engine {
         }
         let _statement = self.runtime.statement_gate.lock();
         let mut stack = self.session.transactions.lock();
+        let versioned = stack
+            .first()
+            .is_some_and(|frame| frame.backend_mode == BackendTransactionMode::Versioned);
         let fixed_snapshot_already_set = stack
             .first()
             .is_some_and(|frame| frame.fixed_snapshot.is_some());
-        if fixed_snapshot_already_set {
+        if fixed_snapshot_already_set && !versioned {
             return Ok(());
         }
-        if !stack
-            .first()
-            .is_some_and(|frame| frame.backend_mode == BackendTransactionMode::Deferred)
+        if !versioned
+            && !stack
+                .first()
+                .is_some_and(|frame| frame.backend_mode == BackendTransactionMode::Deferred)
         {
             return Ok(());
         }
-        if backend
-            .transaction_has_written()
-            .map_err(|error| Self::storage_tx_error("inspect statement snapshot", &error))?
+        if !versioned
+            && backend
+                .transaction_has_written()
+                .map_err(|error| Self::storage_tx_error("inspect statement snapshot", &error))?
         {
             return Ok(());
         }
@@ -62,7 +75,8 @@ impl Engine {
         let snapshot_gate = self
             .row_locks
             .begin_change_snapshot(&self.runtime.cancellation)?;
-        let establish_fixed_snapshot = sets_transaction_snapshot
+        let establish_fixed_snapshot = !fixed_snapshot_already_set
+            && sets_transaction_snapshot
             && stack.first().is_some_and(|frame| {
                 matches!(
                     frame.characteristics.isolation,
@@ -70,54 +84,21 @@ impl Engine {
                         | uqa_sql::ast::TransactionIsolationLevel::Serializable
                 )
             });
-        self.replace_unwritten_backend_transaction(&mut stack, true, "refresh statement snapshot")?;
+        if versioned {
+            backend
+                .refresh_transaction_snapshot(&self.runtime.cancellation)
+                .map_err(|error| Self::storage_tx_error("refresh command snapshot", &error))?;
+            self.refresh_pinned_transaction_snapshot()
+                .map_err(|error| Self::storage_tx_error("refresh command caches", &error))?;
+        } else {
+            self.replace_unwritten_backend_transaction(
+                &mut stack,
+                true,
+                "refresh statement snapshot",
+            )?;
+        }
         if establish_fixed_snapshot {
-            let catalog_baseline = self.capture_fixed_transaction_catalog_baseline()?;
-            let (snapshot, graph_snapshot) = if backend.supports_concurrent_pinned_read_and_write()
-            {
-                let snapshot: std::sync::Arc<Engine> =
-                    self.open_independent_pinned_read_snapshot()?.into();
-                let uqa_graph::GraphStoreHandle::Persistent(graph_store) = snapshot
-                    .new_graph_store()
-                    .map_err(|error| SQLError::Internal(error.to_string()))?
-                else {
-                    return Err(SQLError::Internal(
-                        "persistent snapshot has no graph storage".into(),
-                    ));
-                };
-                let graph_store = graph_store.retain_resource(snapshot.clone());
-                (FixedTransactionSnapshot::Pinned(snapshot), graph_store)
-            } else {
-                let snapshot = self.capture_detached_fixed_transaction_snapshot()?;
-                let graph_snapshot =
-                    self.detach_graph_storage_snapshot(&self.visible_graph_handles())?;
-                self.restart_unwritten_backend_reader(&mut stack)?;
-                (FixedTransactionSnapshot::Detached(snapshot), graph_snapshot)
-            };
-            self.install_fixed_graph_snapshot(&graph_snapshot)?;
-            // FirstSnapshotSet belongs to the outer transaction even when
-            // the first read occurs inside an existing SQL savepoint. Those
-            // savepoints must restore the fixed graph view, not a live view.
-            let graph_overlay = self.session.state.read().graph_overlay.clone();
-            for (index, frame) in stack.iter_mut().enumerate() {
-                if index != 0 {
-                    frame
-                        .session_snapshot
-                        .graph_overlay
-                        .clone_from(&graph_overlay);
-                }
-                for savepoint in &mut frame.savepoints {
-                    savepoint
-                        .session_snapshot
-                        .graph_overlay
-                        .clone_from(&graph_overlay);
-                }
-            }
-            let frame = stack.first_mut().ok_or_else(|| {
-                SQLError::Internal("fixed snapshot transaction frame disappeared".into())
-            })?;
-            frame.fixed_snapshot = Some(snapshot);
-            frame.fixed_catalog_baseline = Some(catalog_baseline);
+            self.retain_fixed_transaction_snapshot(&mut stack, backend.as_ref())?;
         }
         let baseline = match snapshot_gate.baseline() {
             Ok(baseline) => baseline,
@@ -129,8 +110,65 @@ impl Engine {
                 ));
             }
         };
-        stack[0].snapshot_change_baseline = baseline;
-        self.update_statement_row_lock_baseline(baseline);
+        if !fixed_snapshot_already_set && (advance_statement_baseline || !versioned) {
+            stack[0].snapshot_change_baseline = baseline;
+            self.update_statement_row_lock_baseline(baseline);
+        }
+        Ok(())
+    }
+
+    /// Keep the fixed data view and its graph resources in the outer transaction and every existing savepoint.
+    fn retain_fixed_transaction_snapshot(
+        &self,
+        stack: &mut Vec<TransactionFrame>,
+        backend: &dyn uqa_storage::PersistentStorageBackend,
+    ) -> Result<(), SQLError> {
+        let catalog_baseline = self.capture_fixed_transaction_catalog_baseline()?;
+        let (snapshot, graph_snapshot) = if backend.supports_concurrent_pinned_read_and_write() {
+            let snapshot: std::sync::Arc<Engine> =
+                self.open_independent_pinned_read_snapshot()?.into();
+            let uqa_graph::GraphStoreHandle::Persistent(graph_store) =
+                snapshot
+                    .new_graph_store()
+                    .map_err(|error| SQLError::Internal(error.to_string()))?
+            else {
+                return Err(SQLError::Internal(
+                    "persistent snapshot has no graph storage".into(),
+                ));
+            };
+            let graph_store = graph_store.retain_resource(snapshot.clone());
+            (FixedTransactionSnapshot::Pinned(snapshot), graph_store)
+        } else {
+            let snapshot = self.capture_detached_fixed_transaction_snapshot()?;
+            let graph_snapshot =
+                self.detach_graph_storage_snapshot(&self.visible_graph_handles())?;
+            self.restart_unwritten_backend_reader(stack)?;
+            (FixedTransactionSnapshot::Detached(snapshot), graph_snapshot)
+        };
+        self.install_fixed_graph_snapshot(&graph_snapshot)?;
+        // FirstSnapshotSet belongs to the outer transaction even when
+        // the first read occurs inside an existing SQL savepoint. Those
+        // savepoints must restore the fixed graph view, not a live view.
+        let graph_overlay = self.session.state.read().graph_overlay.clone();
+        for (index, frame) in stack.iter_mut().enumerate() {
+            if index != 0 {
+                frame
+                    .session_snapshot
+                    .graph_overlay
+                    .clone_from(&graph_overlay);
+            }
+            for savepoint in &mut frame.savepoints {
+                savepoint
+                    .session_snapshot
+                    .graph_overlay
+                    .clone_from(&graph_overlay);
+            }
+        }
+        let frame = stack.first_mut().ok_or_else(|| {
+            SQLError::Internal("fixed snapshot transaction frame disappeared".into())
+        })?;
+        frame.fixed_snapshot = Some(snapshot);
+        frame.fixed_catalog_baseline = Some(catalog_baseline);
         Ok(())
     }
 
@@ -232,12 +270,26 @@ impl Engine {
     }
 
     pub(crate) fn refresh_explicit_statement_snapshot(&self) -> Result<(), SQLError> {
-        self.prepare_explicit_statement_snapshot(false)
+        self.prepare_command_snapshot(false, false)
     }
 
     pub(crate) fn prepare_explicit_transaction_writer(&self) -> Result<bool, SQLError> {
         let _statement = self.runtime.statement_gate.lock();
         let mut stack = self.session.transactions.lock();
+        if stack
+            .first()
+            .is_some_and(|frame| frame.backend_mode == BackendTransactionMode::Versioned)
+        {
+            drop(stack);
+            // Logical locks can wait while another writer commits. Refresh the storage target without replacing command caches: a compound DDL operation may have staged only part of its private catalog changes when it prepares another write. Command boundaries own catalog restoration, and retained source snapshots and the original row-change baseline stay fixed here.
+            self.storage
+                .backend
+                .as_ref()
+                .expect("versioned transaction frame requires a backend")
+                .refresh_transaction_snapshot(&self.runtime.cancellation)
+                .map_err(|error| Self::storage_tx_error("refresh write target", &error))?;
+            return Ok(false);
+        }
         if !stack
             .first()
             .is_some_and(|frame| frame.backend_mode == BackendTransactionMode::Deferred)
@@ -258,6 +310,9 @@ impl Engine {
 
     /// Before a deferred writer statement reports a catalog lookup miss, wait for any backend writer that may have committed without publishing its in-process epoch yet, then refresh the `READ COMMITTED` snapshot without retaining writer ownership. The transient lock mark preserves row-lock-before-writer ordering for query-bearing commands.
     pub(crate) fn fence_catalog_writer_and_refresh_snapshot(&self) -> Result<(), SQLError> {
+        if self.versioned_backend_transactions() {
+            return self.refresh_explicit_statement_snapshot();
+        }
         if !self.backend_transaction_is_deferred() {
             return Ok(());
         }

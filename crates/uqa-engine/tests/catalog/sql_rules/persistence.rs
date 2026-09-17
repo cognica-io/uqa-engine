@@ -242,7 +242,7 @@ fn rule_catalog_enable_rename_drop_and_reopen_are_durable() {
 
 #[test]
 fn current_rule_catalog_rejects_missing_bound_routine_state() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     fn remove_first_binding(value: &mut serde_json::Value) -> bool {
         match value {
@@ -276,7 +276,8 @@ fn current_rule_catalog_rejects_missing_bound_routine_state() {
         );
     }
     {
-        let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+        let catalog =
+            crate::native_storage::catalog(ManagedConnection::open(&path).unwrap()).unwrap();
         let encoded = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
         let mut metadata: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         assert_eq!(metadata["format_version"], serde_json::Value::from(3));
@@ -293,7 +294,7 @@ fn current_rule_catalog_rejects_missing_bound_routine_state() {
 
 #[test]
 fn older_rule_catalog_rebuilds_and_persists_column_dependencies() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("rule-column-migration.uqa");
@@ -311,7 +312,8 @@ fn older_rule_catalog_rebuilds_and_persists_column_dependencies() {
         );
     }
     {
-        let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+        let catalog =
+            crate::native_storage::catalog(ManagedConnection::open(&path).unwrap()).unwrap();
         let encoded = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
         let mut metadata: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         metadata["format_version"] = serde_json::Value::from(1);
@@ -347,7 +349,7 @@ fn older_rule_catalog_rebuilds_and_persists_column_dependencies() {
             Some(&Value::Int(17))
         );
     }
-    let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+    let catalog = crate::native_storage::catalog(ManagedConnection::open(&path).unwrap()).unwrap();
     let encoded = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
     let metadata: serde_json::Value = serde_json::from_str(&encoded).unwrap();
     assert_eq!(metadata["format_version"], serde_json::Value::from(3));
@@ -371,7 +373,7 @@ fn older_rule_catalog_rebuilds_and_persists_column_dependencies() {
 
 #[test]
 fn current_rule_catalog_rejects_missing_column_dependency_state() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("rule-column-corruption.uqa");
@@ -388,7 +390,8 @@ fn current_rule_catalog_rejects_missing_column_dependency_state() {
         );
     }
     {
-        let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+        let catalog =
+            crate::native_storage::catalog(ManagedConnection::open(&path).unwrap()).unwrap();
         let encoded = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
         let mut metadata: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         assert_eq!(metadata["format_version"], serde_json::Value::from(3));

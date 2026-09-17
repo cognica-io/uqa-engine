@@ -15,7 +15,7 @@ use tempfile::tempdir;
 use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_storage::ColumnStatsInput;
-use uqa_storage_sqlite::{Catalog, ManagedConnection, SQLiteStorageBackend};
+use uqa_storage_sqlite::{ManagedConnection, SQLiteStorageBackend};
 
 #[path = "sql_analyze_persistence/automatic.rs"]
 mod automatic;
@@ -45,9 +45,7 @@ fn metadata_projection_and_explain_do_not_analyze_unrequested_blobs() {
         .unwrap();
     // A missing payload is an I/O tripwire: metadata remains readable, but
     // any accidental full-document read must fail instead of hiding its cost.
-    rusqlite::Connection::open(&path).unwrap().execute(
-        "DELETE FROM _document_blobs WHERE table_name = 'public.assets' AND field_name = 'bytes'", []
-    ).unwrap();
+    crate::native_storage::remove_blob(&path, "public.assets", 1, "bytes");
     let query = "SELECT kind, size_bytes FROM assets WHERE kind IN ('image', 'video')";
     let rows = engine.sql(query, &[]).unwrap();
     assert_eq!(rows.rows[0]["size_bytes"], Value::Int(8 * 1024 * 1024));
@@ -82,7 +80,7 @@ fn lazy_statistics_are_durable_and_not_recomputed_on_reopen() {
         );
         engine.column_stats("t").unwrap()
     };
-    let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+    let catalog = crate::native_storage::catalog(ManagedConnection::open(&path).unwrap()).unwrap();
     let persisted = catalog.load_column_stats("public.t").unwrap();
     assert_eq!(
         persisted.len(),
@@ -110,7 +108,7 @@ fn insert_skewed_rows(engine: &Engine) {
 
 fn write_persisted_row_count(db_path: &std::path::Path, row_count: i64) {
     let conn = ManagedConnection::open(db_path).unwrap();
-    let catalog = Catalog::open(conn).unwrap();
+    let catalog = crate::native_storage::catalog(conn).unwrap();
     catalog
         .save_column_stats(ColumnStatsInput::basic(
             "public.t", "val", 1, 0, None, None, row_count,
@@ -178,7 +176,7 @@ fn persisted_column_stats_refresh_after_an_external_commit() {
     // is a backend capability, so this low-level constructor must refresh just
     // like `Engine::open` when another writer commits.
     let connection = ManagedConnection::open(&db_path).unwrap();
-    let catalog = Arc::new(Catalog::open(connection.clone()).unwrap());
+    let catalog = Arc::new(crate::native_storage::catalog(connection.clone()).unwrap());
     let backend = Arc::new(SQLiteStorageBackend::new(connection));
     let reopened = Engine::from_persistent_backends(catalog, backend).unwrap();
     assert_eq!(reopened.column_stats("t").unwrap()["val"].row_count, 999);
@@ -205,7 +203,7 @@ fn analyze_persists_stats_only_under_the_canonical_relation_name() {
     }
 
     let conn = ManagedConnection::open(&db_path).unwrap();
-    let catalog = Catalog::open(conn).unwrap();
+    let catalog = crate::native_storage::catalog(conn).unwrap();
     assert!(catalog.load_column_stats("t").unwrap().is_empty());
     assert!(catalog.load_column_stats("public.t").unwrap().is_empty());
     let stats = catalog.load_column_stats("app.t").unwrap();
@@ -330,7 +328,7 @@ fn drop_table_removes_persisted_column_stats() {
     }
 
     let conn = ManagedConnection::open(&db_path).unwrap();
-    let catalog = Catalog::open(conn).unwrap();
+    let catalog = crate::native_storage::catalog(conn).unwrap();
     assert!(catalog.load_column_stats("public.t").unwrap().is_empty());
 }
 

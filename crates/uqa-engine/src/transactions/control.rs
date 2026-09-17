@@ -98,6 +98,14 @@ impl Engine {
             false
         };
         if apply_on_commit {
+            if self.versioned_backend_transactions() {
+                if let Err(error) = self.refresh_explicit_statement_snapshot() {
+                    return Err(self.rollback_transaction_completion_failure(
+                        error,
+                        "commit snapshot refresh",
+                    ));
+                }
+            }
             // PostgreSQL alternates deferred-trigger processing with WITH HOLD portal conversion until neither phase can enqueue more work. A cursor query may invoke a mutating routine while it is being materialized, so validating only before portal conversion can otherwise commit a newly queued deferred FK violation.
             loop {
                 self.validate_deferred_constraints_before_outer_commit()?;

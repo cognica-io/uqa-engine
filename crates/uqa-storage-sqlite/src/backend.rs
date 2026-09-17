@@ -23,11 +23,15 @@ use uqa_storage::{
 #[derive(Clone)]
 pub struct SQLiteStorageBackend {
     conn: ManagedConnection,
+    native_initial_restore: bool,
 }
 
 impl SQLiteStorageBackend {
     pub fn new(conn: ManagedConnection) -> Self {
-        Self { conn }
+        Self {
+            conn,
+            native_initial_restore: false,
+        }
     }
 
     pub fn connection(&self) -> ManagedConnection {
@@ -52,6 +56,14 @@ impl SQLiteStorageProvider {
     pub fn new(connection: ManagedConnection) -> Self {
         Self { connection }
     }
+
+    fn native_session(&self) -> StorageBackendResult<ManagedConnection> {
+        if !self.connection.is_native_record_session() {
+            self.connection
+                .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())?;
+        }
+        Ok(self.connection.new_session())
+    }
 }
 
 impl PersistentStorageProvider for SQLiteStorageProvider {
@@ -63,13 +75,15 @@ impl PersistentStorageProvider for SQLiteStorageProvider {
         let connection = self.connection.new_session();
         let catalog: Arc<dyn CatalogFacade> =
             Arc::new(Catalog::for_initial_restore(connection.clone()));
-        let backend: Arc<dyn PersistentStorageBackend> =
-            Arc::new(SQLiteStorageBackend::new(connection));
+        let backend: Arc<dyn PersistentStorageBackend> = Arc::new(SQLiteStorageBackend {
+            conn: connection,
+            native_initial_restore: true,
+        });
         Ok(PersistentStorageSession::new(catalog, backend))
     }
 
     fn open_session(&self) -> StorageBackendResult<PersistentStorageSession> {
-        let connection = self.connection.new_session();
+        let connection = self.native_session()?;
         let catalog: Arc<dyn CatalogFacade> = Arc::new(Catalog::open(connection.clone())?);
         let backend: Arc<dyn PersistentStorageBackend> =
             Arc::new(SQLiteStorageBackend::new(connection));
@@ -333,7 +347,11 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
     }
 
     fn begin_upgradeable_transaction(&self) -> StorageBackendResult<()> {
-        self.conn.begin_deferred_transaction()?;
+        if self.native_initial_restore && !self.conn.is_native_record_session() {
+            self.conn.begin_native_initial_restore()?;
+        } else {
+            self.conn.begin_deferred_transaction()?;
+        }
         Ok(())
     }
 
@@ -401,6 +419,30 @@ mod tests {
 
     use super::*;
     use crate::{Catalog, SQLiteError};
+
+    #[test]
+    fn session_factories_preserve_a_bound_native_sessions_retention_options() {
+        let connection = ManagedConnection::open_in_memory().unwrap();
+        connection
+            .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions {
+                retained_bytes: 8 << 20,
+            })
+            .unwrap();
+        let provider = SQLiteStorageProvider::new(connection);
+        let initial = provider.open_initial_session().unwrap();
+        let sibling = provider.open_session().unwrap();
+        initial.validate_transaction_affinity().unwrap();
+        sibling.validate_transaction_affinity().unwrap();
+        assert!(initial.backend.transaction_model().is_versioned());
+        assert_eq!(
+            initial.backend.transaction_model(),
+            sibling.backend.transaction_model()
+        );
+        assert_ne!(
+            initial.backend.transaction_affinity(),
+            sibling.backend.transaction_affinity()
+        );
+    }
 
     #[test]
     fn session_factory_reads_current_catalog_while_a_sibling_holds_a_writer_reservation() {

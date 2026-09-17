@@ -286,7 +286,7 @@ fn engine_open_rejects_foreign_table_with_missing_owner_role() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("invalid-foreign-table-owner.db");
     {
-        let engine = Engine::open(&database).unwrap();
+        let engine = crate::native_storage::legacy_engine(&database);
         setup_foreign_table_ownership(&engine);
     }
     let connection = rusqlite::Connection::open(&database).unwrap();
@@ -731,7 +731,7 @@ fn engine_open_rejects_foreign_table_acl_with_missing_role() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("invalid-foreign-table-acl.db");
     {
-        let engine = Engine::open(&database).unwrap();
+        let engine = crate::native_storage::legacy_engine(&database);
         setup_foreign_table_acl(&engine);
     }
     let connection = rusqlite::Connection::open(&database).unwrap();

@@ -2,7 +2,7 @@
 
 This document defines the implemented Key/Value storage boundary, session ownership contract, redb behavior, and remaining compatibility limits. SQLite remains the default engine format, while applications can compose `uqa-engine` with `uqa-storage-redb` or another provider without changing query execution.
 
-The [concurrent storage transaction design](concurrent-storage-transactions.md) and [implementation plan](../plans/0008-concurrent-storage-transactions.md) track shared MVCC for native SQLite, SQLite Key/Value and redb. The development SQLite Key/Value and redb providers use common logical sessions; native relational SQLite and complete concurrent SQL transaction integration remain in progress.
+The [concurrent storage transaction design](concurrent-storage-transactions.md) and [implementation plan](../plans/0008-concurrent-storage-transactions.md) track shared MVCC for native SQLite, SQLite Key/Value and redb. The development SQLite Key/Value and redb providers use common logical sessions; default native SQLite now joins the same logical Engine transaction model, while complete concurrent SQL acceptance remains in progress.
 
 ## Architecture
 
@@ -39,7 +39,7 @@ Third-party implementations should run `uqa_storage::key_value::conformance::ver
 | --- | --- | --- | --- | --- |
 | Relational SQLite | `uqa-storage-sqlite` | yes | one `ManagedConnection` session per engine session | Default engine backend; supports persisted B-tree, IVF, and HNSW indexes plus SQLCipher and compressed-container variants |
 | `SQLiteKeyValueStore` | `uqa-storage-sqlite` | yes | common logical session bound to managed connection clones | Stores versioned records with short physical transactions; migrates the legacy `_key_value` table atomically |
-| `RedbKeyValueStore` | `uqa-storage-redb` | yes | common logical session over one shared redb file owner | Private changes, pinned record snapshots and conditional commits; physical writes remain serialized, and Engine SQL still retains its writer gate |
+| `RedbKeyValueStore` | `uqa-storage-redb` | yes | common logical session over one shared redb file owner | Private changes, pinned record snapshots and conditional commits; physical publication remains serialized, while Engine SQL retains private writes |
 | `MemoryKeyValueStore` | `uqa-storage` | no | one in-process test state | Reference implementation for logical tests, not a durable engine provider |
 
 ## SQLite Key/Value transaction mapping
@@ -54,7 +54,7 @@ Initial open copies legacy `_key_value` bytes into versioned histories in one bo
 
 ## redb transaction mapping
 
-`RedbKeyValueStore` reexports `uqa_storage::mvcc::VersionedKeyValueStore`. Each session retains a committed sequence and private evaluated records. Reads merge that fixed boundary with the session's changes; provider read transactions close at the end of each operation. Independent Key/Value writers can commit while another session retains uncommitted changes. Native write transactions exist only for allocation, conditional publication, abort and format maintenance. The commit validates every original revision, including tombstones, and atomically publishes record versions, the change sequence and its receipt. Conflicting attempts publish no partial records. Engine SQL retains its transaction-wide writer gate until shared-index, SQL-lock and publication integration is complete.
+`RedbKeyValueStore` reexports `uqa_storage::mvcc::VersionedKeyValueStore`. Each session retains a committed sequence and private evaluated records. Reads merge that fixed boundary with the session's changes; provider read transactions close at the end of each operation. Independent Key/Value writers can commit while another session retains uncommitted changes. Native write transactions exist only for allocation, conditional publication, abort and format maintenance. The commit validates every original revision, including tombstones, and atomically publishes record versions, the change sequence and its receipt. Conflicting attempts publish no partial records. Engine selects the common versioned transaction model for these sessions; full SQL-lock, serializable-history and durable publication recovery acceptance remains open.
 
 Common storage owns savepoints, ordered batches and undo. Prefix deletion freezes the currently visible keys before staging tombstones; it is not replayed over a newer database at commit. Failed batches restore only their own changes. Commit seals one immutable fingerprinted batch; a failed commit retains the attempt, including an autocommit attempt, so `commit_transaction` can resolve the same receipt without reevaluating operations. Mutations are rejected while sealed. `rollback_transaction` cannot report success if persistence returns a committed receipt; it retains that attempt for resolution.
 

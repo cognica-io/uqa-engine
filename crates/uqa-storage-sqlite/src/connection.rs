@@ -24,6 +24,7 @@ use crate::compressed_vfs::{self, SQLiteCompressedContainerAnchor, SQLiteCompres
 
 mod logical;
 mod native;
+mod native_restore;
 mod snapshot;
 use snapshot::PhysicalConnection;
 pub(crate) use snapshot::SnapshotIdentity;
@@ -288,6 +289,7 @@ struct SessionState {
     transaction_failure: Mutex<Option<String>>,
     cleanup_failure: Mutex<Option<String>>,
     logical: OnceLock<Arc<logical::BoundRecordSession>>,
+    native_restore: Mutex<Option<native_restore::NativeRestore>>,
     snapshot_branch: Mutex<Arc<()>>,
 }
 
@@ -300,6 +302,7 @@ impl SessionState {
             transaction_failure: Mutex::new(None),
             cleanup_failure: Mutex::new(None),
             logical: OnceLock::new(),
+            native_restore: Mutex::new(None),
             snapshot_branch: Mutex::new(Arc::new(())),
         }
     }
@@ -310,6 +313,7 @@ impl Drop for SessionState {
         // `PooledConnection::drop` performs the rollback and discards the
         // physical connection when rollback itself fails. Taking the pinned
         // handle here therefore cannot return a broken connection to the pool.
+        self.native_restore.get_mut().take();
         self.transaction.get_mut().take();
     }
 }
@@ -824,22 +828,40 @@ impl ManagedConnection {
             let transaction_failure = self.session.transaction_failure.lock().clone();
             if let Some(error) = transaction_failure {
                 if let Err(rollback_error) = connection.connection()?.execute_batch("ROLLBACK") {
+                    self.session.native_restore.lock().take();
                     transaction.take();
                     self.session.transaction_failure.lock().take();
                     return Err(SQLiteError::SQLite(rollback_error));
                 }
+                self.session.native_restore.lock().take();
                 transaction.take();
                 self.session.transaction_failure.lock().take();
                 return Err(SQLiteError::TransactionAborted(error));
             }
         }
+        let native = if statement == "COMMIT" && self.session.native_restore.lock().is_some() {
+            match self.prepare_initial_native_binding(connection.connection()?) {
+                Ok(native) => Some(native),
+                Err(error) => {
+                    *self.session.transaction_failure.lock() = Some(error.to_string());
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
         if let Err(error) = connection.connection()?.execute_batch(statement) {
+            self.session.native_restore.lock().take();
             transaction.take();
             self.session.transaction_failure.lock().take();
             return Err(SQLiteError::SQLite(error));
         }
+        self.session.native_restore.lock().take();
         transaction.take();
         self.session.transaction_failure.lock().take();
+        if let Some(native) = native {
+            self.install_initial_native_binding(native);
+        }
         Ok(())
     }
 

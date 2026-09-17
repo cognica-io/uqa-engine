@@ -526,7 +526,7 @@ fn pg18_xmin_eagerly_migrates_legacy_persistent_tuple_metadata() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("legacy-xmin.db");
     let expected_xmin = {
-        let eng = Engine::open(&path).unwrap();
+        let eng = crate::native_storage::legacy_engine(&path);
         eng.sql("CREATE TABLE versioned (a INTEGER)", &[]).unwrap();
         eng.sql("INSERT INTO versioned VALUES (1)", &[]).unwrap();
         integer_column(&eng.sql("SELECT xmin FROM versioned", &[]).unwrap(), "xmin")[0]

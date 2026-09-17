@@ -31,7 +31,7 @@ mod vector_guards;
 pub(super) use graph_cache::NativeGraphRecords;
 pub(crate) use session::NativeSnapshot;
 
-pub(super) use format::{check_mapping, initialize, reject_mapped};
+pub(super) use format::{check_mapping, initialize, initialize_in, present, reject_mapped};
 pub(super) use projection::materialize;
 
 #[cfg(test)]

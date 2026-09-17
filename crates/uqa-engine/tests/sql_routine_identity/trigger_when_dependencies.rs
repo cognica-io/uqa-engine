@@ -300,13 +300,14 @@ fn create_trigger_when_migration_fixture(engine: &Engine) {
 
 #[test]
 fn secondary_session_refuses_to_repair_trigger_when_bindings() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = TempDir::new().unwrap();
     let database = directory.path().join("trigger-when-load-only.sqlite");
     let engine = Engine::open(&database).unwrap();
     create_trigger_when_migration_fixture(&engine);
-    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     let encoded = catalog.get_metadata("sql_triggers_json").unwrap().unwrap();
     let legacy = remove_trigger_when_binding(&encoded, "migration_trigger_when_guard");
     catalog.set_metadata("sql_triggers_json", &legacy).unwrap();
@@ -336,7 +337,7 @@ fn secondary_session_refuses_to_repair_trigger_when_bindings() {
 
 #[test]
 fn failed_trigger_when_migration_rolls_back_its_catalog_write() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = TempDir::new().unwrap();
     let database = directory
@@ -346,7 +347,8 @@ fn failed_trigger_when_migration_rolls_back_its_catalog_write() {
         let engine = Engine::open(&database).unwrap();
         create_trigger_when_migration_fixture(&engine);
     }
-    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     let encoded = catalog.get_metadata("sql_triggers_json").unwrap().unwrap();
     let legacy = remove_trigger_when_binding(&encoded, "migration_trigger_when_guard");
     catalog.set_metadata("sql_triggers_json", &legacy).unwrap();
@@ -355,7 +357,8 @@ fn failed_trigger_when_migration_rolls_back_its_catalog_write() {
     drop(catalog);
 
     assert!(Engine::open(&database).is_err());
-    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     assert_eq!(
         catalog.get_metadata("sql_triggers_json").unwrap(),
         Some(legacy)

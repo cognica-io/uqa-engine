@@ -14,7 +14,6 @@ use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_sql::SQLResult;
 use uqa_storage::RelationIdentity;
-use uqa_storage_sqlite::CURRENT_SCHEMA_VERSION;
 
 fn persisted_index_count(path: &std::path::Path, table: &str, field: &str) -> i64 {
     let table = RelationIdentity::from_legacy_name(table)
@@ -236,15 +235,14 @@ fn persistent_reopen_keeps_index_semantics() {
     assert_eq!(persisted_index_definition_count(&path, "shadow", "id"), 0);
 
     // Reopen and indexed reads must only hydrate the compact postings. A
-    // rebuild would insert all 1,500 rows again and fire this audit trigger.
+    // rebuild would insert all 1,500 rows again and fail this tripwire.
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute_batch(
-            "CREATE TABLE _btree_rebuild_audit (writes INTEGER NOT NULL);
-             CREATE TRIGGER _btree_rebuild_audit_insert
+            "CREATE TRIGGER _btree_rebuild_audit_insert
              AFTER INSERT ON _btree_index_entries
              BEGIN
-                 INSERT INTO _btree_rebuild_audit (writes) VALUES (1);
+                 SELECT RAISE(ABORT, 'reopen rebuilt durable btree postings');
              END;",
         )
         .unwrap();
@@ -252,13 +250,10 @@ fn persistent_reopen_keeps_index_semantics() {
     let engine = Engine::open(&path).unwrap();
     assert_same(&engine, "qty = 999");
     assert_all_predicates(&engine);
-    let rebuild_writes: i64 = rusqlite::Connection::open(&path)
+    rusqlite::Connection::open(&path)
         .unwrap()
-        .query_row("SELECT COUNT(*) FROM _btree_rebuild_audit", [], |row| {
-            row.get(0)
-        })
+        .execute_batch("DROP TRIGGER _btree_rebuild_audit_insert")
         .unwrap();
-    assert_eq!(rebuild_writes, 0, "reopen rebuilt durable btree postings");
 
     // Writes after reopen keep the rebuilt indexes in sync.
     for table in ["indexed", "shadow"] {
@@ -271,7 +266,7 @@ fn persistent_reopen_keeps_index_semantics() {
 }
 
 fn seed_engine_meta(path: &std::path::Path) {
-    let engine = Engine::open(path).unwrap();
+    let engine = crate::native_storage::legacy_engine(path);
     engine
         .sql(
             "CREATE TABLE engine_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
@@ -354,7 +349,7 @@ fn simulate_legacy_btree_inconsistency(path: &std::path::Path) {
 }
 
 fn assert_repaired_queries(path: &std::path::Path) {
-    let engine = Engine::open(path).unwrap();
+    let engine = crate::native_storage::legacy_engine(path);
     let deleted = engine
         .sql("SELECT value FROM engine_meta WHERE key = 'key-19'", &[])
         .unwrap();
@@ -473,6 +468,16 @@ fn schema_21_rebuilds_historically_inconsistent_btree_postings() {
     assert_sparse_repair(&path);
     assert_delete_guard_without_foreign_keys(&path);
     remove_key_posting(&path, "key-18");
+
+    // The audit and raw-writer checks belong to the historical physical format. Remove their auxiliary table before importing that format into the guarded native record families.
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch(
+            "DROP TRIGGER test_btree_repair_delete;
+             DROP TRIGGER test_btree_repair_insert;
+             DROP TABLE _btree_repair_audit;",
+        )
+        .unwrap();
 
     let engine = Engine::open(&path).unwrap();
     let repaired = engine
@@ -638,7 +643,7 @@ fn schema_v10_database_backfills_btree_once() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("value-index-upgrade.db");
     {
-        let engine = Engine::open(&path).unwrap();
+        let engine = crate::native_storage::legacy_engine(&path);
         setup(&engine);
     }
     {
@@ -666,5 +671,5 @@ fn schema_v10_database_backfills_btree_once() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, i64::from(CURRENT_SCHEMA_VERSION));
+    assert_eq!(version, 49);
 }

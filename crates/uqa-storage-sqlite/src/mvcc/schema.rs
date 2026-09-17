@@ -26,9 +26,13 @@ const TABLES: [(&str, &str); 5] = [
 ];
 
 /// A connection-local admission token. Dropping it closes permission without any fallible SQL cleanup, including on unwind or commit failure.
-pub(super) struct WritePermit(Arc<AtomicBool>);
+pub(crate) struct WritePermit(Arc<AtomicBool>);
 
 impl WritePermit {
+    pub(crate) fn for_native_restore(connection: &Connection) -> super::VersionResult<Self> {
+        Self::acquire(connection).map_err(super::Error::into_version)
+    }
+
     pub(super) fn acquire(connection: &Connection) -> PhysicalResult<Self> {
         if !connection.is_autocommit() {
             return Err(VersionError::InvalidEncoding(

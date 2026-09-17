@@ -247,7 +247,7 @@ fn legacy_boolean_auto_increment_catalog_fields_are_internally_consistent() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("legacy-auto-increment-catalog.db");
     {
-        let engine = Engine::open(&database).unwrap();
+        let engine = crate::native_storage::legacy_engine(&database);
         exec(&engine, "CREATE TABLE legacy_catalog (id SERIAL)");
     }
     {

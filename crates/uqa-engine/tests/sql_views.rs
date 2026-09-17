@@ -14,7 +14,7 @@ use std::sync::{
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLResult, SQLScalarFunction};
 use uqa_sql::{ColumnType, SQLError};
-use uqa_storage_sqlite::{Catalog, ManagedConnection};
+use uqa_storage_sqlite::ManagedConnection;
 
 #[path = "sql_views/automatic_updatability.rs"]
 mod automatic_updatability;
@@ -676,7 +676,8 @@ fn v016_view_dispatch_markers_migrate_structurally_on_reopen() {
     }
 
     {
-        let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+        let catalog =
+            crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
         let mut views = catalog.load_views().unwrap();
         let view = views
             .iter_mut()
@@ -700,7 +701,8 @@ fn v016_view_dispatch_markers_migrate_structurally_on_reopen() {
     );
     drop(reopened);
 
-    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     let migrated = catalog
         .load_views()
         .unwrap()

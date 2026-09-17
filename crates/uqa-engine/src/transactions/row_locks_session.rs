@@ -111,6 +111,9 @@ impl Engine {
         if self.storage.provider.is_none() {
             return Ok(false);
         }
+        if backend.transaction_model().is_versioned() {
+            return Ok(true);
+        }
         let stack = self.session.transactions.lock();
         let deferred_reader = stack.first().is_some_and(|frame| {
             frame.intent == TransactionIntent::ReadOnly

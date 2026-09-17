@@ -613,7 +613,7 @@ fn view_acl_changes_follow_transactions_external_refresh_and_temporary_lifetime(
 
 #[test]
 fn legacy_view_column_metadata_is_migrated_before_acl_state_can_reference_it() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("legacy-view-acl.db");
@@ -636,7 +636,8 @@ fn legacy_view_column_metadata_is_migrated_before_acl_state_can_reference_it() {
         .unwrap()
     };
     {
-        let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+        let catalog =
+            crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
         let mut views = catalog.load_views().unwrap();
         let view = views
             .iter_mut()
@@ -653,7 +654,8 @@ fn legacy_view_column_metadata_is_migrated_before_acl_state_can_reference_it() {
     );
     drop(engine);
 
-    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     let migrated = catalog
         .load_views()
         .unwrap()
@@ -676,7 +678,7 @@ fn legacy_view_column_metadata_is_migrated_before_acl_state_can_reference_it() {
 
 #[test]
 fn broken_view_acl_grant_chains_are_rejected_during_open() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("broken-view-acl.db");
@@ -690,7 +692,8 @@ fn broken_view_acl_grant_chains_are_rejected_during_open() {
         );
     }
     {
-        let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+        let catalog =
+            crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
         let mut views = catalog.load_views().unwrap();
         let view = views
             .iter_mut()

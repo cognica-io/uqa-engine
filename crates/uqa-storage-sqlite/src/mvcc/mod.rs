@@ -16,6 +16,8 @@ mod schema;
 mod tests;
 mod write;
 
+pub(crate) use schema::WritePermit;
+
 use std::sync::Arc;
 
 use rusqlite::Connection;
@@ -63,7 +65,7 @@ fn sqlite_error(error: rusqlite::Error) -> VersionError {
 
 /// Record persistence over a managed `SQLite` pool, including `SQLCipher` and compressed connections. Snapshots retain logical sequences; this adapter does not retain physical transactions between operations.
 ///
-/// All versions and receipts are currently retained. The Key/Value provider uses these records directly. `Self::for_native` converts a native catalog and atomically maintains its current rows with their history; native document sessions can bind through `ManagedConnection::bind_native_records`, while complete catalog/backend routing is still required before Engine can use that format.
+/// All versions and receipts are currently retained. The Key/Value provider uses these records directly. `Self::for_native` converts a native catalog and atomically maintains its current rows with their history; `ManagedConnection::bind_native_records` binds catalog and data handles to the same logical session.
 #[derive(Clone)]
 pub struct SQLiteRecordStore {
     connection: ManagedConnection,
@@ -72,6 +74,24 @@ pub struct SQLiteRecordStore {
 }
 
 impl SQLiteRecordStore {
+    pub(crate) fn has_native_mapping(connection: &Connection) -> VersionResult<bool> {
+        native::present(connection).map_err(Error::into_version)
+    }
+
+    /// Prepare a native baseline on the initial restore's physical transaction. Its owner publishes both the restored catalog and this baseline with one COMMIT.
+    pub(crate) fn initialize_native_in(
+        connection: &ManagedConnection,
+        transaction: &Connection,
+        control: &StorageReadControl,
+    ) -> VersionResult<Self> {
+        let identity = native::initialize_in(transaction, control).map_err(Error::into_version)?;
+        Ok(Self {
+            connection: connection.record_connection(),
+            identity,
+            native: true,
+        })
+    }
+
     pub fn new(connection: &ManagedConnection) -> VersionResult<Self> {
         if connection.in_transaction() {
             return Err(VersionError::Storage(
@@ -90,7 +110,7 @@ impl SQLiteRecordStore {
         })
     }
 
-    /// Atomically import an initialized native schema 48 catalog, or reopen its versioned materialization. Unbound native store handles are disabled after conversion; callers must bind a routed native session or prepare native records through the shared transaction contract. This lower persistence adapter does not enable concurrent Engine SQL.
+    /// Atomically initialize or upgrade a native catalog and import its baseline, or reopen its versioned materialization. Unbound native store handles are disabled after conversion; callers must bind a routed native session or prepare native records through the shared transaction contract.
     pub fn for_native(
         connection: &ManagedConnection,
         control: &StorageReadControl,

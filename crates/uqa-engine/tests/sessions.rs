@@ -22,6 +22,8 @@ use uqa_storage_sqlite::{Catalog, ManagedConnection};
 mod affinity;
 #[path = "sessions/commit_resolution.rs"]
 mod commit_resolution;
+#[path = "sessions/concurrent_writes.rs"]
+mod concurrent_writes;
 #[path = "sessions/identifiers.rs"]
 mod identifiers;
 #[path = "sessions/native_records.rs"]
@@ -776,7 +778,11 @@ fn opening_an_engine_assigns_legacy_sequence_object_identities() {
     assert_eq!(engine.nextval("legacy_ids").unwrap(), 5);
     drop(engine);
 
-    let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+    let connection = ManagedConnection::open(&path).unwrap();
+    connection
+        .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+        .unwrap();
+    let catalog = Catalog::open(connection).unwrap();
     let sequence = catalog.load_sequence_rows().unwrap().remove(0);
     assert_ne!(sequence.object_id, [0; 16]);
 }

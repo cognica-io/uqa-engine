@@ -13,6 +13,7 @@ use uqa_storage_sqlite::SQLiteStorageBackend;
 use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
 use super::Engine;
+use crate::tests::native_storage;
 
 mod cache_refresh;
 mod external_refresh;
@@ -203,7 +204,7 @@ fn initial_restore_eagerly_loads_column_statistics() {
     }
 
     let connection = ManagedConnection::open(&path).unwrap();
-    let catalog = Catalog::open(connection.clone()).unwrap();
+    let catalog = native_storage::catalog(connection.clone()).unwrap();
     catalog
         .save_column_stats(ColumnStatsInput::basic(
             "public.t", "val", 1, 0, None, None, 999,
@@ -231,7 +232,7 @@ fn initial_restore_promotes_legacy_column_keys_to_named_constraints() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("legacy-column-keys.db");
     {
-        let engine = Engine::open(&path).unwrap();
+        let engine = native_storage::legacy_engine(&path);
         engine
             .sql(
                 "CREATE TABLE legacy_jobs (\
@@ -311,7 +312,7 @@ fn independently_opened_backend_pairs_share_row_locks_for_the_same_database() {
 
     let open_engine = || {
         let connection = ManagedConnection::open(&path).unwrap();
-        let catalog = Arc::new(Catalog::open(connection.clone()).unwrap());
+        let catalog = Arc::new(native_storage::catalog(connection.clone()).unwrap());
         let backend = Arc::new(SQLiteStorageBackend::new(connection));
         Engine::from_persistent_backends(catalog, backend).unwrap()
     };
@@ -340,7 +341,7 @@ fn backend_pair_wait_rechecks_through_an_independent_committed_session() {
 
     let open_engine = || {
         let connection = ManagedConnection::open(&path).unwrap();
-        let catalog = Arc::new(Catalog::open(connection.clone()).unwrap());
+        let catalog = Arc::new(native_storage::catalog(connection.clone()).unwrap());
         let backend = Arc::new(SQLiteStorageBackend::new(connection));
         Engine::from_persistent_backends(catalog, backend).unwrap()
     };
@@ -441,7 +442,7 @@ fn legacy_fts_repair_is_one_time_and_reload_remains_read_only() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("one-time-fts-repair.db");
     {
-        let engine = Engine::open(&path).unwrap();
+        let engine = native_storage::legacy_engine(&path);
         engine
             .sql(
                 "CREATE TABLE docs (id INTEGER PRIMARY KEY, body TEXT); \
@@ -485,13 +486,8 @@ fn legacy_fts_repair_is_one_time_and_reload_remains_read_only() {
         "pinned catalog reload repeated the FTS repair"
     );
 
-    let external = rusqlite::Connection::open(&path).unwrap();
-    external
-        .execute(
-            "INSERT OR REPLACE INTO _metadata (key, value) VALUES ('reload_probe', '1')",
-            [],
-        )
-        .unwrap();
+    let external = native_storage::catalog(ManagedConnection::open(&path).unwrap()).unwrap();
+    external.set_metadata("reload_probe", "1").unwrap();
     let external_commit = sqlite_data_version(&engine);
     engine.synchronize_catalog_registries().unwrap();
     assert_eq!(
