@@ -7,6 +7,7 @@
 //! Native row addressing over a retained common committed/private view.
 
 mod graph;
+mod graph_selection;
 
 use rusqlite::types::ValueRef;
 use uqa_storage::mvcc::{DatabaseId, MergedRecordSnapshot, VersionError, VersionedKeyValueStore};
@@ -26,6 +27,17 @@ pub(crate) struct NativeSnapshot {
 }
 
 impl NativeSnapshot {
+    /// Select entity identities without reading unselected property payloads. `None` names the catalog graph; a string selects one standalone namespace.
+    pub(crate) fn visit_graph_ids(
+        &self,
+        scope: Option<&str>,
+        filter: uqa_storage::GraphEntityFilter<'_>,
+        after: Option<u64>,
+        visit: impl FnMut(i64) -> Result<bool>,
+    ) -> Result<()> {
+        graph_selection::visit(self, scope, filter, after, visit)
+    }
+
     /// Release each physical read before visiting decoded rows, allowing callbacks to probe other records on this retained boundary.
     pub(crate) fn visit_paged_rows(
         &self,

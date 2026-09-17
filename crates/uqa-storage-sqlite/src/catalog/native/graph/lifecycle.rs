@@ -7,7 +7,7 @@
 //! Atomic graph replacement and removal evaluate their selected identities before staging publication.
 
 use super::{
-    encode_catalog_id, owner, paths, selection, source, text, write, Family, GraphEntityFilter,
+    encode_catalog_id, owner, paths, source, text, write, Family, GraphEntityFilter,
     GraphEntityKind, NativeSnapshot, Result, ValueRef,
 };
 use crate::mvcc::native::NativeRecordIdentity;
@@ -53,7 +53,7 @@ pub(in crate::catalog) fn purge(
     keep: impl Fn(GraphEntityKind, u64) -> bool,
 ) -> Result<()> {
     for kind in [GraphEntityKind::Vertex, GraphEntityKind::Edge] {
-        selection::visit(snapshot, GraphEntityFilter::new(kind, None), None, |id| {
+        snapshot.visit_graph_ids(None, GraphEntityFilter::new(kind, None), None, |id| {
             let decoded = super::decode_catalog_id("graph entity", id)?;
             let mut retained = keep(kind, decoded);
             if !retained {

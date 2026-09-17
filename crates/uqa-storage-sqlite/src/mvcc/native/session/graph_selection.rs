@@ -9,29 +9,44 @@
 use uqa_core::memory::BudgetedVec;
 use uqa_storage::{catalog::GraphEntitySelector, mvcc::VersionError};
 
-use super::{
-    encode_catalog_id, entity_family, owner, text, Family, GraphEntityFilter, NativeSnapshot,
-    Result, ValueRef,
-};
-use crate::mvcc::native::NativeRecordIdentity;
+use super::{Family, NativeRecordOwner, NativeSnapshot, Result};
+use crate::{graph::encode_graph_id, mvcc::native::NativeRecordIdentity};
+use rusqlite::types::ValueRef;
+use uqa_storage::{GraphEntityFilter, GraphEntityKind};
+
+fn text(value: &str) -> ValueRef<'_> {
+    ValueRef::Text(value.as_bytes())
+}
+fn owner(snapshot: &NativeSnapshot) -> NativeRecordOwner {
+    NativeRecordOwner::Database(snapshot.database)
+}
+fn entity_family(kind: GraphEntityKind, scoped: bool) -> Family {
+    match (kind, scoped) {
+        (GraphEntityKind::Vertex, false) => Family::GraphVertices,
+        (GraphEntityKind::Edge, false) => Family::GraphEdges,
+        (GraphEntityKind::Vertex, true) => Family::StandaloneGraphVertices,
+        (GraphEntityKind::Edge, true) => Family::StandaloneGraphEdges,
+    }
+}
 
 struct Selection<'a> {
     family: Family,
     selector: GraphEntitySelector<'a>,
-    parts: [ValueRef<'a>; 4],
+    scope: Option<&'a str>,
+    parts: [ValueRef<'a>; 5],
     width: usize,
 }
 
 impl<'a> Selection<'a> {
-    fn new(filter: GraphEntityFilter<'a>) -> Result<Self> {
+    fn new(scope: Option<&'a str>, filter: GraphEntityFilter<'a>) -> Result<Self> {
         let selector = filter.selector().map_err(crate::SQLiteError::from)?;
         let source = filter
             .source
-            .map(|id| encode_catalog_id("edge source", id))
+            .map(|id| encode_graph_id("edge source", id))
             .transpose()?;
         let target = filter
             .target
-            .map(|id| encode_catalog_id("edge target", id))
+            .map(|id| encode_graph_id("edge target", id))
             .transpose()?;
         let kind = text(filter.kind.as_str());
         let zero = ValueRef::Integer(0);
@@ -52,19 +67,29 @@ impl<'a> Selection<'a> {
             GraphEntitySelector::Graph(graph) => [text("member"), text(graph), zero, kind],
             GraphEntitySelector::All => [zero; 4],
         };
+        let offset = usize::from(scope.is_some());
+        let mut scoped_parts = [ValueRef::Null; 5];
+        if let Some(scope) = scope {
+            scoped_parts[0] = text(scope);
+        }
+        scoped_parts[offset..offset + 4].copy_from_slice(&parts);
         Ok(Self {
+            scope,
             family: if selector == GraphEntitySelector::All {
-                entity_family(filter.kind)
+                entity_family(filter.kind, scope.is_some())
+            } else if scope.is_some() {
+                Family::StandaloneGraphLookups
             } else {
                 Family::GraphLookups
             },
             selector,
-            parts,
-            width: if selector == GraphEntitySelector::All {
-                0
-            } else {
-                4
-            },
+            parts: scoped_parts,
+            width: offset
+                + if selector == GraphEntitySelector::All {
+                    0
+                } else {
+                    4
+                },
         })
     }
 
@@ -75,7 +100,7 @@ impl<'a> Selection<'a> {
     ) -> Result<(BudgetedVec<i64>, Option<i64>)> {
         let identity = NativeRecordIdentity::new(self.family, owner(snapshot))?;
         let prefix = identity.encode_prefix(&self.parts[..self.width], &snapshot.control)?;
-        let mut components = [ValueRef::Null; 5];
+        let mut components = [ValueRef::Null; 6];
         components[..self.width].copy_from_slice(&self.parts[..self.width]);
         let cursor = after
             .map(|after| {
@@ -118,13 +143,14 @@ impl<'a> Selection<'a> {
 
 pub(super) fn visit(
     snapshot: &NativeSnapshot,
+    scope: Option<&str>,
     filter: GraphEntityFilter<'_>,
     after: Option<u64>,
     mut visit: impl FnMut(i64) -> Result<bool>,
 ) -> Result<()> {
-    let selection = Selection::new(filter)?;
+    let selection = Selection::new(scope, filter)?;
     let mut after = after
-        .map(|id| encode_catalog_id("graph scan cursor", id))
+        .map(|id| encode_graph_id("graph scan cursor", id))
         .transpose()?;
     loop {
         let (ids, last) = selection.page(snapshot, after)?;
@@ -151,8 +177,23 @@ fn matches(
     id: i64,
 ) -> Result<bool> {
     let encoded = ValueRef::Integer(id);
-    if selection.family == Family::GraphLookups
-        && !snapshot.contains_row(entity_family(filter.kind), owner(snapshot), &[encoded])?
+    let contains = |family, parts: &[ValueRef<'_>]| {
+        let offset = usize::from(selection.scope.is_some());
+        let mut key = [ValueRef::Null; 6];
+        if let Some(scope) = selection.scope {
+            key[0] = text(scope);
+        }
+        key[offset..offset + parts.len()].copy_from_slice(parts);
+        snapshot.contains_row(family, owner(snapshot), &key[..offset + parts.len()])
+    };
+    let scoped = selection.scope.is_some();
+    let lookup_family = if scoped {
+        Family::StandaloneGraphLookups
+    } else {
+        Family::GraphLookups
+    };
+    if selection.family == lookup_family
+        && !contains(entity_family(filter.kind, scoped), &[encoded])?
     {
         return Err(crate::SQLiteError::StorageBackend(format!(
             "graph lookup references missing {} {id}",
@@ -160,9 +201,8 @@ fn matches(
         )));
     }
     let lookup = |kind, key, integer| {
-        snapshot.contains_row(
-            Family::GraphLookups,
-            owner(snapshot),
+        contains(
+            lookup_family,
             &[
                 text(kind),
                 text(key),
@@ -179,23 +219,26 @@ fn matches(
     }
     if let Some(source) = filter.source {
         if selection.selector != GraphEntitySelector::Source(source)
-            && !lookup("source", "", encode_catalog_id("edge source", source)?)?
+            && !lookup("source", "", encode_graph_id("edge source", source)?)?
         {
             return Ok(false);
         }
     }
     if let Some(target) = filter.target {
         if selection.selector != GraphEntitySelector::Target(target)
-            && !lookup("target", "", encode_catalog_id("edge target", target)?)?
+            && !lookup("target", "", encode_graph_id("edge target", target)?)?
         {
             return Ok(false);
         }
     }
     if let Some(graph) = filter.graph {
         if selection.selector != GraphEntitySelector::Graph(graph)
-            && !snapshot.contains_row(
-                Family::GraphMembership,
-                owner(snapshot),
+            && !contains(
+                if scoped {
+                    Family::StandaloneGraphMembership
+                } else {
+                    Family::GraphMembership
+                },
                 &[text(filter.kind.as_str()), encoded, text(graph)],
             )?
         {

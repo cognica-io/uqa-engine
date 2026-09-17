@@ -36,6 +36,7 @@ fn restore_format_two(
     with(connection, |connection| {
         let _permit = schema::WritePermit::acquire(connection)?;
         let transaction = schema::begin(connection)?;
+        crate::mvcc::native::tests::standalone_graph::remove_empty_tables(&transaction)?;
         for (name, _) in
             super::super::super::graph_lookup::source_triggers(&[Family::GraphPathIndexState])
         {
@@ -148,7 +149,7 @@ fn native_path_lookup_upgrade_preserves_sources_and_old_selectors_in_every_file_
             }
             assert_eq!(
                 dump(&connection, "SELECT format FROM _uqa_mvcc_native_format"),
-                vec![vec![rusqlite::types::Value::Integer(7)]]
+                vec![vec![rusqlite::types::Value::Integer(8)]]
             );
             assert_eq!(
                 SQLiteRecordStore::for_native(&connection, &control)

@@ -90,6 +90,9 @@ impl NativeRecordIdentity {
     pub(super) fn validate_row(self, values: &[ValueRef<'_>]) -> VersionResult<()> {
         let layout = self.family.layout();
         layout.validate_values(values)?;
+        if self.family.is_standalone_graph() {
+            super::standalone_graph::validate_values(self.family, values)?;
+        }
         let generation_column = match self.family {
             NativeRecordFamily::Tables => "storage_generation",
             NativeRecordFamily::Sequences => "definition_generation",

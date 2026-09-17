@@ -150,8 +150,14 @@ pub(super) fn validate(
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
     let family = identity.family();
-    if family == Family::GraphLookups {
-        super::graph_lookup::validate_row(connection, values, control)?;
+    if family.is_standalone_graph() && family != Family::StandaloneGraphScopes {
+        super::standalone_graph::validate_owner(connection, values, control)?;
+    }
+    if matches!(
+        family,
+        Family::GraphLookups | Family::StandaloneGraphLookups
+    ) {
+        super::graph_lookup::validate_row(connection, family, values, control)?;
     }
     if for_row(connection, database, family, values, control)? != identity.owner() {
         return Err(invalid("native row targets a different active owner generation").into());

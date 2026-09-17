@@ -17,6 +17,8 @@ fn native_vector_mapping_rejects_prior_writers_and_rollback_restores_the_old_mar
         .with_physical(|sqlite| {
             let _permit = schema::WritePermit::acquire(sqlite).unwrap();
             let transaction = schema::begin(sqlite).unwrap();
+            crate::mvcc::native::tests::standalone_graph::remove_empty_tables(&transaction)
+                .unwrap();
             transaction
                 .execute_batch("DROP TABLE _uqa_mvcc_native_format")
                 .unwrap();
@@ -33,20 +35,20 @@ fn native_vector_mapping_rejects_prior_writers_and_rollback_restores_the_old_mar
             validate_format(sqlite, 6).unwrap();
             let transaction = schema::begin(sqlite).unwrap();
             reopen(&transaction, &control).unwrap();
-            check_mapping_version(&transaction, 7).unwrap();
+            check_mapping_version(&transaction, 8).unwrap();
             assert!(check_mapping_version(&transaction, 6).is_err());
             // An error after migration must roll back its DDL and recreated guards together.
             drop(transaction);
             validate_format(sqlite, 6).unwrap();
             check_mapping_version(sqlite, 6).unwrap();
-            assert!(check_mapping_version(sqlite, 7).is_err());
+            assert!(check_mapping_version(sqlite, 8).is_err());
             Ok(())
         })
         .unwrap();
     SQLiteRecordStore::for_native(&connection, &control).unwrap();
     connection
         .with_physical(|sqlite| {
-            validate_format(sqlite, 7).unwrap();
+            validate_format(sqlite, 8).unwrap();
             assert!(check_mapping_version(sqlite, 6).is_err());
             Ok(())
         })

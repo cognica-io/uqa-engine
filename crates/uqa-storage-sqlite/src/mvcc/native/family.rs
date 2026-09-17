@@ -60,6 +60,13 @@ pub enum NativeRecordFamily {
     OccurrenceBlockMax = 47,
     OccurrenceGuards = 48,
     VectorGuards = 49,
+    StandaloneGraphScopes = 50,
+    StandaloneGraphMetadata = 51,
+    StandaloneGraphCatalog = 52,
+    StandaloneGraphVertices = 53,
+    StandaloneGraphEdges = 54,
+    StandaloneGraphMembership = 55,
+    StandaloneGraphLookups = 56,
 }
 
 impl NativeRecordFamily {
@@ -70,15 +77,31 @@ impl NativeRecordFamily {
     pub fn from_id(id: u16) -> Option<Self> {
         usize::from(id)
             .checked_sub(1)
-            .and_then(|index| LAYOUTS.get(index))
+            .and_then(|index| {
+                LAYOUTS.get(index).or_else(|| {
+                    index
+                        .checked_sub(LAYOUTS.len())
+                        .and_then(|index| super::standalone_graph::schema::LAYOUTS.get(index))
+                })
+            })
             .map(|layout| layout.family)
     }
 
     pub fn layout(self) -> &'static NativeRecordLayout {
-        &LAYOUTS[usize::from(self.id()) - 1]
+        let index = usize::from(self.id()) - 1;
+        if index < LAYOUTS.len() {
+            &LAYOUTS[index]
+        } else {
+            &super::standalone_graph::schema::LAYOUTS[index - LAYOUTS.len()]
+        }
+    }
+
+    pub(crate) fn is_standalone_graph(self) -> bool {
+        self.id() >= Self::StandaloneGraphScopes.id()
     }
 
     pub fn all() -> impl ExactSizeIterator<Item = Self> {
-        LAYOUTS.iter().map(|layout| layout.family)
+        (1..=Self::StandaloneGraphLookups.id())
+            .map(|id| Self::from_id(id).expect("assigned native family"))
     }
 }

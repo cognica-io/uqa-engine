@@ -21,6 +21,7 @@ fn downgrade(connection: &ManagedConnection, version: u32) {
     with(connection, |sqlite| {
         let _permit = schema::WritePermit::acquire(sqlite)?;
         let transaction = schema::begin(sqlite)?;
+        crate::mvcc::native::tests::standalone_graph::remove_empty_tables(&transaction)?;
         if version == 5 {
             transaction.execute_batch("DROP TABLE _uqa_mvcc_native_ivf_guards")?;
         }
@@ -104,7 +105,7 @@ fn native_ivf_guard_upgrade_preserves_closed_files_and_receipts() {
                     .get::<_, i64>(
                     0
                 ))?,
-                7
+                8
             );
             assert_eq!(
                 sqlite.query_row(
@@ -165,80 +166,82 @@ fn failed_native_ivf_guard_upgrade_rolls_back_its_new_table() {
 fn native_hnsw_mapping_upgrade_preserves_existing_vector_tombstones_and_receipts() {
     use crate::{SQLiteHNSWIndex, SQLiteIVFIndex};
     use uqa_storage::{mvcc::VersionedSessionOptions, vector_index::VectorIndex};
-    for mode in 0..4 {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("shared-guards.db");
-        let original = connection(&path, mode);
-        initialize(&original);
-        let mut graph = SQLiteHNSWIndex::new(original.clone(), "public.docs", "hnsw", 2);
-        graph.add(1, vec![1.0, 0.0]).unwrap();
-        graph.initialize().unwrap();
-        original
-            .bind_native_records(VersionedSessionOptions::default())
-            .unwrap();
-        let mut ivf = SQLiteIVFIndex::new(original.clone(), "public.docs", "ivf", 2);
-        ivf.initialize().unwrap();
-        ivf.add(1, vec![0.0, 1.0]).unwrap();
-        ivf.delete(1).unwrap();
-        ivf.delete(99).unwrap();
-        ivf.initialize().unwrap();
-        let control = StorageReadControl::with_limit(1 << 24);
-        let store = SQLiteRecordStore::for_native(&original, &control).unwrap();
-        let prefix =
-            NativeRecordIdentity::family_prefix(NativeRecordFamily::VectorGuards, &control)
+    for version in [6, 7] {
+        for mode in 0..4 {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("shared-guards.db");
+            let original = connection(&path, mode);
+            initialize(&original);
+            let mut graph = SQLiteHNSWIndex::new(original.clone(), "public.docs", "hnsw", 2);
+            graph.add(1, vec![1.0, 0.0]).unwrap();
+            graph.initialize().unwrap();
+            original
+                .bind_native_records(VersionedSessionOptions::default())
                 .unwrap();
-        let snapshot = store.snapshot(&control).unwrap();
-        let mut tombstones = 0;
-        snapshot
-            .visit_keys(&prefix, None, usize::MAX, &control, &mut |_, row| {
-                assert!(!row.live);
-                assert!(row.revision.is_some());
-                tombstones += 1;
-                Ok(true)
-            })
-            .unwrap();
-        assert_eq!(tombstones, 3);
-        let identity = store.database_id();
-        let allocation = store.allocate_transaction(&control).unwrap();
-        let receipt = store
-            .commit(
-                allocation,
-                &PreparedRecordCommit::new(&[], &control).unwrap(),
-                &control,
-            )
-            .unwrap();
-        let pending = store.allocate_transaction(&control).unwrap();
-        let before = history(&original);
-        downgrade(&original, 6);
-        assert!(store.snapshot(&control).is_err());
-        drop((snapshot, graph, ivf, store, original));
-        let reopened = connection(&path, mode);
-        let upgraded = SQLiteRecordStore::for_native(&reopened, &control).unwrap();
-        assert_eq!(upgraded.database_id(), identity);
-        assert_eq!(history(&reopened), before);
-        assert_eq!(
-            upgraded.commit_status(allocation, &control).unwrap(),
-            CommitStatus::Committed(receipt)
-        );
-        assert_eq!(
-            upgraded.commit_status(pending, &control).unwrap(),
-            CommitStatus::Pending
-        );
-        reopened
-            .bind_native_records(VersionedSessionOptions::default())
-            .unwrap();
-        let graph = SQLiteHNSWIndex::new(reopened.clone(), "public.docs", "hnsw", 2);
-        assert_eq!(
-            graph
-                .search_knn(&[1.0, 0.0], 1)
-                .unwrap()
-                .doc_ids()
-                .collect::<Vec<_>>(),
-            vec![1]
-        );
-        assert_eq!(history(&reopened), before);
-        drop((graph, upgraded));
-        SQLiteRecordStore::for_native(&reopened, &control).unwrap();
-        assert_eq!(history(&reopened), before);
+            let mut ivf = SQLiteIVFIndex::new(original.clone(), "public.docs", "ivf", 2);
+            ivf.initialize().unwrap();
+            ivf.add(1, vec![0.0, 1.0]).unwrap();
+            ivf.delete(1).unwrap();
+            ivf.delete(99).unwrap();
+            ivf.initialize().unwrap();
+            let control = StorageReadControl::with_limit(1 << 24);
+            let store = SQLiteRecordStore::for_native(&original, &control).unwrap();
+            let prefix =
+                NativeRecordIdentity::family_prefix(NativeRecordFamily::VectorGuards, &control)
+                    .unwrap();
+            let snapshot = store.snapshot(&control).unwrap();
+            let mut tombstones = 0;
+            snapshot
+                .visit_keys(&prefix, None, usize::MAX, &control, &mut |_, row| {
+                    assert!(!row.live);
+                    assert!(row.revision.is_some());
+                    tombstones += 1;
+                    Ok(true)
+                })
+                .unwrap();
+            assert_eq!(tombstones, 3);
+            let identity = store.database_id();
+            let allocation = store.allocate_transaction(&control).unwrap();
+            let receipt = store
+                .commit(
+                    allocation,
+                    &PreparedRecordCommit::new(&[], &control).unwrap(),
+                    &control,
+                )
+                .unwrap();
+            let pending = store.allocate_transaction(&control).unwrap();
+            let before = history(&original);
+            downgrade(&original, version);
+            assert!(store.snapshot(&control).is_err());
+            drop((snapshot, graph, ivf, store, original));
+            let reopened = connection(&path, mode);
+            let upgraded = SQLiteRecordStore::for_native(&reopened, &control).unwrap();
+            assert_eq!(upgraded.database_id(), identity);
+            assert_eq!(history(&reopened), before);
+            assert_eq!(
+                upgraded.commit_status(allocation, &control).unwrap(),
+                CommitStatus::Committed(receipt)
+            );
+            assert_eq!(
+                upgraded.commit_status(pending, &control).unwrap(),
+                CommitStatus::Pending
+            );
+            reopened
+                .bind_native_records(VersionedSessionOptions::default())
+                .unwrap();
+            let graph = SQLiteHNSWIndex::new(reopened.clone(), "public.docs", "hnsw", 2);
+            assert_eq!(
+                graph
+                    .search_knn(&[1.0, 0.0], 1)
+                    .unwrap()
+                    .doc_ids()
+                    .collect::<Vec<_>>(),
+                vec![1]
+            );
+            assert_eq!(history(&reopened), before);
+            drop((graph, upgraded));
+            SQLiteRecordStore::for_native(&reopened, &control).unwrap();
+            assert_eq!(history(&reopened), before);
+        }
     }
 }

@@ -21,6 +21,7 @@ mod queue;
 mod row;
 mod sequences;
 mod session;
+mod standalone_graph;
 mod vector_guards;
 
 pub(super) use graph_cache::NativeGraphRecords;

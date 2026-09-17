@@ -19,6 +19,7 @@ pub(super) fn restore_format_one(connection: &ManagedConnection, control: &Stora
     with(connection, |connection| {
         let _permit = schema::WritePermit::acquire(connection)?;
         let transaction = schema::begin(connection)?;
+        crate::mvcc::native::tests::standalone_graph::remove_empty_tables(&transaction)?;
         let names: Vec<String> = transaction.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND name GLOB '_uqa_mvcc_graph_lookup_*'")?.query_map([], |row| row.get(0))?.collect::<Result<_, _>>()?;
         for name in names {
             transaction.execute_batch(&format!("DROP TRIGGER {name}"))?;

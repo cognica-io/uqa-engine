@@ -47,6 +47,8 @@ mod native_sequences;
 mod native_tables;
 #[path = "mvcc/native_vectors.rs"]
 mod native_vectors;
+#[path = "mvcc/standalone_graph.rs"]
+mod standalone_graph;
 
 #[derive(Clone, Copy, Debug)]
 enum Mode {

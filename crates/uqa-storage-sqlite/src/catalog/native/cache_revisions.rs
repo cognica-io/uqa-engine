@@ -78,6 +78,7 @@ impl NativeSnapshot {
                     Family::CacheRevisions => {
                         return Err(invalid("cache generations are owned by native publication"));
                     }
+                    family if family.is_standalone_graph() => {}
                     Family::TableOwners
                     | Family::OccurrenceGuards
                     | Family::VectorGuards

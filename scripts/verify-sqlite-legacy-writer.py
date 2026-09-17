@@ -36,6 +36,10 @@ use old_provider::{ManagedConnection, SQLiteCompressionOptions, SQLiteKeyValueSt
 
 fn main() {
     let args: Vec<_> = std::env::args().collect();
+    if args[2].starts_with("graph-") {
+        graph(&args);
+        return;
+    }
     if args[2].starts_with("native-") {
         native(&args);
         return;
@@ -93,6 +97,29 @@ fn native(args: &[String]) {
     }).is_err());
     println!("Released native writer rejected for {}", args[1]);
 }
+
+fn graph(args: &[String]) {
+    let connection = open(&args[1], std::path::Path::new(&args[3]));
+    for suffix in [None, Some("Direct"), Some("fresh")] {
+        if suffix == Some("fresh") && args[2] != "graph-reject" { continue; }
+        let opened = old_provider::SQLiteGraphStore::open(connection.clone(), suffix);
+        if args[2] == "graph-reject" {
+            let error = opened.err().expect("released graph writer accepted converted tables");
+            let message = error.to_string();
+            assert!(message.contains("view") || message.contains("entity_kind") || message.contains("__uqa_mvcc_write_permit"), "unrelated graph open failure: {message}");
+            continue;
+        }
+        let mut graph = opened.unwrap();
+        graph.create_graph("g").unwrap();
+        for id in [1, 2] {
+            let mut vertex = old_core::Vertex::new(id, "item");
+            vertex.properties.insert("bytes".into(), old_core::Value::Bytes(vec![1,2]));
+            graph.add_vertex(vertex, "g").unwrap();
+        }
+        graph.add_edge(old_core::Edge::new(1,1,2,"rel"),"g").unwrap();
+    }
+    println!("Released standalone graph {} completed for {}", args[2], args[1]);
+}
 '''
 NEW = r'''
 use new_storage::KeyValueStore;
@@ -100,6 +127,10 @@ use new_provider::{ManagedConnection, SQLiteCompressionOptions, SQLiteKeyValueSt
 
 fn main() {
     let args: Vec<_> = std::env::args().collect();
+    if args[2].starts_with("graph-") {
+        graph(&args);
+        return;
+    }
     if args[2].starts_with("native-") {
         native(&args);
         return;
@@ -154,6 +185,36 @@ fn native(args: &[String]) {
         Ok(())
     }).unwrap();
 }
+
+fn graph(args: &[String]) {
+    let connection = open(&args[1], std::path::Path::new(&args[3]));
+    connection.bind_native_records(new_storage::mvcc::VersionedSessionOptions::default()).unwrap();
+    for suffix in [None, Some("DIRECT"), Some("Fresh")] {
+        let mut graph = new_provider::SQLiteGraphStore::open(connection.clone(),suffix).unwrap();
+        if suffix == Some("Fresh") && args[2] == "graph-migrate" {
+            graph.create_graph("g").unwrap();
+            for id in [1, 2] {
+                let mut vertex = new_core::Vertex::new(id,"item");
+                vertex.properties.insert("bytes".into(),new_core::Value::Bytes(vec![1,2]));
+                graph.add_vertex(vertex,"g").unwrap();
+            }
+            graph.add_edge(new_core::Edge::new(1,1,2,"rel"),"g").unwrap();
+        }
+        assert_eq!(graph.graph_names().unwrap(),vec!["g"]);
+        let mut vertex = graph.get_vertex(1).unwrap().unwrap();
+        assert_eq!(vertex.properties["bytes"],new_core::Value::Bytes(vec![1,2]));
+        assert_eq!(graph.get_edge(1).unwrap().unwrap().target_id,2);
+        if args[2] == "graph-migrate" {
+            assert_eq!(vertex.label,"item");
+            vertex.label="updated".into();
+            graph.add_vertex(vertex,"g").unwrap();
+        } else {
+            assert_eq!(vertex.label,"updated");
+        }
+        assert_eq!(graph.vertex_ids_by_label("item","g").unwrap(),vec![2]);
+    }
+    println!("Current standalone graph {} completed for {}", args[2], args[1]);
+}
 '''
 
 
@@ -171,8 +232,10 @@ edition = "2021"
 rusqlite = {{ version = "=0.39.0", default-features = false }}
 old_provider = {{ package = "uqa-storage-sqlite", version = "=0.3.6" }}
 old_storage = {{ package = "uqa-storage", version = "=0.3.6" }}
+old_core = {{ package = "uqa-core", version = "=0.3.6" }}
 new_provider = {{ package = "uqa-storage-sqlite", path = {json.dumps(str(ROOT / "crates/uqa-storage-sqlite"))} }}
 new_storage = {{ package = "uqa-storage", path = {json.dumps(str(ROOT / "crates/uqa-storage"))} }}
+new_core = {{ package = "uqa-core", path = {json.dumps(str(ROOT / "crates/uqa-core"))} }}
 '''
         (project / "Cargo.toml").write_text(manifest)
         (project / "src" / "bin" / "old.rs").write_text(OLD + OPEN)
@@ -194,7 +257,10 @@ new_storage = {{ package = "uqa-storage", path = {json.dumps(str(ROOT / "crates/
             database = str(project / f"native-{mode}.db")
             for binary, action in ((old, "native-create"), (new, "native-migrate"), (old, "native-reject"), (new, "native-reopen")):
                 subprocess.run([binary, mode, action, database], check=True)
-        print("Actual 0.3.6 create, migration, old-writer rejection and reopen passed for both layouts in four modes.")
+            database = str(project / f"graph-{mode}.db")
+            for binary, action in ((old, "graph-create"), (new, "graph-migrate"), (old, "graph-reject"), (new, "graph-reopen")):
+                subprocess.run([binary, mode, action, database], check=True)
+        print("Actual 0.3.6 create, migration, old-writer rejection and reopen passed for native, Key/Value and standalone graphs in four modes.")
 
 
 if __name__ == "__main__":

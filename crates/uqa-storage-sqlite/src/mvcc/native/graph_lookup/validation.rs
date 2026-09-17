@@ -20,10 +20,11 @@ use crate::mvcc::{
 
 pub(in crate::mvcc::native) fn validate_row(
     connection: &Connection,
+    family: Family,
     row: &[ValueRef<'_>],
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
-    if !source_projects(connection, row, control)? {
+    if !source_projects(connection, family, row, control)? {
         return Err(invalid("native graph lookup has no matching source entity").into());
     }
     Ok(())
@@ -31,9 +32,14 @@ pub(in crate::mvcc::native) fn validate_row(
 
 fn source_projects(
     connection: &Connection,
+    family: Family,
     lookup: &[ValueRef<'_>],
     control: &StorageReadControl,
 ) -> PhysicalResult<bool> {
+    let scoped = family == Family::StandaloneGraphLookups;
+    let prefix = if scoped { &lookup[..1] } else { &[] };
+    let entire_lookup = lookup;
+    let lookup = &lookup[usize::from(scoped)..];
     let kind = lookup[0]
         .as_str()
         .map_err(|_| invalid("graph selector is not text"))?;
@@ -41,26 +47,36 @@ fn source_projects(
         .as_str()
         .map_err(|_| invalid("graph selector is not text"))?;
     let source = match (kind, entity) {
+        ("label", "vertex") if scoped => Family::StandaloneGraphVertices,
+        ("label" | "source" | "target", "edge") if scoped => Family::StandaloneGraphEdges,
+        ("member", "vertex" | "edge") if scoped => Family::StandaloneGraphMembership,
         ("label", "vertex") => Family::GraphVertices,
         ("label" | "source" | "target", "edge") => Family::GraphEdges,
-        ("member", _) => Family::GraphMembership,
-        ("path", _) => Family::GraphPathIndexState,
+        ("member", _) if !scoped => Family::GraphMembership,
+        ("path", _) if !scoped => Family::GraphPathIndexState,
         _ => return Err(invalid("unknown native graph lookup kind").into()),
     };
-    let key = if source == Family::GraphPathIndexState {
-        encode_row(&[lookup[3]], control)?
-    } else if source == Family::GraphMembership {
-        encode_row(&[lookup[3], lookup[4], lookup[1]], control)?
+    let mut parts = [ValueRef::Null; 4];
+    parts[..prefix.len()].copy_from_slice(prefix);
+    let key_parts: &[ValueRef<'_>] = if source == Family::GraphPathIndexState {
+        &[lookup[3]]
+    } else if matches!(
+        source,
+        Family::GraphMembership | Family::StandaloneGraphMembership
+    ) {
+        &[lookup[3], lookup[4], lookup[1]]
     } else {
-        encode_row(&[lookup[4]], control)?
+        &[lookup[4]]
     };
+    parts[prefix.len()..prefix.len() + key_parts.len()].copy_from_slice(key_parts);
+    let key = encode_row(&parts[..prefix.len() + key_parts.len()], control)?;
     let Some(row) = physical::get(connection, source.layout(), &key, control)? else {
         return Ok(false);
     };
     let values = decode_row(&row, source.layout().columns.len(), control)?;
     let mut matches = false;
     rows(source, &values, |projected| {
-        matches |= projected == lookup;
+        matches |= projected == entire_lookup;
         Ok(())
     })?;
     Ok(matches)
@@ -72,8 +88,12 @@ pub(in crate::mvcc::native) fn validate_deletions(
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
     for record in prepared.records() {
+        let family = NativeRecordIdentity::decode(record.key())?.family();
         if record.value().is_some()
-            || NativeRecordIdentity::decode(record.key())?.family() != Family::GraphLookups
+            || !matches!(
+                family,
+                Family::GraphLookups | Family::StandaloneGraphLookups
+            )
         {
             continue;
         }
@@ -87,7 +107,9 @@ pub(in crate::mvcc::native) fn validate_deletions(
                     return Ok(());
                 };
                 let (_, values) = decode_record(record.key(), bytes, control)?;
-                if source_projects(connection, &values, control).map_err(Error::into_version)? {
+                if source_projects(connection, family, &values, control)
+                    .map_err(Error::into_version)?
+                {
                     return Err(invalid(
                         "native graph lookup removal leaves a matching source entity",
                     ));

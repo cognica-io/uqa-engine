@@ -19,7 +19,14 @@ use super::{
 use crate::mvcc::{read, write, Error, PhysicalResult};
 
 // Parents precede their children; native document guards and graph invalidation triggers also run before evaluated index materializations are installed.
-const ORDER: [Family; 49] = [
+const ORDER: [Family; 56] = [
+    Family::StandaloneGraphScopes,
+    Family::StandaloneGraphMetadata,
+    Family::StandaloneGraphCatalog,
+    Family::StandaloneGraphVertices,
+    Family::StandaloneGraphEdges,
+    Family::StandaloneGraphMembership,
+    Family::StandaloneGraphLookups,
     Family::TableOwners,
     Family::Schemas,
     Family::Relations,
@@ -127,7 +134,7 @@ fn apply(
             }
             let Some(row) = record.value() else { continue };
             let (_, values) = decode_record(record.key(), row, control)?;
-            physical::upsert(connection, family.layout(), &values, control)?;
+            publish_row(connection, family, &values, control)?;
         }
     }
     super::graph_lookup::validate_deletions(connection, prepared, control)?;
@@ -211,6 +218,11 @@ fn seed_originals(
                     };
                     let (identity, values) = decode_record(record.key(), row, control)?;
                     let family = identity.family();
+                    if family == Family::StandaloneGraphScopes && record.value() != Some(row) {
+                        return Err(
+                            invalid("standalone graph namespace bindings are immutable").into()
+                        );
+                    }
                     owners::validate(connection, database, identity, &values, control)?;
                     let key = physical::physical_key(family.layout(), &values, control)?;
                     if physical::get(connection, family.layout(), &key, control)?.as_deref()
@@ -251,6 +263,9 @@ fn seed_targets(
         let Some(row) = record.value() else { continue };
         let (identity, values) = decode_record(record.key(), row, control)?;
         let family = identity.family();
+        if family == Family::StandaloneGraphScopes {
+            super::standalone_graph::validate_target(connection, &values, control)?;
+        }
         if family == Family::Metadata
             && values[0] == ValueRef::Text(b"schema_version")
             && values[1] != ValueRef::Text(b"49")
@@ -324,4 +339,17 @@ fn verify_expected(
         return Err(invalid("native trigger or cascade changed an unprepared record").into());
     }
     Ok(())
+}
+
+fn publish_row(
+    connection: &Connection,
+    family: Family,
+    values: &[ValueRef<'_>],
+    control: &StorageReadControl,
+) -> PhysicalResult<()> {
+    if family == Family::StandaloneGraphScopes {
+        super::standalone_graph::publish_scope(connection, values, control)
+    } else {
+        physical::upsert(connection, family.layout(), values, control)
+    }
 }

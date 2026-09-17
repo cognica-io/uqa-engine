@@ -9,7 +9,6 @@
 pub(in crate::catalog) mod lifecycle;
 pub(in crate::catalog) mod paths;
 mod restore;
-mod selection;
 mod write;
 pub(in crate::catalog) use write::{membership, named_graph, source};
 
@@ -90,7 +89,7 @@ pub(in crate::catalog) fn ids(
 ) -> Result<Vec<u64>> {
     uqa_storage::catalog::validate_graph_page(limit).map_err(crate::SQLiteError::from)?;
     let mut ids = Vec::new();
-    selection::visit(snapshot, filter, after, |id| {
+    snapshot.visit_graph_ids(None, filter, after, |id| {
         ids.push(decode_catalog_id("graph entity", id)?);
         Ok(ids.len() < limit)
     })?;
@@ -102,7 +101,7 @@ pub(in crate::catalog) fn count(
     filter: GraphEntityFilter<'_>,
 ) -> Result<u64> {
     let mut count = 0_u64;
-    selection::visit(snapshot, filter, None, |_| {
+    snapshot.visit_graph_ids(None, filter, None, |_| {
         count = count.checked_add(1).ok_or_else(|| {
             crate::SQLiteError::StorageBackend("graph entity count overflow".into())
         })?;
@@ -116,7 +115,7 @@ pub(in crate::catalog) fn max_id(
     kind: GraphEntityKind,
 ) -> Result<Option<u64>> {
     let mut maximum = None;
-    selection::visit(snapshot, GraphEntityFilter::new(kind, None), None, |id| {
+    snapshot.visit_graph_ids(None, GraphEntityFilter::new(kind, None), None, |id| {
         maximum = Some(id);
         Ok(true)
     })?;

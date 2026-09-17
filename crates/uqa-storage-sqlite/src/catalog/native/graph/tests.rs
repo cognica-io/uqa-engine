@@ -98,20 +98,21 @@ fn selection_releases_physical_io_and_keeps_predicates_and_payloads_on_one_snaps
     let mut filter = GraphEntityFilter::new(GraphEntityKind::Vertex, Some("g"));
     filter.label = Some("node");
     let mut seen = Vec::new();
-    selection::visit(&snapshot, filter, None, |id| {
-        if id == 1 {
-            start.send(()).unwrap();
-            completion
-                .recv_timeout(Duration::from_secs(10))
-                .unwrap()
-                .unwrap()
-                .unwrap();
-        }
-        let row = vertex(&snapshot, id as u64)?.unwrap();
-        seen.push((row.vertex_id, row.label, row.properties_json));
-        Ok(true)
-    })
-    .unwrap();
+    snapshot
+        .visit_graph_ids(None, filter, None, |id| {
+            if id == 1 {
+                start.send(()).unwrap();
+                completion
+                    .recv_timeout(Duration::from_secs(10))
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+            }
+            let row = vertex(&snapshot, id as u64)?.unwrap();
+            seen.push((row.vertex_id, row.label, row.properties_json));
+            Ok(true)
+        })
+        .unwrap();
     writer.join().unwrap();
     assert_eq!(
         seen,
