@@ -6,7 +6,12 @@
 
 //! Ordered explicit table locks, binding rechecks, inheritance and view authorization.
 
-use crate::row_locks::{RelationLockMode, ScopedRelationLock};
+use crate::row_locks::{
+    binding::{
+        bind_relation, lock_descendants, RelationBinding, RelationLockCatalog, RelationLockSession,
+    },
+    RelationLockMode,
+};
 use uqa_sql::{
     ast::{LockTableStmt, TableLockMode},
     catalog::{
@@ -22,24 +27,16 @@ pub struct TableLockMetadata {
     pub security: TableSecurity,
 }
 
-pub trait TableLockCatalog {
+pub trait TableLockCatalog: RelationLockCatalog {
     fn resolve(&self, name: &str, bound: bool) -> Result<RelationResolution, SQLError>;
     fn table(&self, name: &str) -> Result<Option<TableLockMetadata>, SQLError>;
-    fn table_name(&self, object_id: [u8; 16]) -> Option<String>;
     fn view(&self, name: &str) -> Result<Option<StoredView>, SQLError>;
     fn descendants(&self, name: &str) -> Result<Vec<String>, SQLError>;
 }
 
-pub trait TableLockSession {
+pub trait TableLockSession: RelationLockSession {
     fn in_transaction_block(&self) -> bool;
     fn current_user(&self) -> String;
-    fn acquire(
-        &self,
-        name: &str,
-        mode: RelationLockMode,
-        nowait: bool,
-    ) -> Result<Option<ScopedRelationLock<'_>>, SQLError>;
-    fn refresh_after_wait(&self) -> Result<(), SQLError>;
 }
 
 #[derive(Clone, Copy)]
@@ -114,87 +111,45 @@ impl TableLockContext<'_> {
         statement: &LockTableStmt,
         view_source: bool,
     ) -> Result<Option<BoundRelation>, SQLError> {
-        loop {
-            let Some(initial) = self.resolve(name, bound, view_source)? else {
-                return Ok(None);
-            };
-            ensure_lock_privilege(
-                self.roles,
-                &initial.metadata.security,
-                subject,
-                statement.mode,
-                &initial.name,
-                initial.kind,
-            )?;
-            let guard = self.acquire(&initial.name, statement)?;
-            self.session.refresh_after_wait()?;
-            let Some(current) = self.resolve(name, bound, view_source)? else {
-                return Ok(None);
-            };
-            if initial.name == current.name
-                && initial.metadata.object_id == current.metadata.object_id
-            {
+        bind_relation(
+            self.session,
+            statement.mode.into(),
+            statement.nowait,
+            || {
+                self.resolve(name, bound, view_source).map(|relation| {
+                    relation.map(|value| RelationBinding {
+                        name: value.name.clone(),
+                        object_id: Some(value.metadata.object_id),
+                        value,
+                    })
+                })
+            },
+            |relation| {
+                let target = &relation.value;
                 ensure_lock_privilege(
                     self.roles,
-                    &current.metadata.security,
+                    &target.metadata.security,
                     subject,
                     statement.mode,
-                    &current.name,
-                    current.kind,
-                )?;
-                guard.retain();
-                return Ok(Some(current));
-            }
-        }
-    }
-
-    fn acquire(
-        &self,
-        name: &str,
-        statement: &LockTableStmt,
-    ) -> Result<ScopedRelationLock<'_>, SQLError> {
-        self.session
-            .acquire(name, statement.mode.into(), statement.nowait)?
-            .ok_or_else(|| {
-                let local = uqa_core::RelationIdentity::parse_reference(name)
-                    .map_or_else(|_| name.to_string(), |(_, local)| local);
-                SQLError::Routine {
-                    sqlstate: "55P03".into(),
-                    message: format!("could not obtain lock on relation \"{local}\""),
-                }
-            })
+                    &relation.name,
+                    target.kind,
+                )
+            },
+        )
+        .map(|relation| relation.map(|relation| relation.value))
     }
 
     fn lock_descendants(&self, name: &str, statement: &LockTableStmt) -> Result<(), SQLError> {
-        let targets = self
-            .catalog
-            .descendants(name)?
-            .into_iter()
-            .filter(|child| child != name)
-            .map(|child| {
-                self.catalog
-                    .table(&child)
-                    .map(|table| table.map(|metadata| (child, metadata.object_id)))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        for (mut child, object_id) in targets.into_iter().flatten() {
-            loop {
-                let acquired = match self.acquire(&child, statement) {
-                    Err(error) if error.sqlstate() != Some("55P03") => return Err(error),
-                    other => other,
-                };
-                self.session.refresh_after_wait()?;
-                let Some(current) = self.catalog.table_name(object_id) else {
-                    break;
-                };
-                if current == child {
-                    acquired?.retain();
-                    break;
-                }
-                child = current;
-            }
-        }
-        Ok(())
+        lock_descendants(
+            self.catalog,
+            self.session,
+            self.catalog
+                .descendants(name)?
+                .into_iter()
+                .filter(|child| child != name),
+            statement.mode.into(),
+            statement.nowait,
+        )
     }
 
     fn lock_references(

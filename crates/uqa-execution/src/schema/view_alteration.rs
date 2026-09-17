@@ -5,15 +5,17 @@
 //
 
 //! Execute view options, owner changes and renames within the caller's catalog transaction.
+use super::view_locking::ViewDefinitionSession;
 use super::{
     publication::dependencies::CatalogPublicationChanges,
     relation_alteration::{
-        rewrite_relation_rename_dependents, role_transfer_target, RelationAlterLocks,
-        RelationRenameDependencies, RoleTransferContext,
+        rewrite_relation_rename_dependents, role_transfer_target, RelationRenameDependencies,
+        RoleTransferContext,
     },
 };
 use crate::catalog::view::ViewPublication;
 use crate::catalog::view::{catalog_view_row, StoredView};
+use crate::row_locks::binding::{bind_relation, RelationBinding};
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::{AlterViewAction, AlterViewKind, AlterViewStmt, RelationPersistence},
@@ -45,7 +47,7 @@ pub struct ViewAlterContext<'a> {
     pub names: &'a dyn RelationAlterNames,
     pub catalog: &'a dyn ViewAlterCatalog,
     pub access: &'a dyn ViewAlterAccess,
-    pub locks: &'a dyn RelationAlterLocks,
+    pub locks: &'a dyn ViewDefinitionSession,
     pub roles: RoleTransferContext<'a>,
     pub dependencies: &'a dyn RelationRenameDependencies,
     pub publication: &'a dyn ViewAlterPublication,
@@ -69,28 +71,51 @@ fn execute_alter_view(
     context: &ViewAlterContext<'_>,
     statement: &AlterViewStmt,
 ) -> Result<(), SQLError> {
-    let Some(target) = relation_alteration::view_alter_target(
-        context.names.resolve_relation_kind(&statement.name)?,
-        statement,
-        &mut |message| {
+    let Some(binding) = bind_relation(
+        context.locks,
+        relation_alteration::view_alter_lock_mode(statement).into(),
+        false,
+        || {
+            let Some(target) = relation_alteration::view_alter_target(
+                context.names.resolve_relation_kind(&statement.name)?,
+                statement,
+                &mut |message| {
+                    context
+                        .notices
+                        .lock()
+                        .push(("NOTICE".into(), message.into()));
+                },
+            )?
+            else {
+                return Ok(None);
+            };
+            let view = context.catalog.view(&target.relation).ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "{} `{}` disappeared",
+                    target.kind, target.canonical
+                ))
+            })?;
+            Ok(Some(RelationBinding {
+                name: target.canonical.clone(),
+                object_id: Some(view.object_id),
+                value: (target, view),
+            }))
+        },
+        |binding| {
             context
-                .notices
-                .lock()
-                .push(("NOTICE".into(), message.into()));
+                .access
+                .ensure_owner(&binding.name, &binding.value.1)
+                .map(|_| ())
         },
     )?
     else {
         return Ok(());
     };
+    let (target, mut view) = binding.value;
     let relation = &target.relation;
     let canonical = &target.canonical;
     let expected_kind = target.kind;
-    let mut view = context
-        .catalog
-        .view(relation)
-        .ok_or_else(|| SQLError::Internal(format!("{expected_kind} `{canonical}` disappeared")))?;
-    context.access.ensure_owner(canonical, &view)?;
-    context.locks.lock_exclusive(canonical)?;
+    context.locks.prepare_definition_write()?;
     match &statement.action {
         AlterViewAction::Set(changes) => {
             relation_alteration::set_view_options(&mut view.options, changes);

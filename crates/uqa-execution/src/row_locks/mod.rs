@@ -8,6 +8,7 @@
 //!
 //! Locks follow `PostgreSQL` 18 tuple-lock conflict rules and are held until the owning session's transaction ends or a savepoint rolls back the acquisition. Sessions inside one process arbitrate through the in-memory lock table; engines in separate OS processes over the same durable database additionally coordinate through native byte-range locks on a sidecar file next to the database.
 
+pub mod binding;
 mod change_gate;
 mod change_resolution;
 mod changes;

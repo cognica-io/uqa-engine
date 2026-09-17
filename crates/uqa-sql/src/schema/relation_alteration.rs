@@ -8,7 +8,7 @@
 use crate::{
     ast::{
         AlterForeignTableAction, AlterForeignTableStmt, AlterViewAction, AlterViewKind,
-        AlterViewStmt,
+        AlterViewStmt, TableLockMode,
     },
     catalog::resolution::{resolve_relation_rename_source, RelationResolution},
     SQLError,
@@ -25,6 +25,18 @@ pub struct ViewAlterTarget {
     pub relation: RelationIdentity,
     pub kind: &'static str,
 }
+
+pub fn view_alter_lock_mode(statement: &AlterViewStmt) -> TableLockMode {
+    match (&statement.kind, &statement.action) {
+        (AlterViewKind::MaterializedView, AlterViewAction::Set(_) | AlterViewAction::Reset(_)) => {
+            TableLockMode::ShareUpdateExclusive
+        }
+        _ => TableLockMode::AccessExclusive,
+    }
+}
+
+#[cfg(test)]
+mod tests;
 
 pub fn view_alter_target(
     resolution: RelationResolution,

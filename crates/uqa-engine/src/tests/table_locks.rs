@@ -6,12 +6,9 @@
 
 //! Explicit SQL table locks across every persistent provider and session boundary.
 
+use super::relation_lock_support::{error, sessions, sql, wait_for_relation};
 use super::*;
-use std::{
-    sync::mpsc,
-    thread,
-    time::{Duration, Instant},
-};
+use std::{sync::mpsc, thread, time::Duration};
 
 const MODES: [&str; 8] = [
     "ACCESS SHARE",
@@ -23,47 +20,6 @@ const MODES: [&str; 8] = [
     "EXCLUSIVE",
     "ACCESS EXCLUSIVE",
 ];
-
-fn sessions(provider: usize) -> (tempfile::TempDir, Engine, Engine) {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("table-locks.db");
-    let first = match provider {
-        0 => Engine::open(&path).unwrap(),
-        1 => Engine::from_persistent_provider(Arc::new(
-            uqa_storage_sqlite::SQLiteKeyValueStorage::open(&path).unwrap(),
-        ))
-        .unwrap(),
-        2 => Engine::from_persistent_provider(Arc::new(
-            uqa_storage_redb::RedbStorage::open(&path).unwrap(),
-        ))
-        .unwrap(),
-        _ => unreachable!(),
-    };
-    let second = first.new_session().unwrap();
-    for engine in [&first, &second] {
-        engine.release_automatic_statistics_client();
-        engine
-            .session
-            .statistics_worker
-            .store(true, Ordering::Release);
-    }
-    sql(
-        &first,
-        "CREATE TABLE t(v integer); INSERT INTO t VALUES (1)",
-    );
-    (directory, first, second)
-}
-
-fn sql(engine: &Engine, statement: &str) -> SQLResult {
-    engine
-        .sql(statement, &[])
-        .unwrap_or_else(|error| panic!("{statement}: {error}"))
-}
-
-fn error(engine: &Engine, statement: &str, state: &str) {
-    let error = engine.sql(statement, &[]).unwrap_err();
-    assert_eq!(error.sqlstate(), Some(state), "{statement}: {error}");
-}
 
 #[test]
 fn all_table_lock_modes_match_conflicts_and_read_only_transactions() {
@@ -180,23 +136,6 @@ fn table_lock_view_security_and_inheritance_preserve_only_and_owner_scope() {
         error(&first, "LOCK invoker_v IN ACCESS SHARE MODE", "42501");
         sql(&first, "ROLLBACK; RESET ROLE");
     }
-}
-
-fn wait_for_relation(
-    first: &Engine,
-    session: u64,
-    relation: &str,
-    finished: impl Fn() -> bool,
-) -> bool {
-    let key = first.row_locks.table_key(relation);
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while !first.row_locks.waiting_for_relation(session, key)
-        && !finished()
-        && Instant::now() < deadline
-    {
-        thread::yield_now();
-    }
-    first.row_locks.waiting_for_relation(session, key)
 }
 
 #[test]

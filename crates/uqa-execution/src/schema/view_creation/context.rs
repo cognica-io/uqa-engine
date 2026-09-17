@@ -22,6 +22,7 @@ pub trait ViewCreationCatalog: ViewIdentityAllocation {
     fn synchronize(&self) -> StorageBackendResult<()>;
 }
 pub trait ViewPlanBinding {
+    fn lock_relations(&self, plan: &QueryPlan) -> Result<(), SQLError>;
     fn bind_relations(&self, plan: &mut QueryPlan) -> Result<bool, SQLError>;
     fn bind_routines(
         &self,
@@ -41,6 +42,7 @@ pub trait ViewQueryOwners {
 }
 pub struct ViewCreationContext<'a> {
     pub catalog: &'a dyn ViewCreationCatalog,
+    pub locks: &'a dyn crate::schema::view_locking::ViewDefinitionSession,
     pub views: &'a dyn ViewAlterCatalog,
     pub namespace: crate::schema::namespaces::relations::RelationCreationContext<'a>,
     pub names: &'a dyn RelationAlterNames,

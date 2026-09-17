@@ -11,7 +11,10 @@ use super::{
     RowLockRetryCache, SQLError, SQLParam,
 };
 use crate::row_locks::{
-    retry_cache::CommittedRowSource, session::RowLockSession, RelationLockMode, RowLockAcquisition,
+    binding::{RelationLockCatalog, RelationLockSession},
+    retry_cache::CommittedRowSource,
+    session::RowLockSession,
+    RelationLockMode, RowLockAcquisition,
 };
 use std::{collections::BTreeSet, sync::Arc};
 use uqa_core::{CancellationToken, DocId};
@@ -20,7 +23,7 @@ use uqa_sql::{
     routines::RoutineResolution,
 };
 
-pub trait LockingCatalog: RoutineResolution {
+pub trait LockingCatalog: RoutineResolution + RelationLockCatalog {
     fn hierarchy_scan_tables(
         &self,
         table: &str,
@@ -37,7 +40,7 @@ pub trait LockingCatalog: RoutineResolution {
     fn table_columns(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String>;
 }
 
-pub trait QueryRowLockSession: RowLockSession + Sync {
+pub trait QueryRowLockSession: RowLockSession + RelationLockSession + Sync {
     fn lock_relation(&self, table: &str, mode: RelationLockMode) -> Result<(), SQLError>;
     fn rollback_row_lock_acquisition(&self, acquisition: RowLockAcquisition);
     fn row_changed_in_open_transaction(&self, table: &str, doc_id: DocId)

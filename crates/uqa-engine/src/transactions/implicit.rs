@@ -69,6 +69,26 @@ impl Engine {
         })
     }
 
+    /// Definition changes need transaction-owned relation locks even for direct memory APIs. Defer physical writer admission until execution has acquired and revalidated those locks.
+    pub(crate) fn with_implicit_definition_transaction<R>(
+        &self,
+        f: impl FnOnce(&Self) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
+        let _statement = self.runtime.statement_gate.lock();
+        if self.current_transaction_is_read_only() {
+            return Err(SQLError::Routine {
+                sqlstate: "25006".into(),
+                message: "cannot execute direct mutation in a read-only transaction".into(),
+            });
+        }
+        if self.transaction_depth() != 0 {
+            self.ensure_transaction_usable()?;
+            f(self)
+        } else {
+            self.transaction(f)
+        }
+    }
+
     /// Error-type-preserving counterpart for direct APIs whose public error
     /// type is not [`SQLError`]. `map_transaction_error` is used only for
     /// begin/commit/rollback infrastructure failures; an error returned by

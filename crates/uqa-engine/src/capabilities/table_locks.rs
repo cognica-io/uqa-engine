@@ -8,7 +8,10 @@
 
 use crate::Engine;
 use uqa_execution::{
-    row_locks::{RelationLockMode, ScopedRelationLock},
+    row_locks::{
+        binding::{RelationLockCatalog, RelationLockSession},
+        RelationLockMode, ScopedRelationLock,
+    },
     statement::table_locks::{
         TableLockCatalog, TableLockContext, TableLockMetadata, TableLockSession,
     },
@@ -57,12 +60,6 @@ impl TableLockCatalog for Engine {
         Ok(self.durable.views.read().get(&relation).cloned())
     }
 
-    fn table_name(&self, object_id: [u8; 16]) -> Option<String> {
-        self.storage.tables.read().iter().find_map(|(name, table)| {
-            (table.object_id() == object_id).then(|| name.qualified_name())
-        })
-    }
-
     fn descendants(&self, name: &str) -> Result<Vec<String>, SQLError> {
         self.hierarchy_scan_tables(name, true)
     }
@@ -75,6 +72,9 @@ impl TableLockSession for Engine {
     fn current_user(&self) -> String {
         self.current_user_name()
     }
+}
+
+impl RelationLockSession for Engine {
     fn acquire(
         &self,
         name: &str,
@@ -106,5 +106,29 @@ impl TableLockSession for Engine {
     }
     fn refresh_after_wait(&self) -> Result<(), SQLError> {
         self.refresh_explicit_statement_snapshot()
+    }
+}
+
+impl RelationLockCatalog for Engine {
+    fn relation_object_id(&self, name: &str) -> Result<Option<[u8; 16]>, SQLError> {
+        let relation =
+            uqa_core::RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
+        if let Some(table) = self.storage.tables.read().get(&relation) {
+            return Ok(Some(table.object_id()));
+        }
+        if let Some(view) = self.durable.views.read().get(&relation) {
+            return Ok(Some(view.object_id));
+        }
+        Ok(self
+            .durable
+            .foreign_tables
+            .read()
+            .get(&relation)
+            .map(|table| table.object_id))
+    }
+    fn table_name(&self, object_id: [u8; 16]) -> Option<String> {
+        self.storage.tables.read().iter().find_map(|(name, table)| {
+            (table.object_id() == object_id).then(|| name.qualified_name())
+        })
     }
 }

@@ -213,6 +213,9 @@ impl RoleCatalogGuards for Fixture {
     }
 }
 impl ViewPlanBinding for Fixture {
+    fn lock_relations(&self, _: &QueryPlan) -> Result<(), SQLError> {
+        panic!("restoration uses its explicit persisted namespace");
+    }
     fn bind_relations(&self, _: &mut QueryPlan) -> Result<bool, SQLError> {
         panic!("restoration uses its explicit persisted namespace");
     }

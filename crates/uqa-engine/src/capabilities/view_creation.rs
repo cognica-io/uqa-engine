@@ -31,6 +31,7 @@ impl Engine {
         ViewCreationContext {
             catalog: self,
             views: self,
+            locks: self,
             namespace: self.relation_creation_context(),
             names: self,
             owners: self,
@@ -48,13 +49,13 @@ impl Engine {
 }
 impl ViewCreationTransactions for Engine {
     fn with_view_creation(&self, write: ViewCreationWrite<'_>) -> Result<(), SQLError> {
-        self.with_implicit_transaction(|engine| write(&engine.view_creation_context()))
+        self.with_implicit_definition_transaction(|engine| write(&engine.view_creation_context()))
     }
     fn with_materialized_view_creation(
         &self,
         write: MaterializedViewWrite<'_>,
     ) -> Result<Option<u64>, SQLError> {
-        self.with_implicit_transaction(|engine| write(&engine.view_creation_context()))
+        self.with_implicit_definition_transaction(|engine| write(&engine.view_creation_context()))
     }
 }
 impl ViewCreationCatalog for Engine {
@@ -63,6 +64,9 @@ impl ViewCreationCatalog for Engine {
     }
 }
 impl ViewPlanBinding for Engine {
+    fn lock_relations(&self, plan: &QueryPlan) -> Result<(), SQLError> {
+        uqa_execution::query::locking::lock_query_relations(self.row_lock_context(), plan)
+    }
     fn bind_relations(&self, plan: &mut QueryPlan) -> Result<bool, SQLError> {
         self.bind_stored_query_relations(plan, "CREATE VIEW", true)
     }

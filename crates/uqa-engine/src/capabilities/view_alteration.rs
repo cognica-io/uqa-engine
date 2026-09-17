@@ -35,7 +35,12 @@ impl Engine {
 }
 impl ViewAlterTransactions for Engine {
     fn with_view_write(&self, write: ViewAlterWrite<'_>) -> Result<(), SQLError> {
-        self.with_implicit_transaction(|engine| write(&engine.view_alter_context()))
+        self.with_implicit_definition_transaction(|engine| write(&engine.view_alter_context()))
+    }
+}
+impl uqa_execution::schema::view_locking::ViewDefinitionSession for Engine {
+    fn prepare_definition_write(&self) -> Result<(), SQLError> {
+        self.prepare_explicit_transaction_writer().map(|_| ())
     }
 }
 impl ViewAlterCatalog for Engine {

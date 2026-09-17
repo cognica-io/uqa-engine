@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::row_locks::ScopedRelationLock;
 use std::{cell::RefCell, collections::BTreeMap};
 use uqa_sql::catalog::roles::{
     guards::{RoleDefinitionRead, RoleMembershipRead},
@@ -89,12 +90,6 @@ impl TableLockCatalog for Fixture {
     fn view(&self, _: &str) -> Result<Option<StoredView>, SQLError> {
         Ok(None)
     }
-    fn table_name(&self, object_id: [u8; 16]) -> Option<String> {
-        self.tables
-            .borrow()
-            .iter()
-            .find_map(|(name, id)| (*id == object_id).then(|| name.clone()))
-    }
     fn descendants(&self, _: &str) -> Result<Vec<String>, SQLError> {
         Ok(self.children.clone())
     }
@@ -107,6 +102,9 @@ impl TableLockSession for Fixture {
     fn current_user(&self) -> String {
         "uqa".into()
     }
+}
+
+impl RelationLockSession for Fixture {
     fn acquire(
         &self,
         name: &str,
@@ -246,4 +244,16 @@ fn descendant_locks_follow_object_identity_across_rename_and_name_reuse() {
             &fixture.cancel,
         )
         .unwrap());
+}
+
+impl RelationLockCatalog for Fixture {
+    fn relation_object_id(&self, name: &str) -> Result<Option<[u8; 16]>, SQLError> {
+        Ok(self.tables.borrow().get(name).copied())
+    }
+    fn table_name(&self, object_id: [u8; 16]) -> Option<String> {
+        self.tables
+            .borrow()
+            .iter()
+            .find_map(|(name, id)| (*id == object_id).then(|| name.clone()))
+    }
 }

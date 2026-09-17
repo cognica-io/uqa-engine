@@ -10,6 +10,10 @@ use super::{
     publication, ViewRegistration,
 };
 use crate::catalog::view::{StoredView, StoredViewKind};
+use crate::row_locks::{
+    binding::{bind_relation, RelationBinding},
+    RelationLockMode,
+};
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     catalog::{
@@ -68,26 +72,47 @@ fn replacement_view(
     or_replace: bool,
     replacement_schema: &uqa_sql::RowSchema,
 ) -> Result<Option<StoredView>, SQLError> {
-    let kind = context
-        .names
-        .relation_kind_at(name)
-        .map_err(|error| SQLError::Internal(format!("resolve relation `{name}`: {error}")))?;
-    if !replacement_is_view(name, kind, or_replace)? {
-        return Ok(None);
+    let binding = bind_relation(
+        context.locks,
+        RelationLockMode::AccessExclusive,
+        false,
+        || {
+            let kind = context.names.relation_kind_at(name).map_err(|error| {
+                SQLError::Internal(format!("resolve relation `{name}`: {error}"))
+            })?;
+            let view = if replacement_is_view(name, kind, or_replace)? {
+                Some(context.views.view(relation).ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "view `{name}` exists in the catalog but has no loaded definition"
+                    ))
+                })?)
+            } else {
+                None
+            };
+            Ok(Some(RelationBinding {
+                name: name.into(),
+                object_id: view.as_ref().map(|view| view.object_id),
+                value: view,
+            }))
+        },
+        |binding| {
+            if let Some(view) = &binding.value {
+                context.owners.ensure_owner(name, view)?;
+            }
+            context.namespace.ensure_create(name)
+        },
+    )?
+    .ok_or_else(|| SQLError::Internal("view creation binding disappeared".into()))?;
+    if let Some(existing) = &binding.value {
+        let existing_schema = uqa_sql::semantics::view_rewrite::context::stored_view_schema(
+            context.rewrite,
+            &existing.rewrite_definition(),
+        )?;
+        validate_replacement_schema(&existing_schema, replacement_schema)?;
     }
-    let existing = context.views.view(relation).ok_or_else(|| {
-        SQLError::Internal(format!(
-            "view `{name}` exists in the catalog but has no loaded definition"
-        ))
-    })?;
-    let existing_schema = uqa_sql::semantics::view_rewrite::context::stored_view_schema(
-        context.rewrite,
-        &existing.rewrite_definition(),
-    )?;
-    validate_replacement_schema(&existing_schema, replacement_schema)?;
-    context.owners.ensure_owner(name, &existing)?;
-    Ok(Some(existing))
+    Ok(binding.value)
 }
+
 pub(super) fn reject_regrole_constants(
     context: &ViewCreationContext<'_>,
     plan: &mut QueryPlan,
@@ -113,6 +138,7 @@ fn register_view_plan_inner(
         .catalog
         .synchronize()
         .map_err(|err| SQLError::Internal(format!("refresh view catalog: {err}")))?;
+    context.bindings.lock_relations(&plan)?;
     let uses_temporary_relation = context.bindings.bind_relations(&mut plan)?;
     let (name, persistence) = view_creation_target(
         &context.namespace,
@@ -133,6 +159,7 @@ fn register_view_plan_inner(
     let replacement_schema = named_view_schema(&query_schema, &output_columns)?;
     let existing_view =
         replacement_view(context, &name, &relation, or_replace, &replacement_schema)?;
+    context.locks.prepare_definition_write()?;
     let object_id = if let Some(existing) = existing_view.as_ref() {
         existing.object_id
     } else {
