@@ -49,6 +49,12 @@ pub enum VersionError {
         expected: Option<CommitSequence>,
         actual: Option<CommitSequence>,
     },
+    #[error("record dependency {dependency} expected revision {expected:?}, found {actual:?}")]
+    ReadConflict {
+        dependency: usize,
+        expected: Option<CommitSequence>,
+        actual: Option<CommitSequence>,
+    },
     /// The provider verified a pending receipt under exclusive admission, but evaluated derived effects used an earlier committed snapshot. Only those pure effects may be prepared again.
     #[error("derived commit snapshot {expected:?} changed to {actual:?}")]
     CommitSnapshotChanged {

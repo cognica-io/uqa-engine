@@ -17,6 +17,9 @@ use uqa_storage::read_control::StorageReadControl;
 use uqa_storage::KeyValueStore;
 use uqa_storage_sqlite::{ManagedConnection, SQLiteCompressionOptions, SQLiteRecordStore};
 
+#[path = "mvcc/guards.rs"]
+mod guards;
+
 #[path = "mvcc/identifiers.rs"]
 mod identifiers;
 #[path = "mvcc/key_value.rs"]

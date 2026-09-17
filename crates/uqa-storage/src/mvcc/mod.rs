@@ -10,11 +10,13 @@
 
 pub(crate) mod commit;
 mod graph;
+mod guards;
 mod history;
 mod hnsw;
 mod identifiers;
 mod ivf;
 mod key;
+mod markers;
 mod memory;
 mod occurrence;
 mod overlay;
@@ -27,6 +29,7 @@ mod view;
 
 pub use commit::{PreparedRecordCommit, PreparedRecordWrite};
 pub use graph::{GraphMutation, GraphRecordKey, GraphRecordLayout};
+pub use guards::verify_revision_guards;
 pub use history::{RecordHistory, RecordVersion, ScannedRecord, SharedRecordValue};
 pub use hnsw::{HNSWRecordHeader, HNSWRecordKey, HNSWRecordLayout, HNSWRecordValue};
 pub use identifiers::{

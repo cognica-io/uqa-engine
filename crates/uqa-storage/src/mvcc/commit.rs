@@ -6,6 +6,9 @@
 
 //! Private evaluated changes and provider-independent revision validation.
 
+mod requirements;
+pub(super) use requirements::RecordRequirement;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -38,6 +41,7 @@ pub(crate) enum RecordWriteKind {
     OccurrenceCache,
     IVFPreview,
     HNSWPreview,
+    Marker,
 }
 
 impl PreparedRecordWrite {
@@ -82,6 +86,7 @@ pub struct PreparedRecordCommit {
     pub(super) graph: Option<GraphEffects>,
     pub(super) vector: Option<super::vector::VectorEffects>,
     pub(super) resolved_at: Option<CommitSequence>,
+    requirements: Option<Arc<BudgetedVec<RecordRequirement>>>,
 }
 
 impl PreparedRecordCommit {
@@ -159,6 +164,7 @@ impl PreparedRecordCommit {
                     RecordWriteKind::OccurrenceCache => 4,
                     RecordWriteKind::IVFPreview => 5,
                     RecordWriteKind::HNSWPreview => 6,
+                    RecordWriteKind::Marker => 7,
                 }]);
             }
             digest.update((write.key().len() as u64).to_be_bytes());
@@ -185,6 +191,7 @@ impl PreparedRecordCommit {
             graph: None,
             vector: None,
             resolved_at: None,
+            requirements: None,
         })
     }
 
@@ -255,6 +262,7 @@ impl PreparedRecordCommit {
     pub(crate) fn resolved(mut self, original: &Self, sequence: CommitSequence) -> Self {
         self.fingerprint = original.fingerprint;
         self.resolved_at = Some(sequence);
+        self.requirements.clone_from(&original.requirements);
         self
     }
 
@@ -335,6 +343,7 @@ impl PreparedRecordCommit {
                 });
             }
         }
+        self.validate_requirements(cancellation, head_revision)?;
         cancellation.check()?;
         Ok(())
     }

@@ -99,17 +99,21 @@ impl MemoryVersionStore {
         let mut state = self.database.state.lock();
         commit.validate_snapshot(state.sequence)?;
         let writes = commit.records();
+        let validate = || {
+            commit.validate(control.cancellation(), |key| {
+                Ok(state
+                    .records
+                    .get(key)
+                    .and_then(|entry| entry.history.head())
+                    .map(RecordVersion::sequence))
+            })
+        };
         if writes.is_empty() {
+            validate()?;
             return Ok(state.sequence);
         }
         let sequence = state.sequence.successor()?;
-        commit.validate(control.cancellation(), |key| {
-            Ok(state
-                .records
-                .get(key)
-                .and_then(|entry| entry.history.head())
-                .map(RecordVersion::sequence))
-        })?;
+        validate()?;
         let mut prepared = BudgetedVec::new(&self.database.memory);
         prepared.reserve(writes.len())?;
         for (write, value) in writes.iter().zip(values.iter()) {

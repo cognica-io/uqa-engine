@@ -7,6 +7,9 @@
 use uqa_storage::{KeyValueStore, PersistentStorageProvider};
 use uqa_storage_redb::RedbStorage;
 
+#[path = "store_contract/guards.rs"]
+mod guards;
+
 fn push_legacy_string(key: &mut Vec<u8>, value: &str) {
     key.extend_from_slice(&u32::try_from(value.len()).unwrap().to_be_bytes());
     key.extend_from_slice(value.as_bytes());

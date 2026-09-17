@@ -102,6 +102,18 @@ enum KeyValueBatchOperation {
 
 /// Atomic mutation buffer for a [`KeyValueStore`].
 pub trait KeyValueBatch {
+    /// Require this record's original committed revision at publication without replacing it. This permits independent data writers to share a definition. Stores without commit-time read validation reject this operation; capable wrappers must forward it.
+    fn require_unchanged(&mut self, _key: &[u8]) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "commit-time record requirements are not supported".into(),
+        ))
+    }
+    /// Publish a new revision of an immutable marker, merging concurrent touches of the same value. Structural changes fence the marker and replace their definition; data changes require the definition and touch the marker. The payload must contain only immutable owner/format data. Capable wrappers must forward this operation.
+    fn touch_marker(&mut self, _key: &[u8], _value: &[u8]) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "mergeable revision markers are not supported".into(),
+        ))
+    }
     /// Stage a durable identifier observation before publishing this batch's records. Successful observations survive later transaction/savepoint rollback. Dropping an unevaluated batch consumes nothing. Stores without autonomous allocation reject this operation; capable wrappers must forward it.
     fn observe_identifier(&mut self, _namespace: &[u8], _value: u64) -> StorageBackendResult<()> {
         Err(StorageBackendError::Other(

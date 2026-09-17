@@ -20,13 +20,17 @@ pub(super) fn reserve_bindings(
     control: &StorageReadControl,
 ) -> VersionResult<MemoryReservation> {
     let mut peak = 96;
-    for record in prepared.records() {
+    for (key, value) in prepared
+        .records()
+        .iter()
+        .map(|record| (record.key(), record.value()))
+        .chain(prepared.required_keys().map(|key| (key, None)))
+    {
         control.cancellation().check()?;
-        let bytes = record
-            .key()
+        let bytes = key
             .len()
             .checked_mul(2)
-            .and_then(|key| key.checked_add(record.value().map_or(0, <[u8]>::len)))
+            .and_then(|key| key.checked_add(value.map_or(0, <[u8]>::len)))
             .and_then(|length| length.checked_add(96))
             .ok_or(MemoryError::SizeOverflow)?;
         peak = peak.max(bytes);

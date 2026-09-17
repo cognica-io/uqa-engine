@@ -455,6 +455,12 @@ struct CancellingStore {
 
 struct BorrowedBatch<'a>(&'a mut dyn uqa_storage::key_value::KeyValueBatch);
 impl uqa_storage::key_value::KeyValueBatch for BorrowedBatch<'_> {
+    fn require_unchanged(&mut self, key: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.0.require_unchanged(key)
+    }
+    fn touch_marker(&mut self, key: &[u8], value: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.0.touch_marker(key, value)
+    }
     fn observe_identifier(
         &mut self,
         namespace: &[u8],
@@ -482,6 +488,12 @@ struct CancellingBatch<'a> {
 }
 
 impl uqa_storage::key_value::KeyValueBatch for CancellingBatch<'_> {
+    fn require_unchanged(&mut self, key: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.require_unchanged(key)
+    }
+    fn touch_marker(&mut self, key: &[u8], value: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.touch_marker(key, value)
+    }
     fn observe_identifier(
         &mut self,
         namespace: &[u8],

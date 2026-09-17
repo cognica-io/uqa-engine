@@ -16,6 +16,7 @@ use super::transaction::Transaction;
 use super::VersionedKeyValueStore;
 
 enum Operation {
+    Requirement(BudgetedVec<u8>),
     IdentifierObservation(BudgetedVec<u8>, u64),
     Put(BudgetedVec<u8>, BudgetedVec<u8>),
     Delete(BudgetedVec<u8>),
@@ -67,6 +68,9 @@ impl<'a> Batch<'a> {
         transaction.writable()?;
         for operation in self.operations.iter() {
             match operation {
+                Operation::Requirement(key) => {
+                    transaction.require_unchanged(key, &self.store.control)?;
+                }
                 Operation::IdentifierObservation(_, _) => {}
                 Operation::Put(key, value) => {
                     transaction.replace(key, Some(value), &self.store.control)?;
@@ -150,6 +154,14 @@ impl<'a> Batch<'a> {
 }
 
 impl KeyValueBatch for Batch<'_> {
+    fn require_unchanged(&mut self, key: &[u8]) -> StorageBackendResult<()> {
+        self.operations
+            .push(Operation::Requirement(self.copy(key)?))?;
+        Ok(())
+    }
+    fn touch_marker(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
+        self.typed_record(key, Some(value), RecordWriteKind::Marker)
+    }
     fn observe_identifier(&mut self, namespace: &[u8], value: u64) -> StorageBackendResult<()> {
         crate::mvcc::IdentifierRequest::Observe(value)
             .reserve_workspace(namespace, &self.store.control)

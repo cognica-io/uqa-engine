@@ -48,6 +48,10 @@ pub(in crate::mvcc) fn resolve(
     writes.reserve(original.records().len())?;
     for (mutation, write) in original.records().iter().enumerate() {
         control.cancellation().check()?;
+        if write.kind() == RecordWriteKind::Marker {
+            writes.push(write.clone())?;
+            continue;
+        }
         let actual = committed
             .metadata(write.key(), control)?
             .and_then(|head| head.revision);

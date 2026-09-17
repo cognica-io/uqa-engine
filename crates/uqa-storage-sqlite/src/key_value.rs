@@ -255,6 +255,12 @@ struct SQLiteKeyValueBatch<'a> {
 }
 
 impl KeyValueBatch for SQLiteKeyValueBatch<'_> {
+    fn require_unchanged(&mut self, key: &[u8]) -> StorageBackendResult<()> {
+        self.batch.require_unchanged(key)
+    }
+    fn touch_marker(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
+        self.batch.touch_marker(key, value)
+    }
     fn observe_identifier(&mut self, namespace: &[u8], value: u64) -> StorageBackendResult<()> {
         self.batch.observe_identifier(namespace, value)
     }

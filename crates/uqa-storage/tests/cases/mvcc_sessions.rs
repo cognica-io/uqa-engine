@@ -10,6 +10,8 @@
 mod compound;
 #[path = "mvcc_sessions/graph.rs"]
 mod graph;
+#[path = "mvcc_sessions/guards.rs"]
+mod guards;
 #[path = "mvcc_sessions/hnsw_merging.rs"]
 mod hnsw_merging;
 #[path = "mvcc_sessions/identifiers.rs"]
@@ -90,6 +92,7 @@ struct State {
     commit_fault: CommitFault,
     abort_fault: AbortFault,
     attempts: Vec<CommitFingerprint>,
+    required_keys: Vec<Vec<u8>>,
 }
 struct Persistence {
     store: MemoryVersionStore,
@@ -108,6 +111,7 @@ impl Persistence {
                 commit_fault: CommitFault::None,
                 abort_fault: AbortFault::None,
                 attempts: Vec::new(),
+                required_keys: Vec::new(),
             }),
         })
     }
@@ -183,6 +187,7 @@ impl VersionedPersistence for Persistence {
             return Ok(receipt);
         }
         state.attempts.push(prepared.fingerprint());
+        state.required_keys = prepared.required_keys().map(<[u8]>::to_vec).collect();
         if state.commit_fault == CommitFault::ConcurrentCommit {
             state.commit_fault = CommitFault::None;
             self.store.commit(

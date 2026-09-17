@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use uqa_core::memory::BudgetedVec;
 
-use crate::mvcc::commit::RecordWriteKind;
+use crate::mvcc::commit::{RecordRequirement, RecordWriteKind};
 use crate::mvcc::graph::OwnedGraphMutation;
 use crate::mvcc::key::RecordKey;
 use crate::mvcc::vector::OwnedVectorMutation;
@@ -25,6 +25,7 @@ struct Savepoint {
     id: StorageSavepointId,
     graph_position: usize,
     vector_position: usize,
+    requirement_position: usize,
 }
 
 pub(super) struct Transaction {
@@ -36,6 +37,7 @@ pub(super) struct Transaction {
     materialized: Option<PreparedRecordCommit>,
     graph: BudgetedVec<OwnedGraphMutation>,
     vector: BudgetedVec<OwnedVectorMutation>,
+    requirements: BudgetedVec<RecordRequirement>,
     outcome: Option<CommitErrorOutcome>,
     savepoints: BudgetedVec<Savepoint>,
 }
@@ -55,6 +57,7 @@ impl Transaction {
             materialized: None,
             graph: BudgetedVec::new(control.memory()),
             vector: BudgetedVec::new(control.memory()),
+            requirements: BudgetedVec::new(control.memory()),
             outcome: None,
             savepoints: BudgetedVec::new(control.memory()),
         })
@@ -130,6 +133,7 @@ impl Transaction {
                 | RecordWriteKind::OccurrenceCache
                 | RecordWriteKind::IVFPreview
                 | RecordWriteKind::HNSWPreview
+                | RecordWriteKind::Marker
         ) && self.changes.write_kind(key, control)? == Some(RecordWriteKind::Canonical)
         {
             RecordWriteKind::Canonical
@@ -147,7 +151,31 @@ impl Transaction {
     }
 
     pub(super) fn has_derived_changes(&self) -> bool {
-        !self.graph.is_empty() || !self.vector.is_empty()
+        !self.graph.is_empty() || !self.vector.is_empty() || !self.requirements.is_empty()
+    }
+
+    pub(super) fn require_unchanged(
+        &mut self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        self.writable()?;
+        control.check()?;
+        for requirement in self.requirements.iter() {
+            control.cancellation().check()?;
+            if requirement.key.bytes() == key {
+                return Ok(());
+            }
+        }
+        let expected = self
+            .committed
+            .metadata(key, control)?
+            .and_then(|record| record.revision);
+        self.requirements.push(RecordRequirement {
+            key: RecordKey::new(key, control.memory())?,
+            expected,
+        })?;
+        Ok(())
     }
 
     pub(super) fn vector_mutation(&mut self, mutation: &OwnedVectorMutation) -> VersionResult<()> {
@@ -213,11 +241,13 @@ impl Transaction {
         self.changes.savepoint(id)?;
         let graph_position = self.graph.len();
         let vector_position = self.vector.len();
+        let requirement_position = self.requirements.len();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(self)));
         if !matches!(&result, Ok(Ok(_))) {
             self.changes.rollback_to_savepoint(id)?;
             self.graph.truncate(graph_position);
             self.vector.truncate(vector_position);
+            self.requirements.truncate(requirement_position);
         }
         self.changes.release_savepoint(id)?;
         match result {
@@ -241,6 +271,7 @@ impl Transaction {
             id,
             graph_position: self.graph.len(),
             vector_position: self.vector.len(),
+            requirement_position: self.requirements.len(),
         })?;
         Ok(())
     }
@@ -270,6 +301,8 @@ impl Transaction {
             .truncate(self.savepoints[position].graph_position);
         self.vector
             .truncate(self.savepoints[position].vector_position);
+        self.requirements
+            .truncate(self.savepoints[position].requirement_position);
         self.savepoints.truncate(position + 1);
         Ok(())
     }
@@ -290,12 +323,17 @@ impl Transaction {
             self.prepared = Some(
                 self.changes
                     .prepare(control)?
+                    .with_requirements(&self.requirements, control)?
                     .with_graph_effects(self.committed.sequence(), &self.graph, control)?
                     .with_vector_effects(self.committed.sequence(), &self.vector, control)?,
             );
         }
         let prepared = self.prepared.as_ref().expect("prepared once");
-        if prepared.records().is_empty() && prepared.graph.is_none() && prepared.vector.is_none() {
+        if prepared.records().is_empty()
+            && prepared.graph.is_none()
+            && prepared.vector.is_none()
+            && !prepared.has_requirements()
+        {
             return Ok(());
         }
         let allocation = if let Some(id) = self.allocation {
@@ -358,10 +396,19 @@ impl Transaction {
                 RecordWriteKind::Occurrence | RecordWriteKind::OccurrenceCache
             )
         });
-        if (prepared.graph.is_some() || prepared.vector.is_some() || occurrences)
+        let markers = prepared
+            .records()
+            .iter()
+            .any(|write| write.kind() == RecordWriteKind::Marker);
+        if (prepared.graph.is_some() || prepared.vector.is_some() || occurrences || markers)
             && self.materialized.is_none()
         {
             let current = persistence.snapshot(control)?;
+            prepared.validate_requirements(control.cancellation(), |key| {
+                Ok(current
+                    .metadata(key, control)?
+                    .and_then(|record| record.revision))
+            })?;
             let vector = if prepared.vector.is_some() {
                 Some(crate::mvcc::vector::resolve(
                     prepared,
@@ -386,7 +433,7 @@ impl Transaction {
                 vector
             };
             let input = merged.as_ref().unwrap_or(prepared);
-            self.materialized = if input.graph.is_some() {
+            let merged = if input.graph.is_some() {
                 let layout =
                     persistence
                         .graph_record_layout()
@@ -395,9 +442,18 @@ impl Transaction {
                         ))?;
                 Some(crate::mvcc::graph::resolve(
                     input,
-                    current,
+                    Arc::clone(&current),
                     layout,
                     persistence.database_id(),
+                    control,
+                )?)
+            } else {
+                merged
+            };
+            self.materialized = if markers {
+                Some(crate::mvcc::markers::resolve(
+                    merged.as_ref().unwrap_or(prepared),
+                    &*current,
                     control,
                 )?)
             } else {
