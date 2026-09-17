@@ -79,6 +79,16 @@ impl Engine {
         restart_identity: bool,
     ) -> Result<(), SQLError> {
         let t = self.require_table(table_name)?;
+        let allocator = self.table_identifier_allocator(&t).map_err(|error| {
+            SQLError::Internal(format!("bind TRUNCATE document allocator: {error}"))
+        })?;
+        if allocator.is_durable() {
+            allocator
+                .synchronize(&mut t.next_id.lock())
+                .map_err(|error| {
+                    SQLError::Internal(format!("retain TRUNCATE document watermark: {error}"))
+                })?;
+        }
         *t.storage_generation.write() = crate::new_table_storage_generation().map_err(|error| {
             SQLError::Internal(format!("rotate TRUNCATE storage generation: {error}"))
         })?;
@@ -123,6 +133,10 @@ impl Engine {
                     SQLError::Internal(format!("restart owned sequence `{sequence}`: {error}"))
                 })?;
             }
+        } else if allocator.is_durable() {
+            self.persist_next_id(table_name).map_err(|error| {
+                SQLError::Internal(format!("persist TRUNCATE document watermark: {error}"))
+            })?;
         }
         self.value_indexes_truncate(table_name, &t)?;
         self.mark_column_stats_dirty_by_count(table_name, &t, removed_count)

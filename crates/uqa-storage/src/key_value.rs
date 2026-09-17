@@ -214,6 +214,11 @@ pub trait KeyValueBatch {
 
 /// Ordered byte-key storage used by Key/Value catalog and index backends.
 pub trait KeyValueStore: Send + Sync {
+    /// Durable reservations outside private record undo. Serialized custom stores may omit this capability; wrappers over a capable store must forward it.
+    fn identifier_allocator(&self) -> Option<&dyn crate::mvcc::IdentifierAllocator> {
+        None
+    }
+
     /// Evaluate a compound read once against one fixed committed/private view. The callback must use the supplied reader and must not reenter this session. Stores without this capability reject it explicitly.
     fn with_read_view(&self, _read: &mut KeyValueReadScope<'_>) -> StorageBackendResult<()> {
         Err(StorageBackendError::Other(

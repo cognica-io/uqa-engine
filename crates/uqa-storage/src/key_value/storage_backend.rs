@@ -31,6 +31,10 @@ impl KeyValueStorageBackend {
 }
 
 impl PersistentStorageBackend for KeyValueStorageBackend {
+    fn identifier_allocator(&self) -> Option<&dyn crate::mvcc::IdentifierAllocator> {
+        self.store.identifier_allocator()
+    }
+
     fn transaction_affinity(&self) -> Option<crate::StorageSessionAffinity> {
         self.store.transaction_affinity()
     }
@@ -179,7 +183,8 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
     }
 
     fn begin_read_transaction(&self) -> StorageBackendResult<()> {
-        self.store.begin_read_transaction()
+        // The backend contract is a read-first hint; the byte-store's read transaction is strictly read-only.
+        self.store.begin_upgradeable_transaction()
     }
 
     fn begin_upgradeable_transaction(&self) -> StorageBackendResult<()> {

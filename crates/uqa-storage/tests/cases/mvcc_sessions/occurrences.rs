@@ -103,6 +103,10 @@ impl KeyValueRead for InterleavedRead<'_> {
     }
 }
 impl KeyValueStore for InterleavedStore {
+    fn identifier_allocator(&self) -> Option<&dyn uqa_storage::mvcc::IdentifierAllocator> {
+        self.inner.identifier_allocator()
+    }
+
     fn with_read_view(&self, visit: &mut KeyValueReadScope<'_>) -> StorageBackendResult<()> {
         self.inner.with_read_view(&mut |read| {
             visit(&InterleavedRead {

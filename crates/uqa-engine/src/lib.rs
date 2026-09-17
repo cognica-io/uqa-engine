@@ -588,7 +588,7 @@ pub(crate) struct TableState {
     /// Column schema captured at CREATE TABLE / ALTER TABLE time, driving auto-id allocation and ALTER COLUMN bookkeeping.
     columns: state::CatalogCell<Vec<uqa_sql::ast::ColumnDef>>,
     columns_declared: state::CatalogCell<bool>,
-    /// Monotonic id watermark for SERIAL/BIGSERIAL columns. The first allocated value is `1`; the watermark grows past `max(existing_doc_id, allocated)` so reopened catalogs do not collide with existing rows.
+    /// Retained document-ID floor. Capable persistent backends reserve from the storage-owned durable namespace; temporary, memory and serialized backends use this local state. `u128` preserves the exhausted `u64::MAX + 1` value.
     next_id: parking_lot::Mutex<u128>,
     analyzer: state::CatalogCell<Analyzer>,
     /// Per-column statistics refreshed by `ANALYZE table_name` or lazily

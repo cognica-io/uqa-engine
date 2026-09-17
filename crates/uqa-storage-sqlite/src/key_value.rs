@@ -63,7 +63,22 @@ impl SQLiteKeyValueStore {
     }
 }
 
+impl uqa_storage::mvcc::IdentifierAllocator for SQLiteKeyValueStore {
+    fn allocate_identifiers(
+        &self,
+        namespace: &[u8],
+        request: uqa_storage::mvcc::IdentifierRequest,
+    ) -> StorageBackendResult<uqa_storage::mvcc::IdentifierAllocation> {
+        self.conn
+            .with_records(|store| store.allocate_identifiers(namespace, request))
+    }
+}
+
 impl KeyValueStore for SQLiteKeyValueStore {
+    fn identifier_allocator(&self) -> Option<&dyn uqa_storage::mvcc::IdentifierAllocator> {
+        Some(self)
+    }
+
     fn with_read_view(
         &self,
         read: &mut uqa_storage::key_value::KeyValueReadScope<'_>,

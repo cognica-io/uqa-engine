@@ -34,6 +34,7 @@ const HIDE_AFTER_ABORT_RECEIPT: u8 = 5;
 struct FaultPersistence {
     inner: Arc<dyn VersionedPersistence>,
     fault: AtomicU8,
+    foreground: std::thread::ThreadId,
     attempt: Mutex<Option<StorageTransactionId>>,
     aborts: AtomicUsize,
 }
@@ -44,8 +45,11 @@ impl FaultPersistence {
         if fault == HEALTHY {
             return HEALTHY;
         }
-        // Independent automatic-statistics transactions must not consume this attempt's fault.
+        // Only the foreground may select the target; subsequent faults follow that transaction even when another thread resolves it.
         let mut attempt = self.attempt.lock().unwrap();
+        if attempt.is_none() && std::thread::current().id() != self.foreground {
+            return HEALTHY;
+        }
         let target = *attempt.get_or_insert(transaction);
         if target == transaction {
             fault
@@ -173,6 +177,7 @@ fn fixtures() -> (tempfile::TempDir, Vec<Arc<FaultPersistence>>) {
                 Arc::new(FaultPersistence {
                     inner,
                     fault: AtomicU8::new(HEALTHY),
+                    foreground: std::thread::current().id(),
                     attempt: Mutex::new(None),
                     aborts: AtomicUsize::new(0),
                 })
@@ -204,6 +209,32 @@ fn count(engine: &Engine, table: &str) -> Value {
         .unwrap()
         .rows[0]["n"]
         .clone()
+}
+
+#[test]
+fn an_independent_writer_cannot_claim_the_foreground_commit_fault() {
+    let (_directory, fixtures) = fixtures();
+    for persistence in fixtures {
+        let root = engine(persistence.clone());
+        root.sql("CREATE TABLE items(id INTEGER)", &[]).unwrap();
+        let independent = root.new_session().unwrap();
+        persistence
+            .fault
+            .store(LOSE_COMMITTED_REPLY, Ordering::Release);
+        std::thread::spawn(move || {
+            independent
+                .sql("INSERT INTO items VALUES (1)", &[])
+                .unwrap()
+        })
+        .join()
+        .unwrap();
+        assert!(persistence.attempt.lock().unwrap().is_none());
+        assert_unknown(&root.sql("INSERT INTO items VALUES (2)", &[]).unwrap_err());
+        assert!(root.pending_commit().is_some());
+        persistence.fault.store(HEALTHY, Ordering::Release);
+        root.commit().unwrap();
+        assert_eq!(count(&root, "items"), Value::Int(2));
+    }
 }
 
 #[test]

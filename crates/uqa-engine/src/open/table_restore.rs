@@ -211,6 +211,16 @@ impl Engine {
         }
         self.synchronize_partition_identity_watermarks()?;
         if mode.allows_migration() {
+            for (relation, table) in self.storage.tables.read().iter() {
+                let allocator = self.table_identifier_allocator(table)?;
+                if allocator.is_durable() {
+                    allocator.persist(
+                        catalog,
+                        &relation.qualified_name(),
+                        &mut table.next_id.lock(),
+                    )?;
+                }
+            }
             self.migrate_graph_access_metadata(catalog)?;
         }
         self.restore_graphs_from_catalog(catalog)?;
@@ -412,7 +422,10 @@ impl Engine {
         } else {
             None
         };
-        let next_id = persisted_next_id.unwrap_or(1).max(u128::from(max_id) + 1);
+        let next_id = uqa_storage::document_store::identifiers::restored_document_id_watermark(
+            max_id,
+            persisted_next_id,
+        );
         Ok(Arc::new(TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: schema.object_id,

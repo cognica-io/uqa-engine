@@ -5,8 +5,11 @@
 //
 
 use super::{
-    table_next_id_metadata_key, table_not_found, DocId, Engine, RelationIdentity, SQLError,
-    StorageBackendError, StorageBackendResult, TableState,
+    table_not_found, DocId, Engine, RelationIdentity, SQLError, StorageBackendError,
+    StorageBackendResult, TableState,
+};
+use uqa_storage::document_store::identifiers::{
+    load_legacy_document_id_watermark, restored_document_id_watermark, DocumentIdAllocator,
 };
 
 impl Engine {
@@ -280,21 +283,27 @@ impl Engine {
         Ok(constraints)
     }
 
-    /// Allocate the next id from the per-table watermark, returning the
-    /// allocated value. Updates the watermark in place.
+    pub(crate) fn table_identifier_allocator(
+        &self,
+        state: &TableState,
+    ) -> StorageBackendResult<DocumentIdAllocator<'_>> {
+        let durable = (state.persistence != uqa_sql::ast::RelationPersistence::Temporary)
+            .then(|| self.storage.backend.as_ref()?.identifier_allocator())
+            .flatten();
+        DocumentIdAllocator::new(durable, state.object_id(), state.storage_generation())
+    }
+
+    /// Supply the retained table state to the storage-owned identifier allocator.
     pub(crate) fn allocate_next_id(&self, table: &str) -> Result<u64, SQLError> {
         let t = self
             .try_table(table)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
             .ok_or_else(|| SQLError::Internal(format!("unknown table `{table}`")))?;
-        let mut g = t.next_id.lock();
-        let id = u64::try_from(*g).map_err(|_| {
-            SQLError::Internal(format!(
-                "document id space for table `{table}` is exhausted"
-            ))
-        })?;
-        *g += 1;
-        Ok(id)
+        self.table_identifier_allocator(&t)
+            .and_then(|allocator| allocator.allocate(&mut t.next_id.lock()))
+            .map_err(|error| {
+                SQLError::Internal(format!("allocate document id for `{table}`: {error}"))
+            })
     }
 
     /// Move the watermark past `doc_id` if needed (called after a manual
@@ -303,12 +312,9 @@ impl Engine {
         let t = self
             .try_table(table)?
             .ok_or_else(|| table_not_found(table))?;
-        let mut g = t.next_id.lock();
-        let next = u128::from(doc_id) + 1;
-        if next > *g {
-            *g = next;
-        }
-        Ok(())
+        let mut next = t.next_id.lock();
+        self.table_identifier_allocator(&t)?
+            .observe(&mut next, doc_id)
     }
 
     pub(crate) fn persist_next_id(&self, table: &str) -> StorageBackendResult<()> {
@@ -321,25 +327,16 @@ impl Engine {
         let Some(catalog) = self.storage.catalog.as_ref() else {
             return Ok(());
         };
-        let next_id = t.next_id.lock().to_string();
-        catalog.set_metadata(&table_next_id_metadata_key(table), &next_id)
+        let mut next = t.next_id.lock();
+        self.table_identifier_allocator(&t)?
+            .persist(catalog.as_ref(), table, &mut next)
     }
 
     pub(crate) fn load_persisted_next_id(
         catalog: &dyn uqa_storage::CatalogFacade,
         table: &str,
     ) -> StorageBackendResult<Option<u128>> {
-        let Some(value) = catalog.get_metadata(&table_next_id_metadata_key(table))? else {
-            return Ok(None);
-        };
-        if value.is_empty() {
-            return Ok(None);
-        }
-        value.parse::<u128>().map(Some).map_err(|error| {
-            StorageBackendError::Other(format!(
-                "invalid persisted next id for table `{table}`: {error}"
-            ))
-        })
+        load_legacy_document_id_watermark(catalog, table)
     }
 
     pub(crate) fn refresh_table_next_id(
@@ -362,12 +359,9 @@ impl Engine {
         } else {
             None
         };
-        let physical = u128::from(state.document_store.read().max_doc_id()?) + 1;
+        let maximum = state.document_store.read().max_doc_id()?;
         let mut current = state.next_id.lock();
-        *current = persisted.map_or_else(
-            || (*current).max(physical),
-            |persisted| persisted.max(physical),
-        );
+        *current = restored_document_id_watermark(maximum, persisted.or(Some(*current)));
         Ok(())
     }
 }

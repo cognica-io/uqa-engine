@@ -246,6 +246,11 @@ pub trait PersistentStorageProvider: Send + Sync {
 
 /// Factory plus transaction surface for persistent table/index storage.
 pub trait PersistentStorageBackend: Send + Sync {
+    /// Durable identifier allocation independent of logical transaction undo. A missing capability retains serialized allocation; it cannot establish support for concurrent writers. Wrappers must forward the underlying capability.
+    fn identifier_allocator(&self) -> Option<&dyn crate::mvcc::IdentifierAllocator> {
+        None
+    }
+
     /// Identity shared with the paired catalog's transaction context. Wrappers must delegate this when their underlying backend reports an identity.
     fn transaction_affinity(&self) -> Option<StorageSessionAffinity> {
         None

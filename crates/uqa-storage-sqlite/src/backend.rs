@@ -91,7 +91,23 @@ impl PersistentStorageProvider for SQLiteStorageProvider {
     }
 }
 
+impl uqa_storage::mvcc::IdentifierAllocator for SQLiteStorageBackend {
+    fn allocate_identifiers(
+        &self,
+        namespace: &[u8],
+        request: uqa_storage::mvcc::IdentifierRequest,
+    ) -> StorageBackendResult<uqa_storage::mvcc::IdentifierAllocation> {
+        self.conn
+            .allocate_native_identifiers(namespace, request)
+            .map_err(Into::into)
+    }
+}
+
 impl PersistentStorageBackend for SQLiteStorageBackend {
+    fn identifier_allocator(&self) -> Option<&dyn uqa_storage::mvcc::IdentifierAllocator> {
+        self.conn.is_native_record_session().then_some(self)
+    }
+
     fn transaction_affinity(&self) -> Option<uqa_storage::StorageSessionAffinity> {
         Some(self.conn.transaction_affinity())
     }

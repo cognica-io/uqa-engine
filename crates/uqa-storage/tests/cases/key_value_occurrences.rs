@@ -524,6 +524,10 @@ impl uqa_storage::key_value::KeyValueBatch for CancellingBatch<'_> {
 }
 
 impl KeyValueStore for CancellingStore {
+    fn identifier_allocator(&self) -> Option<&dyn uqa_storage::mvcc::IdentifierAllocator> {
+        self.inner.identifier_allocator()
+    }
+
     fn with_read_view(
         &self,
         read: &mut uqa_storage::key_value::KeyValueReadScope<'_>,

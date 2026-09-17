@@ -29,7 +29,9 @@ pub use commit::{PreparedRecordCommit, PreparedRecordWrite};
 pub use graph::{GraphMutation, GraphRecordKey, GraphRecordLayout};
 pub use history::{RecordHistory, RecordVersion, ScannedRecord, SharedRecordValue};
 pub use hnsw::{HNSWRecordHeader, HNSWRecordKey, HNSWRecordLayout, HNSWRecordValue};
-pub use identifiers::{verify_identifier_allocations, IdentifierAllocation, IdentifierRequest};
+pub use identifiers::{
+    verify_identifier_allocations, IdentifierAllocation, IdentifierAllocator, IdentifierRequest,
+};
 pub use ivf::{IVFRecordHeader, IVFRecordKey, IVFRecordLayout, IVFRecordValue};
 pub use memory::{MemoryRecordSnapshot, MemoryVersionStore};
 pub use occurrence::{

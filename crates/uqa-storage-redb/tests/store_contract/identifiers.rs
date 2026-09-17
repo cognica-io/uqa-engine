@@ -12,6 +12,29 @@ use uqa_storage::read_control::StorageReadControl;
 use uqa_storage::KeyValueStore;
 use uqa_storage_redb::RedbStorage;
 
+#[test]
+fn document_id_backends_reserve_independently_and_reopen() {
+    use uqa_storage::document_store::identifiers::{
+        conformance::verify_document_id_sessions, DocumentIdAllocator,
+    };
+    use uqa_storage::PersistentStorageProvider;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("document-identifiers.redb");
+    let last = {
+        let storage = RedbStorage::open(&path).unwrap();
+        verify_document_id_sessions(
+            &storage.open_session().unwrap(),
+            &storage.open_session().unwrap(),
+        )
+        .unwrap()
+    };
+    let reopened = RedbStorage::open(&path).unwrap();
+    let session = reopened.open_session().unwrap();
+    let ids = DocumentIdAllocator::new(session.backend.identifier_allocator(), [11; 16], [12; 16])
+        .unwrap();
+    assert_eq!(ids.allocate(&mut 1).unwrap(), last + 1);
+}
+
 fn request() -> IdentifierRequest {
     IdentifierRequest::Reserve {
         minimum: 1,

@@ -17,6 +17,8 @@ use uqa_core::{DocId, FieldName, PathSegment, Value};
 
 use crate::backend::{StorageBackendError, StorageBackendResult};
 
+pub mod identifiers;
+
 /// Document field map. Keys are field names; values are dynamic.
 pub type Document = BTreeMap<FieldName, Value>;
 

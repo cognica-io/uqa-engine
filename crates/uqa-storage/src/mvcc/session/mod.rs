@@ -178,7 +178,21 @@ impl VersionedKeyValueStore {
     }
 }
 
+impl super::IdentifierAllocator for VersionedKeyValueStore {
+    fn allocate_identifiers(
+        &self,
+        namespace: &[u8],
+        request: super::IdentifierRequest,
+    ) -> StorageBackendResult<super::IdentifierAllocation> {
+        Self::allocate_identifiers(self, namespace, request)
+    }
+}
+
 impl KeyValueStore for VersionedKeyValueStore {
+    fn identifier_allocator(&self) -> Option<&dyn super::IdentifierAllocator> {
+        Some(self)
+    }
+
     fn with_read_view(
         &self,
         operation: &mut crate::key_value::KeyValueReadScope<'_>,

@@ -11,6 +11,55 @@ use std::num::NonZeroU64;
 use uqa_storage::PersistentStorageBackend;
 use uqa_storage_sqlite::{Catalog, SQLiteKeyValueStore, SQLiteStorageBackend};
 
+#[test]
+fn document_id_backends_reserve_independently_and_reopen_in_every_file_mode() {
+    use uqa_storage::document_store::identifiers::{
+        conformance::verify_document_id_sessions, DocumentIdAllocator,
+    };
+    use uqa_storage::{KeyValueCatalog, KeyValueStorageBackend, PersistentStorageSession};
+    for mode in MODES {
+        for native in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("document-identifiers.db");
+            let pair = |initialize| {
+                let connection = open(mode, &path);
+                if native {
+                    if initialize {
+                        Catalog::open(connection.clone()).unwrap();
+                    }
+                    connection
+                        .bind_native_records(VersionedSessionOptions::default())
+                        .unwrap();
+                    PersistentStorageSession::new(
+                        Arc::new(Catalog::open(connection.clone()).unwrap()),
+                        Arc::new(SQLiteStorageBackend::new(connection)),
+                    )
+                } else {
+                    let store: Arc<dyn KeyValueStore> =
+                        Arc::new(SQLiteKeyValueStore::new(connection).unwrap());
+                    PersistentStorageSession::new(
+                        Arc::new(KeyValueCatalog::new(store.clone())),
+                        Arc::new(KeyValueStorageBackend::new(store)),
+                    )
+                }
+            };
+            let last = {
+                let a = pair(true);
+                let b = pair(false);
+                verify_document_id_sessions(&a, &b).unwrap()
+            };
+            let reopened = pair(false);
+            let ids = DocumentIdAllocator::new(
+                reopened.backend.identifier_allocator(),
+                [11; 16],
+                [12; 16],
+            )
+            .unwrap();
+            assert_eq!(ids.allocate(&mut 1).unwrap(), last + 1);
+        }
+    }
+}
+
 fn request(minimum: u64, count: u64) -> IdentifierRequest {
     IdentifierRequest::Reserve {
         minimum,

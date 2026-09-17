@@ -13,9 +13,18 @@ use std::{num::NonZeroU64, ops::RangeInclusive};
 
 use uqa_core::memory::{MemoryError, MemoryReservation};
 
-use crate::read_control::StorageReadControl;
+use crate::{read_control::StorageReadControl, StorageBackendResult};
 
 use super::{VersionError, VersionResult};
+
+/// Session-bound access to durable, nontransactional identifier reservations. Implementations retain their session's cancellation, memory and read-only checks; forwarding storage wrappers must preserve this capability.
+pub trait IdentifierAllocator: Send + Sync {
+    fn allocate_identifiers(
+        &self,
+        namespace: &[u8],
+        request: IdentifierRequest,
+    ) -> StorageBackendResult<IdentifierAllocation>;
+}
 
 /// Observe an externally supplied identity or reserve a contiguous range. Namespace keys must include the allocation domain and the owning object's non-reused generation, rather than its reusable name.
 #[derive(Debug, Clone, Copy)]

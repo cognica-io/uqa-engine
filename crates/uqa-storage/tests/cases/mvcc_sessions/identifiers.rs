@@ -8,6 +8,79 @@
 
 use super::*;
 
+#[test]
+fn document_allocations_use_the_backend_capability_across_private_undo() {
+    use uqa_storage::{KeyValueCatalog, KeyValueStorageBackend, PersistentStorageSession};
+    let persistence = Persistence::new();
+    let pair = || {
+        let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 20));
+        PersistentStorageSession::new(
+            Arc::new(KeyValueCatalog::new(store.clone())),
+            Arc::new(KeyValueStorageBackend::new(store)),
+        )
+    };
+    uqa_storage::document_store::identifiers::conformance::verify_document_id_sessions(
+        &pair(),
+        &pair(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn document_identifier_migration_retires_legacy_metadata_only_with_its_catalog_commit() {
+    use uqa_storage::document_store::identifiers::{
+        legacy_document_id_metadata_key, DocumentIdAllocator,
+    };
+    use uqa_storage::{CatalogFacade, KeyValueCatalog};
+    let persistence = Persistence::new();
+    let store = Arc::new(persistence.session(1 << 20));
+    let other = Arc::new(persistence.session(1 << 20));
+    let catalog = KeyValueCatalog::new(store.clone());
+    let observer = KeyValueCatalog::new(other.clone());
+    let key = legacy_document_id_metadata_key("public.docs");
+    catalog.set_metadata(&key, "500").unwrap();
+    let allocator =
+        DocumentIdAllocator::new(store.identifier_allocator(), [1; 16], [2; 16]).unwrap();
+    store.begin_transaction().unwrap();
+    allocator
+        .persist(&catalog, "public.docs", &mut 500)
+        .unwrap();
+    assert_eq!(catalog.get_metadata(&key).unwrap().as_deref(), Some(""));
+    assert_eq!(observer.get_metadata(&key).unwrap().as_deref(), Some("500"));
+    persistence.state.lock().commit_fault = CommitFault::Reject;
+    assert!(store.commit_transaction().is_err());
+    store.rollback_transaction().unwrap();
+    assert_eq!(catalog.get_metadata(&key).unwrap().as_deref(), Some("500"));
+    let independent =
+        DocumentIdAllocator::new(other.identifier_allocator(), [1; 16], [2; 16]).unwrap();
+    assert_eq!(independent.allocate(&mut 1).unwrap(), 500);
+    persistence.state.lock().commit_fault = CommitFault::None;
+    store.begin_transaction().unwrap();
+    let mut next = 500;
+    allocator
+        .persist(&catalog, "public.docs", &mut next)
+        .unwrap();
+    assert_eq!(next, 501);
+    store.commit_transaction().unwrap();
+    assert_eq!(observer.get_metadata(&key).unwrap().as_deref(), Some(""));
+}
+
+#[test]
+fn document_allocator_capability_preserves_read_only_errors_and_the_local_cache() {
+    use uqa_storage::document_store::identifiers::DocumentIdAllocator;
+    let persistence = Persistence::new();
+    let store = persistence.session(1 << 20);
+    let allocator =
+        DocumentIdAllocator::new(store.identifier_allocator(), [1; 16], [2; 16]).unwrap();
+    store.begin_read_transaction().unwrap();
+    let mut next = 1;
+    assert!(allocator.allocate(&mut next).is_err());
+    assert!(allocator.observe(&mut next, 100).is_err());
+    assert_eq!(next, 1);
+    store.rollback_transaction().unwrap();
+    assert_eq!(allocator.allocate(&mut next).unwrap(), 1);
+}
+
 fn one() -> IdentifierRequest {
     IdentifierRequest::Reserve {
         minimum: 1,
