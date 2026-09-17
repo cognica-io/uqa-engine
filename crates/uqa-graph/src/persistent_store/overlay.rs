@@ -188,6 +188,15 @@ impl Drop for OverlayCheckpoint {
 }
 
 impl GraphStorage for OverlayGraphStorage {
+    fn guard_definition(&self, graph: Option<&str>) -> GraphStoreResult<()> {
+        self.write.storage.guard_definition(graph)
+    }
+    fn identifiers(&self) -> GraphStoreResult<Option<super::storage::GraphIdentifierScope<'_>>> {
+        self.write.storage.identifiers()
+    }
+    fn reset_identifiers(&self) -> GraphStoreResult<()> {
+        self.write.storage.reset_identifiers()
+    }
     fn unmodified_read_snapshot(&self) -> Option<PersistentGraphStore> {
         let state = self.state.lock();
         (state.changes.vertices.is_empty()

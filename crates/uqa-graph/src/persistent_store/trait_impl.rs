@@ -49,9 +49,15 @@ impl GraphStore for PersistentGraphStore {
         self.transaction(|store| {
             if !store.storage.has_graph(name)? {
                 store.storage.create_graph(name)?;
-                store
-                    .storage
-                    .save_registry(name, &GraphLabelRegistry::default())?;
+                let registry = GraphLabelRegistry {
+                    allocation_id: if store.storage.identifiers()?.is_some() {
+                        uqa_storage::catalog::new_nonzero_catalog_identity("graph", "allocation")?
+                    } else {
+                        [0; 16]
+                    },
+                    ..GraphLabelRegistry::default()
+                };
+                store.save_registry(name, &registry)?;
             }
             Ok(())
         })
@@ -91,6 +97,7 @@ impl GraphStore for PersistentGraphStore {
     fn add_vertex(&mut self, vertex: Vertex, graph: &str) -> GraphStoreResult<()> {
         self.transaction(|store| {
             store.require_graph(graph)?;
+            store.storage.guard_definition(Some(graph))?;
             store.reserve_id(GraphEntityKind::Vertex, vertex.vertex_id)?;
             store.storage.save_vertex(&vertex)?;
             store
@@ -100,9 +107,10 @@ impl GraphStore for PersistentGraphStore {
                 .storage
                 .memberships(GraphEntityKind::Vertex, vertex.vertex_id)?
             {
+                store.storage.guard_definition(Some(&owner))?;
                 let mut registry = store.label_registry(&owner)?;
                 if registry.observe(&vertex.label, vertex.vertex_id, LabelKind::Vertex) {
-                    store.storage.save_registry(&owner, &registry)?;
+                    store.save_registry(&owner, &registry)?;
                 }
             }
             Ok(())
@@ -118,6 +126,7 @@ impl GraphStore for PersistentGraphStore {
                 owners.push(graph.to_owned());
             }
             for owner in &owners {
+                store.storage.guard_definition(Some(owner))?;
                 for id in [edge.source_id, edge.target_id] {
                     if !store
                         .storage
@@ -139,7 +148,7 @@ impl GraphStore for PersistentGraphStore {
             for owner in owners {
                 let mut registry = store.label_registry(&owner)?;
                 if registry.observe(&edge.label, edge.edge_id, LabelKind::Edge) {
-                    store.storage.save_registry(&owner, &registry)?;
+                    store.save_registry(&owner, &registry)?;
                 }
             }
             Ok(())
@@ -407,6 +416,7 @@ impl GraphStore for PersistentGraphStore {
                 })?;
                 store.storage.save_counter(kind, 1)?;
             }
+            store.storage.reset_identifiers()?;
             Ok(())
         })
     }

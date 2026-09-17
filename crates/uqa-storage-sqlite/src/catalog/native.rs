@@ -65,7 +65,11 @@ impl Catalog {
                     .ok()
                     .and_then(|name| name.strip_prefix("graph_label_registry::"))
                 {
+                    snapshot.fence_graph_definition(batch, None, graph)?;
                     graph::paths::invalidate_graph(snapshot, batch, graph)?;
+                }
+                if row[0] == text("graph_identifier_generation") {
+                    snapshot.fence_graph_identifier_scope(batch, None)?;
                 }
             }
             if family == Family::Metadata && row[0] == text("schema_version") {

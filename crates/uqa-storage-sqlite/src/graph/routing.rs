@@ -49,6 +49,15 @@ impl RoutedGraphStorage {
 }
 
 impl GraphStorage for RoutedGraphStorage {
+    fn guard_definition(&self, graph: Option<&str>) -> GraphStoreResult<()> {
+        self.current().guard_definition(graph)
+    }
+    fn identifiers(&self) -> GraphStoreResult<Option<uqa_graph::GraphIdentifierScope<'_>>> {
+        self.current().identifiers()
+    }
+    fn reset_identifiers(&self) -> GraphStoreResult<()> {
+        self.current().reset_identifiers()
+    }
     fn begin_write(&self) -> GraphStoreResult<Box<dyn GraphWriteTransaction>> {
         self.current().begin_write()
     }

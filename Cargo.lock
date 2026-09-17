@@ -4082,6 +4082,7 @@ dependencies = [
  "tempfile",
  "uqa-analysis",
  "uqa-core",
+ "uqa-graph",
  "uqa-storage",
 ]
 

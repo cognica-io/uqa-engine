@@ -84,6 +84,7 @@ pub(in crate::catalog) fn named_graph(
     present: bool,
 ) -> Result<()> {
     if !present {
+        snapshot.fence_graph_definition(batch, None, name)?;
         remove_memberships(snapshot, batch, name, |_, _| false)?;
     }
     if snapshot.contains_row(Family::NamedGraphs, owner(snapshot), &[text(name)])? != present {

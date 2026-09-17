@@ -19,13 +19,20 @@ const METADATA_SCOPES: [(&str, &str); 3] = [
     ("graph_label_registry::", "graph"),
 ];
 
-pub(super) fn metadata_scope(name: &str) -> (&'static str, &str) {
+pub(super) fn metadata_scope(name: &str) -> Option<(&'static str, &str)> {
+    if matches!(
+        name,
+        "graph_identifier_generation" | "graph_identifier_data_revision"
+    ) || name.starts_with("graph_definition_data_revision::")
+    {
+        return None;
+    }
     for (prefix, kind) in METADATA_SCOPES {
         if let Some(name) = name.strip_prefix(prefix) {
-            return (kind, name);
+            return Some((kind, name));
         }
     }
-    ("registry", "")
+    Some(("registry", ""))
 }
 
 impl Catalog {
@@ -54,10 +61,10 @@ impl Catalog {
         has_table_name: bool,
         event: &str,
     ) -> (String, String) {
-        cache_trigger(table, has_table_name, event, true)
+        cache_trigger(table, has_table_name, event, true, true)
     }
 
-    /// Replace the known text-slicing metadata triggers without altering data or revision history. The caller owns the schema transaction.
+    /// Upgrade known metadata trigger encodings and exclude internal allocation state without altering data or revision history. The caller owns the schema transaction.
     pub(crate) fn upgrade_metadata_cache_triggers(conn: &rusqlite::Connection) -> Result<()> {
         for event in ["INSERT", "DELETE", "UPDATE"] {
             let (name, expected) = Self::cache_revision_trigger("_metadata", false, event);
@@ -71,8 +78,11 @@ impl Catalog {
             if current.as_deref() == Some(expected.as_str()) {
                 continue;
             }
-            let previous = cache_trigger("_metadata", false, event, false).1;
-            if current.as_deref() != Some(previous.as_str()) {
+            let previous = cache_trigger("_metadata", false, event, false, false).1;
+            let binary = cache_trigger("_metadata", false, event, true, false).1;
+            if current.as_deref() != Some(previous.as_str())
+                && current.as_deref() != Some(binary.as_str())
+            {
                 return Err(SQLiteError::StorageBackend(
                     "missing or changed metadata cache trigger".into(),
                 ));
@@ -148,6 +158,7 @@ fn cache_trigger(
     has_table_name: bool,
     event: &str,
     binary_names: bool,
+    exclude_allocations: bool,
 ) -> (String, String) {
     let name = format!("uqa_cache_{table}_{event}");
     let images: &[&str] = match event {
@@ -173,9 +184,15 @@ fn cache_trigger(
             .expect("write graph revision trigger");
         } else {
             let (kind, name) = revision_scope(table, has_table_name, image, binary_names);
+            let values = if table == "_metadata" && exclude_allocations {
+                let prefix = "graph_definition_data_revision::";
+                format!("SELECT {kind}, {name}, 1 WHERE {image}.key NOT IN ('graph_identifier_generation', 'graph_identifier_data_revision') AND substr(CAST({image}.key AS BLOB), 1, {}) != CAST('{prefix}' AS BLOB)", prefix.len())
+            } else {
+                format!("VALUES ({kind}, {name}, 1)")
+            };
             write!(
                 body,
-                "INSERT INTO _cache_revisions(kind, name, generation) VALUES ({kind}, {name}, 1) \
+                "INSERT INTO _cache_revisions(kind, name, generation) {values} \
                          ON CONFLICT(kind, name) DO UPDATE SET generation = generation + 1;"
             )
             .expect("write catalog revision trigger");

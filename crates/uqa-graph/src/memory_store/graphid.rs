@@ -27,7 +27,7 @@ pub const FIRST_USER_LABEL_ID: u32 = 3;
 /// 64-bit agtype integer.
 pub const MAX_GRAPHID_LABEL_ID: u32 = 32_767;
 
-pub(super) const MAX_GRAPHID_SEQUENCE: u64 = (1_u64 << GRAPHID_LABEL_SHIFT) - 1;
+pub(crate) const MAX_GRAPHID_SEQUENCE: u64 = (1_u64 << GRAPHID_LABEL_SHIFT) - 1;
 const MAX_EXACT_F64_INTEGER: u64 = 9_007_199_254_740_992;
 
 pub(crate) fn usize_to_f64_exact(value: usize, context: &str) -> GraphStoreResult<f64> {
@@ -135,6 +135,8 @@ pub struct GraphLabelInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GraphLabelRegistry {
+    /// Persistent allocation identity, preserved by rename. Zero denotes a legacy registry or an in-memory graph.
+    pub allocation_id: [u8; 16],
     /// Label name -> AGE label id. Vertex and edge labels share the
     /// namespace-wide counter; the reserved names for ids 1 / 2 are
     /// not stored here (empty labels map onto them implicitly).
@@ -156,6 +158,7 @@ pub struct GraphLabelRegistry {
 impl Default for GraphLabelRegistry {
     fn default() -> Self {
         Self {
+            allocation_id: [0; 16],
             labels: BTreeMap::new(),
             kinds: BTreeMap::new(),
             sequences: BTreeMap::new(),

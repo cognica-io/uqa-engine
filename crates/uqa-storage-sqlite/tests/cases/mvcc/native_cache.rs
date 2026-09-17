@@ -26,6 +26,33 @@ fn write(connection: &ManagedConnection, table: &str, id: u64, value: i64) {
 }
 
 #[test]
+fn native_graph_identifier_guards_preserve_private_and_committed_cache_generations() {
+    use std::sync::Arc;
+    use uqa_graph::{GraphStore, LabelKind, PersistentGraphStore};
+    use uqa_storage_sqlite::SQLiteStorageBackend;
+
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let catalog = Catalog::open(connection.clone()).unwrap();
+    bind(&connection);
+    let mut graph = PersistentGraphStore::from_catalog(
+        Arc::new(Catalog::open(connection.clone()).unwrap()),
+        Arc::new(SQLiteStorageBackend::new(connection.clone())),
+    );
+    graph.create_graph("g\0日本語").unwrap();
+    graph
+        .create_label("g\0日本語", "item", LabelKind::Vertex)
+        .unwrap();
+    let before = catalog.cache_revisions().unwrap();
+    connection.begin_transaction().unwrap();
+    graph.allocate_vertex_id("item", "g\0日本語").unwrap();
+    assert_eq!(catalog.cache_revisions().unwrap(), before);
+    connection.commit_transaction().unwrap();
+    assert_eq!(catalog.cache_revisions().unwrap(), before);
+    Catalog::open(connection.clone()).unwrap();
+    assert_eq!(catalog.cache_revisions().unwrap(), before);
+}
+
+#[test]
 fn native_cache_generations_merge_independent_commits_and_reopen_in_every_mode() {
     let directory = tempfile::tempdir().unwrap();
     for mode in MODES {

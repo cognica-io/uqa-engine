@@ -15,6 +15,36 @@ use super::{
 };
 
 impl KeyValueCatalog {
+    pub(super) fn guard_graph_definition_impl(
+        &self,
+        graph: Option<&str>,
+    ) -> StorageBackendResult<()> {
+        self.store.with_mutation(&mut |_, batch| {
+            batch.require_unchanged(&single_str_key(
+                TAG_METADATA,
+                "graph_identifier_generation",
+            )?)?;
+            batch.touch_marker(
+                &single_str_key(TAG_METADATA, "graph_identifier_data_revision")?,
+                &string_value("1"),
+            )?;
+            if let Some(graph) = graph {
+                batch.require_unchanged(&single_str_key(TAG_NAMED_GRAPH, graph)?)?;
+                batch.require_unchanged(&single_str_key(
+                    TAG_METADATA,
+                    &format!("graph_label_registry::{graph}"),
+                )?)?;
+                batch.touch_marker(
+                    &single_str_key(
+                        TAG_METADATA,
+                        &format!("graph_definition_data_revision::{graph}"),
+                    )?,
+                    &string_value("1"),
+                )?;
+            }
+            Ok(())
+        })
+    }
     pub(super) fn save_named_graph_impl(&self, name: &str) -> StorageBackendResult<()> {
         self.ensure_graph_lookup_indexes()?;
         self.store.put(&single_str_key(TAG_NAMED_GRAPH, name)?, &[])
@@ -23,6 +53,12 @@ impl KeyValueCatalog {
     pub(super) fn drop_named_graph_impl(&self, name: &str) -> StorageBackendResult<()> {
         self.ensure_graph_lookup_indexes()?;
         let mut batch = self.store.batch();
+        if self.store.identifier_allocator().is_some() {
+            batch.fence_record(&single_str_key(
+                TAG_METADATA,
+                &format!("graph_definition_data_revision::{name}"),
+            )?)?;
+        }
         batch.delete(&single_str_key(TAG_NAMED_GRAPH, name)?)?;
         self.delete_graph_memberships_into(batch.as_mut(), name)?;
         batch.commit()

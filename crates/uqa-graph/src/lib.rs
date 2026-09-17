@@ -76,4 +76,7 @@ pub use temporal::{TemporalFilter, TemporalPatternMatch, TemporalTraverse};
 pub use types::Direction;
 pub use versioned_store::VersionedGraphStore;
 
-pub use persistent_store::storage::{begin_graph_write, GraphStorage, GraphWriteTransaction};
+pub use persistent_store::storage::{
+    begin_graph_write, decode_identifier_generation, GraphIdentifierScope, GraphStorage,
+    GraphWriteTransaction,
+};

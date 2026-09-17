@@ -368,6 +368,28 @@ impl CatalogFacade for KeyValueCatalog {
     fn save_named_graph(&self, name: &str) -> StorageBackendResult<()> {
         self.save_named_graph_impl(name)
     }
+    fn guard_graph_definition(&self, graph: Option<&str>) -> StorageBackendResult<()> {
+        self.guard_graph_definition_impl(graph)
+    }
+    fn load_named_graph_snapshot(&self, name: &str) -> StorageBackendResult<Option<GraphSnapshot>> {
+        let mut result = crate::catalog::graph_snapshot::load(self, name)?;
+        if let (Some(snapshot), Some(allocator)) =
+            (result.as_mut(), self.store.identifier_allocator())
+        {
+            let generation = self
+                .get_metadata("graph_identifier_generation")?
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?
+                .unwrap_or([0; 16]);
+            snapshot.label_registry_json = crate::catalog::graph_identifiers::export_registry(
+                &snapshot.label_registry_json,
+                name,
+                crate::catalog::graph_identifiers::GraphIdentifierNamespace::new(None, generation),
+                |key| allocator.identifier_watermark(key),
+            )?;
+        }
+        Ok(result)
+    }
 
     fn drop_named_graph(&self, name: &str) -> StorageBackendResult<()> {
         self.drop_named_graph_impl(name)

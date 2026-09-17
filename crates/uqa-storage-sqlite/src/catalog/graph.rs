@@ -18,8 +18,30 @@ impl Catalog {
     /// Indexed, graph-scoped hydration. LEFT JOIN retains invalid memberships
     /// so missing entities cannot silently disappear from a restored graph.
     pub fn load_named_graph_snapshot(&self, name: &str) -> Result<Option<GraphSnapshot>> {
-        if let Some(snapshot) = self.read_native(|snapshot| graph::load_snapshot(snapshot, name))? {
-            return Ok(snapshot);
+        if let Some(mut result) =
+            self.read_native(|snapshot| graph::load_snapshot(snapshot, name))?
+        {
+            if let Some(snapshot) = result.as_mut() {
+                let generation = self
+                    .get_metadata("graph_identifier_generation")?
+                    .map(|value| serde_json::from_str(&value))
+                    .transpose()?
+                    .unwrap_or([0; 16]);
+                snapshot.label_registry_json =
+                    uqa_storage::catalog::graph_identifiers::export_registry(
+                        &snapshot.label_registry_json,
+                        name,
+                        uqa_storage::catalog::graph_identifiers::GraphIdentifierNamespace::new(
+                            None, generation,
+                        ),
+                        |key| {
+                            self.conn
+                                .native_identifier_watermark(key)
+                                .map_err(Into::into)
+                        },
+                    )?;
+            }
+            return Ok(result);
         }
         self.conn.with(|conn| {
             let exists: bool = conn.query_row(

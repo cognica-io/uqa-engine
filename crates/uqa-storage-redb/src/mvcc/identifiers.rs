@@ -25,7 +25,7 @@ fn validate_metadata(
     if codec::database_id(metadata)? != store.identity {
         return Err(VersionError::WrongDatabase);
     }
-    if codec::read_u64(metadata, "format")? != 6 {
+    if codec::read_u64(metadata, "format")? != 7 {
         return Err(VersionError::InvalidEncoding("unknown record format"));
     }
     Ok(())

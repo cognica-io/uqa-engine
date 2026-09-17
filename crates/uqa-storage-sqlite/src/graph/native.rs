@@ -116,6 +116,9 @@ impl NativeGraphStorage {
     pub(super) fn save_metadata(&self, key: &str, value: &str) -> Result<()> {
         self.connection
             .with_native_write(|snapshot, batch| {
+                if key == "identifier_generation" {
+                    snapshot.fence_graph_identifier_scope(batch, Some(&self.scope))?;
+                }
                 snapshot.put_row(
                     batch,
                     Family::StandaloneGraphMetadata,
@@ -187,6 +190,33 @@ impl NativeGraphStorage {
 }
 
 impl GraphStorage for NativeGraphStorage {
+    fn guard_definition(&self, graph: Option<&str>) -> GraphStoreResult<()> {
+        self.write(|snapshot, batch| {
+            snapshot.guard_graph_definition(batch, Some(&self.scope), graph)
+        })
+    }
+    fn identifiers(&self) -> GraphStoreResult<Option<uqa_graph::GraphIdentifierScope<'_>>> {
+        let Some(allocator) = self.backend.identifier_allocator() else {
+            return Ok(None);
+        };
+        let generation = uqa_graph::decode_identifier_generation(
+            self.metadata("identifier_generation")
+                .map_err(|error| sqlite_graph_error(&error))?
+                .as_deref(),
+        )?;
+        Ok(Some(uqa_graph::GraphIdentifierScope::standalone(
+            allocator,
+            &self.scope,
+            generation,
+        )))
+    }
+    fn reset_identifiers(&self) -> GraphStoreResult<()> {
+        let generation = uqa_storage::catalog::new_nonzero_catalog_identity("graph", "generation")?;
+        let value = serde_json::to_string(&generation)
+            .map_err(|error| GraphStoreError::CorruptGraph(error.to_string()))?;
+        self.save_metadata("identifier_generation", &value)
+            .map_err(|error| sqlite_graph_error(&error))
+    }
     fn begin_write(&self) -> GraphStoreResult<Box<dyn GraphWriteTransaction>> {
         begin_graph_write(Arc::clone(&self.backend))
     }
@@ -228,6 +258,7 @@ impl GraphStorage for NativeGraphStorage {
     }
     fn delete_graph(&self, graph: &str) -> GraphStoreResult<()> {
         self.write(|snapshot, batch| {
+            snapshot.fence_graph_definition(batch, Some(&self.scope), graph)?;
             snapshot.delete_prefix(
                 batch,
                 Family::StandaloneGraphCatalog,
@@ -250,6 +281,7 @@ impl GraphStorage for NativeGraphStorage {
     }
     fn save_registry(&self, graph: &str, registry: &GraphLabelRegistry) -> GraphStoreResult<()> {
         self.write(|snapshot, batch| {
+            snapshot.fence_graph_definition(batch, Some(&self.scope), graph)?;
             if snapshot.contains_row(
                 Family::StandaloneGraphCatalog,
                 owner(snapshot),

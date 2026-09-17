@@ -93,7 +93,22 @@ impl KeyValueCatalog {
     pub(super) fn set_metadata_impl(&self, key: &str, value: &str) -> StorageBackendResult<()> {
         if let Some(graph) = key.strip_prefix("graph_label_registry::") {
             let mut batch = self.store.batch();
+            if self.store.identifier_allocator().is_some() {
+                batch.fence_record(&single_str_key(
+                    TAG_METADATA,
+                    &format!("graph_definition_data_revision::{graph}"),
+                )?)?;
+            }
             self.invalidate_graph_path_data(batch.as_mut(), graph)?;
+            batch.put(&single_str_key(TAG_METADATA, key)?, &string_value(value))?;
+            return batch.commit();
+        }
+        if key == "graph_identifier_generation" && self.store.identifier_allocator().is_some() {
+            let mut batch = self.store.batch();
+            batch.fence_record(&single_str_key(
+                TAG_METADATA,
+                "graph_identifier_data_revision",
+            )?)?;
             batch.put(&single_str_key(TAG_METADATA, key)?, &string_value(value))?;
             return batch.commit();
         }

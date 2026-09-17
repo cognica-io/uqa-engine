@@ -193,7 +193,10 @@ impl NativeSnapshot {
             {
                 let name = string(value).map_err(|error| VersionError::Storage(error.into()))?;
                 let (kind, name) = if family == Family::Metadata {
-                    metadata_scope(name)
+                    let Some(scope) = metadata_scope(name) else {
+                        return Ok(());
+                    };
+                    scope
                 } else {
                     ("graph", name)
                 };

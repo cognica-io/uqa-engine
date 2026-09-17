@@ -25,6 +25,57 @@ fn build(catalog: &Catalog, index: &str, graph: &str) {
 }
 
 #[test]
+fn independent_native_label_allocations_commit_and_reopen() {
+    use std::sync::Arc;
+    use uqa_core::Vertex;
+    use uqa_graph::{GraphStore, PersistentGraphStore};
+    use uqa_storage_sqlite::SQLiteStorageBackend;
+
+    for mode in MODES {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("graph-allocations.db");
+        let a = open(mode, &path);
+        Catalog::open(a.clone()).unwrap();
+        bind(&a);
+        let graph = |connection: &ManagedConnection| {
+            PersistentGraphStore::from_catalog(
+                Arc::new(Catalog::open(connection.clone()).unwrap()),
+                Arc::new(SQLiteStorageBackend::new(connection.clone())),
+            )
+        };
+        let mut left = graph(&a);
+        left.create_graph("g").unwrap();
+        let baseline = left.allocate_vertex_id("item", "g").unwrap();
+        left.add_vertex(Vertex::new(baseline, "item"), "g").unwrap();
+        let b = open(mode, &path);
+        bind(&b);
+        let mut right = graph(&b);
+        a.begin_transaction().unwrap();
+        let first = left.allocate_vertex_id("item", "g").unwrap();
+        left.add_vertex(Vertex::new(first, "item"), "g").unwrap();
+        b.begin_transaction().unwrap();
+        let second = right.allocate_vertex_id("item", "g").unwrap();
+        assert_ne!(
+            first, second,
+            "independent sessions reused a graph identity"
+        );
+        right.add_vertex(Vertex::new(second, "item"), "g").unwrap();
+        b.commit_transaction().unwrap();
+        assert!(a.in_transaction());
+        assert!(left.get_vertex(second).unwrap().is_none());
+        a.commit_transaction().unwrap();
+        assert!(left.get_vertex(second).unwrap().is_some());
+        assert!(right.get_vertex(first).unwrap().is_some());
+        drop((left, right, a, b));
+        let connection = open(mode, &path);
+        bind(&connection);
+        let mut reopened = graph(&connection);
+        assert_eq!(reopened.vertices_in_graph("g").unwrap().len(), 3);
+        assert!(reopened.allocate_vertex_id("item", "g").unwrap() > first.max(second));
+    }
+}
+
+#[test]
 fn independent_native_graph_sources_commit_with_cache_effects_and_reopen_in_every_mode() {
     let directory = tempfile::tempdir().unwrap();
     for mode in MODES {

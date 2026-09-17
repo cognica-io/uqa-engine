@@ -18,6 +18,7 @@ redb = { workspace = true }
 getrandom = { workspace = true }
 
 [dev-dependencies]
+uqa-graph = { workspace = true }
 uqa-core = { workspace = true }
 allocation-counter = "=0.8.1"
 serde_json = { workspace = true }

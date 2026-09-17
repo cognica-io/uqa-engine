@@ -69,50 +69,61 @@ const LEGACY_METADATA_INSERT: &str = "CREATE TRIGGER \"uqa_cache__metadata_INSER
 #[test]
 fn cache_trigger_upgrade_preserves_counters_and_native_history_and_is_idempotent() {
     use uqa_storage::{mvcc::VersionedPersistence, read_control::StorageReadControl};
-    for native in [false, true] {
-        let connection = ManagedConnection::open_in_memory().unwrap();
-        let catalog = Catalog::open(connection.clone()).unwrap();
-        catalog.save_named_graph("g\0日本語").unwrap();
-        let baseline = catalog.cache_revisions().unwrap().graphs;
-        let control = StorageReadControl::with_limit(1 << 20);
-        let records =
-            native.then(|| crate::SQLiteRecordStore::for_native(&connection, &control).unwrap());
-        let history = || {
-            connection.record_connection().with(|conn| {
+    for binary_names in [false, true] {
+        for native in [false, true] {
+            let connection = ManagedConnection::open_in_memory().unwrap();
+            let catalog = Catalog::open(connection.clone()).unwrap();
+            catalog.save_named_graph("g\0日本語").unwrap();
+            let baseline = catalog.cache_revisions().unwrap().graphs;
+            let control = StorageReadControl::with_limit(1 << 20);
+            let records = native
+                .then(|| crate::SQLiteRecordStore::for_native(&connection, &control).unwrap());
+            let history = || {
+                connection.record_connection().with(|conn| {
             Ok(conn.prepare("SELECT key, sequence, value FROM _uqa_mvcc_versions ORDER BY key, sequence")?
                 .query_map([], |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?, row.get::<_, Option<Vec<u8>>>(2)?)))?
                 .collect::<rusqlite::Result<Vec<_>>>()?)
         }).unwrap()
-        };
-        let before_history = native.then(history);
-        connection
-            .record_connection()
-            .with(|conn| {
-                conn.execute_batch("DROP TRIGGER uqa_cache__metadata_INSERT")?;
-                conn.execute_batch(LEGACY_METADATA_INSERT)?;
-                Ok(())
-            })
-            .unwrap();
-        if let Some(records) = records {
-            let before = records.snapshot(&control).unwrap().sequence();
-            let reopened = crate::SQLiteRecordStore::for_native(&connection, &control).unwrap();
-            assert_eq!(reopened.database_id(), records.database_id());
-            assert_eq!(reopened.snapshot(&control).unwrap().sequence(), before);
-            assert_eq!(Some(history()), before_history);
+            };
+            let before_history = native.then(history);
             connection
-                .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+                .record_connection()
+                .with(|conn| {
+                    conn.execute_batch("DROP TRIGGER uqa_cache__metadata_INSERT")?;
+                    let mut previous = LEGACY_METADATA_INSERT.to_owned();
+                    if binary_names {
+                        for offset in [31, 22, 23] {
+                            previous = previous.replace(
+                                &format!("substr(NEW.key, {offset})"),
+                                &format!("CAST(substr(CAST(NEW.key AS BLOB), {offset}) AS TEXT)"),
+                            );
+                        }
+                    }
+                    conn.execute_batch(&previous)?;
+                    Ok(())
+                })
                 .unwrap();
-        } else {
+            if let Some(records) = records {
+                let before = records.snapshot(&control).unwrap().sequence();
+                let reopened = crate::SQLiteRecordStore::for_native(&connection, &control).unwrap();
+                assert_eq!(reopened.database_id(), records.database_id());
+                assert_eq!(reopened.snapshot(&control).unwrap().sequence(), before);
+                assert_eq!(Some(history()), before_history);
+                connection
+                    .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+                    .unwrap();
+            } else {
+                Catalog::open(connection.clone()).unwrap();
+            }
+            assert_eq!(catalog.cache_revisions().unwrap().graphs, baseline);
+            let stable = catalog.cache_revisions().unwrap();
             Catalog::open(connection.clone()).unwrap();
+            assert_eq!(catalog.cache_revisions().unwrap(), stable);
+            catalog
+                .set_metadata("graph_label_registry::g\0日本語", "{}")
+                .unwrap();
+            assert_ne!(catalog.cache_revisions().unwrap().graphs, baseline);
         }
-        assert_eq!(catalog.cache_revisions().unwrap().graphs, baseline);
-        let stable = catalog.cache_revisions().unwrap();
-        Catalog::open(connection.clone()).unwrap();
-        assert_eq!(catalog.cache_revisions().unwrap(), stable);
-        catalog
-            .set_metadata("graph_label_registry::g\0日本語", "{}")
-            .unwrap();
-        assert_ne!(catalog.cache_revisions().unwrap().graphs, baseline);
     }
 }
 

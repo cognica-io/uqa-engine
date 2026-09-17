@@ -17,7 +17,8 @@ use crate::backend::{StorageBackendError, StorageBackendResult};
 
 mod cache_revisions;
 mod graph_access;
-mod graph_snapshot;
+pub mod graph_identifiers;
+pub(crate) mod graph_snapshot;
 mod identity;
 mod relation;
 mod schema;
@@ -499,6 +500,12 @@ pub trait CatalogFacade: Send + Sync {
     fn load_views(&self) -> StorageBackendResult<Vec<ViewRow>>;
 
     fn save_named_graph(&self, name: &str) -> StorageBackendResult<()>;
+    /// Bind graph mutations to their definition and allocation generation while allowing independent data writers to share the definition. Concurrent backends and catalog wrappers must implement this capability.
+    fn guard_graph_definition(&self, _graph: Option<&str>) -> StorageBackendResult<()> {
+        Err(crate::StorageBackendError::Other(
+            "graph definition guards are not supported".into(),
+        ))
+    }
     fn drop_named_graph(&self, name: &str) -> StorageBackendResult<()>;
     fn load_named_graphs(&self) -> StorageBackendResult<Vec<String>>;
     fn named_graph_exists(&self, name: &str) -> StorageBackendResult<bool>;

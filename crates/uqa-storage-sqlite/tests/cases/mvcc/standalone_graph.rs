@@ -26,6 +26,45 @@ fn vertex(id: u64, value: i64) -> Vertex {
 }
 
 #[test]
+fn independent_standalone_label_allocations_commit_and_reopen() {
+    for mode in MODES {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("standalone-allocations.db");
+        let a = open(mode, &path);
+        let mut left = SQLiteGraphStore::open(a.clone(), Some("direct")).unwrap();
+        left.create_graph("g").unwrap();
+        let baseline = left.allocate_vertex_id("item", "g").unwrap();
+        left.add_vertex(vertex(baseline, 0), "g").unwrap();
+        bind(&a);
+        let b = open(mode, &path);
+        bind(&b);
+        let mut right = SQLiteGraphStore::open(b.clone(), Some("direct")).unwrap();
+        a.begin_transaction().unwrap();
+        let first = left.allocate_vertex_id("item", "g").unwrap();
+        left.add_vertex(vertex(first, 10), "g").unwrap();
+        b.begin_transaction().unwrap();
+        let second = right.allocate_vertex_id("item", "g").unwrap();
+        assert_ne!(
+            first, second,
+            "independent sessions reused a graph identity"
+        );
+        right.add_vertex(vertex(second, 20), "g").unwrap();
+        b.commit_transaction().unwrap();
+        assert!(a.in_transaction());
+        assert!(left.get_vertex(second).unwrap().is_none());
+        a.commit_transaction().unwrap();
+        assert_eq!(left.get_vertex(second).unwrap(), Some(vertex(second, 20)));
+        assert_eq!(right.get_vertex(first).unwrap(), Some(vertex(first, 10)));
+        drop((left, right, a, b));
+        let connection = open(mode, &path);
+        bind(&connection);
+        let mut reopened = SQLiteGraphStore::open(connection, Some("direct")).unwrap();
+        assert_eq!(reopened.vertices_in_graph("g").unwrap().len(), 3);
+        assert!(reopened.allocate_vertex_id("item", "g").unwrap() > first.max(second));
+    }
+}
+
+#[test]
 fn standalone_graph_namespaces_merge_independent_vertices_in_native_sessions() {
     for mode in MODES {
         let directory = tempfile::tempdir().unwrap();

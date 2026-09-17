@@ -36,7 +36,7 @@ pub(super) fn header(connection: &Connection, expected: DatabaseId) -> PhysicalR
     let row = rows
         .next()?
         .ok_or(VersionError::InvalidEncoding("missing record metadata"))?;
-    if row.get::<_, i64>(0)? != 6 {
+    if row.get::<_, i64>(0)? != 7 {
         return Err(VersionError::InvalidEncoding("unknown record format").into());
     }
     let database = identity(bytes(row, 1)?)?;

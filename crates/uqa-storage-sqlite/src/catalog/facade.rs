@@ -18,6 +18,15 @@ fn into_storage_result<T>(result: Result<T>) -> StorageBackendResult<T> {
 }
 
 impl CatalogFacade for Catalog {
+    fn guard_graph_definition(&self, graph: Option<&str>) -> StorageBackendResult<()> {
+        into_storage_result(
+            self.conn
+                .with_native_write(|snapshot, batch| {
+                    snapshot.guard_graph_definition(batch, None, graph)
+                })
+                .map(|_| ()),
+        )
+    }
     fn transaction_affinity(&self) -> Option<uqa_storage::StorageSessionAffinity> {
         Some(self.conn.transaction_affinity())
     }
