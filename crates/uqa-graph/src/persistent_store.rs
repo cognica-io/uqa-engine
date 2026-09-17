@@ -223,7 +223,9 @@ impl PersistentGraphStore {
             GraphStoreError::IdExhausted(format!("{} id counter overflow", kind.as_str()))
         })?;
         let previous = self.next_counter(kind)?;
-        self.storage.save_counter(kind, next.max(previous))?;
+        if next > previous || self.storage.counter(kind)?.is_none() {
+            self.storage.save_counter(kind, next.max(previous))?;
+        }
         Ok(())
     }
 
@@ -314,7 +316,7 @@ impl PersistentGraphStore {
                             id,
                             LabelKind::Edge,
                         ),
-                    }
+                    };
                     Ok(())
                 })?;
             }

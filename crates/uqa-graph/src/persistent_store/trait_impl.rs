@@ -101,8 +101,9 @@ impl GraphStore for PersistentGraphStore {
                 .memberships(GraphEntityKind::Vertex, vertex.vertex_id)?
             {
                 let mut registry = store.label_registry(&owner)?;
-                registry.observe(&vertex.label, vertex.vertex_id, LabelKind::Vertex);
-                store.storage.save_registry(&owner, &registry)?;
+                if registry.observe(&vertex.label, vertex.vertex_id, LabelKind::Vertex) {
+                    store.storage.save_registry(&owner, &registry)?;
+                }
             }
             Ok(())
         })
@@ -137,8 +138,9 @@ impl GraphStore for PersistentGraphStore {
                 .attach(GraphEntityKind::Edge, edge.edge_id, graph)?;
             for owner in owners {
                 let mut registry = store.label_registry(&owner)?;
-                registry.observe(&edge.label, edge.edge_id, LabelKind::Edge);
-                store.storage.save_registry(&owner, &registry)?;
+                if registry.observe(&edge.label, edge.edge_id, LabelKind::Edge) {
+                    store.storage.save_registry(&owner, &registry)?;
+                }
             }
             Ok(())
         })
