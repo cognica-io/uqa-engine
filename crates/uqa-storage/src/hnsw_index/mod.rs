@@ -12,12 +12,14 @@ mod metric;
 mod mutation;
 mod neighbors;
 mod persistence;
+mod prepare;
 mod restore;
 mod search;
 mod types;
 mod validation;
 
 pub use metric::MAX_HNSW_LEVEL;
+pub use prepare::HNSWMutation;
 pub use types::HNSWIndex;
 pub use types::{HNSWGraphMeta, HNSWNodeSnapshot, HNSWPersistenceDelta};
 

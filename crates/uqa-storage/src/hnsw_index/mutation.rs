@@ -8,6 +8,7 @@
 
 use uqa_core::DocId;
 
+use super::prepare::{check, Control};
 use super::types::HNSWIndex;
 use crate::vector_index::validate_vector_values;
 use crate::{StorageBackendError, StorageBackendResult};
@@ -17,8 +18,10 @@ impl HNSWIndex {
         &mut self,
         doc_id: DocId,
         vectors: Vec<Vec<f32>>,
+        control: Control<'_>,
     ) -> StorageBackendResult<()> {
         for vector in &vectors {
+            check(control)?;
             validate_vector_values(self.dimensions, vector)?;
         }
         if u64::try_from(vectors.len()).unwrap_or(u64::MAX) > u64::from(u32::MAX) + 1 {
@@ -32,19 +35,28 @@ impl HNSWIndex {
         self.next_node_id
             .checked_add(inserted)
             .ok_or_else(|| StorageBackendError::Other("HNSW node id space exhausted".into()))?;
-        self.mark_document_deleted(doc_id)?;
+        self.mark_document_deleted(doc_id, control)?;
         for (ordinal, vector) in vectors.into_iter().enumerate() {
-            self.insert_vector(doc_id, ordinal as u32, vector)?;
+            check(control)?;
+            self.insert_vector(doc_id, ordinal as u32, vector, control)?;
         }
-        self.maybe_rebuild()
+        self.maybe_rebuild(control)
     }
 
-    pub(super) fn mark_document_deleted(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
+    pub(super) fn mark_document_deleted(
+        &mut self,
+        doc_id: DocId,
+        control: Control<'_>,
+    ) -> StorageBackendResult<()> {
+        check(control)?;
         let node_ids = self
             .active
             .range((doc_id, 0)..=(doc_id, u32::MAX))
-            .map(|(_, node_id)| *node_id)
-            .collect::<Vec<_>>();
+            .map(|(_, node_id)| {
+                check(control)?;
+                Ok(*node_id)
+            })
+            .collect::<StorageBackendResult<Vec<_>>>()?;
         let next_deleted_count =
             self.deleted_count
                 .checked_add(node_ids.len())
@@ -60,6 +72,7 @@ impl HNSWIndex {
             )));
         }
         for node_id in node_ids {
+            check(control)?;
             let node = self
                 .nodes
                 .get_mut(&node_id)
@@ -72,18 +85,20 @@ impl HNSWIndex {
         Ok(())
     }
 
-    pub(super) fn maybe_rebuild(&mut self) -> StorageBackendResult<()> {
+    pub(super) fn maybe_rebuild(&mut self, control: Control<'_>) -> StorageBackendResult<()> {
+        check(control)?;
         if self.deleted_count >= self.params.rebuild_threshold {
-            self.rebuild()?;
+            self.rebuild(control)?;
         }
         Ok(())
     }
 
-    fn rebuild(&mut self) -> StorageBackendResult<()> {
+    fn rebuild(&mut self, control: Control<'_>) -> StorageBackendResult<()> {
         let live = self
             .active
             .iter()
             .map(|(&(doc_id, ordinal), node_id)| {
+                check(control)?;
                 self.nodes
                     .get(node_id)
                     .map(|node| (doc_id, ordinal, node.raw_vector.clone()))
@@ -103,7 +118,8 @@ impl HNSWIndex {
         self.dirty_nodes.clear();
         self.full_rewrite = true;
         for (doc_id, ordinal, vector) in live {
-            self.insert_vector(doc_id, ordinal, vector)?;
+            check(control)?;
+            self.insert_vector(doc_id, ordinal, vector, control)?;
         }
         Ok(())
     }

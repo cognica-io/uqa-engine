@@ -13,7 +13,7 @@ use super::codec::{other_error, vector_field_prefix};
 use super::hnsw_persistence;
 use super::index_keys::{hnsw_metadata_key, hnsw_node_prefix};
 use super::{KeyValueBatch, KeyValueRead, KeyValueStore, KeyValueVectorIndex};
-use crate::hnsw_index::{HNSWIndex, HNSWPersistenceDelta};
+use crate::hnsw_index::{HNSWIndex, HNSWMutation, HNSWPersistenceDelta};
 use crate::vector_index::{HNSWIndexParams, VectorIndex};
 use crate::{StorageBackendError, StorageBackendResult};
 
@@ -109,18 +109,15 @@ impl KeyValueHNSWIndex {
 
     fn mutate_graph(
         &self,
-        mutate: impl FnOnce(&mut HNSWIndex, &mut dyn KeyValueBatch) -> StorageBackendResult<()>,
+        mutation: HNSWMutation<'_>,
+        canonical: impl FnOnce(&mut dyn KeyValueBatch) -> StorageBackendResult<()>,
     ) -> StorageBackendResult<()> {
         self.view.evaluate(self.store.as_ref(), |read, batch| {
             let cached = self.graph_at(read)?;
-            let mut graph = cached.value.as_ref().clone();
-            mutate(&mut graph, batch)?;
+            let delta = cached.value.prepare_delta(mutation, read.control())?;
+            canonical(batch)?;
             // Only a later reader publishes the graph with its actual committed/private identity.
-            self.stage_delta(
-                batch,
-                &graph.take_persistence_delta(),
-                next_revision(cached.revision)?,
-            )
+            self.stage_delta(batch, &delta, next_revision(cached.revision)?)
         })
     }
 
@@ -133,12 +130,14 @@ impl KeyValueHNSWIndex {
                     self.table, self.field
                 )));
             }
-            let mut graph = self.build_from_canonical(read)?;
-            self.stage_delta(
-                batch,
-                &graph.take_persistence_delta(),
-                next_revision(revision)?,
-            )
+            let vectors = self.raw.load_all_from(read)?;
+            let delta = HNSWIndex::prepare_canonical(
+                self.dimensions,
+                self.params,
+                &vectors,
+                read.control(),
+            )?;
+            self.stage_delta(batch, &delta, next_revision(revision)?)
         })
     }
 
@@ -187,22 +186,21 @@ impl VectorIndex for KeyValueHNSWIndex {
         self.add_many(doc_id, vec![vector])
     }
     fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>) -> StorageBackendResult<()> {
-        self.mutate_graph(|graph, batch| {
-            self.raw.stage_replace(batch, doc_id, &vectors)?;
-            graph.add_many(doc_id, vectors)
-        })
+        self.mutate_graph(
+            HNSWMutation::Replace {
+                document: doc_id,
+                vectors: &vectors,
+            },
+            |batch| self.raw.stage_replace(batch, doc_id, &vectors),
+        )
     }
     fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
-        self.mutate_graph(|graph, batch| {
-            self.raw.stage_replace(batch, doc_id, &[])?;
-            graph.delete(doc_id)
+        self.mutate_graph(HNSWMutation::Delete(doc_id), |batch| {
+            self.raw.stage_replace(batch, doc_id, &[])
         })
     }
     fn clear(&mut self) -> StorageBackendResult<()> {
-        self.mutate_graph(|graph, batch| {
-            self.raw.stage_clear(batch)?;
-            graph.clear()
-        })
+        self.mutate_graph(HNSWMutation::Clear, |batch| self.raw.stage_clear(batch))
     }
     fn search_knn(&self, query: &[f32], k: usize) -> StorageBackendResult<PostingList> {
         self.read_graph()?.value.search_knn(query, k)

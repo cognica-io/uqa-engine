@@ -32,12 +32,12 @@ impl VectorIndex for HNSWIndex {
     }
 
     fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>) -> StorageBackendResult<()> {
-        self.replace_document_vectors(doc_id, vectors)
+        self.replace_document_vectors(doc_id, vectors, None)
     }
 
     fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
-        self.mark_document_deleted(doc_id)?;
-        self.maybe_rebuild()
+        self.mark_document_deleted(doc_id, None)?;
+        self.maybe_rebuild(None)
     }
 
     fn clear(&mut self) -> StorageBackendResult<()> {
@@ -62,7 +62,7 @@ impl VectorIndex for HNSWIndex {
         let mut scored = Vec::<(DocId, f32)>::with_capacity(ef);
         loop {
             scored.clear();
-            for candidate in self.query_candidates(&normalized_query, ef) {
+            for candidate in self.query_candidates(&normalized_query, ef, None)? {
                 let Some(node) = self.nodes.get(&candidate.node_id) else {
                     continue;
                 };

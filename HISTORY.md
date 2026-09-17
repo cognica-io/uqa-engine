@@ -19,6 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Bound native SQLite and Key/Value HNSW candidate preparation and explicit reconstruction under the caller’s memory and cancellation allowance. Preserve serial graph topology, node allocation, compaction and incremental deltas while keeping failed candidates separate from the source. Reject incomplete canonical tensor ordinals during reconstruction. HNSW concurrent generation merging remains in progress.
 - Merge independent native SQLite, SQLite Key/Value and redb writers sharing one IVF index, preserving ordered training changes, tensors, snapshots and savepoint undo. Retain conflicts for overlapping documents and index lifecycle changes, reject mismatched canonical inputs, and resolve publication retries with the original receipt identity. Development MVCC record format 3 upgrades formats 1/2, and native mapping format 6 adds IVF guards with an atomic upgrade from mappings 1–5. Both preserve existing source histories and IVF row encodings. HNSW merging and concurrent Engine SQL remain in progress.
 - Preserve bound native SQLite IVF centroids and deletion counters through ordinary document changes, and retrain at the common storage threshold. Native and Key/Value IVF mutations now share bounded, cancellable candidate preparation. Reject missing or inconsistent native IVF generations instead of silently using exact search; explicit initialization rebuilds from canonical tensors. HNSW merging remains in progress.
 

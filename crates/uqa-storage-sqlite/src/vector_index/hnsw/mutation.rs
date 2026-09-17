@@ -14,7 +14,7 @@ use uqa_core::DocId;
 use super::{loading::load_meta_from, SQLiteHNSWIndex};
 use crate::vector_index::{encode_doc_id, EncodedVector};
 use crate::Result;
-use uqa_storage::hnsw_index::HNSWIndex;
+use uqa_storage::hnsw_index::{HNSWIndex, HNSWMutation};
 use uqa_storage::vector_index::VectorIndex;
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
@@ -69,7 +69,10 @@ impl SQLiteHNSWIndex {
                 self.mutate_native(
                     read,
                     batch,
-                    |graph| graph.add_many(doc_id, vectors.clone()),
+                    HNSWMutation::Replace {
+                        document: doc_id,
+                        vectors: &vectors,
+                    },
                     |read, batch| read.replace(batch, encoded_doc_id, &encoded_vectors),
                 )
             })?
@@ -88,12 +91,9 @@ impl SQLiteHNSWIndex {
         if self
             .persistent
             .write_native(|read, batch| {
-                self.mutate_native(
-                    read,
-                    batch,
-                    |graph| graph.delete(doc_id),
-                    |read, batch| read.delete(batch, encoded),
-                )
+                self.mutate_native(read, batch, HNSWMutation::Delete(doc_id), |read, batch| {
+                    read.delete(batch, encoded)
+                })
             })?
             .is_some()
         {
@@ -115,7 +115,7 @@ impl SQLiteHNSWIndex {
         if self
             .persistent
             .write_native(|read, batch| {
-                self.mutate_native(read, batch, HNSWIndex::clear, |read, batch| {
+                self.mutate_native(read, batch, HNSWMutation::Clear, |read, batch| {
                     read.clear_family(batch, crate::mvcc::native::NativeRecordFamily::Vectors)
                 })
             })?

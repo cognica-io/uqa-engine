@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::{Catalog, ManagedConnection, SQLiteVectorIndex};
+use uqa_storage::VectorIndex;
 use uqa_storage::{mvcc::VersionedSessionOptions, vector_index::HNSWIndexParams};
 
 fn fixture() -> (ManagedConnection, SQLiteHNSWIndex) {
@@ -170,7 +171,11 @@ fn intervening_native_recreation_rejects_the_obsolete_candidate_without_replayin
         index.mutate_native(
             read,
             batch,
-            |candidate| {
+            uqa_storage::hnsw_index::HNSWMutation::Replace {
+                document: 3,
+                vectors: &[vec![0.0, -1.0]],
+            },
+            |read, batch| {
                 calls += 1;
                 other.begin_transaction().unwrap();
                 SQLiteHNSWIndex::drop_metadata(&other, "docs", "embedding").unwrap();
@@ -181,9 +186,6 @@ fn intervening_native_recreation_rejects_the_obsolete_candidate_without_replayin
                 rebuilt.initialize().unwrap();
                 assert_eq!(rebuilt.persisted_revision().unwrap(), Some(1));
                 other.commit_transaction().unwrap();
-                candidate.add(3, vec![0.0, -1.0])
-            },
-            |read, batch| {
                 read.replace(
                     batch,
                     3,

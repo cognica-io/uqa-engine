@@ -7,7 +7,8 @@
 //! Native record adapters keep canonical vectors and HNSW generations on one logical boundary.
 
 use uqa_storage::{
-    hnsw_index::HNSWIndex, vector_index::VectorIndex, KeyValueBatch, StorageBackendResult,
+    hnsw_index::{HNSWIndex, HNSWMutation},
+    KeyValueBatch,
 };
 
 use super::{
@@ -48,29 +49,20 @@ impl SQLiteHNSWIndex {
         }
         let read = read.owned(batch)?;
         let entries = read.vectors()?;
-        let mut graph = HNSWIndex::with_params(self.persistent.dimensions, self.params)?;
-        // Canonical rows are already ordered by document and vector ordinal.
-        for vectors in entries.chunk_by(|a, b| a.0 == b.0) {
-            read.snapshot.control.check()?;
-            graph.add_many(
-                vectors[0].0,
-                vectors.iter().map(|(_, _, v)| v.clone()).collect(),
-            )?;
-        }
-        writing::persist_delta(
-            &read,
-            batch,
-            self,
-            &graph.take_persistence_delta(),
-            next_revision(expected)?,
-        )
+        let delta = HNSWIndex::prepare_canonical(
+            self.persistent.dimensions,
+            self.params,
+            &entries,
+            &read.snapshot.control,
+        )?;
+        writing::persist_delta(&read, batch, self, &delta, next_revision(expected)?)
     }
 
     pub(in crate::vector_index::hnsw) fn mutate_native(
         &self,
         read: &NativeVectorRead<'_>,
         batch: &mut dyn KeyValueBatch,
-        mutate: impl FnOnce(&mut HNSWIndex) -> StorageBackendResult<()>,
+        mutation: HNSWMutation<'_>,
         canonical: impl FnOnce(&NativeVectorRead<'_>, &mut dyn KeyValueBatch) -> Result<()>,
     ) -> Result<()> {
         let Some((_, _, _, revision)) = load_meta(read)? else {
@@ -82,10 +74,8 @@ impl SQLiteHNSWIndex {
         let cached = self
             .cached_native_graph(read)?
             .ok_or_else(|| missing_metadata(self))?;
+        let delta = cached.prepare_delta(mutation, &read.snapshot.control)?;
         canonical(read, batch)?;
-        let mut candidate = cached.as_ref().clone();
-        mutate(&mut candidate)?;
-        let delta = candidate.take_persistence_delta();
         // Cache publication is read-side only: a candidate must never be tagged with a later session view.
         writing::persist_delta(read, batch, self, &delta, next_revision(Some(revision))?)
     }
