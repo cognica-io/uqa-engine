@@ -32,6 +32,38 @@ pub struct SequenceRestoreContext<'a> {
     pub security: &'a dyn SequenceSecurityCatalog,
     pub registry: &'a dyn SequenceRestoreRegistry,
 }
+
+/// Sequence values use current committed rows while transaction-private creation, rename, replacement and deletion keep their selected scope. This does not advance the caller's ordinary row snapshot.
+pub fn load_sequence_value_rows(
+    bound: &dyn CatalogFacade,
+    committed: &dyn CatalogFacade,
+) -> StorageBackendResult<Vec<SequenceRow>> {
+    select_sequence_value_rows(
+        bound.load_sequence_rows()?,
+        committed.load_sequence_rows()?,
+        |row| bound.sequence_has_private_changes(&row.relation, row.object_id),
+    )
+}
+
+fn select_sequence_value_rows(
+    bound: Vec<SequenceRow>,
+    committed: Vec<SequenceRow>,
+    mut private: impl FnMut(&SequenceRow) -> StorageBackendResult<bool>,
+) -> StorageBackendResult<Vec<SequenceRow>> {
+    let mut rows = BTreeMap::new();
+    for row in committed {
+        if !private(&row)? {
+            rows.insert(row.relation.clone(), row);
+        }
+    }
+    for row in bound {
+        if private(&row)? {
+            rows.insert(row.relation.clone(), row);
+        }
+    }
+    Ok(rows.into_values().collect())
+}
+
 /// Initial-open migration; the allocator must return a fresh nonzero object identity.
 pub fn migrate_legacy_sequences_from_metadata(
     catalog: &dyn CatalogFacade,

@@ -159,8 +159,12 @@ impl SequenceValueContext<'_> {
             state: previous,
             temporary,
         } = target;
-        let persisted =
-            self.mutate_persistent_value(temporary, "persist sequence value", |catalog| {
+        let persisted = self.mutate_persistent_value(
+            temporary,
+            &relation,
+            object_id,
+            "persist sequence value",
+            |catalog| {
                 catalog.set_sequence_value(
                     &name,
                     object_id,
@@ -169,7 +173,8 @@ impl SequenceValueContext<'_> {
                     is_called,
                     0,
                 )
-            })?;
+            },
+        )?;
         let autonomous = match persisted {
             Some((uqa_storage::SequenceSetValueResult::Set(_), autonomous)) => Some(autonomous),
             Some((uqa_storage::SequenceSetValueResult::DefinitionChanged, _)) => return Ok(None),

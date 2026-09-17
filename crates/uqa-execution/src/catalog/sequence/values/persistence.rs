@@ -15,16 +15,27 @@ impl SequenceValueContext<'_> {
     pub(super) fn mutate_persistent_value<T>(
         &self,
         temporary: bool,
+        relation: &uqa_core::RelationIdentity,
+        object_id: [u8; 16],
         action: &str,
         operation: impl Fn(&dyn CatalogFacade) -> StorageBackendResult<T>,
     ) -> Result<Option<(T, bool)>, SequenceValueError> {
         if temporary {
             return Ok(None);
         }
-        let session = self
-            .runtime
-            .open_nontransactional_sequence_session()
-            .map_err(|error| sequence_storage_error("open sequence session", error))?;
+        let private = self
+            .storage
+            .map(|catalog| catalog.sequence_has_private_changes(relation, object_id))
+            .transpose()
+            .map_err(|error| sequence_storage_error("inspect sequence transaction scope", error))?
+            .unwrap_or(false);
+        let session = if private {
+            None
+        } else {
+            self.runtime
+                .open_nontransactional_sequence_session()
+                .map_err(|error| sequence_storage_error("open sequence session", error))?
+        };
         if let Some(session) = session {
             return autonomous_value(&session, self.runtime.cancellation(), &operation)
                 .map(|value| Some((value, true)))

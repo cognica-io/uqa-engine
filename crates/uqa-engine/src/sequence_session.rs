@@ -61,8 +61,9 @@ impl Engine {
     pub(super) fn open_nontransactional_sequence_session(
         &self,
     ) -> StorageBackendResult<Option<uqa_storage::PersistentStorageSession>> {
-        if !self.backend_transaction_is_deferred()
-            || self.session.row_lock_statements.lock().is_empty()
+        if !self.versioned_backend_transactions()
+            && (!self.backend_transaction_is_deferred()
+                || self.session.row_lock_statements.lock().is_empty())
         {
             return Ok(None);
         }

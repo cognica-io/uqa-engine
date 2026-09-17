@@ -32,6 +32,10 @@ impl SequenceValueContext<'_> {
                 kind,
             });
         }
+        // Relation lookup may retain an ordinary transaction snapshot. Sequence values use the current committed definition unless the caller has a private definition of its own.
+        self.sequences.refresh_sequences().map_err(|error| {
+            SequenceValueError::Internal(format!("load sequence catalog: {error}"))
+        })?;
         let relation = RelationIdentity::from_legacy_name(&name)
             .map_err(uqa_storage::StorageBackendError::Other)
             .map_err(|error| {

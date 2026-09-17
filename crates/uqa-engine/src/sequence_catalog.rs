@@ -30,6 +30,18 @@ impl Engine {
 
     pub(crate) fn refresh_sequences_from_catalog(&self) -> StorageBackendResult<()> {
         let sequence_session = self.open_nontransactional_sequence_session()?;
+        if let (Some(bound), Some(current)) =
+            (self.storage.catalog.as_deref(), sequence_session.as_ref())
+        {
+            if self.versioned_backend_transactions() {
+                current.validate_transaction_affinity()?;
+                let rows = uqa_execution::catalog::sequence::restoration::load_sequence_value_rows(
+                    bound,
+                    current.catalog.as_ref(),
+                )?;
+                return self.install_durable_sequence_rows(rows);
+            }
+        }
         let catalog = sequence_session
             .as_ref()
             .map(|session| session.catalog.as_ref())

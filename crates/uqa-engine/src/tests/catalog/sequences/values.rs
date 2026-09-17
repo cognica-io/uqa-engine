@@ -106,11 +106,18 @@ fn observer(engine: &Engine, allocating: bool, fail_writer: bool) -> RuntimeObse
 fn setval_rechecks_bounds_if_the_definition_changes_after_resolution() {
     use std::sync::Arc;
     use uqa_storage_redb::RedbStorage;
-    use uqa_storage_sqlite::SQLiteKeyValueStorage;
+    use uqa_storage_sqlite::{
+        Catalog, ManagedConnection, SQLiteKeyValueStorage, SQLiteStorageProvider,
+    };
 
     let directory = tempfile::tempdir().unwrap();
+    let native = ManagedConnection::open(&directory.path().join("setval.sqlite")).unwrap();
+    Catalog::open(native.clone()).unwrap();
+    native
+        .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+        .unwrap();
     let engines = [
-        Engine::open(&directory.path().join("setval.sqlite")).unwrap(),
+        Engine::from_persistent_provider(Arc::new(SQLiteStorageProvider::new(native))).unwrap(),
         Engine::from_persistent_provider(Arc::new(
             SQLiteKeyValueStorage::open(&directory.path().join("setval-kv.sqlite")).unwrap(),
         ))
@@ -121,29 +128,38 @@ fn setval_rechecks_bounds_if_the_definition_changes_after_resolution() {
         .unwrap(),
     ];
     for engine in &engines {
-        engine.sql("CREATE SEQUENCE ids MAXVALUE 100", &[]).unwrap();
-        let peer = engine.new_session().unwrap();
-        let runtime = observer(engine, false, false);
-        *runtime.before_open.borrow_mut() = Some(Box::new(move || {
-            peer.sql("ALTER SEQUENCE ids MAXVALUE 50", &[]).unwrap();
-        }));
-        let mut context = engine.sequence_value_context();
-        context.runtime = &runtime;
-        let error = context.setval("ids", 75, true).unwrap_err();
-        assert!(matches!(
-            error,
-            SequenceValueError::SetvalOutOfBounds {
-                value: 75,
-                min: 1,
-                max: 50,
-                ..
+        for explicit in [false, true] {
+            engine.sql("CREATE SEQUENCE ids MAXVALUE 100", &[]).unwrap();
+            let peer = engine.new_session().unwrap();
+            if explicit {
+                engine.begin().unwrap();
             }
-        ));
-        assert!(matches!(
-            context.currval("ids"),
-            Err(SequenceValueError::CurrvalUndefined(_))
-        ));
-        assert_eq!(engine.nextval("ids").unwrap(), 1);
+            let runtime = observer(engine, false, false);
+            *runtime.before_open.borrow_mut() = Some(Box::new(move || {
+                peer.sql("ALTER SEQUENCE ids MAXVALUE 50", &[]).unwrap();
+            }));
+            let mut context = engine.sequence_value_context();
+            context.runtime = &runtime;
+            let error = context.setval("ids", 75, true).unwrap_err();
+            assert!(matches!(
+                error,
+                SequenceValueError::SetvalOutOfBounds {
+                    value: 75,
+                    min: 1,
+                    max: 50,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                context.currval("ids"),
+                Err(SequenceValueError::CurrvalUndefined(_))
+            ));
+            if explicit {
+                engine.rollback().unwrap();
+            }
+            assert_eq!(engine.nextval("ids").unwrap(), 1);
+            engine.sql("DROP SEQUENCE ids", &[]).unwrap();
+        }
     }
 }
 #[test]

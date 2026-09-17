@@ -11,6 +11,13 @@ use std::collections::BTreeMap;
 use super::{BackendTransactionMode, Engine, FixedTransactionSnapshot, SQLError, TransactionFrame};
 
 impl Engine {
+    pub(crate) fn versioned_backend_transactions(&self) -> bool {
+        self.storage
+            .backend
+            .as_ref()
+            .is_some_and(|backend| backend.transaction_model().is_versioned())
+    }
+
     pub(crate) fn current_lock_mark(&self) -> u32 {
         self.session
             .transactions

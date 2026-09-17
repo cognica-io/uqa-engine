@@ -63,15 +63,19 @@ impl SequenceValueContext<'_> {
         &self,
         target: &NextvalTarget,
     ) -> Result<Option<(uqa_storage::SequenceValueReservation, bool)>, SequenceValueError> {
-        if let Some((result, autonomous)) =
-            self.mutate_persistent_value(target.temporary, "reserve sequence values", |catalog| {
+        if let Some((result, autonomous)) = self.mutate_persistent_value(
+            target.temporary,
+            &target.relation,
+            target.object_id,
+            "reserve sequence values",
+            |catalog| {
                 catalog.reserve_sequence_values(
                     &target.name,
                     target.object_id,
                     target.state.definition_generation,
                 )
-            })?
-        {
+            },
+        )? {
             return match result {
                 SequenceReservationResult::Reserved(reservation) => {
                     Ok(Some((reservation, autonomous)))
