@@ -291,6 +291,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::Load { .. }
         | CommandPlan::Analyze { .. }
         | CommandPlan::Vacuum(_)
+        | CommandPlan::LockTable(_)
         | CommandPlan::Truncate { .. }
         | CommandPlan::Transaction(_)
         | CommandPlan::FetchCursor(_)

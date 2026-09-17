@@ -324,6 +324,7 @@ impl UnifiedPlan {
             })),
             Statement::Analyze { table } => Self::Command(Box::new(CommandPlan::Analyze { table })),
             Statement::Vacuum(vacuum) => Self::Command(Box::new(CommandPlan::Vacuum(vacuum))),
+            Statement::LockTable(lock) => Self::Command(Box::new(CommandPlan::LockTable(lock))),
             Statement::Truncate {
                 tables,
                 cascade,
@@ -548,6 +549,7 @@ impl CommandPlan {
             Self::Explain { .. } => "Explain",
             Self::Analyze { .. } => "Analyze",
             Self::Vacuum(_) => "Vacuum",
+            Self::LockTable(_) => "LockTable",
             Self::Truncate { .. } => "Truncate",
             Self::Transaction(_) => "Transaction",
             Self::DeclareCursor { .. } => "DeclareCursor",

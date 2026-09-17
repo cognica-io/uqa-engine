@@ -635,6 +635,8 @@ pub enum Statement {
     },
     /// `VACUUM [options] [relations]`. Execution enforces `PostgreSQL`'s transaction-block restriction before validating options and dispatching storage maintenance.
     Vacuum(VacuumStmt),
+    /// `LOCK [TABLE] [ONLY] name [IN mode MODE] [NOWAIT]`.
+    LockTable(LockTableStmt),
     /// `TRUNCATE TABLE t1, t2 ...`. Wipes the listed table hierarchies unless
     /// a target uses `ONLY`.
     Truncate {

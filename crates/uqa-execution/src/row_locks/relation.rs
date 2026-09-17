@@ -49,13 +49,34 @@ impl RelationLockMode {
 pub struct ScopedRelationLock<'a> {
     manager: &'a RowLockManager,
     session_id: u64,
+    table: u64,
     keep_mark: u32,
+    retained: bool,
+}
+
+impl ScopedRelationLock<'_> {
+    /// Keep the successful binding acquisition in the caller's transaction/savepoint after catalog revalidation. No unrelated locks may be acquired while the temporary guard is alive.
+    pub fn retain(mut self) {
+        let mut state = self.manager.state.lock();
+        if let Some(grant) = state.relations.get_mut(&self.table).and_then(|grants| {
+            grants
+                .iter_mut()
+                .find(|grant| grant.session_id == self.session_id)
+        }) {
+            for acquisition in &mut grant.acquisitions {
+                acquisition.mark = acquisition.mark.min(self.keep_mark);
+            }
+        }
+        self.retained = true;
+    }
 }
 
 impl Drop for ScopedRelationLock<'_> {
     fn drop(&mut self) {
-        self.manager
-            .release_mark_above(self.session_id, self.keep_mark);
+        if !self.retained {
+            self.manager
+                .release_mark_above(self.session_id, self.keep_mark);
+        }
     }
 }
 
@@ -69,6 +90,14 @@ pub(super) struct MarkedRelationMode {
 pub(super) struct RelationLockGrant {
     pub(super) session_id: u64,
     pub(super) acquisitions: Vec<MarkedRelationMode>,
+}
+
+struct RelationRequest<'a> {
+    session_id: u64,
+    table: u64,
+    mode: RelationLockMode,
+    mark: u32,
+    cancel: &'a uqa_core::CancellationToken,
 }
 
 impl RelationLockGrant {
@@ -99,8 +128,35 @@ impl RowLockManager {
         Ok(ScopedRelationLock {
             manager: self,
             session_id,
+            table,
             keep_mark,
+            retained: false,
         })
+    }
+
+    pub fn try_acquire_scoped_relation(
+        &self,
+        session_id: u64,
+        table: u64,
+        mode: RelationLockMode,
+        marks: (u32, u32),
+        cancel: &uqa_core::CancellationToken,
+    ) -> Result<Option<ScopedRelationLock<'_>>, SQLError> {
+        let (keep_mark, mark) = marks;
+        if mark <= keep_mark {
+            return Err(SQLError::Internal(
+                "temporary relation lock requires a newer mark".into(),
+            ));
+        }
+        Ok(self
+            .try_acquire_relation(session_id, table, mode, mark, cancel)?
+            .then(|| ScopedRelationLock {
+                manager: self,
+                session_id,
+                table,
+                keep_mark,
+                retained: false,
+            }))
     }
 
     pub(super) fn release_relation_claims(
@@ -123,6 +179,52 @@ impl RowLockManager {
         mark: u32,
         cancel: &uqa_core::CancellationToken,
     ) -> Result<(), SQLError> {
+        self.acquire_relation_inner(
+            RelationRequest {
+                session_id,
+                table,
+                mode,
+                mark,
+                cancel,
+            },
+            true,
+        )
+        .map(|_| ())
+    }
+
+    /// Acquire a relation lock without waiting for conflicting holders. Short internal admission serialization is independent of the SQL wait policy; a failed attempt preserves this session's earlier modes and savepoint marks.
+    pub fn try_acquire_relation(
+        &self,
+        session_id: u64,
+        table: u64,
+        mode: RelationLockMode,
+        mark: u32,
+        cancel: &uqa_core::CancellationToken,
+    ) -> Result<bool, SQLError> {
+        self.acquire_relation_inner(
+            RelationRequest {
+                session_id,
+                table,
+                mode,
+                mark,
+                cancel,
+            },
+            false,
+        )
+    }
+
+    fn acquire_relation_inner(
+        &self,
+        request: RelationRequest<'_>,
+        wait: bool,
+    ) -> Result<bool, SQLError> {
+        let RelationRequest {
+            session_id,
+            table,
+            mode,
+            mark,
+            cancel,
+        } = request;
         let coordinator = self.coordinator()?;
         let relation = self.relation_bytes(table);
         let cross_wait = CrossWaitGuard::new(self, coordinator, session_id);
@@ -141,7 +243,7 @@ impl RowLockManager {
                     }
                     RelationGrantAttempt::AlreadyHeld => {
                         state.waiting_relations.remove(&session_id);
-                        return Ok(());
+                        return Ok(true);
                     }
                     RelationGrantAttempt::Granted => {
                         let foreign_conflict = match coordinator {
@@ -171,7 +273,7 @@ impl RowLockManager {
                         match foreign_conflict {
                             None => {
                                 state.waiting_relations.remove(&session_id);
-                                return Ok(());
+                                return Ok(true);
                             }
                             Some(contended) => {
                                 rollback_relation_grant(&mut state, session_id, table);
@@ -180,6 +282,12 @@ impl RowLockManager {
                         }
                     }
                 };
+            if !wait {
+                state.waiting_relations.remove(&session_id);
+                drop(state);
+                self.wake.notify_all();
+                return Ok(false);
+            }
             if relation_deadlock_exists(&state, session_id, table, mode) {
                 state.waiting_relations.remove(&session_id);
                 drop(state);

@@ -213,7 +213,7 @@ impl Engine {
         self.release_backend_reader_before_lock_wait(&mut self.session.transactions.lock())
     }
 
-    pub(super) fn temporary_relation_lock_marks(&self) -> Result<(u32, u32), SQLError> {
+    pub(crate) fn temporary_relation_lock_marks(&self) -> Result<(u32, u32), SQLError> {
         let mut stack = self.session.transactions.lock();
         let frame = stack.last_mut().ok_or_else(|| {
             SQLError::Internal("temporary relation lock requires an open transaction".into())

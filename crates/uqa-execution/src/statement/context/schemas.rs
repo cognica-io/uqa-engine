@@ -31,6 +31,7 @@ pub trait SchemaStatementInputs<S: Clone + 'static> {
         &self,
     ) -> crate::catalog::security::sequence_lifecycle::SequencePrivilegeContext<'_>;
     fn vacuum_execution_context(&self) -> crate::maintenance::VacuumContext<'_>;
+    fn table_lock_context(&self) -> crate::statement::table_locks::TableLockContext<'_>;
     fn truncate_context(&self) -> crate::schema::truncate::TruncateContext<'_>;
 }
 #[derive(Clone)]

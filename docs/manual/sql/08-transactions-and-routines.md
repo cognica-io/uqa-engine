@@ -15,7 +15,29 @@ COMMIT;
 
 A statement that fails inside an explicit transaction aborts the transaction as in PostgreSQL 18: every later statement, including typed engine mutations and failing savepoint commands, reports `25P02` until `ROLLBACK` or `ROLLBACK TO SAVEPOINT` ends the aborted state, and `COMMIT` of an aborted transaction rolls back. A failure inside a nested `BEGIN` aborts only that nested frame; the enclosing frames keep their writes and row locks.
 
-`BEGIN` and `START TRANSACTION` accept `ISOLATION LEVEL`, `READ ONLY` or `READ WRITE`, and `DEFERRABLE` or `NOT DEFERRABLE` characteristics. `SET TRANSACTION` changes the active transaction subject to PostgreSQL's first-snapshot and savepoint restrictions, `SET SESSION CHARACTERISTICS AS TRANSACTION` changes later transaction defaults, and `COMMIT AND CHAIN` or `ROLLBACK AND CHAIN` starts the next transaction with the current characteristics. Read-only transactions reject permanent-relation DML, every DDL command including temporary-object DDL, and `TRUNCATE` with `25006`; they allow DML against an existing temporary relation, `nextval` and `setval` on an existing temporary sequence, `ANALYZE`, and session-local effects. The four isolation-level names and transaction settings are retained and exposed, but the complete PostgreSQL concurrent-isolation anomaly matrix and imported snapshots remain compatibility bugs.
+`BEGIN` and `START TRANSACTION` accept `ISOLATION LEVEL`, `READ ONLY` or `READ WRITE`, and `DEFERRABLE` or `NOT DEFERRABLE` characteristics. `SET TRANSACTION` changes the active transaction subject to PostgreSQL's first-snapshot and savepoint restrictions, `SET SESSION CHARACTERISTICS AS TRANSACTION` changes later transaction defaults, and `COMMIT AND CHAIN` or `ROLLBACK AND CHAIN` starts the next transaction with the current characteristics. Read-only transactions reject permanent-relation DML, every DDL command including temporary-object DDL, and `TRUNCATE` with `25006`; they allow DML against an existing temporary relation, `nextval` and `setval` on an existing temporary sequence, `ANALYZE`, every `LOCK TABLE` mode, and session-local effects. The four isolation-level names and transaction settings are retained and exposed, but the complete PostgreSQL concurrent-isolation anomaly matrix and imported snapshots remain compatibility bugs.
+
+## Explicit table locks
+
+```text
+LOCK [TABLE] [ONLY] name [*] [, ...] [IN lockmode MODE] [NOWAIT]
+```
+
+`name` is a relation identifier. Modes are `ACCESS SHARE`, `ROW SHARE`, `ROW EXCLUSIVE`, `SHARE UPDATE EXCLUSIVE`, `SHARE`, `SHARE ROW EXCLUSIVE`, `EXCLUSIVE` and `ACCESS EXCLUSIVE`; omitting the mode selects `ACCESS EXCLUSIVE`. Targets are acquired in their written order. `ONLY` excludes descendants; otherwise inheritance and partition descendants are included. Locking a view also locks its referenced tables and views recursively, preserving each stored source's `ONLY` scope.
+
+The command returns no rows and the completion tag `LOCK TABLE`. Acquired locks remain until transaction end; rolling back a savepoint releases acquisitions made after that savepoint while preserving earlier modes. A transaction's own modes do not conflict with each other. `NOWAIT` reports `55P03` when another transaction holds a conflicting mode, and ordinary SQL statement-error rollback applies. Blocking requests participate in cancellation (`57014`) and deadlock detection (`40P01`).
+
+`LOCK TABLE` alone outside a transaction reports `25P01`. An explicit transaction, a multi-statement Simple Query transaction or a routine's transaction can retain the lock. All modes are permitted in read-only transactions. Locking alone does not fix the first data snapshot of a `REPEATABLE READ` transaction.
+
+Relation-wide `MAINTAIN`, `UPDATE`, `DELETE` or `TRUNCATE` privileges permit every mode. `INSERT` permits `ACCESS SHARE`, `ROW SHARE` and `ROW EXCLUSIVE`; `SELECT` permits only `ACCESS SHARE`. Column-only grants do not authorize explicit table locks. Missing privileges report `42501`. Descendants use the parent's authorization; view sources use the view owner's privileges unless that view has `security_invoker=true`, in which case the invoking role is checked. Sequences, indexes, foreign tables and materialized views are invalid direct targets (`42809`).
+
+```sql execute
+CREATE TABLE lock_example (id INTEGER PRIMARY KEY);
+BEGIN;
+LOCK TABLE lock_example IN SHARE ROW EXCLUSIVE MODE NOWAIT;
+INSERT INTO lock_example VALUES (1);
+COMMIT;
+```
 
 ## Savepoints
 

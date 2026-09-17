@@ -222,6 +222,7 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::ExplainStmt(stmt) => compile_explain(stmt),
         NodeEnum::VacuumStmt(stmt) => compile_analyze(stmt),
         NodeEnum::TruncateStmt(stmt) => compile_truncate(stmt),
+        NodeEnum::LockStmt(stmt) => super::locking::compile_lock_table(stmt),
         NodeEnum::TransactionStmt(stmt) => compile_transaction(stmt),
         NodeEnum::DeclareCursorStmt(stmt) => compile_declare_cursor(stmt),
         NodeEnum::FetchStmt(stmt) => compile_fetch_cursor(stmt),

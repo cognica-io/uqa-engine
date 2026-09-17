@@ -758,6 +758,7 @@ impl Statement {
             | Self::Load { .. }
             | Self::Analyze { .. }
             | Self::Vacuum(_)
+            | Self::LockTable(_)
             | Self::Truncate { .. }
             | Self::Transaction(_)
             | Self::FetchCursor(_)

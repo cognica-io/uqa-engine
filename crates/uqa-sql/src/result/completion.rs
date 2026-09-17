@@ -102,6 +102,7 @@ fn command_completion(
         CommandPlan::Load { .. } => "LOAD",
         CommandPlan::Explain { .. } => "EXPLAIN",
         CommandPlan::Analyze { .. } => "ANALYZE",
+        CommandPlan::LockTable(_) => "LOCK TABLE",
         CommandPlan::Vacuum(_) => "VACUUM",
         CommandPlan::Truncate { .. } => "TRUNCATE TABLE",
         CommandPlan::Transaction(statement) => {

@@ -152,6 +152,7 @@ fn reorder_command_joins(
         | CommandPlan::Discard { .. }
         | CommandPlan::Load { .. }
         | CommandPlan::Analyze { .. }
+        | CommandPlan::LockTable(_)
         | CommandPlan::Vacuum(_)
         | CommandPlan::Truncate { .. }
         | CommandPlan::Transaction(_)

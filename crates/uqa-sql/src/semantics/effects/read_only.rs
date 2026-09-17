@@ -78,6 +78,7 @@ pub fn forbidden_command(
         CommandPlan::CreateSchema { .. } => Ok(Some("CREATE SCHEMA")),
         CommandPlan::AlterSchemaOwner { .. } => Ok(Some("ALTER SCHEMA")),
         CommandPlan::Analyze { .. } => Ok(None),
+        CommandPlan::LockTable(_) => Ok(None),
         // VACUUM's transaction-block prohibition has precedence over read-only validation and is enforced by its executor.
         CommandPlan::Vacuum(_) => Ok(None),
         CommandPlan::Truncate { .. } => Ok(Some("TRUNCATE")),
@@ -163,6 +164,7 @@ pub fn plan_sets_transaction_snapshot(plan: &UnifiedPlan) -> bool {
                     | CommandPlan::SetConstraints { .. }
                     | CommandPlan::ShowVariable { .. }
                     | CommandPlan::Transaction(_)
+                    | CommandPlan::LockTable(_)
                     | CommandPlan::FetchCursor(_)
                     | CommandPlan::CloseCursor { .. }
                     | CommandPlan::Deallocate { .. }

@@ -175,6 +175,7 @@ pub(super) fn optimize_command(
         | CommandPlan::Discard { .. }
         | CommandPlan::Load { .. }
         | CommandPlan::Analyze { .. }
+        | CommandPlan::LockTable(_)
         | CommandPlan::Vacuum(_)
         | CommandPlan::Truncate { .. }
         | CommandPlan::Transaction(_)

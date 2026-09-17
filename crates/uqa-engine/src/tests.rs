@@ -40,3 +40,4 @@ mod search_and_vectors;
 mod catalog;
 mod prepared;
 mod queries;
+mod table_locks;

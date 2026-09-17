@@ -9,6 +9,139 @@
 use super::*;
 
 #[test]
+fn retained_binding_locks_keep_the_transaction_mark_and_failed_bindings_leave_it_alone() {
+    use RelationLockMode::{RowExclusive, Share};
+    let manager = RowLockManager::new();
+    let table = manager.table_key("t");
+    let cancel = uqa_core::CancellationToken::new();
+    manager
+        .acquire_relation(1, table, RowExclusive, 0, &cancel)
+        .unwrap();
+    manager
+        .acquire_scoped_relation(1, table, Share, (1, 2), &cancel)
+        .unwrap()
+        .retain();
+    assert!(!manager
+        .try_acquire_relation(2, table, RowExclusive, 0, &cancel)
+        .unwrap());
+    assert!(manager
+        .try_acquire_scoped_relation(2, table, Share, (0, 1), &cancel)
+        .unwrap()
+        .is_none());
+    manager.release_mark_above(1, 1);
+    assert!(!manager
+        .try_acquire_relation(2, table, RowExclusive, 0, &cancel)
+        .unwrap());
+    manager.release_mark_above(1, 0);
+    assert!(manager
+        .try_acquire_scoped_relation(2, table, RowExclusive, (0, 1), &cancel)
+        .unwrap()
+        .is_some());
+    assert!(!manager
+        .try_acquire_relation(2, table, Share, 0, &cancel)
+        .unwrap());
+    manager.release_session(1);
+    assert!(manager
+        .try_acquire_relation(2, table, Share, 0, &cancel)
+        .unwrap());
+}
+
+#[test]
+fn conditional_relation_acquisition_matches_every_conflict_without_registering_waits() {
+    let conflicts = [
+        ".......X", "......XX", "....XXXX", "...XXXXX", "..XX.XXX", "..XXXXXX", ".XXXXXXX",
+        "XXXXXXXX",
+    ];
+    let cancel = uqa_core::CancellationToken::new();
+    for (held, expected) in RelationLockMode::ALL.into_iter().zip(conflicts) {
+        let manager = RowLockManager::new();
+        let table = manager.table_key("t");
+        manager
+            .acquire_relation(1, table, held, 0, &cancel)
+            .unwrap();
+        for (wanted, conflict) in RelationLockMode::ALL.into_iter().zip(expected.bytes()) {
+            assert_eq!(
+                manager
+                    .try_acquire_relation(2, table, wanted, 0, &cancel)
+                    .unwrap(),
+                conflict != b'X',
+                "{held:?}, {wanted:?}",
+            );
+            let state = manager.state.lock();
+            assert!(state.waiting_relations.is_empty());
+            assert!(state.advertised_waits.is_empty());
+            assert_eq!(
+                state.relations[&table].len(),
+                if conflict == b'X' { 1 } else { 2 }
+            );
+            drop(state);
+            manager.release_session(2);
+        }
+        manager.release_session(1);
+        assert!(manager
+            .try_acquire_relation(2, table, RelationLockMode::AccessExclusive, 0, &cancel)
+            .unwrap());
+    }
+}
+
+#[test]
+fn failed_conditional_upgrade_preserves_modes_marks_and_does_not_report_a_deadlock() {
+    use RelationLockMode::{RowExclusive, Share};
+    let manager = RowLockManager::new();
+    let table = manager.table_key("t");
+    let cancel = uqa_core::CancellationToken::new();
+    for session in [1, 2] {
+        manager
+            .acquire_relation(session, table, RowExclusive, 0, &cancel)
+            .unwrap();
+    }
+    manager
+        .state
+        .lock()
+        .waiting_relations
+        .entry(2)
+        .or_default()
+        .insert(table, Share);
+    assert!(!manager
+        .try_acquire_relation(1, table, Share, 1, &cancel)
+        .unwrap());
+    {
+        let state = manager.state.lock();
+        assert!(!state.waiting_relations.contains_key(&1));
+        assert!(state.advertised_waits.is_empty());
+        let grant = state.relations[&table]
+            .iter()
+            .find(|grant| grant.session_id == 1)
+            .unwrap();
+        assert_eq!(grant.acquisitions.len(), 1);
+        assert_eq!(grant.acquisitions[0].mode, RowExclusive);
+        assert_eq!(grant.acquisitions[0].mark, 0);
+    }
+    manager.release_session(2);
+    assert!(manager
+        .try_acquire_relation(1, table, Share, 1, &cancel)
+        .unwrap());
+    assert!(manager
+        .try_acquire_relation(1, table, RowExclusive, 2, &cancel)
+        .unwrap());
+    manager.release_mark_above(1, 0);
+    assert!(manager
+        .try_acquire_relation(2, table, RowExclusive, 0, &cancel)
+        .unwrap());
+    assert!(!manager
+        .try_acquire_relation(2, table, Share, 0, &cancel)
+        .unwrap());
+    cancel.cancel();
+    assert_eq!(
+        manager
+            .try_acquire_relation(1, table, RowExclusive, 0, &cancel)
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014")
+    );
+}
+
+#[test]
 fn temporary_binding_locks_release_only_their_new_acquisition_even_on_unwind() {
     for held in [
         RelationLockMode::AccessShare,

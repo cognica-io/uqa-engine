@@ -67,6 +67,7 @@ pub mod rules;
 pub mod cte_validation;
 
 pub mod locking;
+pub mod table_locks;
 
 pub fn doc_id_value(doc_id: uqa_core::DocId) -> Result<Value, SQLError> {
     i64::try_from(doc_id).map(Value::Int).map_err(|_| {

@@ -593,6 +593,7 @@ pub enum CommandPlan {
         table: Option<String>,
     },
     Vacuum(crate::ast::VacuumStmt),
+    LockTable(crate::ast::LockTableStmt),
     Truncate {
         tables: Vec<crate::ast::TruncateTarget>,
         cascade: bool,

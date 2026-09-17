@@ -601,6 +601,7 @@ mod copy;
 mod cypher;
 
 mod maintenance;
+mod table_locks;
 
 mod index_removal;
 

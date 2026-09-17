@@ -716,6 +716,11 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 }
                 Ok(SQLResult::empty())
             }
+            CommandPlan::LockTable(statement) => super::table_locks::execute(
+                self.context.schemas.inputs.table_lock_context(),
+                statement,
+                self.nested_statement,
+            ),
             CommandPlan::Vacuum(statement) => crate::maintenance::run_vacuum(
                 &self.context.schemas.inputs.vacuum_execution_context(),
                 statement,

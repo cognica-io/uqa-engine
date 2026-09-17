@@ -29,6 +29,7 @@ mod domains;
 mod drop_alter;
 mod events;
 mod hierarchy;
+mod locking;
 mod merge;
 mod names;
 mod relations;
