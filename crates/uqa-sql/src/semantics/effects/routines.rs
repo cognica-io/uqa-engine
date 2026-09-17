@@ -320,13 +320,15 @@ fn plpgsql_statement_may_mutate_engine(
             visiting_routines,
             classification,
         )?),
-        PLpgSQLStmt::ForQuery { query, body, .. } => Ok(lowered_statement_may_mutate_engine(
-            context,
-            query.clone(),
-            visiting_views,
-            visiting_routines,
-            classification,
-        )?
+        PLpgSQLStmt::ForQuery { query, body, .. } => Ok(classification
+            .procedural_state_requires_transaction
+            || lowered_statement_may_mutate_engine(
+                context,
+                query.clone(),
+                visiting_views,
+                visiting_routines,
+                classification,
+            )?
             || plpgsql_statement_list_may_mutate_engine(
                 context,
                 datums,
@@ -542,3 +544,6 @@ pub(super) fn plpgsql_function_may_mutate_engine(
         classification,
     )
 }
+
+#[cfg(test)]
+mod tests;

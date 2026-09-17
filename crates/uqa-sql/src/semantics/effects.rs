@@ -73,7 +73,7 @@ pub fn query_may_mutate_engine(
     )
 }
 
-/// Some read-only operations still need a statement transaction. In particular, a PL/pgSQL block with an `EXCEPTION` arm opens a subtransaction even when neither branch writes data.
+/// Some read-only operations still need a statement transaction. PL/pgSQL exception blocks open subtransactions, and query FOR loops retain internal portals and their relation locks even when their queries and bodies do not write data.
 pub fn query_requires_statement_transaction(
     context: &QueryEffectContext<'_>,
     query: &crate::plan::QueryPlan,
