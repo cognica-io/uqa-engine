@@ -45,7 +45,7 @@ const TABLES: [(&str, &str); 4] = [
 const OWNER_INDEX: &str =
     "CREATE UNIQUE INDEX _uqa_mvcc_native_owner_identity ON _uqa_mvcc_native_owners(object_id)";
 
-fn present(connection: &Connection) -> PhysicalResult<bool> {
+pub(in crate::mvcc) fn present(connection: &Connection) -> PhysicalResult<bool> {
     Ok(connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name GLOB '_uqa_mvcc_native_*')",
         [],
@@ -83,15 +83,10 @@ fn prepare_catalog_sources(
     connection: &Connection,
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
-    let imported_graphs = super::standalone_graph::import_sources(connection, control)?;
-    let has_catalog: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = '_metadata')",
-        [],
-        |row| row.get(0),
-    )?;
-    if imported_graphs && !has_catalog {
-        crate::Catalog::migrate_storage_in(connection)?;
-    }
+    super::standalone_graph::import_sources(connection, control)?;
+    // Bootstrap or upgrade the catalog inside the same physical transaction as conversion. A failed baseline import leaves the original file and schema intact.
+    crate::Catalog::migrate_storage_in(connection)?;
+    crate::Catalog::prepare_native_fts_sources(connection)?;
     let source: Option<bool> = connection
         .query_row(
             "SELECT value = '48' FROM _metadata WHERE key = 'schema_version'",
@@ -112,15 +107,27 @@ pub(in crate::mvcc) fn initialize(
     control.cancellation().check().map_err(VersionError::from)?;
     let _permit = schema::WritePermit::acquire(connection)?;
     let transaction = schema::begin(connection)?;
-    if present(&transaction)? {
-        let identity = reopen(&transaction, control)?;
+    let identity = initialize_in(&transaction, control)?;
+    transaction.commit()?;
+    Ok(identity)
+}
+
+pub(in crate::mvcc) fn initialize_in(
+    transaction: &Connection,
+    control: &StorageReadControl,
+) -> PhysicalResult<DatabaseId> {
+    control.cancellation().check().map_err(VersionError::from)?;
+    if transaction.is_autocommit() {
+        return Err(invalid("native baseline import requires an owning transaction").into());
+    }
+    if present(transaction)? {
+        let identity = reopen(transaction, control)?;
         control.cancellation().check().map_err(VersionError::from)?;
-        transaction.commit()?;
         return Ok(identity);
     }
-    prepare_catalog_sources(&transaction, control)?;
-    let identity = schema::initialize_in(&transaction)?.identity;
-    let header = codec::header(&transaction, identity)?;
+    prepare_catalog_sources(transaction, control)?;
+    let identity = schema::initialize_in(transaction)?.identity;
+    let header = codec::header(transaction, identity)?;
     let populated: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_heads) OR EXISTS(SELECT 1 FROM _uqa_mvcc_versions) OR EXISTS(SELECT 1 FROM _uqa_mvcc_transactions)", [], |row| row.get(0))?;
     if header.key_value_mapping
         || header.allocated != 0
@@ -152,32 +159,32 @@ pub(in crate::mvcc) fn initialize(
     transaction.execute_batch(graph_lookup::SQL)?;
     transaction.execute_batch(super::occurrence_guards::SQL)?;
     transaction.execute_batch(super::vector_guards::SQL)?;
-    occurrence_accelerators::create(&transaction)?;
-    occurrence_accelerators::import(&transaction, control)?;
-    crate::Catalog::upgrade_metadata_cache_triggers(&transaction)?;
-    validate_layouts(&transaction, 8)?;
-    validate_cache_triggers(&transaction, 8)?;
-    owners::seed(&transaction, control)?;
-    super::sequences::validate_source(&transaction)?;
-    graph_lookup::seed(&transaction, control)?;
+    occurrence_accelerators::create(transaction)?;
+    occurrence_accelerators::import(transaction, control)?;
+    crate::Catalog::upgrade_metadata_cache_triggers(transaction)?;
+    validate_layouts(transaction, 8)?;
+    validate_cache_triggers(transaction, 8)?;
+    owners::seed(transaction, control)?;
+    super::sequences::validate_source(transaction)?;
+    graph_lookup::seed(transaction, control)?;
     transaction.execute(
         "UPDATE _metadata SET value = '49' WHERE key = 'schema_version'",
         [],
     )?;
     let baseline = CommitSequence::from_u64(1);
     for family in Family::all() {
-        physical::visit(&transaction, family.layout(), control, |values| {
-            let owner = owners::for_row(&transaction, identity, family, values, control)?;
+        physical::visit(transaction, family.layout(), control, |values| {
+            let owner = owners::for_row(transaction, identity, family, values, control)?;
             let record = NativeRecord::encode(family, owner, values, control)?;
             owners::validate(
-                &transaction,
+                transaction,
                 identity,
                 super::NativeRecordIdentity::new(family, owner)?,
                 values,
                 control,
             )?;
             write::stage_record(
-                &transaction,
+                transaction,
                 record.key(),
                 Some(record.row()),
                 baseline,
@@ -190,8 +197,8 @@ pub(in crate::mvcc) fn initialize(
         params![baseline.as_u64().to_be_bytes().as_slice()],
     )?;
     transaction.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1, 8, 49)", [])?;
-    install_guards(&transaction)?;
-    super::standalone_graph::install_legacy_guards(&transaction, control)?;
+    install_guards(transaction)?;
+    super::standalone_graph::install_legacy_guards(transaction, control)?;
     let invalid_foreign_key = transaction
         .prepare("PRAGMA foreign_key_check")?
         .query([])?
@@ -201,7 +208,6 @@ pub(in crate::mvcc) fn initialize(
         return Err(invalid("native source catalog violates a physical foreign key").into());
     }
     control.cancellation().check().map_err(VersionError::from)?;
-    transaction.commit()?;
     Ok(identity)
 }
 

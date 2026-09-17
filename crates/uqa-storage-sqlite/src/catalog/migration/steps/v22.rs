@@ -196,7 +196,7 @@ pub(in crate::catalog::migration) fn clustered_posting_tables_have_current_shape
     Ok(posting_clusters_ok && posting_documents_ok)
 }
 
-pub(super) fn migrate(tx: &rusqlite::Connection) -> Result<()> {
+pub(in crate::catalog::migration) fn migrate(tx: &rusqlite::Connection) -> Result<()> {
     let legacy_postings_exist = table_exists(tx, "_postings")?;
     if !legacy_postings_exist && clustered_posting_tables_have_current_shape(tx)? {
         return Ok(());
