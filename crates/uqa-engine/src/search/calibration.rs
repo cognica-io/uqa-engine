@@ -160,6 +160,7 @@ impl Engine {
         field: &str,
     ) -> Result<BayesianBM25Params, SQLError> {
         self.validate_text_search_field(table, field)?;
+        self.lock_scoring_parameter_write(&format!("{signal_table}.{field}"))?;
         if let Some(params) = self.load_fresh_bayesian_params(table, signal_table, field)? {
             return Ok(params);
         }

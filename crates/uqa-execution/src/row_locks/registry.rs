@@ -131,6 +131,11 @@ impl RowLockManager {
         self.relation_key(LockRelationIdentity::KeyReservation(digest))
     }
 
+    /// Coordinate one named scoring-parameter value without locking unrelated signals or SQL tables.
+    pub fn scoring_parameters_key(&self, name: &str) -> u64 {
+        self.relation_key(LockRelationIdentity::ScoringParameters(Arc::from(name)))
+    }
+
     fn relation_key(&self, identity: LockRelationIdentity) -> u64 {
         let mut relations = self.relation_ids.lock();
         if let Some(id) = relations.get(&identity) {

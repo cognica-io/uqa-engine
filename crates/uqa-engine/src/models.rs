@@ -131,6 +131,7 @@ impl Engine {
         name: &str,
         params_json: &str,
     ) -> Result<(), SQLError> {
+        self.lock_scoring_parameter_write(name)?;
         let mut scoring_params = self.durable.scoring_params.write();
         if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
@@ -236,6 +237,7 @@ impl Engine {
     }
 
     fn drop_scoring_params_inner(&self, name: &str) -> Result<bool, SQLError> {
+        self.lock_scoring_parameter_write(name)?;
         if self.load_scoring_params(name)?.is_none() {
             return Ok(false);
         }

@@ -150,6 +150,38 @@ impl Engine {
         })
     }
 
+    /// Refresh a named parameter after obtaining its transaction-retained logical lock. Execution workers already belong to the parent command, so this adapter must not reenter its thread-owned statement gate.
+    pub(crate) fn lock_scoring_parameter_write(&self, name: &str) -> Result<(), SQLError> {
+        let Some(backend) = self
+            .storage
+            .backend
+            .as_ref()
+            .filter(|backend| backend.transaction_model().is_versioned())
+        else {
+            return Ok(());
+        };
+        if self.transaction_depth() == 0 {
+            return Err(SQLError::Internal(
+                "scoring parameter writes require an active transaction".into(),
+            ));
+        }
+        self.row_locks.acquire(&crate::row_locks::LockRequest {
+            session_id: self.session_id,
+            key: crate::row_locks::RowLockKey {
+                table: self.row_locks.scoring_parameters_key(name),
+                doc_id: 0,
+            },
+            strength: uqa_sql::ast::LockStrength::ForUpdate,
+            mark: self.current_lock_mark(),
+            wait: uqa_sql::ast::LockWait::Block,
+            cancel: &self.runtime.cancellation,
+            relation: name,
+        })?;
+        backend
+            .refresh_transaction_snapshot(&self.runtime.cancellation)
+            .map_err(|error| Self::storage_tx_error("refresh scoring parameters", &error))
+    }
+
     pub(crate) fn lock_key_reservation(
         &self,
         digest: [u8; 32],

@@ -19,6 +19,7 @@ pub(super) enum LockRelationIdentity {
     Table(Arc<str>),
     BackendWriter,
     KeyReservation([u8; 32]),
+    ScoringParameters(Arc<str>),
 }
 
 impl LockRelationIdentity {
@@ -26,6 +27,11 @@ impl LockRelationIdentity {
         match self {
             Self::Table(name) => name.as_bytes().to_vec(),
             Self::BackendWriter => b"\xffbackend-writer".to_vec(),
+            Self::ScoringParameters(name) => {
+                let mut bytes = b"\xffscoring-parameters".to_vec();
+                bytes.extend_from_slice(name.as_bytes());
+                bytes
+            }
             Self::KeyReservation(digest) => {
                 let mut bytes = Vec::with_capacity(1 + "key-reservation".len() + digest.len());
                 bytes.extend_from_slice(b"\xffkey-reservation");
