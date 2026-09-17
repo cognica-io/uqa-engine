@@ -261,7 +261,7 @@ pub struct SequenceRow {
     /// Stable identity of this sequence incarnation. Dropping and recreating the same qualified name must allocate a different value.
     #[serde(default)]
     pub object_id: [u8; 16],
-    /// Changes for every successful definition-changing `ALTER SEQUENCE` while remaining stable across name lifecycle operations, value reservations, and `setval`.
+    /// Changes when value-generation options or persistence replace the sequence's allocation state. Stable across ownership and name changes, value reservations, and `setval`.
     #[serde(default)]
     pub definition_generation: [u8; 16],
     pub start: i64,

@@ -7,8 +7,7 @@
 use crate::Engine;
 use uqa_core::RelationIdentity;
 use uqa_sql::SQLError;
-use uqa_storage::{SequenceOwner, StorageBackendResult};
-use uqa_storage::{SequenceOwnerDependency, StorageBackendError};
+use uqa_storage::{SequenceOwner, SequenceOwnerDependency};
 
 fn owner(engine: &Engine) -> SequenceOwner {
     let table = engine.storage.tables.read()[&RelationIdentity::new("public", "items")].clone();
@@ -19,23 +18,13 @@ fn owner(engine: &Engine) -> SequenceOwner {
         dependency: SequenceOwnerDependency::Automatic,
     }
 }
-fn allocation_failure() -> StorageBackendResult<[u8; 16]> {
-    Err(StorageBackendError::Other(
-        "injected owner generation allocation failure".into(),
-    ))
-}
-fn unexpected_allocation() -> StorageBackendResult<[u8; 16]> {
-    panic!("unchanged or conflicting owner must not allocate a generation")
-}
-
 #[test]
 fn unchanged_and_conflicting_implicit_owners_leave_the_actual_allocation_state_untouched() {
     let engine = Engine::new();
     engine.sql("CREATE TABLE items(id serial)", &[]).unwrap();
     let before = engine.sequence_state("items_id_seq").unwrap().unwrap().1;
     let original = before.owner.unwrap();
-    let mut context = engine.sequence_owner_publication_context();
-    context.new_generation = unexpected_allocation;
+    let context = engine.sequence_owner_publication_context();
     context
         .attach_sequence_owner_identity("items_id_seq", original)
         .unwrap();
@@ -56,29 +45,34 @@ fn unchanged_and_conflicting_implicit_owners_leave_the_actual_allocation_state_u
 }
 
 #[test]
-fn owner_generation_allocation_failure_preserves_loaded_and_persisted_sequence_state() {
+fn owner_attachment_rollback_keeps_value_progress_in_the_original_generation() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("allocation.db");
     let engine = Engine::open(&path).unwrap();
     engine
         .sql(
-            "CREATE TABLE items(id integer); CREATE SEQUENCE ids START WITH 17",
+            "CREATE TABLE items(id integer); CREATE SEQUENCE ids START WITH 17 CACHE 3",
             &[],
         )
         .unwrap();
+    assert_eq!(engine.nextval("ids").unwrap(), 17);
     let before = engine.sequence_state("ids").unwrap().unwrap().1;
     let owner = owner(&engine);
-    let error = engine
+    engine.begin().unwrap();
+    engine
         .with_implicit_transaction(|engine| {
-            let mut context = engine.sequence_owner_publication_context();
-            context.new_generation = allocation_failure;
-            context.attach_sequence_owner_identity("ids", owner)
+            engine
+                .sequence_owner_publication_context()
+                .attach_sequence_owner_identity("ids", owner)
         })
-        .unwrap_err();
-    assert!(
-        matches!(&error,SQLError::Internal(message) if message.starts_with("allocate sequence `public.ids` definition generation:") && message.contains("injected owner generation allocation failure"))
-    );
-    assert_eq!(engine.sequence_state("ids").unwrap().unwrap().1, before);
+        .unwrap();
+    assert_eq!(engine.nextval("ids").unwrap(), 20);
+    engine.rollback().unwrap();
+    assert_eq!(engine.nextval("ids").unwrap(), 21);
+    let after = engine.sequence_state("ids").unwrap().unwrap().1;
+    assert_eq!(after.definition_generation, before.definition_generation);
+    assert_eq!(after.current, 22);
+    assert!(after.owner.is_none());
     assert!(engine
         .storage
         .catalog
@@ -90,11 +84,12 @@ fn owner_generation_allocation_failure_preserves_loaded_and_persisted_sequence_s
         .is_none());
     drop(engine);
     let reopened = Engine::open(&path).unwrap();
-    assert_eq!(reopened.sequence_state("ids").unwrap().unwrap().1, before);
+    assert_eq!(reopened.sequence_state("ids").unwrap().unwrap().1, after);
+    assert_eq!(reopened.nextval("ids").unwrap(), 23);
 }
 
 #[test]
-fn owner_attachment_publishes_one_new_generation_and_reopens_with_the_same_sequence_identity() {
+fn owner_attachment_reopens_with_the_same_sequence_identity_and_allocation_generation() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("attachment.db");
     let engine = Engine::open(&path).unwrap();
@@ -111,11 +106,10 @@ fn owner_attachment_publishes_one_new_generation_and_reopens_with_the_same_seque
         })
         .unwrap();
     let after = engine.sequence_state("ids").unwrap().unwrap().1;
-    assert_ne!(after.definition_generation, before.definition_generation);
+    assert_eq!(after.definition_generation, before.definition_generation);
     assert_ne!(after.definition_generation, [0; 16]);
     let expected = crate::SequenceState {
         owner: Some(owner),
-        definition_generation: after.definition_generation,
         ..before
     };
     assert_eq!(after, expected);

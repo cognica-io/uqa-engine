@@ -24,7 +24,6 @@ impl Engine {
             sequences: self,
             definitions: self,
             publication: self,
-            new_generation: crate::new_sequence_definition_generation,
         }
     }
     pub(crate) fn validate_implicit_sequence_owners_for_columns(

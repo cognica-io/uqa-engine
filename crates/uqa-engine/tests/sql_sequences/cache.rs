@@ -7,6 +7,69 @@
 use super::*;
 
 #[test]
+fn sequence_ownership_changes_preserve_nontransactional_values_in_memory() {
+    let engine = Engine::new();
+    engine
+        .sql("CREATE SEQUENCE owned_cache CACHE 3", &[])
+        .unwrap();
+    assert_eq!(engine.nextval("owned_cache").unwrap(), 1);
+    engine
+        .sql("BEGIN; ALTER SEQUENCE owned_cache OWNED BY NONE", &[])
+        .unwrap();
+    assert_eq!(engine.nextval("owned_cache").unwrap(), 4);
+    engine.sql("ROLLBACK", &[]).unwrap();
+    assert_eq!(engine.currval("owned_cache").unwrap(), 4);
+    assert_eq!(engine.nextval("owned_cache").unwrap(), 5);
+}
+
+#[test]
+fn sequence_ownership_changes_preserve_peer_caches_and_nontransactional_values() {
+    use std::sync::Arc;
+    use uqa_storage_redb::RedbStorage;
+    use uqa_storage_sqlite::SQLiteKeyValueStorage;
+
+    let directory = tempfile::tempdir().unwrap();
+    let engines = [
+        Engine::open(&directory.path().join("sequence-owner.sqlite")).unwrap(),
+        Engine::from_persistent_provider(Arc::new(
+            SQLiteKeyValueStorage::open(&directory.path().join("sequence-owner-kv.sqlite"))
+                .unwrap(),
+        ))
+        .unwrap(),
+        Engine::from_persistent_provider(Arc::new(
+            RedbStorage::open(directory.path().join("sequence-owner.redb")).unwrap(),
+        ))
+        .unwrap(),
+    ];
+    for (provider, root) in engines.iter().enumerate() {
+        let first = root.new_session().unwrap();
+        let second = root.new_session().unwrap();
+        first
+            .sql("CREATE SEQUENCE owned_cache CACHE 3", &[])
+            .unwrap();
+        assert_eq!(first.nextval("owned_cache").unwrap(), 1, "{provider}");
+        assert_eq!(second.nextval("owned_cache").unwrap(), 4, "{provider}");
+        first
+            .sql("BEGIN; ALTER SEQUENCE owned_cache OWNED BY NONE", &[])
+            .unwrap();
+        assert_eq!(first.nextval("owned_cache").unwrap(), 7, "{provider}");
+        first.sql("ROLLBACK", &[]).unwrap();
+        assert_eq!(first.currval("owned_cache").unwrap(), 7, "{provider}");
+        assert_eq!(first.nextval("owned_cache").unwrap(), 8, "{provider}");
+        assert_eq!(second.currval("owned_cache").unwrap(), 4, "{provider}");
+        assert_eq!(second.nextval("owned_cache").unwrap(), 5, "{provider}");
+        first
+            .sql("ALTER SEQUENCE owned_cache OWNED BY NONE", &[])
+            .unwrap();
+        assert_eq!(second.nextval("owned_cache").unwrap(), 6, "{provider}");
+        first
+            .sql("ALTER SEQUENCE owned_cache INCREMENT BY 10", &[])
+            .unwrap();
+        assert_eq!(second.nextval("owned_cache").unwrap(), 19, "{provider}");
+    }
+}
+
+#[test]
 fn sequence_cache_reservations_match_postgresql_boundaries_and_catalog_state() {
     let engine = Engine::new();
     engine
