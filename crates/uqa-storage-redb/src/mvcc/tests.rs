@@ -13,6 +13,7 @@ use redb::{backends::InMemoryBackend, StorageBackend};
 
 use super::*;
 
+mod identifiers;
 mod migration;
 
 #[derive(Clone, Debug, Default)]

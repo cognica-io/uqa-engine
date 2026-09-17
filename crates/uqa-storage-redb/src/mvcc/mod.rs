@@ -7,6 +7,7 @@
 //! Short redb transactions persist versioned records and authoritative commit receipts.
 
 mod codec;
+mod identifiers;
 mod migration;
 mod read;
 #[cfg(test)]
@@ -15,8 +16,8 @@ mod tests;
 use std::sync::Arc;
 
 use redb::{
-    Database, Durability, ReadableDatabase, ReadableTable, TableDefinition, TableHandle,
-    WriteTransaction,
+    Database, Durability, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition,
+    TableHandle, WriteTransaction,
 };
 use uqa_storage::mvcc::{
     resolve_prepared_receipt, CommitFailure, CommitReceipt, CommitResult, CommitSequence,
@@ -49,41 +50,35 @@ impl RedbRecordStore {
 
     pub(crate) fn new(database: Arc<Database>) -> VersionResult<Self> {
         let transaction = physical_writer(&database)?;
-        let names = [
-            METADATA.name(),
-            HEADS.name(),
-            VERSIONS.name(),
-            TRANSACTIONS.name(),
-        ];
-        let mut present = 0_u8;
-        for table in transaction.list_tables().map_err(redb_error)? {
-            if let Some(position) = names.iter().position(|name| *name == table.name()) {
-                present |= 1 << position;
-            }
-        }
-        if present != 0 && present != 15 {
-            return Err(VersionError::InvalidEncoding("incomplete record table set"));
-        }
+        let present = record_table_presence(&transaction)?;
         let identity = {
             let mut metadata = transaction.open_table(METADATA).map_err(redb_error)?;
             let heads = transaction.open_table(HEADS).map_err(redb_error)?;
             let versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
             let receipts = transaction.open_table(TRANSACTIONS).map_err(redb_error)?;
+            let identifiers = transaction
+                .open_table(identifiers::TABLE)
+                .map_err(redb_error)?;
             let initialized = metadata
                 .get("format")
                 .map_err(redb_error)?
                 .map(|value| codec::decode_u64(value.value()))
                 .transpose()?;
             if let Some(format) = initialized {
-                if !matches!(format, 1..=4) {
+                if !matches!(format, 1..=5) {
                     return Err(VersionError::InvalidEncoding("unknown record format"));
+                }
+                if present != if format < 5 { 15 } else { 31 } {
+                    return Err(VersionError::InvalidEncoding(
+                        "identifier allocation table disagrees with record format",
+                    ));
                 }
                 read_u64(&metadata, "allocated")?;
                 read_u64(&metadata, "sequence")?;
                 let identity = codec::database_id(&metadata)?;
-                if format < 4 {
+                if format < 5 {
                     metadata
-                        .insert("format", 4_u64.to_be_bytes().as_slice())
+                        .insert("format", 5_u64.to_be_bytes().as_slice())
                         .map_err(redb_error)?;
                 }
                 identity
@@ -116,6 +111,7 @@ impl RedbRecordStore {
                         .transpose()
                         .map_err(redb_error)?
                         .is_some()
+                    || !identifiers.is_empty().map_err(redb_error)?
                 {
                     return Err(VersionError::InvalidEncoding(
                         "uninitialized metadata has record data",
@@ -128,7 +124,7 @@ impl RedbRecordStore {
                     .insert("database", bytes.as_slice())
                     .map_err(redb_error)?;
                 metadata
-                    .insert("format", 4_u64.to_be_bytes().as_slice())
+                    .insert("format", 5_u64.to_be_bytes().as_slice())
                     .map_err(redb_error)?;
                 metadata
                     .insert("allocated", 0_u64.to_be_bytes().as_slice())
@@ -221,6 +217,15 @@ impl RedbRecordStore {
 }
 
 impl VersionedPersistence for RedbRecordStore {
+    fn allocate_identifiers(
+        &self,
+        namespace: &[u8],
+        request: uqa_storage::mvcc::IdentifierRequest,
+        control: &StorageReadControl,
+    ) -> VersionResult<uqa_storage::mvcc::IdentifierAllocation> {
+        identifiers::allocate(self, namespace, request, control)
+    }
+
     fn database_id(&self) -> DatabaseId {
         self.identity
     }
@@ -344,4 +349,24 @@ fn physical_writer(database: &Database) -> VersionResult<WriteTransaction> {
         .set_durability(Durability::Immediate)
         .map_err(redb_error)?;
     Ok(transaction)
+}
+
+fn record_table_presence(transaction: &WriteTransaction) -> VersionResult<u8> {
+    let names = [
+        METADATA.name(),
+        HEADS.name(),
+        VERSIONS.name(),
+        TRANSACTIONS.name(),
+        identifiers::TABLE.name(),
+    ];
+    let mut present = 0_u8;
+    for table in transaction.list_tables().map_err(redb_error)? {
+        if let Some(position) = names.iter().position(|name| *name == table.name()) {
+            present |= 1 << position;
+        }
+    }
+    if present != 0 && present != 15 && present != 31 {
+        return Err(VersionError::InvalidEncoding("incomplete record table set"));
+    }
+    Ok(present)
 }

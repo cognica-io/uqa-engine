@@ -51,6 +51,23 @@ pub struct VersionedKeyValueStore {
 }
 
 impl VersionedKeyValueStore {
+    /// Reserve identities without publishing this session's private records. Read-only sessions and unresolved sealed commits cannot allocate; rollback never reclaims a successful reservation.
+    pub fn allocate_identifiers(
+        &self,
+        namespace: &[u8],
+        request: super::IdentifierRequest,
+    ) -> StorageBackendResult<super::IdentifierAllocation> {
+        let active = self.active.lock();
+        if let Some(transaction) = active.as_ref() {
+            transaction
+                .writable()
+                .map_err(VersionError::into_storage_error)?;
+        }
+        self.persistence
+            .allocate_identifiers(namespace, request, &self.control)
+            .map_err(VersionError::into_storage_error)
+    }
+
     pub fn new(
         persistence: Arc<dyn VersionedPersistence>,
         identity: Option<PersistentStorageIdentity>,

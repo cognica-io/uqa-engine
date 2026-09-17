@@ -1,0 +1,60 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Independent identifier reservations use the same redb write admission as record commits.
+
+use redb::{ReadableTable, TableDefinition, TableHandle};
+use uqa_storage::mvcc::{IdentifierAllocation, IdentifierRequest, VersionError, VersionResult};
+use uqa_storage::read_control::StorageReadControl;
+
+use super::{codec, physical_writer, redb_error, RedbRecordStore, METADATA};
+
+pub(super) const TABLE: TableDefinition<&[u8], &[u8]> =
+    TableDefinition::new("uqa_mvcc_identifiers");
+
+pub(super) fn allocate(
+    store: &RedbRecordStore,
+    namespace: &[u8],
+    request: IdentifierRequest,
+    control: &StorageReadControl,
+) -> VersionResult<IdentifierAllocation> {
+    let _workspace = request.reserve_workspace(namespace, control)?;
+    let transaction = physical_writer(&store.database)?;
+    let allocation = {
+        let metadata = transaction.open_table(METADATA).map_err(redb_error)?;
+        if codec::database_id(&metadata)? != store.identity {
+            return Err(VersionError::WrongDatabase);
+        }
+        if codec::read_u64(&metadata, "format")? != 5 {
+            return Err(VersionError::InvalidEncoding("unknown record format"));
+        }
+        let mut present = false;
+        for table in transaction.list_tables().map_err(redb_error)? {
+            present |= table.name() == TABLE.name();
+        }
+        if !present {
+            return Err(VersionError::InvalidEncoding(
+                "missing identifier watermark table",
+            ));
+        }
+        let mut identifiers = transaction.open_table(TABLE).map_err(redb_error)?;
+        let previous = identifiers
+            .get(namespace)
+            .map_err(redb_error)?
+            .map(|value| codec::decode_u64(value.value()))
+            .transpose()?;
+        let allocation = request.prepare(previous)?;
+        if previous != Some(allocation.watermark()) {
+            identifiers
+                .insert(namespace, allocation.watermark().to_be_bytes().as_slice())
+                .map_err(redb_error)?;
+        }
+        allocation
+    };
+    control.cancellation().check()?;
+    transaction.commit().map_err(redb_error)?;
+    Ok(allocation)
+}

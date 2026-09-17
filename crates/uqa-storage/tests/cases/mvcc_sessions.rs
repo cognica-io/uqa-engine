@@ -12,6 +12,8 @@ mod compound;
 mod graph;
 #[path = "mvcc_sessions/hnsw_merging.rs"]
 mod hnsw_merging;
+#[path = "mvcc_sessions/identifiers.rs"]
+mod identifiers;
 #[path = "mvcc_sessions/occurrence_merging.rs"]
 mod occurrence_merging;
 #[path = "mvcc_sessions/occurrences.rs"]
@@ -82,6 +84,7 @@ enum AbortFault {
 
 struct State {
     next: u64,
+    identifiers: BTreeMap<Vec<u8>, u64>,
     receipts: BTreeMap<u64, CommitStatus>,
     commit_fault: CommitFault,
     abort_fault: AbortFault,
@@ -98,6 +101,7 @@ impl Persistence {
             store: MemoryVersionStore::new(&MemoryBudget::new(1 << 24)),
             state: Mutex::new(State {
                 next: 0,
+                identifiers: BTreeMap::new(),
                 receipts: BTreeMap::new(),
                 commit_fault: CommitFault::None,
                 abort_fault: AbortFault::None,
@@ -120,6 +124,20 @@ impl VersionedPersistence for Persistence {
     }
     fn graph_record_layout(&self) -> Option<&dyn GraphRecordLayout> {
         Some(&uqa_storage::key_value::KeyValueGraphRecords)
+    }
+    fn allocate_identifiers(
+        &self,
+        namespace: &[u8],
+        request: IdentifierRequest,
+        control: &StorageReadControl,
+    ) -> VersionResult<IdentifierAllocation> {
+        let _workspace = request.reserve_workspace(namespace, control)?;
+        let mut state = self.state.lock();
+        let allocation = request.prepare(state.identifiers.get(namespace).copied())?;
+        state
+            .identifiers
+            .insert(namespace.to_vec(), allocation.watermark());
+        Ok(allocation)
     }
     fn allocate_transaction(&self, _: &StorageReadControl) -> VersionResult<StorageTransactionId> {
         let mut state = self.state.lock();

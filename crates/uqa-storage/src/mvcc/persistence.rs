@@ -127,6 +127,14 @@ pub type CommitResult = Result<CommitReceipt, CommitFailure>;
 pub trait VersionedPersistence: Send + Sync {
     fn database_id(&self) -> DatabaseId;
 
+    /// Atomically observe or reserve identifiers under the database's physical admission. Persist the high watermark before returning; an error may consume identifiers but must never permit their reuse. This operation advances neither record visibility nor transaction allocation, publishes no private records, and survives transaction/savepoint rollback. Implementations and wrappers must preserve the caller's resource/cancellation control and reject a different database incarnation.
+    fn allocate_identifiers(
+        &self,
+        namespace: &[u8],
+        request: super::IdentifierRequest,
+        control: &StorageReadControl,
+    ) -> VersionResult<super::IdentifierAllocation>;
+
     fn graph_record_layout(&self) -> Option<&dyn super::GraphRecordLayout> {
         None
     }

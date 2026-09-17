@@ -32,6 +32,10 @@ impl CommitSequence {
 
 #[derive(Debug, thiserror::Error)]
 pub enum VersionError {
+    #[error("identifier allocation minimum exceeds maximum")]
+    InvalidIdentifierBounds,
+    #[error("identifier allocation space exhausted")]
+    IdentifiersExhausted,
     #[error("committed sequence space exhausted")]
     SequenceExhausted,
     #[error("record commit sequence {next:?} must follow {previous:?}")]

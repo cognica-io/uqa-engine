@@ -41,6 +41,14 @@ impl VersionedPersistence for InterleavingPersistence {
     fn graph_record_layout(&self) -> Option<&dyn GraphRecordLayout> {
         self.inner.graph_record_layout()
     }
+    fn allocate_identifiers(
+        &self,
+        namespace: &[u8],
+        request: crate::mvcc::IdentifierRequest,
+        control: &StorageReadControl,
+    ) -> VersionResult<crate::mvcc::IdentifierAllocation> {
+        self.inner.allocate_identifiers(namespace, request, control)
+    }
     fn allocate_transaction(
         &self,
         control: &StorageReadControl,

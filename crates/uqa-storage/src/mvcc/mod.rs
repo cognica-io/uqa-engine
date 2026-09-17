@@ -12,6 +12,7 @@ pub(crate) mod commit;
 mod graph;
 mod history;
 mod hnsw;
+mod identifiers;
 mod ivf;
 mod key;
 mod memory;
@@ -28,6 +29,7 @@ pub use commit::{PreparedRecordCommit, PreparedRecordWrite};
 pub use graph::{GraphMutation, GraphRecordKey, GraphRecordLayout};
 pub use history::{RecordHistory, RecordVersion, ScannedRecord, SharedRecordValue};
 pub use hnsw::{HNSWRecordHeader, HNSWRecordKey, HNSWRecordLayout, HNSWRecordValue};
+pub use identifiers::{verify_identifier_allocations, IdentifierAllocation, IdentifierRequest};
 pub use ivf::{IVFRecordHeader, IVFRecordKey, IVFRecordLayout, IVFRecordValue};
 pub use memory::{MemoryRecordSnapshot, MemoryVersionStore};
 pub use occurrence::{

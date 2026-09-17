@@ -7,6 +7,7 @@
 //! `SQLite` persistence for shared logical records, with short physical transactions and durable receipts.
 
 mod codec;
+mod identifiers;
 mod key_value;
 pub mod native;
 mod read;
@@ -146,6 +147,25 @@ impl SQLiteRecordStore {
 }
 
 impl VersionedPersistence for SQLiteRecordStore {
+    fn allocate_identifiers(
+        &self,
+        namespace: &[u8],
+        request: uqa_storage::mvcc::IdentifierRequest,
+        control: &StorageReadControl,
+    ) -> VersionResult<uqa_storage::mvcc::IdentifierAllocation> {
+        control.cancellation().check()?;
+        self.with(|connection| {
+            identifiers::allocate(
+                connection,
+                self.identity,
+                self.native,
+                namespace,
+                request,
+                control,
+            )
+        })
+    }
+
     fn database_id(&self) -> DatabaseId {
         self.identity
     }

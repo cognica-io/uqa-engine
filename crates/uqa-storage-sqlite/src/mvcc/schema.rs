@@ -17,11 +17,12 @@ use uqa_storage::mvcc::{DatabaseId, VersionError};
 
 use super::{codec, PhysicalResult};
 
-const TABLES: [(&str, &str); 4] = [
-    ("_uqa_mvcc_metadata", "CREATE TABLE _uqa_mvcc_metadata (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 4), database_id BLOB NOT NULL CHECK(typeof(database_id) = 'blob' AND length(database_id) = 16), allocated BLOB NOT NULL CHECK(typeof(allocated) = 'blob' AND length(allocated) = 8), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8), mapping INTEGER NOT NULL DEFAULT 0 CHECK(mapping IN (0, 1)))"),
+const TABLES: [(&str, &str); 5] = [
+    ("_uqa_mvcc_metadata", "CREATE TABLE _uqa_mvcc_metadata (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 5), database_id BLOB NOT NULL CHECK(typeof(database_id) = 'blob' AND length(database_id) = 16), allocated BLOB NOT NULL CHECK(typeof(allocated) = 'blob' AND length(allocated) = 8), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8), mapping INTEGER NOT NULL DEFAULT 0 CHECK(mapping IN (0, 1)))"),
     ("_uqa_mvcc_heads", "CREATE TABLE _uqa_mvcc_heads (key BLOB PRIMARY KEY CHECK(typeof(key) = 'blob'), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8 AND sequence > x'0000000000000000')) WITHOUT ROWID"),
     ("_uqa_mvcc_versions", "CREATE TABLE _uqa_mvcc_versions (key BLOB NOT NULL CHECK(typeof(key) = 'blob'), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8 AND sequence > x'0000000000000000'), value BLOB CHECK(value IS NULL OR typeof(value) = 'blob'), PRIMARY KEY(key, sequence)) WITHOUT ROWID"),
     ("_uqa_mvcc_transactions", "CREATE TABLE _uqa_mvcc_transactions (allocation BLOB PRIMARY KEY CHECK(typeof(allocation) = 'blob' AND length(allocation) = 8 AND allocation > x'0000000000000000'), status INTEGER NOT NULL CHECK(status IN (0, 1, 2)), sequence BLOB, fingerprint BLOB, CHECK((status IN (0, 1) AND sequence IS NULL AND fingerprint IS NULL) OR (status = 2 AND typeof(sequence) = 'blob' AND length(sequence) = 8 AND typeof(fingerprint) = 'blob' AND length(fingerprint) = 32))) WITHOUT ROWID"),
+    super::identifiers::TABLE,
 ];
 
 /// A connection-local admission token. Dropping it closes permission without any fallible SQL cleanup, including on unwind or commit failure.
@@ -106,12 +107,12 @@ pub(super) fn initialize_in(transaction: &Connection) -> PhysicalResult<Initiali
         if let Some(matches) = definition_matches(transaction, name, expected)? {
             if !matches {
                 if name == TABLES[0].0 {
-                    for format in [1, 2, 3] {
+                    for format in [1, 2, 3, 4] {
                         if definition_matches(
                             transaction,
                             name,
                             &expected
-                                .replace("CHECK(format = 4)", &format!("CHECK(format = {format})")),
+                                .replace("CHECK(format = 5)", &format!("CHECK(format = {format})")),
                         )? == Some(true)
                         {
                             predecessor = Some(format);
@@ -128,7 +129,19 @@ pub(super) fn initialize_in(transaction: &Connection) -> PhysicalResult<Initiali
             present += 1;
         }
     }
-    if present != 0 && present != TABLES.len() {
+    let identifier_table = definition_matches(
+        transaction,
+        super::identifiers::TABLE.0,
+        super::identifiers::TABLE.1,
+    )?;
+    if predecessor.is_some() && identifier_table.is_some() {
+        return Err(VersionError::InvalidEncoding(
+            "predecessor contains unexpected identifier allocations",
+        )
+        .into());
+    }
+    let expected = TABLES.len() - usize::from(predecessor.is_some());
+    if present != 0 && present != expected {
         return Err(VersionError::InvalidEncoding("incomplete record table set").into());
     }
     if present == 0 {
@@ -145,7 +158,7 @@ pub(super) fn initialize_in(transaction: &Connection) -> PhysicalResult<Initiali
             )
         })?;
         transaction.execute(
-            "INSERT INTO _uqa_mvcc_metadata (singleton, format, database_id, allocated, sequence) VALUES (1, 4, ?1, ?2, ?2)",
+            "INSERT INTO _uqa_mvcc_metadata (singleton, format, database_id, allocated, sequence) VALUES (1, 5, ?1, ?2, ?2)",
             params![identity.as_slice(), 0_u64.to_be_bytes().as_slice()],
         )?;
         return Ok(Initialization {
@@ -155,6 +168,9 @@ pub(super) fn initialize_in(transaction: &Connection) -> PhysicalResult<Initiali
         });
     }
     for (name, _) in TABLES {
+        if predecessor.is_some() && name == super::identifiers::TABLE.0 {
+            continue;
+        }
         for action in ["INSERT", "UPDATE", "DELETE"] {
             let (name, expected) = trigger(name, action);
             if definition_matches(transaction, &name, &expected)? != Some(true) {
@@ -195,11 +211,16 @@ fn upgrade_metadata(transaction: &Connection, format: i64) -> PhysicalResult<()>
     if !valid {
         return Err(VersionError::InvalidEncoding("invalid predecessor record format").into());
     }
-    // Only the metadata constraint changes. Histories, heads, database identity and receipts retain their original bytes and commit boundaries.
+    // Identifier watermarks start empty; existing histories, heads, identity and receipts retain their bytes and commit boundaries.
+    let (name, sql) = super::identifiers::TABLE;
+    transaction.execute_batch(sql)?;
+    for action in ["INSERT", "UPDATE", "DELETE"] {
+        transaction.execute_batch(&trigger(name, action).1)?;
+    }
     transaction
         .execute_batch("ALTER TABLE _uqa_mvcc_metadata RENAME TO _uqa_mvcc_previous_metadata")?;
     transaction.execute_batch(TABLES[0].1)?;
-    transaction.execute_batch("INSERT INTO _uqa_mvcc_metadata SELECT singleton, 4, database_id, allocated, sequence, mapping FROM _uqa_mvcc_previous_metadata; DROP TABLE _uqa_mvcc_previous_metadata;")?;
+    transaction.execute_batch("INSERT INTO _uqa_mvcc_metadata SELECT singleton, 5, database_id, allocated, sequence, mapping FROM _uqa_mvcc_previous_metadata; DROP TABLE _uqa_mvcc_previous_metadata;")?;
     for action in ["INSERT", "UPDATE", "DELETE"] {
         transaction.execute_batch(&trigger(TABLES[0].0, action).1)?;
     }

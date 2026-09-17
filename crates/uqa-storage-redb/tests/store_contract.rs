@@ -282,6 +282,8 @@ fn redb_rolls_back_legacy_posting_migration_after_staged_writes() {
 #[path = "store_contract/controlled.rs"]
 mod controlled;
 
+#[path = "store_contract/identifiers.rs"]
+mod identifiers;
 #[path = "store_contract/mvcc.rs"]
 mod mvcc;
 

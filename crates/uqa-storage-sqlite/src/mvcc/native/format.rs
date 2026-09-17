@@ -137,6 +137,7 @@ pub(in crate::mvcc) fn initialize(
         "_uqa_mvcc_heads",
         "_uqa_mvcc_versions",
         "_uqa_mvcc_transactions",
+        "_uqa_mvcc_identifiers",
     ] {
         for action in ["INSERT", "UPDATE", "DELETE"] {
             transaction.execute_batch(&format!(
@@ -480,6 +481,7 @@ fn validate_layouts(connection: &Connection, version: u32) -> PhysicalResult<()>
                     | "_uqa_mvcc_heads"
                     | "_uqa_mvcc_versions"
                     | "_uqa_mvcc_transactions"
+                    | "_uqa_mvcc_identifiers"
             )
         {
             return Err(invalid("unmapped native table requires an explicit record family").into());

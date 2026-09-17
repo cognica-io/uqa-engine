@@ -17,6 +17,8 @@ use uqa_storage::read_control::StorageReadControl;
 use uqa_storage::KeyValueStore;
 use uqa_storage_sqlite::{ManagedConnection, SQLiteCompressionOptions, SQLiteRecordStore};
 
+#[path = "mvcc/identifiers.rs"]
+mod identifiers;
 #[path = "mvcc/key_value.rs"]
 mod key_value;
 #[path = "mvcc/key_value_occurrences.rs"]
@@ -506,6 +508,10 @@ fn process_writer_helper() {
         .unwrap()
         .parse::<usize>()
         .unwrap()];
+    if let Ok(layout) = std::env::var("UQA_SQLITE_IDENTIFIER_TEST_LAYOUT") {
+        identifiers::process_helper(mode, Path::new(&path), layout.parse().unwrap());
+        return;
+    }
     let public = std::env::var("UQA_SQLITE_RECORD_TEST_PUBLIC").unwrap() == "true";
     process_store(mode, Path::new(&path), public)
         .put(b"child", b"committed")
