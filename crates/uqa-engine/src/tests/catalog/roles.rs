@@ -13,6 +13,7 @@ mod identity;
 mod migration;
 mod ownership;
 mod publication;
+mod routine_settings;
 mod session_identity;
 mod settings;
 mod snapshots;

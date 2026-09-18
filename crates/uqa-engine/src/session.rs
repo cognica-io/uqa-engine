@@ -24,6 +24,7 @@ mod portals;
 pub(crate) use portals::StatementReadSnapshot;
 mod schemas;
 mod settings;
+pub(crate) use settings::restore_runtime_parameter;
 mod settings_parse;
 mod views;
 

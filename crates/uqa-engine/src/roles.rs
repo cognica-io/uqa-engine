@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use uqa_sql::catalog::roles::RoleReference;
 
 use uqa_sql::catalog::roles::{memberships::role_is_superuser, session::SessionAuthorization};
+use uqa_sql::semantics::parameters::{ParameterScope, ParameterScopes};
 use uqa_sql::SQLError;
 
 use crate::{Engine, SQLStatementCache, StorageBackendResult};
@@ -17,10 +18,17 @@ use uqa_execution::catalog::security::roles::persistence as role_catalog;
 
 pub(crate) struct RoutineSessionStateGuard<'a> {
     engine: &'a Engine,
+    saved: Option<RoutineParameterSnapshot>,
+    sql_statement_cache: Option<SQLStatementCache>,
+    parameter_scope: Option<ParameterScope>,
+    restore_effective: bool,
+}
+
+struct RoutineParameterSnapshot {
     search_path: Vec<String>,
     session_vars: BTreeMap<String, String>,
-    sql_statement_cache: Option<SQLStatementCache>,
-    authorization: Option<SessionAuthorization>,
+    authorization: SessionAuthorization,
+    parameter_scopes: ParameterScopes<crate::state::RuntimeParameterValue>,
 }
 
 pub(crate) use uqa_execution::routines::invocation::scopes::active_routine_reads_command_overlay;
@@ -30,29 +38,49 @@ impl RoutineSessionStateGuard<'_> {
         let state = engine.session.state.read();
         RoutineSessionStateGuard {
             engine,
-            search_path: state.search_path.clone(),
-            session_vars: state.session_vars.clone(),
+            saved: Some(RoutineParameterSnapshot {
+                search_path: state.search_path.clone(),
+                session_vars: state.session_vars.clone(),
+                authorization: state.authorization.clone(),
+                parameter_scopes: state.parameter_scopes.clone(),
+            }),
             sql_statement_cache: preserve_statement_cache
                 .then(|| state.sql_statement_cache.clone()),
-            authorization: Some(state.authorization.clone()),
+            parameter_scope: None,
+            restore_effective: false,
         }
     }
 
-    pub(crate) fn preserve_authorization(&mut self) {
-        self.authorization = None;
+    pub(crate) fn finish(&mut self) {
+        let saved = self.saved.take().expect("unfinished routine state guard");
+        let mut state = self.engine.session.state.write();
+        if let Some(scope) = self.parameter_scope.take() {
+            for (name, value) in state.parameter_scopes.leave_function(scope) {
+                crate::session::restore_runtime_parameter(&mut state, &name, value);
+            }
+        }
+        if self.restore_effective {
+            state
+                .authorization
+                .set_effective(saved.authorization.current().clone());
+        }
     }
 }
 
 impl Drop for RoutineSessionStateGuard<'_> {
     fn drop(&mut self) {
+        let Some(saved) = self.saved.take() else {
+            return;
+        };
         let mut state = self.engine.session.state.write();
-        state.search_path = std::mem::take(&mut self.search_path);
-        state.session_vars = std::mem::take(&mut self.session_vars);
+        state.search_path = saved.search_path;
+        state.session_vars = saved.session_vars;
+        state.authorization = saved.authorization;
+        state.parameter_scopes = saved.parameter_scopes;
         if let Some(cache) = self.sql_statement_cache.take() {
             state.sql_statement_cache = cache;
-        }
-        if let Some(authorization) = self.authorization.take() {
-            state.authorization = authorization;
+        } else {
+            state.sql_statement_cache.clear();
         }
     }
 }
@@ -131,6 +159,20 @@ impl Engine {
 
     pub(crate) fn routine_config_state_guard(&self) -> RoutineSessionStateGuard<'_> {
         RoutineSessionStateGuard::capture(self, true)
+    }
+
+    pub(crate) fn routine_invocation_state_guard(
+        &self,
+        configured: bool,
+        security_definer: bool,
+    ) -> RoutineSessionStateGuard<'_> {
+        let mut guard = RoutineSessionStateGuard::capture(self, false);
+        if configured {
+            guard.parameter_scope =
+                Some(self.session.state.write().parameter_scopes.enter_function());
+        }
+        guard.restore_effective = security_definer;
+        guard
     }
 }
 

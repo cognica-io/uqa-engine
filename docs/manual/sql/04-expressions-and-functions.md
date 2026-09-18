@@ -258,7 +258,7 @@ SELECT lower('[1,5)'::int4range) AS lower_bound,
 
 ## Session and identity functions
 
-Implemented helpers include `current_database`, `current_catalog`, `current_user`, `session_user`, `current_schema`, `current_schemas`, `typeof`, and `pg_typeof`. `current_schema` and `current_schemas` follow the session `search_path`.
+Implemented helpers include `current_database`, `current_catalog`, `current_user`, `session_user`, `current_schema`, `current_schemas`, `typeof`, and `pg_typeof`. `current_schema` and `current_schemas` follow the session `search_path`. [`current_setting(text [, boolean])`](08-transactions-and-routines.md#set-and-show) reads active session or transaction settings and returns text, with optional NULL for an unknown setting.
 
 ### Catalog lookup functions
 

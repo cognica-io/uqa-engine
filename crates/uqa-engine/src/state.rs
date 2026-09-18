@@ -288,7 +288,7 @@ impl SessionContext {
             search_path: vec!["public".to_string()],
             temporary_namespace_allocated: false,
             session_vars: BTreeMap::new(),
-            local_parameter_restore: BTreeMap::new(),
+            parameter_scopes: uqa_sql::semantics::parameters::ParameterScopes::default(),
             sequence_currvals: BTreeMap::new(),
             last_sequence: None,
             sequence_discard_generation: 0,

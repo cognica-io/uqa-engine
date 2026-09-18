@@ -254,6 +254,10 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         ))
     }
 
+    fn runtime_parameter(&self, name: &str) -> std::result::Result<Option<String>, SQLError> {
+        Ok(self.engine.session_execution_view().runtime_parameter(name))
+    }
+
     fn current_schemas(
         &self,
         include_implicit: bool,

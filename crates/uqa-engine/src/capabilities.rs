@@ -93,28 +93,31 @@ impl SessionExecutionView<'_> {
     }
 
     pub(crate) fn show_variable(&self, name: &str) -> Result<String, SQLError> {
-        if name.eq_ignore_ascii_case("search_path") {
-            return Ok(self.search_path().join(","));
-        }
-        if let Some(value) = self.transaction_parameter_value(name) {
-            return Ok(value);
-        }
-        let session = self.session.state.read();
-        if name.eq_ignore_ascii_case("role") {
-            return Ok(session.authorization.show_role().to_owned());
-        }
-        if name.eq_ignore_ascii_case("session_authorization") {
-            return Ok(session.authorization.session().name.clone());
-        }
-        if let Some(value) = session_value(&session.session_vars, name) {
-            return Ok(value);
-        }
-        default_runtime_parameter(name)
-            .map(str::to_string)
+        self.runtime_parameter(name)
             .ok_or_else(|| SQLError::Routine {
                 sqlstate: "42704".into(),
                 message: format!("unrecognized configuration parameter \"{name}\""),
             })
+    }
+
+    pub(crate) fn runtime_parameter(&self, name: &str) -> Option<String> {
+        if name.eq_ignore_ascii_case("search_path") {
+            return Some(self.search_path().join(","));
+        }
+        if let Some(value) = self.transaction_parameter_value(name) {
+            return Some(value);
+        }
+        let session = self.session.state.read();
+        if name.eq_ignore_ascii_case("role") {
+            return Some(session.authorization.show_role().to_owned());
+        }
+        if name.eq_ignore_ascii_case("session_authorization") {
+            return Some(session.authorization.session().name.clone());
+        }
+        if let Some(value) = session_value(&session.session_vars, name) {
+            return Some(value);
+        }
+        default_runtime_parameter(name).map(str::to_string)
     }
 
     pub(crate) fn runtime_parameter_source(&self, name: &str) -> &'static str {

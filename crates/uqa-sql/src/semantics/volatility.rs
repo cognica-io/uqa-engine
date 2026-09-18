@@ -134,6 +134,7 @@ pub fn function_volatility_with_binding(
                 | "statement_timestamp"
                 | "transaction_timestamp"
                 | "current_schemas"
+                | "current_setting"
                 | "pg_backend_pid"
                 | "version"
                 | "pg_listening_channels"

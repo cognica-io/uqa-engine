@@ -57,6 +57,10 @@ fn eval_function_call_inner(
         return result;
     }
 
+    if lower == "current_setting" {
+        return super::session_settings::current_setting(&evaluated, ctx);
+    }
+
     if let Some(result) = random::eval_random_function(lower, &call_args, ctx) {
         return result;
     }

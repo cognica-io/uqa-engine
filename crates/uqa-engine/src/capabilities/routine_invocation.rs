@@ -24,16 +24,20 @@ use uqa_sql::{
     SQLError,
 };
 impl RoutineInvocationState for crate::roles::RoutineSessionStateGuard<'_> {
-    fn preserve_authorization(&mut self) {
-        self.preserve_authorization();
+    fn finish(&mut self) {
+        self.finish();
     }
 }
 impl RoutineInvocationSession for Engine {
     fn depth_limit(&self) -> usize {
         self.sql_function_depth_limit()
     }
-    fn state_guard(&self) -> Box<dyn RoutineInvocationState + '_> {
-        Box::new(self.routine_session_state_guard())
+    fn state_guard(
+        &self,
+        configured: bool,
+        security_definer: bool,
+    ) -> Box<dyn RoutineInvocationState + '_> {
+        Box::new(self.routine_invocation_state_guard(configured, security_definer))
     }
     fn set_current_user(&self, user: &str) -> Result<(), SQLError> {
         let role = RoleReference::from(user).bind(&self.durable.roles.read())?;
@@ -44,8 +48,8 @@ impl RoutineInvocationSession for Engine {
             .set_effective(role.into());
         Ok(())
     }
-    fn set_variable(&self, name: &str, value: &str) -> Result<(), SQLError> {
-        Engine::set_variable(self, name, value)
+    fn set_configured_parameter(&self, name: &str, value: &str) -> Result<(), SQLError> {
+        Engine::set_configured_parameter(self, name, value)
     }
 }
 impl Engine {

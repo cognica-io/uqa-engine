@@ -207,6 +207,13 @@ pub trait EngineHook {
         Ok(None)
     }
 
+    /// Read a session setting. `None` means the parameter is unknown; errors must remain visible even for `current_setting(..., true)`.
+    fn runtime_parameter(&self, _name: &str) -> Result<Option<String>> {
+        Err(SQLError::Unsupported(
+            "engine hook does not provide session settings".into(),
+        ))
+    }
+
     /// Resolve the existing schemas visible to the logical session.
     fn current_schemas(
         &self,
