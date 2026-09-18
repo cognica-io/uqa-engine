@@ -122,7 +122,7 @@ fn resolve_routine_rename_target(
                 "resolved ALTER routine target `{old_name}` disappeared before rename"
             ))
         })?;
-    let current_user = context.mutation.names.current_user_name();
+    let current_user = context.mutation.names.current_role();
     let roles = context.mutation.roles.role_definitions();
     let memberships = context.mutation.roles.role_memberships();
     ensure_routine_owner_as(

@@ -818,7 +818,7 @@ pub fn build_info_sequences(
     catalog: &CatalogReadView,
     session: &dyn CatalogSession,
 ) -> Vec<ResultRow> {
-    let current_user = session.current_user();
+    let current_user = session.current_role();
     let temporary_schema = session.temporary_schema_name();
     catalog
         .sequence_states()

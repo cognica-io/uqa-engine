@@ -14,6 +14,7 @@ use uqa_execution::schema::{
     },
     sequences::role_ownership::{OwnedSequenceSecurityCatalog, OwnedSequenceSecurityRead},
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     catalog::resolution::RelationResolution, schema::relation_alteration::RelationAlterNames,
     SQLError,
@@ -71,7 +72,7 @@ impl RelationRenameDependencies for Engine {
     }
 }
 impl RoleTargetSchemaAccess for Engine {
-    fn require_schema_create(&self, schema: &str, role: &str) -> Result<(), SQLError> {
+    fn require_schema_create(&self, schema: &str, role: &RoleReference) -> Result<(), SQLError> {
         self.require_schema_privilege(
             schema,
             role,

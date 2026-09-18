@@ -11,6 +11,7 @@ use super::{
     names::{routine_lookup_keys, RoutineNameCatalog},
     routine_signature_label, wrong_routine_kind_error, RoutineDropResolution, RoutineDropTarget,
 };
+use crate::catalog::roles::identity::RoleSubject;
 use crate::{
     ast::{AlterRoutineKind, DropFunctionItem, DropFunctionStmt},
     catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey},
@@ -210,7 +211,7 @@ pub fn resolve_sql_routine_alter_target(
 pub fn ensure_routine_drop_owners(
     registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
     targets: &[RoutineDropTarget],
-    current_user: &str,
+    current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> Result<(), SQLError> {

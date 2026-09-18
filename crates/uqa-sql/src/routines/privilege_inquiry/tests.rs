@@ -57,7 +57,7 @@ fn function_inquiry_distinguishes_public_unknown_roles_and_missing_target_input_
         let public = acl.is_none();
         let catalog = Catalog { acl };
         let inquiry = RoutinePrivilegeInquiry {
-            current_user: "reader",
+            current_user: &"reader".into(),
             roles: &roles,
             memberships: &memberships,
             catalog: &catalog,
@@ -118,7 +118,7 @@ fn function_inquiry_preserves_strictness_error_order_and_exact_privilege_tokens(
     let memberships = BTreeMap::new();
     let catalog = Catalog { acl: None };
     let inquiry = RoutinePrivilegeInquiry {
-        current_user: "reader",
+        current_user: &"reader".into(),
         roles: &roles,
         memberships: &memberships,
         catalog: &catalog,

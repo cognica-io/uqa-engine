@@ -249,10 +249,12 @@ fn owner_authorization_rebinds_after_retaining_the_table_generation() {
         engine: &engine,
         replacement,
     };
-    let mut context = engine.table_ownership_context();
-    context.tables = &tables;
-    context
-        .alter_table_role_owner("public.items", "target")
+    engine
+        .with_implicit_definition_transaction(|engine| {
+            let mut context = engine.table_ownership_context();
+            context.tables = &tables;
+            context.alter_table_role_owner("public.items", "target")
+        })
         .unwrap();
     assert_eq!(retained.role_owner(), "uqa", "fresh owner authorization observes the replacement and returns before mutating the retained generation");
     assert_eq!(

@@ -12,6 +12,8 @@ use uqa_core::RelationIdentity;
 use uqa_execution::catalog::security::role_lifecycle::context::{
     RoleDefinitionWrite, RoleExecutionContext, RoleMembershipWrite, RolePublication, RoleRegistry,
 };
+use uqa_sql::catalog::roles::identity::RoleBinding;
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     catalog::{
         roles::{
@@ -36,11 +38,21 @@ impl uqa_execution::catalog::security::roles::RoleCatalogGuards for Engine {
     }
 }
 impl uqa_sql::catalog::roles::RoleReferenceNames for Engine {
-    fn current_user_name(&self) -> String {
-        Engine::current_user_name(self)
+    fn current_role(&self) -> RoleReference {
+        Engine::current_role(self)
     }
-    fn session_user_name(&self) -> String {
-        Engine::session_user_name(self)
+    fn session_role(&self) -> RoleReference {
+        Engine::session_role(self)
+    }
+    fn authenticated_role(&self) -> RoleReference {
+        RoleReference::Bound(
+            self.session
+                .state
+                .read()
+                .authorization
+                .authenticated()
+                .clone(),
+        )
     }
 }
 
@@ -88,9 +100,14 @@ impl RolePublication for Engine {
     fn catalog_changed(&self) {
         self.note_catalog_registry_changed();
     }
-    fn set_current_role(&self, target: String) {
+    fn set_current_role(&self, target: Option<RoleBinding>) {
         let mut state = self.session.state.write();
-        state.current_user = target;
+        state.authorization.set_role(target.map(Arc::new));
+        state.sql_statement_cache.clear();
+    }
+    fn set_session_authorization(&self, target: RoleBinding) {
+        let mut state = self.session.state.write();
+        state.authorization.set_session(Arc::new(target));
         state.sql_statement_cache.clear();
     }
 }

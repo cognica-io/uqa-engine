@@ -20,11 +20,13 @@ pub fn role_is_superuser(
 
 pub fn require_role_attribute_authority(
     roles: &BTreeMap<String, RoleDefinition>,
-    current: &str,
+    current: &(impl RoleSubject + ?Sized),
     attributes: impl IntoIterator<Item = RoleAttribute>,
     action: &str,
 ) -> Result<(), SQLError> {
-    let current_role = roles.get(current).ok_or_else(|| undefined_role(current))?;
+    let current_role = current
+        .role_definition(roles)
+        .ok_or_else(|| insufficient_privilege(&format!("permission denied to {action}")))?;
     if current_role.has(RoleAttribute::Superuser) {
         return Ok(());
     }
@@ -132,7 +134,7 @@ pub fn parse_pg_has_role_privileges(privileges: &str) -> Result<Vec<RolePrivileg
 pub fn pg_has_role_privilege(
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    subject: Option<&str>,
+    subject: Option<&(impl RoleSubject + ?Sized)>,
     target: Option<&str>,
     privilege: RolePrivilegeCheck,
 ) -> bool {
@@ -143,6 +145,9 @@ pub fn pg_has_role_privilege(
         return true;
     }
     let Some(target) = target else {
+        return false;
+    };
+    let Some(subject) = subject.role_name(roles) else {
         return false;
     };
     match privilege {
@@ -250,7 +255,7 @@ pub fn undefined_role(name: &str) -> SQLError {
 pub fn apply_grant_role_statement(
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &mut BTreeMap<RoleMembershipKey, RoleMembership>,
-    current: &str,
+    current: &(impl RoleSubject + ?Sized),
     statement: &GrantRoleStmt,
 ) -> Result<(), SQLError> {
     for role in statement
@@ -262,7 +267,10 @@ pub fn apply_grant_role_statement(
             return Err(undefined_role(role));
         }
     }
-    let grantor = statement.grantor.as_deref().unwrap_or(current);
+    let current_name = current
+        .role_name(roles)
+        .ok_or_else(|| insufficient_privilege("permission denied to grant role"))?;
+    let grantor = statement.grantor.as_deref().unwrap_or(current_name);
     if !roles.contains_key(grantor) {
         return Err(undefined_role(grantor));
     }

@@ -27,7 +27,7 @@ impl TableMaintenanceContext<'_> {
             .tables()
             .security_entries()
             .collect::<Vec<_>>();
-        let current_user = self.authorization.names.current_user_name();
+        let current_user = self.authorization.names.current_role();
         let roles = self.authorization.roles.role_definitions();
         let memberships = self.authorization.roles.role_memberships();
         let mut permitted = Vec::new();

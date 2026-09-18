@@ -199,11 +199,11 @@ pub trait EngineHook {
         Ok(None)
     }
 
-    fn current_user(&self) -> std::result::Result<Option<String>, String> {
+    fn current_user(&self) -> std::result::Result<Option<String>, crate::SQLError> {
         Ok(None)
     }
 
-    fn session_user(&self) -> std::result::Result<Option<String>, String> {
+    fn session_user(&self) -> std::result::Result<Option<String>, crate::SQLError> {
         Ok(None)
     }
 

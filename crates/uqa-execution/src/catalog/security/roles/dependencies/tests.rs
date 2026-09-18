@@ -163,7 +163,7 @@ fn owner_binding_survives_target_and_writer_waits_without_rebinding_the_name() {
             roles: &catalog,
             session: &catalog,
         };
-        let owner = context.bind("reader").unwrap();
+        let owner = context.bind(&"reader".into()).unwrap();
         if replace_before_preflight {
             catalog
                 .roles
@@ -209,7 +209,7 @@ fn unchanged_owner_skips_dependency_locks_and_writer_admission() {
         roles: &catalog,
         session: &catalog,
     };
-    let owner = context.bind("reader").unwrap();
+    let owner = context.bind(&"reader".into()).unwrap();
     let result = prepare_role_owner(
         context,
         &owner,

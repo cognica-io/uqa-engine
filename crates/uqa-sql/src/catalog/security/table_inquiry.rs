@@ -12,6 +12,7 @@ use super::{
     table::{parse_column_privilege_checks, parse_privilege_checks, role_has_privilege},
     TableSecurity,
 };
+use crate::catalog::roles::RoleReference;
 use crate::{
     catalog::{
         resolution::RelationResolution,
@@ -157,14 +158,15 @@ impl TablePrivilegeInquiry<'_> {
                 })
             }
         };
-        let current_user = subject_value
-            .is_none()
-            .then(|| self.names.current_user_name());
+        let current_user = subject_value.is_none().then(|| self.names.current_role());
         let subject = {
             let roles = self.roles.role_definitions();
             subject_value.map_or_else(
                 || Ok(current_user),
-                |value| resolve_table_privilege_role(value, &roles),
+                |value| {
+                    resolve_table_privilege_role(value, &roles)
+                        .map(|role| role.map(RoleReference::from))
+                },
             )?
         };
         let Some(target) = self.resolve_table_privilege_target(table_value)? else {
@@ -219,14 +221,15 @@ impl TablePrivilegeInquiry<'_> {
         }
         let (subject_value, table_value, column_value, privilege_value) =
             column_privilege_arguments(arguments)?;
-        let current_user = subject_value
-            .is_none()
-            .then(|| self.names.current_user_name());
+        let current_user = subject_value.is_none().then(|| self.names.current_role());
         let subject = {
             let roles = self.roles.role_definitions();
             subject_value.map_or_else(
                 || Ok(current_user),
-                |value| resolve_table_privilege_role(value, &roles),
+                |value| {
+                    resolve_table_privilege_role(value, &roles)
+                        .map(|role| role.map(RoleReference::from))
+                },
             )?
         };
         let Some(target) = self.resolve_table_privilege_target(table_value)? else {
@@ -235,7 +238,7 @@ impl TablePrivilegeInquiry<'_> {
         if let ResolvedTablePrivilegeTarget::Sequence(relation) = &target {
             return self.has_sequence_column_privilege_value(
                 relation,
-                subject.as_deref(),
+                subject.as_ref(),
                 column_value,
                 privilege_value,
             );
@@ -309,7 +312,7 @@ impl TablePrivilegeInquiry<'_> {
     fn has_sequence_column_privilege_value(
         &self,
         relation: &RelationIdentity,
-        subject: Option<&str>,
+        subject: Option<&RoleReference>,
         column_value: &Value,
         privilege_value: &Value,
     ) -> Result<Value, SQLError> {

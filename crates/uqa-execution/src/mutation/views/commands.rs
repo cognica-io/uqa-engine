@@ -61,9 +61,11 @@ pub fn materialize_view_rows<S: Clone + Send + Sync + 'static>(
         prune_source_outputs(&mut query, &required_positions, target.columns.len());
     }
     let privilege_subject = if target.definition.security_invoker() {
-        scope.privilege_subject()?.to_string()
+        scope.privilege_subject()?.clone()
     } else {
-        target.definition.role_owner.clone()
+        scope
+            .catalog_read_view()?
+            .bind_role(&target.definition.role_owner)?
     };
     let mut privilege_scope = scope.enter_privilege_subject(privilege_subject);
     let result = crate::query::statement::execute_query_plan_with_ctes(

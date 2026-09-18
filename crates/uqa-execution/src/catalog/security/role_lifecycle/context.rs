@@ -7,6 +7,7 @@
 //! State operations used by native role lifecycle execution.
 
 use std::{collections::BTreeMap, ops::DerefMut};
+use uqa_sql::catalog::roles::identity::RoleBinding;
 use uqa_sql::{
     catalog::roles::{
         definition::RoleValidationContext, dependencies::context::RoleDependencyCatalog,
@@ -35,7 +36,8 @@ pub trait RolePublication {
         memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
     ) -> Result<(), SQLError>;
     fn catalog_changed(&self);
-    fn set_current_role(&self, target: String);
+    fn set_current_role(&self, target: Option<RoleBinding>);
+    fn set_session_authorization(&self, target: RoleBinding);
 }
 #[derive(Clone, Copy)]
 pub struct RoleExecutionContext<'a> {

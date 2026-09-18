@@ -8,6 +8,7 @@
 use super::table_inquiry::{TablePrivilegeRegistry, TablePrivilegeState};
 use std::sync::Arc;
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::roles::identity::RoleSubject;
 use uqa_sql::{
     catalog::{
         roles::{guards::RoleCatalogGuards, role_inherits, RoleReferenceNames},
@@ -31,13 +32,13 @@ impl TableAuthorizationContext<'_> {
         name: &str,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
-        let current_user = self.names.current_user_name();
+        let current_user = self.names.current_role();
         self.ensure_table_privilege_for(name, &current_user, privilege)
     }
     pub fn ensure_table_privilege_for(
         &self,
         name: &str,
-        subject: &str,
+        subject: &(impl RoleSubject + ?Sized),
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         let (relation, table) = self.bound_table_for_security(name)?;
@@ -76,14 +77,14 @@ impl TableAuthorizationContext<'_> {
         column: &str,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
-        let current_user = self.names.current_user_name();
+        let current_user = self.names.current_role();
         self.ensure_column_privilege_for(name, column, &current_user, privilege)
     }
     pub fn ensure_column_privilege_for(
         &self,
         name: &str,
         column: &str,
-        subject: &str,
+        subject: &(impl RoleSubject + ?Sized),
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         let (relation, table) = self.bound_table_for_security(name)?;
@@ -113,13 +114,13 @@ impl TableAuthorizationContext<'_> {
         name: &str,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
-        let current_user = self.names.current_user_name();
+        let current_user = self.names.current_role();
         self.ensure_any_column_privilege_for(name, &current_user, privilege)
     }
     pub fn ensure_any_column_privilege_for(
         &self,
         name: &str,
-        subject: &str,
+        subject: &(impl RoleSubject + ?Sized),
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         let (relation, table) = self.bound_table_for_security(name)?;
@@ -192,7 +193,7 @@ impl TableAuthorizationContext<'_> {
         Ok((relation, table))
     }
     fn current_user_has_role_privileges(&self, target: &str) -> bool {
-        let current = self.names.current_user_name();
+        let current = self.names.current_role();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
         role_inherits(&roles, &memberships, &current, target)

@@ -6,6 +6,7 @@
 
 use super::super::guards::{RoleDefinitionRead, RoleMembershipRead};
 use super::*;
+use crate::catalog::roles::RoleReference;
 use std::cell::{Cell, RefCell};
 
 struct Inputs {
@@ -32,12 +33,12 @@ impl Inputs {
     }
 }
 impl RoleReferenceNames for Inputs {
-    fn current_user_name(&self) -> String {
+    fn current_role(&self) -> RoleReference {
         let index = self.current_reads.get();
         self.current_reads.set(index + 1);
-        format!("current_{index}")
+        format!("current_{index}").into()
     }
-    fn session_user_name(&self) -> String {
+    fn session_role(&self) -> RoleReference {
         "uqa".into()
     }
 }
@@ -133,7 +134,7 @@ fn grant_binds_each_live_role_reference_in_granted_grantee_grantor_order() {
         options: RoleMembershipOptions::default(),
         cascade: false,
     };
-    let bound = bind_grant_role_statement(&inputs.context(), &statement);
+    let bound = bind_grant_role_statement(&inputs, &inputs.roles, &statement).unwrap();
     assert_eq!(bound.granted_roles, ["current_0"]);
     assert_eq!(bound.grantee_roles, ["current_1"]);
     assert_eq!(bound.grantor.as_deref(), Some("current_2"));

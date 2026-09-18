@@ -143,7 +143,6 @@ fn routine_execute_denial_precedes_trigger_return_type_validation() {
             "current-user",
             "trigger-privilege:public.items:reader",
             "routine-visible:handler",
-            "current-user",
             "superuser",
         ]
     );

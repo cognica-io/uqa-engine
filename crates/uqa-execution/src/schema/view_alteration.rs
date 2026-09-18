@@ -179,7 +179,7 @@ fn alter_view_role_owner(
     requested_owner: &str,
 ) -> Result<(), SQLError> {
     let owner = context.roles.bind(requested_owner)?;
-    let current_user = context.roles.session.current_user_name();
+    let current_user = context.roles.session.current_role();
     let RoleDependencyCandidate {
         roles,
         memberships,

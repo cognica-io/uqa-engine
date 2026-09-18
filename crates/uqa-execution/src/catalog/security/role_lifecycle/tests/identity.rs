@@ -58,7 +58,7 @@ fn role_binding_rejects_same_name_and_oid_with_a_different_incarnation() {
         roles: &catalog,
         session: &catalog,
     };
-    let bound = context.bind("original").unwrap();
+    let bound = context.bind(&"original".into()).unwrap();
     let mut refreshed = catalog.roles.borrow().clone();
     refreshed.get_mut("original").unwrap().object_id = [99; 16];
     catalog.refreshed_roles.borrow_mut().push_back(refreshed);

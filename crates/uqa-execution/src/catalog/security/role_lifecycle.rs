@@ -7,6 +7,7 @@
 //! Role lifecycle ordering over retained authorization and publication guards.
 
 use std::collections::BTreeSet;
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::{
         AlterRoleStmt, CreateRoleStmt, DropRoleStmt, GrantRoleStmt, RoleMembershipAction,
@@ -29,27 +30,16 @@ pub fn set_role(
     context: &RoleExecutionContext<'_>,
     requested: Option<&str>,
 ) -> Result<(), SQLError> {
-    if crate::routines::invocation::scopes::security_definer_active() {
-        return Err(SQLError::Routine {
-            sqlstate: "42501".into(),
-            message: "cannot set parameter \"role\" within security-definer function".into(),
-        });
-    }
-    let target = match requested {
-        None | Some("none") => context.analysis.names.session_user_name(),
-        Some(name) => name.to_string(),
+    require_authorization_setting("role")?;
+    let Some(target) = requested.filter(|name| *name != "none") else {
+        context.publication.set_current_role(None);
+        return Ok(());
     };
     let roles = context.analysis.roles.role_definitions();
-    if !roles.contains_key(&target) {
-        return Err(SQLError::Routine {
-            sqlstate: "22023".into(),
-            message: format!("role \"{target}\" does not exist"),
-        });
-    }
-    // The embedded connection starts as the bootstrap superuser. PostgreSQL lets a superuser session SET ROLE to any role even while a prior SET ROLE has reduced current_user.
-    let session_user = context.analysis.names.session_user_name();
+    let bound = selected_role(&roles, target)?;
+    let session_user = context.analysis.names.session_role();
     let memberships = context.analysis.roles.role_memberships();
-    if !role_can_set(&roles, &memberships, &session_user, &target) {
+    if !role_can_set(&roles, &memberships, &session_user, target) {
         return Err(SQLError::Routine {
             sqlstate: "42501".into(),
             message: format!("permission denied to set role \"{target}\""),
@@ -57,8 +47,57 @@ pub fn set_role(
     }
     drop(memberships);
     drop(roles);
-    context.publication.set_current_role(target);
+    context.publication.set_current_role(Some(bound));
     Ok(())
+}
+
+pub fn set_session_authorization(
+    context: &RoleExecutionContext<'_>,
+    requested: Option<&str>,
+) -> Result<(), SQLError> {
+    require_authorization_setting("session_authorization")?;
+    let authenticated = context.analysis.names.authenticated_role();
+    let roles = context.analysis.roles.role_definitions();
+    let original = match &authenticated {
+        RoleReference::Bound(identity) => identity.as_ref().clone(),
+        RoleReference::Named(_) => authenticated.bind(&roles)?,
+    };
+    let selected =
+        requested.map_or_else(|| Ok(original.clone()), |name| selected_role(&roles, name))?;
+    if (selected.oid != original.oid || selected.object_id != original.object_id)
+        && !uqa_sql::catalog::roles::memberships::role_is_superuser(&roles, &authenticated)
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "42501".into(),
+            message: "permission denied to set session authorization".into(),
+        });
+    }
+    drop(roles);
+    context.publication.set_session_authorization(selected);
+    Ok(())
+}
+
+fn require_authorization_setting(parameter: &str) -> Result<(), SQLError> {
+    if crate::routines::invocation::scopes::security_definer_active() {
+        return Err(SQLError::Routine {
+            sqlstate: "42501".into(),
+            message: format!(
+                "cannot set parameter \"{parameter}\" within security-definer function"
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn selected_role(
+    roles: &std::collections::BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+    name: &str,
+) -> Result<uqa_sql::catalog::roles::identity::RoleBinding, SQLError> {
+    let role = roles.get(name).ok_or_else(|| SQLError::Routine {
+        sqlstate: "22023".into(),
+        message: format!("role \"{name}\" does not exist"),
+    })?;
+    uqa_sql::catalog::roles::identity::RoleBinding::from_definition(role)
 }
 
 pub fn create_role(
@@ -66,7 +105,7 @@ pub fn create_role(
     statement: &CreateRoleStmt,
 ) -> Result<(), SQLError> {
     require_role_creation(&context.analysis)?;
-    let current = context.analysis.names.current_user_name();
+    let current = context.analysis.names.current_role();
     {
         let roles = context.analysis.roles.role_definitions();
         require_role_attribute_authority(
@@ -128,11 +167,16 @@ pub fn alter_role(
         );
     }
     let name = resolve_role_reference(context.analysis.names, &statement.name);
-    let current = context.analysis.names.current_user_name();
+    let current = context.analysis.names.current_role();
     context.publication.prepare_writer()?;
     let mut roles = context.registry.write_roles();
-    let next =
-        definition::alter_role_candidate(&context.analysis, &roles, &current, name, statement)?;
+    let next = definition::alter_role_candidate(
+        &context.analysis,
+        &roles,
+        &current,
+        name.catalog_name(&roles)?,
+        statement,
+    )?;
     context.publication.persist_roles(&roles, &next)?;
     **roles = next;
     drop(roles);
@@ -144,8 +188,8 @@ pub fn drop_roles(
     context: &RoleExecutionContext<'_>,
     statement: &DropRoleStmt,
 ) -> Result<(), SQLError> {
-    let current = context.analysis.names.current_user_name();
-    let session = context.analysis.names.session_user_name();
+    let current = context.analysis.names.current_role();
+    let session = context.analysis.names.session_role();
     let names = locking::lock_drop_targets(context, statement, &current, &session)?;
     context.publication.prepare_writer()?;
     let mut roles = context.registry.write_roles();
@@ -202,9 +246,10 @@ pub fn grant_roles(
     statement: &GrantRoleStmt,
 ) -> Result<(), SQLError> {
     context.publication.prepare_writer()?;
-    let resolved = definition::bind_grant_role_statement(&context.analysis, statement);
     let roles = context.analysis.roles.role_definitions();
-    let current = context.analysis.names.current_user_name();
+    let resolved =
+        definition::bind_grant_role_statement(context.analysis.names, &roles, statement)?;
+    let current = context.analysis.names.current_role();
     let mut memberships = context.registry.write_memberships();
     let mut next = memberships.clone();
     apply_grant_role_statement(&roles, &mut next, &current, &resolved)?;

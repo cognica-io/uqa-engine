@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 pub mod identity;
+pub mod session;
+pub use identity::RoleReference;
 pub mod memberships;
 pub use memberships::{role_can_set, role_inherits};
 
@@ -86,16 +88,19 @@ impl RoleDefinition {
     }
 }
 
-/// Session names used by `CURRENT_USER` and `SESSION_USER` role references.
+/// Selected identities used by SQL current-user, session-user and authenticated-role references.
 pub trait RoleReferenceNames {
-    fn current_user_name(&self) -> String;
-    fn session_user_name(&self) -> String;
+    fn current_role(&self) -> RoleReference;
+    fn session_role(&self) -> RoleReference;
+    fn authenticated_role(&self) -> RoleReference {
+        self.session_role()
+    }
 }
-pub fn resolve_role_reference(names: &dyn RoleReferenceNames, name: &str) -> String {
+pub fn resolve_role_reference(names: &dyn RoleReferenceNames, name: &str) -> RoleReference {
     match name {
-        "CURRENT_USER" => names.current_user_name(),
-        "SESSION_USER" => names.session_user_name(),
-        other => other.to_string(),
+        "CURRENT_USER" => names.current_role(),
+        "SESSION_USER" => names.session_role(),
+        other => other.into(),
     }
 }
 pub fn require_role_exists(
@@ -113,7 +118,7 @@ pub fn require_role_exists(
 pub fn require_set_role(
     roles: &std::collections::BTreeMap<String, RoleDefinition>,
     memberships: &std::collections::BTreeMap<RoleMembershipKey, RoleMembership>,
-    current: &str,
+    current: &(impl identity::RoleSubject + ?Sized),
     target: &str,
 ) -> Result<(), crate::SQLError> {
     if role_can_set(roles, memberships, current, target) {

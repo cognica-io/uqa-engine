@@ -6,6 +6,7 @@
 
 //! Explicit relation-lock authorization and stored-view target scope.
 
+use crate::catalog::roles::RoleReference;
 use crate::{
     ast::{LockTableTarget, TableLockMode},
     catalog::{
@@ -22,7 +23,7 @@ use crate::{
 pub fn ensure_lock_privilege(
     roles: &dyn RoleCatalogGuards,
     security: &TableSecurity,
-    subject: &str,
+    subject: &RoleReference,
     mode: TableLockMode,
     name: &str,
     kind: &str,

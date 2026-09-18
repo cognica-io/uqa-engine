@@ -172,7 +172,7 @@ fn parsed_regtype_oid(
         }
         context.require_schema_privilege(
             schema,
-            &context.current_user_name(),
+            &context.current_role(),
             crate::catalog::security::schema::SchemaAclPrivilege::Usage,
         )?;
         return Ok(type_oid_in_schema(

@@ -6,6 +6,7 @@
 
 //! Immutable relation authorization and CTE name inputs for column lineage analysis.
 
+use crate::catalog::roles::RoleReference;
 use crate::{
     catalog::resolution::RelationNameResolution,
     plan::{CtePlan, QueryPlan},
@@ -54,14 +55,14 @@ pub trait PrivilegeCatalog {
         resolution: &RelationNameResolution,
         relation: &PrivilegeRelation,
         column: Option<&str>,
-        subject: &str,
+        subject: &RoleReference,
     ) -> Result<bool, SQLError>;
 }
 pub trait PrivilegeCteCatalog {
     fn is_visible_cte(&self, name: &str) -> bool;
     fn materialized_columns(&self, name: &str) -> Option<Vec<String>>;
     fn deferred_reference(&self, name: &str) -> Option<&CtePlan>;
-    fn privilege_subject(&self) -> Result<&str, SQLError>;
+    fn privilege_subject(&self) -> Result<&RoleReference, SQLError>;
 }
 #[derive(Clone)]
 pub struct PrivilegeScope<'a> {
@@ -108,7 +109,7 @@ impl<'a> PrivilegeScope<'a> {
             .or_else(|| self.inherited.deferred_reference(name))
     }
 
-    pub fn privilege_subject(&self) -> Result<&str, SQLError> {
+    pub fn privilege_subject(&self) -> Result<&RoleReference, SQLError> {
         self.inherited.privilege_subject()
     }
 }

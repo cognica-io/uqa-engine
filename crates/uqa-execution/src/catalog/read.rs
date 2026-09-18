@@ -16,6 +16,8 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
+use uqa_sql::catalog::roles::identity::RoleSubject;
+use uqa_sql::catalog::roles::RoleReference;
 
 use uqa_graph::GraphStore;
 use uqa_sql::SQLError;
@@ -229,6 +231,12 @@ impl CatalogReadView {
         self.snapshot.definitions.roles.values()
     }
 
+    pub fn bind_role(&self, name: &str) -> Result<RoleReference, SQLError> {
+        RoleReference::from(name)
+            .bind(&self.snapshot.definitions.roles)
+            .map(|role| RoleReference::Bound(Arc::new(role)))
+    }
+
     pub fn role_oid(&self, name: &str) -> Result<i64, SQLError> {
         self.snapshot
             .definitions
@@ -324,7 +332,7 @@ impl CatalogReadView {
     pub fn sequence_is_visible_to(
         &self,
         security: &crate::catalog::security::SequenceSecurity,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
     ) -> bool {
         crate::catalog::security::sequence::role_can_view_sequence(
             security,
@@ -337,7 +345,7 @@ impl CatalogReadView {
     pub fn sequence_is_selectable_to(
         &self,
         security: &crate::catalog::security::SequenceSecurity,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
     ) -> bool {
         crate::catalog::security::sequence::role_can_select_sequence(
             security,
@@ -350,7 +358,7 @@ impl CatalogReadView {
     pub fn sequence_value_is_readable_to(
         &self,
         security: &crate::catalog::security::SequenceSecurity,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
     ) -> bool {
         crate::catalog::security::sequence::role_can_read_sequence_value(
             security,
@@ -392,7 +400,7 @@ impl CatalogReadView {
     pub fn schema_has_privilege_to(
         &self,
         schema: &str,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
         privilege: crate::catalog::security::schema::SchemaAclPrivilege,
     ) -> bool {
         let Some(security) = self.snapshot.definitions.schemas.get(schema) else {

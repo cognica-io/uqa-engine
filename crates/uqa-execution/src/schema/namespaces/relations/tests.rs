@@ -9,6 +9,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::catalog::{
     resolution::{candidates::SearchPathRead, creation::CreationRelationNames},
     roles::{
@@ -101,11 +102,11 @@ impl GraphNamespaceRead for EmptyNames {
     }
 }
 impl RoleReferenceNames for Fixture {
-    fn current_user_name(&self) -> String {
+    fn current_role(&self) -> RoleReference {
         self.events.borrow_mut().push("user");
-        self.user.clone()
+        self.user.clone().into()
     }
-    fn session_user_name(&self) -> String {
+    fn session_role(&self) -> RoleReference {
         panic!("creation authorization uses current role")
     }
 }

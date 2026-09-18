@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleReference;
 use crate::{
     ast::{ColumnDef, FunctionBinding, TableHierarchy},
     binding::{
@@ -208,7 +209,7 @@ impl RoutineSupportAuthority for Catalog {
     }
 }
 impl RoutineExecutionAuthority for Catalog {
-    fn current_user_name(&self) -> String {
+    fn current_role(&self) -> RoleReference {
         self.record("current-user");
         "reader".into()
     }
@@ -218,17 +219,20 @@ impl RoutineExecutionAuthority for Catalog {
     }
 }
 impl ViewPrivilegeCatalog for Catalog {
+    fn bind_role(&self, name: &str) -> Result<RoleReference, SQLError> {
+        Ok(name.into())
+    }
     fn view_definition(&self, _: &str) -> Result<Option<StoredView>, SQLError> {
         panic!("unexpected visible view")
     }
-    fn current_user_name(&self) -> String {
-        RoutineExecutionAuthority::current_user_name(self)
+    fn current_role(&self) -> RoleReference {
+        RoutineExecutionAuthority::current_role(self)
     }
     fn ensure_view_privilege_for(
         &self,
         _: &str,
         _: &StoredView,
-        _: &str,
+        _: &RoleReference,
         _: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         panic!("unexpected view privilege")
@@ -238,7 +242,7 @@ impl ViewPrivilegeCatalog for Catalog {
         _: &str,
         _: &StoredView,
         _: &str,
-        _: &str,
+        _: &RoleReference,
         _: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         panic!("unexpected view column privilege")
@@ -247,7 +251,7 @@ impl ViewPrivilegeCatalog for Catalog {
         &self,
         _: &str,
         _: &StoredView,
-        _: &str,
+        _: &RoleReference,
         _: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         panic!("unexpected view column privilege")
@@ -266,10 +270,11 @@ impl MutationPrivilegeCatalog for Catalog {
     fn ensure_table_privilege_for(
         &self,
         table: &str,
-        subject: &str,
+        subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         assert!(matches!(privilege, TableAclPrivilege::Trigger));
+        let subject = subject.catalog_name(&std::collections::BTreeMap::new())?;
         self.record(format!("trigger-privilege:{table}:{subject}"));
         if self.allow_trigger {
             Ok(())
@@ -284,7 +289,7 @@ impl MutationPrivilegeCatalog for Catalog {
         &self,
         _: &str,
         _: &str,
-        _: &str,
+        _: &RoleReference,
         _: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         panic!("unexpected column privilege")
@@ -292,7 +297,7 @@ impl MutationPrivilegeCatalog for Catalog {
     fn ensure_any_column_privilege_for(
         &self,
         _: &str,
-        _: &str,
+        _: &RoleReference,
         _: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         panic!("unexpected column privilege")

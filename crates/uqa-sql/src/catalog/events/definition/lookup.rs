@@ -6,6 +6,7 @@
 
 //! Trigger-name conflicts across current partition ancestry and descendants.
 use super::EventAnalysisContext;
+use crate::catalog::roles::RoleReference;
 use crate::{
     ast::TableHierarchy,
     catalog::events::{
@@ -131,12 +132,12 @@ impl EventLookupContext<'_> {
         }
         Ok(())
     }
-    pub fn rule_privilege_subject(&self, table: &str) -> Result<String, SQLError> {
+    pub fn rule_privilege_subject(&self, table: &str) -> Result<RoleReference, SQLError> {
         let relation = self.analysis.resolve_rule_relation(table)?;
         self.analysis
             .catalog
             .event_relation_owner(&relation)
-            .map(|(owner, _)| owner)
+            .and_then(|(owner, _)| self.analysis.privileges.bind_role(&owner))
     }
     pub fn constraint_trigger_by_constraint_name(
         &self,

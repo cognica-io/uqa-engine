@@ -18,6 +18,8 @@ use super::services::{
     RelationCounts, ViewCatalogCapabilities,
 };
 use super::{CatalogReadView, RelationLookupMode, RelationNameResolution, RelationResolution};
+use uqa_sql::catalog::roles::identity::RoleSubject;
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::routines::RoutineResolution;
 use uqa_sql::{ColumnType, SQLError};
 
@@ -43,8 +45,8 @@ impl CatalogContext<'_> {
     pub fn current_schema_names(&self, implicit: bool) -> Result<Vec<String>, SQLError> {
         self.namespaces.current_schema_names(implicit)
     }
-    pub fn current_user_name(&self) -> String {
-        self.session.current_user()
+    pub fn current_role(&self) -> RoleReference {
+        self.session.current_role()
     }
     pub fn search_path_contains(&self, schema: &str) -> bool {
         self.session
@@ -146,7 +148,7 @@ impl CatalogContext<'_> {
     pub fn require_schema_privilege(
         &self,
         schema: &str,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
         privilege: SchemaAclPrivilege,
     ) -> Result<(), SQLError> {
         let catalog = self.catalog_read_view();

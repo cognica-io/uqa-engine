@@ -92,7 +92,7 @@ pub fn resolve_regprocedure_input_oid(
         if context.schema_security_for_privilege(schema).is_some() {
             context.require_schema_privilege(
                 schema,
-                &context.current_user_name(),
+                &context.current_role(),
                 SchemaAclPrivilege::Usage,
             )?;
         }

@@ -19,7 +19,7 @@ pub fn build_pg_sequences(
     session: &dyn CatalogSession,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let temporary_schema = session.temporary_schema_name();
-    let current_user = session.current_user();
+    let current_user = session.current_role();
     let mut rows = catalog
         .sequence_states()
         .into_iter()

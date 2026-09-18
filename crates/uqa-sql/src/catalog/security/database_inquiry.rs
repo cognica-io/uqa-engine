@@ -10,6 +10,8 @@ use super::database::{
     parse_privilege_checks, role_has_database_privilege, role_has_database_privilege_check,
     DatabaseAclPrivilege, DatabaseSecurity,
 };
+use crate::catalog::roles::identity::RoleSubject;
+use crate::catalog::roles::RoleReference;
 use crate::{
     catalog::{
         roles::{guards::RoleCatalogGuards, RoleDefinition, RoleReferenceNames},
@@ -36,7 +38,7 @@ pub struct DatabasePrivilegeInquiry<'a> {
 impl DatabasePrivilegeInquiry<'_> {
     pub fn ensure_database_privilege(
         &self,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
         privilege: DatabaseAclPrivilege,
     ) -> Result<(), SQLError> {
         if role_has_database_privilege(
@@ -80,14 +82,15 @@ impl DatabasePrivilegeInquiry<'_> {
                 })
             }
         };
-        let current_user = subject_value
-            .is_none()
-            .then(|| self.names.current_user_name());
+        let current_user = subject_value.is_none().then(|| self.names.current_role());
         let subject = {
             let roles = self.roles.role_definitions();
             subject_value.map_or_else(
                 || Ok(current_user),
-                |value| resolve_database_privilege_role(value, &roles),
+                |value| {
+                    resolve_database_privilege_role(value, &roles)
+                        .map(|role| role.map(RoleReference::from))
+                },
             )?
         };
         let database_exists = resolve_database_privilege_target(database_value)?;
@@ -103,8 +106,8 @@ impl DatabasePrivilegeInquiry<'_> {
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
         let subject_is_superuser = subject.as_ref().is_some_and(|subject| {
-            roles
-                .get(subject)
+            subject
+                .role_definition(&roles)
                 .is_some_and(|role| role.has(crate::ast::RoleAttribute::Superuser))
         });
         if !database_exists {

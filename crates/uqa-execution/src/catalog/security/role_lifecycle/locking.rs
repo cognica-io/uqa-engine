@@ -11,13 +11,14 @@ use crate::{
     catalog::security::roles::locking::{RoleBinding, RoleLockContext, ROLE_CATALOG_CLASS_ID},
     row_locks::{shared_objects::SharedCatalogLock, RelationLockMode},
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{ast::DropRoleStmt, catalog::roles::definition, SQLError};
 
 pub(super) fn lock_drop_targets(
     context: &RoleExecutionContext<'_>,
     statement: &DropRoleStmt,
-    current: &str,
-    session: &str,
+    current: &RoleReference,
+    session: &RoleReference,
 ) -> Result<Vec<String>, SQLError> {
     let snapshot = context.analysis.roles.role_definitions().clone();
     let names = definition::resolve_drop_role_names(

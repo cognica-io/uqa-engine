@@ -19,6 +19,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
+use uqa_sql::catalog::roles::identity::RoleSubject;
 use uqa_sql::{
     ast::{AlterRoutineStmt, CreateFunction, RoleAttribute},
     catalog::roles::role_inherits,
@@ -64,15 +65,18 @@ pub fn register_sql_function(
     context: &RoutineRegistrationContext<'_>,
     mut def: CreateFunction,
 ) -> Result<(), SQLError> {
-    let current_user = context.catalog.names.current_user_name();
-    if def.owner.is_empty() {
-        def.owner.clone_from(&current_user);
-    }
+    let current_user = context.catalog.names.current_role();
+    let requested_owner = if def.owner.is_empty() {
+        current_user.clone()
+    } else {
+        def.owner.clone().into()
+    };
     let locks = RoleLockContext {
         roles: context.catalog.roles,
         session: context.namespace.locks,
     };
-    let owner = locks.bind(&def.owner)?;
+    let owner = locks.bind(&requested_owner)?;
+    def.owner.clone_from(&owner.name);
     let requested_name = def.name.clone();
     def.name = context.namespace.persistent_name(&requested_name)?;
     resolve_routine_type_references(context.definition.compilation.analysis.types, &mut def)?;
@@ -100,8 +104,8 @@ pub fn register_sql_function(
             context.namespace.ensure_create(&name)?;
             let roles = context.catalog.roles.role_definitions();
             owner.revalidate(&roles)?;
-            let current_user_is_superuser = roles
-                .get(&current_user)
+            let current_user_is_superuser = current_user
+                .role_definition(&roles)
                 .is_some_and(|role| role.has(RoleAttribute::Superuser));
             let memberships = context.catalog.roles.role_memberships();
             analysis::validate_routine_security_attributes(&def, current_user_is_superuser)?;
@@ -168,10 +172,10 @@ pub fn alter_sql_routine(
     context.catalog.writer.prepare_writer()?;
     let requested_types =
         resolve_alter_routine_identity_types(context.definition.compilation.analysis.types, stmt)?;
-    let current_user = context.catalog.names.current_user_name();
+    let current_user = context.catalog.names.current_role();
     let roles = context.catalog.roles.role_definitions();
-    let current_user_is_superuser = roles
-        .get(&current_user)
+    let current_user_is_superuser = current_user
+        .role_definition(&roles)
         .is_some_and(|role| role.has(RoleAttribute::Superuser));
     let memberships = context.catalog.roles.role_memberships();
     let mut registry = context.catalog.registry.routines_write();

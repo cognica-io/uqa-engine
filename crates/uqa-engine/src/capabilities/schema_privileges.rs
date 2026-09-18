@@ -10,6 +10,7 @@ use crate::Engine;
 use parking_lot::MappedRwLockReadGuard;
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_graph::GraphStoreHandle;
+use uqa_sql::catalog::roles::identity::RoleSubject;
 use uqa_sql::{
     catalog::security::{
         schema::SchemaAclPrivilege,
@@ -62,7 +63,7 @@ impl Engine {
     pub(crate) fn schema_has_privilege_for_role(
         &self,
         schema: &str,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
         privilege: SchemaAclPrivilege,
     ) -> bool {
         self.schema_privilege_inquiry()
@@ -75,7 +76,7 @@ impl Engine {
     pub(crate) fn require_schema_privilege(
         &self,
         schema: &str,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
         privilege: SchemaAclPrivilege,
     ) -> Result<(), SQLError> {
         self.schema_privilege_inquiry()

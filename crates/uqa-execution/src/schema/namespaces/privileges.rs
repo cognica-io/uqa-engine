@@ -116,17 +116,18 @@ fn prepare_privileges<'a>(
     statement: &GrantSchemaStmt,
     targets: &[String],
 ) -> Result<RoleDependencyCandidate<'a, SchemaPrivilegeCandidate<'a>>, SQLError> {
+    let roles = context.roles.role_definitions();
     let grantees = statement
         .grantees
         .iter()
-        .map(|role| resolve_role_reference(context.session, role))
-        .collect::<Vec<_>>();
+        .map(|role| resolve_role_reference(context.session, role).catalog_name(&roles))
+        .collect::<Result<Vec<_>, _>>()?;
     let requested_grantor = statement
         .grantor
         .as_ref()
-        .map(|role| resolve_role_reference(context.session, role));
-    let current_user = context.session.current_user_name();
-    let roles = context.roles.role_definitions();
+        .map(|role| resolve_role_reference(context.session, role).catalog_name(&roles))
+        .transpose()?;
+    let current_user = context.session.current_role();
     validate_schema_acl_roles(
         statement,
         &grantees,

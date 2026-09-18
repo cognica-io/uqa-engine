@@ -8,14 +8,84 @@
 
 use super::RoleDefinition;
 use crate::SQLError;
-use std::collections::BTreeMap;
+use serde::{Deserialize, Serialize};
+use std::{collections::BTreeMap, sync::Arc};
 
 /// A selected role keeps its incarnation even if another role later reuses its name or OID.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoleBinding {
     pub name: String,
     pub oid: u32,
     pub object_id: [u8; 16],
+}
+
+/// Explicit SQL names are resolved against the current catalog; captured authority retains its incarnation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RoleReference {
+    Named(String),
+    Bound(Arc<RoleBinding>),
+}
+
+impl From<String> for RoleReference {
+    fn from(name: String) -> Self {
+        Self::Named(name)
+    }
+}
+
+impl From<&str> for RoleReference {
+    fn from(name: &str) -> Self {
+        Self::Named(name.into())
+    }
+}
+
+impl RoleReference {
+    pub fn require_name<'a>(
+        &'a self,
+        roles: &'a BTreeMap<String, RoleDefinition>,
+    ) -> Result<&'a str, SQLError> {
+        match self {
+            Self::Named(name) => {
+                super::require_role_exists(roles, name)?;
+                Ok(name)
+            }
+            Self::Bound(role) => role.require_name(roles),
+        }
+    }
+
+    pub fn catalog_name(
+        &self,
+        roles: &BTreeMap<String, RoleDefinition>,
+    ) -> Result<String, SQLError> {
+        match self {
+            Self::Named(name) => Ok(name.clone()),
+            Self::Bound(role) => role.require_name(roles).map(str::to_owned),
+        }
+    }
+
+    pub fn bind(&self, roles: &BTreeMap<String, RoleDefinition>) -> Result<RoleBinding, SQLError> {
+        let name = self.require_name(roles)?;
+        RoleBinding::from_definition(&roles[name])
+    }
+}
+
+impl RoleSubject for RoleReference {
+    fn role_name<'a>(&'a self, roles: &'a BTreeMap<String, RoleDefinition>) -> Option<&'a str> {
+        match self {
+            Self::Named(name) => name.role_name(roles),
+            Self::Bound(role) => role.role_name(roles),
+        }
+    }
+
+    fn role_definition<'a>(
+        &self,
+        roles: &'a BTreeMap<String, RoleDefinition>,
+    ) -> Option<&'a RoleDefinition> {
+        match self {
+            Self::Named(name) => name.role_definition(roles),
+            Self::Bound(role) => role.role_definition(roles),
+        }
+    }
 }
 
 impl RoleBinding {
@@ -71,6 +141,18 @@ pub trait RoleSubject {
         &self,
         roles: &'a BTreeMap<String, RoleDefinition>,
     ) -> Option<&'a RoleDefinition>;
+}
+
+impl<T: RoleSubject + ?Sized> RoleSubject for Arc<T> {
+    fn role_name<'a>(&'a self, roles: &'a BTreeMap<String, RoleDefinition>) -> Option<&'a str> {
+        self.as_ref().role_name(roles)
+    }
+    fn role_definition<'a>(
+        &self,
+        roles: &'a BTreeMap<String, RoleDefinition>,
+    ) -> Option<&'a RoleDefinition> {
+        self.as_ref().role_definition(roles)
+    }
 }
 
 impl<T: RoleSubject + ?Sized> RoleSubject for &T {

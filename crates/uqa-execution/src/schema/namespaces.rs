@@ -107,7 +107,7 @@ pub fn register_api_schema(
         roles: context.roles,
         session: context.locks,
     };
-    let owner = locks.bind(&context.session.current_user_name())?;
+    let owner = locks.bind(&context.session.current_role())?;
     let RoleDependencyCandidate {
         roles,
         memberships,
@@ -148,7 +148,7 @@ pub fn create_schema(
     if_not_exists: bool,
     authorization: Option<&uqa_sql::ast::SchemaAuthorization>,
 ) -> Result<SQLResult, SQLError> {
-    let current_user = context.session.current_user_name();
+    let current_user = context.session.current_role();
     let target = uqa_sql::schema::namespaces::creation::schema_creation_target(
         context.session,
         context.roles,
@@ -251,7 +251,8 @@ pub fn alter_schema_owner(
         session: context.locks,
     };
     let owner = locks.bind(&new_owner)?;
-    let current_user = context.session.current_user_name();
+    let new_owner = owner.name.clone();
+    let current_user = context.session.current_role();
     let RoleDependencyCandidate {
         roles,
         memberships,

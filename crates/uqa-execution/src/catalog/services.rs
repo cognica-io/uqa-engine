@@ -7,6 +7,7 @@
 //! Consumer-owned services required to project catalog rows.
 use super::RelationNameResolution;
 use uqa_core::Value;
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::catalog::session::PreparedStatementMetadata;
 use uqa_sql::{
     ast::{Expr, TriggerEvent},
@@ -14,7 +15,7 @@ use uqa_sql::{
 };
 
 pub trait CatalogSession: Sync {
-    fn current_user(&self) -> String;
+    fn current_role(&self) -> RoleReference;
     fn temporary_schema_name(&self) -> String;
     fn relation_name_resolution(&self) -> RelationNameResolution;
     fn show_variable(&self, name: &str) -> Result<String, SQLError>;

@@ -8,6 +8,7 @@
 use crate::row_locks::{session::RowLockSession, LockAcquire};
 use std::collections::BTreeSet;
 use uqa_core::{DocId, PostingList, Predicate, Value};
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::ForeignKey,
     semantics::{partition::PartitionContext, referential::ReferentialCatalog},
@@ -44,11 +45,11 @@ pub trait ConstraintTransactions {
     fn lock_key_reservation(&self, key: [u8; 32], table: &str) -> Result<LockAcquire, SQLError>;
 }
 pub trait MutationNamespace {
-    fn current_user_name(&self) -> String;
+    fn current_role(&self) -> RoleReference;
     fn require_schema_privilege(
         &self,
         schema: &str,
-        role: &str,
+        role: &RoleReference,
         privilege: crate::catalog::security::schema::SchemaAclPrivilege,
     ) -> Result<(), SQLError>;
 }

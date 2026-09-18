@@ -6,6 +6,7 @@
 
 //! DROP DOMAIN name binding, namespace privileges, and owner diagnostics.
 
+use crate::catalog::roles::RoleReference;
 use crate::{
     catalog::{domain::DomainCatalog, roles::RoleReferenceNames, security::SchemaSecurity},
     SQLError,
@@ -17,7 +18,7 @@ pub trait DomainDropCatalog: DomainCatalog {
     fn format_domain_drop_type(&self, oid: i64) -> Result<Option<String>, String>;
 }
 pub trait DomainDropAuthority {
-    fn schema_usage(&self, schema: &str, role: &str) -> bool;
+    fn schema_usage(&self, schema: &str, role: &RoleReference) -> bool;
     fn current_user_has_role_privileges(&self, role: &str) -> bool;
 }
 pub struct DomainDropBinding<'a> {
@@ -56,7 +57,7 @@ pub fn resolve_drop_domain(
         }
         if !context
             .authority
-            .schema_usage(schema, &context.session.current_user_name())
+            .schema_usage(schema, &context.session.current_role())
         {
             return Err(SQLError::Routine {
                 sqlstate: "42501".into(),

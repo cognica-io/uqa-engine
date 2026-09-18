@@ -7,6 +7,7 @@
 //! Bind database privilege inquiry, publication and restoration to live catalog state.
 
 use crate::Engine;
+use uqa_sql::catalog::roles::identity::RoleSubject;
 use uqa_sql::{
     catalog::security::{
         database::DatabaseAclPrivilege,
@@ -37,7 +38,7 @@ impl Engine {
     }
     pub(crate) fn ensure_database_privilege(
         &self,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
         privilege: DatabaseAclPrivilege,
     ) -> Result<(), SQLError> {
         self.database_privilege_inquiry()

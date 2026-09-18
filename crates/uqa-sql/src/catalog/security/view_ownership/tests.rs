@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleReference;
 use crate::catalog::security::SchemaSecurity;
 use crate::{
     ast::RelationPersistence,
@@ -40,11 +41,11 @@ impl Catalog {
     }
 }
 impl RoleReferenceNames for Catalog {
-    fn current_user_name(&self) -> String {
+    fn current_role(&self) -> RoleReference {
         self.calls.borrow_mut().push("current_user");
-        self.user.clone()
+        self.user.clone().into()
     }
-    fn session_user_name(&self) -> String {
+    fn session_role(&self) -> RoleReference {
         panic!("view ownership uses the current role");
     }
 }

@@ -14,6 +14,7 @@ use super::{
     },
     resolve_role_reference, RoleDefinition, RoleMembership, RoleMembershipKey, RoleReferenceNames,
 };
+use crate::catalog::roles::identity::RoleSubject;
 use crate::{
     ast::{
         AlterRoleStmt, CreateRoleStmt, DropRoleStmt, GrantRoleStmt, RoleAttribute,
@@ -35,16 +36,16 @@ pub struct RoleValidationContext<'a> {
 }
 
 pub fn require_role_creation(context: &RoleValidationContext<'_>) -> Result<(), SQLError> {
-    let current = context.names.current_user_name();
+    let current = context.names.current_role();
     require_createrole(&context.roles.role_definitions(), &current, "create role")
 }
 
 fn require_createrole(
     roles: &BTreeMap<String, RoleDefinition>,
-    current: &str,
+    current: &(impl RoleSubject + ?Sized),
     action: &str,
 ) -> Result<(), SQLError> {
-    let allowed = roles.get(current).is_some_and(|role| {
+    let allowed = current.role_definition(roles).is_some_and(|role| {
         role.has(RoleAttribute::Superuser) || role.has(RoleAttribute::CreateRole)
     });
     if allowed {
@@ -59,18 +60,22 @@ fn require_createrole(
 pub fn require_role_administration_for(
     catalog: &dyn RoleCatalogGuards,
     roles: &BTreeMap<String, RoleDefinition>,
-    current: &str,
+    current: &(impl RoleSubject + ?Sized),
     target: &str,
     action: &str,
 ) -> Result<(), SQLError> {
     if role_is_superuser(roles, current) {
         return Ok(());
     }
-    let can_create_roles = roles
-        .get(current)
+    let can_create_roles = current
+        .role_definition(roles)
         .is_some_and(|role| role.has(RoleAttribute::CreateRole));
     let memberships = catalog.role_memberships();
-    if can_create_roles && role_has_admin(&memberships, current, target) {
+    if can_create_roles
+        && current
+            .role_name(roles)
+            .is_some_and(|name| role_has_admin(&memberships, name, target))
+    {
         Ok(())
     } else {
         Err(insufficient_privilege(&format!(
@@ -81,7 +86,7 @@ pub fn require_role_administration_for(
 
 pub fn create_role_candidate(
     roles: &BTreeMap<String, RoleDefinition>,
-    current: &str,
+    current: &(impl RoleSubject + ?Sized),
     definition: RoleDefinition,
 ) -> Result<(BTreeMap<String, RoleDefinition>, bool), SQLError> {
     if roles.contains_key(&definition.name) {
@@ -99,7 +104,7 @@ pub fn create_role_candidate(
 pub fn apply_create_role_memberships(
     context: &RoleValidationContext<'_>,
     statement: &CreateRoleStmt,
-    current: &str,
+    current: &(impl RoleSubject + ?Sized),
     current_is_superuser: bool,
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &mut BTreeMap<RoleMembershipKey, RoleMembership>,
@@ -113,7 +118,9 @@ pub fn apply_create_role_memberships(
         insert_membership(
             memberships,
             &statement.name,
-            current,
+            current
+                .role_name(roles)
+                .ok_or_else(|| insufficient_privilege("permission denied to create role"))?,
             &bootstrap,
             RoleMembershipOptions {
                 admin: Some(true),
@@ -126,8 +133,8 @@ pub fn apply_create_role_memberships(
     let in_roles = statement
         .in_roles
         .iter()
-        .map(|role| resolve_role_reference(context.names, role))
-        .collect::<Vec<_>>();
+        .map(|role| resolve_role_reference(context.names, role).catalog_name(roles))
+        .collect::<Result<Vec<_>, _>>()?;
     if !in_roles.is_empty() {
         apply_grant_role_statement(
             roles,
@@ -146,8 +153,8 @@ pub fn apply_create_role_memberships(
     let role_members = statement
         .role_members
         .iter()
-        .map(|role| resolve_role_reference(context.names, role))
-        .collect::<Vec<_>>();
+        .map(|role| resolve_role_reference(context.names, role).catalog_name(roles))
+        .collect::<Result<Vec<_>, _>>()?;
     if !role_members.is_empty() {
         apply_grant_role_statement(
             roles,
@@ -166,8 +173,8 @@ pub fn apply_create_role_memberships(
     let admin_members = statement
         .admin_members
         .iter()
-        .map(|role| resolve_role_reference(context.names, role))
-        .collect::<Vec<_>>();
+        .map(|role| resolve_role_reference(context.names, role).catalog_name(roles))
+        .collect::<Result<Vec<_>, _>>()?;
     if !admin_members.is_empty() {
         apply_grant_role_statement(
             roles,
@@ -192,7 +199,7 @@ pub fn apply_create_role_memberships(
 pub fn alter_role_candidate(
     context: &RoleValidationContext<'_>,
     roles: &BTreeMap<String, RoleDefinition>,
-    current: &str,
+    current: &(impl RoleSubject + ?Sized),
     name: String,
     statement: &AlterRoleStmt,
 ) -> Result<BTreeMap<String, RoleDefinition>, SQLError> {
@@ -207,8 +214,8 @@ pub fn alter_role_candidate(
         statement.attributes.keys().copied(),
         "alter role",
     )?;
-    let current_is_superuser = roles
-        .get(current)
+    let current_is_superuser = current
+        .role_definition(roles)
         .is_some_and(|role| role.has(RoleAttribute::Superuser));
     if (statement.attributes.contains_key(&RoleAttribute::Superuser)
         || existing.has(RoleAttribute::Superuser))
@@ -237,14 +244,14 @@ pub fn alter_role_candidate(
 pub fn resolve_drop_role_names(
     context: &RoleValidationContext<'_>,
     statement: &DropRoleStmt,
-    current: &str,
-    session: &str,
+    current: &(impl RoleSubject + ?Sized),
+    session: &(impl RoleSubject + ?Sized),
     snapshot: &BTreeMap<String, RoleDefinition>,
 ) -> Result<Vec<String>, SQLError> {
     require_createrole(snapshot, current, "drop role")?;
     let mut names = Vec::new();
     for requested in &statement.names {
-        let name = resolve_role_reference(context.names, requested);
+        let name = resolve_role_reference(context.names, requested).catalog_name(snapshot)?;
         if !snapshot.contains_key(&name) {
             if statement.if_exists {
                 context.notices.notice(
@@ -267,12 +274,12 @@ pub fn resolve_drop_role_names(
 pub fn require_role_drop_authority(
     context: &RoleValidationContext<'_>,
     roles: &BTreeMap<String, RoleDefinition>,
-    current: &str,
-    session: &str,
+    current: &(impl RoleSubject + ?Sized),
+    session: &(impl RoleSubject + ?Sized),
     name: &str,
 ) -> Result<(), SQLError> {
     require_createrole(roles, current, "drop role")?;
-    if name == current || name == session {
+    if current.role_name(roles) == Some(name) || session.role_name(roles) == Some(name) {
         return Err(SQLError::Routine {
             sqlstate: "55006".into(),
             message: "current user cannot be dropped".into(),
@@ -289,28 +296,30 @@ pub fn require_role_drop_authority(
 }
 
 pub fn bind_grant_role_statement(
-    context: &RoleValidationContext<'_>,
+    names: &dyn RoleReferenceNames,
+    roles: &BTreeMap<String, RoleDefinition>,
     statement: &GrantRoleStmt,
-) -> GrantRoleStmt {
-    GrantRoleStmt {
+) -> Result<GrantRoleStmt, SQLError> {
+    Ok(GrantRoleStmt {
         granted_roles: statement
             .granted_roles
             .iter()
-            .map(|role| resolve_role_reference(context.names, role))
-            .collect(),
+            .map(|role| resolve_role_reference(names, role).catalog_name(roles))
+            .collect::<Result<_, _>>()?,
         grantee_roles: statement
             .grantee_roles
             .iter()
-            .map(|role| resolve_role_reference(context.names, role))
-            .collect(),
+            .map(|role| resolve_role_reference(names, role).catalog_name(roles))
+            .collect::<Result<_, _>>()?,
         is_grant: statement.is_grant,
         options: statement.options,
         grantor: statement
             .grantor
             .as_ref()
-            .map(|role| resolve_role_reference(context.names, role)),
+            .map(|role| resolve_role_reference(names, role).catalog_name(roles))
+            .transpose()?,
         cascade: statement.cascade,
-    }
+    })
 }
 
 pub fn ensure_no_grantor_dependencies(

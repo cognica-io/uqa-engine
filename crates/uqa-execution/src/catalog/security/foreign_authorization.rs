@@ -48,7 +48,7 @@ impl ForeignAuthorizationContext<'_> {
         let memberships = self.roles.role_memberships();
         if role_has_table_privilege(
             &security,
-            &self.names.current_user_name(),
+            &self.names.current_role(),
             privilege,
             &roles,
             &memberships,
@@ -76,7 +76,7 @@ impl ForeignAuthorizationContext<'_> {
         })
     }
     fn current_user_has_role_privileges(&self, target: &str) -> bool {
-        let current = self.names.current_user_name();
+        let current = self.names.current_role();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
         role_inherits(&roles, &memberships, &current, target)

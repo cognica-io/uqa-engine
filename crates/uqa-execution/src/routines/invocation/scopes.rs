@@ -81,14 +81,14 @@ pub(super) fn with_routine_context<T>(
     let _volatility = RoutineVolatilityGuard::enter(definition.volatility);
     let _security_definer = SecurityDefinerGuard::enter(definition.security.security_definer);
     if definition.security.security_definer {
-        session.set_current_user(&definition.owner);
+        session.set_current_user(&definition.owner)?;
     }
     for (name, value) in &definition.config {
         session.set_variable(name, value)?;
     }
     let result = execute();
     if result.is_ok() && !definition.security.security_definer {
-        guard.preserve_current_user();
+        guard.preserve_authorization();
     }
     result
 }

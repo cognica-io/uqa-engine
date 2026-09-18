@@ -47,17 +47,18 @@ pub(super) fn prepare<'a>(
     statement: &GrantTableStmt,
     targets: &[ResolvedTableGrantTarget],
 ) -> Result<RoleDependencyCandidate<'a, PreparedTableGrant<'a>>, SQLError> {
+    let roles = context.roles.role_definitions();
     let grantees = statement
         .grantees
         .iter()
-        .map(|role| resolve_role_reference(context.names, role))
-        .collect::<Vec<_>>();
+        .map(|role| resolve_role_reference(context.names, role).catalog_name(&roles))
+        .collect::<Result<Vec<_>, _>>()?;
     let requested_grantor = statement
         .grantor
         .as_ref()
-        .map(|role| resolve_role_reference(context.names, role));
-    let current_user = context.names.current_user_name();
-    let roles = context.roles.role_definitions();
+        .map(|role| resolve_role_reference(context.names, role).catalog_name(&roles))
+        .transpose()?;
+    let current_user = context.names.current_role();
     validate_table_acl_roles(
         statement,
         &grantees,

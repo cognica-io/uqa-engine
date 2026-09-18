@@ -6,6 +6,7 @@
 
 use super::super::CatalogReadView;
 use crate::catalog::{security::table::TableAclPrivilege, view::StoredViewKind};
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     catalog::resolution::RelationNameResolution,
     semantics::privileges::context::{PrivilegeCatalog, PrivilegeRelation, PrivilegeRelationKind},
@@ -82,7 +83,7 @@ impl PrivilegeCatalog for CatalogReadView {
         resolution: &RelationNameResolution,
         relation: &PrivilegeRelation,
         column: Option<&str>,
-        subject: &str,
+        subject: &RoleReference,
     ) -> Result<bool, SQLError> {
         let privilege = TableAclPrivilege::Select;
         match relation.kind {

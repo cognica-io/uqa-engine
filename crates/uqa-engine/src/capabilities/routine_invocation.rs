@@ -17,14 +17,15 @@ use uqa_execution::routines::{
     },
     TriggerRoutineContext,
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::FunctionBinding,
     routines::{resolution::RoutineOverloadContext, SQLUserFunction},
     SQLError,
 };
 impl RoutineInvocationState for crate::roles::RoutineSessionStateGuard<'_> {
-    fn preserve_current_user(&mut self) {
-        self.preserve_current_user();
+    fn preserve_authorization(&mut self) {
+        self.preserve_authorization();
     }
 }
 impl RoutineInvocationSession for Engine {
@@ -34,8 +35,14 @@ impl RoutineInvocationSession for Engine {
     fn state_guard(&self) -> Box<dyn RoutineInvocationState + '_> {
         Box::new(self.routine_session_state_guard())
     }
-    fn set_current_user(&self, user: &str) {
-        self.session.state.write().current_user = user.to_string();
+    fn set_current_user(&self, user: &str) -> Result<(), SQLError> {
+        let role = RoleReference::from(user).bind(&self.durable.roles.read())?;
+        self.session
+            .state
+            .write()
+            .authorization
+            .set_effective(role.into());
+        Ok(())
     }
     fn set_variable(&self, name: &str, value: &str) -> Result<(), SQLError> {
         Engine::set_variable(self, name, value)

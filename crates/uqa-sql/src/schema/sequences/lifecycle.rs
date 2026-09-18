@@ -5,6 +5,7 @@
 //
 
 //! Sequence rename and schema-move declaration rules.
+use crate::catalog::roles::RoleReference;
 use crate::{
     ast::{RelationPersistence, SequenceBound, SequenceLifecycle, SequenceOwnership},
     SQLError,
@@ -15,8 +16,8 @@ pub trait SequenceLifecycleCatalog {
     fn temporary_schema_name(&self) -> String;
     fn sequence_is_owned(&self, relation: &RelationIdentity) -> bool;
     fn schema_exists(&self, schema: &str) -> bool;
-    fn current_user_name(&self) -> String;
-    fn require_schema_create(&self, schema: &str, role: &str) -> Result<(), SQLError>;
+    fn current_role(&self) -> RoleReference;
+    fn require_schema_create(&self, schema: &str, role: &RoleReference) -> Result<(), SQLError>;
     fn relation_kind_at(&self, name: &str) -> Result<Option<&'static str>, String>;
 }
 pub fn validate_sequence_lifecycle_shape(
@@ -93,7 +94,7 @@ pub fn sequence_lifecycle_target(
                     message: format!("schema \"{target_schema}\" does not exist"),
                 });
             }
-            let current_user = catalog.current_user_name();
+            let current_user = catalog.current_role();
             catalog.require_schema_create(&target_schema, &current_user)?;
             let target = RelationIdentity::new(target_schema, &source.name);
             if target == *source {

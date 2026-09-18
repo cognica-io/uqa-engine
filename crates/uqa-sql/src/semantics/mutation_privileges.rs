@@ -5,6 +5,7 @@
 //
 
 //! Mutation target privilege analysis.
+use crate::catalog::roles::RoleReference;
 use crate::{
     catalog::security::table::TableAclPrivilege,
     plan::UpdatePlan,
@@ -16,20 +17,20 @@ pub trait MutationPrivilegeCatalog: ViewPrivilegeCatalog {
     fn ensure_table_privilege_for(
         &self,
         table: &str,
-        subject: &str,
+        subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError>;
     fn ensure_column_privilege_for(
         &self,
         table: &str,
         column: &str,
-        subject: &str,
+        subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError>;
     fn ensure_any_column_privilege_for(
         &self,
         table: &str,
-        subject: &str,
+        subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError>;
 }
@@ -40,7 +41,7 @@ pub fn ensure_update_target_privileges<'a>(
     let privilege_subject = statement
         .target_privilege_subject
         .clone()
-        .unwrap_or_else(|| catalog.current_user_name());
+        .unwrap_or_else(|| catalog.current_role());
     for assignment in &statement.assignments {
         catalog.ensure_column_privilege_for(
             &statement.table,
@@ -63,7 +64,7 @@ pub fn ensure_update_target_privileges<'a>(
         .collect::<Vec<_>>();
     catalog.ensure_target_select(TargetSelectPrivilegeRequest {
         table: &statement.table,
-        privilege_subject: statement.target_privilege_subject.as_deref(),
+        privilege_subject: statement.target_privilege_subject.as_ref(),
         target_qualifier: &statement.target_qualifier,
         returning_aliases: &statement.returning_aliases,
         expressions: &expressions,
@@ -85,7 +86,7 @@ pub fn ensure_insert_target_privileges(
     let privilege_subject = stmt
         .target_privilege_subject
         .clone()
-        .unwrap_or_else(|| catalog.current_user_name());
+        .unwrap_or_else(|| catalog.current_role());
     if default_values {
         catalog.ensure_any_column_privilege_for(
             &stmt.table,
@@ -151,7 +152,7 @@ pub fn ensure_insert_target_privileges(
     }
     catalog.ensure_target_select(TargetSelectPrivilegeRequest {
         table: &stmt.table,
-        privilege_subject: stmt.target_privilege_subject.as_deref(),
+        privilege_subject: stmt.target_privilege_subject.as_ref(),
         target_qualifier: &stmt.target_qualifier,
         returning_aliases: &stmt.returning_aliases,
         expressions: &privilege_expressions,
@@ -167,7 +168,7 @@ pub fn ensure_insert_target_privileges(
 /// Fill missing DML privilege subjects from the surrounding WITH definition.
 pub fn inherit_command_privilege_subject(
     command: &mut crate::plan::CommandPlan,
-    subject: String,
+    subject: RoleReference,
 ) -> Result<(), SQLError> {
     use crate::plan::CommandPlan;
     let (statement_subject, target_subject) = match command {

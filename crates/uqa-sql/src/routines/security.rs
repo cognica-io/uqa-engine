@@ -7,6 +7,8 @@
 //! Routine execution authorization, owner transitions, and grant-option reachability.
 
 use super::{registration::RoutineSupportAuthority, routine_kind, routine_local_name};
+use crate::catalog::roles::identity::RoleSubject;
+use crate::catalog::roles::RoleReference;
 use crate::{
     ast::{
         AlterRoutineOwnerStmt, AlterRoutineStmt, CreateFunction, GrantRoutineStmt, RoutineAclEntry,
@@ -17,7 +19,7 @@ use crate::{
 use std::collections::{BTreeMap, BTreeSet};
 
 pub trait RoutineExecutionAuthority: RoutineSupportAuthority {
-    fn current_user_name(&self) -> String;
+    fn current_role(&self) -> RoleReference;
     fn current_user_has_role_privileges(&self, role: &str) -> bool;
 }
 
@@ -53,13 +55,12 @@ pub fn ensure_routine_execute_privilege_named(
     definition: &CreateFunction,
     display_name: &str,
 ) -> Result<(), SQLError> {
-    let current = authority.current_user_name();
     let allowed = routine_privilege_allowed(
         &definition.owner,
         definition.execute_acl.as_deref(),
         false,
         authority.current_user_is_superuser(),
-        |role| role == current || authority.current_user_has_role_privileges(role),
+        |role| authority.current_user_has_role_privileges(role),
     );
     if allowed {
         Ok(())
@@ -111,7 +112,7 @@ pub fn validate_routine_acl_roles(
     stmt: &GrantRoutineStmt,
     grantees: &[String],
     requested_grantor: Option<&str>,
-    current_user: &str,
+    current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> Result<(), SQLError> {
     for role in grantees {
@@ -135,7 +136,7 @@ pub fn validate_routine_acl_roles(
                 message: format!("role \"{requested_grantor}\" does not exist"),
             });
         }
-        if requested_grantor != current_user {
+        if current_user.role_name(roles) != Some(requested_grantor) {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
                 message: "grantor must be current user".into(),
@@ -200,7 +201,7 @@ fn routine_grant_option_roles_for(
 
 pub fn select_routine_acl_grantor(
     definition: &CreateFunction,
-    current_user: &str,
+    current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> Option<String> {
@@ -208,8 +209,11 @@ pub fn select_routine_acl_grantor(
         return Some(definition.owner.clone());
     }
     let grant_options = routine_grant_option_roles(definition);
-    if grant_options.contains(current_user) {
-        return Some(current_user.to_string());
+    if let Some(name) = current_user
+        .role_name(roles)
+        .filter(|name| grant_options.contains(*name))
+    {
+        return Some(name.to_owned());
     }
     definition.execute_acl.as_ref().and_then(|acl| {
         acl.iter()

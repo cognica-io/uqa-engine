@@ -172,7 +172,10 @@ fn dropping_the_worker_closes_and_joins_its_thread() {
 struct UnopenedQuery;
 
 impl StatementQueryContexts<()> for UnopenedQuery {
-    fn statement_scope(&self, _: Option<&str>) -> crate::query::CteScope<()> {
+    fn statement_scope(
+        &self,
+        _: Option<&uqa_sql::catalog::roles::RoleReference>,
+    ) -> crate::query::CteScope<()> {
         panic!("a portal must wait for a step before capturing its catalog scope")
     }
     fn query_context(&self) -> crate::query::statement::context::QueryContext<'_, ()> {

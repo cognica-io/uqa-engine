@@ -12,6 +12,7 @@ use crate::row_locks::{
     },
     RelationLockMode,
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::{LockTableStmt, LockTableTarget, TableLockMode},
     catalog::{
@@ -38,7 +39,7 @@ pub trait TableLockCatalog:
 
 pub trait TableLockSession: RelationLockSession {
     fn in_transaction_block(&self) -> bool;
-    fn current_user(&self) -> String;
+    fn current_role(&self) -> RoleReference;
 }
 
 #[derive(Clone, Copy)]
@@ -126,7 +127,7 @@ impl TableLockContext<'_> {
         &self,
         name: &str,
         bound: bool,
-        subject: &str,
+        subject: &RoleReference,
         statement: &LockTableStmt,
         view_source: bool,
     ) -> Result<Option<BoundRelation>, SQLError> {
@@ -192,9 +193,9 @@ impl TableLockContext<'_> {
             RelationSource::View(view) => (
                 view_lock_targets(&view.query)?,
                 if view.security_invoker() {
-                    self.session.current_user()
+                    self.session.current_role()
                 } else {
-                    view.role_owner.clone()
+                    view.role_owner.clone().into()
                 },
             ),
             RelationSource::System(system) => (
@@ -206,7 +207,7 @@ impl TableLockContext<'_> {
                         include_descendants: false,
                     })
                     .collect(),
-                relation.metadata.security.role_owner,
+                relation.metadata.security.role_owner.into(),
             ),
         };
         ancestors.push(relation.metadata.object_id);
@@ -237,7 +238,7 @@ pub fn execute(
             message: "LOCK TABLE can only be used in transaction blocks".into(),
         });
     }
-    let subject = context.session.current_user();
+    let subject = context.session.current_role();
     for target in &statement.targets {
         if let Some(relation) =
             context.lock_named(&target.name, false, &subject, statement, false)?

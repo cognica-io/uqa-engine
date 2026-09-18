@@ -11,6 +11,7 @@ use uqa_execution::{
     mutation::rules::{RuleContext, RuleExpressions, RuleSecurity, RuleStatements},
     PhysicalRow, RowSchema,
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::{Expr, Statement},
     plan::ExpressionPlan,
@@ -37,7 +38,7 @@ impl Engine {
     }
 }
 impl RuleSecurity for Engine {
-    fn privilege_subject(&self, table: &str) -> Result<String, SQLError> {
+    fn privilege_subject(&self, table: &str) -> Result<RoleReference, SQLError> {
         self.event_lookup_context().rule_privilege_subject(table)
     }
 }
@@ -45,7 +46,7 @@ impl RuleStatements for Engine {
     fn execute(
         &self,
         statement: Statement,
-        privilege_subject: &str,
+        privilege_subject: &RoleReference,
     ) -> Result<SQLResult, SQLError> {
         uqa_execution::statement::compiled::execute_with_privilege_subject(
             &self.compiled_statement_context(),
@@ -64,7 +65,7 @@ impl RuleExpressions for Engine {
         expression: &ExpressionPlan,
         schema: &RowSchema,
         row: &PhysicalRow,
-        privilege_subject: &str,
+        privilege_subject: &RoleReference,
     ) -> Result<Value, SQLError> {
         crate::capabilities::query_expressions::eval_stored_expression_plan_with_row(
             self,

@@ -15,6 +15,7 @@ use std::{
     sync::Arc,
 };
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::RoleAttribute,
     catalog::{
@@ -172,11 +173,11 @@ impl<T> Drop for Write<'_, T> {
     }
 }
 impl RoleReferenceNames for Catalog {
-    fn current_user_name(&self) -> String {
+    fn current_role(&self) -> RoleReference {
         self.event("current");
-        self.current.borrow().clone()
+        self.current.borrow().clone().into()
     }
-    fn session_user_name(&self) -> String {
+    fn session_role(&self) -> RoleReference {
         self.event("session");
         "uqa".into()
     }
@@ -248,10 +249,15 @@ impl RolePublication for Catalog {
         self.event("epoch");
         self.epoch.set(self.epoch.get() + 1);
     }
-    fn set_current_role(&self, target: String) {
+    fn set_current_role(&self, target: Option<uqa_sql::catalog::roles::identity::RoleBinding>) {
         self.released();
         self.event("set current");
-        *self.current.borrow_mut() = target;
+        *self.current.borrow_mut() = target.map_or_else(|| "uqa".into(), |role| role.name);
+    }
+    fn set_session_authorization(&self, target: uqa_sql::catalog::roles::identity::RoleBinding) {
+        self.released();
+        self.event("set authorization");
+        *self.current.borrow_mut() = target.name;
     }
 }
 impl RoleNotices for Catalog {

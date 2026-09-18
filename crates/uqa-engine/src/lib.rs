@@ -416,8 +416,7 @@ struct SessionStateSnapshot {
     /// Names of portals that existed at this transaction or savepoint boundary. Rollback removes portals created later without rewinding cursor positions or resurrecting closed portals.
     portal_names: BTreeSet<String>,
     listened_channels: Vec<String>,
-    current_user: String,
-    session_user: String,
+    authorization: uqa_sql::catalog::roles::session::SessionAuthorization,
 }
 
 #[derive(Clone)]

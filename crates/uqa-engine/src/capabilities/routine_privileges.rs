@@ -8,11 +8,12 @@
 
 use crate::Engine;
 use uqa_execution::routines::privileges::{RoutinePrivilegeContext, RoutinePrivilegeNotices};
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::routines::security::RoutineExecutionAuthority;
 
 impl RoutineExecutionAuthority for Engine {
-    fn current_user_name(&self) -> String {
-        Engine::current_user_name(self)
+    fn current_role(&self) -> RoleReference {
+        Engine::current_role(self)
     }
     fn current_user_has_role_privileges(&self, role: &str) -> bool {
         Engine::current_user_has_role_privileges(self, role)

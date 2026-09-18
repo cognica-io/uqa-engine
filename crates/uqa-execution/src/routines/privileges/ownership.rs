@@ -40,7 +40,7 @@ pub fn alter_sql_routine_owner(
     let identity = analysis::routine_owner_identity(stmt);
     let requested_types = resolve_alter_routine_identity_types(context.types, &identity)?;
     let target = lock_owner_target(context, stmt, requested_types.as_deref())?;
-    let current_user = context.catalog.names.current_user_name();
+    let current_user = context.catalog.names.current_role();
     let RoleDependencyCandidate {
         roles,
         memberships,

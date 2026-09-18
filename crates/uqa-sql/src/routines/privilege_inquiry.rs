@@ -7,6 +7,7 @@
 //! Function privilege inquiry semantics with strict name resolution and nullable OID lookup.
 
 use super::security::routine_privilege_allowed;
+use crate::catalog::roles::{identity::RoleSubject, RoleReference};
 use crate::{
     ast::{RoleAttribute, RoutineAclEntry},
     catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey},
@@ -26,7 +27,7 @@ pub trait RoutinePrivilegeCatalog {
 }
 
 pub struct RoutinePrivilegeInquiry<'a> {
-    pub current_user: &'a str,
+    pub current_user: &'a RoleReference,
     pub roles: &'a BTreeMap<String, RoleDefinition>,
     pub memberships: &'a BTreeMap<RoleMembershipKey, RoleMembership>,
     pub catalog: &'a dyn RoutinePrivilegeCatalog,
@@ -38,7 +39,7 @@ impl RoutinePrivilegeInquiry<'_> {
             return Ok(Value::Null);
         }
         let (subject, target, privilege) = match arguments {
-            [target, privilege] => (Some(self.current_user), target, privilege),
+            [target, privilege] => (Some(self.current_user.clone()), target, privilege),
             [subject, target, privilege] => (self.resolve_role(subject)?, target, privilege),
             _ => {
                 return Err(SQLError::BadArity {
@@ -75,7 +76,8 @@ impl RoutinePrivilegeInquiry<'_> {
             }
         };
         if subject
-            .and_then(|name| self.roles.get(name))
+            .as_ref()
+            .and_then(|subject| subject.role_definition(self.roles))
             .is_some_and(|role| role.attributes.contains(&RoleAttribute::Superuser))
         {
             return Ok(Value::Bool(true));
@@ -96,7 +98,7 @@ impl RoutinePrivilegeInquiry<'_> {
                 grant_option,
                 false,
                 |role| {
-                    subject.is_some_and(|subject| {
+                    subject.as_ref().is_some_and(|subject| {
                         role_inherits(self.roles, self.memberships, subject, role)
                     })
                 },
@@ -104,12 +106,12 @@ impl RoutinePrivilegeInquiry<'_> {
         })))
     }
 
-    fn resolve_role<'a>(&'a self, value: &'a Value) -> Result<Option<&'a str>, SQLError> {
+    fn resolve_role(&self, value: &Value) -> Result<Option<RoleReference>, SQLError> {
         match value {
             Value::Str(name) | Value::FixedChar(name) if name == "public" => Ok(None),
             Value::Str(name) | Value::FixedChar(name) => {
                 if self.roles.contains_key(name) {
-                    Ok(Some(name))
+                    Ok(Some(name.clone().into()))
                 } else {
                     Err(SQLError::Routine {
                         sqlstate: "42704".into(),
@@ -121,7 +123,7 @@ impl RoutinePrivilegeInquiry<'_> {
                 .roles
                 .values()
                 .find(|role| role.oid == *oid)
-                .map(|role| role.name.as_str())),
+                .map(|role| role.name.clone().into())),
             other => Err(SQLError::TypeMismatch(format!(
                 "has_function_privilege role must be name or oid, got {other:?}"
             ))),

@@ -139,8 +139,7 @@ fn eval_function_call_inner(
                     engine.session_user()
                 }
             })
-            .transpose()
-            .map_err(SQLError::Internal)?
+            .transpose()?
             .flatten()
             .unwrap_or_else(|| "uqa".to_string());
         return Ok(Value::Str(user));

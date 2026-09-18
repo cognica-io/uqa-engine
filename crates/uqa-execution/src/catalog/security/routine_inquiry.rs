@@ -64,7 +64,7 @@ pub fn has_function_privilege_value(
     };
     let definitions = &catalog.catalog.snapshot().definitions;
     RoutinePrivilegeInquiry {
-        current_user: &context.current_user_name(),
+        current_user: &context.current_role(),
         roles: &definitions.roles,
         memberships: &definitions.role_memberships,
         catalog: &catalog,

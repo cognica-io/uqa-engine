@@ -227,9 +227,9 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     ));
                 }
                 let privilege_subject = if view.security_invoker() {
-                    ctes.privilege_subject()?.to_string()
+                    ctes.privilege_subject()?.clone()
                 } else {
-                    view.role_owner.clone()
+                    catalog.bind_role(&view.role_owner)?
                 };
                 let mut privilege_scope = ctes.enter_privilege_subject(privilege_subject);
                 let ctes: &mut CteScope<S> = &mut privilege_scope;

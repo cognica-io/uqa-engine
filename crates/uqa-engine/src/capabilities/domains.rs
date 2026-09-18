@@ -10,6 +10,7 @@ use crate::Engine;
 use uqa_execution::schema::domains::{
     DomainCreationContext, DomainDeclarationBinding, DomainPublication,
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::CreateDomain, catalog::domain::StoredDomain, schema::domains::DomainCreationCatalog,
     SQLError,
@@ -26,7 +27,6 @@ impl Engine {
                 crate::new_nonzero_catalog_identity("domain", "object identity")
                     .map_err(|error| SQLError::Internal(error.to_string()))
             },
-            session: self,
             publication: self,
         }
     }
@@ -253,7 +253,7 @@ impl DomainDropCatalog for Engine {
     }
 }
 impl DomainDropAuthority for Engine {
-    fn schema_usage(&self, schema: &str, role: &str) -> bool {
+    fn schema_usage(&self, schema: &str, role: &RoleReference) -> bool {
         self.schema_has_privilege_for_role(
             schema,
             role,

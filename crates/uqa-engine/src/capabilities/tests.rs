@@ -90,8 +90,20 @@ fn capability_views_expose_only_their_owned_state() {
     let runtime = engine.query_runtime_view();
     assert!(catalog.has_schema("public"));
     assert_eq!(session.search_path(), vec!["public"]);
-    assert_eq!(session.current_user(), "uqa");
-    assert_eq!(session.session_user(), "uqa");
+    assert_eq!(
+        session
+            .current_role()
+            .require_name(&engine.durable.roles.read())
+            .unwrap(),
+        "uqa"
+    );
+    assert_eq!(
+        session
+            .session_role()
+            .require_name(&engine.durable.roles.read())
+            .unwrap(),
+        "uqa"
+    );
     assert_eq!(session.transaction_depth(), 0);
     assert_eq!(session.transaction_snapshot_identity(), None);
     assert_eq!(runtime.work_mem_bytes().unwrap(), 64 * 1024 * 1024);

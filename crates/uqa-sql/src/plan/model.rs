@@ -7,6 +7,7 @@
 //! Serializable relational, command, source, and scalar plan data model.
 
 use super::{NullsOrder, ScalarExpr, SetOpKind};
+use crate::catalog::roles::RoleReference;
 
 const fn default_include_descendants() -> bool {
     true
@@ -365,9 +366,9 @@ pub struct InsertPlan {
     /// Whether non-target relation references are stored catalog identities rather than names that must be resolved in the executing session.
     pub relations_bound: bool,
     /// Effective role used for non-target privilege checks in an internally rewritten statement.
-    pub statement_privilege_subject: Option<String>,
+    pub statement_privilege_subject: Option<RoleReference>,
     /// Effective role used only for privilege checks on an internally rewritten target relation.
-    pub target_privilege_subject: Option<String>,
+    pub target_privilege_subject: Option<RoleReference>,
     pub target_qualifier: String,
     pub include_descendants: bool,
     pub columns: Vec<String>,
@@ -409,9 +410,9 @@ pub struct UpdatePlan {
     /// Whether non-target relation references are stored catalog identities rather than names that must be resolved in the executing session.
     pub relations_bound: bool,
     /// Effective role used for non-target privilege checks in an internally rewritten statement.
-    pub statement_privilege_subject: Option<String>,
+    pub statement_privilege_subject: Option<RoleReference>,
     /// Effective role used only for privilege checks on an internally rewritten target relation.
-    pub target_privilege_subject: Option<String>,
+    pub target_privilege_subject: Option<RoleReference>,
     pub target_qualifier: String,
     pub include_descendants: bool,
     pub assignments: Vec<AssignmentPlan>,
@@ -434,9 +435,9 @@ pub struct DeletePlan {
     /// Whether non-target relation references are stored catalog identities rather than names that must be resolved in the executing session.
     pub relations_bound: bool,
     /// Effective role used for non-target privilege checks in an internally rewritten statement.
-    pub statement_privilege_subject: Option<String>,
+    pub statement_privilege_subject: Option<RoleReference>,
     /// Effective role used only for privilege checks on an internally rewritten target relation.
-    pub target_privilege_subject: Option<String>,
+    pub target_privilege_subject: Option<RoleReference>,
     pub target_qualifier: String,
     pub include_descendants: bool,
     pub predicate: Option<ScalarExpr>,
@@ -455,9 +456,9 @@ pub struct MergePlan {
     pub ctes: Vec<CtePlan>,
     pub target: String,
     /// Effective role used for non-target privilege checks in an internally rewritten statement.
-    pub statement_privilege_subject: Option<String>,
+    pub statement_privilege_subject: Option<RoleReference>,
     /// Effective role used only for privilege checks on an internally rewritten target relation.
-    pub target_privilege_subject: Option<String>,
+    pub target_privilege_subject: Option<RoleReference>,
     pub target_qualifier: String,
     pub target_alias: Option<String>,
     pub include_descendants: bool,

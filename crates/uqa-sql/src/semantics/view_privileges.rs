@@ -6,6 +6,7 @@
 
 //! Privilege checks at each view boundary before DML rewrite or trigger dispatch.
 
+use crate::catalog::roles::RoleReference;
 use std::collections::BTreeSet;
 
 use crate::plan::{
@@ -34,16 +35,20 @@ fn view_target(
 
 fn privilege_subject(
     services: &dyn ViewPrivilegeCatalog,
-    rewritten_subject: Option<&str>,
-) -> String {
-    rewritten_subject.map_or_else(|| services.current_user_name(), str::to_string)
+    rewritten_subject: Option<&RoleReference>,
+) -> RoleReference {
+    rewritten_subject.map_or_else(|| services.current_role(), Clone::clone)
 }
 
-fn next_privilege_subject(view: &StoredView, subject: String) -> String {
+fn next_privilege_subject(
+    services: &dyn ViewPrivilegeCatalog,
+    view: &StoredView,
+    subject: RoleReference,
+) -> Result<RoleReference, SQLError> {
     if view.security_invoker() {
-        subject
+        Ok(subject)
     } else {
-        view.role_owner.clone()
+        services.bind_role(&view.role_owner)
     }
 }
 
@@ -70,10 +75,10 @@ fn validate_columns(
 pub fn ensure_insert(
     services: &dyn ViewPrivilegeCatalog,
     statement: &InsertPlan,
-) -> Result<String, SQLError> {
+) -> Result<RoleReference, SQLError> {
     let (view, available) = view_target(services, &statement.table)?;
     validate_columns(&statement.table, &available, &statement.columns)?;
-    let subject = privilege_subject(services, statement.target_privilege_subject.as_deref());
+    let subject = privilege_subject(services, statement.target_privilege_subject.as_ref());
     let default_values = statement.source.is_none()
         && statement.columns.is_empty()
         && statement.rows.iter().all(Vec::is_empty);
@@ -158,13 +163,13 @@ pub fn ensure_insert(
         subqueries: &statement.subqueries,
         required_columns,
     })?;
-    Ok(next_privilege_subject(&view, subject))
+    next_privilege_subject(services, &view, subject)
 }
 
 pub fn ensure_update(
     services: &dyn ViewPrivilegeCatalog,
     statement: &UpdatePlan,
-) -> Result<String, SQLError> {
+) -> Result<RoleReference, SQLError> {
     let (view, available) = view_target(services, &statement.table)?;
     let columns = statement
         .assignments
@@ -172,7 +177,7 @@ pub fn ensure_update(
         .map(|assignment| assignment.column.clone())
         .collect::<Vec<_>>();
     validate_columns(&statement.table, &available, &columns)?;
-    let subject = privilege_subject(services, statement.target_privilege_subject.as_deref());
+    let subject = privilege_subject(services, statement.target_privilege_subject.as_ref());
     for column in &columns {
         services.ensure_view_column_privilege_for(
             &statement.table,
@@ -203,15 +208,15 @@ pub fn ensure_update(
         subqueries: &statement.subqueries,
         required_columns: &[],
     })?;
-    Ok(next_privilege_subject(&view, subject))
+    next_privilege_subject(services, &view, subject)
 }
 
 pub fn ensure_delete(
     services: &dyn ViewPrivilegeCatalog,
     statement: &DeletePlan,
-) -> Result<String, SQLError> {
+) -> Result<RoleReference, SQLError> {
     let (view, _) = view_target(services, &statement.table)?;
-    let subject = privilege_subject(services, statement.target_privilege_subject.as_deref());
+    let subject = privilege_subject(services, statement.target_privilege_subject.as_ref());
     services.ensure_view_privilege_for(
         &statement.table,
         &view,
@@ -237,15 +242,15 @@ pub fn ensure_delete(
         subqueries: &statement.subqueries,
         required_columns: &[],
     })?;
-    Ok(next_privilege_subject(&view, subject))
+    next_privilege_subject(services, &view, subject)
 }
 
 pub fn ensure_merge(
     services: &dyn ViewPrivilegeCatalog,
     statement: &MergePlan,
-) -> Result<String, SQLError> {
+) -> Result<RoleReference, SQLError> {
     let (view, available) = view_target(services, &statement.target)?;
-    let subject = privilege_subject(services, statement.target_privilege_subject.as_deref());
+    let subject = privilege_subject(services, statement.target_privilege_subject.as_ref());
     let mut requires_delete = false;
     let mut requires_any_insert = false;
     let mut column_privileges = BTreeSet::new();
@@ -323,7 +328,7 @@ pub fn ensure_merge(
         subqueries: &statement.subqueries,
         required_columns: &[],
     })?;
-    Ok(next_privilege_subject(&view, subject))
+    next_privilege_subject(services, &view, subject)
 }
 
 pub fn merge_privilege_expressions(stmt: &MergePlan) -> Vec<&crate::ScalarExpr> {
@@ -364,12 +369,13 @@ pub fn merge_privilege_expressions(stmt: &MergePlan) -> Vec<&crate::ScalarExpr> 
 /// Authorization access to one loaded view and the current statement's SELECT privileges.
 pub trait ViewPrivilegeCatalog {
     fn view_definition(&self, name: &str) -> Result<Option<StoredView>, SQLError>;
-    fn current_user_name(&self) -> String;
+    fn current_role(&self) -> RoleReference;
+    fn bind_role(&self, name: &str) -> Result<RoleReference, SQLError>;
     fn ensure_view_privilege_for(
         &self,
         name: &str,
         view: &StoredView,
-        subject: &str,
+        subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError>;
     fn ensure_view_column_privilege_for(
@@ -377,14 +383,14 @@ pub trait ViewPrivilegeCatalog {
         name: &str,
         view: &StoredView,
         column: &str,
-        subject: &str,
+        subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError>;
     fn ensure_any_view_column_privilege_for(
         &self,
         name: &str,
         view: &StoredView,
-        subject: &str,
+        subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError>;
     fn ensure_target_select(

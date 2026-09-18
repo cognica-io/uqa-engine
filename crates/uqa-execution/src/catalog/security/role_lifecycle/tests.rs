@@ -156,8 +156,8 @@ fn grant_prepares_writer_before_binding_names_and_retains_authorization_through_
         *catalog.events.borrow(),
         [
             "writer",
-            "current",
             "read roles",
+            "current",
             "current",
             "write memberships",
             "persist memberships",

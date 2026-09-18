@@ -53,7 +53,7 @@ fn apply(
         statement: &statement,
         grantees: &statement.grantees,
         requested: &requested,
-        current_user: user,
+        current_user: &user,
         roles,
         memberships: &memberships,
     };
@@ -418,7 +418,7 @@ fn foreign_acl_candidates_validate_columns_without_mutating_the_source_security(
         statement: &statement,
         grantees: &statement.grantees,
         requested: &requested,
-        current_user: "uqa",
+        current_user: &"uqa",
         roles: &roles,
         memberships: &memberships,
     };

@@ -13,6 +13,7 @@ mod identity;
 mod migration;
 mod ownership;
 mod publication;
+mod session_identity;
 mod settings;
 mod snapshots;
 
@@ -78,5 +79,11 @@ fn failed_role_declaration_preserves_live_registry_identity_and_prepared_cache()
         &prepared,
         &engine.session.prepared.read()["saved"].logical_plan
     ));
-    assert_eq!(engine.current_user_name(), "limited");
+    assert_eq!(
+        engine
+            .current_role()
+            .require_name(&engine.durable.roles.read())
+            .unwrap(),
+        "limited"
+    );
 }

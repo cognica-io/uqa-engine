@@ -69,7 +69,8 @@ pub fn alter_sequence_role_owner(
         session: context.locks,
     };
     let owner = locks.bind(&new_owner)?;
-    let current_user = context.session.current_user_name();
+    let new_owner = owner.name.clone();
+    let current_user = context.session.current_role();
     let RoleDependencyCandidate {
         roles,
         memberships,

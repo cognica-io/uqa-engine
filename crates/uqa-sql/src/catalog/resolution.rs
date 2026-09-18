@@ -6,6 +6,7 @@
 
 //! Relation namespace inputs for static SQL analysis.
 
+use crate::catalog::roles::RoleReference;
 use crate::SQLError;
 
 /// Immutable session inputs used to resolve unqualified relation names during one statement.
@@ -14,7 +15,7 @@ pub struct RelationNameResolution {
     pub search_path: Vec<String>,
     pub temporary_schema: String,
     pub temporary_namespace_allocated: bool,
-    pub current_user: String,
+    pub current_user: RoleReference,
     pub lookup_mode: RelationLookupMode,
 }
 
@@ -34,7 +35,7 @@ impl RelationNameResolution {
         self.search_path.iter().any(|candidate| candidate == schema)
     }
 
-    pub fn current_user(&self) -> &str {
+    pub fn current_user(&self) -> &RoleReference {
         &self.current_user
     }
 

@@ -9,10 +9,7 @@
 use super::namespaces::SchemaStatementWriter;
 use uqa_sql::{
     ast::CreateDomain,
-    catalog::{
-        domain::{domain_object_oid, StoredDomain},
-        roles::RoleReferenceNames,
-    },
+    catalog::domain::{domain_object_oid, StoredDomain},
     schema::domains::{bind_domain_creation_target, DomainCreationCatalog},
     SQLError,
 };
@@ -29,7 +26,6 @@ pub struct DomainCreationContext<'a> {
     pub catalog: &'a dyn DomainCreationCatalog,
     pub bindings: &'a dyn DomainDeclarationBinding,
     pub allocate_identity: fn() -> Result<[u8; 16], SQLError>,
-    pub session: &'a dyn RoleReferenceNames,
     pub publication: &'a dyn DomainPublication,
 }
 
@@ -37,6 +33,7 @@ pub fn create_domain(
     context: &DomainCreationContext<'_>,
     mut definition: CreateDomain,
 ) -> Result<(), SQLError> {
+    let owner = context.creation.bind_owner()?;
     context.writer.prepare_writer()?;
     definition.name = context.creation.persistent_name(&definition.name)?;
     let identity = bind_domain_creation_target(context.catalog, &mut definition)?;
@@ -47,7 +44,7 @@ pub fn create_domain(
         object_id,
         oid,
         identity,
-        owner: context.session.current_user_name(),
+        owner: context.creation.owner_for_publication(&owner)?,
         definition,
     })
 }

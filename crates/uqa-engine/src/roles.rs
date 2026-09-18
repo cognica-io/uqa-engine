@@ -7,8 +7,9 @@
 //! PostgreSQL-shaped logical roles and routine execution contexts.
 
 use std::collections::BTreeMap;
+use uqa_sql::catalog::roles::RoleReference;
 
-use uqa_sql::ast::RoleAttribute;
+use uqa_sql::catalog::roles::{memberships::role_is_superuser, session::SessionAuthorization};
 use uqa_sql::SQLError;
 
 use crate::{Engine, SQLStatementCache, StorageBackendResult};
@@ -19,7 +20,7 @@ pub(crate) struct RoutineSessionStateGuard<'a> {
     search_path: Vec<String>,
     session_vars: BTreeMap<String, String>,
     sql_statement_cache: Option<SQLStatementCache>,
-    current_user: Option<String>,
+    authorization: Option<SessionAuthorization>,
 }
 
 pub(crate) use uqa_execution::routines::invocation::scopes::active_routine_reads_command_overlay;
@@ -33,12 +34,12 @@ impl RoutineSessionStateGuard<'_> {
             session_vars: state.session_vars.clone(),
             sql_statement_cache: preserve_statement_cache
                 .then(|| state.sql_statement_cache.clone()),
-            current_user: Some(state.current_user.clone()),
+            authorization: Some(state.authorization.clone()),
         }
     }
 
-    pub(crate) fn preserve_current_user(&mut self) {
-        self.current_user = None;
+    pub(crate) fn preserve_authorization(&mut self) {
+        self.authorization = None;
     }
 }
 
@@ -50,8 +51,8 @@ impl Drop for RoutineSessionStateGuard<'_> {
         if let Some(cache) = self.sql_statement_cache.take() {
             state.sql_statement_cache = cache;
         }
-        if let Some(current_user) = self.current_user.take() {
-            state.current_user = current_user;
+        if let Some(authorization) = self.authorization.take() {
+            state.authorization = authorization;
         }
     }
 }
@@ -59,25 +60,21 @@ impl Drop for RoutineSessionStateGuard<'_> {
 pub(crate) use uqa_sql::catalog::roles::{RoleDefinition, RoleMembership, RoleMembershipKey};
 
 impl Engine {
-    pub(crate) fn current_user_name(&self) -> String {
-        self.session_execution_view().current_user()
+    pub(crate) fn current_role(&self) -> RoleReference {
+        self.session_execution_view().current_role()
     }
 
-    pub(crate) fn session_user_name(&self) -> String {
-        self.session_execution_view().session_user()
+    pub(crate) fn session_role(&self) -> RoleReference {
+        self.session_execution_view().session_role()
     }
 
     pub(crate) fn current_user_is_superuser(&self) -> bool {
-        let current = self.current_user_name();
-        self.durable
-            .roles
-            .read()
-            .get(&current)
-            .is_some_and(|role| role.has(RoleAttribute::Superuser))
+        let current = self.current_role();
+        role_is_superuser(&self.durable.roles.read(), &current)
     }
 
     pub(crate) fn current_user_has_role_privileges(&self, target: &str) -> bool {
-        let current = self.current_user_name();
+        let current = self.current_role();
         let roles = self.durable.roles.read();
         let memberships = self.durable.role_memberships.read();
         role_inherits(&roles, &memberships, &current, target)
@@ -119,7 +116,12 @@ impl Engine {
         execute: impl FnOnce() -> Result<T, SQLError>,
     ) -> Result<T, SQLError> {
         let _guard = self.routine_session_state_guard();
-        self.session.state.write().current_user = current_user.to_string();
+        let role = RoleReference::from(current_user).bind(&self.durable.roles.read())?;
+        self.session
+            .state
+            .write()
+            .authorization
+            .set_effective(role.into());
         execute()
     }
 

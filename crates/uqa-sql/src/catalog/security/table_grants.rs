@@ -15,6 +15,7 @@ use super::{
     },
     TableSecurity,
 };
+use crate::catalog::roles::identity::RoleSubject;
 use crate::catalog::{
     roles::{RoleDefinition, RoleMembership, RoleMembershipKey},
     stored_view::StoredView,
@@ -40,7 +41,7 @@ fn apply_table_acl(
     statement: &GrantTableStmt,
     grantees: &[String],
     privileges: &[TableAclPrivilege],
-    current_user: &str,
+    current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
     current: &TableSecurity,
@@ -160,7 +161,7 @@ pub struct TableGrantApplication<'a> {
     pub statement: &'a GrantTableStmt,
     pub grantees: &'a [String],
     pub requested: &'a RequestedTablePrivileges,
-    pub current_user: &'a str,
+    pub current_user: &'a dyn RoleSubject,
     pub roles: &'a BTreeMap<String, RoleDefinition>,
     pub memberships: &'a BTreeMap<RoleMembershipKey, RoleMembership>,
 }
@@ -287,7 +288,7 @@ pub fn validate_table_acl_roles(
     statement: &GrantTableStmt,
     grantees: &[String],
     requested_grantor: Option<&str>,
-    current_user: &str,
+    current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> Result<(), SQLError> {
     for role in grantees {
@@ -312,7 +313,7 @@ pub fn validate_table_acl_roles(
                 message: format!("role \"{requested_grantor}\" does not exist"),
             });
         }
-        if requested_grantor != current_user {
+        if current_user.role_name(roles) != Some(requested_grantor) {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
                 message: "grantor must be current user".into(),

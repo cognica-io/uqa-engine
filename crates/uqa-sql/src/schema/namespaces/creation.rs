@@ -5,33 +5,33 @@
 //
 
 //! Resolve schema authorization before checking the invoking role's database privileges.
+use crate::catalog::roles::RoleReference;
 use crate::{
     ast::SchemaAuthorization,
-    catalog::roles::{guards::RoleCatalogGuards, require_role_exists, RoleReferenceNames},
+    catalog::roles::{guards::RoleCatalogGuards, RoleReferenceNames},
     SQLError,
 };
 pub struct SchemaCreationTarget {
     pub name: String,
-    pub role_owner: String,
+    pub role_owner: RoleReference,
 }
 pub fn schema_creation_target(
     names: &dyn RoleReferenceNames,
     roles: &dyn RoleCatalogGuards,
-    current_user: &str,
+    current_user: &RoleReference,
     name: Option<&str>,
     authorization: Option<&SchemaAuthorization>,
 ) -> Result<SchemaCreationTarget, SQLError> {
     let role_owner = match authorization {
-        None | Some(SchemaAuthorization::CurrentUser) => current_user.to_string(),
-        Some(SchemaAuthorization::SessionUser) => names.session_user_name(),
-        Some(SchemaAuthorization::Role(role)) => role.clone(),
+        None | Some(SchemaAuthorization::CurrentUser) => current_user.clone(),
+        Some(SchemaAuthorization::SessionUser) => names.session_role(),
+        Some(SchemaAuthorization::Role(role)) => role.clone().into(),
     };
-    if authorization.is_some() {
-        require_role_exists(&roles.role_definitions(), &role_owner)?;
-    }
+    let catalog = roles.role_definitions();
+    let owner = role_owner.bind(&catalog)?;
     Ok(SchemaCreationTarget {
-        name: name.unwrap_or(&role_owner).to_string(),
-        role_owner,
+        name: name.unwrap_or(&owner.name).to_string(),
+        role_owner: RoleReference::Bound(owner.into()),
     })
 }
 pub fn validate_schema_creation_name(name: &str) -> Result<(), SQLError> {

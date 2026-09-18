@@ -14,12 +14,12 @@ use uqa_sql::{
     SQLError,
 };
 pub trait RoutineInvocationState {
-    fn preserve_current_user(&mut self);
+    fn preserve_authorization(&mut self);
 }
 pub trait RoutineInvocationSession {
     fn depth_limit(&self) -> usize;
     fn state_guard(&self) -> Box<dyn RoutineInvocationState + '_>;
-    fn set_current_user(&self, user: &str);
+    fn set_current_user(&self, user: &str) -> Result<(), SQLError>;
     fn set_variable(&self, name: &str, value: &str) -> Result<(), SQLError>;
 }
 pub struct RoutineInvocationContext<'a> {

@@ -144,12 +144,20 @@ impl uqa_sql::expr::EngineHook for Engine {
             .map_err(|error| error.to_string())
     }
 
-    fn current_user(&self) -> std::result::Result<Option<String>, String> {
-        Ok(Some(self.current_user_name()))
+    fn current_user(&self) -> std::result::Result<Option<String>, SQLError> {
+        Ok(Some(
+            self.current_role()
+                .require_name(&self.durable.roles.read())?
+                .to_owned(),
+        ))
     }
 
-    fn session_user(&self) -> std::result::Result<Option<String>, String> {
-        Ok(Some(self.session_user_name()))
+    fn session_user(&self) -> std::result::Result<Option<String>, SQLError> {
+        Ok(Some(
+            self.session_role()
+                .require_name(&self.durable.roles.read())?
+                .to_owned(),
+        ))
     }
 
     fn current_schemas(

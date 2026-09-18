@@ -11,6 +11,7 @@ use uqa_execution::schema::sequences::{
     creation::{SequenceCreationContext, SequenceCreationNamespace, SequenceCreationPublication},
     implicit::{ImplicitSequenceContext, ImplicitSequencePublication},
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::schema::sequences::ownership::{SequenceOwnerCatalog, SequenceOwnerColumns};
 use uqa_sql::{
     ast::{RelationPersistence, SequenceDataType},
@@ -196,10 +197,10 @@ impl uqa_sql::schema::sequences::lifecycle::SequenceLifecycleCatalog for Engine 
     fn schema_exists(&self, schema: &str) -> bool {
         self.durable.schemas.read().contains_key(schema)
     }
-    fn current_user_name(&self) -> String {
-        Engine::current_user_name(self)
+    fn current_role(&self) -> RoleReference {
+        Engine::current_role(self)
     }
-    fn require_schema_create(&self, schema: &str, role: &str) -> Result<(), SQLError> {
+    fn require_schema_create(&self, schema: &str, role: &RoleReference) -> Result<(), SQLError> {
         self.require_schema_privilege(
             schema,
             role,

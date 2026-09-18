@@ -11,6 +11,7 @@ use crate::{
 };
 use parking_lot::Mutex;
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::{FunctionBinding, RelationPersistence, RuleEvent},
     catalog::{
@@ -49,7 +50,7 @@ impl Inputs {
 }
 
 impl CatalogSession for Inputs {
-    fn current_user(&self) -> String {
+    fn current_role(&self) -> RoleReference {
         panic!("validation must not read unrelated session values")
     }
     fn temporary_schema_name(&self) -> String {

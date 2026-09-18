@@ -12,6 +12,7 @@ use crate::catalog::security::roles::{
 use crate::row_locks::shared_objects::SharedObjectLockSession;
 use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     catalog::roles::{self, RoleReferenceNames},
     catalog::security::ownership::RelationOwnerSchemas,
@@ -53,7 +54,7 @@ pub fn rewrite_relation_rename_dependents(
 }
 
 pub trait RoleTargetSchemaAccess {
-    fn require_schema_create(&self, schema: &str, role: &str) -> Result<(), SQLError>;
+    fn require_schema_create(&self, schema: &str, role: &RoleReference) -> Result<(), SQLError>;
 }
 
 pub struct RoleTransferContext<'a> {

@@ -67,7 +67,7 @@ impl TableOwnershipContext<'_> {
         // The ALTER entry retains the table lock; bind the new owner from the catalog current after that wait.
         self.roles.locks.refresh_shared_catalog()?;
         let owner = self.roles.bind(requested_owner)?;
-        let current_user = self.roles.session.current_user_name();
+        let current_user = self.roles.session.current_role();
         let RoleDependencyCandidate {
             roles,
             memberships,

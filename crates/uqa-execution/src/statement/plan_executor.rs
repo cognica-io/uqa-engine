@@ -9,6 +9,7 @@
 use crate::schema::ctas::CreateTableAsExecution;
 use uqa_core::Value;
 use uqa_sql::ast::{CreateForeignServer, CreateForeignTable};
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::plan::{
     CommandPlan, DeletePlan, ExpressionPlan, InsertPlan, MergePlan, QueryPlan, UnifiedPlan,
     UpdatePlan,
@@ -31,7 +32,7 @@ pub struct UnifiedPlanExecutor<'engine, 'params, S: Clone + 'static> {
     context: StatementExecutionContext<'engine, S>,
     params: &'params [SQLParam],
     nested_statement: bool,
-    privilege_subject: Option<String>,
+    privilege_subject: Option<RoleReference>,
     source_sql: Option<String>,
 }
 
@@ -64,8 +65,8 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         }
     }
 
-    pub fn with_privilege_subject(mut self, subject: &str) -> Self {
-        self.privilege_subject = Some(subject.to_string());
+    pub fn with_privilege_subject(mut self, subject: &RoleReference) -> Self {
+        self.privilege_subject = Some(subject.clone());
         self
     }
 
@@ -99,7 +100,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         let mut ctes = self
             .context
             .queries
-            .statement_scope(self.privilege_subject.as_deref());
+            .statement_scope(self.privilege_subject.as_ref());
         execute_query_plan_with_ctes(
             &self.context.queries.query_context(),
             query,
@@ -128,7 +129,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         let mut ctes = self
             .context
             .queries
-            .statement_scope(self.privilege_subject.as_deref());
+            .statement_scope(self.privilege_subject.as_ref());
         execute_query_plan_output(
             &self.context.queries.query_context(),
             query,
@@ -182,8 +183,8 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
 
     fn apply_statement_privilege_subject(
         &self,
-        statement_subject: &mut Option<String>,
-        target_subject: &mut Option<String>,
+        statement_subject: &mut Option<RoleReference>,
+        target_subject: &mut Option<RoleReference>,
     ) {
         let Some(subject) = self.privilege_subject.as_ref() else {
             return;

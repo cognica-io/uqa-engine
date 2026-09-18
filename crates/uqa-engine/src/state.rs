@@ -277,7 +277,8 @@ pub(super) enum RuntimeParameterValue {
         setting: Option<String>,
         path: Vec<String>,
     },
-    Role(String),
+    Role(Option<Arc<uqa_sql::catalog::roles::identity::RoleBinding>>),
+    SessionAuthorization(Arc<uqa_sql::catalog::roles::identity::RoleBinding>),
 }
 
 impl SessionContext {
@@ -294,8 +295,7 @@ impl SessionContext {
             sql_statement_cache: SQLStatementCache::default(),
             portal_names: BTreeSet::new(),
             listened_channels: Vec::new(),
-            current_user: "uqa".to_string(),
-            session_user: "uqa".to_string(),
+            authorization: uqa_sql::catalog::roles::session::SessionAuthorization::default(),
         };
         Self {
             statement_started_at_micros: AtomicI64::new(0),

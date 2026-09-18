@@ -113,17 +113,18 @@ impl SequencePrivilegeContext<'_> {
         statement: &GrantSequenceStmt,
         targets: &[ResolvedSequenceGrantTarget],
     ) -> Result<RoleDependencyCandidate<'a, SequencePrivilegeCandidate<'a>>, SQLError> {
+        let roles = self.inquiry.roles.role_definitions();
         let grantees = statement
             .grantees
             .iter()
-            .map(|role| resolve_role_reference(self.inquiry.names, role))
-            .collect::<Vec<_>>();
+            .map(|role| resolve_role_reference(self.inquiry.names, role).catalog_name(&roles))
+            .collect::<Result<Vec<_>, _>>()?;
         let requested_grantor = statement
             .grantor
             .as_ref()
-            .map(|role| resolve_role_reference(self.inquiry.names, role));
-        let current_user = self.inquiry.names.current_user_name();
-        let roles = self.inquiry.roles.role_definitions();
+            .map(|role| resolve_role_reference(self.inquiry.names, role).catalog_name(&roles))
+            .transpose()?;
+        let current_user = self.inquiry.names.current_role();
         validate_sequence_acl_roles(
             statement,
             &grantees,

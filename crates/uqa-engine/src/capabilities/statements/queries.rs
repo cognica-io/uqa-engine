@@ -18,9 +18,10 @@ use uqa_execution::{
     scalar::plan::PhysicalEvalContext,
     statement::context::queries::{StatementExpressionOperation, StatementQueryContexts},
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{SQLError, SQLParam, SQLResult};
 impl StatementQueryContexts<StatementReadSnapshot> for Engine {
-    fn statement_scope(&self, privilege_subject: Option<&str>) -> CteScope {
+    fn statement_scope(&self, privilege_subject: Option<&RoleReference>) -> CteScope {
         query_scope::new_for_statement(self, privilege_subject)
     }
     fn query_context(

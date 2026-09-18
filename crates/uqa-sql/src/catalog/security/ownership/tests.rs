@@ -52,7 +52,7 @@ fn transfer_requires_existing_owner_privileges_and_separate_target_set_permissio
         let authority = OwnerChangeAuthority {
             roles: &roles,
             memberships: &memberships,
-            current_user: "actor",
+            current_user: &"actor",
             new_owner: "target",
         };
         let result = authority.require_owner_change("original", "table", "items");
@@ -80,7 +80,7 @@ fn namespace_create_is_checked_for_the_new_owner_and_bypassed_for_superusers() {
         let authority = OwnerChangeAuthority {
             roles: &roles,
             memberships: &memberships,
-            current_user: "actor",
+            current_user: &"actor",
             new_owner: "target",
         };
         let result = authority.require_schema_create(&schemas, "restricted");
@@ -98,7 +98,7 @@ fn namespace_create_is_checked_for_the_new_owner_and_bypassed_for_superusers() {
     OwnerChangeAuthority {
         roles: &roles,
         memberships: &memberships,
-        current_user: "actor",
+        current_user: &"actor",
         new_owner: "target",
     }
     .require_schema_create(
@@ -118,7 +118,7 @@ fn schema_owner_transfer_checks_database_create_for_the_invoker() {
     let authority = OwnerChangeAuthority {
         roles: &roles,
         memberships: &memberships,
-        current_user: "actor",
+        current_user: &"actor",
         new_owner: "target",
     };
     for owner in ["actor", "target"] {

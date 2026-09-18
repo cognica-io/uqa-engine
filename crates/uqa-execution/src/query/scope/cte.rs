@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::Ordering;
+use uqa_sql::catalog::roles::RoleReference;
 
 use uqa_sql::plan::{CtePlan, QueryPlan};
 use uqa_sql::SQLError;
@@ -40,7 +41,10 @@ impl<S: Clone> CteScope<S> {
     }
 
     /// Override only relation privilege checks while preserving SQL-visible `current_user` and the caller's namespace.
-    pub fn enter_privilege_subject(&mut self, subject: String) -> PrivilegeSubjectScope<'_, S> {
+    pub fn enter_privilege_subject(
+        &mut self,
+        subject: RoleReference,
+    ) -> PrivilegeSubjectScope<'_, S> {
         let previous = self.privilege_subject.replace(subject);
         PrivilegeSubjectScope {
             ctes: self,
@@ -215,7 +219,7 @@ impl<S: Clone> CteScope<S> {
 
 pub struct PrivilegeSubjectScope<'a, S: Clone> {
     ctes: &'a mut CteScope<S>,
-    previous: Option<String>,
+    previous: Option<RoleReference>,
 }
 
 impl<S: Clone> std::ops::Deref for PrivilegeSubjectScope<'_, S> {

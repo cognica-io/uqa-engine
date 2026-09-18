@@ -181,7 +181,7 @@ impl SequenceIntrospectionContext<'_> {
         sequence: &IntrospectionSequence,
         access: SequenceAccess,
     ) -> bool {
-        let current_user = self.catalog.current_user_name();
+        let current_user = self.catalog.current_role();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
         match access {

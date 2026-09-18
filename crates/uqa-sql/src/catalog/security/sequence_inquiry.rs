@@ -10,6 +10,8 @@ use super::{
     sequence::{self as acl, role_has_privilege, AclPrivilege, PrivilegeCheck},
     SequenceSecurity,
 };
+use crate::catalog::roles::identity::RoleSubject;
+use crate::catalog::roles::RoleReference;
 use crate::{
     catalog::{
         resolution::RelationResolution,
@@ -86,7 +88,7 @@ impl SequencePrivilegeInquiry<'_> {
             .ok_or_else(|| {
                 SQLError::Internal(format!("sequence `{name}` has no security metadata"))
             })?;
-        let current_user = self.names.current_user_name();
+        let current_user = self.names.current_role();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
         if privileges.iter().any(|privilege| {
@@ -124,14 +126,15 @@ impl SequencePrivilegeInquiry<'_> {
                 })
             }
         };
-        let current_user = subject_value
-            .is_none()
-            .then(|| self.names.current_user_name());
+        let current_user = subject_value.is_none().then(|| self.names.current_role());
         let subject = {
             let roles = self.roles.role_definitions();
             subject_value.map_or_else(
                 || Ok(current_user),
-                |value| resolve_sequence_privilege_role(value, &roles),
+                |value| {
+                    resolve_sequence_privilege_role(value, &roles)
+                        .map(|role| role.map(RoleReference::from))
+                },
             )?
         };
         let Some((_name, relation)) = self.resolve_sequence_privilege_target(sequence_value)?
@@ -171,7 +174,7 @@ impl SequencePrivilegeInquiry<'_> {
     pub fn role_has_sequence_table_privilege(
         &self,
         relation: &RelationIdentity,
-        subject: &str,
+        subject: &(impl RoleSubject + ?Sized),
         privilege: super::table::TableAclPrivilege,
         grant_option: bool,
     ) -> Result<bool, SQLError> {
@@ -263,7 +266,7 @@ impl SequencePrivilegeInquiry<'_> {
                 SQLError::Internal(format!("sequence `{name}` has no security metadata"))
             })?;
         crate::schema::sequences::ownership::require_sequence_ownership(&relation.name, {
-            let current = self.names.current_user_name();
+            let current = self.names.current_role();
             let roles = self.roles.role_definitions();
             let memberships = self.roles.role_memberships();
             crate::catalog::roles::role_inherits(&roles, &memberships, &current, &owner)

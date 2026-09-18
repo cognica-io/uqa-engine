@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use uqa_sql::catalog::roles::RoleReference;
 
 use uqa_sql::ast::TransactionIsolationLevel;
 use uqa_sql::SQLError;
@@ -60,12 +61,12 @@ impl SessionExecutionView<'_> {
         self.session.state.read().search_path.clone()
     }
 
-    pub(crate) fn current_user(&self) -> String {
-        self.session.state.read().current_user.clone()
+    pub(crate) fn current_role(&self) -> RoleReference {
+        RoleReference::Bound(self.session.state.read().authorization.current().clone())
     }
 
-    pub(crate) fn session_user(&self) -> String {
-        self.session.state.read().session_user.clone()
+    pub(crate) fn session_role(&self) -> RoleReference {
+        RoleReference::Bound(self.session.state.read().authorization.session().clone())
     }
 
     pub(crate) fn transaction_depth(&self) -> usize {
@@ -86,7 +87,7 @@ impl SessionExecutionView<'_> {
             search_path: state.search_path.clone(),
             temporary_schema: self.temporary_schema_name(),
             temporary_namespace_allocated: state.temporary_namespace_allocated,
-            current_user: state.current_user.clone(),
+            current_user: RoleReference::Bound(state.authorization.current().clone()),
             lookup_mode: RelationLookupMode::Dynamic,
         }
     }
@@ -99,6 +100,12 @@ impl SessionExecutionView<'_> {
             return Ok(value);
         }
         let session = self.session.state.read();
+        if name.eq_ignore_ascii_case("role") {
+            return Ok(session.authorization.show_role().to_owned());
+        }
+        if name.eq_ignore_ascii_case("session_authorization") {
+            return Ok(session.authorization.session().name.clone());
+        }
         if let Some(value) = session_value(&session.session_vars, name) {
             return Ok(value);
         }
@@ -328,6 +335,12 @@ impl Engine {
 }
 
 pub(super) fn default_runtime_parameter(name: &str) -> Option<&'static str> {
+    if name.eq_ignore_ascii_case("role") {
+        return Some("none");
+    }
+    if name.eq_ignore_ascii_case("session_authorization") {
+        return Some("uqa");
+    }
     if name.eq_ignore_ascii_case("application_name") {
         return Some("");
     }
@@ -385,6 +398,8 @@ pub(super) fn is_known_runtime_parameter(name: &str) -> bool {
 
 pub(super) fn is_mutable_runtime_parameter(name: &str) -> bool {
     name.eq_ignore_ascii_case("application_name")
+        || name.eq_ignore_ascii_case("role")
+        || name.eq_ignore_ascii_case("session_authorization")
         || name.eq_ignore_ascii_case("search_path")
         || name.eq_ignore_ascii_case("client_encoding")
         || name.eq_ignore_ascii_case("datestyle")

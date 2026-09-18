@@ -89,17 +89,18 @@ fn prepare_privileges<'a>(
     context: &'a RoutinePrivilegeContext<'_>,
     stmt: &GrantRoutineStmt,
 ) -> Result<RoleDependencyCandidate<'a, RoutinePrivilegeCandidate<'a>>, SQLError> {
+    let roles = context.catalog.roles.role_definitions();
     let grantees = stmt
         .grantees
         .iter()
-        .map(|role| resolve_role_reference(context.role_names, role))
-        .collect::<Vec<_>>();
+        .map(|role| resolve_role_reference(context.role_names, role).catalog_name(&roles))
+        .collect::<Result<Vec<_>, _>>()?;
     let requested_grantor = stmt
         .grantor
         .as_ref()
-        .map(|role| resolve_role_reference(context.role_names, role));
-    let current_user = context.catalog.names.current_user_name();
-    let roles = context.catalog.roles.role_definitions();
+        .map(|role| resolve_role_reference(context.role_names, role).catalog_name(&roles))
+        .transpose()?;
+    let current_user = context.catalog.names.current_role();
     analysis::validate_routine_acl_roles(
         stmt,
         &grantees,

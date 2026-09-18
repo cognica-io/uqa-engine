@@ -24,7 +24,7 @@ pub struct ViewOwnershipContext<'a> {
     pub schemas: &'a dyn ViewOwnerSchemas,
 }
 fn current_user_has_role_privileges(context: ViewOwnershipContext<'_>, target: &str) -> bool {
-    let current = context.session.current_user_name();
+    let current = context.session.current_role();
     let roles = context.roles.role_definitions();
     let memberships = context.roles.role_memberships();
     role_inherits(&roles, &memberships, &current, target)
@@ -88,7 +88,7 @@ pub fn ensure_materialized_view_maintenance(
     view: &StoredView,
 ) -> Result<(), SQLError> {
     debug_assert_eq!(view.kind, StoredViewKind::Materialized);
-    let current_user = context.session.current_user_name();
+    let current_user = context.session.current_role();
     let roles = context.roles.role_definitions();
     let memberships = context.roles.role_memberships();
     if role_has_table_privilege(

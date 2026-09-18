@@ -12,6 +12,7 @@ use crate::row_locks::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{catalog::roles::guards::RoleCatalogGuards, SQLError};
 
 pub const ROLE_CATALOG_CLASS_ID: u32 = 1260;
@@ -78,13 +79,8 @@ pub struct RoleLockContext<'a> {
 }
 
 impl RoleLockContext<'_> {
-    pub fn bind(&self, name: &str) -> Result<RoleBinding, SQLError> {
-        let roles = self.roles.role_definitions();
-        let role = roles.get(name).ok_or_else(|| SQLError::Routine {
-            sqlstate: "42704".into(),
-            message: format!("role \"{name}\" does not exist"),
-        })?;
-        RoleBinding::from_definition(role)
+    pub fn bind(&self, role: &RoleReference) -> Result<RoleBinding, SQLError> {
+        role.bind(&self.roles.role_definitions())
     }
 
     /// Never bind the name again after waiting: a replacement role must not acquire the old role's dependencies.

@@ -118,7 +118,7 @@ pub fn execute_cte_command<S: Clone + Send + Sync + 'static>(
         return Err(error);
     }
     let mut command = command.clone();
-    let subject = ctes.privilege_subject()?.to_string();
+    let subject = ctes.privilege_subject()?.clone();
     uqa_sql::semantics::mutation_privileges::inherit_command_privilege_subject(
         &mut command,
         subject,

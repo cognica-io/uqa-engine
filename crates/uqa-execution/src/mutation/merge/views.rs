@@ -586,7 +586,7 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
             let read_mutation = &read_context.mutation;
             let mut ctes = read_mutation
                 .scopes
-                .command_scope(plan.statement_privilege_subject.as_deref(), false)?;
+                .command_scope(plan.statement_privilege_subject.as_ref(), false)?;
             if let Some(parent) = inherited_ctes {
                 ctes.inherit_cte_bindings(parent);
             }

@@ -9,6 +9,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::{DatabasePrivilege, DatabaseRevokeBehavior},
     catalog::roles::{
@@ -50,11 +51,11 @@ impl DatabaseCatalog {
 }
 
 impl RoleReferenceNames for DatabaseCatalog {
-    fn current_user_name(&self) -> String {
+    fn current_role(&self) -> RoleReference {
         "uqa".into()
     }
 
-    fn session_user_name(&self) -> String {
+    fn session_role(&self) -> RoleReference {
         "uqa".into()
     }
 }

@@ -13,6 +13,8 @@ use super::{
     },
     SchemaSecurity,
 };
+use crate::catalog::roles::identity::RoleSubject;
+use crate::catalog::roles::RoleReference;
 use crate::{
     catalog::roles::{guards::RoleCatalogGuards, RoleDefinition, RoleReferenceNames},
     SQLError,
@@ -47,7 +49,7 @@ impl SchemaPrivilegeInquiry<'_> {
     pub fn schema_has_privilege_for_role(
         &self,
         schema: &str,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
         privilege: SchemaAclPrivilege,
     ) -> bool {
         let Some(security) = self.schema_security_for_privilege(schema) else {
@@ -82,7 +84,7 @@ impl SchemaPrivilegeInquiry<'_> {
     pub fn require_schema_privilege(
         &self,
         schema: &str,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
         privilege: SchemaAclPrivilege,
     ) -> Result<(), SQLError> {
         if self.schema_has_privilege_for_role(schema, role, privilege) {
@@ -109,14 +111,15 @@ impl SchemaPrivilegeInquiry<'_> {
                 })
             }
         };
-        let current_user = subject_value
-            .is_none()
-            .then(|| self.names.current_user_name());
+        let current_user = subject_value.is_none().then(|| self.names.current_role());
         let subject = {
             let roles = self.roles.role_definitions();
             subject_value.map_or_else(
                 || Ok(current_user),
-                |value| resolve_schema_privilege_role(value, &roles),
+                |value| {
+                    resolve_schema_privilege_role(value, &roles)
+                        .map(|role| role.map(RoleReference::from))
+                },
             )?
         };
         let schema = self.resolve_schema_privilege_target(schema_value)?;
@@ -132,8 +135,8 @@ impl SchemaPrivilegeInquiry<'_> {
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
         let subject_is_superuser = subject.as_ref().is_some_and(|subject| {
-            roles
-                .get(subject)
+            subject
+                .role_definition(&roles)
                 .is_some_and(|role| role.has(crate::ast::RoleAttribute::Superuser))
         });
         let Some(schema) = schema else {

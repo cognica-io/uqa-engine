@@ -7,6 +7,7 @@
 //! Routine replacement compatibility, security attributes, and ALTER definition analysis.
 
 use super::{builtin_routine_support_oid, lifecycle::ensure_routine_owner_as, routine_kind};
+use crate::catalog::roles::identity::RoleSubject;
 use crate::{
     ast::{AlterRoutineStmt, CreateFunction},
     catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey},
@@ -58,7 +59,7 @@ pub fn prepare_routine_replacement(
     existing: &CreateFunction,
     def: &mut CreateFunction,
     requested_name: &str,
-    current_user: &str,
+    current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> Result<(), SQLError> {

@@ -11,6 +11,7 @@ use super::{
     sequence_inquiry::SequencePrivilegeResolution,
     SequenceSecurity,
 };
+use crate::catalog::roles::identity::RoleSubject;
 use crate::{
     ast::{GrantSequenceStmt, SequenceRevokeBehavior},
     catalog::{
@@ -87,7 +88,7 @@ pub fn apply_sequence_acl(
     statement: &GrantSequenceStmt,
     grantees: &[String],
     privileges: &[AclPrivilege],
-    current_user: &str,
+    current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
     current: &SequenceSecurity,
@@ -136,7 +137,7 @@ pub fn validate_sequence_acl_roles(
     statement: &GrantSequenceStmt,
     grantees: &[String],
     requested_grantor: Option<&str>,
-    current_user: &str,
+    current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> Result<(), SQLError> {
     for role in grantees {
@@ -161,7 +162,7 @@ pub fn validate_sequence_acl_roles(
                 message: format!("role \"{requested_grantor}\" does not exist"),
             });
         }
-        if requested_grantor != current_user {
+        if current_user.role_name(roles) != Some(requested_grantor) {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
                 message: "grantor must be current user".into(),

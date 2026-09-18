@@ -234,7 +234,7 @@ impl EventAnalysisContext<'_> {
         let canonical = relation.qualified_name();
         match relation_kind {
             "table" => {
-                let current_user = self.authority.current_user_name();
+                let current_user = self.authority.current_role();
                 self.privileges.ensure_table_privilege_for(
                     &canonical,
                     &current_user,
@@ -253,7 +253,7 @@ impl EventAnalysisContext<'_> {
                 self.privileges.ensure_view_privilege_for(
                     &canonical,
                     &view,
-                    &self.authority.current_user_name(),
+                    &self.authority.current_role(),
                     TableAclPrivilege::Trigger,
                 )
             }

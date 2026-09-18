@@ -48,7 +48,7 @@ impl Engine {
     ) -> StorageBackendResult<Vec<String>> {
         self.synchronize_catalog_registries()?;
         let path = self.session.state.read().search_path.clone();
-        let user = self.current_user_name();
+        let user = self.current_role();
         let mut out = Vec::new();
         if include_implicit && !path.iter().any(|name| name == "pg_catalog") {
             out.push("pg_catalog".to_string());
@@ -112,6 +112,9 @@ impl Engine {
     /// directly; every other parameter is stored in the session-vars
     /// map so a subsequent `SHOW <name>` can echo it back.
     pub fn set_variable(&self, name: &str, value: &str) -> Result<(), SQLError> {
+        if name.eq_ignore_ascii_case("role") || name.eq_ignore_ascii_case("session_authorization") {
+            return self.set_runtime_parameter(name, Some(value), false);
+        }
         if !crate::capabilities::is_known_runtime_parameter(name) {
             return Err(SQLError::Routine {
                 sqlstate: "42704".into(),
@@ -211,6 +214,9 @@ impl Engine {
     }
 
     pub fn reset_variable(&self, name: &str) -> Result<(), SQLError> {
+        if name.eq_ignore_ascii_case("role") || name.eq_ignore_ascii_case("session_authorization") {
+            return self.set_runtime_parameter(name, None, false);
+        }
         if !crate::capabilities::is_known_runtime_parameter(name) {
             return Err(SQLError::Routine {
                 sqlstate: "42704".into(),
@@ -256,7 +262,7 @@ impl Engine {
         session.session_vars.clear();
         session
             .local_parameter_restore
-            .retain(|name, _| name == "role");
+            .retain(|name, _| matches!(name.as_str(), "role" | "session_authorization"));
         session.search_path = vec!["public".into()];
         session.sql_statement_cache.clear();
     }
@@ -290,11 +296,22 @@ impl Engine {
                     setting,
                     path: state.search_path.clone(),
                 },
-                "role" => RuntimeParameterValue::Role(state.current_user.clone()),
+                "role" => RuntimeParameterValue::Role(state.authorization.selected().cloned()),
+                "session_authorization" => RuntimeParameterValue::SessionAuthorization(
+                    state.authorization.session().clone(),
+                ),
                 _ => RuntimeParameterValue::Setting(setting),
             }
         };
-        if name == "role" {
+        let prior_role = (name == "session_authorization").then(|| {
+            RuntimeParameterValue::Role(self.session.state.read().authorization.selected().cloned())
+        });
+        if name == "session_authorization" {
+            uqa_execution::catalog::security::role_lifecycle::set_session_authorization(
+                &self.role_execution_context(),
+                value,
+            )?;
+        } else if name == "role" {
             uqa_execution::catalog::security::role_lifecycle::set_role(
                 &self.role_execution_context(),
                 value,
@@ -306,6 +323,20 @@ impl Engine {
         }
         let in_transaction = self.transaction_depth() != 0;
         let mut state = self.session.state.write();
+        if let Some(prior_role) = prior_role {
+            if local {
+                if in_transaction {
+                    state
+                        .local_parameter_restore
+                        .entry("role".into())
+                        .or_insert(prior_role);
+                } else {
+                    restore_runtime_parameter(&mut state, "role", prior_role);
+                }
+            } else {
+                state.local_parameter_restore.remove("role");
+            }
+        }
         if local {
             if in_transaction {
                 state.local_parameter_restore.entry(name).or_insert(before);
@@ -389,8 +420,7 @@ impl Engine {
                 self.session.prepared.write().clear();
                 session.sql_statement_cache.clear();
                 session.search_path = vec!["public".to_string()];
-                let session_user = session.session_user.clone();
-                session.current_user = session_user;
+                session.authorization.discard();
                 drop(session);
                 self.session.portals.lock().clear();
                 return Ok(());
@@ -497,8 +527,13 @@ fn restore_runtime_parameter(
             state.sql_statement_cache.clear();
             setting
         }
+        RuntimeParameterValue::SessionAuthorization(role) => {
+            state.authorization.restore_session(role);
+            state.sql_statement_cache.clear();
+            return;
+        }
         RuntimeParameterValue::Role(role) => {
-            state.current_user = role;
+            state.authorization.set_role(role);
             state.sql_statement_cache.clear();
             return;
         }

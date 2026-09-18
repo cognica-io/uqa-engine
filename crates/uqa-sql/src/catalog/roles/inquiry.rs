@@ -14,6 +14,7 @@ use super::{
     },
     RoleReferenceNames,
 };
+use crate::catalog::roles::RoleReference;
 use crate::SQLError;
 use uqa_core::Value;
 
@@ -36,11 +37,13 @@ pub fn pg_has_role_value(
             });
         }
     };
-    let current_user = subject_value.is_none().then(|| names.current_user_name());
+    let current_user = subject_value.is_none().then(|| names.current_role());
     let roles = catalog.role_definitions();
     let subject = subject_value.map_or_else(
         || Ok(current_user),
-        |value| resolve_pg_has_role_identifier(value, &roles),
+        |value| {
+            resolve_pg_has_role_identifier(value, &roles).map(|role| role.map(RoleReference::from))
+        },
     )?;
     let target = resolve_pg_has_role_identifier(target_value, &roles)?;
     let privileges = parse_pg_has_role_privileges(role_privilege_text(privilege_value)?)?;
@@ -49,7 +52,7 @@ pub fn pg_has_role_value(
         pg_has_role_privilege(
             &roles,
             &memberships,
-            subject.as_deref(),
+            subject.as_ref(),
             target.as_deref(),
             privilege,
         )

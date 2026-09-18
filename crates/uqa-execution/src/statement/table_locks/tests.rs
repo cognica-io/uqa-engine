@@ -7,6 +7,7 @@
 use super::*;
 use crate::row_locks::ScopedRelationLock;
 use std::{cell::RefCell, collections::BTreeMap};
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::catalog::roles::{
     guards::{RoleDefinitionRead, RoleMembershipRead},
     RoleDefinition, RoleMembership, RoleMembershipKey,
@@ -115,8 +116,8 @@ impl TableLockSession for Fixture {
     fn in_transaction_block(&self) -> bool {
         true
     }
-    fn current_user(&self) -> String {
-        self.user.clone()
+    fn current_role(&self) -> RoleReference {
+        self.user.clone().into()
     }
 }
 

@@ -6,6 +6,7 @@
 
 //! Read-only authority shared by object ownership checks.
 use super::SchemaSecurity;
+use crate::catalog::roles::identity::RoleSubject;
 use crate::{
     ast::RoleAttribute,
     catalog::roles::{
@@ -25,14 +26,14 @@ mod tests;
 pub struct OwnerChangeAuthority<'a> {
     pub roles: &'a BTreeMap<String, RoleDefinition>,
     pub memberships: &'a BTreeMap<RoleMembershipKey, RoleMembership>,
-    pub current_user: &'a str,
+    pub current_user: &'a dyn RoleSubject,
     pub new_owner: &'a str,
 }
 
 impl OwnerChangeAuthority<'_> {
     pub fn is_superuser(&self) -> bool {
-        self.roles
-            .get(self.current_user)
+        self.current_user
+            .role_definition(self.roles)
             .is_some_and(|role| role.has(RoleAttribute::Superuser))
     }
 

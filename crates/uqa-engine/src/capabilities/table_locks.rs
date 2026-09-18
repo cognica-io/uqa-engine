@@ -17,6 +17,7 @@ use uqa_execution::{
         TableLockCatalog, TableLockContext, TableLockMetadata, TableLockSession,
     },
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     catalog::{resolution::RelationResolution, stored_view::StoredView},
     SQLError,
@@ -70,8 +71,8 @@ impl TableLockSession for Engine {
     fn in_transaction_block(&self) -> bool {
         Engine::in_transaction_block(self)
     }
-    fn current_user(&self) -> String {
-        self.current_user_name()
+    fn current_role(&self) -> RoleReference {
+        self.current_role()
     }
 }
 

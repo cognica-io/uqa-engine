@@ -59,7 +59,7 @@ impl RelationCreationContext<'_> {
         }
     }
     pub fn bind_owner(&self) -> Result<RoleBinding, SQLError> {
-        self.role_locks().bind(&self.names.current_user_name())
+        self.role_locks().bind(&self.names.current_role())
     }
     pub fn retain_owner(&self, owner: &RoleBinding) -> Result<(), SQLError> {
         retain_created_owner(self.role_locks(), owner)
@@ -76,7 +76,7 @@ impl RelationCreationContext<'_> {
         }
     }
     pub fn ensure_temporary_privilege(&self) -> Result<(), SQLError> {
-        let current_user = self.names.current_user_name();
+        let current_user = self.names.current_role();
         DatabasePrivilegeInquiry {
             catalog: self.database,
             names: self.names,
@@ -104,7 +104,7 @@ impl RelationCreationContext<'_> {
     pub fn resolve_persistent_name(&self, name: &str) -> Result<String, SQLError> {
         let (schema, relation) =
             RelationIdentity::parse_reference(name).map_err(SQLError::Unsupported)?;
-        let current_user = self.names.current_user_name();
+        let current_user = self.names.current_role();
         for attempt in 0..2 {
             self.runtime
                 .synchronize_catalog_registries()
@@ -135,7 +135,7 @@ impl RelationCreationContext<'_> {
         if relation.schema == self.state.temporary_schema_name() {
             return self.ensure_temporary_privilege();
         }
-        let current_user = self.names.current_user_name();
+        let current_user = self.names.current_role();
         self.schema_privileges().require_schema_privilege(
             &relation.schema,
             &current_user,
