@@ -10,6 +10,7 @@ use super::{
     security::{TableAclEntry, TablePrivileges, TableSecurity},
     VirtualRelation,
 };
+mod columns;
 
 macro_rules! system_relations {
     ($($variant:ident => ($schema:literal, $name:literal, $oid:literal, $kind:literal)),* $(,)?) => {

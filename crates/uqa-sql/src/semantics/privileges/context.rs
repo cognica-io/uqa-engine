@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Copy)]
 pub enum PrivilegeRelationKind {
+    System(crate::catalog::SystemRelation),
     Table,
     View,
     MaterializedView,
@@ -22,10 +23,14 @@ pub enum PrivilegeRelationKind {
 }
 impl PrivilegeRelationKind {
     pub const fn has_system_columns(self) -> bool {
-        matches!(self, Self::Table | Self::ForeignTable)
+        match self {
+            Self::System(relation) => matches!(relation.kind().as_bytes(), b"table"),
+            _ => matches!(self, Self::Table | Self::ForeignTable),
+        }
     }
     pub const fn description(self) -> &'static str {
         match self {
+            Self::System(relation) => relation.kind(),
             Self::Table => "table",
             Self::View => "view",
             Self::MaterializedView => "materialized view",

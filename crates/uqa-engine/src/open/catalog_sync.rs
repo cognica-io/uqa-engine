@@ -243,7 +243,13 @@ impl Engine {
             .filter(|(relation, _)| temporary_sequence_persistence.contains_key(*relation))
             .map(|(relation, security)| (relation.clone(), security.clone()))
             .collect::<BTreeMap<_, _>>();
+        let system_security = uqa_execution::catalog::security::system_relations::merge_private(
+            self.storage.catalog.as_deref(),
+            &previous_durable.system_relation_security,
+            (*latest.durable.system_relation_security.read()).clone(),
+        )?;
         self.durable.restore(&latest.durable.snapshot());
+        *self.durable.system_relation_security.write() = system_security;
         self.rebind_graph_stores()?;
         self.durable.views.write().extend(temporary_views);
         self.durable.sequences.write().extend(temporary_sequences);
@@ -615,6 +621,7 @@ impl Engine {
         self.durable.foreign_servers.write().clear();
         self.durable.foreign_tables.write().clear();
         self.durable.foreign_table_security.write().clear();
+        self.durable.system_relation_security.write().clear();
         self.durable.sql_user_functions.write().clear();
         self.durable.models.write().clear();
         self.durable.scoring_params.write().clear();

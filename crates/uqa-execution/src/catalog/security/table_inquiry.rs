@@ -54,7 +54,9 @@ pub type PrivilegeForeignTablesRead<'a> =
     Box<dyn Deref<Target = BTreeMap<RelationIdentity, StoredForeignTable>> + 'a>;
 pub type PrivilegeForeignSecurityRead<'a> =
     Box<dyn Deref<Target = BTreeMap<RelationIdentity, TableSecurity>> + 'a>;
-pub trait TablePrivilegeRegistry {
+pub trait TablePrivilegeRegistry:
+    uqa_sql::catalog::security::system_relations::SystemRelationSecurityCatalog
+{
     fn refresh_tables(&self) -> StorageBackendResult<()>;
     fn refresh_catalog(&self) -> StorageBackendResult<()>;
     fn tables(&self) -> Box<dyn TablePrivilegeRead + '_>;
@@ -88,6 +90,9 @@ impl TablePrivilegeCatalog for TablePrivilegeContext<'_> {
         target: &ResolvedTablePrivilegeTarget,
     ) -> Result<TableSecurity, SQLError> {
         match target {
+            ResolvedTablePrivilegeTarget::System(relation) => {
+                Ok(self.registry.system_relation_security(*relation))
+            }
             ResolvedTablePrivilegeTarget::Table(relation) => self
                 .registry
                 .tables()
@@ -117,6 +122,12 @@ impl TablePrivilegeCatalog for TablePrivilegeContext<'_> {
         target: &ResolvedTablePrivilegeTarget,
     ) -> Result<ColumnPrivilegeRelation, SQLError> {
         match target {
+            ResolvedTablePrivilegeTarget::System(relation) => Ok(ColumnPrivilegeRelation {
+                relation: RelationIdentity::new(relation.namespace(), relation.name()),
+                security: self.registry.system_relation_security(*relation),
+                columns: relation.column_names(),
+                has_system_columns: relation.kind() == "table",
+            }),
             ResolvedTablePrivilegeTarget::Table(relation) => {
                 let table = self
                     .registry
@@ -179,6 +190,11 @@ impl TablePrivilegeCatalog for TablePrivilegeContext<'_> {
         &self,
         oid: i64,
     ) -> Result<Option<ResolvedTablePrivilegeTarget>, SQLError> {
+        if let Some(relation) =
+            uqa_sql::catalog::SystemRelation::all().find(|relation| relation.oid() == oid)
+        {
+            return Ok(Some(ResolvedTablePrivilegeTarget::System(relation)));
+        }
         self.registry.refresh_tables().map_err(|error| {
             SQLError::Internal(format!("load tables for privilege inquiry: {error}"))
         })?;

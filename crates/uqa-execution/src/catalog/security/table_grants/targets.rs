@@ -7,6 +7,7 @@
 //! Resolve table grant targets and validate retained relation metadata in catalog order.
 use super::context::{TableGrantContext, TableGrantState};
 use crate::catalog::view::{StoredView, StoredViewKind};
+use uqa_sql::catalog::SystemRelation;
 use uqa_sql::{
     ast::GrantTableTarget,
     catalog::security::{
@@ -24,6 +25,10 @@ type RetainedTableGrantTarget<'a, 'scope> = (
     Box<dyn TableGrantState + 'scope>,
 );
 
+pub(super) fn system_target(target: &ResolvedTableGrantTarget) -> Option<SystemRelation> {
+    SystemRelation::at(&target.relation.schema, &target.relation.name)
+}
+
 pub(super) fn validated_table_grant_targets<'a, 'scope>(
     context: &'scope TableGrantContext<'_>,
     targets: &'a [ResolvedTableGrantTarget],
@@ -32,7 +37,7 @@ pub(super) fn validated_table_grant_targets<'a, 'scope>(
     let tables = context.tables.tables();
     targets
         .iter()
-        .filter(|target| target.kind == "table")
+        .filter(|target| target.kind == "table" && system_target(target).is_none())
         .map(|target| {
             let table = tables.retained(&target.relation).ok_or_else(|| {
                 SQLError::Internal(format!("table `{}` disappeared", target.name))
@@ -51,7 +56,9 @@ pub(super) fn validated_view_grant_targets<'a>(
     let views = context.registry.views();
     let selected = targets
         .iter()
-        .filter(|target| matches!(target.kind, "view" | "materialized view"))
+        .filter(|target| {
+            matches!(target.kind, "view" | "materialized view") && system_target(target).is_none()
+        })
         .map(|target| {
             let view = views
                 .get(&target.relation)
@@ -164,6 +171,23 @@ impl TableGrantContext<'_> {
                     name: relation.qualified_name(),
                     relation: relation.clone(),
                     kind: "foreign table",
+                }),
+        );
+        targets.extend(
+            SystemRelation::all()
+                .filter(|relation| {
+                    resolved_schemas
+                        .iter()
+                        .any(|schema| schema == relation.namespace())
+                })
+                .map(|relation| ResolvedTableGrantTarget {
+                    requested: relation.qualified_name(),
+                    name: relation.qualified_name(),
+                    relation: uqa_core::RelationIdentity::new(
+                        relation.namespace(),
+                        relation.name(),
+                    ),
+                    kind: relation.kind(),
                 }),
         );
         targets.sort_by(|left, right| left.relation.cmp(&right.relation));

@@ -129,6 +129,9 @@ impl RelationLockCatalog for Engine {
         if let Some(view) = self.durable.views.read().get(&relation) {
             return Ok(Some(view.object_id));
         }
+        if let Some(object_id) = self.durable.sequence_object_ids.read().get(&relation) {
+            return Ok(Some(*object_id));
+        }
         Ok(self
             .durable
             .foreign_tables

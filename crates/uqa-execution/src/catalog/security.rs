@@ -30,6 +30,7 @@ pub mod sequence_lifecycle;
 
 pub mod table_inquiry;
 
+pub mod system_relations;
 pub mod table_grants;
 
 pub mod foreign_authorization;

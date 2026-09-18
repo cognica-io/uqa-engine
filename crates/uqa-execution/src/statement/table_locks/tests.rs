@@ -24,6 +24,7 @@ struct Fixture {
     manager: crate::row_locks::RowLockManager,
     cancel: uqa_core::CancellationToken,
     user: String,
+    system_security: uqa_sql::catalog::security::system_relations::SystemRelationSecurities,
 }
 
 impl Fixture {
@@ -43,6 +44,7 @@ impl Fixture {
             manager: crate::row_locks::RowLockManager::new(),
             cancel: uqa_core::CancellationToken::new(),
             user: "uqa".into(),
+            system_security: BTreeMap::new(),
         }
     }
     fn execute(&self, sql: &str) -> Result<SQLResult, SQLError> {
@@ -98,6 +100,14 @@ impl TableLockCatalog for Fixture {
     }
     fn descendants(&self, _: &str) -> Result<Vec<String>, SQLError> {
         Ok(self.children.clone())
+    }
+}
+
+impl uqa_sql::catalog::security::system_relations::SystemRelationSecurityCatalog for Fixture {
+    fn system_relation_securities(
+        &self,
+    ) -> uqa_sql::catalog::security::system_relations::SystemRelationSecurityRead<'_> {
+        Box::new(&self.system_security)
     }
 }
 

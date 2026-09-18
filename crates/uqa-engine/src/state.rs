@@ -91,6 +91,8 @@ pub(super) struct DurableCatalogState {
     pub(super) foreign_tables:
         CatalogCell<BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>>,
     pub(super) foreign_table_security: CatalogCell<BTreeMap<RelationIdentity, TableSecurity>>,
+    pub(super) system_relation_security:
+        CatalogCell<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
     pub(super) sql_user_functions:
         CatalogCell<BTreeMap<String, Vec<Arc<super::user_functions::SQLUserFunction>>>>,
     pub(super) roles: CatalogCell<BTreeMap<String, super::roles::RoleDefinition>>,
@@ -123,6 +125,8 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) foreign_servers: Arc<BTreeMap<String, uqa_fdw::ForeignServer>>,
     pub(super) foreign_tables: Arc<BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>>,
     pub(super) foreign_table_security: Arc<BTreeMap<RelationIdentity, TableSecurity>>,
+    pub(super) system_relation_security:
+        Arc<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
     pub(super) sql_user_functions:
         Arc<BTreeMap<String, Vec<Arc<super::user_functions::SQLUserFunction>>>>,
     pub(super) roles: Arc<BTreeMap<String, super::roles::RoleDefinition>>,
@@ -157,6 +161,7 @@ impl DurableCatalogState {
             foreign_servers: CatalogCell::new(BTreeMap::new()),
             foreign_tables: CatalogCell::new(BTreeMap::new()),
             foreign_table_security: CatalogCell::new(BTreeMap::new()),
+            system_relation_security: CatalogCell::new(BTreeMap::new()),
             sql_user_functions: CatalogCell::new(BTreeMap::new()),
             roles: CatalogCell::new(BTreeMap::from([(
                 "uqa".to_string(),
@@ -189,6 +194,7 @@ impl DurableCatalogState {
             foreign_servers: self.foreign_servers.snapshot(),
             foreign_tables: self.foreign_tables.snapshot(),
             foreign_table_security: self.foreign_table_security.snapshot(),
+            system_relation_security: self.system_relation_security.snapshot(),
             sql_user_functions: self.sql_user_functions.snapshot(),
             roles: self.roles.snapshot(),
             role_memberships: self.role_memberships.snapshot(),
@@ -220,6 +226,8 @@ impl DurableCatalogState {
         self.foreign_tables.restore(&snapshot.foreign_tables);
         self.foreign_table_security
             .restore(&snapshot.foreign_table_security);
+        self.system_relation_security
+            .restore(&snapshot.system_relation_security);
         self.sql_user_functions
             .restore(&snapshot.sql_user_functions);
         self.domains.restore(&snapshot.domains);

@@ -11,6 +11,10 @@ use super::super::{
 };
 use crate::{
     catalog::view::ViewRegistryState,
+    row_locks::{
+        binding::{RelationLockCatalog, RelationLockSession},
+        session::RowLockSession,
+    },
     schema::{
         foreign_table_alteration::ForeignTableAlterPublication, namespaces::SchemaStatementWriter,
         publication::dependencies::CatalogPublicationChanges,
@@ -40,6 +44,10 @@ pub trait TableGrantRegistry {
 pub use crate::catalog::notices::CatalogNotices as TableGrantNotices;
 pub struct TableGrantContext<'a> {
     pub writer: &'a dyn SchemaStatementWriter,
+    pub bindings: &'a dyn RelationLockCatalog,
+    pub locks: &'a dyn RelationLockSession,
+    pub rows: &'a dyn RowLockSession,
+    pub system: &'a dyn super::super::system_relations::SystemRelationSecurityState,
     pub resolution: &'a dyn TableGrantResolution,
     pub namespaces: &'a dyn GrantNamespace,
     pub names: &'a dyn RoleReferenceNames,

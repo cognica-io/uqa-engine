@@ -84,6 +84,8 @@ pub struct CatalogDefinitionSnapshot {
     pub sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
     pub sequence_security: Arc<BTreeMap<RelationIdentity, SequenceSecurity>>,
     pub foreign_table_security: Arc<BTreeMap<RelationIdentity, TableSecurity>>,
+    pub system_relation_security:
+        Arc<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
     pub roles: Arc<BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>>,
     pub triggers: Arc<
         BTreeMap<

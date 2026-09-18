@@ -90,3 +90,22 @@ impl Engine {
         }
     }
 }
+
+impl uqa_sql::catalog::security::system_relations::SystemRelationSecurityCatalog for Engine {
+    fn system_relation_securities(
+        &self,
+    ) -> uqa_sql::catalog::security::system_relations::SystemRelationSecurityRead<'_> {
+        Box::new(self.durable.system_relation_security.read())
+    }
+}
+impl uqa_execution::catalog::security::system_relations::SystemRelationSecurityState for Engine {
+    fn system_relation_securities_write(
+        &self,
+    ) -> Box<
+        dyn std::ops::DerefMut<
+                Target = uqa_sql::catalog::security::system_relations::SystemRelationSecurities,
+            > + '_,
+    > {
+        Box::new(self.durable.system_relation_security.write())
+    }
+}

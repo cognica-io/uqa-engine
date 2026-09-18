@@ -28,6 +28,7 @@ pub(crate) fn empty_catalog() -> CatalogReadView {
             sequence_object_ids: Arc::default(),
             sequence_security: Arc::default(),
             foreign_table_security: Arc::default(),
+            system_relation_security: Arc::default(),
             roles: Arc::default(),
             triggers: Arc::default(),
             rules: Arc::default(),

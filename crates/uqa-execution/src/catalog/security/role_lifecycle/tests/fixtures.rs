@@ -43,6 +43,7 @@ pub(super) struct Catalog {
     schemas: BTreeMap<String, SchemaSecurity>,
     views: BTreeMap<RelationIdentity, StoredView>,
     foreign_tables: BTreeMap<RelationIdentity, TableSecurity>,
+    system_relations: uqa_sql::catalog::security::system_relations::SystemRelationSecurities,
     sequences: BTreeMap<RelationIdentity, SequenceSecurity>,
     routines: BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
 }
@@ -62,6 +63,7 @@ impl Catalog {
             schemas: BTreeMap::new(),
             views: BTreeMap::new(),
             foreign_tables: BTreeMap::new(),
+            system_relations: BTreeMap::new(),
             sequences: BTreeMap::new(),
             routines: BTreeMap::new(),
         }
@@ -274,5 +276,13 @@ impl RoleDependencyCatalog for Catalog {
     fn routines(&self) -> RoleDependencyRead<'_, BTreeMap<String, Vec<Arc<SQLUserFunction>>>> {
         self.event("routines");
         Box::new(&self.routines)
+    }
+}
+
+impl uqa_sql::catalog::security::system_relations::SystemRelationSecurityCatalog for Catalog {
+    fn system_relation_securities(
+        &self,
+    ) -> uqa_sql::catalog::security::system_relations::SystemRelationSecurityRead<'_> {
+        Box::new(&self.system_relations)
     }
 }

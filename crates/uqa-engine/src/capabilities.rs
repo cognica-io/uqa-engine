@@ -289,6 +289,7 @@ impl Engine {
                 sequence_object_ids: durable.sequence_object_ids.clone(),
                 sequence_security: durable.sequence_security.clone(),
                 foreign_table_security: durable.foreign_table_security.clone(),
+                system_relation_security: durable.system_relation_security.clone(),
                 roles: durable.roles.clone(),
                 triggers: durable.triggers.clone(),
                 rules: durable.rules.clone(),

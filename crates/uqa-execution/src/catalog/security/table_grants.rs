@@ -6,6 +6,7 @@
 
 //! Apply table-shaped privilege commands while preserving authorization guards and persistence/publication order.
 pub mod context;
+mod locking;
 mod targets;
 mod updates;
 pub use context::{TableGrantContext, TableGrantInputs};
@@ -13,7 +14,7 @@ use targets::{
     validated_foreign_table_grant_targets, validated_table_grant_targets,
     validated_view_grant_targets,
 };
-use updates::{persist_table_privilege_updates, table_privilege_updates};
+use updates::{persist_table_privilege_updates, system_privilege_updates, table_privilege_updates};
 use uqa_sql::{
     ast::{
         GrantSequenceStmt, GrantSequenceTarget, GrantTableStmt, GrantTableTarget,
@@ -42,8 +43,8 @@ pub fn grant_table_privileges(
 }
 impl TableGrantContext<'_> {
     pub fn grant_table_privileges(&self, statement: &GrantTableStmt) -> Result<(), SQLError> {
+        let targets = locking::lock_targets(self, statement)?;
         self.writer.prepare_writer()?;
-        let targets = self.resolve_table_grant_targets(&statement.target)?;
         let grantees = statement
             .grantees
             .iter()
@@ -100,7 +101,13 @@ impl TableGrantContext<'_> {
         let view_updates = view_privilege_updates(view_targets, &application, &mut notices)?;
         let foreign_updates =
             foreign_table_privilege_updates(foreign_targets, &application, &mut notices)?;
+        let system_updates = system_privilege_updates(self, &targets, &application, &mut notices)?;
         persist_table_privilege_updates(self, &updates, &view_updates, &foreign_updates)?;
+        for update in &system_updates {
+            update.persist(self.catalog).map_err(|error| {
+                SQLError::Internal(format!("persist system relation privileges: {error}"))
+            })?;
+        }
         let table_changed = !updates.is_empty();
         for (_, table, security) in updates {
             table.security_write().clone_from(&security);
@@ -119,6 +126,13 @@ impl TableGrantContext<'_> {
                 securities.insert(relation, security);
             }
         }
+        let system_changed = !system_updates.is_empty();
+        if system_changed {
+            let mut securities = self.system.system_relation_securities_write();
+            for update in system_updates {
+                update.publish(&mut securities);
+            }
+        }
         drop(memberships);
         drop(roles);
 
@@ -126,7 +140,7 @@ impl TableGrantContext<'_> {
         for (level, message) in notices {
             self.notices.notice(level, &message);
         }
-        if table_changed || view_changed || foreign_changed {
+        if table_changed || view_changed || foreign_changed || system_changed {
             self.changes.table_catalog_changed();
             self.changes.catalog_registry_changed();
         }

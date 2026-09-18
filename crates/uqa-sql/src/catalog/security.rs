@@ -79,6 +79,7 @@ pub mod table_inquiry;
 pub mod view_ownership;
 
 pub mod grants;
+pub mod system_relations;
 pub mod table_grants;
 
 pub mod view_authorization;

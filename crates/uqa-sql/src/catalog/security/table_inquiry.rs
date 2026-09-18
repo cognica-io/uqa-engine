@@ -45,6 +45,7 @@ pub struct TablePrivilegeInquiry<'a> {
 }
 
 pub enum ResolvedTablePrivilegeTarget {
+    System(crate::catalog::SystemRelation),
     Table(RelationIdentity),
     View(RelationIdentity),
     ForeignTable(RelationIdentity),
@@ -198,6 +199,16 @@ impl TablePrivilegeInquiry<'_> {
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
         Ok(Value::Bool(checks.into_iter().any(|check| {
+            if let ResolvedTablePrivilegeTarget::System(relation) = target {
+                return super::system_relations::has_table_privilege(
+                    relation,
+                    &security,
+                    &subject,
+                    check,
+                    &roles,
+                    &memberships,
+                );
+            }
             role_has_privilege(&security, &subject, check, &roles, &memberships)
         })))
     }
@@ -253,17 +264,44 @@ impl TablePrivilegeInquiry<'_> {
         };
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
-        Ok(Value::Bool(checks.into_iter().any(|check| match &column {
-            ResolvedColumnPrivilegeTarget::User(column) => column_privilege_check(
-                &metadata.security,
-                column,
-                &subject,
-                check,
-                &roles,
-                &memberships,
-            ),
-            ResolvedColumnPrivilegeTarget::System => {
-                role_has_privilege(&metadata.security, &subject, check, &roles, &memberships)
+        Ok(Value::Bool(checks.into_iter().any(|check| {
+            if let ResolvedTablePrivilegeTarget::System(relation) = target {
+                return match &column {
+                    ResolvedColumnPrivilegeTarget::User(column) => {
+                        super::system_relations::has_column_privilege(
+                            relation,
+                            &metadata.security,
+                            column,
+                            &subject,
+                            check,
+                            &roles,
+                            &memberships,
+                        )
+                    }
+                    ResolvedColumnPrivilegeTarget::System => {
+                        super::system_relations::has_table_privilege(
+                            relation,
+                            &metadata.security,
+                            &subject,
+                            check,
+                            &roles,
+                            &memberships,
+                        )
+                    }
+                };
+            }
+            match &column {
+                ResolvedColumnPrivilegeTarget::User(column) => column_privilege_check(
+                    &metadata.security,
+                    column,
+                    &subject,
+                    check,
+                    &roles,
+                    &memberships,
+                ),
+                ResolvedColumnPrivilegeTarget::System => {
+                    role_has_privilege(&metadata.security, &subject, check, &roles, &memberships)
+                }
             }
         })))
     }
@@ -346,6 +384,9 @@ impl TablePrivilegeInquiry<'_> {
                         })
                     }
                 };
+                if let Some(relation) = crate::catalog::SystemRelation::from_qualified_name(&name) {
+                    return Ok(Some(ResolvedTablePrivilegeTarget::System(relation)));
+                }
                 if !matches!(
                     kind,
                     "table" | "view" | "materialized view" | "foreign table" | "sequence"

@@ -187,3 +187,13 @@ impl CatalogReadView {
         Ok(false)
     }
 }
+
+impl uqa_sql::catalog::security::system_relations::SystemRelationSecurityCatalog
+    for CatalogReadView
+{
+    fn system_relation_securities(
+        &self,
+    ) -> uqa_sql::catalog::security::system_relations::SystemRelationSecurityRead<'_> {
+        Box::new(self.snapshot.definitions.system_relation_security.as_ref())
+    }
+}

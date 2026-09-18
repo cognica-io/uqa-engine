@@ -25,7 +25,9 @@ pub trait RoleTableSecurity {
 pub trait RoleTablesRead {
     fn iter(&self) -> Box<dyn Iterator<Item = (&RelationIdentity, &dyn RoleTableSecurity)> + '_>;
 }
-pub trait RoleDependencyCatalog {
+pub trait RoleDependencyCatalog:
+    crate::catalog::security::system_relations::SystemRelationSecurityCatalog
+{
     fn database(&self) -> RoleDependencyRead<'_, DatabaseSecurity>;
     fn schemas(&self) -> RoleDependencyRead<'_, BTreeMap<String, SchemaSecurity>>;
     fn tables(&self) -> Box<dyn RoleTablesRead + '_>;

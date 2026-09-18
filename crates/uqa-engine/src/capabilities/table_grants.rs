@@ -107,6 +107,10 @@ impl TableGrantInputs for Engine {
     fn table_grant_context(&self) -> TableGrantContext<'_> {
         TableGrantContext {
             writer: self,
+            bindings: self,
+            locks: self,
+            rows: self,
+            system: self,
             resolution: self,
             namespaces: self,
             names: self,

@@ -64,6 +64,8 @@ pub fn ensure_roles_have_no_object_dependencies(
     }
     drop(tables);
 
+    ensure_roles_have_no_system_relation_dependencies(catalog, names)?;
+
     let views = catalog.views();
     for name in names {
         if let Some((relation, view)) = views
@@ -119,6 +121,31 @@ pub fn ensure_roles_have_no_object_dependencies(
             });
         }
     }
+    Ok(())
+}
+
+fn ensure_roles_have_no_system_relation_dependencies(
+    catalog: &dyn RoleDependencyCatalog,
+    names: &[String],
+) -> Result<(), SQLError> {
+    let system_relations = catalog.system_relation_securities();
+    for name in names {
+        if let Some((relation, _)) = system_relations.iter().find(|(identity, entry)| {
+            crate::catalog::SystemRelation::at(&identity.schema, &identity.name).is_some_and(
+                |relation| table_security_depends_on_role(&entry.security(relation), name),
+            )
+        }) {
+            return Err(SQLError::Routine {
+                sqlstate: "2BP01".into(),
+                message: format!(
+                    "role \"{name}\" cannot be dropped because some objects depend on it: table {}",
+                    relation.qualified_name()
+                ),
+            });
+        }
+    }
+    drop(system_relations);
+
     Ok(())
 }
 

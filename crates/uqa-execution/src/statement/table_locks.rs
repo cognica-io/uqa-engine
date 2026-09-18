@@ -27,7 +27,9 @@ pub struct TableLockMetadata {
     pub security: TableSecurity,
 }
 
-pub trait TableLockCatalog: RelationLockCatalog {
+pub trait TableLockCatalog:
+    RelationLockCatalog + uqa_sql::catalog::security::system_relations::SystemRelationSecurityCatalog
+{
     fn resolve(&self, name: &str, bound: bool) -> Result<RelationResolution, SQLError>;
     fn table(&self, name: &str) -> Result<Option<TableLockMetadata>, SQLError>;
     fn view(&self, name: &str) -> Result<Option<StoredView>, SQLError>;
@@ -82,7 +84,7 @@ impl TableLockContext<'_> {
                 kind,
                 metadata: TableLockMetadata {
                     object_id: relation.object_id(),
-                    security: relation.bootstrap_security(),
+                    security: self.catalog.system_relation_security(relation),
                 },
                 source: RelationSource::System(relation),
             }));

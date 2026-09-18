@@ -61,6 +61,20 @@ impl PrivilegeCatalog for CatalogReadView {
                 kind: PrivilegeRelationKind::ForeignTable,
             }));
         }
+        if let Some((canonical, _)) = self
+            .relation_kind_resolution(resolution, name)?
+            .into_found()
+        {
+            if let Some(relation) =
+                uqa_sql::catalog::SystemRelation::from_qualified_name(&canonical)
+            {
+                return Ok(Some(PrivilegeRelation {
+                    canonical,
+                    columns: relation.column_names(),
+                    kind: PrivilegeRelationKind::System(relation),
+                }));
+            }
+        }
         Ok(None)
     }
     fn has_select_privilege(
@@ -72,6 +86,41 @@ impl PrivilegeCatalog for CatalogReadView {
     ) -> Result<bool, SQLError> {
         let privilege = TableAclPrivilege::Select;
         match relation.kind {
+            PrivilegeRelationKind::System(system) => {
+                use uqa_sql::catalog::security::{
+                    system_relations::{self, SystemRelationSecurityCatalog},
+                    table::TablePrivilegeCheck,
+                };
+                let security = self.system_relation_security(system);
+                let check = TablePrivilegeCheck {
+                    privilege,
+                    grant_option: false,
+                };
+                let definitions = &self.snapshot.definitions;
+                Ok(column.map_or_else(
+                    || {
+                        system_relations::has_table_privilege(
+                            system,
+                            &security,
+                            subject,
+                            check,
+                            &definitions.roles,
+                            &definitions.role_memberships,
+                        )
+                    },
+                    |column| {
+                        system_relations::has_column_privilege(
+                            system,
+                            &security,
+                            column,
+                            subject,
+                            check,
+                            &definitions.roles,
+                            &definitions.role_memberships,
+                        )
+                    },
+                ))
+            }
             PrivilegeRelationKind::Table => {
                 let table = self
                     .table_resolved(resolution, &relation.canonical)?

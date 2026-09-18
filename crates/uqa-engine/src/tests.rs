@@ -41,6 +41,7 @@ mod catalog;
 mod prepared;
 mod queries;
 mod system_catalog_locks;
+mod system_catalog_security;
 mod table_locks;
 mod virtual_catalog_names;
 

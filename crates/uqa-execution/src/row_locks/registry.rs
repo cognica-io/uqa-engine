@@ -131,6 +131,15 @@ impl RowLockManager {
             .is_some_and(|relations| relations.contains_key(&key))
     }
 
+    #[doc(hidden)]
+    pub fn waiting_for_row(&self, session_id: u64, key: super::RowLockKey) -> bool {
+        self.state
+            .lock()
+            .waiting
+            .get(&session_id)
+            .is_some_and(|rows| rows.contains_key(&key))
+    }
+
     pub fn key_reservation_key(&self, digest: [u8; 32]) -> u64 {
         self.relation_key(LockRelationIdentity::KeyReservation(digest))
     }

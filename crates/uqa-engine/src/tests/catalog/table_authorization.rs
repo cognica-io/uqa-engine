@@ -71,6 +71,15 @@ struct ObservedRegistry<'a> {
     engine: &'a Engine,
     columns_reads: Arc<AtomicUsize>,
 }
+impl uqa_sql::catalog::security::system_relations::SystemRelationSecurityCatalog
+    for ObservedRegistry<'_>
+{
+    fn system_relation_securities(
+        &self,
+    ) -> uqa_sql::catalog::security::system_relations::SystemRelationSecurityRead<'_> {
+        self.engine.system_relation_securities()
+    }
+}
 impl TablePrivilegeRegistry for ObservedRegistry<'_> {
     fn refresh_tables(&self) -> StorageBackendResult<()> {
         TablePrivilegeRegistry::refresh_tables(self.engine)
