@@ -7,6 +7,7 @@
 use super::*;
 
 mod cache_revisions;
+mod metadata;
 mod migration;
 mod version_migrations;
 

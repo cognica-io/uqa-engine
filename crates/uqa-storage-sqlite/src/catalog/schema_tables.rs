@@ -19,6 +19,43 @@ use super::{
 use crate::mvcc::native::NativeRecordFamily as Family;
 
 impl Catalog {
+    pub fn metadata_with_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>> {
+        if let Some(entries) = self.read_native(|snapshot| {
+            let mut entries = Vec::new();
+            snapshot.visit_rows(
+                Family::Metadata,
+                Some(crate::mvcc::native::NativeRecordOwner::Database(
+                    snapshot.database,
+                )),
+                &[],
+                |row| {
+                    let key = super::native::string(row[0])?;
+                    if key.starts_with(prefix) {
+                        entries.push((key, super::native::string(row[1])?));
+                    }
+                    Ok(())
+                },
+            )?;
+            Ok(entries)
+        })? {
+            return Ok(entries);
+        }
+        self.conn.with(|connection| {
+            let mut statement =
+                connection.prepare("SELECT key, value FROM _metadata ORDER BY key")?;
+            let mut entries = Vec::new();
+            let rows = statement.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            for row in rows {
+                let (key, value) = row?;
+                if key.starts_with(prefix) {
+                    entries.push((key, value));
+                }
+            }
+            Ok(entries)
+        })
+    }
     /// Store an arbitrary key/value pair in the `_metadata` table.
     pub fn set_metadata(&self, key: &str, value: &str) -> Result<()> {
         if self

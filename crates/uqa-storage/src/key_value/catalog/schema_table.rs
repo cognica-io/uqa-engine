@@ -90,6 +90,31 @@ fn rename_document_scoped_fts_fields(
 }
 
 impl KeyValueCatalog {
+    pub(super) fn metadata_with_prefix_impl(
+        &self,
+        prefix: &str,
+    ) -> StorageBackendResult<Vec<(String, String)>> {
+        crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
+            let mut entries = Vec::new();
+            read.visit_prefix(&[TAG_METADATA], &mut |key, value| {
+                let name = read_str(key, &mut 1)?;
+                if name.starts_with(prefix) {
+                    entries.push((
+                        name,
+                        std::str::from_utf8(value)
+                            .map_err(|error| {
+                                StorageBackendError::Other(format!(
+                                    "invalid UTF-8 metadata value: {error}"
+                                ))
+                            })?
+                            .to_owned(),
+                    ));
+                }
+                Ok(())
+            })?;
+            Ok(entries)
+        })
+    }
     pub(super) fn set_metadata_impl(&self, key: &str, value: &str) -> StorageBackendResult<()> {
         let identifiers = self.store.identifier_allocator().is_some();
         if let Some(graph) = key.strip_prefix("graph_label_registry::") {
@@ -121,6 +146,19 @@ impl KeyValueCatalog {
             .get(&single_str_key(TAG_METADATA, key)?)?
             .map(decode_string)
             .transpose()
+    }
+
+    pub(super) fn metadata_has_private_changes_impl(
+        &self,
+        name: &str,
+    ) -> StorageBackendResult<bool> {
+        if !self.store.transaction_model().is_versioned() {
+            return Ok(false);
+        }
+        let key = single_str_key(TAG_METADATA, name)?;
+        crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
+            Ok(read.revision(&[&key])?.has_private_changes())
+        })
     }
 
     pub(super) fn migrate_relation_namespace_impl(&self) -> StorageBackendResult<()> {

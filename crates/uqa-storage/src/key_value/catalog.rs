@@ -230,6 +230,13 @@ impl CatalogFacade for KeyValueCatalog {
         self.get_metadata_impl(key)
     }
 
+    fn metadata_has_private_changes(&self, key: &str) -> StorageBackendResult<bool> {
+        self.metadata_has_private_changes_impl(key)
+    }
+    fn metadata_with_prefix(&self, prefix: &str) -> StorageBackendResult<Vec<(String, String)>> {
+        self.metadata_with_prefix_impl(prefix)
+    }
+
     fn save_statistics_maintenance(
         &self,
         table: &str,

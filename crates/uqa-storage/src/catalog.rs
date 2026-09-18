@@ -401,6 +401,17 @@ pub trait CatalogFacade: Send + Sync {
 
     fn set_metadata(&self, key: &str, value: &str) -> StorageBackendResult<()>;
     fn get_metadata(&self, key: &str) -> StorageBackendResult<Option<String>>;
+    /// Read matching metadata keys from one catalog snapshot; the prefix is literal, including NUL and wildcard characters.
+    fn metadata_with_prefix(&self, prefix: &str) -> StorageBackendResult<Vec<(String, String)>>;
+    /// Whether this metadata key has a transaction-private replacement in the current session.
+    fn metadata_has_private_changes(&self, _key: &str) -> StorageBackendResult<bool> {
+        if self.transaction_model().is_versioned() {
+            return Err(StorageBackendError::Other(
+                "private metadata provenance is not supported by this catalog".into(),
+            ));
+        }
+        Ok(false)
+    }
     /// Persist evaluated maintenance state. Concurrent providers merge its counters under their existing record-publication boundary; serialized providers use an ordinary metadata replacement.
     fn save_statistics_maintenance(
         &self,

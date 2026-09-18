@@ -143,6 +143,13 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::get_metadata(self, key))
     }
 
+    fn metadata_has_private_changes(&self, key: &str) -> StorageBackendResult<bool> {
+        into_storage_result(self.native_metadata_has_private_changes(key))
+    }
+    fn metadata_with_prefix(&self, prefix: &str) -> StorageBackendResult<Vec<(String, String)>> {
+        into_storage_result(Catalog::metadata_with_prefix(self, prefix))
+    }
+
     fn save_statistics_maintenance(
         &self,
         table: &str,

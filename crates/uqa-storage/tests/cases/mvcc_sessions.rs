@@ -24,6 +24,8 @@ mod hnsw_merging;
 mod identifiers;
 #[path = "mvcc_sessions/maintenance.rs"]
 mod maintenance;
+#[path = "mvcc_sessions/metadata.rs"]
+mod metadata;
 #[path = "mvcc_sessions/occurrence_merging.rs"]
 mod occurrence_merging;
 #[path = "mvcc_sessions/occurrences.rs"]
