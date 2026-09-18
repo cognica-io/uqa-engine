@@ -31,7 +31,7 @@ fn roles() -> BTreeMap<String, RoleDefinition> {
         else {
             panic!("expected role")
         };
-        roles.insert(name.into(), RoleDefinition::from_create(&role));
+        roles.insert(name.into(), RoleDefinition::from_create(&role).unwrap());
     }
     roles
 }

@@ -83,9 +83,10 @@ impl Catalog {
     pub fn role(&self, name: &str, attributes: &[RoleAttribute]) {
         let mut statement = create(name);
         statement.attributes = attributes.iter().copied().collect();
-        self.roles
-            .borrow_mut()
-            .insert(name.into(), RoleDefinition::from_create(&statement));
+        self.roles.borrow_mut().insert(
+            name.into(),
+            RoleDefinition::from_create(&statement).unwrap(),
+        );
     }
     pub fn membership(&self, role: &str, member: &str, grantor: &str) {
         let membership = RoleMembership {

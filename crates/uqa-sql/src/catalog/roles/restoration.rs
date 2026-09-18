@@ -14,12 +14,25 @@ pub fn restore_role_definitions(
     roles
         .entry("uqa".into())
         .or_insert_with(RoleDefinition::bootstrap);
+    let mut oids = BTreeSet::new();
     for (name, role) in roles.iter() {
         if role.name != *name {
             return Err(format!(
                 "persisted role key `{name}` does not match role name `{}`",
                 role.name
             ));
+        }
+        if role.oid <= 0 || role.oid > i64::from(u32::MAX) {
+            return Err(format!(
+                "persisted role `{name}` has an invalid OID {}",
+                role.oid
+            ));
+        }
+        if name == "uqa" && role.oid != 10 {
+            return Err("persisted bootstrap role must have OID 10".into());
+        }
+        if !oids.insert(role.oid) {
+            return Err(format!("persisted role OID {} is duplicated", role.oid));
         }
     }
     Ok(())

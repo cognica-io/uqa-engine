@@ -86,10 +86,13 @@ pub fn create_role_candidate(
     }
     let current_is_superuser = role_is_superuser(roles, current);
     let mut next_roles = roles.clone();
-    next_roles.insert(
-        statement.name.clone(),
-        RoleDefinition::from_create(statement),
-    );
+    let definition = loop {
+        let definition = RoleDefinition::from_create(statement)?;
+        if !roles.values().any(|role| role.oid == definition.oid) {
+            break definition;
+        }
+    };
+    next_roles.insert(statement.name.clone(), definition);
     Ok((next_roles, current_is_superuser))
 }
 

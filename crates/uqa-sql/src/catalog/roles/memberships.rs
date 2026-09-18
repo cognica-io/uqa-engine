@@ -444,16 +444,18 @@ pub fn insufficient_privilege(message: &str) -> SQLError {
 
 #[cfg(test)]
 mod tests {
-    use super::super::role_oid;
     use super::*;
 
     fn role(name: &str) -> RoleDefinition {
-        RoleDefinition {
-            oid: role_oid(name),
+        RoleDefinition::from_create(&crate::ast::CreateRoleStmt {
             name: name.into(),
             attributes: BTreeSet::new(),
             connection_limit: -1,
-        }
+            in_roles: Vec::new(),
+            role_members: Vec::new(),
+            admin_members: Vec::new(),
+        })
+        .unwrap()
     }
 
     fn membership(
@@ -472,7 +474,7 @@ mod tests {
         memberships.insert(
             key.clone(),
             RoleMembership {
-                oid: role_oid(&format!("{role}/{member}")),
+                oid: allocate_role_membership_oid(memberships, &key),
                 role: key.role,
                 member: key.member,
                 grantor: key.grantor,

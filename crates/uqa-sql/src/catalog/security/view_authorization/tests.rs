@@ -50,7 +50,7 @@ impl RoleCatalogGuards for Catalog {
             };
             self.roles
                 .borrow_mut()
-                .insert("reader".into(), RoleDefinition::from_create(&role));
+                .insert("reader".into(), RoleDefinition::from_create(&role).unwrap());
         }
         self.reads.set(self.reads.get() + 1);
         self.calls.borrow_mut().push("roles");

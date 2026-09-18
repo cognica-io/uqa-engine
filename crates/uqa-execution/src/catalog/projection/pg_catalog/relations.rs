@@ -259,10 +259,7 @@ pub fn build_pg_database(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQ
     Ok(vec![row([
         ("oid", int_value(uqa_sql::catalog::DATABASE_OID)),
         ("datname", str_value(uqa_sql::catalog::DATABASE_NAME)),
-        (
-            "datdba",
-            int_value(uqa_sql::catalog::roles::role_oid(&security.role_owner)),
-        ),
+        ("datdba", int_value(catalog.role_oid(&security.role_owner)?)),
         ("encoding", int_value(6)),
         ("datlocprovider", str_value("b")),
         ("datistemplate", bool_value(false)),

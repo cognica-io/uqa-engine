@@ -86,9 +86,7 @@ pub fn build_pg_class(
         );
         row.insert(
             "relowner".into(),
-            int_value(uqa_sql::catalog::roles::role_oid(
-                &table_snapshot.security.role_owner,
-            )),
+            int_value(catalog.role_oid(&table_snapshot.security.role_owner)?),
         );
         row.insert(
             "relacl".into(),
@@ -155,7 +153,7 @@ pub fn build_pg_class(
         );
         row.insert(
             "relowner".into(),
-            int_value(uqa_sql::catalog::roles::role_oid(&definition.role_owner)),
+            int_value(catalog.role_oid(&definition.role_owner)?),
         );
         row.insert(
             "relacl".into(),
@@ -189,7 +187,7 @@ pub fn build_pg_class(
         );
         row.insert(
             "relowner".into(),
-            int_value(uqa_sql::catalog::roles::role_oid(&definition.role_owner)),
+            int_value(catalog.role_oid(&definition.role_owner)?),
         );
         row.insert(
             "relacl".into(),
@@ -221,7 +219,7 @@ pub fn build_pg_class(
         );
         row.insert(
             "relowner".into(),
-            int_value(uqa_sql::catalog::roles::role_oid(&security.role_owner)),
+            int_value(catalog.role_oid(&security.role_owner)?),
         );
         row.insert(
             "relacl".into(),
@@ -243,7 +241,7 @@ pub fn build_pg_class(
         );
         row.insert(
             "relowner".into(),
-            int_value(uqa_sql::catalog::roles::role_oid(&security.role_owner)),
+            int_value(catalog.role_oid(&security.role_owner)?),
         );
         row.insert("relacl".into(), sequence_acl_catalog_value(&security)?);
         out.push(row);
@@ -269,9 +267,7 @@ pub fn build_pg_class(
             .ok_or_else(|| SQLError::UnknownTable(index.table_name.clone()))?;
         index_row.insert(
             "relowner".into(),
-            int_value(uqa_sql::catalog::roles::role_oid(
-                &table.security.role_owner,
-            )),
+            int_value(catalog.role_oid(&table.security.role_owner)?),
         );
         index_row.insert("relispartition".into(), bool_value(index.is_partition));
         index_row.insert("relhassubclass".into(), bool_value(index.has_children));

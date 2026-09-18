@@ -66,30 +66,28 @@ impl RoleDefinition {
         }
     }
 
-    pub fn from_create(statement: &CreateRoleStmt) -> Self {
-        Self {
-            oid: role_oid(&statement.name),
+    pub fn from_create(statement: &CreateRoleStmt) -> Result<Self, crate::SQLError> {
+        let oid = loop {
+            let mut bytes = [0; 4];
+            getrandom::fill(&mut bytes).map_err(|error| {
+                crate::SQLError::Internal(format!("allocate role OID: {error}"))
+            })?;
+            let oid = u32::from_ne_bytes(bytes);
+            if oid >= 16_384 {
+                break i64::from(oid);
+            }
+        };
+        Ok(Self {
+            oid,
             name: statement.name.clone(),
             attributes: statement.attributes.clone(),
             connection_limit: statement.connection_limit,
-        }
+        })
     }
 
     pub fn has(&self, attribute: RoleAttribute) -> bool {
         self.attributes.contains(&attribute)
     }
-}
-
-pub fn role_oid(name: &str) -> i64 {
-    if name == "uqa" {
-        return 10;
-    }
-    let mut hash = 14_695_981_039_346_656_037_u64;
-    for byte in name.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(1_099_511_628_211);
-    }
-    20_000 + i64::try_from(hash % 2_000_000_000).unwrap_or(0)
 }
 
 /// Session names used by `CURRENT_USER` and `SESSION_USER` role references.

@@ -18,7 +18,6 @@ use super::helpers::rows::{
 use super::helpers::type_metadata::{routine_type_oid, routine_variadic_element_oid};
 use crate::catalog::CatalogReadView;
 use uqa_core::Value;
-use uqa_sql::catalog::roles::role_oid;
 use uqa_sql::registry::registered_names;
 use uqa_sql::routines::{builtin_routine_support_oid, SQLUserFunction};
 use uqa_sql::{ResultRow, SQLError};
@@ -270,7 +269,7 @@ pub fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLErr
             ("oid", int_value(user_routine_catalog_oid(&function)?)),
             ("proname", str_value(routine_name)),
             ("pronamespace", int_value(schema_oid(&routine_schema))),
-            ("proowner", int_value(role_oid(&def.owner))),
+            ("proowner", int_value(catalog.role_oid(&def.owner)?)),
             ("prolang", int_value(0)),
             ("procost", Value::Float(100.0)),
             (

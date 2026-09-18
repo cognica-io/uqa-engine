@@ -56,3 +56,32 @@ fn distinct_membership_oids_do_not_allow_duplicate_grant_identities() {
     let restored = restore_role_memberships(&roles(), vec![membership(31)]).unwrap();
     assert_eq!(restored.values().next(), Some(&membership(31)));
 }
+
+#[test]
+fn restored_role_oids_preserve_stored_identity_and_reject_invalid_or_duplicate_values() {
+    let mut stored = RoleDefinition::bootstrap();
+    stored.name = "stored".into();
+    stored.oid = 4_000_000_001;
+    let mut catalog = roles();
+    catalog.insert(stored.name.clone(), stored.clone());
+    restore_role_definitions(&mut catalog).unwrap();
+    assert_eq!(catalog["stored"], stored);
+    for oid in [0, -1, i64::from(u32::MAX) + 1] {
+        catalog.get_mut("stored").unwrap().oid = oid;
+        assert_eq!(
+            restore_role_definitions(&mut catalog).unwrap_err(),
+            format!("persisted role `stored` has an invalid OID {oid}")
+        );
+    }
+    catalog.get_mut("stored").unwrap().oid = 10;
+    assert_eq!(
+        restore_role_definitions(&mut catalog).unwrap_err(),
+        "persisted role OID 10 is duplicated"
+    );
+    catalog.remove("stored");
+    catalog.get_mut("uqa").unwrap().oid = 16_384;
+    assert_eq!(
+        restore_role_definitions(&mut catalog).unwrap_err(),
+        "persisted bootstrap role must have OID 10"
+    );
+}

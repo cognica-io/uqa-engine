@@ -27,9 +27,10 @@ pub fn build_pg_namespace(
                 ("nspname", str_value(&schema)),
                 (
                     "nspowner",
-                    int_value(security.map_or_else(current_user_oid, |security| {
-                        uqa_sql::catalog::roles::role_oid(&security.role_owner)
-                    })),
+                    int_value(match security {
+                        Some(security) => catalog.role_oid(&security.role_owner)?,
+                        None => current_user_oid(),
+                    }),
                 ),
                 ("nspacl", schema_acl_catalog_value(security)?),
             ]))

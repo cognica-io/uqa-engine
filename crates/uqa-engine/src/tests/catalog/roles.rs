@@ -6,6 +6,8 @@
 
 use crate::Engine;
 
+mod identity;
+
 #[test]
 fn role_registry_and_memberships_restore_together_after_reopen() {
     let directory = tempfile::tempdir().unwrap();

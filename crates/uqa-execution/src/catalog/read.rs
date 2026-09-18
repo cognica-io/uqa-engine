@@ -229,6 +229,15 @@ impl CatalogReadView {
         self.snapshot.definitions.roles.values()
     }
 
+    pub fn role_oid(&self, name: &str) -> Result<i64, SQLError> {
+        self.snapshot
+            .definitions
+            .roles
+            .get(name)
+            .map(|role| role.oid)
+            .ok_or_else(|| SQLError::Internal(format!("catalog references missing role `{name}`")))
+    }
+
     pub fn role_memberships(
         &self,
     ) -> impl Iterator<Item = &uqa_sql::catalog::roles::RoleMembership> {
