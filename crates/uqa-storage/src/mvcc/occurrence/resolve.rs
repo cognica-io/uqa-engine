@@ -94,6 +94,13 @@ pub(super) fn revision(
 }
 
 impl Resolver<'_> {
+    pub(super) fn preserve(&self, write: &PreparedRecordWrite) -> VersionResult<()> {
+        self.changes.apply_owned(
+            &[write.clone().with_kind(self.mode.kind(write.kind()))],
+            self.control,
+        )
+    }
+
     fn merge_write(
         &self,
         mutation: usize,

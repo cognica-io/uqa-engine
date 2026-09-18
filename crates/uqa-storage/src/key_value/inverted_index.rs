@@ -19,8 +19,8 @@ use super::{
 };
 use crate::clustered_postings::{
     cluster_id, decode_all_scores, decode_occurrence_cluster, decode_term_keys, encode_cluster,
-    encode_occurrence_cluster, encode_term_keys, encode_terms, score_count, ClusterPosting,
-    ClusteredPostingCursor, EncodedScoreCluster, OccurrencePosting,
+    encode_occurrence_cluster_controlled, encode_term_keys, encode_terms, score_count,
+    ClusterPosting, ClusteredPostingCursor, EncodedScoreCluster, OccurrencePosting,
 };
 use crate::inverted_index::{
     analyze_index_field, AnalyzerBindings, IndexedFieldMetadata, IndexedFieldRevision,

@@ -16,6 +16,7 @@ use super::*;
 mod identifiers;
 mod metadata;
 mod migration;
+mod read;
 
 #[derive(Clone, Debug, Default)]
 struct FaultBackend {

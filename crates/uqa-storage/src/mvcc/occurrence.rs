@@ -9,6 +9,8 @@
 mod clusters;
 mod resolve;
 mod statistics;
+#[cfg(test)]
+mod tests;
 
 use crate::{inverted_index::IndexedFieldRevision, read_control::StorageReadControl};
 use uqa_core::memory::BudgetedVec;

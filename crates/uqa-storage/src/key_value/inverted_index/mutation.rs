@@ -8,9 +8,9 @@
 
 use super::super::codec::u64_value;
 use super::{
-    cluster_id, encode_occurrence_cluster, encode_term_keys, keys, other_error, BTreeMap,
-    ClusterChanges, DocId, DocumentFields, FieldName, FieldStats, KeyValueBatch, OccurrencePosting,
-    OccurrenceRead, StorageBackendResult, TokenTermKey,
+    cluster_id, encode_occurrence_cluster_controlled, encode_term_keys, keys, other_error,
+    BTreeMap, ClusterChanges, DocId, DocumentFields, FieldName, FieldStats, KeyValueBatch,
+    OccurrencePosting, OccurrenceRead, StorageBackendResult, TokenTermKey,
 };
 
 fn merge_cluster_changes(
@@ -48,7 +48,8 @@ impl OccurrenceRead<'_> {
             batch.replace_occurrence_record(&score_key, None)?;
             batch.replace_occurrence_record(&graph_key, None)?;
         } else {
-            let (score, graph) = encode_occurrence_cluster(entries)?;
+            let (score, graph) =
+                encode_occurrence_cluster_controlled(entries.iter(), self.store.control())?;
             batch.replace_occurrence_record(&score_key, Some(&score))?;
             batch.replace_occurrence_record(&graph_key, Some(&graph))?;
         }

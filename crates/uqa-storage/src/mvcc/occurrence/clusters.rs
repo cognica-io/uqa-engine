@@ -11,7 +11,8 @@ use super::{
     OccurrenceRecordValue as Value,
 };
 use crate::clustered_postings::{
-    decode_occurrence_cluster_budgeted, encode_occurrence_cluster_controlled, OccurrencePosting,
+    decode_occurrence_cluster_budgeted, encode_occurrence_cluster_controlled,
+    validate_occurrence_cluster, OccurrencePosting,
 };
 use crate::mvcc::{
     CommittedRecordSnapshot, PreparedRecordWrite, SharedRecordValue, VersionError, VersionResult,
@@ -40,13 +41,12 @@ impl Resolver<'_> {
         Ok((value, peer))
     }
 
-    fn decode_cluster(
+    fn encoded_cluster<'a>(
         &self,
-        cluster: u64,
         key: &[u8],
-        value: Option<&[u8]>,
-        peer: Option<(&[u8], Option<&[u8]>)>,
-    ) -> VersionResult<Budgeted<Vec<OccurrencePosting>>> {
+        value: Option<&'a [u8]>,
+        peer: Option<(&[u8], Option<&'a [u8]>)>,
+    ) -> VersionResult<Option<(&'a [u8], &'a [u8])>> {
         let value = value
             .map(|value| self.layout.decode(key, value, self.control))
             .transpose()?;
@@ -59,12 +59,7 @@ impl Resolver<'_> {
             .transpose()?
             .flatten();
         let (score, positions) = match (value, peer) {
-            (None, None) => {
-                return Ok(Budgeted::new(
-                    Vec::new(),
-                    self.control.memory().empty_reservation(),
-                ))
-            }
+            (None, None) => return Ok(None),
             (Some(Value::Cluster { score, positions }), None)
             | (Some(Value::Score(score)), Some(Value::Positions(positions))) => (score, positions),
             _ => {
@@ -72,6 +67,22 @@ impl Resolver<'_> {
                     "incomplete occurrence cluster pair",
                 ))
             }
+        };
+        Ok(Some((score, positions)))
+    }
+
+    fn decode_cluster(
+        &self,
+        cluster: u64,
+        key: &[u8],
+        value: Option<&[u8]>,
+        peer: Option<(&[u8], Option<&[u8]>)>,
+    ) -> VersionResult<Budgeted<Vec<OccurrencePosting>>> {
+        let Some((score, positions)) = self.encoded_cluster(key, value, peer)? else {
+            return Ok(Budgeted::new(
+                Vec::new(),
+                self.control.memory().empty_reservation(),
+            ));
         };
         Ok(decode_occurrence_cluster_budgeted(
             cluster,
@@ -143,6 +154,29 @@ impl Resolver<'_> {
         cluster: u64,
     ) -> VersionResult<()> {
         let (base_value, base_peer) = self.cluster_view(self.base, write, peer)?;
+        if self.base.sequence() == self.current.sequence() {
+            // The publication boundary has not advanced since evaluation. Validate both complete graphs, then share the evaluated bytes instead of decoding, merging and encoding them again.
+            for (value, peer_value) in [
+                (borrowed(base_value.as_ref()), borrowed(base_peer.as_ref())),
+                (write.value(), peer.and_then(PreparedRecordWrite::value)),
+            ] {
+                if let Some((score, positions)) = self.encoded_cluster(
+                    write.key(),
+                    value,
+                    peer.map(|peer| (peer.key(), peer_value)),
+                )? {
+                    validate_occurrence_cluster(cluster, score, positions, || {
+                        self.control.cancellation().check()?;
+                        Ok(())
+                    })?;
+                }
+            }
+            self.preserve(write)?;
+            if let Some(peer) = peer {
+                self.preserve(peer)?;
+            }
+            return Ok(());
+        }
         let (current_value, current_peer) = self.cluster_view(self.current, write, peer)?;
         let base = self.decode_cluster(
             cluster,

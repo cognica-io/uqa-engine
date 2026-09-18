@@ -492,6 +492,7 @@ mod term_keys;
 
 use legacy::{decode_positions, encode_positions};
 pub use legacy::{decode_terms, encode_terms};
+pub(crate) use occurrences::validate_occurrence_cluster;
 pub use occurrences::{
     decode_occurrence_cluster, decode_occurrence_cluster_budgeted,
     decode_occurrence_document_budgeted, encode_occurrence_cluster,

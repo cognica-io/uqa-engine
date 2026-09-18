@@ -51,18 +51,14 @@ impl CommittedRecordSnapshot for Snapshot {
     ) -> VersionResult<()> {
         control.cancellation().check()?;
         let transaction = self.begin_read()?;
+        let heads = transaction.open_table(HEADS).map_err(redb_error)?;
+        let Some(head) = heads.get(key).map_err(redb_error)? else {
+            visit(None)?;
+            control.cancellation().check()?;
+            return Ok(());
+        };
         let versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
-        let entry = versions
-            .range((key, 0)..=(key, self.sequence.as_u64()))
-            .map_err(redb_error)?
-            .next_back()
-            .transpose()
-            .map_err(redb_error)?;
-        let record = entry
-            .as_ref()
-            .map(|(key, bytes)| borrowed(key.value().1, bytes.value()))
-            .transpose()?;
-        visit(record)?;
+        visit_visible(&versions, key, head.value(), self.sequence, visit)?;
         control.cancellation().check()?;
         Ok(())
     }
@@ -86,7 +82,7 @@ impl CommittedRecordSnapshot for Snapshot {
         let mut count = 0;
         for entry in heads.range(start..).map_err(redb_error)? {
             control.cancellation().check()?;
-            let (key, _) = entry.map_err(redb_error)?;
+            let (key, head) = entry.map_err(redb_error)?;
             let key = key.value();
             if !key.starts_with(prefix) {
                 break;
@@ -94,20 +90,17 @@ impl CommittedRecordSnapshot for Snapshot {
             if after.is_some_and(|after| key <= after) {
                 continue;
             }
-            let entry = versions
-                .range((key, 0)..=(key, self.sequence.as_u64()))
-                .map_err(redb_error)?
-                .next_back()
-                .transpose()
-                .map_err(redb_error)?;
-            if let Some((version, bytes)) = entry {
-                let record = borrowed(version.value().1, bytes.value())?;
-                let more = visit(key, record)?;
-                control.cancellation().check()?;
-                count += 1;
-                if !more || count == limit {
-                    break;
+            let mut more = true;
+            visit_visible(&versions, key, head.value(), self.sequence, &mut |record| {
+                if let Some(record) = record {
+                    more = visit(key, record)?;
+                    count += 1;
                 }
+                Ok(())
+            })?;
+            control.cancellation().check()?;
+            if !more || count == limit {
+                break;
             }
         }
         Ok(())
@@ -118,10 +111,20 @@ impl CommittedRecordSnapshot for Snapshot {
         key: &[u8],
         control: &StorageReadControl,
     ) -> VersionResult<Option<RecordVersion<SharedRecordValue>>> {
-        control.cancellation().check()?;
-        let transaction = self.begin_read()?;
-        let versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
-        visible(&versions, key, self.sequence, control)
+        let mut found = None;
+        self.visit_value(key, control, &mut |record| {
+            found = record
+                .map(|record| {
+                    RecordVersion::copy_bytes(
+                        record.revision.expect("committed revision"),
+                        record.value,
+                        control,
+                    )
+                })
+                .transpose()?;
+            Ok(())
+        })?;
+        Ok(found)
     }
 
     fn scan(
@@ -142,7 +145,7 @@ impl CommittedRecordSnapshot for Snapshot {
         let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
         for entry in heads.range(start..).map_err(redb_error)? {
             control.cancellation().check()?;
-            let (key, _) = entry.map_err(redb_error)?;
+            let (key, head) = entry.map_err(redb_error)?;
             let key = key.value();
             if !key.starts_with(prefix) {
                 break;
@@ -150,11 +153,19 @@ impl CommittedRecordSnapshot for Snapshot {
             if after.is_some_and(|after| key <= after) {
                 continue;
             }
-            if let Some(version) = visible(&versions, key, self.sequence, control)? {
-                result.push(ScannedRecord::copy_key(key, version, control)?)?;
-                if result.len() == limit {
-                    break;
+            visit_visible(&versions, key, head.value(), self.sequence, &mut |record| {
+                if let Some(record) = record {
+                    let version = RecordVersion::copy_bytes(
+                        record.revision.expect("committed revision"),
+                        record.value,
+                        control,
+                    )?;
+                    result.push(ScannedRecord::copy_key(key, version, control)?)?;
                 }
+                Ok(())
+            })?;
+            if result.len() == limit {
+                break;
             }
         }
         Ok(result)
@@ -171,23 +182,30 @@ fn borrowed(sequence: u64, bytes: &[u8]) -> VersionResult<BorrowedRecord<'_>> {
     })
 }
 
-fn visible(
+fn visit_visible(
     versions: &impl ReadableTable<(&'static [u8], u64), &'static [u8]>,
     key: &[u8],
+    head: u64,
     sequence: CommitSequence,
-    control: &StorageReadControl,
-) -> VersionResult<Option<RecordVersion<SharedRecordValue>>> {
-    control.cancellation().check()?;
+    visit: &mut uqa_storage::mvcc::RecordValueVisitor<'_>,
+) -> VersionResult<()> {
+    if head <= sequence.as_u64() {
+        let bytes = versions
+            .get((key, head))
+            .map_err(redb_error)?
+            .ok_or(VersionError::InvalidEncoding("record head has no version"))?;
+        return visit(Some(borrowed(head, bytes.value())?));
+    }
     let entry = versions
         .range((key, 0)..=(key, sequence.as_u64()))
         .map_err(redb_error)?
         .next_back()
         .transpose()
         .map_err(redb_error)?;
-    let Some((key, bytes)) = entry else {
-        return Ok(None);
-    };
-    let sequence = CommitSequence::from_u64(key.value().1);
-    let record = RecordVersion::copy_bytes(sequence, value_bytes(bytes.value())?, control)?;
-    Ok(Some(record))
+    visit(
+        entry
+            .as_ref()
+            .map(|(key, bytes)| borrowed(key.value().1, bytes.value()))
+            .transpose()?,
+    )
 }

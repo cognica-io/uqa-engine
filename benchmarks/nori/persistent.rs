@@ -109,6 +109,7 @@ fn file_bytes(directory: &Path) -> u64 {
         .sum()
 }
 
+#[derive(Clone, Copy)]
 struct Workload {
     name: &'static str,
     base: u64,

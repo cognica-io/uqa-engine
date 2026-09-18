@@ -15,6 +15,7 @@ use super::{
 };
 
 mod allocation;
+pub(crate) use allocation::validate_occurrence_cluster;
 pub use allocation::{decode_occurrence_cluster_budgeted, decode_occurrence_document_budgeted};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

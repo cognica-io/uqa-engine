@@ -13,6 +13,30 @@ use uqa_core::{
 mod reference;
 
 #[test]
+fn occurrence_validation_borrows_complete_graphs_and_preserves_cancellation() {
+    let entries = graph_fixture(0, 129);
+    let (scores, positions) = encode_occurrence_cluster(&entries).unwrap();
+    let info = allocation_counter::measure(|| {
+        validate_occurrence_cluster(0, &scores, &positions, || Ok(())).unwrap();
+    });
+    assert_eq!(info.count_total, 0);
+    for end in 0..positions.len() {
+        assert!(validate_occurrence_cluster(0, &scores, &positions[..end], || Ok(())).is_err());
+    }
+    let mut polls = 0;
+    let result = validate_occurrence_cluster(0, &scores, &positions, || {
+        polls += 1;
+        if polls == 20 {
+            Err(QueryCancelled.into())
+        } else {
+            Ok(())
+        }
+    });
+    assert!(matches!(result, Err(StorageBackendError::Cancelled(_))));
+    assert_eq!(polls, 20);
+}
+
+#[test]
 fn occurrence_encoding_preserves_wire_bytes_across_varint_widths() {
     let entries = vec![
         OccurrencePosting {
