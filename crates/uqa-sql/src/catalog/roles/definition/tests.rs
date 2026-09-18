@@ -71,8 +71,17 @@ fn role_creation_grants_creator_administration_without_inherit_or_set() {
     };
     let mut creator = RoleDefinition::bootstrap();
     creator.name = "creator".into();
+    creator.oid = 20_002;
+    creator.object_id = [2; 16];
     creator.attributes = BTreeSet::from([RoleAttribute::CreateRole]);
     inputs.roles.insert("creator".into(), creator);
+    let mut other_superuser = RoleDefinition::bootstrap();
+    other_superuser.name = "another_superuser".into();
+    other_superuser.oid = 20_003;
+    other_superuser.object_id = [3; 16];
+    inputs
+        .roles
+        .insert(other_superuser.name.clone(), other_superuser);
     let (roles, superuser) = create_role_candidate(
         &inputs.roles,
         "creator",

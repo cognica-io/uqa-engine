@@ -10,6 +10,8 @@ use crate::SQLError;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use uqa_core::Value;
 
+mod grants;
+
 pub fn role_is_superuser(
     roles: &BTreeMap<String, RoleDefinition>,
     role: &(impl RoleSubject + ?Sized),
@@ -258,57 +260,36 @@ pub fn apply_grant_role_statement(
     current: &(impl RoleSubject + ?Sized),
     statement: &GrantRoleStmt,
 ) -> Result<(), SQLError> {
-    for role in statement
-        .granted_roles
-        .iter()
-        .chain(statement.grantee_roles.iter())
-    {
+    if let Some(grantor) = &statement.grantor {
+        if !roles.contains_key(grantor) {
+            return Err(undefined_role(grantor));
+        }
+    }
+    for role in &statement.grantee_roles {
         if !roles.contains_key(role) {
             return Err(undefined_role(role));
         }
     }
-    let current_name = current
-        .role_name(roles)
-        .ok_or_else(|| insufficient_privilege("permission denied to grant role"))?;
-    let grantor = statement.grantor.as_deref().unwrap_or(current_name);
-    if !roles.contains_key(grantor) {
-        return Err(undefined_role(grantor));
-    }
-    if statement.grantor.is_some() && !role_can_set(roles, memberships, current, grantor) {
-        return Err(insufficient_privilege(&format!(
-            "permission denied to grant privileges as role \"{grantor}\""
-        )));
-    }
     for role in &statement.granted_roles {
-        let superuser_revoke = !statement.is_grant && role_is_superuser(roles, current);
-        if !superuser_revoke
-            && !role_is_superuser(roles, grantor)
-            && !role_has_admin(memberships, grantor, role)
-        {
-            return Err(insufficient_privilege(&format!(
-                "permission denied to {} role \"{role}\"",
-                if statement.is_grant {
-                    "grant"
-                } else {
-                    "revoke"
-                }
-            )));
+        let grantor = grants::select_grantor(roles, memberships, current, role, statement)?;
+        if statement.is_grant {
+            grants::validate_grant(roles, memberships, role, &grantor, statement)?;
         }
-    }
-    for role in &statement.granted_roles {
         for member in &statement.grantee_roles {
             let key = RoleMembershipKey {
                 role: role.clone(),
                 member: member.clone(),
-                grantor: grantor.to_string(),
+                grantor: grantor.clone(),
             };
             if statement.is_grant {
-                if role_reaches(memberships, role, member, |_| true) {
-                    return Err(membership_error(format!(
-                        "role \"{role}\" is a member of role \"{member}\""
-                    )));
-                }
-                insert_membership(memberships, role, member, grantor, statement.options, roles);
+                insert_membership(
+                    memberships,
+                    role,
+                    member,
+                    &grantor,
+                    statement.options,
+                    roles,
+                );
             } else if statement.options == RoleMembershipOptions::default() {
                 revoke_membership(memberships, &key, statement.cascade, true)?;
             } else if let Some(existing) = memberships.get(&key).cloned() {

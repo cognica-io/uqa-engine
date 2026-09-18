@@ -112,7 +112,7 @@ pub fn apply_create_role_memberships(
     if !current_is_superuser {
         let bootstrap = roles
             .values()
-            .find(|role| role.has(RoleAttribute::Superuser))
+            .find(|role| role.oid == 10)
             .map(|role| role.name.clone())
             .ok_or_else(|| SQLError::Internal("role catalog has no bootstrap superuser".into()))?;
         insert_membership(
