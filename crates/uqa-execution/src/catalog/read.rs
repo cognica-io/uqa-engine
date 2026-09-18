@@ -207,8 +207,24 @@ impl CatalogReadView {
         schemas
     }
 
-    pub fn schema_security(&self, name: &str) -> Option<&crate::catalog::security::SchemaSecurity> {
+    pub fn schema_security(
+        &self,
+        name: &str,
+    ) -> Option<&crate::catalog::security::BoundSchemaSecurity> {
         self.snapshot.definitions.schemas.get(name)
+    }
+
+    pub fn schema_security_names(
+        &self,
+        name: &str,
+    ) -> Result<Option<crate::catalog::security::SchemaSecurity>, SQLError> {
+        self.schema_security(name)
+            .map(|security| {
+                security
+                    .resolve(&self.snapshot.definitions.roles)
+                    .map_err(SQLError::Internal)
+            })
+            .transpose()
     }
 
     pub fn database_security(&self) -> &crate::catalog::security::BoundDatabaseSecurity {
@@ -414,13 +430,17 @@ impl CatalogReadView {
         let Some(security) = self.snapshot.definitions.schemas.get(schema) else {
             return true;
         };
-        crate::catalog::security::schema::role_has_schema_privilege(
-            security,
-            role,
-            privilege,
-            &self.snapshot.definitions.roles,
-            &self.snapshot.definitions.role_memberships,
-        )
+        security
+            .resolve(&self.snapshot.definitions.roles)
+            .is_ok_and(|security| {
+                crate::catalog::security::schema::role_has_schema_privilege(
+                    &security,
+                    role,
+                    privilege,
+                    &self.snapshot.definitions.roles,
+                    &self.snapshot.definitions.role_memberships,
+                )
+            })
     }
 
     pub fn views_of_kind(

@@ -67,7 +67,7 @@ impl RoleDefinition {
     pub fn bootstrap() -> Self {
         Self {
             oid: 10,
-            object_id: *b"UQA:role00000010",
+            object_id: RoleIdentity::BOOTSTRAP.object_id,
             name: "uqa".into(),
             attributes: BTreeSet::from([
                 RoleAttribute::Superuser,

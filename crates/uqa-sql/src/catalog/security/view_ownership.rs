@@ -7,7 +7,9 @@
 //! View ownership, schema-owner drop authority, and materialized-view maintenance rules.
 use crate::{
     catalog::{
-        roles::{guards::RoleCatalogGuards, role_inherits, RoleReferenceNames},
+        roles::{
+            guards::RoleCatalogGuards, identity::RoleSubject, role_inherits, RoleReferenceNames,
+        },
         security::table::{role_has_table_privilege, TableAclPrivilege},
         stored_view::StoredView,
         view::StoredViewKind,
@@ -23,7 +25,10 @@ pub struct ViewOwnershipContext<'a> {
     pub roles: &'a dyn RoleCatalogGuards,
     pub schemas: &'a dyn ViewOwnerSchemas,
 }
-fn current_user_has_role_privileges(context: ViewOwnershipContext<'_>, target: &str) -> bool {
+fn current_user_has_role_privileges(
+    context: ViewOwnershipContext<'_>,
+    target: &(impl RoleSubject + ?Sized),
+) -> bool {
     let current = context.session.current_role();
     let roles = context.roles.role_definitions();
     let memberships = context.roles.role_memberships();

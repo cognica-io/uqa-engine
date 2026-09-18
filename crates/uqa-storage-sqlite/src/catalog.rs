@@ -51,6 +51,7 @@ mod migration;
 mod models_scoring;
 mod native;
 mod path_index_data;
+mod role_security;
 mod schema_tables;
 mod sequences_views;
 mod stats;

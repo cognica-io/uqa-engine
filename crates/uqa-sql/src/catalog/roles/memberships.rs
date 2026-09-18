@@ -247,13 +247,13 @@ pub fn role_inherits(
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
     member: &(impl RoleSubject + ?Sized),
-    role: &str,
+    role: &(impl RoleSubject + ?Sized),
 ) -> bool {
     let Some(member) = member.role_definition(roles) else {
         return false;
     };
     member.has(RoleAttribute::Superuser)
-        || roles.get(role).is_some_and(|role| {
+        || role.role_definition(roles).is_some_and(|role| {
             role_reaches(memberships, member.identity(), role.identity(), |edge| {
                 edge.inherit_option
             })

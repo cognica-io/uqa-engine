@@ -7,6 +7,7 @@
 //! Schema registration and owner publication through live catalog and authorization guards.
 pub mod privileges;
 pub mod removal;
+pub mod restoration;
 
 use crate::catalog::security::roles::RoleCatalogGuards;
 use crate::catalog::security::roles::{
@@ -18,7 +19,7 @@ use std::{collections::BTreeMap, ops::DerefMut};
 use uqa_sql::{
     catalog::{
         roles::{self, RoleReferenceNames},
-        security::{schema::rewrite_schema_acl_owner, SchemaSecurity},
+        security::{schema::rewrite_schema_acl_owner, BoundSchemaSecurity},
     },
     SQLError, SQLResult,
 };
@@ -35,13 +36,17 @@ pub trait NamespaceCatalogChanges {
 }
 
 pub type SchemaRegistryWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<String, SchemaSecurity>> + 'a>;
+    Box<dyn DerefMut<Target = BTreeMap<String, BoundSchemaSecurity>> + 'a>;
 pub trait SchemaRegistrationState {
     fn schemas_write(&self) -> SchemaRegistryWrite<'_>;
     fn contains_graph(&self, name: &str) -> bool;
 }
 pub trait SchemaRegistrationPersistence {
-    fn persist_schema(&self, name: &str, security: &SchemaSecurity) -> StorageBackendResult<()>;
+    fn persist_schema(
+        &self,
+        name: &str,
+        security: &BoundSchemaSecurity,
+    ) -> StorageBackendResult<()>;
 }
 pub struct SchemaRegistrationContext<'a> {
     pub state: &'a dyn SchemaRegistrationState,
@@ -53,7 +58,7 @@ pub fn register_schema(
     context: &SchemaRegistrationContext<'_>,
     name: &str,
     if_not_exists: bool,
-    role_owner: &str,
+    role_owner: uqa_core::catalog_role::RoleIdentity,
 ) -> StorageBackendResult<bool> {
     uqa_sql::schema::namespaces::validate_schema_name(name).map_err(StorageBackendError::Other)?;
     let mut schemas = context.state.schemas_write();
@@ -65,8 +70,8 @@ pub fn register_schema(
             "schema `{name}` already exists"
         )));
     }
-    let security = SchemaSecurity {
-        role_owner: role_owner.to_string(),
+    let security = BoundSchemaSecurity {
+        role_owner,
         acl: None,
     };
     context.persistence.persist_schema(name, &security)?;
@@ -81,7 +86,7 @@ pub trait SchemaRegistration {
         &self,
         name: &str,
         if_not_exists: bool,
-        role_owner: &str,
+        role_owner: uqa_core::catalog_role::RoleIdentity,
     ) -> StorageBackendResult<bool>;
 }
 pub struct SchemaCreationContext<'a> {
@@ -128,7 +133,7 @@ pub fn register_api_schema(
     let created = if value.is_some() {
         context
             .registration
-            .register_schema(name, if_not_exists, &owner.name)
+            .register_schema(name, if_not_exists, owner.identity())
             .map_err(|error| uqa_sql::catalog::errors::storage_error("CREATE SCHEMA", &error))?
     } else if if_not_exists {
         false
@@ -192,7 +197,7 @@ pub fn create_schema(
     } else {
         context
             .registration
-            .register_schema(&target.name, true, &owner.name)
+            .register_schema(&target.name, true, owner.identity())
             .map_err(|error| {
                 SQLError::Internal(format!("CREATE SCHEMA catalog write failed: {error}"))
             })?
@@ -215,13 +220,13 @@ pub fn create_schema(
 }
 
 pub trait SchemaSecurityCatalog {
-    fn schema_security(&self, name: &str) -> Option<SchemaSecurity>;
+    fn schema_security(&self, name: &str) -> Option<BoundSchemaSecurity>;
 }
 pub trait SchemaSecurityPersistence {
-    fn persist_security(&self, name: &str, security: &SchemaSecurity) -> Result<(), SQLError>;
+    fn persist_security(&self, name: &str, security: &BoundSchemaSecurity) -> Result<(), SQLError>;
 }
 pub trait SchemaSecurityPublication {
-    fn publish_security(&self, name: &str, security: SchemaSecurity);
+    fn publish_security(&self, name: &str, security: BoundSchemaSecurity);
 }
 pub struct SchemaOwnerContext<'a> {
     pub writer: &'a dyn SchemaStatementWriter,
@@ -263,7 +268,7 @@ pub fn alter_schema_owner(
         &owner,
         || context.writer.prepare_writer(),
         |roles, memberships| {
-            let mut security =
+            let security =
                 context
                     .catalog
                     .schema_security(name)
@@ -271,9 +276,10 @@ pub fn alter_schema_owner(
                         sqlstate: "3F000".into(),
                         message: format!("schema \"{name}\" does not exist"),
                     })?;
-            if security.role_owner == new_owner {
+            if security.role_owner == owner.identity() {
                 return Ok(None);
             }
+            let mut security = security.resolve(roles).map_err(SQLError::Internal)?;
             let authority = uqa_sql::catalog::security::ownership::OwnerChangeAuthority {
                 roles,
                 memberships,
@@ -283,7 +289,9 @@ pub fn alter_schema_owner(
             authority.require_owner_change(&security.role_owner, "schema", name)?;
             authority.require_database_create(&context.database.security())?;
             rewrite_schema_acl_owner(&mut security, &new_owner);
-            Ok(Some(security))
+            Ok(Some(
+                BoundSchemaSecurity::bind(&security, roles).map_err(SQLError::Internal)?,
+            ))
         },
     )?;
     let Some(security) = value else {

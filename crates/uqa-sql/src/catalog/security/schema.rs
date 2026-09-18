@@ -452,7 +452,7 @@ pub fn schema_acl_warning(is_grant: bool, partial: bool, name: &str) -> (&'stati
 }
 
 pub fn resolve_schema_grant_targets(
-    registry: &BTreeMap<String, SchemaSecurity>,
+    registry: &BTreeMap<String, super::BoundSchemaSecurity>,
     schemas: &[String],
 ) -> Result<Vec<String>, SQLError> {
     let mut targets = Vec::with_capacity(schemas.len());

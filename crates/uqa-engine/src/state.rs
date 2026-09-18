@@ -31,7 +31,7 @@ pub(super) struct StorageContext {
 }
 
 pub(crate) use uqa_execution::catalog::security::{
-    BoundDatabaseSecurity, SchemaSecurity, SequenceSecurity, TableSecurity,
+    BoundDatabaseSecurity, BoundSchemaSecurity, SequenceSecurity, TableSecurity,
 };
 
 impl StorageContext {
@@ -78,7 +78,7 @@ pub(super) struct DurableCatalogState {
     pub(super) catalog_indexes:
         CatalogCell<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
     pub(super) database_security: CatalogCell<BoundDatabaseSecurity>,
-    pub(super) schemas: CatalogCell<BTreeMap<String, SchemaSecurity>>,
+    pub(super) schemas: CatalogCell<BTreeMap<String, BoundSchemaSecurity>>,
     pub(super) path_indexes: CatalogCell<BTreeMap<String, uqa_graph::PathIndex>>,
     pub(super) sequences: CatalogCell<BTreeMap<RelationIdentity, SequenceState>>,
     pub(super) sequence_object_ids: CatalogCell<BTreeMap<RelationIdentity, [u8; 16]>>,
@@ -113,7 +113,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) views: Arc<BTreeMap<RelationIdentity, StoredView>>,
     pub(super) catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
     pub(super) database_security: Arc<BoundDatabaseSecurity>,
-    pub(super) schemas: Arc<BTreeMap<String, SchemaSecurity>>,
+    pub(super) schemas: Arc<BTreeMap<String, BoundSchemaSecurity>>,
     pub(super) path_indexes: Arc<BTreeMap<String, uqa_graph::PathIndex>>,
     pub(super) sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
     pub(super) sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
@@ -149,7 +149,7 @@ impl DurableCatalogState {
             database_security: CatalogCell::new(BoundDatabaseSecurity::bootstrap()),
             schemas: CatalogCell::new(BTreeMap::from([(
                 "public".to_string(),
-                SchemaSecurity::legacy("public"),
+                BoundSchemaSecurity::bootstrap("public"),
             )])),
             path_indexes: CatalogCell::new(BTreeMap::new()),
             sequences: CatalogCell::new(BTreeMap::new()),

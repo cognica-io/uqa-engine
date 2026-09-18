@@ -44,7 +44,7 @@ pub fn build_info_schemata(
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let current_user = resolution.current_user();
-    Ok(all_schema_names(catalog, resolution)?
+    all_schema_names(catalog, resolution)?
         .into_iter()
         .filter(|schema| {
             catalog.schema_security(schema).is_none()
@@ -60,11 +60,11 @@ pub fn build_info_schemata(
                 )
         })
         .map(|schema| {
-            let owner = catalog.schema_security(&schema).map_or_else(
+            let owner = catalog.schema_security_names(&schema)?.map_or_else(
                 || current_user_name().to_string(),
-                |security| security.role_owner.clone(),
+                |security| security.role_owner,
             );
-            row([
+            Ok(row([
                 ("catalog_name", catalog_name()),
                 ("schema_name", str_value(schema)),
                 ("schema_owner", str_value(owner)),
@@ -72,9 +72,9 @@ pub fn build_info_schemata(
                 ("default_character_set_schema", str_value("pg_catalog")),
                 ("default_character_set_name", str_value("UTF8")),
                 ("sql_path", Value::Null),
-            ])
+            ]))
         })
-        .collect())
+        .collect()
 }
 
 pub fn build_info_tables(

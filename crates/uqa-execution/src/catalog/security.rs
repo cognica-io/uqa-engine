@@ -19,7 +19,7 @@ pub use uqa_sql::catalog::security::SequenceSecurity;
 
 pub use uqa_sql::catalog::security::TableSecurity;
 
-pub use uqa_sql::catalog::security::SchemaSecurity;
+pub use uqa_sql::catalog::security::{BoundSchemaSecurity, SchemaSecurity};
 
 pub mod role_lifecycle;
 pub mod roles;

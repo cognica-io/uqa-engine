@@ -12,7 +12,7 @@ pub mod security;
 pub mod sequence;
 pub mod view;
 
-use security::{BoundDatabaseSecurity, SchemaSecurity, SequenceSecurity, TableSecurity};
+use security::{BoundDatabaseSecurity, BoundSchemaSecurity, SequenceSecurity, TableSecurity};
 use sequence::SequenceState;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -79,7 +79,7 @@ pub struct CatalogDefinitionSnapshot {
     pub views: Arc<BTreeMap<RelationIdentity, StoredView>>,
     pub catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
     pub database_security: Arc<BoundDatabaseSecurity>,
-    pub schemas: Arc<BTreeMap<String, SchemaSecurity>>,
+    pub schemas: Arc<BTreeMap<String, BoundSchemaSecurity>>,
     pub sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
     pub sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
     pub sequence_security: Arc<BTreeMap<RelationIdentity, SequenceSecurity>>,

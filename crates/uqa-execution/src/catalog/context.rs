@@ -8,10 +8,8 @@
 
 use super::cache::RegtypeOutputCache;
 use super::security::{
-    schema::{
-        role_has_schema_privilege, schema_security_with_public_privileges, SchemaAclPrivilege,
-    },
-    SchemaSecurity,
+    schema::{role_has_schema_privilege, SchemaAclPrivilege},
+    BoundSchemaSecurity,
 };
 use super::services::{
     CatalogExpressionEvaluation, CatalogNamespace, CatalogSession, CatalogSnapshotSource,
@@ -121,26 +119,27 @@ impl CatalogContext<'_> {
         }
         None
     }
-    pub fn schema_security_for_privilege(&self, schema: &str) -> Option<SchemaSecurity> {
-        if let Some(security) = self.catalog_read_view().schema_security(schema) {
+    pub fn schema_security_for_privilege(&self, schema: &str) -> Option<BoundSchemaSecurity> {
+        self.schema_security_in(&self.catalog_read_view(), schema)
+    }
+    fn schema_security_in(
+        &self,
+        catalog: &CatalogReadView,
+        schema: &str,
+    ) -> Option<BoundSchemaSecurity> {
+        if let Some(security) = catalog.schema_security(schema) {
             return Some(security.clone());
         }
         match schema {
             "pg_catalog" | "information_schema" => {
-                Some(schema_security_with_public_privileges(false))
+                Some(BoundSchemaSecurity::with_public_privileges(false))
             }
-            "ag_catalog" => Some(SchemaSecurity::legacy("ag_catalog")),
+            "ag_catalog" => Some(BoundSchemaSecurity::bootstrap("ag_catalog")),
             name if name == self.session.temporary_schema_name() => {
-                Some(schema_security_with_public_privileges(true))
+                Some(BoundSchemaSecurity::with_public_privileges(true))
             }
-            name if self
-                .catalog_read_view()
-                .snapshot()
-                .definitions
-                .graphs
-                .contains_key(name) =>
-            {
-                Some(SchemaSecurity::legacy(name))
+            name if catalog.snapshot().definitions.graphs.contains_key(name) => {
+                Some(BoundSchemaSecurity::bootstrap(name))
             }
             _ => None,
         }
@@ -154,7 +153,13 @@ impl CatalogContext<'_> {
         let catalog = self.catalog_read_view();
         let definitions = &catalog.snapshot().definitions;
         if self
-            .schema_security_for_privilege(schema)
+            .schema_security_in(&catalog, schema)
+            .map(|security| {
+                security
+                    .resolve(&definitions.roles)
+                    .map_err(SQLError::Internal)
+            })
+            .transpose()?
             .is_some_and(|security| {
                 role_has_schema_privilege(
                     &security,

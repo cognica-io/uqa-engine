@@ -202,7 +202,8 @@ impl Engine {
         backend: &dyn PersistentStorageBackend,
         mode: super::CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
-        self.restore_schemas_from_catalog(catalog)?;
+        self.restore_roles_from_metadata(catalog, mode.allows_migration())?;
+        self.restore_schemas_from_catalog(catalog, mode)?;
         let schemas = catalog.load_tables()?;
         for schema in schemas {
             let relation = schema.relation.clone();
@@ -237,15 +238,15 @@ impl Engine {
         catalog.migrate_relation_namespace()?;
         let schemas = catalog.load_schema_rows()?;
         for schema in &schemas {
-            Self::validate_stored_schema_name(&schema.name)?;
+            Self::validate_stored_schema_name(schema.name())?;
         }
         // Bootstrap once; an initialized database may legitimately have dropped public.
         if catalog
             .get_metadata("sql_schema_catalog_initialized")?
             .is_none()
         {
-            if !schemas.iter().any(|schema| schema.name == "public") {
-                catalog.save_schema_row(&uqa_storage::SchemaRow::legacy("public"))?;
+            if !schemas.iter().any(|schema| schema.name() == "public") {
+                catalog.save_schema_row(&uqa_storage::SchemaRow::bootstrap("public"))?;
             }
             catalog.set_metadata("sql_schema_catalog_initialized", "true")?;
         }

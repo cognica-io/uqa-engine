@@ -16,7 +16,7 @@ use uqa_execution::schema::namespaces::{
     SchemaRegistryWrite, SchemaSecurityCatalog, SchemaSecurityPersistence,
     SchemaSecurityPublication, SchemaStatementWriter,
 };
-use uqa_sql::{catalog::security::SchemaSecurity, SQLError};
+use uqa_sql::{catalog::security::BoundSchemaSecurity, SQLError};
 use uqa_storage::StorageBackendResult;
 
 impl Engine {
@@ -79,9 +79,13 @@ impl SchemaRegistrationState for MutationCoordinator<'_> {
     }
 }
 impl SchemaRegistrationPersistence for MutationCoordinator<'_> {
-    fn persist_schema(&self, name: &str, security: &SchemaSecurity) -> StorageBackendResult<()> {
+    fn persist_schema(
+        &self,
+        name: &str,
+        security: &BoundSchemaSecurity,
+    ) -> StorageBackendResult<()> {
         if let Some(catalog) = self.storage.catalog.as_ref() {
-            catalog.save_schema_row(&security.row(name))?;
+            catalog.save_schema_row(&security.row(name).into())?;
         }
         Ok(())
     }
@@ -101,24 +105,24 @@ impl SchemaRegistration for Engine {
         &self,
         name: &str,
         if_not_exists: bool,
-        role_owner: &str,
+        role_owner: uqa_core::catalog_role::RoleIdentity,
     ) -> StorageBackendResult<bool> {
         self.mutation_coordinator()
             .register_schema(name, if_not_exists, role_owner)
     }
 }
 impl SchemaSecurityCatalog for Engine {
-    fn schema_security(&self, name: &str) -> Option<SchemaSecurity> {
+    fn schema_security(&self, name: &str) -> Option<BoundSchemaSecurity> {
         self.schema_security_for_privilege(name)
     }
 }
 impl SchemaSecurityPersistence for Engine {
-    fn persist_security(&self, name: &str, security: &SchemaSecurity) -> Result<(), SQLError> {
+    fn persist_security(&self, name: &str, security: &BoundSchemaSecurity) -> Result<(), SQLError> {
         self.persist_schema_security(name, security)
     }
 }
 impl SchemaSecurityPublication for Engine {
-    fn publish_security(&self, name: &str, security: SchemaSecurity) {
+    fn publish_security(&self, name: &str, security: BoundSchemaSecurity) {
         self.durable
             .schemas
             .write()
@@ -185,10 +189,13 @@ impl EmptySchemaCatalog for Engine {
     }
 }
 impl SchemaDropCatalog for Engine {
-    fn schema_security(&self, name: &str) -> Option<SchemaSecurity> {
+    fn schema_security(&self, name: &str) -> Option<BoundSchemaSecurity> {
         self.schema_security_for_privilege(name)
     }
-    fn current_user_has_role_privileges(&self, role: &str) -> bool {
+    fn current_user_has_role_privileges(
+        &self,
+        role: &uqa_core::catalog_role::RoleIdentity,
+    ) -> bool {
         Engine::current_user_has_role_privileges(self, role)
     }
     fn schema_is_graph(&self, name: &str) -> Result<bool, String> {

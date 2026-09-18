@@ -192,7 +192,7 @@ impl TableAuthorizationContext<'_> {
             .ok_or_else(|| SQLError::Internal(format!("table `{name}` disappeared")))?;
         Ok((relation, table))
     }
-    fn current_user_has_role_privileges(&self, target: &str) -> bool {
+    fn current_user_has_role_privileges(&self, target: &(impl RoleSubject + ?Sized)) -> bool {
         let current = self.names.current_role();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();

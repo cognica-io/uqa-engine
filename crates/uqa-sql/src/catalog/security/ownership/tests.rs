@@ -7,9 +7,9 @@
 use super::*;
 use std::collections::BTreeSet;
 
-struct Schemas(SchemaSecurity);
+struct Schemas(BoundSchemaSecurity);
 impl RelationOwnerSchemas for Schemas {
-    fn schema_security(&self, _: &str) -> Option<SchemaSecurity> {
+    fn schema_security(&self, _: &str) -> Option<BoundSchemaSecurity> {
         Some(self.0.clone())
     }
 }
@@ -78,8 +78,8 @@ fn namespace_create_is_checked_for_the_new_owner_and_bypassed_for_superusers() {
     let mut roles = roles();
     let memberships = BTreeMap::new();
     for schema_owner in ["actor", "target"] {
-        let schemas = Schemas(SchemaSecurity {
-            role_owner: schema_owner.into(),
+        let schemas = Schemas(BoundSchemaSecurity {
+            role_owner: roles[schema_owner].identity(),
             acl: None,
         });
         let authority = OwnerChangeAuthority {
@@ -107,8 +107,8 @@ fn namespace_create_is_checked_for_the_new_owner_and_bypassed_for_superusers() {
         new_owner: "target",
     }
     .require_schema_create(
-        &Schemas(SchemaSecurity {
-            role_owner: "original".into(),
+        &Schemas(BoundSchemaSecurity {
+            role_owner: roles["original"].identity(),
             acl: Some(Vec::new()),
         }),
         "restricted",

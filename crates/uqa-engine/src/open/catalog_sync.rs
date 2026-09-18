@@ -652,7 +652,8 @@ impl Engine {
         self.durable.models.write().clear();
         self.durable.scoring_params.write().clear();
 
-        self.restore_schemas_from_catalog(catalog.as_ref())?;
+        self.restore_roles_from_metadata(catalog.as_ref(), false)?;
+        self.restore_schemas_from_catalog(catalog.as_ref(), super::CatalogRestoreMode::LoadOnly)?;
         self.restore_graphs_from_catalog(catalog.as_ref())?;
         self.restore_engine_registries_from_catalog(
             catalog.as_ref(),

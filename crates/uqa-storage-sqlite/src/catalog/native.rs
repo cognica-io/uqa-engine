@@ -195,13 +195,13 @@ impl Catalog {
                     let acl = if row[2] == ValueRef::Null {
                         None
                     } else {
-                        Some(serde_json::from_str(&string(row[2])?)?)
+                        Some(string(row[2])?)
                     };
-                    schemas.push(SchemaRow {
-                        name: string(row[0])?,
-                        role_owner: string(row[1])?,
-                        acl,
-                    });
+                    schemas.push(super::role_security::decode_schema(
+                        string(row[0])?,
+                        row[1],
+                        acl.as_deref(),
+                    )?);
                     Ok(())
                 },
             )?;

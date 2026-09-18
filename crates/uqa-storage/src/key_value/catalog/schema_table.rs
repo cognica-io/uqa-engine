@@ -192,7 +192,7 @@ impl KeyValueCatalog {
         schema: &crate::catalog::SchemaRow,
     ) -> StorageBackendResult<()> {
         self.store.put(
-            &single_str_key(TAG_SCHEMA, &schema.name)?,
+            &single_str_key(TAG_SCHEMA, schema.name())?,
             &encode_value(schema)?,
         )
     }
@@ -215,17 +215,20 @@ impl KeyValueCatalog {
         for (key, value) in self.store.scan_prefix(&key_with_tag(TAG_SCHEMA))? {
             let mut offset = 1;
             let name = read_str(&key, &mut offset)?;
-            let schema = decode_value::<crate::catalog::SchemaRow>(&value)
-                .or_else(|_| decode_string(value).map(crate::catalog::SchemaRow::legacy))?;
-            if schema.name != name {
+            let schema = if value == string_value(&name) {
+                crate::catalog::SchemaRow::legacy(&name)
+            } else {
+                decode_value::<crate::catalog::SchemaRow>(&value)?
+            };
+            if schema.name() != name {
                 return Err(StorageBackendError::Other(format!(
                     "schema catalog key `{name}` disagrees with stored name `{}`",
-                    schema.name
+                    schema.name()
                 )));
             }
             rows.push(schema);
         }
-        rows.sort_by(|left, right| left.name.cmp(&right.name));
+        rows.sort_by(|left, right| left.name().cmp(right.name()));
         Ok(rows)
     }
 

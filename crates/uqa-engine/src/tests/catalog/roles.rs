@@ -16,6 +16,7 @@ mod migration;
 mod ownership;
 mod publication;
 mod routine_settings;
+mod schema_security;
 mod session_identity;
 mod settings;
 mod snapshots;

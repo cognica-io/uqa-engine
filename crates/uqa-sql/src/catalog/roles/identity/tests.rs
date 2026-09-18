@@ -53,6 +53,24 @@ fn membership_catalog() -> (
 }
 
 #[test]
+fn inherited_owner_identity_follows_rename_and_rejects_reused_names_and_oids() {
+    let (mut roles, memberships) = membership_catalog();
+    let owner = roles["group"].identity();
+    assert!(role_inherits(&roles, &memberships, "actor", &owner));
+    let mut renamed = roles.remove("group").unwrap();
+    let mut replacement = renamed.clone();
+    renamed.name = "renamed_group".into();
+    replacement.oid += 100;
+    replacement.object_id = [9; 16];
+    roles.insert(renamed.name.clone(), renamed);
+    roles.insert(replacement.name.clone(), replacement);
+    assert!(role_inherits(&roles, &memberships, "actor", &owner));
+    assert!(!role_inherits(&roles, &memberships, "actor", "group"));
+    roles.get_mut("renamed_group").unwrap().object_id = [8; 16];
+    assert!(!role_inherits(&roles, &memberships, "actor", &owner));
+}
+
+#[test]
 fn selected_role_follows_attributes_and_rename_but_not_name_or_oid_reuse() {
     let original = actor();
     let selected = RoleBinding::from_definition(&original).unwrap();

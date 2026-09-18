@@ -6,7 +6,47 @@
 
 //! Durable schema ownership and access-control metadata shared by catalog consumers.
 
+use crate::catalog_role::{BoundAclEntry, RoleIdentity};
 use serde::{Deserialize, Serialize};
+
+/// Schema security with role incarnations, independent of current display names.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BoundSchemaRow {
+    pub name: String,
+    pub role_owner: RoleIdentity,
+    pub acl: Option<Vec<BoundAclEntry<SchemaPrivileges>>>,
+}
+
+impl BoundSchemaRow {
+    pub fn bootstrap(name: impl Into<String>) -> Self {
+        let name = name.into();
+        let owner = RoleIdentity::BOOTSTRAP;
+        let acl = (name == "public").then(|| {
+            vec![
+                BoundAclEntry {
+                    role: Some(owner),
+                    grantor: owner,
+                    privileges: SchemaPrivileges::ALL,
+                    grant_options: SchemaPrivileges::default(),
+                },
+                BoundAclEntry {
+                    role: None,
+                    grantor: owner,
+                    privileges: SchemaPrivileges {
+                        usage: true,
+                        create: false,
+                    },
+                    grant_options: SchemaPrivileges::default(),
+                },
+            ]
+        });
+        Self {
+            name,
+            role_owner: owner,
+            acl,
+        }
+    }
+}
 
 /// Grantable privileges carried by one schema ACL path.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

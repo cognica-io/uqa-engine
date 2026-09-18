@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::catalog::roles::RoleReference;
-use crate::catalog::security::SchemaSecurity;
+use crate::catalog::security::BoundSchemaSecurity;
 use crate::{
     ast::RelationPersistence,
     catalog::roles::{
@@ -76,12 +76,12 @@ impl RoleCatalogGuards for Catalog {
     }
 }
 impl ViewOwnerSchemas for Catalog {
-    fn schema_security(&self, _: &str) -> Option<SchemaSecurity> {
+    fn schema_security(&self, _: &str) -> Option<BoundSchemaSecurity> {
         assert!(self.roles.try_borrow_mut().is_ok());
         assert!(self.memberships.try_borrow_mut().is_ok());
         self.calls.borrow_mut().push("schema");
-        Some(SchemaSecurity {
-            role_owner: "schema_owner".into(),
+        Some(BoundSchemaSecurity {
+            role_owner: self.roles.borrow()["schema_owner"].identity(),
             acl: None,
         })
     }

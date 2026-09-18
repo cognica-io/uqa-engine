@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Column and primary-key mappings for the native catalog format. Owner names are retained in row payloads and excluded from object-scoped record identities.
+//! Column and primary-key mappings for the native catalog format. Owner references are retained in row payloads and excluded from object-scoped record identities.
 
 use super::{invalid, NativeRecordFamily};
 use rusqlite::types::ValueRef;
@@ -16,7 +16,7 @@ pub enum NativeColumnType {
     Real,
     Text,
     Blob,
-    /// TEXT column names and BLOB catalog-index identities occupy distinct namespaces in the same physical column.
+    /// Text values and binary catalog identities share a physically declared TEXT column.
     TextOrBlob,
 }
 
@@ -549,7 +549,7 @@ pub(super) const LAYOUTS: &[NativeRecordLayout] = &[
         family: NativeRecordFamily::Schemas,
         table: "_schemas",
         columns: &["name", "role_owner", "acl_json"],
-        column_types: &[Text, Text, Text],
+        column_types: &[Text, TextOrBlob, Text],
         nullable: &[true, false, true],
         primary_key: &[0],
         identity_columns: &[0],

@@ -8,7 +8,7 @@ use super::*;
 use crate::{
     ast::{DatabasePrivilege, DatabaseRevokeBehavior, GrantDatabaseStmt},
     catalog::{
-        roles::RoleReference,
+        roles::{identity::RoleBinding, RoleReference},
         security::database::{
             apply_database_acl, role_has_database_privilege_check as role_has_privilege,
             DatabaseAclPrivilege, DatabasePrivilegeCheck,

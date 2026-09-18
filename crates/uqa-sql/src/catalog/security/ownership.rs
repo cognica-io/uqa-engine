@@ -5,7 +5,7 @@
 //
 
 //! Read-only authority shared by object ownership checks.
-use super::SchemaSecurity;
+use super::BoundSchemaSecurity;
 use crate::catalog::roles::identity::RoleSubject;
 use crate::{
     ast::RoleAttribute,
@@ -17,7 +17,7 @@ use crate::{
 use std::collections::BTreeMap;
 
 pub trait RelationOwnerSchemas {
-    fn schema_security(&self, schema: &str) -> Option<SchemaSecurity>;
+    fn schema_security(&self, schema: &str) -> Option<BoundSchemaSecurity>;
 }
 
 #[cfg(test)]
@@ -72,7 +72,7 @@ impl OwnerChangeAuthority<'_> {
                 message: format!("schema \"{schema}\" does not exist"),
             })?;
         if super::schema::role_has_schema_privilege(
-            &security,
+            &security.resolve(self.roles).map_err(SQLError::Internal)?,
             self.new_owner,
             super::schema::SchemaAclPrivilege::Create,
             self.roles,

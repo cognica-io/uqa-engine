@@ -17,7 +17,7 @@ use uqa_sql::{
         schema_inquiry::{
             GraphNamespaceRead, SchemaPrivilegeCatalog, SchemaPrivilegeInquiry, SchemaRegistryRead,
         },
-        SchemaSecurity,
+        BoundSchemaSecurity,
     },
     SQLError,
 };
@@ -69,7 +69,10 @@ impl Engine {
         self.schema_privilege_inquiry()
             .schema_has_privilege_for_role(schema, role, privilege)
     }
-    pub(crate) fn schema_security_for_privilege(&self, schema: &str) -> Option<SchemaSecurity> {
+    pub(crate) fn schema_security_for_privilege(
+        &self,
+        schema: &str,
+    ) -> Option<BoundSchemaSecurity> {
         self.schema_privilege_inquiry()
             .schema_security_for_privilege(schema)
     }

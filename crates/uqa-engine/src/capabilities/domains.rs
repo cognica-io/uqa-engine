@@ -214,7 +214,7 @@ impl DomainIndexRemoval for Engine {
 use uqa_execution::schema::domains::removal::{
     DomainDropNotices, DomainRemovalContext, DomainRoutineRemoval,
 };
-use uqa_sql::catalog::security::SchemaSecurity;
+use uqa_sql::catalog::security::BoundSchemaSecurity;
 use uqa_sql::schema::domains::removal::{
     DomainDropAuthority, DomainDropBinding, DomainDropCatalog,
 };
@@ -234,7 +234,7 @@ impl Engine {
     }
 }
 impl DomainDropCatalog for Engine {
-    fn schema_security(&self, name: &str) -> Option<SchemaSecurity> {
+    fn schema_security(&self, name: &str) -> Option<BoundSchemaSecurity> {
         self.schema_security_for_privilege(name)
     }
     fn resolve_domain_drop_type(&self, name: &str) -> Result<Option<i64>, SQLError> {
@@ -260,7 +260,10 @@ impl DomainDropAuthority for Engine {
             uqa_sql::catalog::security::schema::SchemaAclPrivilege::Usage,
         )
     }
-    fn current_user_has_role_privileges(&self, role: &str) -> bool {
+    fn current_user_has_role_privileges(
+        &self,
+        role: &dyn uqa_sql::catalog::roles::identity::RoleSubject,
+    ) -> bool {
         Engine::current_user_has_role_privileges(self, role)
     }
 }

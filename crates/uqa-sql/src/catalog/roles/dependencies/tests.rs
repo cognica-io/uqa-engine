@@ -45,8 +45,8 @@ fn an_earlier_catalog_dependency_prevents_reading_later_registries() {
     catalog.database.role_owner = catalog.roles["second"].identity();
     catalog.schemas.insert(
         "owned".into(),
-        SchemaSecurity {
-            role_owner: "first".into(),
+        BoundSchemaSecurity {
+            role_owner: catalog.roles["first"].identity(),
             acl: None,
         },
     );

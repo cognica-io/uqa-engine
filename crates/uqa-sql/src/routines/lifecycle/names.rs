@@ -7,11 +7,11 @@
 //! Search-path and namespace authorization rules for routine names.
 
 use crate::catalog::roles::RoleReference;
-use crate::{catalog::security::SchemaSecurity, SQLError};
+use crate::{catalog::security::BoundSchemaSecurity, SQLError};
 use uqa_core::RelationIdentity;
 
 pub trait RoutineNameCatalog {
-    fn schema_security(&self, schema: &str) -> Option<SchemaSecurity>;
+    fn schema_security(&self, schema: &str) -> Option<BoundSchemaSecurity>;
     fn current_role(&self) -> RoleReference;
     fn search_path(&self) -> Vec<String>;
     fn require_schema_usage(&self, schema: &str, role: &RoleReference) -> Result<(), SQLError>;

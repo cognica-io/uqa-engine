@@ -20,7 +20,7 @@ use uqa_sql::catalog::{
         database::BoundDatabaseSecurity,
         database_inquiry::DatabaseSecurityRead,
         schema_inquiry::{GraphNamespaceRead, SchemaRegistryRead},
-        SchemaSecurity,
+        BoundSchemaSecurity,
     },
 };
 use uqa_storage::StorageBackendError;
@@ -28,7 +28,7 @@ use uqa_storage::StorageBackendError;
 struct Fixture {
     user: String,
     path: Vec<String>,
-    schemas: RefCell<BTreeMap<String, SchemaSecurity>>,
+    schemas: RefCell<BTreeMap<String, BoundSchemaSecurity>>,
     roles: BTreeMap<String, RoleDefinition>,
     memberships: BTreeMap<RoleMembershipKey, RoleMembership>,
     database: BoundDatabaseSecurity,
@@ -191,7 +191,7 @@ impl RelationCreationRuntime for Fixture {
         if self.publish_on_fence {
             self.schemas
                 .borrow_mut()
-                .insert("tenant".into(), SchemaSecurity::legacy("tenant"));
+                .insert("tenant".into(), BoundSchemaSecurity::bootstrap("tenant"));
         }
         Ok(())
     }

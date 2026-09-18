@@ -124,7 +124,10 @@ impl Engine {
     }
 }
 impl uqa_sql::catalog::security::view_ownership::ViewOwnerSchemas for Engine {
-    fn schema_security(&self, schema: &str) -> Option<uqa_sql::catalog::security::SchemaSecurity> {
+    fn schema_security(
+        &self,
+        schema: &str,
+    ) -> Option<uqa_sql::catalog::security::BoundSchemaSecurity> {
         self.schema_security_for_privilege(schema)
     }
 }

@@ -33,7 +33,7 @@ pub use identity::new_nonzero_catalog_identity;
 pub use relation::RelationIdentity;
 mod table;
 
-pub use schema::{SchemaAclEntry, SchemaPrivileges, SchemaRow};
+pub use schema::{BoundSchemaRow, SchemaAclEntry, SchemaPrivileges, SchemaRow};
 pub use table::{TableAclEntry, TablePrivileges};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -439,14 +439,14 @@ pub trait CatalogFacade: Send + Sync {
     fn load_schema_rows(&self) -> StorageBackendResult<Vec<SchemaRow>>;
 
     fn save_schema(&self, name: &str) -> StorageBackendResult<()> {
-        self.save_schema_row(&SchemaRow::legacy(name))
+        self.save_schema_row(&SchemaRow::bootstrap(name))
     }
 
     fn load_schemas(&self) -> StorageBackendResult<Vec<String>> {
         Ok(self
             .load_schema_rows()?
             .into_iter()
-            .map(|schema| schema.name)
+            .map(|schema| schema.name().to_owned())
             .collect())
     }
 

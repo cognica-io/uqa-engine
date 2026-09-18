@@ -9,9 +9,9 @@
 use super::{
     schema::{
         parse_privilege_checks, role_has_schema_privilege, role_has_schema_privilege_check,
-        schema_security_with_public_privileges, SchemaAclPrivilege,
+        SchemaAclPrivilege,
     },
-    SchemaSecurity,
+    BoundSchemaSecurity,
 };
 use crate::catalog::roles::identity::RoleSubject;
 use crate::catalog::roles::RoleReference;
@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::Value;
 
 pub type SchemaRegistryRead<'a> =
-    Box<dyn std::ops::Deref<Target = BTreeMap<String, SchemaSecurity>> + 'a>;
+    Box<dyn std::ops::Deref<Target = BTreeMap<String, BoundSchemaSecurity>> + 'a>;
 
 /// Metadata-only graph names held under the caller's original registry read guard.
 pub trait GraphNamespaceRead {
@@ -55,28 +55,28 @@ impl SchemaPrivilegeInquiry<'_> {
         let Some(security) = self.schema_security_for_privilege(schema) else {
             return false;
         };
-        role_has_schema_privilege(
-            &security,
-            role,
-            privilege,
-            &self.roles.role_definitions(),
-            &self.roles.role_memberships(),
-        )
+        let roles = self.roles.role_definitions();
+        let memberships = self.roles.role_memberships();
+        security.resolve(&roles).is_ok_and(|security| {
+            role_has_schema_privilege(&security, role, privilege, &roles, &memberships)
+        })
     }
 
-    pub fn schema_security_for_privilege(&self, schema: &str) -> Option<SchemaSecurity> {
+    pub fn schema_security_for_privilege(&self, schema: &str) -> Option<BoundSchemaSecurity> {
         if let Some(security) = self.catalog.schemas().get(schema) {
             return Some(security.clone());
         }
         match schema {
             "pg_catalog" | "information_schema" => {
-                Some(schema_security_with_public_privileges(false))
+                Some(BoundSchemaSecurity::with_public_privileges(false))
             }
-            "ag_catalog" => Some(SchemaSecurity::legacy("ag_catalog")),
+            "ag_catalog" => Some(BoundSchemaSecurity::bootstrap("ag_catalog")),
             name if name == self.catalog.temporary_schema_name() => {
-                Some(schema_security_with_public_privileges(true))
+                Some(BoundSchemaSecurity::with_public_privileges(true))
             }
-            name if self.catalog.graphs().contains(name) => Some(SchemaSecurity::legacy(name)),
+            name if self.catalog.graphs().contains(name) => {
+                Some(BoundSchemaSecurity::bootstrap(name))
+            }
             _ => None,
         }
     }
@@ -152,6 +152,7 @@ impl SchemaPrivilegeInquiry<'_> {
         let security = self.schema_security_for_privilege(&schema).ok_or_else(|| {
             SQLError::Internal(format!("schema `{schema}` has no security metadata"))
         })?;
+        let security = security.resolve(&roles).map_err(SQLError::Internal)?;
         Ok(Value::Bool(checks.into_iter().any(|check| {
             role_has_schema_privilege_check(&security, &subject, check, &roles, &memberships)
         })))

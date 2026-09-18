@@ -102,17 +102,17 @@ impl Catalog {
     }
 
     pub fn save_schema(&self, name: &str) -> Result<()> {
-        self.save_schema_row(&SchemaRow::legacy(name))
+        self.save_schema_row(&SchemaRow::bootstrap(name))
     }
 
     pub fn save_schema_row(&self, schema: &SchemaRow) -> Result<()> {
-        let acl_json = schema.acl.as_ref().map(serde_json::to_string).transpose()?;
+        let (owner, acl_json) = super::role_security::encode_schema(schema)?;
         if self
             .put_native_named(
                 Family::Schemas,
                 &[
-                    text(&schema.name),
-                    text(&schema.role_owner),
+                    text(schema.name()),
+                    (&owner).into(),
                     optional_text(acl_json.as_deref()),
                 ],
             )?
@@ -124,7 +124,7 @@ impl Catalog {
             c.execute(
                 "INSERT INTO _schemas (name, role_owner, acl_json) VALUES (?1, ?2, ?3)
                  ON CONFLICT(name) DO UPDATE SET role_owner = excluded.role_owner, acl_json = excluded.acl_json",
-                params![schema.name, schema.role_owner, acl_json],
+                params![schema.name(), owner, acl_json],
             )?;
             Ok(())
         })
@@ -154,7 +154,7 @@ impl Catalog {
         Ok(self
             .load_schema_rows()?
             .into_iter()
-            .map(|schema| schema.name)
+            .map(|schema| schema.name().to_owned())
             .collect())
     }
 
@@ -168,21 +168,18 @@ impl Catalog {
             let rows = stmt.query_map([], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
+                    row.get::<_, rusqlite::types::Value>(1)?,
                     row.get::<_, Option<String>>(2)?,
                 ))
             })?;
             let mut out = Vec::new();
             for row in rows {
                 let (name, role_owner, acl_json) = row?;
-                let acl = acl_json
-                    .map(|json| serde_json::from_str(&json))
-                    .transpose()?;
-                out.push(SchemaRow {
+                out.push(super::role_security::decode_schema(
                     name,
-                    role_owner,
-                    acl,
-                });
+                    (&role_owner).into(),
+                    acl_json.as_deref(),
+                )?);
             }
             Ok(out)
         })

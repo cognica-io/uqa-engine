@@ -8,18 +8,21 @@
 
 use crate::catalog::roles::RoleReference;
 use crate::{
-    catalog::{domain::DomainCatalog, roles::RoleReferenceNames, security::SchemaSecurity},
+    catalog::{domain::DomainCatalog, roles::RoleReferenceNames, security::BoundSchemaSecurity},
     SQLError,
 };
 
 pub trait DomainDropCatalog: DomainCatalog {
-    fn schema_security(&self, name: &str) -> Option<SchemaSecurity>;
+    fn schema_security(&self, name: &str) -> Option<BoundSchemaSecurity>;
     fn resolve_domain_drop_type(&self, name: &str) -> Result<Option<i64>, SQLError>;
     fn format_domain_drop_type(&self, oid: i64) -> Result<Option<String>, String>;
 }
 pub trait DomainDropAuthority {
     fn schema_usage(&self, schema: &str, role: &RoleReference) -> bool;
-    fn current_user_has_role_privileges(&self, role: &str) -> bool;
+    fn current_user_has_role_privileges(
+        &self,
+        role: &dyn crate::catalog::roles::identity::RoleSubject,
+    ) -> bool;
 }
 pub struct DomainDropBinding<'a> {
     pub catalog: &'a dyn DomainDropCatalog,

@@ -6,19 +6,13 @@
 
 //! Database ownership and ACL references retain role incarnations independently of names.
 
+use super::super::role_bindings;
 use super::{DatabaseAclEntry, DatabasePrivileges, DatabaseSecurity};
-use crate::catalog::roles::{identity::RoleBinding, RoleDefinition, RoleIdentity};
+use crate::catalog::roles::{RoleDefinition, RoleIdentity};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BoundDatabaseAclEntry {
-    /// An absent grantee represents PUBLIC, not a missing role.
-    pub role: Option<RoleIdentity>,
-    pub grantor: RoleIdentity,
-    pub privileges: DatabasePrivileges,
-    pub grant_options: DatabasePrivileges,
-}
+pub type BoundDatabaseAclEntry = uqa_core::catalog_role::BoundAclEntry<DatabasePrivileges>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BoundDatabaseSecurity {
@@ -30,19 +24,7 @@ fn role_name(
     roles: &BTreeMap<String, RoleDefinition>,
     identity: RoleIdentity,
 ) -> Result<&str, String> {
-    if identity.oid <= 0 || u32::try_from(identity.oid).is_err() || identity.object_id == [0; 16] {
-        return Err("invalid persisted database role identity".into());
-    }
-    roles
-        .values()
-        .find(|role| role.identity() == identity)
-        .map(|role| role.name.as_str())
-        .ok_or_else(|| {
-            format!(
-                "persisted database privileges reference missing role incarnation {}",
-                identity.oid
-            )
-        })
+    role_bindings::role_name(roles, identity, "database")
 }
 
 impl BoundDatabaseSecurity {
@@ -78,11 +60,7 @@ impl BoundDatabaseSecurity {
         roles: &BTreeMap<String, RoleDefinition>,
     ) -> Result<Self, String> {
         super::validate_stored_database_security(security, roles)?;
-        let bind = |name: &str| {
-            RoleBinding::from_definition(&roles[name])
-                .map(|role| role.identity())
-                .map_err(|error| error.to_string())
-        };
+        let bind = |name: &str| role_bindings::bind_role(roles, name, "database");
         Ok(Self {
             role_owner: bind(&security.role_owner)?,
             acl: security

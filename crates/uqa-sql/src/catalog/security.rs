@@ -7,7 +7,10 @@
 use std::collections::BTreeMap;
 pub mod columns;
 pub mod dependencies;
+mod role_bindings;
 pub mod schema;
+pub mod schema_binding;
+pub use schema_binding::BoundSchemaSecurity;
 pub mod table;
 pub use uqa_core::catalog_acl::{TableAclEntry, TablePrivileges};
 

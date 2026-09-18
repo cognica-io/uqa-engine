@@ -221,5 +221,21 @@ impl RoleSubject for RoleBinding {
     }
 }
 
+impl RoleSubject for RoleIdentity {
+    fn role_name<'a>(&'a self, roles: &'a BTreeMap<String, RoleDefinition>) -> Option<&'a str> {
+        self.role_definition(roles).map(|role| role.name.as_str())
+    }
+
+    fn role_definition<'a>(
+        &self,
+        roles: &'a BTreeMap<String, RoleDefinition>,
+    ) -> Option<&'a RoleDefinition> {
+        if !self.is_valid() {
+            return None;
+        }
+        roles.values().find(|role| role.identity() == *self)
+    }
+}
+
 #[cfg(test)]
 mod tests;

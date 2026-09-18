@@ -71,7 +71,7 @@ fn schema_rows_decode_legacy_names_and_round_trip_security_metadata() {
         vec![SchemaRow::legacy("archive")]
     );
 
-    let schema = SchemaRow {
+    let schema = SchemaRow::Legacy(uqa_core::catalog_schema::SchemaRow {
         name: "archive".into(),
         role_owner: "archive_owner".into(),
         acl: Some(vec![crate::catalog::SchemaAclEntry {
@@ -83,9 +83,12 @@ fn schema_rows_decode_legacy_names_and_round_trip_security_metadata() {
                 create: true,
             },
         }]),
-    };
+    });
     catalog.save_schema_row(&schema).unwrap();
     assert_eq!(catalog.load_schema_rows().unwrap(), vec![schema]);
+    let current = SchemaRow::bootstrap("archive");
+    catalog.save_schema_row(&current).unwrap();
+    assert_eq!(catalog.load_schema_rows().unwrap(), vec![current]);
 }
 
 #[test]

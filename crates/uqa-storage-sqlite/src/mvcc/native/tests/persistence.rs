@@ -76,7 +76,8 @@ fn encoded_native_rows_keep_binary_fields_and_tuple_metadata_through_durable_rec
         let control = StorageReadControl::with_limit(1 << 22);
         let (records, receipt) = {
             let connection = connection(&path, mode);
-            Catalog::open(connection.clone()).unwrap();
+            let catalog = Catalog::open(connection.clone()).unwrap();
+            catalog.save_schema("bound_role_schema").unwrap();
             let mut documents = SQLiteDocumentStore::new(connection.clone(), "public.native");
             let fields = BTreeMap::from([
                 ("body".to_owned(), Value::Str("native\0text 日本어".into())),

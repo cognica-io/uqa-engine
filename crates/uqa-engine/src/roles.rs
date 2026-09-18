@@ -101,7 +101,10 @@ impl Engine {
         role_is_superuser(&self.durable.roles.read(), &current)
     }
 
-    pub(crate) fn current_user_has_role_privileges(&self, target: &str) -> bool {
+    pub(crate) fn current_user_has_role_privileges(
+        &self,
+        target: &(impl uqa_sql::catalog::roles::identity::RoleSubject + ?Sized),
+    ) -> bool {
         let current = self.current_role();
         let roles = self.durable.roles.read();
         let memberships = self.durable.role_memberships.read();

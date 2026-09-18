@@ -32,13 +32,14 @@ use uqa_sql::{
                 apply_schema_acl, requested_acl_privileges, resolve_schema_grant_targets,
                 schema_acl_warning, validate_schema_acl_roles,
             },
-            SchemaSecurity,
+            BoundSchemaSecurity,
         },
     },
     SQLError,
 };
 
-pub type SchemaRegistryRead<'a> = Box<dyn Deref<Target = BTreeMap<String, SchemaSecurity>> + 'a>;
+pub type SchemaRegistryRead<'a> =
+    Box<dyn Deref<Target = BTreeMap<String, BoundSchemaSecurity>> + 'a>;
 pub trait SchemaPrivilegeRegistry {
     fn schemas_read(&self) -> SchemaRegistryRead<'_>;
     fn schemas_write(&self) -> SchemaRegistryWrite<'_>;
@@ -107,7 +108,7 @@ pub fn grant_schema_privileges(
 
 struct SchemaPrivilegeCandidate<'a> {
     registry: SchemaRegistryWrite<'a>,
-    updates: Vec<(String, SchemaSecurity)>,
+    updates: Vec<(String, BoundSchemaSecurity)>,
     notices: Vec<(&'static str, String)>,
 }
 
@@ -145,6 +146,7 @@ fn prepare_privileges<'a>(
         let current = registry.get(name).cloned().ok_or_else(|| {
             SQLError::Internal(format!("schema `{name}` has no security metadata"))
         })?;
+        let resolved = current.resolve(&roles).map_err(SQLError::Internal)?;
         let (next, grantable) = apply_schema_acl(
             statement,
             &grantees,
@@ -152,18 +154,19 @@ fn prepare_privileges<'a>(
             &current_user,
             &roles,
             &memberships,
-            &current,
+            &resolved,
         )?;
         if grantable != privileges.len() {
             notices.push(schema_acl_warning(statement.is_grant, grantable != 0, name));
         }
         added_acl_roles(
-            current.acl.as_deref().unwrap_or_default(),
-            &current.role_owner,
+            resolved.acl.as_deref().unwrap_or_default(),
+            &resolved.role_owner,
             next.acl.as_deref().unwrap_or_default(),
             &next.role_owner,
             &mut dependencies,
         );
+        let next = BoundSchemaSecurity::bind(&next, &roles).map_err(SQLError::Internal)?;
         if next != current {
             updates.push((name.clone(), next));
         }

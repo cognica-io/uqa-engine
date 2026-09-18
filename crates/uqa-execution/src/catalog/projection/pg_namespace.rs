@@ -22,17 +22,18 @@ pub fn build_pg_namespace(
         .into_iter()
         .map(|schema| {
             let security = catalog.schema_security(&schema);
+            let names = catalog.schema_security_names(&schema)?;
             Ok(row([
                 ("oid", int_value(schema_oid(&schema))),
                 ("nspname", str_value(&schema)),
                 (
                     "nspowner",
                     int_value(match security {
-                        Some(security) => catalog.role_oid(&security.role_owner)?,
+                        Some(security) => security.role_owner.oid,
                         None => current_user_oid(),
                     }),
                 ),
-                ("nspacl", schema_acl_catalog_value(security)?),
+                ("nspacl", schema_acl_catalog_value(names.as_ref())?),
             ]))
         })
         .collect::<Result<Vec<_>, SQLError>>()
@@ -75,3 +76,6 @@ fn schema_acl_catalog_value(
         "pg_namespace.nspacl",
     )
 }
+
+#[cfg(test)]
+mod tests;

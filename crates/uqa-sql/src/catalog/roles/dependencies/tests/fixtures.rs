@@ -58,7 +58,7 @@ impl RoleTablesRead for Read<'_, BTreeMap<RelationIdentity, Table>> {
 pub(super) struct Catalog {
     pub roles: BTreeMap<String, RoleDefinition>,
     pub database: BoundDatabaseSecurity,
-    pub schemas: BTreeMap<String, SchemaSecurity>,
+    pub schemas: BTreeMap<String, BoundSchemaSecurity>,
     pub tables: BTreeMap<RelationIdentity, Table>,
     pub views: BTreeMap<RelationIdentity, StoredView>,
     pub foreign_tables: BTreeMap<RelationIdentity, TableSecurity>,
@@ -132,7 +132,7 @@ impl RoleDependencyCatalog for Catalog {
     fn database(&self) -> RoleDependencyRead<'_, BoundDatabaseSecurity> {
         Box::new(self.read("database", &self.database))
     }
-    fn schemas(&self) -> RoleDependencyRead<'_, BTreeMap<String, SchemaSecurity>> {
+    fn schemas(&self) -> RoleDependencyRead<'_, BTreeMap<String, BoundSchemaSecurity>> {
         Box::new(self.read("schemas", &self.schemas))
     }
     fn tables(&self) -> Box<dyn RoleTablesRead + '_> {

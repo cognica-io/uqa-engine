@@ -8,10 +8,14 @@
 
 use super::{open, MODES};
 use std::{collections::BTreeMap, sync::mpsc, time::Duration};
-use uqa_core::Value;
+use uqa_core::{
+    catalog_role::{BoundAclEntry, RoleIdentity},
+    catalog_schema::BoundSchemaRow,
+    Value,
+};
 use uqa_storage::{
-    mvcc::VersionedSessionOptions, DocumentStore, RelationIdentity, SchemaAclEntry,
-    SchemaPrivileges, SchemaRow, TableSchema,
+    mvcc::VersionedSessionOptions, DocumentStore, RelationIdentity, SchemaPrivileges, SchemaRow,
+    TableSchema,
 };
 use uqa_storage_sqlite::{Catalog, ManagedConnection, SQLiteDocumentStore};
 
@@ -247,26 +251,34 @@ fn native_catalog_schema_ownership_and_format_version_survive_failed_operations(
         })
         .unwrap();
     bind(&connection);
-    let schema = SchemaRow {
+    let owner = RoleIdentity {
+        oid: 20_001,
+        object_id: [1; 16],
+    };
+    let reader = RoleIdentity {
+        oid: 20_002,
+        object_id: [2; 16],
+    };
+    let schema = SchemaRow::Bound(BoundSchemaRow {
         name: "private".into(),
-        role_owner: "alice".into(),
-        acl: Some(vec![SchemaAclEntry {
-            role: "reader".into(),
-            grantor: Some("alice".into()),
+        role_owner: owner,
+        acl: Some(vec![BoundAclEntry {
+            role: Some(reader),
+            grantor: owner,
             privileges: SchemaPrivileges {
                 usage: true,
                 create: false,
             },
             grant_options: SchemaPrivileges::default(),
         }]),
-    };
+    });
     catalog.save_schema_row(&schema).unwrap();
     assert_eq!(
         catalog
             .load_schema_rows()
             .unwrap()
             .into_iter()
-            .find(|row| row.name == "private"),
+            .find(|row| row.name() == "private"),
         Some(schema)
     );
     assert!(catalog.drop_schema("occupied").is_err());

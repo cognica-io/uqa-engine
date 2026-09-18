@@ -9,7 +9,7 @@
 use crate::{
     catalog::{
         security::{
-            database::BoundDatabaseSecurity, SchemaSecurity, SequenceSecurity, TableSecurity,
+            database::BoundDatabaseSecurity, BoundSchemaSecurity, SequenceSecurity, TableSecurity,
         },
         stored_view::StoredView,
     },
@@ -32,7 +32,7 @@ pub trait RoleDependencyCatalog:
     crate::catalog::security::system_relations::SystemRelationSecurityCatalog
 {
     fn database(&self) -> RoleDependencyRead<'_, BoundDatabaseSecurity>;
-    fn schemas(&self) -> RoleDependencyRead<'_, BTreeMap<String, SchemaSecurity>>;
+    fn schemas(&self) -> RoleDependencyRead<'_, BTreeMap<String, BoundSchemaSecurity>>;
     fn tables(&self) -> Box<dyn RoleTablesRead + '_>;
     fn views(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, StoredView>>;
     fn foreign_tables(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, TableSecurity>>;

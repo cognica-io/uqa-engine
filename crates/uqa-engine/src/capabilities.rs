@@ -193,7 +193,7 @@ impl MutationCoordinator<'_> {
         &self,
         name: &str,
         if_not_exists: bool,
-        role_owner: &str,
+        role_owner: uqa_core::catalog_role::RoleIdentity,
     ) -> StorageBackendResult<bool> {
         uqa_execution::schema::namespaces::register_schema(
             &uqa_execution::schema::namespaces::SchemaRegistrationContext {

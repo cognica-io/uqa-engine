@@ -9,11 +9,12 @@
 use crate::{schema_security::SchemaAclPrivilege, Engine};
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
-    catalog::security::SchemaSecurity, routines::lifecycle::names::RoutineNameCatalog, SQLError,
+    catalog::security::BoundSchemaSecurity, routines::lifecycle::names::RoutineNameCatalog,
+    SQLError,
 };
 
 impl RoutineNameCatalog for Engine {
-    fn schema_security(&self, schema: &str) -> Option<SchemaSecurity> {
+    fn schema_security(&self, schema: &str) -> Option<BoundSchemaSecurity> {
         self.schema_security_for_privilege(schema)
     }
     fn current_role(&self) -> RoleReference {

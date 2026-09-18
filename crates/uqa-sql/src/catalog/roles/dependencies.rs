@@ -8,7 +8,7 @@
 
 use crate::{
     catalog::{
-        security::{SchemaSecurity, SequenceSecurity, TableSecurity},
+        security::{BoundSchemaSecurity, SequenceSecurity, TableSecurity},
         view::StoredViewKind,
     },
     SQLError,
@@ -42,7 +42,10 @@ pub fn ensure_roles_have_no_object_dependencies(
 
     let schema_security = catalog.schemas();
     for name in names {
-        if let Some(schema) = dependent_schema_for_role(&schema_security, name) {
+        if let Some(schema) = roles
+            .get(name)
+            .and_then(|role| dependent_schema_for_role(&schema_security, role.identity()))
+        {
             return Err(SQLError::Routine {
                 sqlstate: "2BP01".into(),
                 message: format!(
@@ -205,19 +208,13 @@ fn dependent_sequence_for_role<'a>(
     })
 }
 
-fn dependent_schema_for_role<'a>(
-    schemas: &'a BTreeMap<String, SchemaSecurity>,
-    role: &str,
-) -> Option<&'a String> {
-    schemas.iter().find_map(|(name, security)| {
-        let acl_dependency = security.acl.as_ref().is_some_and(|acl| {
-            acl.iter().any(|entry| {
-                entry.role == role
-                    || entry.grantor.as_deref().unwrap_or(&security.role_owner) == role
-            })
-        });
-        (security.role_owner == role || acl_dependency).then_some(name)
-    })
+fn dependent_schema_for_role(
+    schemas: &BTreeMap<String, BoundSchemaSecurity>,
+    role: super::RoleIdentity,
+) -> Option<&String> {
+    schemas
+        .iter()
+        .find_map(|(name, security)| security.depends_on(role).then_some(name))
 }
 
 #[cfg(test)]

@@ -11,7 +11,9 @@ use crate::schema::foreign_table_alteration::{
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     catalog::{
-        roles::{guards::RoleCatalogGuards, role_inherits, RoleReferenceNames},
+        roles::{
+            guards::RoleCatalogGuards, identity::RoleSubject, role_inherits, RoleReferenceNames,
+        },
         security::{
             ownership::RelationOwnerSchemas,
             table::{role_has_table_privilege, TableAclPrivilege},
@@ -75,7 +77,7 @@ impl ForeignAuthorizationContext<'_> {
             message: format!("must be owner of foreign table {}", relation.name),
         })
     }
-    fn current_user_has_role_privileges(&self, target: &str) -> bool {
+    fn current_user_has_role_privileges(&self, target: &(impl RoleSubject + ?Sized)) -> bool {
         let current = self.names.current_role();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
