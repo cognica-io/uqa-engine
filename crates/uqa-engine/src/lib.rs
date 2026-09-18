@@ -174,8 +174,6 @@ use statement_cache::{PreparedStatementPlan, SQLStatementCache};
 
 #[cfg(test)]
 use uqa_execution::catalog::sequence::restoration::SEQUENCES_METADATA_KEY;
-const ROLES_METADATA_KEY: &str = "sql_roles_json";
-const ROLE_MEMBERSHIPS_METADATA_KEY: &str = "sql_role_memberships_json";
 /// Default nesting cap for user-defined function calls. Exceeding it
 /// raises `stack depth limit exceeded`, mirroring the `PostgreSQL`
 /// `max_stack_depth` guard.

@@ -7,6 +7,7 @@
 use crate::Engine;
 
 mod identity;
+mod snapshots;
 
 #[test]
 fn role_registry_and_memberships_restore_together_after_reopen() {

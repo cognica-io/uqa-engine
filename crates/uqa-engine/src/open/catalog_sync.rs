@@ -192,6 +192,36 @@ impl Engine {
         }
     }
 
+    fn latest_catalog_snapshot_with_private_records(
+        &self,
+        current: &crate::DurableCatalogSnapshot,
+        latest: &Engine,
+    ) -> StorageBackendResult<crate::DurableCatalogSnapshot> {
+        use uqa_execution::catalog::security::{
+            roles::persistence::RoleCatalogSnapshot, system_relations,
+        };
+        let mut snapshot = latest.durable.snapshot();
+        let roles = RoleCatalogSnapshot {
+            roles: snapshot.roles,
+            memberships: snapshot.role_memberships,
+        }
+        .merge_private(
+            self.storage.catalog.as_deref(),
+            &RoleCatalogSnapshot {
+                roles: Arc::clone(&current.roles),
+                memberships: Arc::clone(&current.role_memberships),
+            },
+        )?;
+        snapshot.roles = roles.roles;
+        snapshot.role_memberships = roles.memberships;
+        snapshot.system_relation_security = Arc::new(system_relations::merge_private(
+            self.storage.catalog.as_deref(),
+            &current.system_relation_security,
+            (*snapshot.system_relation_security).clone(),
+        )?);
+        Ok(snapshot)
+    }
+
     fn install_latest_fixed_transaction_catalogs(
         &self,
         latest: &Engine,
@@ -243,13 +273,9 @@ impl Engine {
             .filter(|(relation, _)| temporary_sequence_persistence.contains_key(*relation))
             .map(|(relation, security)| (relation.clone(), security.clone()))
             .collect::<BTreeMap<_, _>>();
-        let system_security = uqa_execution::catalog::security::system_relations::merge_private(
-            self.storage.catalog.as_deref(),
-            &previous_durable.system_relation_security,
-            (*latest.durable.system_relation_security.read()).clone(),
-        )?;
-        self.durable.restore(&latest.durable.snapshot());
-        *self.durable.system_relation_security.write() = system_security;
+        let latest_durable =
+            self.latest_catalog_snapshot_with_private_records(&previous_durable, latest)?;
+        self.durable.restore(&latest_durable);
         self.rebind_graph_stores()?;
         self.durable.views.write().extend(temporary_views);
         self.durable.sequences.write().extend(temporary_sequences);

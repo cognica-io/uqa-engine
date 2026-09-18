@@ -11,10 +11,8 @@ use std::collections::BTreeMap;
 use uqa_sql::ast::RoleAttribute;
 use uqa_sql::SQLError;
 
-use crate::{
-    Engine, SQLStatementCache, StorageBackendError, StorageBackendResult, ROLES_METADATA_KEY,
-    ROLE_MEMBERSHIPS_METADATA_KEY,
-};
+use crate::{Engine, SQLStatementCache, StorageBackendResult};
+use uqa_execution::catalog::security::roles::persistence as role_catalog;
 
 pub(crate) struct RoutineSessionStateGuard<'a> {
     engine: &'a Engine,
@@ -89,53 +87,23 @@ impl Engine {
         &self,
         roles: &BTreeMap<String, RoleDefinition>,
     ) -> Result<(), SQLError> {
-        let Some(catalog) = self.storage.catalog.as_ref() else {
-            return Ok(());
-        };
-        let json = serde_json::to_string(roles)
-            .map_err(|error| SQLError::Internal(format!("serialize role catalog: {error}")))?;
-        catalog
-            .set_metadata(ROLES_METADATA_KEY, &json)
-            .map_err(|error| SQLError::Internal(format!("persist role catalog: {error}")))
+        role_catalog::persist_roles(self.storage.catalog.as_deref(), roles)
     }
 
     pub(crate) fn persist_role_memberships_snapshot(
         &self,
         memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
     ) -> Result<(), SQLError> {
-        let Some(catalog) = self.storage.catalog.as_ref() else {
-            return Ok(());
-        };
-        let stored = memberships.values().cloned().collect::<Vec<_>>();
-        let json = serde_json::to_string(&stored).map_err(|error| {
-            SQLError::Internal(format!("serialize role membership catalog: {error}"))
-        })?;
-        catalog
-            .set_metadata(ROLE_MEMBERSHIPS_METADATA_KEY, &json)
-            .map_err(|error| {
-                SQLError::Internal(format!("persist role membership catalog: {error}"))
-            })
+        role_catalog::persist_memberships(self.storage.catalog.as_deref(), memberships)
     }
 
     pub(crate) fn restore_roles_from_metadata(
         &self,
         catalog: &dyn crate::CatalogFacade,
     ) -> StorageBackendResult<()> {
-        let mut roles = match catalog.get_metadata(ROLES_METADATA_KEY)? {
-            Some(json) => serde_json::from_str::<BTreeMap<String, RoleDefinition>>(&json)?,
-            None => BTreeMap::new(),
-        };
-        uqa_sql::catalog::roles::restoration::restore_role_definitions(&mut roles)
-            .map_err(StorageBackendError::Other)?;
-        let memberships = match catalog.get_metadata(ROLE_MEMBERSHIPS_METADATA_KEY)? {
-            Some(json) => serde_json::from_str::<Vec<RoleMembership>>(&json)?,
-            None => Vec::new(),
-        };
-        let membership_map =
-            uqa_sql::catalog::roles::restoration::restore_role_memberships(&roles, memberships)
-                .map_err(StorageBackendError::Other)?;
-        *self.durable.roles.write() = roles;
-        *self.durable.role_memberships.write() = membership_map;
+        let values = role_catalog::restore(catalog)?;
+        *self.durable.roles.write() = values.roles;
+        *self.durable.role_memberships.write() = values.memberships;
         Ok(())
     }
 
