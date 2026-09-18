@@ -99,3 +99,6 @@ pub mod table_grants;
 pub mod view_authorization;
 
 pub mod ownership;
+
+#[cfg(test)]
+mod owner_privileges;

@@ -311,7 +311,6 @@ pub fn role_has_privilege(
     if subject
         .role_definition(roles)
         .is_some_and(|role| role.has(RoleAttribute::Superuser))
-        || role_inherits(roles, memberships, subject, &security.role_owner)
     {
         return true;
     }
@@ -321,7 +320,7 @@ pub fn role_has_privilege(
             .any(|role| role_inherits(roles, memberships, subject, role));
     }
     match security.acl.as_ref() {
-        None => false,
+        None => role_inherits(roles, memberships, subject, &security.role_owner),
         Some(acl) => acl.iter().any(|entry| {
             entry.privileges.intersects(check.privilege.mask())
                 && (entry.role.is_public()

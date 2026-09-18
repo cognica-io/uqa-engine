@@ -182,7 +182,7 @@ impl SequenceIntrospectionContext<'_> {
         let roles = &sequence.authority.roles;
         let memberships = &sequence.authority.memberships;
         match access {
-            SequenceAccess::Any => super::security::sequence::role_can_view_sequence(
+            SequenceAccess::Any => super::security::sequence::role_has_any_sequence_privilege(
                 &sequence.security,
                 &current_user,
                 roles,

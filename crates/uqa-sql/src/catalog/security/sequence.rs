@@ -173,7 +173,6 @@ pub fn role_has_privilege(
     if subject
         .role_definition(roles)
         .is_some_and(|role| role.has(RoleAttribute::Superuser))
-        || role_inherits(roles, memberships, subject, &security.role_owner)
     {
         return true;
     }
@@ -183,7 +182,7 @@ pub fn role_has_privilege(
             .any(|role| role_inherits(roles, memberships, subject, role));
     }
     match security.acl.as_ref() {
-        None => false,
+        None => role_inherits(roles, memberships, subject, &security.role_owner),
         Some(acl) => acl.iter().any(|entry| {
             entry.privileges.intersects(check.privilege.mask())
                 && (entry.role.is_public()
@@ -340,24 +339,33 @@ pub fn role_can_view_sequence(
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> bool {
     role_inherits(roles, memberships, subject, &security.role_owner)
-        || [
-            AclPrivilege::Select,
-            AclPrivilege::Update,
-            AclPrivilege::Usage,
-        ]
-        .into_iter()
-        .any(|privilege| {
-            role_has_privilege(
-                security,
-                subject,
-                PrivilegeCheck {
-                    privilege,
-                    grant_option: false,
-                },
-                roles,
-                memberships,
-            )
-        })
+        || role_has_any_sequence_privilege(security, subject, roles, memberships)
+}
+
+pub fn role_has_any_sequence_privilege(
+    security: &SequenceSecurity,
+    subject: &(impl RoleSubject + ?Sized),
+    roles: &BTreeMap<String, RoleDefinition>,
+    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+) -> bool {
+    [
+        AclPrivilege::Select,
+        AclPrivilege::Update,
+        AclPrivilege::Usage,
+    ]
+    .into_iter()
+    .any(|privilege| {
+        role_has_privilege(
+            security,
+            subject,
+            PrivilegeCheck {
+                privilege,
+                grant_option: false,
+            },
+            roles,
+            memberships,
+        )
+    })
 }
 
 pub fn role_can_select_sequence(

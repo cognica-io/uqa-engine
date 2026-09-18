@@ -78,7 +78,6 @@ pub fn role_has_column_privilege(
     if subject
         .role_definition(roles)
         .is_some_and(|role| role.has(RoleAttribute::Superuser))
-        || role_inherits(roles, memberships, subject, &security.role_owner)
     {
         return true;
     }
