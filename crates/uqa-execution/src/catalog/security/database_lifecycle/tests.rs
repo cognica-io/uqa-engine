@@ -19,7 +19,7 @@ use uqa_sql::{
 };
 
 struct DatabaseCatalog {
-    security: RefCell<DatabaseSecurity>,
+    security: RefCell<BoundDatabaseSecurity>,
     roles: RefCell<BTreeMap<String, RoleDefinition>>,
     memberships: RefCell<BTreeMap<RoleMembershipKey, RoleMembership>>,
     fail_persistence: Cell<bool>,
@@ -92,10 +92,14 @@ impl DatabasePrivilegePublication for DatabaseCatalog {
         Ok(())
     }
 
-    fn persist_security(&self, security: &DatabaseSecurity) -> Result<(), SQLError> {
+    fn persist_security(&self, json: &str) -> Result<(), SQLError> {
         self.assert_authorization_is_retained();
         assert!(self.security.try_borrow_mut().is_ok());
-        assert_ne!(*self.security.borrow(), *security);
+        let stored: serde_json::Value = serde_json::from_str(json).unwrap();
+        assert_eq!(stored["database_security_format"], 1);
+        let bound: uqa_sql::catalog::security::database::binding::BoundDatabaseSecurity =
+            serde_json::from_value(stored["security"].clone()).unwrap();
+        assert_ne!(bound, *self.security.borrow());
         self.publications.borrow_mut().push("persist");
         if self.fail_persistence.get() {
             return Err(SQLError::Internal("simulated persistence failure".into()));
@@ -133,7 +137,7 @@ impl SharedObjectLockSession for DatabaseCatalog {
 #[test]
 fn database_acl_persistence_failure_leaves_security_and_epoch_unchanged() {
     let catalog = DatabaseCatalog {
-        security: RefCell::new(DatabaseSecurity::bootstrap()),
+        security: RefCell::new(BoundDatabaseSecurity::bootstrap()),
         roles: RefCell::new(BTreeMap::from([(
             "uqa".into(),
             RoleDefinition::bootstrap(),

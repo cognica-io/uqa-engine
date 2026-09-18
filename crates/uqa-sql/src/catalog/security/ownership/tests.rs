@@ -131,7 +131,10 @@ fn schema_owner_transfer_checks_database_create_for_the_invoker() {
             role_owner: owner.into(),
             acl: None,
         };
-        let result = authority.require_database_create(&security);
+        let bound =
+            crate::catalog::security::database::BoundDatabaseSecurity::bind(&security, &roles)
+                .unwrap();
+        let result = authority.require_database_create(&bound);
         if owner == "actor" {
             result.unwrap();
         } else {

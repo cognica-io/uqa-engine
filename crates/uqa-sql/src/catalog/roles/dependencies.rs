@@ -8,7 +8,7 @@
 
 use crate::{
     catalog::{
-        security::{database::DatabaseSecurity, SchemaSecurity, SequenceSecurity, TableSecurity},
+        security::{SchemaSecurity, SequenceSecurity, TableSecurity},
         view::StoredViewKind,
     },
     SQLError,
@@ -22,10 +22,14 @@ use context::RoleDependencyCatalog;
 pub fn ensure_roles_have_no_object_dependencies(
     catalog: &dyn RoleDependencyCatalog,
     names: &[String],
+    roles: &BTreeMap<String, super::RoleDefinition>,
 ) -> Result<(), SQLError> {
     let database_security = catalog.database();
     for name in names {
-        if database_depends_on_role(&database_security, name) {
+        if roles
+            .get(name)
+            .is_some_and(|role| database_security.depends_on(role.identity()))
+        {
             return Err(SQLError::Routine {
                 sqlstate: "2BP01".into(),
                 message: format!(
@@ -214,15 +218,6 @@ fn dependent_schema_for_role<'a>(
         });
         (security.role_owner == role || acl_dependency).then_some(name)
     })
-}
-
-fn database_depends_on_role(security: &DatabaseSecurity, role: &str) -> bool {
-    let acl_dependency = security.acl.as_ref().is_some_and(|acl| {
-        acl.iter().any(|entry| {
-            entry.role == role || entry.grantor.as_deref().unwrap_or(&security.role_owner) == role
-        })
-    });
-    security.role_owner == role || acl_dependency
 }
 
 #[cfg(test)]

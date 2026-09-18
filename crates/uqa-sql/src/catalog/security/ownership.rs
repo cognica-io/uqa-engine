@@ -89,10 +89,10 @@ impl OwnerChangeAuthority<'_> {
 
     pub fn require_database_create(
         &self,
-        security: &super::database::DatabaseSecurity,
+        security: &super::database::BoundDatabaseSecurity,
     ) -> Result<(), SQLError> {
         if super::database::role_has_database_privilege(
-            security,
+            &security.resolve(self.roles).map_err(SQLError::Internal)?,
             self.current_user,
             super::database::DatabaseAclPrivilege::Create,
             self.roles,

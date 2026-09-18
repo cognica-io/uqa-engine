@@ -6,6 +6,7 @@
 
 use super::super::context::{RoleDependencyRead, RoleTableSecurity, RoleTablesRead};
 use super::*;
+use crate::catalog::{roles::RoleDefinition, security::database::BoundDatabaseSecurity};
 use crate::{catalog::stored_view::StoredView, routines::SQLUserFunction};
 use std::{cell::RefCell, ops::Deref, rc::Rc, sync::Arc};
 
@@ -55,7 +56,8 @@ impl RoleTablesRead for Read<'_, BTreeMap<RelationIdentity, Table>> {
     }
 }
 pub(super) struct Catalog {
-    pub database: DatabaseSecurity,
+    pub roles: BTreeMap<String, RoleDefinition>,
+    pub database: BoundDatabaseSecurity,
     pub schemas: BTreeMap<String, SchemaSecurity>,
     pub tables: BTreeMap<RelationIdentity, Table>,
     pub views: BTreeMap<RelationIdentity, StoredView>,
@@ -69,7 +71,21 @@ pub(super) struct Catalog {
 impl Catalog {
     pub fn new() -> Self {
         Self {
-            database: DatabaseSecurity::bootstrap(),
+            roles: ["uqa", "first", "second", "unreferenced"]
+                .into_iter()
+                .enumerate()
+                .map(|(index, name)| {
+                    let mut role = RoleDefinition::bootstrap();
+                    if index != 0 {
+                        role.name = name.into();
+                        role.oid = 20_000 + index as i64;
+                        role.object_id = [index as u8; 16];
+                        role.attributes.clear();
+                    }
+                    (name.into(), role)
+                })
+                .collect(),
+            database: BoundDatabaseSecurity::bootstrap(),
             schemas: BTreeMap::new(),
             tables: BTreeMap::new(),
             views: BTreeMap::new(),
@@ -113,7 +129,7 @@ impl super::super::context::TemporaryRoleDependencyCatalog for Catalog {
     }
 }
 impl RoleDependencyCatalog for Catalog {
-    fn database(&self) -> RoleDependencyRead<'_, DatabaseSecurity> {
+    fn database(&self) -> RoleDependencyRead<'_, BoundDatabaseSecurity> {
         Box::new(self.read("database", &self.database))
     }
     fn schemas(&self) -> RoleDependencyRead<'_, BTreeMap<String, SchemaSecurity>> {

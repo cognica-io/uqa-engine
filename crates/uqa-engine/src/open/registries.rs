@@ -28,7 +28,7 @@ impl Engine {
                 catalog,
                 &self.durable.roles.read(),
             )?;
-        self.restore_database_security_from_metadata(catalog)?;
+        self.restore_database_security_from_metadata(catalog, mode.allows_migration())?;
         // Install definition-only routine placeholders before any stored expression is rebound. Final compilation waits until every row-producing relation registry is present, which also permits views and routines to bind each other without recursive catalog synchronization.
         let pending_sql_functions =
             self.install_sql_function_restore_placeholders(catalog, mode)?;

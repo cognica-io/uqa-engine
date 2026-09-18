@@ -28,7 +28,9 @@ use uqa_sql::{
             guards::{RoleCatalogGuards, RoleDefinitionRead, RoleMembershipRead},
             RoleDefinition, RoleMembership, RoleMembershipKey, RoleReferenceNames,
         },
-        security::{database::DatabaseSecurity, SchemaSecurity, SequenceSecurity, TableSecurity},
+        security::{
+            database::BoundDatabaseSecurity, SchemaSecurity, SequenceSecurity, TableSecurity,
+        },
         stored_view::StoredView,
     },
     routines::SQLUserFunction,
@@ -48,7 +50,7 @@ pub(super) struct Catalog {
         RefCell<std::collections::VecDeque<BTreeMap<RoleMembershipKey, RoleMembership>>>,
     pub writer_memberships: RefCell<Option<BTreeMap<RoleMembershipKey, RoleMembership>>>,
     pub catalog_locks: RefCell<Vec<(u32, Option<u32>, crate::row_locks::RelationLockMode)>>,
-    database: DatabaseSecurity,
+    database: BoundDatabaseSecurity,
     schemas: BTreeMap<String, SchemaSecurity>,
     views: BTreeMap<RelationIdentity, StoredView>,
     foreign_tables: BTreeMap<RelationIdentity, TableSecurity>,
@@ -74,7 +76,7 @@ impl Catalog {
             refreshed_memberships: RefCell::new(std::collections::VecDeque::new()),
             writer_memberships: RefCell::new(None),
             catalog_locks: RefCell::new(Vec::new()),
-            database: DatabaseSecurity::bootstrap(),
+            database: BoundDatabaseSecurity::bootstrap(),
             schemas: BTreeMap::new(),
             views: BTreeMap::new(),
             foreign_tables: BTreeMap::new(),
@@ -288,7 +290,7 @@ impl RoleTablesRead for EmptyTables {
     }
 }
 impl RoleDependencyCatalog for Catalog {
-    fn database(&self) -> RoleDependencyRead<'_, DatabaseSecurity> {
+    fn database(&self) -> RoleDependencyRead<'_, BoundDatabaseSecurity> {
         self.event("database");
         Box::new(&self.database)
     }

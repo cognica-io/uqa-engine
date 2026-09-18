@@ -10,13 +10,7 @@ use super::RoleDefinition;
 use crate::SQLError;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
-
-/// A role endpoint is independent of its display name and of later OID reuse.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct RoleIdentity {
-    pub oid: i64,
-    pub object_id: [u8; 16],
-}
+pub use uqa_core::catalog_role::RoleIdentity;
 
 /// A selected role keeps its incarnation even if another role later reuses its name or OID.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

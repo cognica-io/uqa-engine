@@ -8,7 +8,9 @@
 
 use crate::{
     catalog::{
-        security::{database::DatabaseSecurity, SchemaSecurity, SequenceSecurity, TableSecurity},
+        security::{
+            database::BoundDatabaseSecurity, SchemaSecurity, SequenceSecurity, TableSecurity,
+        },
         stored_view::StoredView,
     },
     routines::SQLUserFunction,
@@ -29,7 +31,7 @@ pub trait RoleTablesRead {
 pub trait RoleDependencyCatalog:
     crate::catalog::security::system_relations::SystemRelationSecurityCatalog
 {
-    fn database(&self) -> RoleDependencyRead<'_, DatabaseSecurity>;
+    fn database(&self) -> RoleDependencyRead<'_, BoundDatabaseSecurity>;
     fn schemas(&self) -> RoleDependencyRead<'_, BTreeMap<String, SchemaSecurity>>;
     fn tables(&self) -> Box<dyn RoleTablesRead + '_>;
     fn views(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, StoredView>>;

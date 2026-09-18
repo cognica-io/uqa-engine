@@ -184,7 +184,7 @@ pub fn drop_roles(
         .collect::<BTreeSet<_>>();
     let mut memberships = context.registry.write_memberships();
     definition::ensure_no_grantor_dependencies(&memberships, &identities)?;
-    ensure_roles_have_no_object_dependencies(context.dependencies, &names)?;
+    ensure_roles_have_no_object_dependencies(context.dependencies, &names, &snapshot)?;
     for name in &names {
         let role = super::roles::locking::RoleBinding::from_definition(&snapshot[name])?;
         if context

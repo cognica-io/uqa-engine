@@ -6,6 +6,9 @@
 
 //! Relation, view, database, and stable OID catalog projection.
 
+#[cfg(test)]
+mod tests;
+
 use uqa_core::Value;
 use uqa_sql::{ResultRow, SQLError};
 
@@ -255,11 +258,12 @@ pub fn build_pg_matviews(
 }
 
 pub fn build_pg_database(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
-    let security = catalog.database_security();
+    let bound = catalog.database_security();
+    let security = catalog.database_security_names()?;
     Ok(vec![row([
         ("oid", int_value(uqa_sql::catalog::DATABASE_OID)),
         ("datname", str_value(uqa_sql::catalog::DATABASE_NAME)),
-        ("datdba", int_value(catalog.role_oid(&security.role_owner)?)),
+        ("datdba", int_value(bound.role_owner.oid)),
         ("encoding", int_value(6)),
         ("datlocprovider", str_value("b")),
         ("datistemplate", bool_value(false)),
@@ -274,7 +278,7 @@ pub fn build_pg_database(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQ
         ("datlocale", str_value("PG_UNICODE_FAST")),
         ("daticurules", Value::Null),
         ("datcollversion", str_value("1")),
-        ("datacl", database_acl_catalog_value(security)?),
+        ("datacl", database_acl_catalog_value(&security)?),
     ])])
 }
 

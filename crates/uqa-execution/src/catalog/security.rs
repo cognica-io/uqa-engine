@@ -12,7 +12,7 @@ pub mod sequence;
 pub mod table;
 
 pub use uqa_sql::catalog::security::database::{
-    DatabaseAclEntry, DatabasePrivileges, DatabaseSecurity,
+    BoundDatabaseSecurity, DatabaseAclEntry, DatabasePrivileges, DatabaseSecurity,
 };
 
 pub use uqa_sql::catalog::security::SequenceSecurity;

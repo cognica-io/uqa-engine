@@ -50,7 +50,6 @@ use uqa_execution::catalog::security::database_lifecycle::{
     self, DatabasePrivilegeContext, DatabasePrivilegePublication, DatabaseSecurityRegistry,
     DatabaseSecurityWrite, DATABASE_SECURITY_METADATA_KEY,
 };
-use uqa_sql::catalog::security::database::DatabaseSecurity;
 use uqa_storage::{CatalogFacade, StorageBackendResult};
 
 impl DatabaseSecurityRegistry for Engine {
@@ -68,15 +67,12 @@ impl DatabasePrivilegePublication for Engine {
     fn refresh_catalog(&self) -> StorageBackendResult<()> {
         self.synchronize_catalog_registries()
     }
-    fn persist_security(&self, security: &DatabaseSecurity) -> Result<(), SQLError> {
+    fn persist_security(&self, json: &str) -> Result<(), SQLError> {
         let Some(catalog) = self.storage.catalog.as_ref() else {
             return Ok(());
         };
-        let json = serde_json::to_string(security).map_err(|error| {
-            SQLError::Internal(format!("serialize database privileges: {error}"))
-        })?;
         catalog
-            .set_metadata(DATABASE_SECURITY_METADATA_KEY, &json)
+            .set_metadata(DATABASE_SECURITY_METADATA_KEY, json)
             .map_err(|error| SQLError::Internal(format!("persist database privileges: {error}")))
     }
 
@@ -100,10 +96,12 @@ impl Engine {
     pub(crate) fn restore_database_security_from_metadata(
         &self,
         catalog: &dyn CatalogFacade,
+        allow_migration: bool,
     ) -> StorageBackendResult<()> {
         database_lifecycle::restore_database_security_from_metadata(
             &self.database_privilege_context(),
             catalog,
+            allow_migration,
         )
     }
 }

@@ -8,7 +8,7 @@
 
 use super::database::{
     parse_privilege_checks, role_has_database_privilege, role_has_database_privilege_check,
-    DatabaseAclPrivilege, DatabaseSecurity,
+    BoundDatabaseSecurity, DatabaseAclPrivilege,
 };
 use crate::catalog::roles::identity::RoleSubject;
 use crate::catalog::roles::RoleReference;
@@ -22,7 +22,7 @@ use crate::{
 use std::collections::BTreeMap;
 use uqa_core::Value;
 
-pub type DatabaseSecurityRead<'a> = Box<dyn std::ops::Deref<Target = DatabaseSecurity> + 'a>;
+pub type DatabaseSecurityRead<'a> = Box<dyn std::ops::Deref<Target = BoundDatabaseSecurity> + 'a>;
 
 pub trait DatabasePrivilegeCatalog {
     fn refresh_privilege_catalog(&self) -> Result<(), SQLError>;
@@ -41,13 +41,11 @@ impl DatabasePrivilegeInquiry<'_> {
         role: &(impl RoleSubject + ?Sized),
         privilege: DatabaseAclPrivilege,
     ) -> Result<(), SQLError> {
-        if role_has_database_privilege(
-            &self.catalog.security(),
-            role,
-            privilege,
-            &self.roles.role_definitions(),
-            &self.roles.role_memberships(),
-        ) {
+        let security = self.catalog.security();
+        let roles = self.roles.role_definitions();
+        let memberships = self.roles.role_memberships();
+        let resolved = security.resolve(&roles).map_err(SQLError::Internal)?;
+        if role_has_database_privilege(&resolved, role, privilege, &roles, &memberships) {
             return Ok(());
         }
         let message = match privilege {
@@ -121,8 +119,9 @@ impl DatabasePrivilegeInquiry<'_> {
             return Ok(Value::Bool(false));
         };
         let security = self.catalog.security();
+        let resolved = security.resolve(&roles).map_err(SQLError::Internal)?;
         Ok(Value::Bool(checks.into_iter().any(|check| {
-            role_has_database_privilege_check(&security, &subject, check, &roles, &memberships)
+            role_has_database_privilege_check(&resolved, &subject, check, &roles, &memberships)
         })))
     }
 }

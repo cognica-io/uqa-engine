@@ -15,9 +15,12 @@ fn table_dependencies_visit_requested_roles_first_and_read_security_lazily() {
     catalog.table("a", "second");
     catalog.table("b", "first");
     catalog.table("c", "first");
-    let error =
-        ensure_roles_have_no_object_dependencies(&catalog, &["first".into(), "second".into()])
-            .unwrap_err();
+    let error = ensure_roles_have_no_object_dependencies(
+        &catalog,
+        &["first".into(), "second".into()],
+        &catalog.roles,
+    )
+    .unwrap_err();
     assert!(
         matches!(error, SQLError::Routine { sqlstate, message } if sqlstate == "2BP01" && message == "role \"first\" cannot be dropped because some objects depend on it: table public.b")
     );
@@ -39,7 +42,7 @@ fn table_dependencies_visit_requested_roles_first_and_read_security_lazily() {
 #[test]
 fn an_earlier_catalog_dependency_prevents_reading_later_registries() {
     let mut catalog = Catalog::new();
-    catalog.database.role_owner = "second".into();
+    catalog.database.role_owner = catalog.roles["second"].identity();
     catalog.schemas.insert(
         "owned".into(),
         SchemaSecurity {
@@ -47,9 +50,12 @@ fn an_earlier_catalog_dependency_prevents_reading_later_registries() {
             acl: None,
         },
     );
-    let error =
-        ensure_roles_have_no_object_dependencies(&catalog, &["first".into(), "second".into()])
-            .unwrap_err();
+    let error = ensure_roles_have_no_object_dependencies(
+        &catalog,
+        &["first".into(), "second".into()],
+        &catalog.roles,
+    )
+    .unwrap_err();
     assert!(
         matches!(error, SQLError::Routine { message, .. } if message == "role \"second\" cannot be dropped because some objects depend on it: database uqa")
     );
@@ -62,7 +68,8 @@ fn an_earlier_catalog_dependency_prevents_reading_later_registries() {
 #[test]
 fn dependency_readers_release_each_registry_before_the_next_is_acquired() {
     let catalog = Catalog::new();
-    ensure_roles_have_no_object_dependencies(&catalog, &["unreferenced".into()]).unwrap();
+    ensure_roles_have_no_object_dependencies(&catalog, &["unreferenced".into()], &catalog.roles)
+        .unwrap();
     assert_eq!(
         *catalog.events.borrow(),
         [

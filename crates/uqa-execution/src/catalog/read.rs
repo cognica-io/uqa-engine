@@ -211,8 +211,16 @@ impl CatalogReadView {
         self.snapshot.definitions.schemas.get(name)
     }
 
-    pub fn database_security(&self) -> &crate::catalog::security::DatabaseSecurity {
+    pub fn database_security(&self) -> &crate::catalog::security::BoundDatabaseSecurity {
         &self.snapshot.definitions.database_security
+    }
+
+    pub fn database_security_names(
+        &self,
+    ) -> Result<crate::catalog::security::DatabaseSecurity, SQLError> {
+        self.database_security()
+            .resolve(&self.snapshot.definitions.roles)
+            .map_err(SQLError::Internal)
     }
 
     pub fn has_schema(&self, name: &str) -> bool {

@@ -19,8 +19,7 @@ use uqa_sql::{
         security::{
             database::{
                 apply_database_acl, database_acl_warning, requested_acl_privileges,
-                resolve_database_grant_targets, validate_database_acl_roles,
-                validate_stored_database_security, DatabaseSecurity,
+                resolve_database_grant_targets, validate_database_acl_roles, BoundDatabaseSecurity,
             },
             database_inquiry::DatabaseSecurityRead,
             dependencies::added_acl_roles,
@@ -29,10 +28,11 @@ use uqa_sql::{
     },
     SQLError,
 };
-use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
+use uqa_storage::{CatalogFacade, StorageBackendResult};
 
 pub const DATABASE_SECURITY_METADATA_KEY: &str = "sql_database_security_json";
-pub type DatabaseSecurityWrite<'a> = Box<dyn DerefMut<Target = DatabaseSecurity> + 'a>;
+mod persistence;
+pub type DatabaseSecurityWrite<'a> = Box<dyn DerefMut<Target = BoundDatabaseSecurity> + 'a>;
 
 pub trait DatabaseSecurityRegistry {
     fn security_read(&self) -> DatabaseSecurityRead<'_>;
@@ -41,7 +41,7 @@ pub trait DatabaseSecurityRegistry {
 pub trait DatabasePrivilegePublication {
     fn prepare_writer(&self) -> Result<(), SQLError>;
     fn refresh_catalog(&self) -> StorageBackendResult<()>;
-    fn persist_security(&self, security: &DatabaseSecurity) -> Result<(), SQLError>;
+    fn persist_security(&self, json: &str) -> Result<(), SQLError>;
     fn catalog_changed(&self);
     fn notice(&self, level: &str, message: &str);
 }
@@ -80,7 +80,10 @@ pub fn grant_database_privileges(
         || prepare_privileges(context, statement),
     )?;
     if next != current {
-        context.publication.persist_security(&next)?;
+        let json = persistence::encode(&next, &roles).map_err(|error| {
+            SQLError::Internal(format!("serialize database privileges: {error}"))
+        })?;
+        context.publication.persist_security(&json)?;
         **context.registry.security_write() = next;
         context.publication.catalog_changed();
     }
@@ -93,8 +96,8 @@ pub fn grant_database_privileges(
 }
 
 struct DatabasePrivilegeCandidate {
-    current: DatabaseSecurity,
-    next: DatabaseSecurity,
+    current: BoundDatabaseSecurity,
+    next: BoundDatabaseSecurity,
     notice: Option<(&'static str, String)>,
 }
 
@@ -125,6 +128,7 @@ fn prepare_privileges<'a>(
     let privileges = requested_acl_privileges(&statement.privileges)?;
     let memberships = context.roles.role_memberships();
     let current = context.registry.security_read().clone();
+    let resolved = current.resolve(&roles).map_err(SQLError::Internal)?;
     let (next, grantable) = apply_database_acl(
         statement,
         &grantees,
@@ -132,18 +136,19 @@ fn prepare_privileges<'a>(
         &current_user,
         &roles,
         &memberships,
-        &current,
+        &resolved,
     )?;
     let notice = (grantable != privileges.len())
         .then(|| database_acl_warning(statement.is_grant, grantable != 0, DATABASE_NAME));
     let mut dependencies = BTreeSet::new();
     added_acl_roles(
-        current.acl.as_deref().unwrap_or_default(),
-        &current.role_owner,
+        resolved.acl.as_deref().unwrap_or_default(),
+        &resolved.role_owner,
         next.acl.as_deref().unwrap_or_default(),
         &next.role_owner,
         &mut dependencies,
     );
+    let next = BoundDatabaseSecurity::bind(&next, &roles).map_err(SQLError::Internal)?;
     Ok(RoleDependencyCandidate {
         value: DatabasePrivilegeCandidate {
             current,
@@ -159,13 +164,10 @@ fn prepare_privileges<'a>(
 pub fn restore_database_security_from_metadata(
     context: &DatabasePrivilegeContext<'_>,
     catalog: &dyn CatalogFacade,
+    allow_migration: bool,
 ) -> StorageBackendResult<()> {
-    let security = match catalog.get_metadata(DATABASE_SECURITY_METADATA_KEY)? {
-        Some(json) => serde_json::from_str::<DatabaseSecurity>(&json)?,
-        None => DatabaseSecurity::bootstrap(),
-    };
     let roles = context.roles.role_definitions();
-    validate_stored_database_security(&security, &roles).map_err(StorageBackendError::Other)?;
+    let security = persistence::restore(catalog, &roles, allow_migration)?;
     drop(roles);
     **context.registry.security_write() = security;
     Ok(())

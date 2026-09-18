@@ -15,6 +15,9 @@ use crate::SQLError;
 
 use crate::catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey};
 
+pub mod binding;
+pub use binding::BoundDatabaseSecurity;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DatabaseAclPrivilege {
     Connect,
