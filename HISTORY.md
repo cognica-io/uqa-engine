@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-09-18
+
+See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.3.7/docs/manual/reference/10-upgrading.md) for package updates, concurrent writer coordination and encrypted notification sidecar requirements.
+
+### Fixed
+
+- Prevented independent sessions and processes from assigning the same generated physical document identity and silently overwriting successful inserts with distinct TEXT or composite primary keys. Reserved candidates and committed-state rechecks preserve VALUES and INSERT ... SELECT rows through RETURNING, multi-row statements, fixed snapshots, rollback and database reopen.
+- Encrypted cross-process notification channels, payloads and registry state with the database credential for encrypted SQLite and compressed-encrypted providers. Pooled registry connections preserve encryption and concurrent initialization; incompatible plaintext or differently keyed sidecars fail without replacing their history.
+- Updated the Node.js build tool's `js-yaml` dependency to address unbounded CPU use while processing empty merge sources.
+
 ## [0.3.6] - 2026-09-15
 
 See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.3.6/docs/manual/reference/10-upgrading.md) for package updates and operator-tree optimizer compatibility.
