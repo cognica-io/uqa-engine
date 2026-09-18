@@ -22,6 +22,7 @@ use uqa_sql::{
 };
 pub mod context;
 mod identity;
+mod locking;
 use context::RoleExecutionContext;
 
 pub fn set_role(context: &RoleExecutionContext<'_>, requested: &str) -> Result<(), SQLError> {
@@ -146,16 +147,19 @@ pub fn drop_roles(
 ) -> Result<(), SQLError> {
     let current = context.analysis.names.current_user_name();
     let session = context.analysis.names.session_user_name();
+    let names = locking::lock_drop_targets(context, statement, &current, &session)?;
     context.publication.prepare_writer()?;
     let mut roles = context.registry.write_roles();
     let snapshot = roles.clone();
-    let names = definition::resolve_drop_role_names(
-        &context.analysis,
-        statement,
-        &current,
-        &session,
-        &snapshot,
-    )?;
+    for name in &names {
+        definition::require_role_drop_authority(
+            &context.analysis,
+            &snapshot,
+            &current,
+            &session,
+            name,
+        )?;
+    }
     let names_set = names.iter().cloned().collect::<BTreeSet<_>>();
     let mut memberships = context.registry.write_memberships();
     definition::ensure_no_grantor_dependencies(&memberships, &names_set)?;

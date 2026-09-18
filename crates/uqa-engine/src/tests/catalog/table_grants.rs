@@ -13,6 +13,10 @@ use std::{
 use uqa_core::RelationIdentity;
 use uqa_execution::{
     catalog::security::table_grants::context::{TableGrantInputs, TableGrantNotices},
+    row_locks::{
+        shared_objects::{SharedCatalogLock, SharedObjectLockSession},
+        RelationLockMode, ScopedRelationLock,
+    },
     schema::{
         foreign_table_alteration::{
             ForeignMemoryRegistryWrite, ForeignSecurityRegistryWrite, ForeignTableAlterPublication,
@@ -111,6 +115,24 @@ impl RoleCatalogGuards for Authorization<'_> {
     }
 }
 
+impl SharedObjectLockSession for Authorization<'_> {
+    fn acquire_shared_catalog(
+        &self,
+        target: SharedCatalogLock<'_>,
+        mode: RelationLockMode,
+    ) -> Result<ScopedRelationLock<'_>, SQLError> {
+        assert!(!self.roles_held.get() && !self.memberships_held.get());
+        self.calls.borrow_mut().push("shared-role-lock");
+        SharedObjectLockSession::acquire_shared_catalog(self.engine, target, mode)
+    }
+
+    fn refresh_shared_catalog(&self) -> Result<(), SQLError> {
+        assert!(!self.roles_held.get() && !self.memberships_held.get());
+        self.calls.borrow_mut().push("shared-role-refresh");
+        SharedObjectLockSession::refresh_shared_catalog(self.engine)
+    }
+}
+
 struct FailedForeignWrite<'a> {
     authorization: &'a Authorization<'a>,
     before: (TableSecurity, TableSecurity, TableSecurity),
@@ -181,9 +203,10 @@ fn final_foreign_persistence_failure_rolls_back_prior_writes_without_publishing_
         };
         let statement = statement("GRANT SELECT ON items, visible, remote TO reader");
         let error = engine
-            .with_implicit_transaction(|engine| {
+            .with_implicit_definition_transaction(|engine| {
                 let mut context = engine.table_grant_context();
                 context.roles = &authorization;
+                context.shared_locks = &authorization;
                 context.foreign = &publication;
                 context.grant_table_privileges(&statement)
             })
@@ -192,6 +215,11 @@ fn final_foreign_persistence_failure_rolls_back_prior_writes_without_publishing_
             .to_string()
             .contains("injected foreign ACL persistence failure"));
         assert!(publication.reached.get());
+        assert!(authorization.calls.borrow().contains(&"shared-role-lock"));
+        assert!(authorization
+            .calls
+            .borrow()
+            .contains(&"shared-role-refresh"));
         assert!(!authorization.roles_held.get() && !authorization.memberships_held.get());
         assert_eq!(security(&engine), before);
         let catalog = engine.storage.catalog.as_ref().unwrap();
@@ -234,23 +262,26 @@ fn mixed_table_sequence_grant_releases_authorization_guards_before_sequence_warn
     let authorization = Authorization::new(&engine);
     let statement = statement("GRANT SELECT, INSERT ON TABLE items, ids TO reader");
     engine
-        .with_implicit_transaction(|engine| {
+        .with_implicit_definition_transaction(|engine| {
             let mut context = engine.table_grant_context();
             context.roles = &authorization;
+            context.shared_locks = &authorization;
             context.notices = &authorization;
             context.grant_table_privileges(&statement)
         })
         .unwrap();
-    assert_eq!(
-        *authorization.calls.borrow(),
-        vec![
-            "roles",
-            "memberships",
-            "memberships-released",
-            "roles-released",
-            "notice"
-        ]
-    );
+    let calls = authorization.calls.borrow();
+    assert!(calls.contains(&"shared-role-lock"));
+    assert!(calls.contains(&"shared-role-refresh"));
+    assert!(calls.ends_with(&[
+        "roles",
+        "memberships",
+        "memberships-released",
+        "roles-released",
+        "notice"
+    ]));
+    assert_eq!(calls.iter().filter(|call| **call == "notice").count(), 1);
+    drop(calls);
     assert_eq!(
         engine.take_sql_notices(),
         vec![(

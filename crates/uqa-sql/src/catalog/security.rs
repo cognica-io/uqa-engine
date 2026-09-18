@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 pub mod columns;
+pub mod dependencies;
 pub mod schema;
 pub mod table;
 pub use uqa_core::catalog_acl::{TableAclEntry, TablePrivileges};

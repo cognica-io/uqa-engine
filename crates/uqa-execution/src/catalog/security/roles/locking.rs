@@ -10,6 +10,8 @@ use crate::row_locks::{
     shared_objects::{SharedCatalogLock, SharedObjectLockSession},
     RelationLockMode,
 };
+use std::collections::{BTreeMap, BTreeSet};
+use uqa_sql::catalog::roles::RoleDefinition;
 use uqa_sql::{catalog::roles::guards::RoleCatalogGuards, SQLError};
 
 pub const ROLE_CATALOG_CLASS_ID: u32 = 1260;
@@ -19,6 +21,73 @@ pub struct RoleBinding {
     pub name: String,
     pub oid: u32,
     pub object_id: [u8; 16],
+}
+
+impl RoleBinding {
+    pub fn from_definition(role: &RoleDefinition) -> Result<Self, SQLError> {
+        if role.object_id == [0; 16] {
+            return Err(SQLError::Internal("role has no object identity".into()));
+        }
+        Ok(Self {
+            name: role.name.clone(),
+            oid: u32::try_from(role.oid)
+                .map_err(|_| SQLError::Internal("invalid role OID".into()))?,
+            object_id: role.object_id,
+        })
+    }
+}
+
+#[derive(Default)]
+pub struct RoleDependencyLocks {
+    bindings: BTreeMap<String, RoleBinding>,
+}
+
+impl RoleDependencyLocks {
+    pub fn missing(
+        &self,
+        roles: &BTreeMap<String, RoleDefinition>,
+        dependencies: &BTreeSet<String>,
+    ) -> Result<Vec<RoleBinding>, SQLError> {
+        let mut pending = Vec::new();
+        for name in dependencies {
+            let role = roles.get(name).ok_or_else(|| SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!("role \"{name}\" does not exist"),
+            })?;
+            // The bootstrap role is pinned and has no shared dependency entry.
+            if role.oid == 10 {
+                continue;
+            }
+            let bound = RoleBinding::from_definition(role)?;
+            if let Some(original) = self.bindings.get(name) {
+                if original != &bound {
+                    return Err(concurrently_dropped(original.oid));
+                }
+            } else {
+                pending.push(bound);
+            }
+        }
+        Ok(pending)
+    }
+
+    pub fn acquire(
+        &mut self,
+        context: &RoleLockContext<'_>,
+        pending: Vec<RoleBinding>,
+    ) -> Result<(), SQLError> {
+        for bound in pending {
+            context.lock(&bound, RelationLockMode::AccessShare)?;
+            self.bindings.insert(bound.name.clone(), bound);
+        }
+        Ok(())
+    }
+}
+
+fn concurrently_dropped(oid: u32) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "42704".into(),
+        message: format!("role {oid} was concurrently dropped"),
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -34,12 +103,7 @@ impl RoleLockContext<'_> {
             sqlstate: "42704".into(),
             message: format!("role \"{name}\" does not exist"),
         })?;
-        Ok(RoleBinding {
-            name: name.to_string(),
-            oid: u32::try_from(role.oid)
-                .map_err(|_| SQLError::Internal("invalid role OID".into()))?,
-            object_id: role.object_id,
-        })
+        RoleBinding::from_definition(role)
     }
 
     /// Never bind the name again after waiting: a replacement role must not acquire the old role's dependencies.
@@ -68,10 +132,7 @@ impl RoleLockContext<'_> {
         {
             Ok(())
         } else {
-            Err(SQLError::Routine {
-                sqlstate: "42704".into(),
-                message: format!("role {} was concurrently dropped", bound.oid),
-            })
+            Err(concurrently_dropped(bound.oid))
         }
     }
 }

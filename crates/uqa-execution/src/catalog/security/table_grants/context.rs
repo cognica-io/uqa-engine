@@ -46,6 +46,7 @@ pub struct TableGrantContext<'a> {
     pub writer: &'a dyn SchemaStatementWriter,
     pub bindings: &'a dyn RelationLockCatalog,
     pub locks: &'a dyn RelationLockSession,
+    pub shared_locks: &'a dyn crate::row_locks::shared_objects::SharedObjectLockSession,
     pub rows: &'a dyn RowLockSession,
     pub system: &'a dyn super::super::system_relations::SystemRelationSecurityState,
     pub resolution: &'a dyn TableGrantResolution,

@@ -428,6 +428,7 @@ fn foreign_acl_candidates_validate_columns_without_mutating_the_source_security(
         vec![(&target, security.clone(), vec!["id".into()])],
         &application,
         &mut Vec::new(),
+        &mut std::collections::BTreeSet::new(),
     )
     .unwrap();
     assert_eq!(updates.len(), 1);
@@ -436,7 +437,8 @@ fn foreign_acl_candidates_validate_columns_without_mutating_the_source_security(
     assert!(foreign_table_privilege_updates(
         vec![(&target, security, vec!["different".into()])],
         &application,
-        &mut Vec::new()
+        &mut Vec::new(),
+        &mut std::collections::BTreeSet::new()
     )
     .is_err());
 }

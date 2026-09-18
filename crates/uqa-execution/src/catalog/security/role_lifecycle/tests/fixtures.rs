@@ -250,7 +250,7 @@ impl RolePublication for Catalog {
 }
 impl RoleNotices for Catalog {
     fn notice(&self, level: &str, message: &str) {
-        assert!(self.roles.try_borrow().is_err());
+        self.released();
         self.event(&format!("{level}: {message}"));
     }
 }

@@ -10,27 +10,14 @@ mod locking;
 mod targets;
 mod updates;
 pub use context::{TableGrantContext, TableGrantInputs};
-use targets::{
-    validated_foreign_table_grant_targets, validated_table_grant_targets,
-    validated_view_grant_targets,
-};
-use updates::{persist_table_privilege_updates, system_privilege_updates, table_privilege_updates};
+mod prepared;
+use updates::persist_table_privilege_updates;
 use uqa_sql::{
     ast::{
-        GrantSequenceStmt, GrantSequenceTarget, GrantTableStmt, GrantTableTarget,
-        SequenceRevokeBehavior, TableRevokeBehavior,
+        GrantSequenceStmt, GrantSequenceTarget, GrantTableStmt, SequenceRevokeBehavior,
+        TableRevokeBehavior,
     },
-    catalog::{
-        roles::resolve_role_reference,
-        security::{
-            table::{requested_acl_privileges, RequestedTablePrivileges},
-            table_grants::{
-                foreign_table_privilege_updates, table_sequence_privileges,
-                validate_table_acl_roles, validate_table_grant_target_kinds,
-                view_privilege_updates, ResolvedTableGrantTarget, TableGrantApplication,
-            },
-        },
-    },
+    catalog::security::table_grants::{table_sequence_privileges, ResolvedTableGrantTarget},
     SQLError,
 };
 pub fn grant_table_privileges(
@@ -44,64 +31,37 @@ pub fn grant_table_privileges(
 impl TableGrantContext<'_> {
     pub fn grant_table_privileges(&self, statement: &GrantTableStmt) -> Result<(), SQLError> {
         let targets = locking::lock_targets(self, statement)?;
-        self.writer.prepare_writer()?;
-        let grantees = statement
-            .grantees
-            .iter()
-            .map(|role| resolve_role_reference(self.names, role))
-            .collect::<Vec<_>>();
-        let requested_grantor = statement
-            .grantor
-            .as_ref()
-            .map(|role| resolve_role_reference(self.names, role));
-        let current_user = self.names.current_user_name();
-        let roles = self.roles.role_definitions();
-        validate_table_acl_roles(
-            statement,
-            &grantees,
-            requested_grantor.as_deref(),
-            &current_user,
-            &roles,
-        )?;
-
-        validate_table_grant_target_kinds(statement, &targets)?;
-        let has_table_relations = targets.iter().any(|target| {
-            matches!(
-                target.kind,
-                "table" | "view" | "materialized view" | "foreign table"
-            )
-        });
-        let requested_privileges = if has_table_relations
-            || matches!(
-                statement.target,
-                GrantTableTarget::AllTablesInSchemas { .. }
-            ) {
-            requested_acl_privileges(&statement.privileges)?
-        } else {
-            RequestedTablePrivileges {
-                table: Vec::new(),
-                columns: Vec::new(),
+        let mut held = super::roles::locking::RoleDependencyLocks::default();
+        let role_locks = super::roles::locking::RoleLockContext {
+            roles: self.roles,
+            session: self.shared_locks,
+        };
+        let mut writer_prepared = false;
+        let prepared = loop {
+            let candidate = prepared::prepare(self, statement, &targets)?;
+            let pending = held.missing(&candidate.roles, &candidate.dependencies)?;
+            if !pending.is_empty() {
+                drop(candidate);
+                held.acquire(&role_locks, pending)?;
+                writer_prepared = false;
+            } else if writer_prepared {
+                break candidate;
+            } else {
+                drop(candidate);
+                self.writer.prepare_writer()?;
+                writer_prepared = true;
             }
         };
-        let memberships = self.roles.role_memberships();
-        let table_targets = validated_table_grant_targets(self, &targets, &requested_privileges)?;
-        let view_targets = validated_view_grant_targets(self, &targets, &requested_privileges)?;
-        let foreign_targets =
-            validated_foreign_table_grant_targets(self, &targets, &requested_privileges)?;
-        let mut notices = Vec::new();
-        let application = TableGrantApplication {
-            statement,
-            grantees: &grantees,
-            requested: &requested_privileges,
-            current_user: &current_user,
-            roles: &roles,
-            memberships: &memberships,
-        };
-        let updates = table_privilege_updates(table_targets, &application, &mut notices)?;
-        let view_updates = view_privilege_updates(view_targets, &application, &mut notices)?;
-        let foreign_updates =
-            foreign_table_privilege_updates(foreign_targets, &application, &mut notices)?;
-        let system_updates = system_privilege_updates(self, &targets, &application, &mut notices)?;
+        let prepared::PreparedTableGrant {
+            updates,
+            view_updates,
+            foreign_updates,
+            system_updates,
+            roles,
+            memberships,
+            notices,
+            ..
+        } = prepared;
         persist_table_privilege_updates(self, &updates, &view_updates, &foreign_updates)?;
         for update in &system_updates {
             update.persist(self.catalog).map_err(|error| {

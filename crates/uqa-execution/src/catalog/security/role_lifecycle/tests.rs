@@ -186,19 +186,20 @@ fn drop_reports_grantor_dependency_before_object_catalog_reads() {
     assert!(
         matches!(error, SQLError::Routine { sqlstate, message } if sqlstate == "2BP01" && message == "role \"grantor\" cannot be dropped because some objects depend on it: privileges for membership of role member in role team")
     );
-    assert_eq!(
-        *catalog.events.borrow(),
-        [
-            "current",
-            "session",
-            "writer",
-            "write roles",
-            "NOTICE: role \"missing\" does not exist, skipping",
-            "write memberships",
-            "release memberships",
-            "release roles"
-        ]
-    );
+    let events = catalog.events.borrow();
+    let lock = events
+        .iter()
+        .position(|event| event == "lock role")
+        .unwrap();
+    let writer = events.iter().position(|event| event == "writer").unwrap();
+    assert!(lock < writer);
+    assert!(events
+        .iter()
+        .any(|event| event == "NOTICE: role \"missing\" does not exist, skipping"));
+    assert!(!events
+        .iter()
+        .any(|event| ["database", "schemas", "tables"].contains(&event.as_str())));
+    drop(events);
     assert_eq!(*catalog.roles.borrow(), roles);
     assert_eq!(catalog.epoch.get(), 0);
 }
@@ -226,4 +227,52 @@ fn set_role_releases_authorization_guards_before_changing_current_identity() {
     assert!(set_role(&catalog.context(), "missing").is_err());
     assert_eq!(*catalog.current.borrow(), "target");
     assert_eq!(*catalog.events.borrow(), ["read roles", "release roles"]);
+}
+
+#[test]
+fn a_non_superuser_admin_cannot_drop_a_superuser_role() {
+    let catalog = Catalog::new();
+    catalog.role("creator", &[RoleAttribute::CreateRole]);
+    catalog.role("privileged", &[RoleAttribute::Superuser]);
+    catalog.membership("privileged", "creator", "uqa");
+    *catalog.current.borrow_mut() = "creator".into();
+    let error = drop_roles(
+        &catalog.context(),
+        &DropRoleStmt {
+            names: vec!["privileged".into()],
+            if_exists: false,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42501"));
+    assert!(!catalog
+        .events
+        .borrow()
+        .iter()
+        .any(|event| event == "writer" || event == "lock role"));
+    assert!(catalog.roles.borrow().contains_key("privileged"));
+}
+
+#[test]
+fn drop_requires_createrole_before_missing_role_notices_or_current_user_checks() {
+    let catalog = Catalog::new();
+    catalog.role("limited", &[]);
+    *catalog.current.borrow_mut() = "limited".into();
+    for name in ["missing", "limited"] {
+        catalog.events.borrow_mut().clear();
+        let error = drop_roles(
+            &catalog.context(),
+            &DropRoleStmt {
+                names: vec![name.into()],
+                if_exists: true,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42501"));
+        assert!(!catalog
+            .events
+            .borrow()
+            .iter()
+            .any(|event| event.starts_with("NOTICE") || event == "writer" || event == "lock role"));
+    }
 }

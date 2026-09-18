@@ -109,6 +109,7 @@ impl TableGrantInputs for Engine {
             writer: self,
             bindings: self,
             locks: self,
+            shared_locks: self,
             rows: self,
             system: self,
             resolution: self,

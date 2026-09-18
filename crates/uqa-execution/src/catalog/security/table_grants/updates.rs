@@ -26,6 +26,7 @@ pub(super) fn system_privilege_updates(
     targets: &[ResolvedTableGrantTarget],
     application: &TableGrantApplication<'_>,
     notices: &mut Vec<(&'static str, String)>,
+    dependencies: &mut std::collections::BTreeSet<String>,
 ) -> Result<Vec<SystemPrivilegeUpdate>, SQLError> {
     let mut updates = Vec::new();
     for target in targets {
@@ -39,6 +40,11 @@ pub(super) fn system_privilege_updates(
         )?;
         let current = context.system.system_relation_security(relation);
         let (next, grantable) = application.apply(&current)?;
+        uqa_sql::catalog::security::dependencies::added_table_acl_roles(
+            &current,
+            &next,
+            dependencies,
+        );
         uqa_sql::catalog::security::system_relations::validate_security(
             relation,
             &next,
@@ -83,11 +89,17 @@ pub(super) fn table_privilege_updates<'a>(
     targets: Vec<(&ResolvedTableGrantTarget, Box<dyn TableGrantState + 'a>)>,
     application: &TableGrantApplication<'_>,
     notices: &mut Vec<(&'static str, String)>,
+    dependencies: &mut std::collections::BTreeSet<String>,
 ) -> Result<Vec<TablePrivilegeUpdate<'a>>, SQLError> {
     let mut updates = Vec::new();
     for (target, table) in targets {
         let current = table.security();
         let (next, grantable) = application.apply(&current)?;
+        uqa_sql::catalog::security::dependencies::added_table_acl_roles(
+            &current,
+            &next,
+            dependencies,
+        );
         application.record_warning(grantable, &target.relation, notices);
         if next != current {
             updates.push((target.name.clone(), table, next));

@@ -373,11 +373,17 @@ pub fn view_privilege_updates(
     targets: Vec<(&ResolvedTableGrantTarget, StoredView)>,
     application: &TableGrantApplication<'_>,
     notices: &mut Vec<(&'static str, String)>,
+    dependencies: &mut std::collections::BTreeSet<String>,
 ) -> Result<Vec<ViewPrivilegeUpdate>, SQLError> {
     let mut updates = Vec::new();
     for (target, mut view) in targets {
         let current = view.security();
         let (next, grantable) = application.apply(&current)?;
+        crate::catalog::security::dependencies::added_table_acl_roles(
+            &current,
+            &next,
+            dependencies,
+        );
         let columns = view.output_columns.as_deref().ok_or_else(|| {
             SQLError::Internal(format!(
                 "loaded view `{}` has no durable public column metadata",
@@ -404,10 +410,16 @@ pub fn foreign_table_privilege_updates(
     targets: Vec<ForeignTableGrantTarget<'_>>,
     application: &TableGrantApplication<'_>,
     notices: &mut Vec<(&'static str, String)>,
+    dependencies: &mut std::collections::BTreeSet<String>,
 ) -> Result<Vec<ForeignTablePrivilegeUpdate>, SQLError> {
     let mut updates = Vec::new();
     for (target, current, columns) in targets {
         let (next, grantable) = application.apply(&current)?;
+        crate::catalog::security::dependencies::added_table_acl_roles(
+            &current,
+            &next,
+            dependencies,
+        );
         validate_table_security_invariants(&next, Some(&columns), application.roles).map_err(
             |error| {
                 SQLError::Internal(format!(

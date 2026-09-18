@@ -7,6 +7,7 @@
 use crate::Engine;
 
 mod coordination;
+mod dependencies;
 mod identity;
 mod migration;
 mod publication;

@@ -36,17 +36,23 @@ pub struct RoleValidationContext<'a> {
 
 pub fn require_role_creation(context: &RoleValidationContext<'_>) -> Result<(), SQLError> {
     let current = context.names.current_user_name();
-    let allowed = context
-        .roles
-        .role_definitions()
-        .get(&current)
-        .is_some_and(|role| {
-            role.has(RoleAttribute::Superuser) || role.has(RoleAttribute::CreateRole)
-        });
+    require_createrole(&context.roles.role_definitions(), &current, "create role")
+}
+
+fn require_createrole(
+    roles: &BTreeMap<String, RoleDefinition>,
+    current: &str,
+    action: &str,
+) -> Result<(), SQLError> {
+    let allowed = roles.get(current).is_some_and(|role| {
+        role.has(RoleAttribute::Superuser) || role.has(RoleAttribute::CreateRole)
+    });
     if allowed {
         Ok(())
     } else {
-        Err(insufficient_privilege("permission denied to create role"))
+        Err(insufficient_privilege(&format!(
+            "permission denied to {action}"
+        )))
     }
 }
 
@@ -235,6 +241,7 @@ pub fn resolve_drop_role_names(
     session: &str,
     snapshot: &BTreeMap<String, RoleDefinition>,
 ) -> Result<Vec<String>, SQLError> {
+    require_createrole(snapshot, current, "drop role")?;
     let mut names = Vec::new();
     for requested in &statement.names {
         let name = resolve_role_reference(context.names, requested);
@@ -251,16 +258,34 @@ pub fn resolve_drop_role_names(
                 message: format!("role \"{name}\" does not exist"),
             });
         }
-        if name == current || name == session {
-            return Err(SQLError::Routine {
-                sqlstate: "55006".into(),
-                message: "current user cannot be dropped".into(),
-            });
-        }
-        require_role_administration_for(context.roles, snapshot, current, &name, "drop role")?;
+        require_role_drop_authority(context, snapshot, current, session, &name)?;
         names.push(name);
     }
     Ok(names)
+}
+
+pub fn require_role_drop_authority(
+    context: &RoleValidationContext<'_>,
+    roles: &BTreeMap<String, RoleDefinition>,
+    current: &str,
+    session: &str,
+    name: &str,
+) -> Result<(), SQLError> {
+    require_createrole(roles, current, "drop role")?;
+    if name == current || name == session {
+        return Err(SQLError::Routine {
+            sqlstate: "55006".into(),
+            message: "current user cannot be dropped".into(),
+        });
+    }
+    if roles
+        .get(name)
+        .is_some_and(|role| role.has(RoleAttribute::Superuser))
+        && !role_is_superuser(roles, current)
+    {
+        return Err(insufficient_privilege("permission denied to drop role"));
+    }
+    require_role_administration_for(context.roles, roles, current, name, "drop role")
 }
 
 pub fn bind_grant_role_statement(
