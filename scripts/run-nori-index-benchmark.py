@@ -80,6 +80,7 @@ def check(report: dict, limits: dict, baseline: dict | None = None, *, expected:
     ceilings = limits["allocation_ceilings"][str(report["pointer_bits"])]
     if set(ceilings) != set(expected) or set(limits["outputs"]) != set(expected):
         raise RuntimeError("indexing limits do not cover every workload")
+    allocation_failures = []
     for name, row in rows.items():
         output = limits["outputs"][name]
         if not isinstance(output, dict) or set(output) != {"graph_sha256", "field_length", "posting_count"}:
@@ -93,7 +94,9 @@ def check(report: dict, limits: dict, baseline: dict | None = None, *, expected:
             if type(ceiling) is not int or (not key.endswith("_net") and ceiling < 0):
                 raise RuntimeError(f"invalid indexing allocation ceiling: {name}/{key}")
             if value > ceiling:
-                raise RuntimeError(f"indexing allocation regression: {name}/{key}: {value} > {ceiling}")
+                allocation_failures.append(f"{name}/{key}: {value} > {ceiling}")
+    if allocation_failures:
+        raise RuntimeError("indexing allocation regression:\n" + "\n".join(allocation_failures))
     maximum = limits["timing_max_ratio"]
     if isinstance(maximum, bool) or not math.isfinite(maximum) or maximum <= 1:
         raise RuntimeError("indexing timing ceiling must be a finite ratio greater than one")

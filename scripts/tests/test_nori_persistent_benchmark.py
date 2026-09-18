@@ -50,6 +50,30 @@ def allocation_fixture(provider="sqlite"):
 
 
 class NoriPersistentBenchmarkTest(unittest.TestCase):
+    def test_all_workload_allocation_excesses_are_reported_in_one_check(self):
+        for provider in ("sqlite", "redb"):
+            report, limits = allocation_fixture(provider)
+            ceilings = limits["allocation_ceilings"][benchmark.target_key(report)]
+            expected = set()
+            for name, counters in ceilings.items():
+                for key in counters:
+                    counters[key] -= 1
+                    expected.add(f"{name}/{key}: {counters[key] + 1} > {counters[key]}")
+            with self.subTest(provider=provider), self.assertRaises(RuntimeError) as failure:
+                benchmark.check(report, limits, provider)
+            lines = str(failure.exception).splitlines()
+            self.assertEqual(lines[0], "indexing allocation regression:")
+            self.assertEqual(len(lines), len(expected) + 1)
+            self.assertEqual(set(lines[1:]), expected)
+
+    def test_late_graph_mismatch_is_not_masked_by_an_earlier_allocation_failure(self):
+        report, limits = allocation_fixture("redb")
+        first = report["measurements"][0]["name"]
+        limits["allocation_ceilings"][benchmark.target_key(report)][first]["count_total"] -= 1
+        report["measurements"][-1]["graph_sha256"] = "d" * 64
+        with self.assertRaisesRegex(RuntimeError, "graph, metadata, or statistics changed"):
+            benchmark.check(report, limits, "redb")
+
     def test_allocation_only_keeps_every_counter_output_and_reopen_gate(self):
         for provider in ("sqlite", "redb"):
             report, limits = allocation_fixture(provider)
