@@ -119,6 +119,10 @@ impl RelationLockCatalog for Engine {
     fn relation_object_id(&self, name: &str) -> Result<Option<[u8; 16]>, SQLError> {
         let relation =
             uqa_core::RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
+        if let Some(system) = uqa_sql::catalog::SystemRelation::at(&relation.schema, &relation.name)
+        {
+            return Ok(Some(system.object_id()));
+        }
         if let Some(table) = self.storage.tables.read().get(&relation) {
             return Ok(Some(table.object_id()));
         }

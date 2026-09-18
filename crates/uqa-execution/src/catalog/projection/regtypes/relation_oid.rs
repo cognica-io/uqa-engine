@@ -49,7 +49,7 @@ fn resolved_regclass_oid(
     canonical: &str,
     kind: &str,
 ) -> Result<Option<i64>, SQLError> {
-    if let Some(relation) = uqa_sql::catalog::VirtualRelation::from_qualified_name(canonical) {
+    if let Some(relation) = uqa_sql::catalog::SystemRelation::from_qualified_name(canonical) {
         return Ok(Some(relation.oid()));
     }
     if kind == "sequence" {

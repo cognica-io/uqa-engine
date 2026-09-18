@@ -76,7 +76,7 @@ impl CatalogReadView {
     }
 
     fn relation_exists(&self, relation: &uqa_core::RelationIdentity) -> bool {
-        uqa_sql::catalog::VirtualRelation::at(&relation.schema, &relation.name).is_some()
+        uqa_sql::catalog::SystemRelation::at(&relation.schema, &relation.name).is_some()
             || self.snapshot.tables.contains_key(relation)
             || self.snapshot.definitions.views.contains_key(relation)
             || self.snapshot.definitions.sequences.contains_key(relation)
@@ -116,7 +116,7 @@ impl CatalogReadView {
         }
         for relation in self.relation_lookup_candidates(resolution, name)? {
             let kind = if let Some(virtual_relation) =
-                uqa_sql::catalog::VirtualRelation::at(&relation.schema, &relation.name)
+                uqa_sql::catalog::SystemRelation::at(&relation.schema, &relation.name)
             {
                 Some(virtual_relation.kind())
             } else if self.snapshot.tables.contains_key(&relation) {

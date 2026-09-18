@@ -31,6 +31,8 @@ The command returns no rows and the completion tag `LOCK TABLE`. Acquired locks 
 
 Relation-wide `MAINTAIN`, `UPDATE`, `DELETE` or `TRUNCATE` privileges permit every mode. `INSERT` permits `ACCESS SHARE`, `ROW SHARE` and `ROW EXCLUSIVE`; `SELECT` permits only `ACCESS SHARE`. Column-only grants do not authorize explicit table locks. Missing privileges report `42501`. Descendants use the parent's authorization; view sources use the view owner's privileges unless that view has `security_invoker=true`, in which case the invoking role is checked. Sequences, indexes, foreign tables and materialized views are invalid direct targets (`42809`).
 
+System catalogs participate in the same transaction and savepoint lock lifetime. Catalog queries retain `ACCESS SHARE` on the selected relation and the catalog relations referenced by a system view; explicit `LOCK` recursively applies the requested mode to those references. Bootstrap public `SELECT` permits `ACCESS SHARE` on PostgreSQL catalog views, including `pg_user`, whose private source catalogs are checked as the view owner. Direct access to lock `pg_authid` or `pg_shadow` requires their own privileges. The bootstrap public `UPDATE` privilege on `pg_settings` permits every explicit lock mode.
+
 ```sql execute
 CREATE TABLE lock_example (id INTEGER PRIMARY KEY);
 BEGIN;

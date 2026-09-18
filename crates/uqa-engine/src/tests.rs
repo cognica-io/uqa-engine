@@ -40,6 +40,7 @@ mod search_and_vectors;
 mod catalog;
 mod prepared;
 mod queries;
+mod system_catalog_locks;
 mod table_locks;
 mod virtual_catalog_names;
 

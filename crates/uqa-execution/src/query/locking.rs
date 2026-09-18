@@ -296,7 +296,17 @@ fn lock_named_query_relation<S: Clone + Send + Sync + 'static>(
     };
     let canonical = binding.name;
     locked.insert(canonical.clone());
-    if uqa_sql::catalog::VirtualRelation::from_qualified_name(&canonical).is_some() {
+    if let Some(relation) = uqa_sql::catalog::SystemRelation::from_qualified_name(&canonical) {
+        for source in relation.view_sources() {
+            lock_named_query_relation(
+                context,
+                &source.qualified_name(),
+                true,
+                false,
+                locked,
+                visiting_views,
+            )?;
+        }
         return Ok(());
     }
     match binding.value {

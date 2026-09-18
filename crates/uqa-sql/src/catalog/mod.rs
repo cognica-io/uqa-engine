@@ -19,6 +19,8 @@ pub const AG_CATALOG_SCHEMA: &str = "ag_catalog";
 
 mod virtual_relations;
 pub use virtual_relations::{resolve_virtual_relation, VirtualRelation};
+mod system_relations;
+pub use system_relations::SystemRelation;
 
 impl VirtualRelation {
     pub const fn accepts_row_lock(self) -> bool {

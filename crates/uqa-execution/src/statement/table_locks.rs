@@ -13,10 +13,10 @@ use crate::row_locks::{
     RelationLockMode,
 };
 use uqa_sql::{
-    ast::{LockTableStmt, TableLockMode},
+    ast::{LockTableStmt, LockTableTarget, TableLockMode},
     catalog::{
         resolution::RelationResolution, roles::guards::RoleCatalogGuards, security::TableSecurity,
-        stored_view::StoredView,
+        stored_view::StoredView, SystemRelation,
     },
     semantics::table_locks::{ensure_lock_privilege, view_lock_targets},
     SQLError, SQLResult,
@@ -50,7 +50,13 @@ struct BoundRelation {
     name: String,
     kind: &'static str,
     metadata: TableLockMetadata,
-    view: Option<StoredView>,
+    source: RelationSource,
+}
+
+enum RelationSource {
+    Table,
+    View(Box<StoredView>),
+    System(SystemRelation),
 }
 
 impl TableLockContext<'_> {
@@ -70,6 +76,17 @@ impl TableLockContext<'_> {
             }
             RelationResolution::MissingRelation => return Err(SQLError::UnknownTable(name.into())),
         };
+        if let Some(relation) = SystemRelation::from_qualified_name(&canonical) {
+            return Ok(Some(BoundRelation {
+                name: canonical,
+                kind,
+                metadata: TableLockMetadata {
+                    object_id: relation.object_id(),
+                    security: relation.bootstrap_security(),
+                },
+                source: RelationSource::System(relation),
+            }));
+        }
         match kind {
             "table" => self
                 .catalog
@@ -78,7 +95,7 @@ impl TableLockContext<'_> {
                     name: canonical,
                     kind,
                     metadata,
-                    view: None,
+                    source: RelationSource::Table,
                 }),
             "view" => self.catalog.view(&canonical)?.map(|view| BoundRelation {
                 name: canonical,
@@ -87,7 +104,7 @@ impl TableLockContext<'_> {
                     object_id: view.object_id,
                     security: view.security(),
                 },
-                view: Some(view),
+                source: RelationSource::View(Box::new(view)),
             }),
             _ if view_source => return Ok(None),
             _ => {
@@ -159,23 +176,39 @@ impl TableLockContext<'_> {
         statement: &LockTableStmt,
         ancestors: &mut Vec<[u8; 16]>,
     ) -> Result<(), SQLError> {
-        let Some(view) = relation.view else {
-            return if descendants {
-                self.lock_descendants(&relation.name, statement)
-            } else {
-                Ok(())
-            };
-        };
-        if ancestors.contains(&view.object_id) {
+        if ancestors.contains(&relation.metadata.object_id) {
             return Ok(());
         }
-        ancestors.push(view.object_id);
-        let subject = if view.security_invoker() {
-            self.session.current_user()
-        } else {
-            view.role_owner.clone()
+        let (targets, subject) = match relation.source {
+            RelationSource::Table => {
+                return if descendants {
+                    self.lock_descendants(&relation.name, statement)
+                } else {
+                    Ok(())
+                };
+            }
+            RelationSource::View(view) => (
+                view_lock_targets(&view.query)?,
+                if view.security_invoker() {
+                    self.session.current_user()
+                } else {
+                    view.role_owner.clone()
+                },
+            ),
+            RelationSource::System(system) => (
+                system
+                    .view_sources()
+                    .iter()
+                    .map(|source| LockTableTarget {
+                        name: source.qualified_name(),
+                        include_descendants: false,
+                    })
+                    .collect(),
+                relation.metadata.security.role_owner,
+            ),
         };
-        for target in view_lock_targets(&view.query)? {
+        ancestors.push(relation.metadata.object_id);
+        for target in targets {
             if self
                 .resolve(&target.name, true, true)?
                 .is_some_and(|source| ancestors.contains(&source.metadata.object_id))

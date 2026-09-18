@@ -661,9 +661,8 @@ fn format_regclass(
     catalog: &RegtypeOutputCatalog,
     oid: i64,
 ) -> Result<Option<String>, SQLError> {
-    if let Some(relation) = uqa_sql::catalog::VirtualRelation::ALL
-        .iter()
-        .find(|relation| relation.oid() == oid)
+    if let Some(relation) =
+        uqa_sql::catalog::SystemRelation::all().find(|relation| relation.oid() == oid)
     {
         let schema = relation.namespace();
         let local = relation.name();

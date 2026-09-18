@@ -23,6 +23,7 @@ struct Fixture {
     memberships: BTreeMap<RoleMembershipKey, RoleMembership>,
     manager: crate::row_locks::RowLockManager,
     cancel: uqa_core::CancellationToken,
+    user: String,
 }
 
 impl Fixture {
@@ -41,6 +42,7 @@ impl Fixture {
             memberships: BTreeMap::new(),
             manager: crate::row_locks::RowLockManager::new(),
             cancel: uqa_core::CancellationToken::new(),
+            user: "uqa".into(),
         }
     }
     fn execute(&self, sql: &str) -> Result<SQLResult, SQLError> {
@@ -75,11 +77,15 @@ impl TableLockCatalog for Fixture {
         } else {
             format!("public.{name}")
         };
-        Ok(if self.tables.borrow().contains_key(&canonical) {
-            RelationResolution::Found(canonical, "table")
-        } else {
-            RelationResolution::MissingRelation
-        })
+        Ok(
+            if let Some(relation) = SystemRelation::from_qualified_name(&canonical) {
+                RelationResolution::Found(canonical, relation.kind())
+            } else if self.tables.borrow().contains_key(&canonical) {
+                RelationResolution::Found(canonical, "table")
+            } else {
+                RelationResolution::MissingRelation
+            },
+        )
     }
     fn table(&self, name: &str) -> Result<Option<TableLockMetadata>, SQLError> {
         Ok(self.tables.borrow().get(name).map(|id| TableLockMetadata {
@@ -100,7 +106,7 @@ impl TableLockSession for Fixture {
         true
     }
     fn current_user(&self) -> String {
-        "uqa".into()
+        self.user.clone()
     }
 }
 
@@ -256,4 +262,104 @@ impl RelationLockCatalog for Fixture {
             .iter()
             .find_map(|(name, id)| (*id == object_id).then(|| name.clone()))
     }
+}
+
+#[test]
+fn system_views_recurse_with_their_owner_and_preserve_reference_order() {
+    let mut fixture = Fixture::new();
+    let mut reader = RoleDefinition::bootstrap();
+    reader.name = "reader".into();
+    reader.attributes.clear();
+    fixture.roles.insert("reader".into(), reader);
+    fixture.user = "reader".into();
+    fixture
+        .execute("LOCK pg_catalog.pg_user IN ACCESS SHARE MODE")
+        .unwrap();
+    assert_eq!(
+        *fixture.acquired.borrow(),
+        [
+            "pg_catalog.pg_user",
+            "pg_catalog.pg_shadow",
+            "pg_catalog.pg_authid",
+            "pg_catalog.pg_db_role_setting"
+        ]
+    );
+    assert_eq!(
+        fixture
+            .execute("LOCK pg_catalog.pg_authid IN ACCESS SHARE MODE")
+            .unwrap_err()
+            .sqlstate(),
+        Some("42501")
+    );
+    assert_eq!(
+        fixture
+            .execute("LOCK pg_catalog.pg_roles IN ROW SHARE MODE")
+            .unwrap_err()
+            .sqlstate(),
+        Some("42501")
+    );
+    fixture
+        .execute("LOCK pg_catalog.pg_settings IN ACCESS EXCLUSIVE MODE")
+        .unwrap();
+}
+
+#[test]
+fn system_view_source_nowait_conflict_keeps_earlier_locks_until_transaction_end() {
+    let fixture = Fixture::new();
+    fixture
+        .manager
+        .try_acquire_relation(
+            2,
+            fixture.manager.table_key("pg_catalog.pg_authid"),
+            RelationLockMode::AccessExclusive,
+            0,
+            &fixture.cancel,
+        )
+        .unwrap();
+    assert_eq!(
+        fixture
+            .execute("LOCK pg_catalog.pg_user IN ACCESS SHARE MODE NOWAIT")
+            .unwrap_err()
+            .sqlstate(),
+        Some("55P03")
+    );
+    assert_eq!(
+        *fixture.acquired.borrow(),
+        [
+            "pg_catalog.pg_user",
+            "pg_catalog.pg_shadow",
+            "pg_catalog.pg_authid"
+        ]
+    );
+    assert!(!fixture
+        .manager
+        .try_acquire_relation(
+            2,
+            fixture.manager.table_key("pg_catalog.pg_user"),
+            RelationLockMode::AccessExclusive,
+            0,
+            &fixture.cancel
+        )
+        .unwrap());
+    assert!(fixture
+        .manager
+        .try_acquire_relation(
+            2,
+            fixture.manager.table_key("pg_catalog.pg_db_role_setting"),
+            RelationLockMode::AccessExclusive,
+            0,
+            &fixture.cancel
+        )
+        .unwrap());
+    fixture.manager.release_session(1);
+    assert!(fixture
+        .manager
+        .try_acquire_relation(
+            2,
+            fixture.manager.table_key("pg_catalog.pg_user"),
+            RelationLockMode::AccessExclusive,
+            0,
+            &fixture.cancel
+        )
+        .unwrap());
 }
