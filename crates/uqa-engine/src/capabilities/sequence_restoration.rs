@@ -30,3 +30,32 @@ impl SequenceRestoreRegistry for Engine {
         *self.durable.sequence_security.write() = registry.security;
     }
 }
+
+impl uqa_execution::catalog::sequence::snapshot::SequenceSnapshotSource for Engine {
+    fn sequence_read_snapshot(
+        &self,
+    ) -> uqa_storage::StorageBackendResult<
+        uqa_execution::catalog::sequence::snapshot::SequenceReadSnapshot,
+    > {
+        use uqa_execution::catalog::{
+            security::roles::persistence::RoleCatalogSnapshot,
+            sequence::snapshot::{read_sequence_snapshot, SequenceReadSnapshot},
+        };
+        let session = self.open_nontransactional_sequence_session()?;
+        read_sequence_snapshot(
+            SequenceReadSnapshot {
+                sequences: self.durable.sequences.snapshot(),
+                object_ids: self.durable.sequence_object_ids.snapshot(),
+                persistence: self.durable.sequence_persistence.snapshot(),
+                security: self.durable.sequence_security.snapshot(),
+                roles: RoleCatalogSnapshot {
+                    roles: self.durable.roles.snapshot(),
+                    memberships: self.durable.role_memberships.snapshot(),
+                },
+            },
+            self.storage.catalog.as_deref(),
+            session.as_ref(),
+            self.versioned_backend_transactions(),
+        )
+    }
+}

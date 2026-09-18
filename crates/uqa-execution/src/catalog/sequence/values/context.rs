@@ -12,10 +12,7 @@ use super::super::{
     },
     SequenceState,
 };
-use crate::catalog::{
-    sequence::restoration::SequencePersistenceRead,
-    sequence_introspection::SequenceIntrospectionCatalog,
-};
+use crate::catalog::sequence::snapshot::SequenceSnapshotSource;
 use std::{collections::BTreeMap, ops::DerefMut};
 use uqa_core::RelationIdentity;
 use uqa_sql::{catalog::security::sequence_inquiry::SequencePrivilegeInquiry, SQLError};
@@ -35,7 +32,6 @@ pub trait SequenceSessionWrite {
 }
 pub trait SequenceValueRuntime {
     fn cancellation(&self) -> &uqa_core::CancellationToken;
-    fn persistence(&self) -> SequencePersistenceRead<'_>;
     fn states_write(&self) -> SequenceStatesWrite<'_>;
     fn caches(&self) -> SequenceCachesWrite<'_>;
     fn session_read(&self) -> Box<dyn SequenceSessionRead + '_>;
@@ -53,7 +49,7 @@ pub trait SequenceValueRuntime {
     );
 }
 pub struct SequenceValueContext<'a> {
-    pub sequences: &'a dyn SequenceIntrospectionCatalog,
+    pub snapshots: &'a dyn SequenceSnapshotSource,
     pub privileges: SequencePrivilegeInquiry<'a>,
     pub runtime: &'a dyn SequenceValueRuntime,
     pub storage: Option<&'a dyn CatalogFacade>,

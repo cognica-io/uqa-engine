@@ -7,15 +7,14 @@
 use crate::{Engine, NontransactionalSequenceValue};
 use std::cell::RefCell;
 use uqa_core::RelationIdentity;
-use uqa_execution::catalog::sequence::{
-    restoration::SequencePersistenceRead,
-    values::context::{
-        SequenceCachesWrite, SequenceSessionRead, SequenceSessionWrite, SequenceStatesWrite,
-        SequenceValueRuntime,
-    },
+use uqa_execution::catalog::sequence::values::context::{
+    SequenceCachesWrite, SequenceSessionRead, SequenceSessionWrite, SequenceStatesWrite,
+    SequenceValueRuntime,
 };
 use uqa_sql::{catalog::sequence_functions::value_error::SequenceValueError, SQLError};
 use uqa_storage::{PersistentStorageSession, StorageBackendResult};
+
+mod authority;
 
 struct RuntimeObserver<'a> {
     engine: &'a Engine,
@@ -27,9 +26,6 @@ struct RuntimeObserver<'a> {
 impl SequenceValueRuntime for RuntimeObserver<'_> {
     fn cancellation(&self) -> &uqa_core::CancellationToken {
         SequenceValueRuntime::cancellation(self.engine)
-    }
-    fn persistence(&self) -> SequencePersistenceRead<'_> {
-        SequenceValueRuntime::persistence(self.engine)
     }
     fn states_write(&self) -> SequenceStatesWrite<'_> {
         SequenceValueRuntime::states_write(self.engine)

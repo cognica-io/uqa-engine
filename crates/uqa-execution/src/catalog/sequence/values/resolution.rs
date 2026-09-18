@@ -4,93 +4,93 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Bind sequence value targets with the original name/OID and access-check order.
+//! Resolve values against one retained definition and authorization view.
+
 use super::{NextvalTarget, SequenceValueContext, SequenceValueError};
+use crate::catalog::sequence::snapshot::SequenceReadSnapshot;
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::resolution::RelationResolution;
+
+pub(super) enum ValueAccess {
+    Next,
+    Current,
+    Set,
+}
+
+enum ValueReference {
+    Name(String),
+    Oid(i64),
+}
+
 impl SequenceValueContext<'_> {
+    pub(super) fn read_snapshot(&self) -> Result<SequenceReadSnapshot, SequenceValueError> {
+        self.snapshots.sequence_read_snapshot().map_err(|error| {
+            super::persistence::sequence_storage_error("load sequence catalog", error)
+        })
+    }
+
     pub(super) fn resolve_sequence_value_target(
         &self,
         reference: &str,
-    ) -> Result<(String, RelationIdentity, [u8; 16]), SequenceValueError> {
+        access: ValueAccess,
+    ) -> Result<NextvalTarget, SequenceValueError> {
         let resolved = self
             .privileges
             .resolution
             .visible_relation_kind(reference)
             .map_err(SequenceValueError::Security)?;
-        let (name, kind) = match resolved {
-            RelationResolution::Found(name, kind) => (name, kind),
+        let target = match resolved {
+            RelationResolution::Found(name, "sequence") => ValueReference::Name(name),
+            RelationResolution::Found(_, kind) => {
+                return Err(SequenceValueError::WrongKind {
+                    name: reference.to_string(),
+                    kind,
+                });
+            }
             RelationResolution::MissingRelation | RelationResolution::MissingSchema(_) => {
-                return self
-                    .resolve_sequence_value_target_by_oid(reference)?
-                    .ok_or_else(|| SequenceValueError::Undefined(reference.to_string()));
+                ValueReference::Oid(
+                    reference
+                        .parse::<i64>()
+                        .map_err(|_| SequenceValueError::Undefined(reference.into()))?,
+                )
             }
         };
-        if kind != "sequence" {
-            return Err(SequenceValueError::WrongKind {
-                name: reference.to_string(),
-                kind,
-            });
-        }
-        // Relation lookup may retain an ordinary transaction snapshot. Sequence values use the current committed definition unless the caller has a private definition of its own.
-        self.sequences.refresh_sequences().map_err(|error| {
-            SequenceValueError::Internal(format!("load sequence catalog: {error}"))
-        })?;
-        let relation = RelationIdentity::from_legacy_name(&name)
-            .map_err(uqa_storage::StorageBackendError::Other)
-            .map_err(|error| {
-                SequenceValueError::Internal(format!("resolve sequence `{name}`: {error}"))
-            })?;
-        let object_id = self
-            .sequences
-            .object_ids()
-            .get(&relation)
-            .copied()
-            .ok_or_else(|| {
-                SequenceValueError::Internal(format!(
-                    "sequence `{name}` has no durable object identity"
-                ))
-            })?;
-        Ok((name, relation, object_id))
-    }
-    pub(super) fn resolve_sequence_value_target_by_oid(
-        &self,
-        reference: &str,
-    ) -> Result<Option<(String, RelationIdentity, [u8; 16])>, SequenceValueError> {
-        let Ok(oid) = reference.parse::<i64>() else {
-            return Ok(None);
+        let snapshot = self.read_snapshot()?;
+        let relation = match target {
+            ValueReference::Name(name) => {
+                RelationIdentity::from_legacy_name(&name).map_err(|error| {
+                    SequenceValueError::Internal(format!("resolve sequence `{name}`: {error}"))
+                })?
+            }
+            ValueReference::Oid(oid) => snapshot
+                .object_ids
+                .iter()
+                .find_map(|(relation, object_id)| {
+                    (crate::catalog::projection::sequence_relation_oid(*object_id) == oid)
+                        .then(|| relation.clone())
+                })
+                .ok_or_else(|| SequenceValueError::Undefined(reference.into()))?,
         };
-        self.sequences.refresh_sequences().map_err(|error| {
-            SequenceValueError::Internal(format!("load sequence catalog: {error}"))
-        })?;
-        let object_ids = self.sequences.object_ids();
-        Ok(object_ids.iter().find_map(|(relation, object_id)| {
-            (crate::catalog::projection::sequence_relation_oid(*object_id) == oid)
-                .then(|| (relation.qualified_name(), relation.clone(), *object_id))
-        }))
-    }
-    pub(super) fn resolve_nextval_target(
-        &self,
-        name: &str,
-    ) -> Result<NextvalTarget, SequenceValueError> {
-        let (name, relation, object_id) = self.resolve_sequence_value_target(name)?;
-        let state = self
-            .sequences
-            .states()
+        let name = relation.qualified_name();
+        let object_id = snapshot
+            .object_ids
             .get(&relation)
             .copied()
             .ok_or_else(|| SequenceValueError::Undefined(name.clone()))?;
-        let temporary = self
-            .runtime
-            .persistence()
+        let state = snapshot
+            .sequences
             .get(&relation)
-            .is_some_and(|persistence| {
-                *persistence == uqa_sql::ast::RelationPersistence::Temporary
-            });
-        self.privileges
-            .ensure_sequence_nextval_privilege(&name, &relation)?;
-        if self.runtime.current_transaction_is_read_only() && !temporary {
-            return Err(SequenceValueError::ReadOnly("nextval"));
+            .copied()
+            .ok_or_else(|| SequenceValueError::Undefined(name.clone()))?;
+        let temporary = snapshot.persistence.get(&relation)
+            == Some(&uqa_sql::ast::RelationPersistence::Temporary);
+        let privileges = snapshot.privileges(&self.privileges);
+        match access {
+            ValueAccess::Next => privileges.ensure_sequence_nextval_privilege(&name, &relation)?,
+            ValueAccess::Current => {
+                privileges.ensure_sequence_currval_privilege(&name, &relation)?;
+            }
+            ValueAccess::Set => privileges.ensure_sequence_setval_privilege(&name, &relation)?,
         }
         Ok(NextvalTarget {
             name,
@@ -99,5 +99,16 @@ impl SequenceValueContext<'_> {
             state,
             temporary,
         })
+    }
+
+    pub(super) fn resolve_nextval_target(
+        &self,
+        name: &str,
+    ) -> Result<NextvalTarget, SequenceValueError> {
+        let target = self.resolve_sequence_value_target(name, ValueAccess::Next)?;
+        if self.runtime.current_transaction_is_read_only() && !target.temporary {
+            return Err(SequenceValueError::ReadOnly("nextval"));
+        }
+        Ok(target)
     }
 }

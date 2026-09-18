@@ -43,7 +43,13 @@ impl Engine {
             return Ok(());
         };
         // A statement issued by a host callback while an outer statement is still executing must keep the outer statement's snapshot: replacing the backend read transaction underneath a running scan would mix snapshots or abort the outer cursor. Only the outermost statement of the session takes a fresh READ COMMITTED snapshot.
-        if self.session.row_lock_statements.lock().len() > 1 {
+        if self
+            .runtime
+            .sql_execution_depth
+            .load(std::sync::atomic::Ordering::Relaxed)
+            > 1
+            || self.session.row_lock_statements.lock().len() > 1
+        {
             return Ok(());
         }
         let _statement = self.runtime.statement_gate.lock();

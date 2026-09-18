@@ -24,6 +24,7 @@ pub struct RoleCatalogValues {
     pub memberships: BTreeMap<RoleMembershipKey, RoleMembership>,
 }
 
+#[derive(Clone)]
 pub struct RoleCatalogSnapshot {
     pub roles: Arc<BTreeMap<String, RoleDefinition>>,
     pub memberships: Arc<BTreeMap<RoleMembershipKey, RoleMembership>>,

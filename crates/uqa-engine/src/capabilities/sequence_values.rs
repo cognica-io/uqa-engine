@@ -11,12 +11,9 @@ use crate::{
 };
 use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
-use uqa_execution::catalog::sequence::{
-    restoration::SequencePersistenceRead,
-    values::context::{
-        SequenceCachesWrite, SequenceSessionRead, SequenceSessionWrite, SequenceStatesWrite,
-        SequenceValueContext, SequenceValueRuntime,
-    },
+use uqa_execution::catalog::sequence::values::context::{
+    SequenceCachesWrite, SequenceSessionRead, SequenceSessionWrite, SequenceStatesWrite,
+    SequenceValueContext, SequenceValueRuntime,
 };
 use uqa_sql::{catalog::sequence_functions::value_error::SequenceValueError, SQLError};
 use uqa_storage::{PersistentStorageSession, StorageBackendResult};
@@ -41,9 +38,6 @@ impl SequenceSessionWrite for SessionWrite<'_> {
 impl SequenceValueRuntime for Engine {
     fn cancellation(&self) -> &uqa_core::CancellationToken {
         &self.runtime.cancellation
-    }
-    fn persistence(&self) -> SequencePersistenceRead<'_> {
-        Box::new(self.durable.sequence_persistence.read())
     }
     fn states_write(&self) -> SequenceStatesWrite<'_> {
         Box::new(self.durable.sequences.write())
@@ -85,16 +79,35 @@ impl SequenceValueRuntime for Engine {
 impl Engine {
     pub(crate) fn sequence_value_context(&self) -> SequenceValueContext<'_> {
         SequenceValueContext {
-            sequences: self,
+            snapshots: self,
             privileges: self.sequence_privilege_inquiry(),
             runtime: self,
             storage: self.storage.catalog.as_deref(),
         }
     }
+
+    fn with_sequence_value_session(
+        &self,
+        operation: impl FnOnce(SequenceValueContext<'_>) -> Result<i64, SequenceValueError>,
+    ) -> Result<i64, String> {
+        let _statement = self.runtime.statement_gate.lock();
+        let outside_statement = self
+            .runtime
+            .sql_execution_depth
+            .load(std::sync::atomic::Ordering::Relaxed)
+            == 0
+            && self.session.row_lock_statements.lock().is_empty();
+        if outside_statement && self.transaction_depth() != 0 {
+            self.ensure_transaction_usable()
+                .map_err(|error| error.to_string())?;
+            self.prepare_explicit_statement_snapshot(true)
+                .map_err(|error| error.to_string())?;
+        }
+        operation(self.sequence_value_context()).map_err(|error| error.to_string())
+    }
+
     pub fn nextval(&self, name: &str) -> Result<i64, String> {
-        self.sequence_value_context()
-            .nextval(name)
-            .map_err(|error| error.to_string())
+        self.with_sequence_value_session(|values| values.nextval(name))
     }
     pub(crate) fn nextval_sql(&self, name: &str) -> Result<i64, SQLError> {
         self.sequence_value_context()
@@ -102,9 +115,7 @@ impl Engine {
             .map_err(SequenceValueError::into_sql_error)
     }
     pub fn currval(&self, name: &str) -> Result<i64, String> {
-        self.sequence_value_context()
-            .currval(name)
-            .map_err(|error| error.to_string())
+        self.with_sequence_value_session(|values| values.currval(name))
     }
     pub(crate) fn currval_sql(&self, name: &str) -> Result<i64, SQLError> {
         self.sequence_value_context()
@@ -112,9 +123,7 @@ impl Engine {
             .map_err(SequenceValueError::into_sql_error)
     }
     pub fn lastval(&self) -> Result<i64, String> {
-        self.sequence_value_context()
-            .lastval()
-            .map_err(|error| error.to_string())
+        self.with_sequence_value_session(|values| values.lastval())
     }
     pub(crate) fn lastval_sql(&self) -> Result<i64, SQLError> {
         self.sequence_value_context()
@@ -122,9 +131,7 @@ impl Engine {
             .map_err(SequenceValueError::into_sql_error)
     }
     pub fn setval(&self, name: &str, value: i64) -> Result<i64, String> {
-        self.sequence_value_context()
-            .setval(name, value, true)
-            .map_err(|error| error.to_string())
+        self.setval_with_is_called(name, value, true)
     }
     pub fn setval_with_is_called(
         &self,
@@ -132,9 +139,7 @@ impl Engine {
         value: i64,
         is_called: bool,
     ) -> Result<i64, String> {
-        self.sequence_value_context()
-            .setval(name, value, is_called)
-            .map_err(|error| error.to_string())
+        self.with_sequence_value_session(|values| values.setval(name, value, is_called))
     }
     pub(crate) fn setval_sql(
         &self,

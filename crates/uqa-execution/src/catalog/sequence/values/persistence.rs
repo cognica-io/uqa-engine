@@ -93,7 +93,10 @@ fn rejected_value_conflict(error: &StorageBackendError) -> bool {
     )
 }
 
-fn sequence_storage_error(action: &str, error: StorageBackendError) -> SequenceValueError {
+pub(super) fn sequence_storage_error(
+    action: &str,
+    error: StorageBackendError,
+) -> SequenceValueError {
     match error {
         StorageBackendError::Cancelled(error) => SequenceValueError::Cancelled(error),
         StorageBackendError::Memory(error) => uqa_sql::SQLError::Routine {

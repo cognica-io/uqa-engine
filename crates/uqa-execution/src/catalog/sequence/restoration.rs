@@ -23,6 +23,41 @@ pub struct RestoredSequenceRegistry {
     pub persistence: BTreeMap<RelationIdentity, RelationPersistence>,
     pub security: BTreeMap<RelationIdentity, SequenceSecurity>,
 }
+impl RestoredSequenceRegistry {
+    pub(super) fn temporary(
+        sequences: &BTreeMap<RelationIdentity, SequenceState>,
+        object_ids: &BTreeMap<RelationIdentity, [u8; 16]>,
+        persistence: &BTreeMap<RelationIdentity, RelationPersistence>,
+        security: &BTreeMap<RelationIdentity, SequenceSecurity>,
+    ) -> Self {
+        let temporary = |relation: &RelationIdentity| {
+            persistence.get(relation) == Some(&RelationPersistence::Temporary)
+        };
+        Self {
+            sequences: sequences
+                .iter()
+                .filter(|(relation, _)| temporary(relation))
+                .map(|(relation, state)| (relation.clone(), *state))
+                .collect(),
+            object_ids: object_ids
+                .iter()
+                .filter(|(relation, _)| temporary(relation))
+                .map(|(relation, object_id)| (relation.clone(), *object_id))
+                .collect(),
+            persistence: persistence
+                .iter()
+                .filter(|(relation, _)| temporary(relation))
+                .map(|(relation, persistence)| (relation.clone(), *persistence))
+                .collect(),
+            security: security
+                .iter()
+                .filter(|(relation, _)| temporary(relation))
+                .map(|(relation, security)| (relation.clone(), security.clone()))
+                .collect(),
+        }
+    }
+}
+
 pub trait SequenceRestoreRegistry {
     fn persistence(&self) -> SequencePersistenceRead<'_>;
     fn install(&self, registry: RestoredSequenceRegistry);
@@ -193,39 +228,31 @@ pub fn restore_sequence_rows(
     context: &SequenceRestoreContext<'_>,
     rows: Vec<SequenceRow>,
 ) -> StorageBackendResult<()> {
-    let temporary_persistence = context
-        .registry
-        .persistence()
-        .iter()
-        .filter(|(_, persistence)| **persistence == uqa_sql::ast::RelationPersistence::Temporary)
-        .map(|(relation, persistence)| (relation.clone(), *persistence))
-        .collect::<BTreeMap<_, _>>();
-    let mut sequences = context
-        .sequences
-        .states()
-        .iter()
-        .filter(|(relation, _)| temporary_persistence.contains_key(*relation))
-        .map(|(relation, state)| (relation.clone(), *state))
-        .collect::<BTreeMap<_, _>>();
-    let mut object_ids = context
-        .sequences
-        .object_ids()
-        .iter()
-        .filter(|(relation, _)| temporary_persistence.contains_key(*relation))
-        .map(|(relation, object_id)| (relation.clone(), *object_id))
-        .collect::<BTreeMap<_, _>>();
-    let mut security = context
-        .security
-        .security_read()
-        .iter()
-        .filter(|(relation, _)| temporary_persistence.contains_key(*relation))
-        .map(|(relation, security)| (relation.clone(), security.clone()))
-        .collect::<BTreeMap<_, _>>();
+    let temporary = RestoredSequenceRegistry::temporary(
+        &context.sequences.states(),
+        &context.sequences.object_ids(),
+        &context.registry.persistence(),
+        &context.security.security_read(),
+    );
+    let registry = prepare_sequence_rows(temporary, rows)?;
+    context.registry.install(registry);
+    Ok(())
+}
+
+pub(super) fn prepare_sequence_rows(
+    temporary: RestoredSequenceRegistry,
+    rows: Vec<SequenceRow>,
+) -> StorageBackendResult<RestoredSequenceRegistry> {
+    let RestoredSequenceRegistry {
+        mut sequences,
+        mut object_ids,
+        mut persistence,
+        mut security,
+    } = temporary;
     let mut seen_object_ids = object_ids
         .values()
         .copied()
         .collect::<std::collections::BTreeSet<_>>();
-    let mut persistence = temporary_persistence;
     for row in rows {
         let name = row.relation.qualified_name();
         if row.role_owner.is_empty() {
@@ -261,13 +288,12 @@ pub fn restore_sequence_rows(
         security.insert(relation.clone(), SequenceSecurity { role_owner, acl });
         sequences.insert(relation, state);
     }
-    context.registry.install(RestoredSequenceRegistry {
+    Ok(RestoredSequenceRegistry {
         sequences,
         object_ids,
         persistence,
         security,
-    });
-    Ok(())
+    })
 }
 
 #[cfg(test)]
