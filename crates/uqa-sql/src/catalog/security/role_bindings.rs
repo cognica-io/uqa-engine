@@ -6,8 +6,39 @@
 
 //! Bind catalog role references once and project names from their retained incarnations.
 
-use crate::catalog::roles::{identity::RoleBinding, RoleDefinition, RoleIdentity};
-use std::collections::BTreeMap;
+use crate::{
+    catalog::roles::{identity::RoleBinding, RoleDefinition, RoleIdentity, RoleReference},
+    SQLError,
+};
+use std::{collections::BTreeMap, sync::Arc};
+use uqa_core::Value;
+
+/// PUBLIC and absent role OIDs have no role binding but still receive PUBLIC privileges.
+pub(super) fn bind_inquiry_subject(
+    value: &Value,
+    roles: &BTreeMap<String, RoleDefinition>,
+    function: &str,
+) -> Result<Option<RoleReference>, SQLError> {
+    let role = match value {
+        Value::Str(name) | Value::FixedChar(name) if name == "public" => None,
+        Value::Str(name) | Value::FixedChar(name) => {
+            Some(roles.get(name).ok_or_else(|| SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!("role \"{name}\" does not exist"),
+            })?)
+        }
+        Value::Int(oid) => roles.values().find(|role| role.oid == *oid),
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "{function} role must be name or oid, got {other:?}"
+            )))
+        }
+    };
+    role.map(|role| {
+        RoleBinding::from_definition(role).map(|role| RoleReference::Bound(Arc::new(role)))
+    })
+    .transpose()
+}
 
 pub(super) fn bind_role(
     roles: &BTreeMap<String, RoleDefinition>,

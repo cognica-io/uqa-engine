@@ -9,10 +9,13 @@
 use super::{
     columns::role_has_column_privilege as column_privilege_check,
     sequence_inquiry::SequencePrivilegeInquiry,
-    table::{parse_column_privilege_checks, parse_privilege_checks, role_has_privilege},
+    table::{
+        parse_column_privilege_checks, parse_privilege_checks, role_has_privilege,
+        TablePrivilegeCheck,
+    },
     TableSecurity,
 };
-use crate::catalog::roles::RoleReference;
+use crate::catalog::roles::{identity::RoleSubject, RoleReference};
 use crate::{
     catalog::{
         resolution::RelationResolution,
@@ -21,7 +24,7 @@ use crate::{
     SQLError,
 };
 use std::collections::BTreeMap;
-use uqa_core::{RelationIdentity, Value};
+use uqa_core::{catalog_acl::AclGrantee, RelationIdentity, Value};
 
 pub trait TablePrivilegeCatalog {
     fn visible_relation_kind(&self, reference: &str) -> Result<RelationResolution, SQLError>;
@@ -40,6 +43,7 @@ pub trait TablePrivilegeCatalog {
         roles: &BTreeMap<String, RoleDefinition>,
     ) -> Result<ColumnPrivilegeRelation, SQLError>;
 }
+
 pub struct TablePrivilegeInquiry<'a> {
     pub names: &'a dyn RoleReferenceNames,
     pub roles: &'a dyn RoleCatalogGuards,
@@ -105,29 +109,21 @@ fn resolve_column_privilege_target(
     }
 }
 
-fn resolve_table_privilege_role(
-    value: &Value,
-    roles: &BTreeMap<String, RoleDefinition>,
-) -> Result<Option<String>, SQLError> {
+fn privilege_text<'a>(function: &str, value: &'a Value) -> Result<&'a str, SQLError> {
     match value {
-        Value::Str(name) | Value::FixedChar(name) => {
-            if roles.contains_key(name) {
-                Ok(Some(name.clone()))
-            } else {
-                Err(SQLError::Routine {
-                    sqlstate: "42704".into(),
-                    message: format!("role \"{name}\" does not exist"),
-                })
-            }
-        }
-        Value::Int(oid) => Ok(roles
-            .values()
-            .find(|role| role.oid == *oid)
-            .map(|role| role.name.clone())),
+        Value::Str(privilege) | Value::FixedChar(privilege) => Ok(privilege),
         other => Err(SQLError::TypeMismatch(format!(
-            "has_table_privilege role must be name or oid, got {other:?}"
+            "{function} privilege must be text, got {other:?}"
         ))),
     }
+}
+
+fn table_privilege_checks(value: &Value) -> Result<Vec<TablePrivilegeCheck>, SQLError> {
+    parse_privilege_checks(privilege_text("has_table_privilege", value)?)
+}
+
+fn column_privilege_checks(value: &Value) -> Result<Vec<TablePrivilegeCheck>, SQLError> {
+    parse_column_privilege_checks(privilege_text("has_column_privilege", value)?)
 }
 
 fn column_privilege_arguments(
@@ -160,37 +156,24 @@ impl TablePrivilegeInquiry<'_> {
                 })
             }
         };
-        let current_user = subject_value.is_none().then(|| self.names.current_role());
-        let subject = {
-            let roles = self.roles.role_definitions();
-            subject_value.map_or_else(
-                || Ok(current_user),
-                |value| {
-                    resolve_table_privilege_role(value, &roles)
-                        .map(|role| role.map(RoleReference::from))
-                },
-            )?
-        };
+        let subject = self.bind_subject(subject_value, "has_table_privilege")?;
+        let subject: &dyn RoleSubject = subject
+            .as_ref()
+            .map_or(&AclGrantee::Public as &dyn RoleSubject, |subject| {
+                subject as &dyn RoleSubject
+            });
+        let checks = matches!(table_value, Value::Int(_))
+            .then(|| table_privilege_checks(privilege_value))
+            .transpose()?;
         let Some(target) = self.resolve_table_privilege_target(table_value)? else {
             return Ok(Value::Null);
         };
-        let privilege = match privilege_value {
-            Value::Str(privilege) | Value::FixedChar(privilege) => privilege,
-            other => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "has_table_privilege privilege must be text, got {other:?}"
-                )))
-            }
-        };
-        let checks = parse_privilege_checks(privilege)?;
-        let Some(subject) = subject else {
-            return Ok(Value::Bool(false));
-        };
+        let checks = checks.map_or_else(|| table_privilege_checks(privilege_value), Ok)?;
         if let ResolvedTablePrivilegeTarget::Sequence(relation) = &target {
             for check in checks {
                 if self.sequences.role_has_sequence_table_privilege(
                     relation,
-                    &subject,
+                    subject,
                     check.privilege,
                     check.grant_option,
                 )? {
@@ -207,13 +190,13 @@ impl TablePrivilegeInquiry<'_> {
                 return super::system_relations::has_table_privilege(
                     relation,
                     &security,
-                    &subject,
+                    subject,
                     check,
                     &roles,
                     &memberships,
                 );
             }
-            role_has_privilege(&security, &subject, check, &roles, &memberships)
+            role_has_privilege(&security, subject, check, &roles, &memberships)
         })))
     }
 
@@ -223,50 +206,45 @@ impl TablePrivilegeInquiry<'_> {
         }
         let (subject_value, table_value, column_value, privilege_value) =
             column_privilege_arguments(arguments)?;
-        let current_user = subject_value.is_none().then(|| self.names.current_role());
-        let subject = {
-            let roles = self.roles.role_definitions();
-            subject_value.map_or_else(
-                || Ok(current_user),
-                |value| {
-                    resolve_table_privilege_role(value, &roles)
-                        .map(|role| role.map(RoleReference::from))
-                },
-            )?
-        };
+        let subject = self.bind_subject(subject_value, "has_column_privilege")?;
+        let subject: &dyn RoleSubject = subject
+            .as_ref()
+            .map_or(&AclGrantee::Public as &dyn RoleSubject, |subject| {
+                subject as &dyn RoleSubject
+            });
+        let mut checks = (matches!(table_value, Value::Int(_))
+            && matches!(column_value, Value::Int(_)))
+        .then(|| column_privilege_checks(privilege_value))
+        .transpose()?;
         let Some(target) = self.resolve_table_privilege_target(table_value)? else {
+            if checks.is_none() {
+                column_privilege_checks(privilege_value)?;
+            }
             return Ok(Value::Null);
         };
+        if checks.is_none() && matches!(column_value, Value::Int(_)) {
+            checks = Some(column_privilege_checks(privilege_value)?);
+        }
         if let ResolvedTablePrivilegeTarget::Sequence(relation) = &target {
             return self.has_sequence_column_privilege_value(
                 relation,
-                subject.as_ref(),
+                subject,
                 column_value,
                 privilege_value,
+                checks,
             );
         }
         let roles = self.roles.role_definitions();
         let metadata = self.catalog.column_privilege_relation(&target, &roles)?;
-        let Some(column) = resolve_column_privilege_target(
+        let column = resolve_column_privilege_target(
             &metadata.relation,
             &metadata.columns,
             metadata.has_system_columns,
             column_value,
-        )?
-        else {
+        )?;
+        let checks = checks.map_or_else(|| column_privilege_checks(privilege_value), Ok)?;
+        let Some(column) = column else {
             return Ok(Value::Null);
-        };
-        let privilege = match privilege_value {
-            Value::Str(privilege) | Value::FixedChar(privilege) => privilege,
-            other => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "has_column_privilege privilege must be text, got {other:?}"
-                )))
-            }
-        };
-        let checks = parse_column_privilege_checks(privilege)?;
-        let Some(subject) = subject else {
-            return Ok(Value::Bool(false));
         };
         let memberships = self.roles.role_memberships();
         Ok(Value::Bool(checks.into_iter().any(|check| {
@@ -277,7 +255,7 @@ impl TablePrivilegeInquiry<'_> {
                             relation,
                             &metadata.security,
                             column,
-                            &subject,
+                            subject,
                             check,
                             &roles,
                             &memberships,
@@ -287,7 +265,7 @@ impl TablePrivilegeInquiry<'_> {
                         super::system_relations::has_table_privilege(
                             relation,
                             &metadata.security,
-                            &subject,
+                            subject,
                             check,
                             &roles,
                             &memberships,
@@ -299,13 +277,13 @@ impl TablePrivilegeInquiry<'_> {
                 ResolvedColumnPrivilegeTarget::User(column) => column_privilege_check(
                     &metadata.security,
                     column,
-                    &subject,
+                    subject,
                     check,
                     &roles,
                     &memberships,
                 ),
                 ResolvedColumnPrivilegeTarget::System => {
-                    role_has_privilege(&metadata.security, &subject, check, &roles, &memberships)
+                    role_has_privilege(&metadata.security, subject, check, &roles, &memberships)
                 }
             }
         })))
@@ -314,9 +292,10 @@ impl TablePrivilegeInquiry<'_> {
     fn has_sequence_column_privilege_value(
         &self,
         relation: &RelationIdentity,
-        subject: Option<&RoleReference>,
+        subject: &dyn RoleSubject,
         column_value: &Value,
         privilege_value: &Value,
+        checks: Option<Vec<TablePrivilegeCheck>>,
     ) -> Result<Value, SQLError> {
         let valid_column = match column_value {
             Value::Str(column) | Value::FixedChar(column) => {
@@ -331,30 +310,20 @@ impl TablePrivilegeInquiry<'_> {
             }
         };
         if !valid_column {
-            return match column_value {
-                Value::Str(column) | Value::FixedChar(column) => Err(SQLError::Routine {
+            if let Value::Str(column) | Value::FixedChar(column) = column_value {
+                return Err(SQLError::Routine {
                     sqlstate: "42703".into(),
                     message: format!(
                         "column \"{column}\" of relation \"{}\" does not exist",
                         relation.name
                     ),
-                }),
-                Value::Int(_) => Ok(Value::Null),
-                _ => unreachable!("column value type was validated above"),
-            };
-        }
-        let privilege = match privilege_value {
-            Value::Str(privilege) | Value::FixedChar(privilege) => privilege,
-            other => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "has_column_privilege privilege must be text, got {other:?}"
-                )))
+                });
             }
-        };
-        let checks = parse_column_privilege_checks(privilege)?;
-        let Some(subject) = subject else {
-            return Ok(Value::Bool(false));
-        };
+        }
+        let checks = checks.map_or_else(|| column_privilege_checks(privilege_value), Ok)?;
+        if !valid_column {
+            return Ok(Value::Null);
+        }
         for check in checks {
             if self.sequences.role_has_sequence_table_privilege(
                 relation,
@@ -366,6 +335,21 @@ impl TablePrivilegeInquiry<'_> {
             }
         }
         Ok(Value::Bool(false))
+    }
+
+    fn bind_subject(
+        &self,
+        value: Option<&Value>,
+        function: &str,
+    ) -> Result<Option<RoleReference>, SQLError> {
+        match value {
+            None => Ok(Some(self.names.current_role())),
+            Some(value) => super::role_bindings::bind_inquiry_subject(
+                value,
+                &self.roles.role_definitions(),
+                function,
+            ),
+        }
     }
 
     fn resolve_table_privilege_target(
@@ -418,3 +402,6 @@ impl TablePrivilegeInquiry<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

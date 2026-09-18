@@ -7,12 +7,11 @@
 //! Strict arguments, retained role subjects and target diagnostics for sequence privilege inquiry.
 
 use super::{
-    acl, role_has_privilege, BTreeMap, PrivilegeCheck, RelationIdentity, RelationResolution,
-    RoleCatalogGuards, RoleDefinition, RoleReferenceNames, RoleSubject, SQLError,
-    SequencePrivilegeResolution, SequenceSecurityCatalog, Value,
+    acl, role_has_privilege, PrivilegeCheck, RelationIdentity, RelationResolution,
+    RoleCatalogGuards, RoleReferenceNames, RoleSubject, SQLError, SequencePrivilegeResolution,
+    SequenceSecurityCatalog, Value,
 };
-use crate::catalog::roles::{identity::RoleBinding, RoleReference};
-use std::sync::Arc;
+use crate::catalog::roles::RoleReference;
 use uqa_core::catalog_acl::AclGrantee;
 
 pub struct SequencePrivilegeArguments<'a> {
@@ -66,7 +65,11 @@ impl<'a> SequencePrivilegeArguments<'a> {
         roles: &dyn RoleCatalogGuards,
     ) -> Result<SequencePrivilegeRequest<'a>, SQLError> {
         let subject = match self.subject {
-            Some(value) => resolve_subject(value, &roles.role_definitions())?,
+            Some(value) => super::super::role_bindings::bind_inquiry_subject(
+                value,
+                &roles.role_definitions(),
+                "has_sequence_privilege",
+            )?,
             None => Some(names.current_role()),
         };
         let privilege = match self.privilege {
@@ -166,29 +169,4 @@ pub fn missing_sequence(reference: &str) -> SQLError {
         sqlstate: "42P01".into(),
         message: format!("relation \"{reference}\" does not exist"),
     }
-}
-
-fn resolve_subject(
-    value: &Value,
-    roles: &BTreeMap<String, RoleDefinition>,
-) -> Result<Option<RoleReference>, SQLError> {
-    let role = match value {
-        Value::Str(name) | Value::FixedChar(name) if name == "public" => None,
-        Value::Str(name) | Value::FixedChar(name) => {
-            Some(roles.get(name).ok_or_else(|| SQLError::Routine {
-                sqlstate: "42704".into(),
-                message: format!("role \"{name}\" does not exist"),
-            })?)
-        }
-        Value::Int(oid) => roles.values().find(|role| role.oid == *oid),
-        other => {
-            return Err(SQLError::TypeMismatch(format!(
-                "has_sequence_privilege role must be name or oid, got {other:?}"
-            )))
-        }
-    };
-    role.map(|role| {
-        RoleBinding::from_definition(role).map(|role| RoleReference::Bound(Arc::new(role)))
-    })
-    .transpose()
 }

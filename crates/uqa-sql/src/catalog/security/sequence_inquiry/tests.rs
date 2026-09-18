@@ -7,7 +7,7 @@
 use super::*;
 use crate::catalog::roles::{
     guards::{RoleDefinitionRead, RoleMembershipRead},
-    RoleMembership, RoleMembershipKey, RoleReference,
+    RoleDefinition, RoleMembership, RoleMembershipKey, RoleReference,
 };
 use std::cell::Cell;
 use uqa_core::{

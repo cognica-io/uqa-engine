@@ -772,5 +772,8 @@ mod column_privileges;
 #[path = "sql_information_schema/owner_privileges.rs"]
 mod owner_privileges;
 
+#[path = "sql_information_schema/privilege_inquiry.rs"]
+mod privilege_inquiry;
+
 #[path = "sql_information_schema/pg18_routines.rs"]
 mod pg18_routines;

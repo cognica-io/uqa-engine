@@ -14,7 +14,7 @@ use crate::catalog::roles::identity::RoleSubject;
 use crate::{
     catalog::{
         resolution::RelationResolution,
-        roles::{guards::RoleCatalogGuards, RoleDefinition, RoleReferenceNames},
+        roles::{guards::RoleCatalogGuards, RoleReferenceNames},
     },
     SQLError,
 };
