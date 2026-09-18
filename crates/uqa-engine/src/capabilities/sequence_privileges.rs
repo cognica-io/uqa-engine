@@ -73,6 +73,16 @@ impl SequencePrivilegePublication for Engine {
     }
 }
 impl Engine {
+    pub(crate) fn sequence_privilege_read_context(
+        &self,
+    ) -> uqa_execution::catalog::security::sequence_inquiry::SequencePrivilegeReadContext<'_> {
+        uqa_execution::catalog::security::sequence_inquiry::SequencePrivilegeReadContext {
+            inquiry: self.sequence_privilege_inquiry(),
+            snapshots: self,
+            catalog: self.catalog_execution(),
+        }
+    }
+
     pub(crate) fn sequence_privilege_inquiry(&self) -> SequencePrivilegeInquiry<'_> {
         SequencePrivilegeInquiry {
             names: self,

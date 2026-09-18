@@ -6,6 +6,7 @@
 
 mod dependencies;
 mod ownership;
+mod privileges;
 mod removal;
 mod restoration;
 mod values;

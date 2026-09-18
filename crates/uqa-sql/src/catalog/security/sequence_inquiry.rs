@@ -11,7 +11,6 @@ use super::{
     SequenceSecurity,
 };
 use crate::catalog::roles::identity::RoleSubject;
-use crate::catalog::roles::RoleReference;
 use crate::{
     catalog::{
         resolution::RelationResolution,
@@ -112,63 +111,14 @@ impl SequencePrivilegeInquiry<'_> {
     }
 
     pub fn has_sequence_privilege_value(&self, arguments: &[Value]) -> Result<Value, SQLError> {
-        if arguments.iter().any(|argument| argument == &Value::Null) {
-            return Ok(Value::Null);
-        }
-        let (subject_value, sequence_value, privilege_value) = match arguments {
-            [sequence, privilege] => (None, sequence, privilege),
-            [subject, sequence, privilege] => (Some(subject), sequence, privilege),
-            _ => {
-                return Err(SQLError::BadArity {
-                    name: "has_sequence_privilege".into(),
-                    expected: "2 or 3".into(),
-                    actual: arguments.len(),
-                })
-            }
-        };
-        let current_user = subject_value.is_none().then(|| self.names.current_role());
-        let subject = {
-            let roles = self.roles.role_definitions();
-            subject_value.map_or_else(
-                || Ok(current_user),
-                |value| {
-                    resolve_sequence_privilege_role(value, &roles)
-                        .map(|role| role.map(RoleReference::from))
-                },
-            )?
-        };
-        let Some((_name, relation)) = self.resolve_sequence_privilege_target(sequence_value)?
-        else {
+        let Some(arguments) = SequencePrivilegeArguments::parse(arguments)? else {
             return Ok(Value::Null);
         };
-        let privilege = match privilege_value {
-            Value::Str(privilege) | Value::FixedChar(privilege) => privilege,
-            other => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "has_sequence_privilege privilege must be text, got {other:?}"
-                )))
-            }
+        let request = arguments.bind(self.names, self.roles)?;
+        let Some((_, relation)) = request.target.resolve(self.resolution)? else {
+            return Ok(Value::Null);
         };
-        let checks = acl::parse_privilege_checks(privilege)?;
-        let Some(subject) = subject else {
-            return Ok(Value::Bool(false));
-        };
-        let security = self
-            .security
-            .security_read()
-            .get(&relation)
-            .cloned()
-            .ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "sequence `{}` has no security metadata",
-                    relation.qualified_name()
-                ))
-            })?;
-        let roles = self.roles.role_definitions();
-        let memberships = self.roles.role_memberships();
-        Ok(Value::Bool(checks.into_iter().any(|check| {
-            role_has_privilege(&security, &subject, check, &roles, &memberships)
-        })))
+        request.evaluate(&relation, self.roles, self.security)
     }
 
     pub fn role_has_sequence_table_privilege(
@@ -213,45 +163,6 @@ impl SequencePrivilegeInquiry<'_> {
         ))
     }
 
-    fn resolve_sequence_privilege_target(
-        &self,
-        value: &Value,
-    ) -> Result<Option<(String, RelationIdentity)>, SQLError> {
-        match value {
-            Value::Str(reference) | Value::FixedChar(reference) => {
-                let (name, kind) = match self.resolution.visible_relation_kind(reference)? {
-                    RelationResolution::Found(name, kind) => (name, kind),
-                    RelationResolution::MissingSchema(schema) => {
-                        return Err(SQLError::Routine {
-                            sqlstate: "3F000".into(),
-                            message: format!("schema \"{schema}\" does not exist"),
-                        });
-                    }
-                    RelationResolution::MissingRelation => {
-                        return Err(SQLError::Routine {
-                            sqlstate: "42P01".into(),
-                            message: format!("relation \"{reference}\" does not exist"),
-                        });
-                    }
-                };
-                if kind != "sequence" {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42809".into(),
-                        message: format!("\"{reference}\" is not a sequence"),
-                    });
-                }
-                let relation = RelationIdentity::from_legacy_name(&name).map_err(|error| {
-                    SQLError::Internal(format!("resolve sequence `{name}`: {error}"))
-                })?;
-                Ok(Some((name, relation)))
-            }
-            Value::Int(oid) => self.resolution.sequence_privilege_oid(*oid),
-            other => Err(SQLError::TypeMismatch(format!(
-                "has_sequence_privilege sequence must be text or oid, got {other:?}"
-            ))),
-        }
-    }
-
     pub fn ensure_sequence_owner(
         &self,
         name: &str,
@@ -275,27 +186,10 @@ impl SequencePrivilegeInquiry<'_> {
     }
 }
 
-fn resolve_sequence_privilege_role(
-    value: &Value,
-    roles: &BTreeMap<String, RoleDefinition>,
-) -> Result<Option<String>, SQLError> {
-    match value {
-        Value::Str(name) | Value::FixedChar(name) => {
-            if roles.contains_key(name) {
-                Ok(Some(name.clone()))
-            } else {
-                Err(SQLError::Routine {
-                    sqlstate: "42704".into(),
-                    message: format!("role \"{name}\" does not exist"),
-                })
-            }
-        }
-        Value::Int(oid) => Ok(roles
-            .values()
-            .find(|role| role.oid == *oid)
-            .map(|role| role.name.clone())),
-        other => Err(SQLError::TypeMismatch(format!(
-            "has_sequence_privilege role must be name or oid, got {other:?}"
-        ))),
-    }
-}
+mod value;
+pub use value::{
+    missing_sequence, SequencePrivilegeArguments, SequencePrivilegeRequest, SequencePrivilegeTarget,
+};
+
+#[cfg(test)]
+mod tests;

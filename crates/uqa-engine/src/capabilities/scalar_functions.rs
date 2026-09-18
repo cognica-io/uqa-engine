@@ -83,7 +83,7 @@ impl Engine {
             roles: self,
             database: self.database_privilege_inquiry(),
             schemas: self.schema_privilege_inquiry(),
-            sequence_privileges: self.sequence_privilege_inquiry(),
+            sequence_privileges: self.sequence_privilege_read_context(),
             tables: self.table_privilege_context(),
             session: self,
             graphs: self,

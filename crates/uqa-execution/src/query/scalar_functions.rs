@@ -11,7 +11,10 @@ use super::{
     model_training::{run_deep_learn_projection, ModelTrainingContext},
 };
 use crate::catalog::{
-    context::CatalogContext, security::table_inquiry::TablePrivilegeContext,
+    context::CatalogContext,
+    security::{
+        sequence_inquiry::SequencePrivilegeReadContext, table_inquiry::TablePrivilegeContext,
+    },
     sequence_introspection::SequenceIntrospectionContext,
 };
 use uqa_core::Value;
@@ -20,7 +23,6 @@ use uqa_sql::{
         roles::{guards::RoleCatalogGuards, RoleReferenceNames},
         security::{
             database_inquiry::DatabasePrivilegeInquiry, schema_inquiry::SchemaPrivilegeInquiry,
-            sequence_inquiry::SequencePrivilegeInquiry,
         },
     },
     semantics::runtime_scalars::{merge_action_value, no_scalar_arguments, notification_arguments},
@@ -38,7 +40,7 @@ pub struct ScalarFunctionContext<'a> {
     pub roles: &'a dyn RoleCatalogGuards,
     pub database: DatabasePrivilegeInquiry<'a>,
     pub schemas: SchemaPrivilegeInquiry<'a>,
-    pub sequence_privileges: SequencePrivilegeInquiry<'a>,
+    pub sequence_privileges: SequencePrivilegeReadContext<'a>,
     pub tables: TablePrivilegeContext<'a>,
     pub session: &'a dyn ScalarSession,
     pub graphs: &'a dyn GraphLifecycle,

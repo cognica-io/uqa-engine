@@ -8,6 +8,8 @@ use super::*;
 
 #[path = "security/information_schema.rs"]
 mod information_schema;
+#[path = "security/inquiry.rs"]
+mod inquiry;
 #[path = "security/schema.rs"]
 mod schema;
 #[path = "security/schema_inquiry.rs"]
