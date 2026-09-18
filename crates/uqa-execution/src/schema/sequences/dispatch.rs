@@ -9,6 +9,10 @@ use super::{
     alteration::SequenceDefinitionContext, lifecycle::SequenceLifecycleContext,
     role_ownership::SequenceRoleOwnershipContext,
 };
+use crate::row_locks::{
+    binding::{bind_relation, RelationBinding},
+    RelationLockMode,
+};
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::{AlterSequence, RelationPersistence},
@@ -40,10 +44,42 @@ pub fn alter_sequence(
         .map_err(|error| SQLError::Internal(format!("resolve sequence `{name}`: {error}")))?;
     if let Some(role_owner) = alter.role_owner.as_deref() {
         uqa_sql::schema::sequences::actions::validate_sequence_role_owner_shape(alter)?;
+        let Some(binding) = bind_relation(
+            context.roles.writer,
+            RelationLockMode::AccessExclusive,
+            false,
+            || {
+                let Some(name) = uqa_sql::schema::sequences::lifecycle::alter_sequence_target_name(
+                    context.catalog.resolve_visible_relation(&alter.name)?,
+                    alter,
+                )?
+                else {
+                    return Ok(None);
+                };
+                let relation = RelationIdentity::from_legacy_name(&name).map_err(|error| {
+                    SQLError::Internal(format!("resolve sequence `{name}`: {error}"))
+                })?;
+                Ok(Some(RelationBinding {
+                    name,
+                    object_id: context.roles.metadata.object_id(&relation),
+                    value: relation,
+                }))
+            },
+            |binding| {
+                context
+                    .roles
+                    .access
+                    .ensure_sequence_owner(&binding.name, &binding.value)
+                    .map(|_| ())
+            },
+        )?
+        else {
+            return Ok(false);
+        };
         super::role_ownership::alter_sequence_role_owner(
             &context.roles,
-            &name,
-            &relation,
+            &binding.name,
+            &binding.value,
             role_owner,
         )?;
         return Ok(true);

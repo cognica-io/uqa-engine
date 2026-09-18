@@ -6,7 +6,16 @@
 
 //! Publish sequence role ownership while retaining the authorization catalog guards.
 use super::alteration::SequenceDefinitionCatalog;
-use crate::catalog::security::{roles::RoleCatalogGuards, SequenceSecurity};
+use crate::catalog::security::{
+    roles::{
+        dependencies::{prepare_role_owner, RoleDependencyCandidate},
+        locking::RoleLockContext,
+        RoleCatalogGuards,
+    },
+    SequenceSecurity,
+};
+use crate::row_locks::binding::RelationDefinitionSession;
+use crate::row_locks::shared_objects::SharedObjectLockSession;
 use crate::schema::publication::dependencies::CatalogPublicationChanges;
 use std::{
     collections::BTreeMap,
@@ -15,7 +24,8 @@ use std::{
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     catalog::roles::{self, RoleReferenceNames},
-    schema::sequences::{lifecycle::SequenceLifecycleCatalog, ownership},
+    catalog::security::ownership::{OwnerChangeAuthority, RelationOwnerSchemas},
+    schema::sequences::ownership,
     SQLError,
 };
 
@@ -25,7 +35,6 @@ pub trait SequenceRoleAccess {
         name: &str,
         relation: &RelationIdentity,
     ) -> Result<String, SQLError>;
-    fn current_user_is_superuser(&self) -> bool;
 }
 pub trait SequenceSecurityPublication {
     fn security(&self, relation: &RelationIdentity) -> Option<SequenceSecurity>;
@@ -41,7 +50,9 @@ pub struct SequenceRoleOwnershipContext<'a> {
     pub roles: &'a dyn RoleCatalogGuards,
     pub session: &'a dyn RoleReferenceNames,
     pub access: &'a dyn SequenceRoleAccess,
-    pub schemas: &'a dyn SequenceLifecycleCatalog,
+    pub schemas: &'a dyn RelationOwnerSchemas,
+    pub locks: &'a dyn SharedObjectLockSession,
+    pub writer: &'a dyn RelationDefinitionSession,
     pub metadata: &'a dyn SequenceDefinitionCatalog,
     pub security: &'a dyn SequenceSecurityPublication,
     pub changes: &'a dyn CatalogPublicationChanges,
@@ -52,31 +63,49 @@ pub fn alter_sequence_role_owner(
     relation: &RelationIdentity,
     requested_owner: &str,
 ) -> Result<(), SQLError> {
-    let current_owner = context.access.ensure_sequence_owner(name, relation)?;
     let new_owner = roles::resolve_role_reference(context.session, requested_owner);
-    let roles = context.roles.role_definitions();
-    roles::require_role_exists(&roles, &new_owner)?;
-    let memberships = context.roles.role_memberships();
+    let locks = RoleLockContext {
+        roles: context.roles,
+        session: context.locks,
+    };
+    let owner = locks.bind(&new_owner)?;
     let current_user = context.session.current_user_name();
-    roles::require_set_role(&roles, &memberships, &current_user, &new_owner)?;
-    let state = context
-        .metadata
-        .state(relation)
-        .ok_or_else(|| SQLError::Internal(format!("sequence `{name}` disappeared")))?;
-    ownership::reject_owned_sequence_role_change(&relation.name, state.owner.is_some())?;
-    if current_owner == new_owner {
+    let RoleDependencyCandidate {
+        roles,
+        memberships,
+        value,
+        ..
+    } = prepare_role_owner(
+        locks,
+        &owner,
+        || context.writer.prepare_definition_write(),
+        |roles, memberships| {
+            let mut security = context.security.security(relation).ok_or_else(|| {
+                SQLError::Internal(format!("sequence `{name}` has no security metadata"))
+            })?;
+            if security.role_owner == new_owner {
+                return Ok(None);
+            }
+            let state = context
+                .metadata
+                .state(relation)
+                .ok_or_else(|| SQLError::Internal(format!("sequence `{name}` disappeared")))?;
+            ownership::reject_owned_sequence_role_change(&relation.name, state.owner.is_some())?;
+            let authority = OwnerChangeAuthority {
+                roles,
+                memberships,
+                current_user: &current_user,
+                new_owner: &new_owner,
+            };
+            authority.require_owner_change(&security.role_owner, "sequence", &relation.name)?;
+            authority.require_schema_create(context.schemas, &relation.schema)?;
+            crate::catalog::security::sequence::rewrite_acl_owner(&mut security, &new_owner);
+            Ok(Some(security))
+        },
+    )?;
+    let Some(security) = value else {
         return Ok(());
-    }
-    if !context.access.current_user_is_superuser() {
-        context
-            .schemas
-            .require_schema_create(&relation.schema, &new_owner)?;
-    }
-    let mut security = context
-        .security
-        .security(relation)
-        .ok_or_else(|| SQLError::Internal(format!("sequence `{name}` has no security metadata")))?;
-    crate::catalog::security::sequence::rewrite_acl_owner(&mut security, &new_owner);
+    };
     context
         .security
         .persist_security(name, relation, &security)?;

@@ -502,8 +502,9 @@ pub(super) fn parse_work_mem_bytes(raw: &str) -> Result<usize, SQLError> {
     })
 }
 
-pub(crate) fn validate_schema_name(name: &str) -> StorageBackendResult<()> {
-    uqa_sql::schema::namespaces::validate_schema_name(name).map_err(StorageBackendError::Other)
+pub(crate) fn validate_stored_schema_name(name: &str) -> StorageBackendResult<()> {
+    uqa_sql::schema::namespaces::validate_stored_schema_name(name)
+        .map_err(StorageBackendError::Other)
 }
 
 #[cfg(test)]

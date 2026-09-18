@@ -154,3 +154,71 @@ fn preparation_rejects_the_original_role_replaced_during_refresh_before_writer_a
         )
         .unwrap());
 }
+
+#[test]
+fn owner_binding_survives_target_and_writer_waits_without_rebinding_the_name() {
+    for replace_before_preflight in [false, true] {
+        let catalog = Catalog::new();
+        let context = RoleLockContext {
+            roles: &catalog,
+            session: &catalog,
+        };
+        let owner = context.bind("reader").unwrap();
+        if replace_before_preflight {
+            catalog
+                .roles
+                .borrow_mut()
+                .get_mut("reader")
+                .unwrap()
+                .object_id = [8; 16];
+        }
+        let result = prepare_role_owner(
+            context,
+            &owner,
+            || {
+                catalog.assert_released();
+                catalog
+                    .roles
+                    .borrow_mut()
+                    .get_mut("reader")
+                    .unwrap()
+                    .object_id = [9; 16];
+                Ok(())
+            },
+            |_, _| {
+                assert!(
+                    !replace_before_preflight,
+                    "replacement is rejected before authorization"
+                );
+                Ok(Some(catalog.object.borrow_mut()))
+            },
+        );
+        assert_eq!(result.err().unwrap().sqlstate(), Some("42704"));
+        catalog.assert_released();
+        assert_eq!(
+            catalog.acquired.get(),
+            usize::from(!replace_before_preflight)
+        );
+    }
+}
+
+#[test]
+fn unchanged_owner_skips_dependency_locks_and_writer_admission() {
+    let catalog = Catalog::new();
+    let context = RoleLockContext {
+        roles: &catalog,
+        session: &catalog,
+    };
+    let owner = context.bind("reader").unwrap();
+    let result = prepare_role_owner(
+        context,
+        &owner,
+        || panic!("an unchanged owner does not admit a writer"),
+        |_, _| Ok(None::<()>),
+    )
+    .unwrap();
+    assert!(result.value.is_none());
+    assert_eq!(catalog.acquired.get(), 0);
+    drop(result);
+    catalog.assert_released();
+}

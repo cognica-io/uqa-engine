@@ -10,6 +10,7 @@ mod coordination;
 mod dependencies;
 mod identity;
 mod migration;
+mod ownership;
 mod publication;
 mod snapshots;
 

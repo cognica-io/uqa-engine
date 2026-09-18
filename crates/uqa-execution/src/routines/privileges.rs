@@ -16,16 +16,12 @@ use crate::{
 };
 use std::{collections::BTreeSet, sync::Arc};
 use uqa_sql::{
-    ast::{AlterRoutineOwnerStmt, GrantRoutineStmt, RoutineRevokeBehavior},
-    catalog::roles::{
-        require_role_exists, require_set_role, resolve_role_reference, role_inherits,
-        RoleReferenceNames,
-    },
+    ast::{GrantRoutineStmt, RoutineRevokeBehavior},
+    catalog::roles::{resolve_role_reference, RoleReferenceNames},
     catalog::security::dependencies::added_acl_roles,
     routines::lifecycle::RoutineRegistry,
     routines::{
-        declaration::{resolve_alter_routine_identity_types, RoutineTypeCatalog},
-        lifecycle::{binding::resolve_sql_routine_alter_target, ensure_routine_owner_as},
+        declaration::RoutineTypeCatalog, lifecycle::binding::resolve_sql_routine_alter_target,
         security as analysis, SQLUserFunction,
     },
     SQLError,
@@ -37,56 +33,14 @@ pub trait RoutinePrivilegeNotices {
 pub struct RoutinePrivilegeContext<'a> {
     pub catalog: RoutineMutationContext<'a>,
     pub locks: &'a dyn SharedObjectLockSession,
+    pub schemas: &'a dyn uqa_sql::catalog::security::ownership::RelationOwnerSchemas,
     pub types: &'a dyn RoutineTypeCatalog,
     pub role_names: &'a dyn RoleReferenceNames,
     pub notices: &'a dyn RoutinePrivilegeNotices,
 }
 
-pub fn alter_sql_routine_owner(
-    context: &RoutinePrivilegeContext<'_>,
-    stmt: &AlterRoutineOwnerStmt,
-) -> Result<(), SQLError> {
-    let identity = analysis::routine_owner_identity(stmt);
-    let requested_types = resolve_alter_routine_identity_types(context.types, &identity)?;
-    let new_owner = resolve_role_reference(context.role_names, &stmt.new_owner);
-    let current_user = context.catalog.names.current_user_name();
-    context.catalog.writer.prepare_writer()?;
-    let roles = context.catalog.roles.role_definitions();
-    require_role_exists(&roles, &new_owner)?;
-    let memberships = context.catalog.roles.role_memberships();
-    let mut registry = context.catalog.registry.routines_write();
-    let (name, position) = resolve_sql_routine_alter_target(
-        context.catalog.names,
-        &registry,
-        &stmt.name,
-        requested_types.as_deref(),
-        stmt.kind,
-    )?;
-    let existing = registry[&name][position].clone();
-    ensure_routine_owner_as(
-        &existing.def,
-        role_inherits(&roles, &memberships, &current_user, &existing.def.owner),
-    )?;
-    require_set_role(&roles, &memberships, &current_user, &new_owner)?;
-    let mut def = existing.def.clone();
-    analysis::rewrite_routine_acl_owner(&mut def, &existing.def.owner, &new_owner);
-    def.owner = new_owner;
-    let mut next = registry.clone();
-    next.get_mut(&name).expect("resolved routine key")[position] = Arc::new(SQLUserFunction {
-        def,
-        compiled: existing.compiled.clone(),
-    });
-    context
-        .catalog
-        .publication
-        .persist_routine_definitions(&next)?;
-    **registry = next;
-    drop(registry);
-    drop(memberships);
-    drop(roles);
-    context.catalog.changes.catalog_registry_changed();
-    Ok(())
-}
+mod ownership;
+pub use ownership::alter_sql_routine_owner;
 
 pub fn grant_sql_routine(
     context: &RoutinePrivilegeContext<'_>,

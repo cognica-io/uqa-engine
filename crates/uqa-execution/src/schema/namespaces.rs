@@ -9,6 +9,11 @@ pub mod privileges;
 pub mod removal;
 
 use crate::catalog::security::roles::RoleCatalogGuards;
+use crate::catalog::security::roles::{
+    dependencies::{prepare_role_owner, RoleDependencyCandidate},
+    locking::RoleLockContext,
+};
+use crate::row_locks::shared_objects::SharedObjectLockSession;
 use std::{collections::BTreeMap, ops::DerefMut};
 use uqa_sql::{
     catalog::{
@@ -29,8 +34,6 @@ pub trait NamespaceCatalogChanges {
     fn catalog_registry_changed(&self);
 }
 pub trait SchemaAuthority {
-    fn current_user_has_role_privileges(&self, role: &str) -> bool;
-    fn current_user_is_superuser(&self) -> bool;
     fn ensure_database_create(&self, role: &str) -> Result<(), SQLError>;
 }
 
@@ -156,10 +159,11 @@ pub struct SchemaOwnerContext<'a> {
     pub refresh: &'a dyn NamespaceCatalogRefresh,
     pub session: &'a dyn RoleReferenceNames,
     pub roles: &'a dyn RoleCatalogGuards,
-    pub authority: &'a dyn SchemaAuthority,
+    pub locks: &'a dyn SharedObjectLockSession,
+    pub database: &'a dyn uqa_sql::catalog::security::database_inquiry::DatabasePrivilegeCatalog,
     pub catalog: &'a dyn SchemaSecurityCatalog,
-    pub persistence: &'a dyn SchemaSecurityPersistence,
     pub publication: &'a dyn SchemaSecurityPublication,
+    pub persistence: &'a dyn SchemaSecurityPersistence,
     pub changes: &'a dyn NamespaceCatalogChanges,
 }
 
@@ -168,46 +172,57 @@ pub fn alter_schema_owner(
     name: &str,
     requested: &str,
 ) -> Result<(), SQLError> {
-    context.writer.prepare_writer()?;
     context
         .refresh
         .refresh_catalog()
         .map_err(|error| SQLError::Internal(error.to_string()))?;
     let new_owner = roles::resolve_role_reference(context.session, requested);
-    roles::require_role_exists(&context.roles.role_definitions(), &new_owner)?;
-    let mut security = context
-        .catalog
-        .schema_security(name)
-        .ok_or_else(|| SQLError::Routine {
-            sqlstate: "3F000".into(),
-            message: format!("schema \"{name}\" does not exist"),
-        })?;
-    if security.role_owner == new_owner {
+    let locks = RoleLockContext {
+        roles: context.roles,
+        session: context.locks,
+    };
+    let owner = locks.bind(&new_owner)?;
+    let current_user = context.session.current_user_name();
+    let RoleDependencyCandidate {
+        roles,
+        memberships,
+        value,
+        ..
+    } = prepare_role_owner(
+        locks,
+        &owner,
+        || context.writer.prepare_writer(),
+        |roles, memberships| {
+            let mut security =
+                context
+                    .catalog
+                    .schema_security(name)
+                    .ok_or_else(|| SQLError::Routine {
+                        sqlstate: "3F000".into(),
+                        message: format!("schema \"{name}\" does not exist"),
+                    })?;
+            if security.role_owner == new_owner {
+                return Ok(None);
+            }
+            let authority = uqa_sql::catalog::security::ownership::OwnerChangeAuthority {
+                roles,
+                memberships,
+                current_user: &current_user,
+                new_owner: &new_owner,
+            };
+            authority.require_owner_change(&security.role_owner, "schema", name)?;
+            authority.require_database_create(&context.database.security())?;
+            rewrite_schema_acl_owner(&mut security, &new_owner);
+            Ok(Some(security))
+        },
+    )?;
+    let Some(security) = value else {
         return Ok(());
-    }
-    if !context
-        .authority
-        .current_user_has_role_privileges(&security.role_owner)
-    {
-        return Err(SQLError::Routine {
-            sqlstate: "42501".into(),
-            message: format!("must be owner of schema {name}"),
-        });
-    }
-    if !context.authority.current_user_is_superuser() {
-        roles::require_set_role(
-            &context.roles.role_definitions(),
-            &context.roles.role_memberships(),
-            &context.session.current_user_name(),
-            &new_owner,
-        )?;
-        context
-            .authority
-            .ensure_database_create(&context.session.current_user_name())?;
-    }
-    rewrite_schema_acl_owner(&mut security, &new_owner);
+    };
     context.persistence.persist_security(name, &security)?;
     context.publication.publish_security(name, security);
+    drop(memberships);
+    drop(roles);
     context.changes.catalog_registry_changed();
     Ok(())
 }

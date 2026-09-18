@@ -26,6 +26,7 @@ impl Engine {
             roles: self,
             session: self,
             schemas: self,
+            locks: self,
         }
     }
 }

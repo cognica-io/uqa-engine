@@ -37,10 +37,11 @@ impl Engine {
             refresh: self,
             session: self,
             roles: self,
-            authority: self,
+            locks: self,
+            database: self,
             catalog: self,
-            persistence: self,
             publication: self,
+            persistence: self,
             changes: self,
         }
     }
@@ -69,12 +70,6 @@ impl NamespaceCatalogRefresh for Engine {
     }
 }
 impl SchemaAuthority for Engine {
-    fn current_user_has_role_privileges(&self, role: &str) -> bool {
-        Engine::current_user_has_role_privileges(self, role)
-    }
-    fn current_user_is_superuser(&self) -> bool {
-        Engine::current_user_is_superuser(self)
-    }
     fn ensure_database_create(&self, role: &str) -> Result<(), SQLError> {
         self.ensure_database_privilege(
             role,

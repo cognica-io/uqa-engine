@@ -35,6 +35,17 @@ impl RoleBinding {
             object_id: role.object_id,
         })
     }
+
+    pub fn revalidate(&self, roles: &BTreeMap<String, RoleDefinition>) -> Result<(), SQLError> {
+        if roles
+            .get(&self.name)
+            .is_some_and(|role| role.oid == i64::from(self.oid) && role.object_id == self.object_id)
+        {
+            Ok(())
+        } else {
+            Err(concurrently_dropped(self.oid))
+        }
+    }
 }
 
 #[derive(Default)]
@@ -122,17 +133,6 @@ impl RoleLockContext<'_> {
     }
 
     pub fn revalidate(&self, bound: &RoleBinding) -> Result<(), SQLError> {
-        if self
-            .roles
-            .role_definitions()
-            .get(&bound.name)
-            .is_some_and(|role| {
-                role.oid == i64::from(bound.oid) && role.object_id == bound.object_id
-            })
-        {
-            Ok(())
-        } else {
-            Err(concurrently_dropped(bound.oid))
-        }
+        bound.revalidate(&self.roles.role_definitions())
     }
 }

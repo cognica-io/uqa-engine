@@ -19,7 +19,7 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         let schemas = catalog.load_schema_rows()?;
         for schema in &schemas {
-            Self::validate_schema_name(&schema.name)?;
+            Self::validate_stored_schema_name(&schema.name)?;
         }
         *self.durable.schemas.write() = schemas
             .into_iter()

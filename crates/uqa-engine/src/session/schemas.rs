@@ -70,8 +70,8 @@ impl Engine {
             || self.durable.graphs.read().contains_key(name))
     }
 
-    pub(crate) fn validate_schema_name(name: &str) -> StorageBackendResult<()> {
-        crate::capabilities::validate_schema_name(name)
+    pub(crate) fn validate_stored_schema_name(name: &str) -> StorageBackendResult<()> {
+        crate::capabilities::validate_stored_schema_name(name)
     }
 
     pub(crate) fn schema_is_empty(&self, schema: &str) -> bool {

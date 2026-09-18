@@ -27,6 +27,7 @@ impl Engine {
     pub(crate) fn routine_privilege_context(&self) -> RoutinePrivilegeContext<'_> {
         RoutinePrivilegeContext {
             locks: self,
+            schemas: self,
             catalog: self.routine_mutation_context(),
             types: self,
             role_names: self,

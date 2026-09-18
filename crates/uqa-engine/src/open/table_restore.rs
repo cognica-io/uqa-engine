@@ -237,7 +237,7 @@ impl Engine {
         catalog.migrate_relation_namespace()?;
         let schemas = catalog.load_schema_rows()?;
         for schema in &schemas {
-            Self::validate_schema_name(&schema.name)?;
+            Self::validate_stored_schema_name(&schema.name)?;
         }
         // Bootstrap once; an initialized database may legitimately have dropped public.
         if catalog

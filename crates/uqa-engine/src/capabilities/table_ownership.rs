@@ -107,7 +107,6 @@ impl Engine {
         TableOwnershipContext {
             writer: self,
             tables: self,
-            authorization: self.table_authorization_context(),
             roles: self.role_transfer_context(),
             owned_sequences: self,
             sequences: self,

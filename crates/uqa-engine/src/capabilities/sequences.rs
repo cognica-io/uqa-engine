@@ -273,6 +273,8 @@ impl Engine {
         &self,
     ) -> uqa_execution::schema::sequences::role_ownership::SequenceRoleOwnershipContext<'_> {
         uqa_execution::schema::sequences::role_ownership::SequenceRoleOwnershipContext {
+            locks: self,
+            writer: self,
             roles: self,
             session: self,
             access: self,
@@ -290,9 +292,6 @@ impl uqa_execution::schema::sequences::role_ownership::SequenceRoleAccess for En
         relation: &RelationIdentity,
     ) -> Result<String, SQLError> {
         Engine::ensure_sequence_owner(self, name, relation)
-    }
-    fn current_user_is_superuser(&self) -> bool {
-        Engine::current_user_is_superuser(self)
     }
 }
 impl uqa_execution::schema::sequences::role_ownership::SequenceSecurityPublication for Engine {

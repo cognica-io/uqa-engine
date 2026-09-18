@@ -8,16 +8,17 @@
 use super::{
     publication::dependencies::CatalogPublicationChanges,
     relation_alteration::{
-        rewrite_relation_rename_dependents, role_transfer_target, RelationRenameDependencies,
-        RoleTransferContext,
+        rewrite_relation_rename_dependents, RelationRenameDependencies, RoleTransferContext,
     },
 };
+use crate::catalog::security::roles::dependencies::{prepare_role_owner, RoleDependencyCandidate};
 use crate::catalog::view::ViewPublication;
 use crate::catalog::view::{catalog_view_row, StoredView};
 use crate::row_locks::binding::{bind_relation, RelationBinding, RelationDefinitionSession};
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::{AlterViewAction, AlterViewKind, AlterViewStmt, RelationPersistence},
+    catalog::security::ownership::OwnerChangeAuthority,
     catalog::security::table::{rewrite_acl_owner, validate_table_security_invariants},
     schema::relation_alteration::{self, RelationAlterNames},
     semantics::view_rewrite::{context::ViewRewriteContext, validate_view_definition_check_option},
@@ -114,6 +115,9 @@ fn execute_alter_view(
     let relation = &target.relation;
     let canonical = &target.canonical;
     let expected_kind = target.kind;
+    if let AlterViewAction::OwnerTo(owner) = &statement.action {
+        return alter_view_role_owner(context, relation, canonical, expected_kind, owner);
+    }
     context.locks.prepare_definition_write()?;
     match &statement.action {
         AlterViewAction::Set(changes) => {
@@ -122,9 +126,7 @@ fn execute_alter_view(
         AlterViewAction::Reset(names) => {
             relation_alteration::reset_view_options(&mut view.options, names);
         }
-        AlterViewAction::OwnerTo(owner) => {
-            alter_view_role_owner(context, canonical, &mut view, owner)?;
-        }
+        AlterViewAction::OwnerTo(_) => unreachable!("owner changes prepare their role dependency"),
         AlterViewAction::RenameTo(new_name) => {
             return rename_view(context, relation, new_name, expected_kind);
         }
@@ -136,6 +138,18 @@ fn execute_alter_view(
             &view.rewrite_definition(),
         )?;
     }
+    publish_altered_view(context, relation, canonical, expected_kind, view)?;
+    context.changes.catalog_registry_changed();
+    Ok(())
+}
+
+fn publish_altered_view(
+    context: &ViewAlterContext<'_>,
+    relation: &RelationIdentity,
+    canonical: &str,
+    expected_kind: &str,
+    view: StoredView,
+) -> Result<(), SQLError> {
     if view.persistence != RelationPersistence::Temporary && context.publication.has_catalog() {
         context
             .publication
@@ -153,49 +167,65 @@ fn execute_alter_view(
     context
         .publication
         .views_write()
-        .insert(target.relation, view);
-    context.changes.catalog_registry_changed();
+        .insert(relation.clone(), view);
     Ok(())
 }
 
 fn alter_view_role_owner(
     context: &ViewAlterContext<'_>,
+    relation: &RelationIdentity,
     canonical_name: &str,
-    view: &mut StoredView,
+    kind: &str,
     requested_owner: &str,
 ) -> Result<(), SQLError> {
-    let current_owner = context.access.ensure_owner(canonical_name, view)?;
-    let (new_owner, current_user_is_superuser) =
-        role_transfer_target(&context.roles, requested_owner)?;
-    if current_owner == new_owner {
+    let owner = context.roles.bind(requested_owner)?;
+    let current_user = context.roles.session.current_user_name();
+    let RoleDependencyCandidate {
+        roles,
+        memberships,
+        value,
+        ..
+    } = prepare_role_owner(
+        context.roles.lock_context(),
+        &owner,
+        || context.locks.prepare_definition_write(),
+        |roles, memberships| {
+            let mut view = context.catalog.view(relation).ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "{kind} `{canonical_name}` disappeared during owner change"
+                ))
+            })?;
+            if view.role_owner == owner.name {
+                return Ok(None);
+            }
+            let authority = OwnerChangeAuthority {
+                roles,
+                memberships,
+                current_user: &current_user,
+                new_owner: &owner.name,
+            };
+            authority.require_owner_change(&view.role_owner, kind, &relation.name)?;
+            authority.require_schema_create(context.roles.schemas, &relation.schema)?;
+            let mut security = view.security();
+            rewrite_acl_owner(&mut security, &owner.name);
+            let output_columns = view.output_columns.as_deref().ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "loaded view `{canonical_name}` has no durable public column metadata"
+                ))
+            })?;
+            validate_table_security_invariants(&security, Some(output_columns), roles)
+                .map_err(|error| SQLError::Internal(format!("view `{canonical_name}` produced invalid privilege metadata after owner transfer: {error}")))?;
+            view.set_security(security);
+            Ok(Some(view))
+        },
+    )?;
+    let Some(view) = value else {
         return Ok(());
-    }
-    let relation = RelationIdentity::from_legacy_name(canonical_name).map_err(|error| {
-        SQLError::Internal(format!(
-            "resolve view owner target `{canonical_name}`: {error}"
-        ))
-    })?;
-    if !current_user_is_superuser {
-        context
-            .roles
-            .schemas
-            .require_schema_create(&relation.schema, &new_owner)?;
-    }
-    let mut security = view.security();
-    rewrite_acl_owner(&mut security, &new_owner);
-    let output_columns = view.output_columns.as_deref().ok_or_else(|| {
-        SQLError::Internal(format!(
-            "loaded view `{canonical_name}` has no durable public column metadata"
-        ))
-    })?;
-    validate_table_security_invariants(
-        &security, Some(output_columns), &context.roles.roles.role_definitions(),
-    ).map_err(|error| {
-        SQLError::Internal(format!(
-            "view `{canonical_name}` produced invalid privilege metadata after owner transfer: {error}"
-        ))
-    })?;
-    view.set_security(security);
+    };
+    publish_altered_view(context, relation, canonical_name, kind, view)?;
+    drop(memberships);
+    drop(roles);
+    context.changes.catalog_registry_changed();
     Ok(())
 }
 
