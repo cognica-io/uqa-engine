@@ -447,15 +447,18 @@ mod tests {
     use super::*;
 
     fn role(name: &str) -> RoleDefinition {
-        RoleDefinition::from_create(&crate::ast::CreateRoleStmt {
-            name: name.into(),
-            attributes: BTreeSet::new(),
-            connection_limit: -1,
-            in_roles: Vec::new(),
-            role_members: Vec::new(),
-            admin_members: Vec::new(),
-        })
-        .unwrap()
+        RoleDefinition::from_create(
+            &crate::ast::CreateRoleStmt {
+                name: name.into(),
+                attributes: BTreeSet::new(),
+                connection_limit: -1,
+                in_roles: Vec::new(),
+                role_members: Vec::new(),
+                admin_members: Vec::new(),
+            },
+            20_001,
+            [1; 16],
+        )
     }
 
     fn membership(

@@ -68,5 +68,21 @@ pub fn restore_role_memberships(
     Ok(membership_map)
 }
 
+pub fn validate_role_identities(roles: &BTreeMap<String, RoleDefinition>) -> Result<(), String> {
+    let mut identities = BTreeSet::new();
+    for (name, role) in roles {
+        if role.object_id == [0; 16] {
+            return Err(format!("persisted role `{name}` has no object identity"));
+        }
+        if name == "uqa" && role.object_id != RoleDefinition::bootstrap().object_id {
+            return Err("persisted bootstrap role has an invalid object identity".into());
+        }
+        if !identities.insert(role.object_id) {
+            return Err("persisted role object identity is duplicated".into());
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;

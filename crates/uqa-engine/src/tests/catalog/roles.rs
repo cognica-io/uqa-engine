@@ -6,6 +6,7 @@
 
 use crate::Engine;
 
+mod coordination;
 mod identity;
 mod migration;
 mod publication;

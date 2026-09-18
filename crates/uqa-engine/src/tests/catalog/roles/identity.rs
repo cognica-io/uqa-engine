@@ -38,27 +38,38 @@ fn role_oids_follow_create_undo_recreate_and_reopen_for_every_provider() {
         let (directory, first, second) = sessions(provider);
         sql(&first, "CREATE ROLE named");
         let original = oid(&first, "named");
+        let incarnation = first.durable.roles.read()["named"].object_id;
+        assert_ne!(incarnation, [0; 16]);
         assert!(
             matches!(original, Value::Int(value) if (16_384..=i64::from(u32::MAX)).contains(&value))
         );
         sql(&first, "ALTER ROLE named LOGIN");
         assert_eq!(oid(&first, "named"), original);
+        assert_eq!(first.durable.roles.read()["named"].object_id, incarnation);
         sql(
             &first,
             "BEGIN; SAVEPOINT old_role; DROP ROLE named; CREATE ROLE named",
         );
         assert_ne!(oid(&first, "named"), original);
+        assert_ne!(first.durable.roles.read()["named"].object_id, incarnation);
         assert_eq!(oid(&second, "named"), original);
         sql(&first, "ROLLBACK TO old_role; COMMIT");
         assert_eq!(oid(&first, "named"), original);
+        assert_eq!(first.durable.roles.read()["named"].object_id, incarnation);
         sql(&first, "DROP ROLE named; CREATE ROLE named");
         let replacement = oid(&first, "named");
+        let replacement_incarnation = first.durable.roles.read()["named"].object_id;
+        assert_ne!(replacement_incarnation, incarnation);
         assert_ne!(replacement, original);
         assert_eq!(oid(&second, "named"), replacement);
         drop(second);
         drop(first);
         let reopened = reopen(provider, &directory.path().join("table-locks.db"));
         assert_eq!(oid(&reopened, "named"), replacement);
+        assert_eq!(
+            reopened.durable.roles.read()["named"].object_id,
+            replacement_incarnation
+        );
     }
 }
 

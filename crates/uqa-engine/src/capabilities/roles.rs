@@ -55,6 +55,7 @@ impl Engine {
             registry: self,
             publication: self,
             dependencies: self,
+            locks: self,
         }
     }
 }

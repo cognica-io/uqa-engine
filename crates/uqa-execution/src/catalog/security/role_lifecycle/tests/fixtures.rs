@@ -39,6 +39,9 @@ pub(super) struct Catalog {
     pub events: RefCell<Vec<String>>,
     pub fail_membership_persistence: Cell<bool>,
     pub epoch: Cell<usize>,
+    pub locks: crate::row_locks::RowLockManager,
+    pub cancel: uqa_core::CancellationToken,
+    pub refreshed_roles: RefCell<std::collections::VecDeque<BTreeMap<String, RoleDefinition>>>,
     database: DatabaseSecurity,
     schemas: BTreeMap<String, SchemaSecurity>,
     views: BTreeMap<RelationIdentity, StoredView>,
@@ -59,6 +62,9 @@ impl Catalog {
             events: RefCell::new(Vec::new()),
             fail_membership_persistence: Cell::new(false),
             epoch: Cell::new(0),
+            locks: crate::row_locks::RowLockManager::new(),
+            cancel: uqa_core::CancellationToken::new(),
+            refreshed_roles: RefCell::new(std::collections::VecDeque::new()),
             database: DatabaseSecurity::bootstrap(),
             schemas: BTreeMap::new(),
             views: BTreeMap::new(),
@@ -78,15 +84,16 @@ impl Catalog {
             registry: self,
             publication: self,
             dependencies: self,
+            locks: self,
         }
     }
     pub fn role(&self, name: &str, attributes: &[RoleAttribute]) {
         let mut statement = create(name);
         statement.attributes = attributes.iter().copied().collect();
-        self.roles.borrow_mut().insert(
-            name.into(),
-            RoleDefinition::from_create(&statement).unwrap(),
-        );
+        let index = self.roles.borrow().len();
+        let definition =
+            RoleDefinition::from_create(&statement, 20_000 + index as i64, [index as u8; 16]);
+        self.roles.borrow_mut().insert(name.into(), definition);
     }
     pub fn membership(&self, role: &str, member: &str, grantor: &str) {
         let membership = RoleMembership {
@@ -289,5 +296,31 @@ impl uqa_sql::catalog::security::system_relations::SystemRelationSecurityCatalog
         &self,
     ) -> uqa_sql::catalog::security::system_relations::SystemRelationSecurityRead<'_> {
         Box::new(&self.system_relations)
+    }
+}
+
+impl crate::row_locks::shared_objects::SharedObjectLockSession for Catalog {
+    fn acquire_shared_catalog(
+        &self,
+        target: crate::row_locks::shared_objects::SharedCatalogLock<'_>,
+        mode: crate::row_locks::RelationLockMode,
+    ) -> Result<crate::row_locks::ScopedRelationLock<'_>, SQLError> {
+        self.released();
+        self.event("lock role");
+        self.locks.acquire_scoped_relation(
+            1,
+            self.locks.shared_catalog_key(target),
+            mode,
+            (0, 1),
+            &self.cancel,
+        )
+    }
+    fn refresh_shared_catalog(&self) -> Result<(), SQLError> {
+        self.released();
+        self.event("refresh");
+        if let Some(roles) = self.refreshed_roles.borrow_mut().pop_front() {
+            *self.roles.borrow_mut() = roles;
+        }
+        Ok(())
     }
 }

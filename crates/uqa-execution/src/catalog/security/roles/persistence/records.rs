@@ -14,7 +14,14 @@ use serde::Deserialize;
 
 pub(super) const ROLE_PREFIX: &str = "uqa.sql.role.v1:";
 const OID_PREFIX: &str = "uqa.sql.role_oid.v1:";
-const FORMAT: &str = r#"{"role_catalog_format":1}"#;
+const FORMAT: &str = r#"{"role_catalog_format":2}"#;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum RoleRecordFormat {
+    Aggregate,
+    Definitions,
+    Identities,
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -39,19 +46,22 @@ fn oid_key(oid: i64) -> String {
 
 pub(super) fn read(
     catalog: &dyn CatalogFacade,
-) -> StorageBackendResult<(BTreeMap<String, RoleDefinition>, bool)> {
+) -> StorageBackendResult<(BTreeMap<String, RoleDefinition>, RoleRecordFormat)> {
     let stored = catalog
         .get_metadata(ROLES_METADATA_KEY)?
         .map(|json| serde_json::from_str::<StoredRoles>(&json))
         .transpose()?;
     match stored {
         Some(StoredRoles::Records(format)) => {
-            if format.role_catalog_format != 1 {
-                return Err(StorageBackendError::Other(format!(
-                    "unsupported role catalog format {}",
-                    format.role_catalog_format
-                )));
-            }
+            let format = match format.role_catalog_format {
+                1 => RoleRecordFormat::Definitions,
+                2 => RoleRecordFormat::Identities,
+                version => {
+                    return Err(StorageBackendError::Other(format!(
+                        "unsupported role catalog format {version}"
+                    )))
+                }
+            };
             let mut roles = BTreeMap::new();
             for (key, json) in catalog.metadata_with_prefix(ROLE_PREFIX)? {
                 let name = key.strip_prefix(ROLE_PREFIX).expect("metadata prefix");
@@ -62,7 +72,7 @@ pub(super) fn read(
                     "role records are missing the bootstrap role".into(),
                 ));
             }
-            Ok((roles, false))
+            Ok((roles, format))
         }
         legacy => {
             if !catalog.metadata_with_prefix(ROLE_PREFIX)?.is_empty()
@@ -78,7 +88,7 @@ pub(super) fn read(
                     None => BTreeMap::new(),
                     _ => unreachable!(),
                 },
-                true,
+                RoleRecordFormat::Aggregate,
             ))
         }
     }
@@ -136,6 +146,8 @@ pub(super) fn persist(
             });
         }
     }
+    uqa_sql::catalog::roles::restoration::validate_role_identities(after)
+        .map_err(SQLError::Internal)?;
     for (name, role) in before {
         if after.get(name).is_none_or(|next| next.oid != role.oid) {
             catalog

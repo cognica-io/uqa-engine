@@ -6,6 +6,7 @@
 
 use super::*;
 mod fixtures;
+mod identity;
 use fixtures::{create, Catalog};
 use std::collections::BTreeMap;
 use uqa_sql::ast::RoleAttribute;
@@ -23,24 +24,19 @@ fn create_keeps_both_write_guards_and_publishes_only_after_both_persistence_call
     assert_eq!(*catalog.roles.borrow(), roles);
     assert!(catalog.memberships.borrow().is_empty());
     assert_eq!(catalog.epoch.get(), 0);
-    assert_eq!(
-        *catalog.events.borrow(),
-        [
-            "current",
-            "read roles",
-            "release roles",
-            "current",
-            "read roles",
-            "release roles",
-            "writer",
-            "write roles",
-            "write memberships",
-            "persist roles",
-            "persist memberships",
-            "release memberships",
-            "release roles"
-        ]
-    );
+    let events = catalog.events.borrow();
+    let writer = events.iter().position(|event| event == "writer").unwrap();
+    let refreshed = events.iter().rposition(|event| event == "refresh").unwrap();
+    assert!(refreshed < writer);
+    assert!(events.ends_with(&[
+        "write roles".into(),
+        "write memberships".into(),
+        "persist roles".into(),
+        "persist memberships".into(),
+        "release memberships".into(),
+        "release roles".into(),
+    ]));
+    drop(events);
     catalog.released();
     catalog.events.borrow_mut().clear();
     catalog.fail_membership_persistence.set(false);
@@ -102,8 +98,7 @@ fn duplicate_creation_stops_before_membership_write_or_persistence() {
             "current",
             "read roles",
             "release roles",
-            "writer",
-            "write roles",
+            "read roles",
             "release roles"
         ]
     );

@@ -115,6 +115,7 @@ fn role_oid_records_reject_two_stale_creators_of_the_same_oid() {
             let mut role = RoleDefinition::bootstrap();
             role.name = name.into();
             role.oid = 20_001;
+            role.object_id = [1; 16];
             after.insert(name.into(), role);
             engine.persist_roles_snapshot(&before, &after).unwrap();
             *engine.durable.roles.write() = after;

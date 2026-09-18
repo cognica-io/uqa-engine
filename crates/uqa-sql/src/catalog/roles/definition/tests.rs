@@ -72,7 +72,12 @@ fn role_creation_grants_creator_administration_without_inherit_or_set() {
     creator.name = "creator".into();
     creator.attributes = BTreeSet::from([RoleAttribute::CreateRole]);
     inputs.roles.insert("creator".into(), creator);
-    let (roles, superuser) = create_role_candidate(&inputs.roles, "creator", &statement).unwrap();
+    let (roles, superuser) = create_role_candidate(
+        &inputs.roles,
+        "creator",
+        RoleDefinition::from_create(&statement, 20_001, [1; 16]),
+    )
+    .unwrap();
     assert!(!superuser);
     let mut memberships = BTreeMap::new();
     apply_create_role_memberships(

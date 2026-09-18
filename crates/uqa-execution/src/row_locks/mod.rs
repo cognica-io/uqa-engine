@@ -19,6 +19,7 @@ mod identity;
 mod physical_changes;
 mod registry;
 mod relation;
+pub mod shared_objects;
 mod waits;
 
 pub use change_gate::RowChangePublication;

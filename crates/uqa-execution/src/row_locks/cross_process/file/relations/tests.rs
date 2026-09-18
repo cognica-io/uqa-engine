@@ -247,3 +247,30 @@ fn relation_mode_offsets_do_not_overlap_row_pairs_or_exceed_supported_offsets() 
         assert_eq!(pair[1].offset, pair[0].offset + 1);
     }
 }
+
+#[test]
+fn shared_objects_keep_typed_addresses_across_processes() {
+    use crate::row_locks::{shared_objects::SharedCatalogLock, RowLockManager};
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("shared-objects.db");
+    let manager = RowLockManager::for_database_file(&path);
+    let key = manager.shared_catalog_key(SharedCatalogLock::Object {
+        class_id: 1260,
+        oid: 20_001,
+    });
+    let mut peer = peer::Peer::start_for_relation(&path, &manager.relation_bytes(key));
+    let cancel = uqa_core::CancellationToken::new();
+    manager
+        .acquire_relation(1, key, RelationLockMode::AccessShare, 1, &cancel)
+        .unwrap();
+    assert!(peer.request("try 7").starts_with("conflict "));
+    manager.release_mark_above(1, 0);
+    assert_eq!(peer.request("try 7"), "granted");
+    assert!(!manager
+        .try_acquire_relation(1, key, RelationLockMode::AccessShare, 0, &cancel)
+        .unwrap());
+    assert_eq!(peer.request("release 7"), "released");
+    assert!(manager
+        .try_acquire_relation(1, key, RelationLockMode::AccessShare, 0, &cancel)
+        .unwrap());
+}

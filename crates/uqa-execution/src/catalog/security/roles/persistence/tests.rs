@@ -43,6 +43,51 @@ fn role_metadata_restoration_preserves_legacy_values_and_round_trips_membership_
 }
 
 #[test]
+fn role_definition_records_gain_stable_incarnations_only_during_initial_open() {
+    let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
+    let mut roles = restore_and_migrate(&catalog).unwrap().roles;
+    let mut role = RoleDefinition::bootstrap();
+    role.name = "legacy".into();
+    role.oid = 20_001;
+    role.object_id = [1; 16];
+    roles.insert(role.name.clone(), role);
+    for (name, role) in &roles {
+        let mut value = serde_json::to_value(role).unwrap();
+        value.as_object_mut().unwrap().remove("object_id");
+        catalog
+            .set_metadata(&records::role_key(name), &value.to_string())
+            .unwrap();
+        catalog
+            .set_metadata(&format!("uqa.sql.role_oid.v1:{}", role.oid), name)
+            .unwrap();
+    }
+    catalog
+        .set_metadata(ROLES_METADATA_KEY, r#"{"role_catalog_format":1}"#)
+        .unwrap();
+    assert!(restore(&catalog)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("initial-open record migration"));
+    let initial = restore_and_migrate(&catalog).unwrap();
+    assert_eq!(initial.roles["legacy"].oid, 20_001);
+    assert_ne!(initial.roles["legacy"].object_id, [0; 16]);
+    assert_eq!(initial.roles["uqa"], RoleDefinition::bootstrap());
+    assert_eq!(restore(&catalog).unwrap().roles, initial.roles);
+    catalog
+        .set_metadata(
+            "uqa.sql.role.v1:legacy",
+            r#"{"oid":20001,"name":"legacy","attributes":[],"connection_limit":-1}"#,
+        )
+        .unwrap();
+    assert!(restore_and_migrate(&catalog)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("has no object identity"));
+}
+
+#[test]
 fn role_metadata_restoration_validates_definitions_before_loading_memberships() {
     let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
     catalog
@@ -77,6 +122,7 @@ fn unchanged_role_metadata_uses_the_committed_catalog_instead_of_stale_session_v
     let mut extra = RoleDefinition::bootstrap();
     extra.name = "committed".into();
     extra.oid = 20_001;
+    extra.object_id = [1; 16];
     roles.insert(extra.name.clone(), extra);
     persist_roles(Some(&catalog), &current.roles, &roles).unwrap();
     let values = restore(&catalog).unwrap();
@@ -133,7 +179,7 @@ fn role_records_validate_format_name_and_oid_ownership() {
         let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
         restore_and_migrate(&catalog).unwrap();
         match corruption {
-            0 => catalog.set_metadata(ROLES_METADATA_KEY, r#"{"role_catalog_format":2}"#),
+            0 => catalog.set_metadata(ROLES_METADATA_KEY, r#"{"role_catalog_format":3}"#),
             1 => catalog.delete_metadata("uqa.sql.role_oid.v1:10"),
             2 => catalog.set_metadata("uqa.sql.role_oid.v1:10", "absent"),
             3 => catalog.set_metadata(
@@ -161,6 +207,7 @@ fn role_records_keep_literal_names_and_reject_reassigned_oids_before_writing() {
         let mut role = RoleDefinition::bootstrap();
         role.name = name.into();
         role.oid = 20_001 + offset as i64;
+        role.object_id = [offset as u8 + 1; 16];
         after.insert(name.into(), role);
     }
     persist_roles(Some(&catalog), &before, &after).unwrap();

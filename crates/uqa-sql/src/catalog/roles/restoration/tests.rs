@@ -9,6 +9,31 @@ use super::*;
 fn roles() -> BTreeMap<String, RoleDefinition> {
     BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())])
 }
+
+#[test]
+fn role_incarnations_reject_missing_duplicate_and_replaced_bootstrap_identities() {
+    let mut roles = roles();
+    let mut stored = RoleDefinition::bootstrap();
+    stored.name = "stored".into();
+    stored.oid = 20_001;
+    roles.insert(stored.name.clone(), stored);
+    assert_eq!(
+        validate_role_identities(&roles).unwrap_err(),
+        "persisted role object identity is duplicated"
+    );
+    roles.get_mut("stored").unwrap().object_id = [0; 16];
+    assert_eq!(
+        validate_role_identities(&roles).unwrap_err(),
+        "persisted role `stored` has no object identity"
+    );
+    roles.get_mut("stored").unwrap().object_id = [1; 16];
+    validate_role_identities(&roles).unwrap();
+    roles.get_mut("uqa").unwrap().object_id = [2; 16];
+    assert_eq!(
+        validate_role_identities(&roles).unwrap_err(),
+        "persisted bootstrap role has an invalid object identity"
+    );
+}
 fn membership(oid: i64) -> RoleMembership {
     RoleMembership {
         oid,

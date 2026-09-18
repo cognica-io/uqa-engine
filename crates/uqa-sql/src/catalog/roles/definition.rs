@@ -76,23 +76,17 @@ pub fn require_role_administration_for(
 pub fn create_role_candidate(
     roles: &BTreeMap<String, RoleDefinition>,
     current: &str,
-    statement: &CreateRoleStmt,
+    definition: RoleDefinition,
 ) -> Result<(BTreeMap<String, RoleDefinition>, bool), SQLError> {
-    if roles.contains_key(&statement.name) {
+    if roles.contains_key(&definition.name) {
         return Err(SQLError::Routine {
             sqlstate: "42710".into(),
-            message: format!("role \"{}\" already exists", statement.name),
+            message: format!("role \"{}\" already exists", definition.name),
         });
     }
     let current_is_superuser = role_is_superuser(roles, current);
     let mut next_roles = roles.clone();
-    let definition = loop {
-        let definition = RoleDefinition::from_create(statement)?;
-        if !roles.values().any(|role| role.oid == definition.oid) {
-            break definition;
-        }
-    };
-    next_roles.insert(statement.name.clone(), definition);
+    next_roles.insert(definition.name.clone(), definition);
     Ok((next_roles, current_is_superuser))
 }
 

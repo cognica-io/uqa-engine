@@ -10,6 +10,7 @@ use crate::Engine;
 use uqa_execution::{
     row_locks::{
         binding::{RelationDefinitionSession, RelationLockCatalog, RelationLockSession},
+        shared_objects::{SharedCatalogLock, SharedObjectLockSession},
         RelationLockMode, ScopedRelationLock,
     },
     statement::table_locks::{
@@ -112,6 +113,29 @@ impl RelationLockSession for Engine {
 impl RelationDefinitionSession for Engine {
     fn prepare_definition_write(&self) -> Result<(), SQLError> {
         self.prepare_explicit_transaction_writer().map(|_| ())
+    }
+}
+
+impl SharedObjectLockSession for Engine {
+    fn acquire_shared_catalog(
+        &self,
+        target: SharedCatalogLock<'_>,
+        mode: RelationLockMode,
+    ) -> Result<ScopedRelationLock<'_>, SQLError> {
+        self.prepare_transaction_lock_wait()?;
+        let key = self.row_locks.shared_catalog_key(target);
+        let marks = self.temporary_relation_lock_marks()?;
+        self.row_locks.acquire_scoped_relation(
+            self.session_id,
+            key,
+            mode,
+            marks,
+            &self.runtime.cancellation,
+        )
+    }
+
+    fn refresh_shared_catalog(&self) -> Result<(), SQLError> {
+        self.refresh_explicit_statement_snapshot()
     }
 }
 

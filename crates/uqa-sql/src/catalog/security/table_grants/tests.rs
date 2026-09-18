@@ -24,14 +24,17 @@ fn statement(sql: &str) -> GrantTableStmt {
 }
 fn roles() -> BTreeMap<String, RoleDefinition> {
     let mut roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
-    for name in ["alice", "reader", "independent"] {
+    for (index, name) in ["alice", "reader", "independent"].into_iter().enumerate() {
         let Statement::CreateRole(role) = crate::compile(&format!("CREATE ROLE {name}"))
             .unwrap()
             .remove(0)
         else {
             panic!("expected role")
         };
-        roles.insert(name.into(), RoleDefinition::from_create(&role).unwrap());
+        roles.insert(
+            name.into(),
+            RoleDefinition::from_create(&role, 20_001 + index as i64, [index as u8 + 1; 16]),
+        );
     }
     roles
 }

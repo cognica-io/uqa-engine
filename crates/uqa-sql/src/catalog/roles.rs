@@ -16,6 +16,9 @@ pub use memberships::{role_can_set, role_inherits};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoleDefinition {
     pub oid: i64,
+    /// Durable incarnation independent of the recyclable SQL-visible OID. Zero identifies legacy metadata that requires initial-open migration.
+    #[serde(default)]
+    pub object_id: [u8; 16],
     pub name: String,
     pub attributes: BTreeSet<RoleAttribute>,
     pub connection_limit: i32,
@@ -53,6 +56,7 @@ impl RoleDefinition {
     pub fn bootstrap() -> Self {
         Self {
             oid: 10,
+            object_id: *b"UQA:role00000010",
             name: "uqa".into(),
             attributes: BTreeSet::from([
                 RoleAttribute::Superuser,
@@ -66,23 +70,14 @@ impl RoleDefinition {
         }
     }
 
-    pub fn from_create(statement: &CreateRoleStmt) -> Result<Self, crate::SQLError> {
-        let oid = loop {
-            let mut bytes = [0; 4];
-            getrandom::fill(&mut bytes).map_err(|error| {
-                crate::SQLError::Internal(format!("allocate role OID: {error}"))
-            })?;
-            let oid = u32::from_ne_bytes(bytes);
-            if oid >= 16_384 {
-                break i64::from(oid);
-            }
-        };
-        Ok(Self {
+    pub fn from_create(statement: &CreateRoleStmt, oid: i64, object_id: [u8; 16]) -> Self {
+        Self {
             oid,
+            object_id,
             name: statement.name.clone(),
             attributes: statement.attributes.clone(),
             connection_limit: statement.connection_limit,
-        })
+        }
     }
 
     pub fn has(&self, attribute: RoleAttribute) -> bool {

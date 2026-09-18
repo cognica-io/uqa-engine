@@ -20,6 +20,8 @@ pub(super) enum LockRelationIdentity {
     BackendWriter,
     KeyReservation([u8; 32]),
     ScoringParameters(Arc<str>),
+    SharedObject { class_id: u32, oid: u32 },
+    SharedObjectName { class_id: u32, name: Arc<str> },
 }
 
 impl LockRelationIdentity {
@@ -36,6 +38,18 @@ impl LockRelationIdentity {
                 let mut bytes = Vec::with_capacity(1 + "key-reservation".len() + digest.len());
                 bytes.extend_from_slice(b"\xffkey-reservation");
                 bytes.extend_from_slice(digest);
+                bytes
+            }
+            Self::SharedObject { class_id, oid } => {
+                let mut bytes = b"\xffshared-object".to_vec();
+                bytes.extend_from_slice(&class_id.to_be_bytes());
+                bytes.extend_from_slice(&oid.to_be_bytes());
+                bytes
+            }
+            Self::SharedObjectName { class_id, name } => {
+                let mut bytes = b"\xffshared-object-name".to_vec();
+                bytes.extend_from_slice(&class_id.to_be_bytes());
+                bytes.extend_from_slice(name.as_bytes());
                 bytes
             }
         }

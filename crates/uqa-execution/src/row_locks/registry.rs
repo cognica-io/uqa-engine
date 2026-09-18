@@ -113,6 +113,19 @@ impl RowLockManager {
         self.relation_key(LockRelationIdentity::Table(Arc::from(table)))
     }
 
+    pub fn shared_catalog_key(&self, target: super::shared_objects::SharedCatalogLock<'_>) -> u64 {
+        use super::shared_objects::SharedCatalogLock;
+        self.relation_key(match target {
+            SharedCatalogLock::Object { class_id, oid } => {
+                LockRelationIdentity::SharedObject { class_id, oid }
+            }
+            SharedCatalogLock::Name { class_id, name } => LockRelationIdentity::SharedObjectName {
+                class_id,
+                name: Arc::from(name),
+            },
+        })
+    }
+
     pub fn backend_writer_key(&self) -> u64 {
         self.relation_key(LockRelationIdentity::BackendWriter)
     }

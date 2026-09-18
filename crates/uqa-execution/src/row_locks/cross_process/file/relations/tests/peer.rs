@@ -6,6 +6,7 @@
 
 //! Causally ordered subprocess requests for the native relation-lock owner tests.
 
+use std::fmt::Write as _;
 use std::io::{BufRead, Write};
 use std::process::{Child, Stdio};
 
@@ -21,6 +22,14 @@ pub(super) struct Peer {
 
 impl Peer {
     pub(super) fn start(path: &std::path::Path) -> Self {
+        Self::start_for_relation(path, RELATION)
+    }
+
+    pub(super) fn start_for_relation(path: &std::path::Path, relation: &[u8]) -> Self {
+        let mut encoded = String::with_capacity(relation.len() * 2);
+        for byte in relation {
+            write!(&mut encoded, "{byte:02x}").unwrap();
+        }
         let mut child = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--ignored",
@@ -30,6 +39,7 @@ impl Peer {
                 "--test-threads=1",
             ])
             .env("UQA_RELATION_LOCK_TEST_PATH", path)
+            .env("UQA_RELATION_LOCK_TEST_IDENTITY", encoded)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -100,6 +110,11 @@ fn respond(value: impl std::fmt::Display) {
 fn relation_lock_peer() {
     let path = std::env::var_os("UQA_RELATION_LOCK_TEST_PATH").unwrap();
     let coordinator = FileLockCoordinator::open(std::path::Path::new(&path)).unwrap();
+    let encoded = std::env::var("UQA_RELATION_LOCK_TEST_IDENTITY").unwrap();
+    let relation = (0..encoded.len())
+        .step_by(2)
+        .map(|offset| u8::from_str_radix(&encoded[offset..offset + 2], 16).unwrap())
+        .collect::<Vec<_>>();
     respond("ready");
     for line in std::io::stdin().lock().lines() {
         let line = line.unwrap();
@@ -113,7 +128,7 @@ fn relation_lock_peer() {
             .map_or(PEER_SESSION, |session| session.parse().unwrap());
         match operation {
             "try" => match coordinator
-                .try_relation_claim(session, RELATION, mode.unwrap())
+                .try_relation_claim(session, &relation, mode.unwrap())
                 .unwrap()
             {
                 Ok(()) => respond("granted"),
@@ -123,11 +138,11 @@ fn relation_lock_peer() {
                 }
             },
             "release" => {
-                coordinator.release(session, &relation_byte_claims(RELATION, mode.unwrap()));
+                coordinator.release(session, &relation_byte_claims(&relation, mode.unwrap()));
                 respond("released");
             }
             "wait" => {
-                coordinator.register_wait(session, relation_wait_claim(RELATION, mode.unwrap()));
+                coordinator.register_wait(session, relation_wait_claim(&relation, mode.unwrap()));
                 respond("waiting");
             }
             "clear" => {

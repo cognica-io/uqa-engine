@@ -21,6 +21,7 @@ use uqa_sql::{
     SQLError,
 };
 pub mod context;
+mod identity;
 use context::RoleExecutionContext;
 
 pub fn set_role(context: &RoleExecutionContext<'_>, requested: &str) -> Result<(), SQLError> {
@@ -75,10 +76,18 @@ pub fn create_role(
             "create role",
         )?;
     }
+    let definition = identity::reserve_definition(context, statement)?;
+    require_role_creation(&context.analysis)?;
     context.publication.prepare_writer()?;
     let mut roles = context.registry.write_roles();
+    require_role_attribute_authority(
+        &roles,
+        &current,
+        statement.attributes.iter().copied(),
+        "create role",
+    )?;
     let (next_roles, current_is_superuser) =
-        definition::create_role_candidate(&roles, &current, statement)?;
+        definition::create_role_candidate(&roles, &current, definition)?;
     let mut memberships = context.registry.write_memberships();
     let mut next_memberships = memberships.clone();
     definition::apply_create_role_memberships(

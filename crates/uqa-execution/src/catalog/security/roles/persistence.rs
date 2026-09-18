@@ -72,9 +72,9 @@ fn restore_catalog(
     catalog: &dyn CatalogFacade,
     allow_migration: bool,
 ) -> StorageBackendResult<RoleCatalogValues> {
-    let (mut roles, legacy) = records::read(catalog)?;
+    let (mut roles, format) = records::read(catalog)?;
     restoration::restore_role_definitions(&mut roles).map_err(StorageBackendError::Other)?;
-    if !legacy {
+    if format != records::RoleRecordFormat::Aggregate {
         records::validate_oids(catalog, &roles)?;
     }
     let memberships = match catalog.get_metadata(ROLE_MEMBERSHIPS_METADATA_KEY)? {
@@ -83,12 +83,24 @@ fn restore_catalog(
     };
     let memberships = restoration::restore_role_memberships(&roles, memberships)
         .map_err(StorageBackendError::Other)?;
-    if legacy {
+    if format == records::RoleRecordFormat::Identities {
+        restoration::validate_role_identities(&roles).map_err(StorageBackendError::Other)?;
+    } else {
         if !allow_migration {
             return Err(StorageBackendError::Other(
                 "role metadata requires initial-open record migration".into(),
             ));
         }
+        for (name, role) in &mut roles {
+            if role.object_id == [0; 16] {
+                role.object_id = if name == "uqa" {
+                    RoleDefinition::bootstrap().object_id
+                } else {
+                    crate::catalog::identity::new_nonzero_catalog_identity("role", "identity")?
+                };
+            }
+        }
+        restoration::validate_role_identities(&roles).map_err(StorageBackendError::Other)?;
         records::migrate(catalog, &roles)?;
     }
     Ok(RoleCatalogValues { roles, memberships })
