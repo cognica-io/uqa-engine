@@ -38,7 +38,75 @@ def fixture(provider="sqlite"):
     return report, limits
 
 
+def allocation_fixture(provider="sqlite"):
+    report, limits = fixture(provider)
+    report["protocol"] = dict(benchmark.index.ALLOCATION_PROTOCOL)
+    del report["timing_scope"]
+    for row in report["measurements"]:
+        del row["elapsed_ns"]
+        del row["median_ns"]
+        row["verified_live_and_reopened_samples"] = 1
+    return report, limits
+
+
 class NoriPersistentBenchmarkTest(unittest.TestCase):
+    def test_allocation_only_keeps_every_counter_output_and_reopen_gate(self):
+        for provider in ("sqlite", "redb"):
+            report, limits = allocation_fixture(provider)
+            self.assertEqual(benchmark.check(report, limits, provider), {
+                "allocation_and_graph_passed": True, "timing_compared": False, "timing_ratios": {}})
+            for offset in range(len(report["measurements"])):
+                for key in benchmark.index.ALLOCATION_KEYS:
+                    changed = copy.deepcopy(limits)
+                    changed["allocation_ceilings"][benchmark.target_key(report)][report["measurements"][offset]["name"]][key] -= 1
+                    with self.subTest(provider=provider, offset=offset, counter=key), self.assertRaisesRegex(RuntimeError, "allocation regression"):
+                        benchmark.check(report, changed, provider)
+                for key in ("graph_sha256", "field_length", "posting_count", "documents_after", "verified_live_and_reopened_samples"):
+                    changed = copy.deepcopy(report)
+                    changed["measurements"][offset][key] = "changed"
+                    with self.subTest(provider=provider, offset=offset, output=key), self.assertRaises(RuntimeError):
+                        benchmark.check(changed, limits, provider)
+
+    def test_allocation_only_rejects_timing_and_incomplete_protocols(self):
+        for key in ("timing_scope", "elapsed_ns", "median_ns"):
+            report, limits = allocation_fixture()
+            (report if key == "timing_scope" else report["measurements"][0])[key] = None
+            with self.subTest(key=key), self.assertRaisesRegex(RuntimeError, "timing observations"):
+                benchmark.check(report, limits, "sqlite")
+        for key in benchmark.index.ALLOCATION_PROTOCOL:
+            report, limits = allocation_fixture()
+            report["protocol"][key] += 1
+            with self.subTest(key=key), self.assertRaisesRegex(RuntimeError, "sampling protocol"):
+                benchmark.check(report, limits, "sqlite")
+            report, limits = allocation_fixture()
+            report["protocol"][key] = bool(report["protocol"][key])
+            with self.subTest(boolean=key), self.assertRaisesRegex(RuntimeError, "sampling protocol"):
+                benchmark.check(report, limits, "sqlite")
+        report, limits = allocation_fixture()
+        timed, _ = fixture()
+        for after, before in ((report, report), (report, timed), (timed, report)):
+            with self.assertRaisesRegex(RuntimeError, "timing baselines"):
+                benchmark.check(after, limits, "sqlite", before)
+        report["measurements"].pop()
+        with self.assertRaisesRegex(RuntimeError, "workload"):
+            benchmark.check(report, limits, "sqlite")
+
+    def test_allocation_only_cli_passes_the_mode_and_rejects_timing_before_execution(self):
+        report, limits = allocation_fixture()
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.json"
+            rules = Path(directory) / "limits.json"
+            rules.write_text(json.dumps({"sqlite": limits}))
+            arguments = ["benchmark", "--provider", "sqlite", "--allocation-only", "--limits", str(rules), "--output", str(output)]
+            with patch.object(benchmark.sys, "argv", arguments), patch.object(benchmark.common, "execute_benchmark", return_value=report) as execute:
+                self.assertEqual(benchmark.main(), 0)
+                self.assertEqual(execute.call_args.kwargs["arguments"], ("--allocation-only",))
+                self.assertTrue(json.loads(output.read_text())["gate"]["allocation_and_graph_passed"])
+            with patch.object(benchmark.sys, "argv", arguments + ["--baseline", str(output)]), patch.object(benchmark.common, "execute_benchmark") as execute:
+                with self.assertRaises(SystemExit):
+                    benchmark.main()
+                execute.assert_not_called()
+
     def test_reviewed_provider_contracts_cover_targets_and_match_memory_graphs(self):
         limits = json.loads(benchmark.LIMITS.read_text())
         memory = json.loads(benchmark.index.LIMITS.read_text())["outputs"]
@@ -197,6 +265,9 @@ class NoriPersistentBenchmarkTest(unittest.TestCase):
             self.assertIn(f"run-nori-persistent-benchmark.py --provider {provider} --output", native)
         self.assertIn("run-nori-persistent-benchmark.py --provider sqlite --target wasm --output", wasm)
         self.assertNotIn("run-nori-persistent-benchmark.py --provider redb", wasm)
+        for command in (native + wasm).splitlines():
+            if "run-nori-persistent-benchmark.py --provider" in command:
+                self.assertIn("--allocation-only", command)
         self.assertNotIn("--measure-only", native + wasm)
 
 if __name__ == "__main__":

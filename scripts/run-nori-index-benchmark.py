@@ -28,14 +28,19 @@ EXPECTED = {"build_points/256": 256, "build_points/2048": 2048,
             "append_batch_16/0": 16, "append_batch_16/256": 272, "append_batch_16/2048": 2064}
 ALLOCATION_KEYS = {"count_total", "count_peak", "count_net", "bytes_total", "bytes_peak", "bytes_net"}
 PROTOCOL = {"samples": 7, "warmup": 1, "timed_operations_per_sample": 1}
+ALLOCATION_PROTOCOL = {"allocation_samples": 1, "samples": 0, "warmup": 0, "timed_operations_per_sample": 0}
 OWNERS = ("uqa-storage", "uqa-analysis", "uqa-core", "uqa-nori-data")
 
 
-def measurements(report: dict, expected: dict = EXPECTED, owner: str = "uqa-storage") -> dict:
+def measurements(report: dict, expected: dict = EXPECTED, owner: str = "uqa-storage", *, allocation_only: bool = False) -> dict:
     if report.get("schema_version") != 1 or report.get("owner") != owner:
         raise RuntimeError("unsupported Nori indexing benchmark schema or owner")
-    if report.get("protocol") != PROTOCOL or report.get("threads") != 1 or report.get("pointer_bits") not in (32, 64):
+    protocol = ALLOCATION_PROTOCOL if allocation_only else PROTOCOL
+    sampling = report.get("protocol")
+    if sampling != protocol or any(type(value) is not int for value in sampling.values()) or type(report.get("threads")) is not int or report["threads"] != 1 or report.get("pointer_bits") not in (32, 64):
         raise RuntimeError("invalid indexing benchmark sampling protocol or target")
+    if allocation_only and "timing_scope" in report:
+        raise RuntimeError("allocation-only verification cannot contain timing observations")
     if report.get("corpus_sha256") != common.digest(common.CORPUS):
         raise RuntimeError("index benchmark corpus does not match the checked-out source")
     rows = report.get("measurements", [])
@@ -45,11 +50,15 @@ def measurements(report: dict, expected: dict = EXPECTED, owner: str = "uqa-stor
     for name, row in indexed.items():
         if row.get("documents_after") != expected[name]:
             raise RuntimeError(f"changed indexing document count: {name}")
-        samples = row["elapsed_ns"]
-        if len(samples) != PROTOCOL["samples"] or any(type(sample) is not int or sample <= 0 for sample in samples):
-            raise RuntimeError(f"invalid indexing timing samples: {name}")
-        if type(row["median_ns"]) is not int or statistics.median(samples) != row["median_ns"]:
-            raise RuntimeError(f"invalid indexing timing estimator: {name}")
+        if allocation_only:
+            if "elapsed_ns" in row or "median_ns" in row:
+                raise RuntimeError("allocation-only verification cannot contain timing observations")
+        else:
+            samples = row["elapsed_ns"]
+            if len(samples) != PROTOCOL["samples"] or any(type(sample) is not int or sample <= 0 for sample in samples):
+                raise RuntimeError(f"invalid indexing timing samples: {name}")
+            if type(row["median_ns"]) is not int or statistics.median(samples) != row["median_ns"]:
+                raise RuntimeError(f"invalid indexing timing estimator: {name}")
         allocation = row["allocation"]
         if set(allocation) != ALLOCATION_KEYS or any(type(value) is not int for value in allocation.values()):
             raise RuntimeError(f"invalid indexing allocation counters: {name}")
@@ -59,8 +68,10 @@ def measurements(report: dict, expected: dict = EXPECTED, owner: str = "uqa-stor
     return indexed
 
 
-def check(report: dict, limits: dict, baseline: dict | None = None, *, expected: dict = EXPECTED, owner: str = "uqa-storage") -> dict:
-    rows = measurements(report, expected, owner)
+def check(report: dict, limits: dict, baseline: dict | None = None, *, expected: dict = EXPECTED, owner: str = "uqa-storage", allocation_only: bool = False) -> dict:
+    if allocation_only and baseline is not None:
+        raise RuntimeError("allocation-only verification cannot compare timing baselines")
+    rows = measurements(report, expected, owner, allocation_only=allocation_only)
     if limits.get("schema_version") != 1:
         raise RuntimeError("unsupported indexing limit schema")
     for key in ("corpus_sha256", "analyzer_fingerprint"):

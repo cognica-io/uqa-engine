@@ -121,7 +121,7 @@ jobs:
         run: |
           python3 scripts/run-nori-benchmark.py --target wasm --output target/benchmark-runs/nori-wasm.json
           python3 scripts/run-nori-index-benchmark.py --target wasm --output target/benchmark-runs/nori-index-wasm.json
-          python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --target wasm --output target/benchmark-runs/nori-sqlite-wasm.json
+          python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --target wasm --output target/benchmark-runs/nori-sqlite-wasm.json --allocation-only
           python3 scripts/run-nori-phrase-benchmark.py --target wasm --output target/benchmark-runs/nori-phrase-wasm.json
       - uses: actions/upload-artifact@v4
         if: always()

@@ -288,8 +288,8 @@ jobs:
           cargo bench --locked -p uqa-storage-redb --bench commit_allocation_order > target/benchmark-runs/redb-commit-allocation-order.json
           python3 scripts/run-nori-benchmark.py --output target/benchmark-runs/nori-native.json
           python3 scripts/run-nori-index-benchmark.py --output target/benchmark-runs/nori-index-native.json
-          python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --output target/benchmark-runs/nori-sqlite-native.json
-          python3 scripts/run-nori-persistent-benchmark.py --provider redb --output target/benchmark-runs/nori-redb-native.json
+          python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --output target/benchmark-runs/nori-sqlite-native.json --allocation-only
+          python3 scripts/run-nori-persistent-benchmark.py --provider redb --output target/benchmark-runs/nori-redb-native.json --allocation-only
           python3 scripts/run-nori-phrase-benchmark.py --output target/benchmark-runs/nori-phrase-native.json
       - uses: actions/upload-artifact@v4
         if: always()
