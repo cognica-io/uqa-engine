@@ -15,6 +15,7 @@ use uqa_sql::{ast::RelationPersistence, catalog::security::SequenceSecurity};
 use uqa_storage::SequenceRow;
 
 mod inspection;
+mod owner_enumeration;
 mod refresh;
 
 #[derive(Debug, PartialEq)]

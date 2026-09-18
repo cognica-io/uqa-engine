@@ -18,6 +18,24 @@ impl Engine {
             registry: self,
         }
     }
+
+    pub(crate) fn install_sequence_read_snapshot(
+        &self,
+        snapshot: &uqa_execution::catalog::sequence::snapshot::SequenceReadSnapshot,
+    ) {
+        self.durable.roles.restore(&snapshot.roles.roles);
+        self.durable
+            .role_memberships
+            .restore(&snapshot.roles.memberships);
+        self.durable.sequences.restore(&snapshot.sequences);
+        self.durable
+            .sequence_object_ids
+            .restore(&snapshot.object_ids);
+        self.durable
+            .sequence_persistence
+            .restore(&snapshot.persistence);
+        self.durable.sequence_security.restore(&snapshot.security);
+    }
 }
 impl SequenceRestoreRegistry for Engine {
     fn persistence(&self) -> SequencePersistenceRead<'_> {
