@@ -16,37 +16,7 @@ use uqa_sql::{catalog::roles::guards::RoleCatalogGuards, SQLError};
 
 pub const ROLE_CATALOG_CLASS_ID: u32 = 1260;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RoleBinding {
-    pub name: String,
-    pub oid: u32,
-    pub object_id: [u8; 16],
-}
-
-impl RoleBinding {
-    pub fn from_definition(role: &RoleDefinition) -> Result<Self, SQLError> {
-        if role.object_id == [0; 16] {
-            return Err(SQLError::Internal("role has no object identity".into()));
-        }
-        Ok(Self {
-            name: role.name.clone(),
-            oid: u32::try_from(role.oid)
-                .map_err(|_| SQLError::Internal("invalid role OID".into()))?,
-            object_id: role.object_id,
-        })
-    }
-
-    pub fn revalidate(&self, roles: &BTreeMap<String, RoleDefinition>) -> Result<(), SQLError> {
-        if roles
-            .get(&self.name)
-            .is_some_and(|role| role.oid == i64::from(self.oid) && role.object_id == self.object_id)
-        {
-            Ok(())
-        } else {
-            Err(concurrently_dropped(self.oid))
-        }
-    }
-}
+pub use uqa_sql::catalog::roles::identity::RoleBinding;
 
 #[derive(Default)]
 pub struct RoleDependencyLocks {

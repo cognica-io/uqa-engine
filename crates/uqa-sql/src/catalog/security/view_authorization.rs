@@ -5,6 +5,7 @@
 //
 
 //! View and public-column access rules using the current authorization catalogs.
+use crate::catalog::roles::identity::RoleSubject;
 use crate::{
     catalog::{
         roles::guards::RoleCatalogGuards,
@@ -26,7 +27,7 @@ impl ViewAuthorizationContext<'_> {
         &self,
         name: &str,
         view: &StoredView,
-        subject: &str,
+        subject: &(impl RoleSubject + ?Sized),
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         let relation = RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
@@ -62,7 +63,7 @@ impl ViewAuthorizationContext<'_> {
         name: &str,
         view: &StoredView,
         column: &str,
-        subject: &str,
+        subject: &(impl RoleSubject + ?Sized),
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         let relation = RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
@@ -98,7 +99,7 @@ impl ViewAuthorizationContext<'_> {
         &self,
         name: &str,
         view: &StoredView,
-        subject: &str,
+        subject: &(impl RoleSubject + ?Sized),
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         let security = view.security();

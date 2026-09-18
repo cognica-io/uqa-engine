@@ -6,6 +6,7 @@
 
 //! Table-shaped relation column ACL grant paths and privilege checks.
 
+use crate::catalog::roles::identity::RoleSubject;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{TableAclEntry, TablePrivileges};
@@ -45,10 +46,11 @@ pub fn select_column_acl_grantor(
     security: &TableSecurity,
     column: &str,
     privilege: TableAclPrivilege,
-    current_user: &str,
+    current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> Option<String> {
+    let current_user = current_user.role_name(roles)?;
     if role_inherits(roles, memberships, current_user, &security.role_owner) {
         return Some(security.role_owner.clone());
     }
@@ -65,13 +67,13 @@ pub fn select_column_acl_grantor(
 pub fn role_has_column_privilege(
     security: &TableSecurity,
     column: &str,
-    subject: &str,
+    subject: &(impl RoleSubject + ?Sized),
     check: TablePrivilegeCheck,
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> bool {
-    if roles
-        .get(subject)
+    if subject
+        .role_definition(roles)
         .is_some_and(|role| role.has(RoleAttribute::Superuser))
         || role_inherits(roles, memberships, subject, &security.role_owner)
     {

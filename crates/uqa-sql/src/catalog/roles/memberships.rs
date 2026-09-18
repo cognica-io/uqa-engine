@@ -4,15 +4,17 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{RoleDefinition, RoleMembership, RoleMembershipKey};
+use super::{identity::RoleSubject, RoleDefinition, RoleMembership, RoleMembershipKey};
 use crate::ast::{GrantRoleStmt, RoleAttribute, RoleMembershipOptions};
 use crate::SQLError;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use uqa_core::Value;
 
-pub fn role_is_superuser(roles: &BTreeMap<String, RoleDefinition>, role: &str) -> bool {
-    roles
-        .get(role)
+pub fn role_is_superuser(
+    roles: &BTreeMap<String, RoleDefinition>,
+    role: &(impl RoleSubject + ?Sized),
+) -> bool {
+    role.role_definition(roles)
         .is_some_and(|definition| definition.has(RoleAttribute::Superuser))
 }
 
@@ -204,9 +206,12 @@ pub fn role_reaches(
 pub fn role_can_set(
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    member: &str,
+    member: &(impl RoleSubject + ?Sized),
     role: &str,
 ) -> bool {
+    let Some(member) = member.role_name(roles) else {
+        return false;
+    };
     role_is_superuser(roles, member)
         || role_reaches(memberships, member, role, |membership| {
             membership.set_option
@@ -216,9 +221,12 @@ pub fn role_can_set(
 pub fn role_inherits(
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    member: &str,
+    member: &(impl RoleSubject + ?Sized),
     role: &str,
 ) -> bool {
+    let Some(member) = member.role_name(roles) else {
+        return false;
+    };
     role_is_superuser(roles, member)
         || role_reaches(memberships, member, role, |membership| {
             membership.inherit_option

@@ -6,6 +6,7 @@
 
 //! Table-shaped relation ACL privilege sets, grant paths, and dependency-aware revocation.
 
+use crate::catalog::roles::identity::RoleSubject;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{TableAclEntry, TablePrivileges};
@@ -276,10 +277,11 @@ pub fn grant_option_roles(
 pub fn select_acl_grantor(
     security: &TableSecurity,
     privilege: TableAclPrivilege,
-    current_user: &str,
+    current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> Option<String> {
+    let current_user = current_user.role_name(roles)?;
     if role_inherits(roles, memberships, current_user, &security.role_owner) {
         return Some(security.role_owner.clone());
     }
@@ -297,13 +299,13 @@ pub fn select_acl_grantor(
 
 pub fn role_has_privilege(
     security: &TableSecurity,
-    subject: &str,
+    subject: &(impl RoleSubject + ?Sized),
     check: TablePrivilegeCheck,
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> bool {
-    if roles
-        .get(subject)
+    if subject
+        .role_definition(roles)
         .is_some_and(|role| role.has(RoleAttribute::Superuser))
         || role_inherits(roles, memberships, subject, &security.role_owner)
     {
@@ -467,7 +469,7 @@ fn rewrite_acl_entries_owner(acl: &mut Vec<TableAclEntry>, old_owner: &str, new_
 
 pub fn role_can_view_table(
     security: &TableSecurity,
-    subject: &str,
+    subject: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> bool {
@@ -501,7 +503,7 @@ pub fn role_can_view_table(
 
 pub fn role_has_table_privilege(
     security: &TableSecurity,
-    subject: &str,
+    subject: &(impl RoleSubject + ?Sized),
     privilege: TableAclPrivilege,
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
@@ -521,7 +523,7 @@ pub fn role_has_table_privilege(
 pub fn role_has_column_privilege(
     security: &TableSecurity,
     column: &str,
-    subject: &str,
+    subject: &(impl RoleSubject + ?Sized),
     privilege: TableAclPrivilege,
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,

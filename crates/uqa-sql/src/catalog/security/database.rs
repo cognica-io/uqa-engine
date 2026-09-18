@@ -6,6 +6,7 @@
 
 //! Database ACL values, grant paths, privilege checks and dependency-aware revocation.
 
+use crate::catalog::roles::identity::RoleSubject;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::{DatabasePrivilege, DatabaseRevokeBehavior, GrantDatabaseStmt, RoleAttribute};
@@ -150,10 +151,11 @@ fn grant_option_roles(
 pub fn select_acl_grantor(
     security: &DatabaseSecurity,
     privilege: DatabaseAclPrivilege,
-    current_user: &str,
+    current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> Option<String> {
+    let current_user = current_user.role_name(roles)?;
     if role_inherits(roles, memberships, current_user, &security.role_owner) {
         return Some(security.role_owner.clone());
     }
@@ -171,13 +173,13 @@ pub fn select_acl_grantor(
 
 pub fn role_has_database_privilege_check(
     security: &DatabaseSecurity,
-    subject: &str,
+    subject: &(impl RoleSubject + ?Sized),
     check: DatabasePrivilegeCheck,
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> bool {
-    if roles
-        .get(subject)
+    if subject
+        .role_definition(roles)
         .is_some_and(|role| role.has(RoleAttribute::Superuser))
     {
         return true;
@@ -205,7 +207,7 @@ pub fn role_has_database_privilege_check(
 
 pub fn role_has_database_privilege(
     security: &DatabaseSecurity,
-    subject: &str,
+    subject: &(impl RoleSubject + ?Sized),
     privilege: DatabaseAclPrivilege,
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,

@@ -13,6 +13,7 @@ use super::{
     },
     TableSecurity,
 };
+use crate::catalog::roles::identity::RoleSubject;
 use crate::{
     ast::RoleAttribute,
     catalog::{
@@ -99,7 +100,7 @@ pub fn validate_security(
 
 fn masks_table_write(
     relation: SystemRelation,
-    subject: &str,
+    subject: &(impl RoleSubject + ?Sized),
     check: TablePrivilegeCheck,
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> bool {
@@ -113,15 +114,15 @@ fn masks_table_write(
                 | TableAclPrivilege::Delete
                 | TableAclPrivilege::Truncate
         )
-        && !roles
-            .get(subject)
+        && !subject
+            .role_definition(roles)
             .is_some_and(|role| role.has(RoleAttribute::Superuser))
 }
 
 pub fn has_table_privilege(
     relation: SystemRelation,
     security: &TableSecurity,
-    subject: &str,
+    subject: &(impl RoleSubject + ?Sized),
     check: TablePrivilegeCheck,
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
@@ -134,7 +135,7 @@ pub fn has_column_privilege(
     relation: SystemRelation,
     security: &TableSecurity,
     column: &str,
-    subject: &str,
+    subject: &(impl RoleSubject + ?Sized),
     check: TablePrivilegeCheck,
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,

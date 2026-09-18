@@ -10,6 +10,7 @@ use crate::ast::{CreateRoleStmt, RoleAttribute};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
+pub mod identity;
 pub mod memberships;
 pub use memberships::{role_can_set, role_inherits};
 
