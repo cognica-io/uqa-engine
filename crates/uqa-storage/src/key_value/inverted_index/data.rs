@@ -13,6 +13,9 @@ use super::{
     StagedDocuments, StorageBackendResult, TokenTermKey,
 };
 
+#[cfg(test)]
+mod tests;
+
 impl FieldStats {
     pub(in crate::key_value) fn to_bytes(self) -> StorageBackendResult<[u8; 56]> {
         if self.doc_count == 0 {
@@ -92,25 +95,30 @@ impl OccurrenceRead<'_> {
         cancellation: Option<&uqa_core::CancellationToken>,
     ) -> StorageBackendResult<StagedDocuments> {
         let mut staged = BTreeMap::new();
+        let mut revisions = BTreeMap::new();
         for (doc_id, fields) in documents {
+            self.store.control().check()?;
             if let Some(cancellation) = cancellation {
                 cancellation.check()?;
             }
             let mut snapshot = DocumentFields::new();
             for (field, text) in fields {
-                if !rebuilding {
-                    self.validate_index_revision_change(&field, self.bindings)?;
+                if !revisions.contains_key(&field) {
+                    if !rebuilding {
+                        self.validate_index_revision_change(&field, self.bindings)?;
+                    }
+                    revisions.insert(field.clone(), self.bindings.index_revision(&field)?);
                 }
-                let revision = self.bindings.index_revision(&field)?;
+                let revision = &revisions[&field];
                 let analyzed = match cancellation {
                     Some(cancellation) => crate::inverted_index::analyze_index_field_cancellable(
-                        &revision,
+                        revision,
                         &text,
                         cancellation,
                     )?,
-                    None => analyze_index_field(&revision, &text)?,
+                    None => analyze_index_field(revision, &text)?,
                 };
-                let metadata = IndexedFieldMetadata::new(&revision, &analyzed);
+                let metadata = IndexedFieldMetadata::new(revision, &analyzed);
                 snapshot.insert(
                     field,
                     FieldSnapshot {

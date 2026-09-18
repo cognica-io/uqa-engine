@@ -133,7 +133,7 @@ impl OccurrenceRead<'_> {
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
     ) -> StorageBackendResult<()> {
         self.require_graph_format()?;
-        let staged = self.stage_documents(documents, false)?;
+        let mut staged = self.stage_documents(documents, false)?;
         let mut previous = BTreeMap::new();
         let mut totals = BTreeMap::<FieldName, FieldStats>::new();
         let mut changes = ClusterChanges::new();
@@ -168,10 +168,10 @@ impl OccurrenceRead<'_> {
             }
             previous.insert(*doc_id, old);
         }
-        for (doc_id, fields) in &staged {
+        for (doc_id, fields) in &mut staged {
             Self::add_field_statistics(&mut totals, fields)?;
             for (field, snapshot) in fields {
-                for (term, occurrences) in &snapshot.terms {
+                for (term, occurrences) in &mut snapshot.terms {
                     changes
                         .entry((field.clone(), term.clone(), cluster_id(*doc_id)))
                         .or_default()
@@ -180,7 +180,7 @@ impl OccurrenceRead<'_> {
                             Some(OccurrencePosting {
                                 doc_id: *doc_id,
                                 doc_length: snapshot.metadata.length,
-                                occurrences: occurrences.clone(),
+                                occurrences: std::mem::take(occurrences),
                             }),
                         );
                 }

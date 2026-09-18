@@ -174,29 +174,39 @@ impl RedbRecordStore {
         } else {
             current.successor()?
         };
+        let mut maximum = 0;
+        for write in prepared.records() {
+            control.cancellation().check()?;
+            maximum = maximum.max(
+                write
+                    .value()
+                    .map_or(0, <[u8]>::len)
+                    .checked_add(1)
+                    .ok_or(VersionError::InvalidEncoding("record size overflow"))?,
+            );
+        }
+        let mut workspace = control.memory().reserve(maximum)?;
+        let mut encoded = Vec::new();
+        encoded
+            .try_reserve_exact(maximum)
+            .map_err(|error| uqa_storage::StorageBackendError::Memory(error.into()))?;
+        workspace.grow(encoded.capacity() - maximum)?;
         let mut versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
         for write in prepared.records() {
             control.cancellation().check()?;
             let value = write.value();
-            let size = value
-                .map_or(0, <[u8]>::len)
-                .checked_add(1)
-                .ok_or(VersionError::InvalidEncoding("record size overflow"))?;
-            // The provider's writable page is borrowed; no transaction-sized payload copy is built here.
-            let mut encoded = versions
-                .insert_reserve((write.key(), sequence.as_u64()), size)
-                .map_err(redb_error)?;
-            encoded.as_mut()[0] = u8::from(value.is_some());
+            // redb's insert_reserve allocates a temporary value for every row. Reuse one charged encoding buffer for this bounded physical commit instead.
+            encoded.clear();
+            encoded.push(u8::from(value.is_some()));
             if let Some(value) = value {
-                for (target, source) in encoded.as_mut()[1..]
-                    .chunks_mut(65536)
-                    .zip(value.chunks(65536))
-                {
+                for source in value.chunks(65536) {
                     control.cancellation().check()?;
-                    target.copy_from_slice(source);
+                    encoded.extend_from_slice(source);
                 }
             }
-            drop(encoded);
+            versions
+                .insert((write.key(), sequence.as_u64()), encoded.as_slice())
+                .map_err(redb_error)?;
             heads
                 .insert(write.key(), sequence.as_u64())
                 .map_err(redb_error)?;

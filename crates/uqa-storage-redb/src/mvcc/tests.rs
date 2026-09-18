@@ -13,6 +13,7 @@ use redb::{backends::InMemoryBackend, StorageBackend};
 
 use super::*;
 
+mod commit;
 mod identifiers;
 mod metadata;
 mod migration;
