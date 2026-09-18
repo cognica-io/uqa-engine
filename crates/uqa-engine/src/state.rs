@@ -28,6 +28,9 @@ pub(super) struct StorageContext {
     pub(super) catalog: Option<Arc<dyn uqa_storage::CatalogFacade>>,
     pub(super) backend: Option<Arc<dyn uqa_storage::PersistentStorageBackend>>,
     pub(super) provider: Option<Arc<dyn uqa_storage::PersistentStorageProvider>>,
+    /// Autocommit reads used to reserve identities beyond a pinned snapshot.
+    pub(super) document_identity_reader:
+        Mutex<Option<Arc<dyn uqa_storage::PersistentStorageBackend>>>,
 }
 
 pub(crate) use uqa_execution::catalog::security::{
@@ -41,6 +44,7 @@ impl StorageContext {
             catalog: None,
             backend: None,
             provider: None,
+            document_identity_reader: Mutex::new(None),
         }
     }
 
@@ -54,6 +58,7 @@ impl StorageContext {
             catalog: Some(catalog),
             backend: Some(backend),
             provider,
+            document_identity_reader: Mutex::new(None),
         }
     }
 
@@ -63,6 +68,7 @@ impl StorageContext {
             catalog: source.catalog.clone(),
             backend: source.backend.clone(),
             provider: source.provider.clone(),
+            document_identity_reader: Mutex::new(None),
         }
     }
 }

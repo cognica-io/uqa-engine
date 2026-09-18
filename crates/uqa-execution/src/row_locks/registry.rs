@@ -113,6 +113,13 @@ impl RowLockManager {
         self.relation_key(LockRelationIdentity::Table(Arc::from(table)))
     }
 
+    /// Reserve generated identities independently of tuple locks and SQL constraint keys. One namespace per table keeps registry metadata independent of the number of allocated rows.
+    pub fn document_identity_key(&self, table: &str) -> u64 {
+        self.relation_key(LockRelationIdentity::DocumentIdentityReservations(
+            Arc::from(table),
+        ))
+    }
+
     pub fn backend_writer_key(&self) -> u64 {
         self.relation_key(LockRelationIdentity::BackendWriter)
     }
