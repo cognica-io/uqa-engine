@@ -31,8 +31,12 @@ impl RoleBinding {
         })
     }
 
+    /// Validate the original name and identity before publishing a stored role reference.
     pub fn revalidate(&self, roles: &BTreeMap<String, RoleDefinition>) -> Result<(), SQLError> {
-        if self.role_definition(roles).is_some() {
+        if roles
+            .get(&self.name)
+            .is_some_and(|role| self.matches_definition(role))
+        {
             Ok(())
         } else {
             Err(SQLError::Routine {
@@ -40,6 +44,10 @@ impl RoleBinding {
                 message: format!("role {} was concurrently dropped", self.oid),
             })
         }
+    }
+
+    fn matches_definition(&self, role: &RoleDefinition) -> bool {
+        role.oid == i64::from(self.oid) && role.object_id == self.object_id
     }
 
     pub fn require_name<'a>(
@@ -113,13 +121,10 @@ impl RoleSubject for RoleBinding {
         &self,
         roles: &'a BTreeMap<String, RoleDefinition>,
     ) -> Option<&'a RoleDefinition> {
-        let matches = |role: &&RoleDefinition| {
-            role.oid == i64::from(self.oid) && role.object_id == self.object_id
-        };
         roles
             .get(&self.name)
-            .filter(matches)
-            .or_else(|| roles.values().find(matches))
+            .filter(|role| self.matches_definition(role))
+            .or_else(|| roles.values().find(|role| self.matches_definition(role)))
     }
 }
 
