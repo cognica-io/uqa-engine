@@ -46,6 +46,7 @@ impl Engine {
     }
     pub(crate) fn schema_privilege_context(&self) -> SchemaPrivilegeContext<'_> {
         SchemaPrivilegeContext {
+            locks: self,
             writer: self,
             refresh: self,
             session: self,

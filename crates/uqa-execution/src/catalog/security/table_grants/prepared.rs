@@ -14,14 +14,13 @@ use super::{
     },
     updates::{system_privilege_updates, table_privilege_updates, TablePrivilegeUpdate},
 };
-use crate::catalog::security::system_relations::SystemPrivilegeUpdate;
+use crate::catalog::security::{
+    roles::dependencies::RoleDependencyCandidate, system_relations::SystemPrivilegeUpdate,
+};
 use uqa_sql::{
     ast::{GrantTableStmt, GrantTableTarget},
     catalog::{
-        roles::{
-            guards::{RoleDefinitionRead, RoleMembershipRead},
-            resolve_role_reference,
-        },
+        roles::resolve_role_reference,
         security::{
             table::{requested_acl_privileges, RequestedTablePrivileges},
             table_grants::{
@@ -40,9 +39,6 @@ pub(super) struct PreparedTableGrant<'a> {
     pub view_updates: Vec<ViewPrivilegeUpdate>,
     pub foreign_updates: Vec<ForeignTablePrivilegeUpdate>,
     pub system_updates: Vec<SystemPrivilegeUpdate>,
-    pub memberships: RoleMembershipRead<'a>,
-    pub roles: RoleDefinitionRead<'a>,
-    pub dependencies: std::collections::BTreeSet<String>,
     pub notices: Vec<(&'static str, String)>,
 }
 
@@ -50,7 +46,7 @@ pub(super) fn prepare<'a>(
     context: &'a TableGrantContext<'_>,
     statement: &GrantTableStmt,
     targets: &[ResolvedTableGrantTarget],
-) -> Result<PreparedTableGrant<'a>, SQLError> {
+) -> Result<RoleDependencyCandidate<'a, PreparedTableGrant<'a>>, SQLError> {
     let grantees = statement
         .grantees
         .iter()
@@ -121,14 +117,16 @@ pub(super) fn prepare<'a>(
         &mut notices,
         &mut dependencies,
     )?;
-    Ok(PreparedTableGrant {
-        updates,
-        view_updates,
-        foreign_updates,
-        system_updates,
+    Ok(RoleDependencyCandidate {
+        value: PreparedTableGrant {
+            updates,
+            view_updates,
+            foreign_updates,
+            system_updates,
+            notices,
+        },
         memberships,
         roles,
         dependencies,
-        notices,
     })
 }

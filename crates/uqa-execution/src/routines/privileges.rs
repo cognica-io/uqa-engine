@@ -6,14 +6,23 @@
 
 //! Apply owner and EXECUTE privilege changes through retained role and registry state.
 
-use super::catalog::RoutineMutationContext;
-use std::sync::Arc;
+use super::catalog::{RoutineMutationContext, RoutineRegistryWrite};
+use crate::{
+    catalog::security::roles::{
+        dependencies::{prepare_role_dependencies, RoleDependencyCandidate},
+        locking::RoleLockContext,
+    },
+    row_locks::shared_objects::SharedObjectLockSession,
+};
+use std::{collections::BTreeSet, sync::Arc};
 use uqa_sql::{
     ast::{AlterRoutineOwnerStmt, GrantRoutineStmt, RoutineRevokeBehavior},
     catalog::roles::{
         require_role_exists, require_set_role, resolve_role_reference, role_inherits,
         RoleReferenceNames,
     },
+    catalog::security::dependencies::added_acl_roles,
+    routines::lifecycle::RoutineRegistry,
     routines::{
         declaration::{resolve_alter_routine_identity_types, RoutineTypeCatalog},
         lifecycle::{binding::resolve_sql_routine_alter_target, ensure_routine_owner_as},
@@ -27,6 +36,7 @@ pub trait RoutinePrivilegeNotices {
 }
 pub struct RoutinePrivilegeContext<'a> {
     pub catalog: RoutineMutationContext<'a>,
+    pub locks: &'a dyn SharedObjectLockSession,
     pub types: &'a dyn RoutineTypeCatalog,
     pub role_names: &'a dyn RoleReferenceNames,
     pub notices: &'a dyn RoutinePrivilegeNotices,
@@ -82,6 +92,49 @@ pub fn grant_sql_routine(
     context: &RoutinePrivilegeContext<'_>,
     stmt: &GrantRoutineStmt,
 ) -> Result<(), SQLError> {
+    let RoleDependencyCandidate {
+        roles,
+        memberships,
+        value:
+            RoutinePrivilegeCandidate {
+                mut registry,
+                next,
+                notices,
+            },
+        ..
+    } = prepare_role_dependencies(
+        &RoleLockContext {
+            roles: context.catalog.roles,
+            session: context.locks,
+        },
+        || context.catalog.writer.prepare_writer(),
+        || prepare_privileges(context, stmt),
+    )?;
+    context
+        .catalog
+        .publication
+        .persist_routine_definitions(&next)?;
+    **registry = next;
+    drop(registry);
+    drop(memberships);
+    drop(roles);
+    for (level, message) in notices {
+        context.notices.routine_privilege_notice(level, &message);
+    }
+    context.catalog.changes.catalog_registry_changed();
+    Ok(())
+}
+
+struct RoutinePrivilegeCandidate<'a> {
+    registry: RoutineRegistryWrite<'a>,
+    next: RoutineRegistry,
+    notices: Vec<(&'static str, String)>,
+}
+
+fn prepare_privileges<'a>(
+    context: &'a RoutinePrivilegeContext<'_>,
+    stmt: &GrantRoutineStmt,
+) -> Result<RoleDependencyCandidate<'a, RoutinePrivilegeCandidate<'a>>, SQLError> {
     let grantees = stmt
         .grantees
         .iter()
@@ -92,7 +145,6 @@ pub fn grant_sql_routine(
         .as_ref()
         .map(|role| resolve_role_reference(context.role_names, role));
     let current_user = context.catalog.names.current_user_name();
-    context.catalog.writer.prepare_writer()?;
     let roles = context.catalog.roles.role_definitions();
     analysis::validate_routine_acl_roles(
         stmt,
@@ -102,7 +154,7 @@ pub fn grant_sql_routine(
         &roles,
     )?;
     let memberships = context.catalog.roles.role_memberships();
-    let mut registry = context.catalog.registry.routines_write();
+    let registry = context.catalog.registry.routines_write();
     let mut resolved = Vec::with_capacity(stmt.items.len());
     for item in &stmt.items {
         let (name, position) = resolve_sql_routine_alter_target(
@@ -123,6 +175,7 @@ pub fn grant_sql_routine(
     }
     let mut next = registry.clone();
     let mut notices = Vec::new();
+    let mut dependencies = BTreeSet::new();
     for (name, position, grantor) in resolved {
         let existing = next[&name][position].clone();
         let Some(grantor) = grantor else {
@@ -154,6 +207,13 @@ pub fn grant_sql_routine(
             }
             changed
         };
+        added_acl_roles(
+            existing.def.execute_acl.as_deref().unwrap_or_default(),
+            &existing.def.owner,
+            def.execute_acl.as_deref().unwrap_or_default(),
+            &def.owner,
+            &mut dependencies,
+        );
         if changed {
             next.get_mut(&name).expect("resolved routine key")[position] =
                 Arc::new(SQLUserFunction {
@@ -162,17 +222,14 @@ pub fn grant_sql_routine(
                 });
         }
     }
-    context
-        .catalog
-        .publication
-        .persist_routine_definitions(&next)?;
-    **registry = next;
-    drop(registry);
-    drop(memberships);
-    drop(roles);
-    for (level, message) in notices {
-        context.notices.routine_privilege_notice(level, &message);
-    }
-    context.catalog.changes.catalog_registry_changed();
-    Ok(())
+    Ok(RoleDependencyCandidate {
+        value: RoutinePrivilegeCandidate {
+            registry,
+            next,
+            notices,
+        },
+        memberships,
+        roles,
+        dependencies,
+    })
 }

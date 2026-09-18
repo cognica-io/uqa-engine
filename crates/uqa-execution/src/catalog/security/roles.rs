@@ -10,5 +10,6 @@ pub use uqa_sql::catalog::roles::guards::{
     RoleCatalogGuards, RoleDefinitionRead, RoleMembershipRead,
 };
 
+pub mod dependencies;
 pub mod locking;
 pub mod persistence;

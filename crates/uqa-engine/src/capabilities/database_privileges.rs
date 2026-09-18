@@ -89,6 +89,7 @@ impl DatabasePrivilegePublication for Engine {
 impl Engine {
     pub(crate) fn database_privilege_context(&self) -> DatabasePrivilegeContext<'_> {
         DatabasePrivilegeContext {
+            locks: self,
             names: self,
             roles: self,
             registry: self,

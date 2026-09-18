@@ -26,6 +26,7 @@ impl RoutinePrivilegeNotices for Engine {
 impl Engine {
     pub(crate) fn routine_privilege_context(&self) -> RoutinePrivilegeContext<'_> {
         RoutinePrivilegeContext {
+            locks: self,
             catalog: self.routine_mutation_context(),
             types: self,
             role_names: self,

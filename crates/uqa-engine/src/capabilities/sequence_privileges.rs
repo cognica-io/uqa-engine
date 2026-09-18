@@ -83,6 +83,7 @@ impl Engine {
     }
     pub(crate) fn sequence_privilege_context(&self) -> SequencePrivilegeContext<'_> {
         SequencePrivilegeContext {
+            locks: self,
             inquiry: self.sequence_privilege_inquiry(),
             sequences: self,
             namespaces: self,

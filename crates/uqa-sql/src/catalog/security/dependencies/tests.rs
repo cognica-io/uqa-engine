@@ -69,3 +69,50 @@ fn existing_grantee_or_grantor_and_public_or_owner_do_not_add_dependencies() {
     added_table_acl_roles(&before, &after, &mut added);
     assert_eq!(added, BTreeSet::from(["new_grantor".into()]));
 }
+
+#[test]
+fn database_schema_sequence_and_routine_acls_preserve_both_role_references() {
+    fn verify<T: AclRoleReferences>(entry: T) {
+        let entries = [entry];
+        let mut added = BTreeSet::new();
+        added_acl_roles(&[], "owner", &entries, "owner", &mut added);
+        assert_eq!(added, BTreeSet::from(["reader".into(), "grantor".into()]));
+        added.clear();
+        added_acl_roles(&entries, "owner", &entries, "owner", &mut added);
+        assert!(added.is_empty());
+        added_acl_roles(&entries, "owner", &[], "owner", &mut added);
+        assert!(added.is_empty());
+    }
+    verify(DatabaseAclEntry {
+        role: "reader".into(),
+        grantor: Some("grantor".into()),
+        privileges: super::super::database::DatabasePrivileges {
+            create: true,
+            ..super::super::database::DatabasePrivileges::default()
+        },
+        grant_options: super::super::database::DatabasePrivileges::default(),
+    });
+    verify(SchemaAclEntry {
+        role: "reader".into(),
+        grantor: Some("grantor".into()),
+        privileges: uqa_core::catalog_schema::SchemaPrivileges {
+            usage: true,
+            create: false,
+        },
+        grant_options: uqa_core::catalog_schema::SchemaPrivileges::default(),
+    });
+    verify(SequenceAclEntry {
+        role: "reader".into(),
+        grantor: Some("grantor".into()),
+        privileges: uqa_core::catalog_sequence::SequencePrivileges {
+            usage: true,
+            ..uqa_core::catalog_sequence::SequencePrivileges::default()
+        },
+        grant_options: uqa_core::catalog_sequence::SequencePrivileges::default(),
+    });
+    verify(crate::ast::RoutineAclEntry {
+        role: "reader".into(),
+        grantor: Some("grantor".into()),
+        grant_option: true,
+    });
+}

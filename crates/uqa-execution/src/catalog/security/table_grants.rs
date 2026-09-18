@@ -11,6 +11,10 @@ mod targets;
 mod updates;
 pub use context::{TableGrantContext, TableGrantInputs};
 mod prepared;
+use super::roles::{
+    dependencies::{prepare_role_dependencies, RoleDependencyCandidate},
+    locking::RoleLockContext,
+};
 use updates::persist_table_privilege_updates;
 use uqa_sql::{
     ast::{
@@ -31,37 +35,27 @@ pub fn grant_table_privileges(
 impl TableGrantContext<'_> {
     pub fn grant_table_privileges(&self, statement: &GrantTableStmt) -> Result<(), SQLError> {
         let targets = locking::lock_targets(self, statement)?;
-        let mut held = super::roles::locking::RoleDependencyLocks::default();
-        let role_locks = super::roles::locking::RoleLockContext {
+        let role_locks = RoleLockContext {
             roles: self.roles,
             session: self.shared_locks,
         };
-        let mut writer_prepared = false;
-        let prepared = loop {
-            let candidate = prepared::prepare(self, statement, &targets)?;
-            let pending = held.missing(&candidate.roles, &candidate.dependencies)?;
-            if !pending.is_empty() {
-                drop(candidate);
-                held.acquire(&role_locks, pending)?;
-                writer_prepared = false;
-            } else if writer_prepared {
-                break candidate;
-            } else {
-                drop(candidate);
-                self.writer.prepare_writer()?;
-                writer_prepared = true;
-            }
-        };
-        let prepared::PreparedTableGrant {
-            updates,
-            view_updates,
-            foreign_updates,
-            system_updates,
+        let RoleDependencyCandidate {
             roles,
             memberships,
-            notices,
+            value:
+                prepared::PreparedTableGrant {
+                    updates,
+                    view_updates,
+                    foreign_updates,
+                    system_updates,
+                    notices,
+                },
             ..
-        } = prepared;
+        } = prepare_role_dependencies(
+            &role_locks,
+            || self.writer.prepare_writer(),
+            || prepared::prepare(self, statement, &targets),
+        )?;
         persist_table_privilege_updates(self, &updates, &view_updates, &foreign_updates)?;
         for update in &system_updates {
             update.persist(self.catalog).map_err(|error| {

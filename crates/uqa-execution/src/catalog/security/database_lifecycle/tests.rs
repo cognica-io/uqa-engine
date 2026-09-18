@@ -30,6 +30,7 @@ impl DatabaseCatalog {
     fn context(&self) -> DatabasePrivilegeContext<'_> {
         DatabasePrivilegeContext {
             names: self,
+            locks: self,
             roles: self,
             registry: self,
             publication: self,
@@ -82,6 +83,7 @@ impl DatabaseSecurityRegistry for DatabaseCatalog {
 
 impl DatabasePrivilegePublication for DatabaseCatalog {
     fn prepare_writer(&self) -> Result<(), SQLError> {
+        self.assert_guards_are_released();
         Ok(())
     }
 
@@ -110,6 +112,20 @@ impl DatabasePrivilegePublication for DatabaseCatalog {
     fn notice(&self, _: &str, _: &str) {
         self.assert_guards_are_released();
         panic!("the database owner can grant CREATE without a warning");
+    }
+}
+
+impl SharedObjectLockSession for DatabaseCatalog {
+    fn acquire_shared_catalog(
+        &self,
+        _: crate::row_locks::shared_objects::SharedCatalogLock<'_>,
+        _: crate::row_locks::RelationLockMode,
+    ) -> Result<crate::row_locks::ScopedRelationLock<'_>, SQLError> {
+        panic!("PUBLIC must not acquire a role dependency lock")
+    }
+
+    fn refresh_shared_catalog(&self) -> Result<(), SQLError> {
+        panic!("PUBLIC has no shared role dependency")
     }
 }
 

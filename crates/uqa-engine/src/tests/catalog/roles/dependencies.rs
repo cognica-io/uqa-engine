@@ -20,17 +20,28 @@ use uqa_execution::{
 struct Target {
     setup: &'static str,
     grant: &'static str,
-    inquiry: &'static str,
+    access: Access,
+}
+
+enum Access {
+    Inquiry(&'static str),
+    Execute(&'static str),
 }
 
 const TARGETS: &[Target] = &[
-    Target { setup: "", grant: "GRANT SELECT ON t TO dependent", inquiry: "has_table_privilege('dependent', 't', 'SELECT')" },
-    Target { setup: "", grant: "GRANT SELECT(v) ON t TO dependent", inquiry: "has_column_privilege('dependent', 't', 'v', 'SELECT')" },
-    Target { setup: "", grant: "GRANT UPDATE ON pg_class TO dependent WITH GRANT OPTION", inquiry: "has_table_privilege('dependent', 'pg_class', 'UPDATE WITH GRANT OPTION')" },
-    Target { setup: "", grant: "GRANT UPDATE(relname) ON pg_class TO dependent", inquiry: "has_column_privilege('dependent', 'pg_class', 'relname', 'UPDATE')" },
-    Target { setup: "CREATE VIEW role_view AS SELECT v FROM t", grant: "GRANT SELECT ON role_view TO dependent", inquiry: "has_table_privilege('dependent', 'role_view', 'SELECT')" },
-    Target { setup: "CREATE MATERIALIZED VIEW role_view AS SELECT v FROM t", grant: "GRANT SELECT ON role_view TO dependent", inquiry: "has_table_privilege('dependent', 'role_view', 'SELECT')" },
-    Target { setup: "CREATE SERVER role_remote FOREIGN DATA WRAPPER memory_fdw; CREATE FOREIGN TABLE role_foreign(v integer) SERVER role_remote", grant: "GRANT SELECT ON role_foreign TO dependent", inquiry: "has_table_privilege('dependent', 'role_foreign', 'SELECT')" },
+    Target { setup: "", grant: "GRANT SELECT ON t TO dependent", access: Access::Inquiry("has_table_privilege('dependent', 't', 'SELECT')") },
+    Target { setup: "", grant: "GRANT SELECT(v) ON t TO dependent", access: Access::Inquiry("has_column_privilege('dependent', 't', 'v', 'SELECT')") },
+    Target { setup: "", grant: "GRANT UPDATE ON pg_class TO dependent WITH GRANT OPTION", access: Access::Inquiry("has_table_privilege('dependent', 'pg_class', 'UPDATE WITH GRANT OPTION')") },
+    Target { setup: "", grant: "GRANT UPDATE(relname) ON pg_class TO dependent", access: Access::Inquiry("has_column_privilege('dependent', 'pg_class', 'relname', 'UPDATE')") },
+    Target { setup: "CREATE VIEW role_view AS SELECT v FROM t", grant: "GRANT SELECT ON role_view TO dependent", access: Access::Inquiry("has_table_privilege('dependent', 'role_view', 'SELECT')") },
+    Target { setup: "CREATE MATERIALIZED VIEW role_view AS SELECT v FROM t", grant: "GRANT SELECT ON role_view TO dependent", access: Access::Inquiry("has_table_privilege('dependent', 'role_view', 'SELECT')") },
+    Target { setup: "CREATE SERVER role_remote FOREIGN DATA WRAPPER memory_fdw; CREATE FOREIGN TABLE role_foreign(v integer) SERVER role_remote", grant: "GRANT SELECT ON role_foreign TO dependent", access: Access::Inquiry("has_table_privilege('dependent', 'role_foreign', 'SELECT')") },
+    Target { setup: "", grant: "GRANT CREATE ON DATABASE uqa TO dependent", access: Access::Inquiry("has_database_privilege('dependent', 'uqa', 'CREATE')") },
+    Target { setup: "CREATE SCHEMA role_schema", grant: "GRANT USAGE ON SCHEMA role_schema TO dependent", access: Access::Inquiry("has_schema_privilege('dependent', 'role_schema', 'USAGE')") },
+    Target { setup: "CREATE SEQUENCE role_sequence", grant: "GRANT USAGE ON SEQUENCE role_sequence TO dependent", access: Access::Inquiry("has_sequence_privilege('dependent', 'role_sequence', 'USAGE')") },
+    Target { setup: "CREATE SEQUENCE role_sequence", grant: "GRANT SELECT ON TABLE role_sequence TO dependent", access: Access::Inquiry("has_sequence_privilege('dependent', 'role_sequence', 'SELECT')") },
+    Target { setup: "CREATE FUNCTION role_function() RETURNS integer LANGUAGE SQL AS 'SELECT 1'; REVOKE EXECUTE ON FUNCTION role_function() FROM PUBLIC", grant: "GRANT EXECUTE ON FUNCTION role_function() TO dependent", access: Access::Execute("SELECT role_function()") },
+    Target { setup: "CREATE PROCEDURE role_procedure() LANGUAGE SQL AS 'SELECT 1'; REVOKE EXECUTE ON PROCEDURE role_procedure() FROM PUBLIC", grant: "GRANT EXECUTE ON PROCEDURE role_procedure() TO dependent", access: Access::Execute("CALL role_procedure()") },
 ];
 
 fn role_lock(engine: &Engine) -> SharedCatalogLock<'static> {
@@ -50,12 +61,28 @@ fn role_exists(engine: &Engine) -> bool {
 }
 
 fn allowed(engine: &Engine, target: &Target) -> bool {
-    sql(engine, &format!("SELECT {} AS allowed", target.inquiry)).rows[0]["allowed"]
-        == Value::Bool(true)
+    match target.access {
+        Access::Inquiry(inquiry) => {
+            sql(engine, &format!("SELECT {inquiry} AS allowed")).rows[0]["allowed"]
+                == Value::Bool(true)
+        }
+        Access::Execute(statement) => {
+            sql(engine, "SET ROLE dependent");
+            let result = engine.sql(statement, &[]);
+            sql(engine, "RESET ROLE");
+            match result {
+                Ok(_) => true,
+                Err(error) => {
+                    assert_eq!(error.sqlstate(), Some("42501"), "{statement}: {error}");
+                    false
+                }
+            }
+        }
+    }
 }
 
 #[test]
-fn role_drop_waits_for_added_relation_and_column_acl_dependencies() {
+fn role_drop_waits_for_added_acl_dependencies() {
     for provider in 0..3 {
         for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
             for target in TARGETS {
@@ -171,30 +198,38 @@ fn acl_grants_wait_for_role_drop_and_never_rebind_a_recreated_name() {
 #[test]
 fn unchanged_acl_roles_and_revoke_do_not_acquire_new_dependency_locks() {
     for provider in 0..3 {
-        let (_directory, first, second) = sessions(provider);
-        sql(
-            &first,
-            "CREATE ROLE dependent; GRANT SELECT ON t TO dependent",
-        );
-        let key = first.row_locks.shared_catalog_key(role_lock(&first));
-        for statement in [
-            "GRANT SELECT ON t TO dependent",
-            "REVOKE SELECT ON t FROM dependent",
-        ] {
-            sql(&first, "BEGIN");
-            sql(&first, statement);
-            assert!(first
-                .row_locks
-                .try_acquire_relation(
-                    second.session_id,
-                    key,
-                    RelationLockMode::AccessExclusive,
-                    0,
-                    &second.runtime.cancellation
-                )
-                .unwrap());
-            first.row_locks.release_session(second.session_id);
-            sql(&first, "ROLLBACK");
+        for target in TARGETS {
+            let (_directory, first, second) = sessions(provider);
+            sql(&first, "CREATE ROLE dependent");
+            if !target.setup.is_empty() {
+                sql(&first, target.setup);
+            }
+            sql(&first, target.grant);
+            let revoke = target
+                .grant
+                .replacen("GRANT ", "REVOKE ", 1)
+                .replace(" TO dependent", " FROM dependent")
+                .replace(" WITH GRANT OPTION", "");
+            let key = first.row_locks.shared_catalog_key(role_lock(&first));
+            for statement in [target.grant, revoke.as_str()] {
+                sql(&first, "BEGIN");
+                sql(&first, statement);
+                assert!(
+                    first
+                        .row_locks
+                        .try_acquire_relation(
+                            second.session_id,
+                            key,
+                            RelationLockMode::AccessExclusive,
+                            0,
+                            &second.runtime.cancellation,
+                        )
+                        .unwrap(),
+                    "unexpected dependency lock for {statement}"
+                );
+                first.row_locks.release_session(second.session_id);
+                sql(&first, "ROLLBACK");
+            }
         }
     }
 }
