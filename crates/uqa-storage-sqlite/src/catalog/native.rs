@@ -161,6 +161,20 @@ impl Catalog {
 
     pub(super) fn drop_native_named(&self, family: Family, name: &str) -> Result<Option<()>> {
         self.conn.with_native_write(|snapshot, batch| {
+            if family == Family::Metadata {
+                if name == "schema_version" {
+                    return Err(SQLiteError::StorageBackend(
+                        "native catalog format version is immutable".into(),
+                    ));
+                }
+                if let Some(graph) = name.strip_prefix("graph_label_registry::") {
+                    snapshot.fence_graph_definition(batch, None, graph)?;
+                    graph::paths::invalidate_graph(snapshot, batch, graph)?;
+                }
+                if name == "graph_identifier_generation" {
+                    snapshot.fence_graph_identifier_scope(batch, None)?;
+                }
+            }
             snapshot.delete_prefix(
                 batch,
                 family,

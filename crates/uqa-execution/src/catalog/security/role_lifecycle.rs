@@ -89,8 +89,10 @@ pub fn create_role(
         &next_roles,
         &mut next_memberships,
     )?;
-    context.publication.persist_roles(&next_roles)?;
-    context.publication.persist_memberships(&next_memberships)?;
+    context.publication.persist_roles(&roles, &next_roles)?;
+    if **memberships != next_memberships {
+        context.publication.persist_memberships(&next_memberships)?;
+    }
     **roles = next_roles;
     **memberships = next_memberships;
     drop(memberships);
@@ -122,7 +124,7 @@ pub fn alter_role(
     let mut roles = context.registry.write_roles();
     let next =
         definition::alter_role_candidate(&context.analysis, &roles, &current, name, statement)?;
-    context.publication.persist_roles(&next)?;
+    context.publication.persist_roles(&roles, &next)?;
     **roles = next;
     drop(roles);
     context.publication.catalog_changed();
@@ -159,7 +161,7 @@ pub fn drop_roles(
             && !names_set.contains(&membership.member)
             && !names_set.contains(&membership.grantor)
     });
-    context.publication.persist_roles(&next_roles)?;
+    context.publication.persist_roles(&roles, &next_roles)?;
     context.publication.persist_memberships(&next_memberships)?;
     **roles = next_roles;
     **memberships = next_memberships;

@@ -43,3 +43,42 @@ fn metadata_private_provenance_and_literal_prefixes_follow_savepoints_and_refres
     );
     assert!(a.metadata_with_prefix("absent").unwrap().is_empty());
 }
+
+#[test]
+fn metadata_deletion_preserves_independent_commits_and_savepoint_undo() {
+    let persistence = Persistence::new();
+    let first = Arc::new(persistence.session(1 << 24));
+    let second = Arc::new(persistence.session(1 << 24));
+    let a = KeyValueCatalog::new(first.clone());
+    let b = KeyValueCatalog::new(second.clone());
+    let key = "role:%_\0日本語";
+    let neighbor = format!("{key}:child");
+    a.set_metadata(key, "kept").unwrap();
+    a.set_metadata(&neighbor, "neighbor").unwrap();
+    first.begin_transaction().unwrap();
+    first.savepoint("removed").unwrap();
+    a.delete_metadata(key).unwrap();
+    assert!(a.metadata_has_private_changes(key).unwrap());
+    assert!(a.get_metadata(key).unwrap().is_none());
+    assert_eq!(b.get_metadata(key).unwrap().as_deref(), Some("kept"));
+    b.set_metadata("role:other", "external").unwrap();
+    first
+        .refresh_transaction_snapshot(&uqa_core::CancellationToken::new())
+        .unwrap();
+    assert!(a.get_metadata(key).unwrap().is_none());
+    assert_eq!(
+        a.get_metadata(&neighbor).unwrap().as_deref(),
+        Some("neighbor")
+    );
+    first.rollback_to_savepoint("removed").unwrap();
+    assert!(!a.metadata_has_private_changes(key).unwrap());
+    assert_eq!(a.get_metadata(key).unwrap().as_deref(), Some("kept"));
+    a.delete_metadata(key).unwrap();
+    first.commit_transaction().unwrap();
+    assert!(b.get_metadata(key).unwrap().is_none());
+    assert_eq!(
+        b.get_metadata("role:other").unwrap().as_deref(),
+        Some("external")
+    );
+    assert!(!a.metadata_has_private_changes(key).unwrap());
+}

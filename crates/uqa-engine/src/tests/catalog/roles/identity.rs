@@ -17,7 +17,7 @@ fn oid(engine: &Engine, name: &str) -> Value {
     sql(engine, &format!("SELECT to_regrole('{name}')::oid AS id")).rows[0]["id"].clone()
 }
 
-fn reopen(provider: usize, path: &std::path::Path) -> Engine {
+pub(super) fn reopen(provider: usize, path: &std::path::Path) -> Engine {
     match provider {
         0 => Engine::open(path).unwrap(),
         1 => Engine::from_persistent_provider(Arc::new(

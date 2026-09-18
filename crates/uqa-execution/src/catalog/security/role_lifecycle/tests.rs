@@ -14,9 +14,11 @@ use uqa_sql::ast::RoleAttribute;
 fn create_keeps_both_write_guards_and_publishes_only_after_both_persistence_calls() {
     let catalog = Catalog::new();
     let roles = catalog.roles.borrow().clone();
+    let mut statement = create("created");
+    statement.role_members.push("uqa".into());
     catalog.fail_membership_persistence.set(true);
     assert!(
-        matches!(create_role(&catalog.context(), &create("created")), Err(SQLError::Internal(message)) if message == "membership write failed")
+        matches!(create_role(&catalog.context(), &statement), Err(SQLError::Internal(message)) if message == "membership write failed")
     );
     assert_eq!(*catalog.roles.borrow(), roles);
     assert!(catalog.memberships.borrow().is_empty());
@@ -42,7 +44,7 @@ fn create_keeps_both_write_guards_and_publishes_only_after_both_persistence_call
     catalog.released();
     catalog.events.borrow_mut().clear();
     catalog.fail_membership_persistence.set(false);
-    create_role(&catalog.context(), &create("created")).unwrap();
+    create_role(&catalog.context(), &statement).unwrap();
     assert!(catalog.roles.borrow().contains_key("created"));
     assert_eq!(catalog.epoch.get(), 1);
     assert!(catalog.events.borrow().ends_with(&[
@@ -54,6 +56,36 @@ fn create_keeps_both_write_guards_and_publishes_only_after_both_persistence_call
         "release roles".into(),
         "epoch".into()
     ]));
+}
+
+#[test]
+fn creation_without_memberships_does_not_publish_the_membership_registry() {
+    let catalog = Catalog::new();
+    catalog.fail_membership_persistence.set(true);
+    create_role(&catalog.context(), &create("created")).unwrap();
+    assert!(catalog.roles.borrow().contains_key("created"));
+    assert!(catalog.memberships.borrow().is_empty());
+    assert!(!catalog
+        .events
+        .borrow()
+        .iter()
+        .any(|event| event == "persist memberships"));
+}
+
+#[test]
+fn deletion_publishes_membership_dependencies_even_when_no_visible_edges_are_removed() {
+    let catalog = Catalog::new();
+    catalog.role("removed", &[]);
+    catalog.fail_membership_persistence.set(true);
+    let statement = DropRoleStmt {
+        names: vec!["removed".into()],
+        if_exists: false,
+    };
+    assert!(
+        matches!(drop_roles(&catalog.context(), &statement), Err(SQLError::Internal(message)) if message == "membership write failed")
+    );
+    assert!(catalog.roles.borrow().contains_key("removed"));
+    assert_eq!(catalog.epoch.get(), 0);
 }
 
 #[test]

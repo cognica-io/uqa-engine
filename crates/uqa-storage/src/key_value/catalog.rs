@@ -226,6 +226,10 @@ impl CatalogFacade for KeyValueCatalog {
         self.set_metadata_impl(key, value)
     }
 
+    fn delete_metadata(&self, key: &str) -> StorageBackendResult<()> {
+        self.delete_metadata_impl(key)
+    }
+
     fn get_metadata(&self, key: &str) -> StorageBackendResult<Option<String>> {
         self.get_metadata_impl(key)
     }

@@ -25,7 +25,11 @@ pub trait RoleRegistry {
 }
 pub trait RolePublication {
     fn prepare_writer(&self) -> Result<(), SQLError>;
-    fn persist_roles(&self, roles: &BTreeMap<String, RoleDefinition>) -> Result<(), SQLError>;
+    fn persist_roles(
+        &self,
+        before: &BTreeMap<String, RoleDefinition>,
+        roles: &BTreeMap<String, RoleDefinition>,
+    ) -> Result<(), SQLError>;
     fn persist_memberships(
         &self,
         memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,

@@ -73,6 +73,17 @@ impl Catalog {
         })
     }
 
+    /// Delete exactly one metadata key in the current catalog transaction.
+    pub fn delete_metadata(&self, key: &str) -> Result<()> {
+        if self.drop_native_named(Family::Metadata, key)?.is_some() {
+            return Ok(());
+        }
+        self.conn.with(|connection| {
+            connection.execute("DELETE FROM _metadata WHERE key = ?1", params![key])?;
+            Ok(())
+        })
+    }
+
     /// Read a key/value pair from the `_metadata` table.
     pub fn get_metadata(&self, key: &str) -> Result<Option<String>> {
         if let NativeLookup::Value(value) = self.get_native_named(Family::Metadata, key, 1)? {

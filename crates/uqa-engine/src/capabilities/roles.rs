@@ -70,8 +70,12 @@ impl RolePublication for Engine {
     fn prepare_writer(&self) -> Result<(), SQLError> {
         self.prepare_explicit_transaction_writer().map(|_| ())
     }
-    fn persist_roles(&self, roles: &BTreeMap<String, RoleDefinition>) -> Result<(), SQLError> {
-        self.persist_roles_snapshot(roles)
+    fn persist_roles(
+        &self,
+        before: &BTreeMap<String, RoleDefinition>,
+        roles: &BTreeMap<String, RoleDefinition>,
+    ) -> Result<(), SQLError> {
+        self.persist_roles_snapshot(before, roles)
     }
     fn persist_memberships(
         &self,

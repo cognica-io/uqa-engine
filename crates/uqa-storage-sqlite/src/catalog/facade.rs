@@ -139,6 +139,10 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::set_metadata(self, key, value))
     }
 
+    fn delete_metadata(&self, key: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::delete_metadata(self, key))
+    }
+
     fn get_metadata(&self, key: &str) -> StorageBackendResult<Option<String>> {
         into_storage_result(Catalog::get_metadata(self, key))
     }

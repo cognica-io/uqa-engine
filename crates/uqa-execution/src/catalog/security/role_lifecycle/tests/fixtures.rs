@@ -209,7 +209,11 @@ impl RolePublication for Catalog {
         self.event("writer");
         Ok(())
     }
-    fn persist_roles(&self, _: &BTreeMap<String, RoleDefinition>) -> Result<(), SQLError> {
+    fn persist_roles(
+        &self,
+        _: &BTreeMap<String, RoleDefinition>,
+        _: &BTreeMap<String, RoleDefinition>,
+    ) -> Result<(), SQLError> {
         assert!(self.roles.try_borrow_mut().is_err());
         self.event("persist roles");
         Ok(())

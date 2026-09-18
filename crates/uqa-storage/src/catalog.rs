@@ -400,6 +400,8 @@ pub trait CatalogFacade: Send + Sync {
     }
 
     fn set_metadata(&self, key: &str, value: &str) -> StorageBackendResult<()>;
+    /// Remove one metadata record, retaining its private deletion and write precondition until transaction end.
+    fn delete_metadata(&self, key: &str) -> StorageBackendResult<()>;
     fn get_metadata(&self, key: &str) -> StorageBackendResult<Option<String>>;
     /// Read matching metadata keys from one catalog snapshot; the prefix is literal, including NUL and wildcard characters.
     fn metadata_with_prefix(&self, prefix: &str) -> StorageBackendResult<Vec<(String, String)>>;

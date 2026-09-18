@@ -11,7 +11,7 @@ use uqa_sql::ast::RoleAttribute;
 
 const ISOLATIONS: &[&str] = &["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"];
 
-fn refresh_catalog(engine: &crate::Engine, isolation: &str) {
+pub(super) fn refresh_catalog(engine: &crate::Engine, isolation: &str) {
     engine.list_named_analyzers().unwrap();
     if isolation == "READ COMMITTED" {
         sql(

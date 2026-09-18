@@ -85,9 +85,10 @@ impl Engine {
 
     pub(crate) fn persist_roles_snapshot(
         &self,
+        before: &BTreeMap<String, RoleDefinition>,
         roles: &BTreeMap<String, RoleDefinition>,
     ) -> Result<(), SQLError> {
-        role_catalog::persist_roles(self.storage.catalog.as_deref(), roles)
+        role_catalog::persist_roles(self.storage.catalog.as_deref(), before, roles)
     }
 
     pub(crate) fn persist_role_memberships_snapshot(
@@ -100,8 +101,13 @@ impl Engine {
     pub(crate) fn restore_roles_from_metadata(
         &self,
         catalog: &dyn crate::CatalogFacade,
+        allow_migration: bool,
     ) -> StorageBackendResult<()> {
-        let values = role_catalog::restore(catalog)?;
+        let values = if allow_migration {
+            role_catalog::restore_and_migrate(catalog)?
+        } else {
+            role_catalog::restore(catalog)?
+        };
         *self.durable.roles.write() = values.roles;
         *self.durable.role_memberships.write() = values.memberships;
         Ok(())

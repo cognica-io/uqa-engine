@@ -286,6 +286,33 @@ fn build(catalog: &KeyValueCatalog, index: &str, graph: &str) {
 }
 
 #[test]
+fn deleting_graph_registry_metadata_fences_data_writers_and_invalidates_paths() {
+    for deletion_wins in [false, true] {
+        let (a, first, b, second) = catalogs();
+        first.set_metadata("graph_label_registry::g", "{}").unwrap();
+        build(&first, "paths", "g");
+        a.begin_transaction().unwrap();
+        b.begin_transaction().unwrap();
+        first.delete_metadata("graph_label_registry::g").unwrap();
+        assert!(!first.path_index_data_is_current("paths", "[]").unwrap());
+        second
+            .save_vertex(1, "node", r#"{"changed":true}"#)
+            .unwrap();
+        let (winner, loser) = if deletion_wins { (&a, &b) } else { (&b, &a) };
+        winner.commit_transaction().unwrap();
+        assert!(loser.commit_transaction().is_err());
+        loser.rollback_transaction().unwrap();
+        assert_eq!(
+            first
+                .get_metadata("graph_label_registry::g")
+                .unwrap()
+                .is_none(),
+            deletion_wins
+        );
+    }
+}
+
+#[test]
 fn path_invalidation_merges_independent_graph_writers() {
     let (a, first, b, second) = catalogs();
     build(&first, "paths", "g");

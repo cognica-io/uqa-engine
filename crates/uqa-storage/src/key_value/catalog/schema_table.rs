@@ -141,6 +141,26 @@ impl KeyValueCatalog {
             .put(&single_str_key(TAG_METADATA, key)?, &string_value(value))
     }
 
+    pub(super) fn delete_metadata_impl(&self, key: &str) -> StorageBackendResult<()> {
+        let identifiers = self.store.identifier_allocator().is_some();
+        self.store.with_mutation(&mut |read, batch| {
+            if let Some(graph) = key.strip_prefix("graph_label_registry::") {
+                if identifiers {
+                    super::graph_view::GraphRead { read, identifiers }
+                        .fence_definition(batch, graph)?;
+                }
+                Self::invalidate_graph_path_data(read, batch, graph)?;
+            }
+            if key == "graph_identifier_generation" && identifiers {
+                batch.fence_record(&single_str_key(
+                    TAG_METADATA,
+                    "graph_identifier_data_revision",
+                )?)?;
+            }
+            batch.delete(&single_str_key(TAG_METADATA, key)?)
+        })
+    }
+
     pub(super) fn get_metadata_impl(&self, key: &str) -> StorageBackendResult<Option<String>> {
         self.store
             .get(&single_str_key(TAG_METADATA, key)?)?

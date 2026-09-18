@@ -22,7 +22,7 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         self.restore_sequences_from_catalog(catalog)?;
         self.restore_domains_from_catalog(catalog)?;
-        self.restore_roles_from_metadata(catalog)?;
+        self.restore_roles_from_metadata(catalog, mode.allows_migration())?;
         *self.durable.system_relation_security.write() =
             uqa_execution::catalog::security::system_relations::restore(
                 catalog,

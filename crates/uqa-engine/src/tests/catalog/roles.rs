@@ -7,6 +7,8 @@
 use crate::Engine;
 
 mod identity;
+mod migration;
+mod publication;
 mod snapshots;
 
 #[test]
