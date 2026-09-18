@@ -58,7 +58,7 @@ impl uqa_execution::catalog::sequence::snapshot::SequenceSnapshotSource for Engi
             security::roles::persistence::RoleCatalogSnapshot,
             sequence::snapshot::{read_sequence_snapshot, SequenceReadSnapshot},
         };
-        let session = self.open_nontransactional_sequence_session()?;
+        let session = self.open_independent_catalog_session()?;
         read_sequence_snapshot(
             SequenceReadSnapshot {
                 sequences: self.durable.sequences.snapshot(),

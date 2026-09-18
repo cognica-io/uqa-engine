@@ -8,7 +8,7 @@
 
 use super::{
     columns::role_has_column_privilege as column_privilege_check,
-    sequence_inquiry::SequencePrivilegeInquiry,
+    sequence_inquiry::SequenceTablePrivilegeInquiry,
     table::{
         parse_column_privilege_checks, parse_privilege_checks, role_has_privilege,
         TablePrivilegeCheck,
@@ -47,7 +47,7 @@ pub trait TablePrivilegeCatalog {
 pub struct TablePrivilegeInquiry<'a> {
     pub names: &'a dyn RoleReferenceNames,
     pub roles: &'a dyn RoleCatalogGuards,
-    pub sequences: &'a SequencePrivilegeInquiry<'a>,
+    pub sequences: &'a dyn SequenceTablePrivilegeInquiry,
     pub catalog: &'a dyn TablePrivilegeCatalog,
 }
 
@@ -170,17 +170,10 @@ impl TablePrivilegeInquiry<'_> {
         };
         let checks = checks.map_or_else(|| table_privilege_checks(privilege_value), Ok)?;
         if let ResolvedTablePrivilegeTarget::Sequence(relation) = &target {
-            for check in checks {
-                if self.sequences.role_has_sequence_table_privilege(
-                    relation,
-                    subject,
-                    check.privilege,
-                    check.grant_option,
-                )? {
-                    return Ok(Value::Bool(true));
-                }
-            }
-            return Ok(Value::Bool(false));
+            return self
+                .sequences
+                .sequence_table_privileges(relation, subject, &checks)
+                .map(Value::Bool);
         }
         let roles = self.roles.role_definitions();
         let security = self.catalog.table_privilege_security(&target, &roles)?;
@@ -324,17 +317,9 @@ impl TablePrivilegeInquiry<'_> {
         if !valid_column {
             return Ok(Value::Null);
         }
-        for check in checks {
-            if self.sequences.role_has_sequence_table_privilege(
-                relation,
-                subject,
-                check.privilege,
-                check.grant_option,
-            )? {
-                return Ok(Value::Bool(true));
-            }
-        }
-        Ok(Value::Bool(false))
+        self.sequences
+            .sequence_table_privileges(relation, subject, &checks)
+            .map(Value::Bool)
     }
 
     fn bind_subject(
@@ -344,11 +329,10 @@ impl TablePrivilegeInquiry<'_> {
     ) -> Result<Option<RoleReference>, SQLError> {
         match value {
             None => Ok(Some(self.names.current_role())),
-            Some(value) => super::role_bindings::bind_inquiry_subject(
-                value,
-                &self.roles.role_definitions(),
-                function,
-            ),
+            Some(value) => {
+                let roles = self.roles.inquiry_role_definitions()?;
+                super::role_bindings::bind_inquiry_subject(value, &roles, function)
+            }
         }
     }
 

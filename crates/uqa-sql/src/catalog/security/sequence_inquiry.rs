@@ -33,6 +33,15 @@ pub trait SequencePrivilegeResolution {
         oid: i64,
     ) -> Result<Option<(String, RelationIdentity)>, SQLError>;
 }
+pub trait SequenceTablePrivilegeInquiry {
+    fn sequence_table_privileges(
+        &self,
+        relation: &RelationIdentity,
+        subject: &dyn RoleSubject,
+        checks: &[super::table::TablePrivilegeCheck],
+    ) -> Result<bool, SQLError>;
+}
+
 pub struct SequencePrivilegeInquiry<'a> {
     pub names: &'a dyn RoleReferenceNames,
     pub roles: &'a dyn RoleCatalogGuards,
@@ -128,16 +137,44 @@ impl SequencePrivilegeInquiry<'_> {
         privilege: super::table::TableAclPrivilege,
         grant_option: bool,
     ) -> Result<bool, SQLError> {
-        let privilege = match privilege {
-            super::table::TableAclPrivilege::Select => AclPrivilege::Select,
-            super::table::TableAclPrivilege::Update => AclPrivilege::Update,
-            super::table::TableAclPrivilege::Insert
-            | super::table::TableAclPrivilege::Delete
-            | super::table::TableAclPrivilege::Truncate
-            | super::table::TableAclPrivilege::References
-            | super::table::TableAclPrivilege::Trigger
-            | super::table::TableAclPrivilege::Maintain => return Ok(false),
-        };
+        self.role_has_sequence_table_privileges(
+            relation,
+            subject,
+            &[super::table::TablePrivilegeCheck {
+                privilege,
+                grant_option,
+            }],
+        )
+    }
+
+    pub fn role_has_sequence_table_privileges(
+        &self,
+        relation: &RelationIdentity,
+        subject: &(impl RoleSubject + ?Sized),
+        checks: &[super::table::TablePrivilegeCheck],
+    ) -> Result<bool, SQLError> {
+        let mut checks = checks
+            .iter()
+            .filter_map(|check| {
+                let privilege = match check.privilege {
+                    super::table::TableAclPrivilege::Select => AclPrivilege::Select,
+                    super::table::TableAclPrivilege::Update => AclPrivilege::Update,
+                    super::table::TableAclPrivilege::Insert
+                    | super::table::TableAclPrivilege::Delete
+                    | super::table::TableAclPrivilege::Truncate
+                    | super::table::TableAclPrivilege::References
+                    | super::table::TableAclPrivilege::Trigger
+                    | super::table::TableAclPrivilege::Maintain => return None,
+                };
+                Some(PrivilegeCheck {
+                    privilege,
+                    grant_option: check.grant_option,
+                })
+            })
+            .peekable();
+        if checks.peek().is_none() {
+            return Ok(false);
+        }
         let security = self
             .security
             .security_read()
@@ -151,16 +188,7 @@ impl SequencePrivilegeInquiry<'_> {
             })?;
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
-        Ok(role_has_privilege(
-            &security,
-            subject,
-            PrivilegeCheck {
-                privilege,
-                grant_option,
-            },
-            &roles,
-            &memberships,
-        ))
+        Ok(checks.any(|check| role_has_privilege(&security, subject, check, &roles, &memberships)))
     }
 
     pub fn ensure_sequence_owner(
@@ -183,6 +211,17 @@ impl SequencePrivilegeInquiry<'_> {
             crate::catalog::roles::role_inherits(&roles, &memberships, &current, &owner)
         })?;
         Ok(owner)
+    }
+}
+
+impl SequenceTablePrivilegeInquiry for SequencePrivilegeInquiry<'_> {
+    fn sequence_table_privileges(
+        &self,
+        relation: &RelationIdentity,
+        subject: &dyn RoleSubject,
+        checks: &[super::table::TablePrivilegeCheck],
+    ) -> Result<bool, SQLError> {
+        self.role_has_sequence_table_privileges(relation, subject, checks)
     }
 }
 

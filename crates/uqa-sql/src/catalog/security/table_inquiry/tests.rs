@@ -14,7 +14,8 @@ use crate::catalog::{
         columns::grant_column_acl,
         sequence::AclPrivilege,
         sequence_inquiry::{
-            SequencePrivilegeResolution, SequenceSecurityCatalog, SequenceSecurityRead,
+            SequencePrivilegeInquiry, SequencePrivilegeResolution, SequenceSecurityCatalog,
+            SequenceSecurityRead,
         },
         table::TableAclPrivilege,
         AclGrantee, SequenceSecurity, TableAclEntry, TablePrivileges,

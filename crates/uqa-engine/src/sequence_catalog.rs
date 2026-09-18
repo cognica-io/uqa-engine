@@ -29,7 +29,7 @@ impl Engine {
     }
 
     pub(crate) fn refresh_sequences_from_catalog(&self) -> StorageBackendResult<()> {
-        let sequence_session = self.open_nontransactional_sequence_session()?;
+        let sequence_session = self.open_independent_catalog_session()?;
         if let (Some(bound), Some(current)) =
             (self.storage.catalog.as_deref(), sequence_session.as_ref())
         {

@@ -7,6 +7,8 @@
 use crate::tests::relation_lock_support::{sessions, sql};
 use uqa_core::{RelationIdentity, Value};
 
+mod relations;
+
 #[test]
 fn sequence_privilege_inquiry_keeps_committed_roles_and_acl_together() {
     for provider in 0..3 {

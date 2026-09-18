@@ -23,6 +23,7 @@ mod analysis;
 pub mod graph;
 mod read;
 pub mod schema;
+mod snapshot_read;
 
 /// Read-only access to catalog-owned state. This view cannot mutate transactions, acquire locks, publish caches, or recover the enclosing engine.
 #[derive(Clone)]

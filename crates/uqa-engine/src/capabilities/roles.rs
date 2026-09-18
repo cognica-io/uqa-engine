@@ -39,6 +39,27 @@ impl uqa_execution::catalog::security::roles::RoleCatalogGuards for Engine {
     fn role_memberships(&self) -> uqa_execution::catalog::security::roles::RoleMembershipRead<'_> {
         Box::new(self.durable.role_memberships.read())
     }
+    fn inquiry_role_definitions(
+        &self,
+    ) -> Result<uqa_execution::catalog::security::roles::RoleDefinitionRead<'_>, SQLError> {
+        use uqa_execution::catalog::security::roles::{
+            persistence::RoleCatalogSnapshot, snapshot::read_role_snapshot,
+        };
+        let session = self
+            .open_independent_catalog_session()
+            .map_err(|error| SQLError::Internal(format!("open role inquiry snapshot: {error}")))?;
+        let snapshot = read_role_snapshot(
+            RoleCatalogSnapshot {
+                roles: self.durable.roles.snapshot(),
+                memberships: self.durable.role_memberships.snapshot(),
+            },
+            self.storage.catalog.as_deref(),
+            session.as_ref(),
+            self.versioned_backend_transactions(),
+        )
+        .map_err(|error| SQLError::Internal(format!("load role inquiry snapshot: {error}")))?;
+        Ok(Box::new(snapshot.roles))
+    }
 }
 impl uqa_sql::catalog::roles::RoleReferenceNames for Engine {
     fn current_role(&self) -> RoleReference {

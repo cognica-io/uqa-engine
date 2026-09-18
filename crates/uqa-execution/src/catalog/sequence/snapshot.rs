@@ -13,7 +13,10 @@ use super::{
     },
     SequenceState,
 };
-use crate::catalog::security::roles::persistence::{self, RoleCatalogSnapshot};
+use crate::catalog::{
+    security::roles::persistence::{self, RoleCatalogSnapshot},
+    snapshot_read::with_read_transaction,
+};
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::RelationIdentity;
 use uqa_sql::{
@@ -29,8 +32,7 @@ use uqa_sql::{
     },
 };
 use uqa_storage::{
-    CatalogFacade, PersistentStorageBackend, PersistentStorageSession, StorageBackendError,
-    StorageBackendResult,
+    CatalogFacade, PersistentStorageSession, StorageBackendError, StorageBackendResult,
 };
 
 #[derive(Clone)]
@@ -226,43 +228,6 @@ pub fn read_sequence_snapshot(
         };
         current.with_rows(rows)
     })
-}
-
-fn with_read_transaction<T>(
-    session: &PersistentStorageSession,
-    read: impl FnOnce(&dyn CatalogFacade) -> StorageBackendResult<T>,
-) -> StorageBackendResult<T> {
-    session.validate_transaction_affinity()?;
-    if session.backend.in_transaction() {
-        return Err(StorageBackendError::Other(
-            "sequence snapshot reads require an idle independent session".into(),
-        ));
-    }
-    session.backend.begin_read_transaction()?;
-    let mut transaction = ReadTransaction {
-        backend: session.backend.as_ref(),
-        active: true,
-    };
-    let result = session
-        .backend
-        .pin_transaction_snapshot()
-        .and_then(|()| read(session.catalog.as_ref()));
-    session.backend.rollback_transaction()?;
-    transaction.active = false;
-    result
-}
-
-struct ReadTransaction<'a> {
-    backend: &'a dyn PersistentStorageBackend,
-    active: bool,
-}
-
-impl Drop for ReadTransaction<'_> {
-    fn drop(&mut self) {
-        if self.active {
-            let _ = self.backend.rollback_transaction();
-        }
-    }
 }
 
 #[cfg(test)]

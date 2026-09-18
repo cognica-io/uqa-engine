@@ -58,7 +58,7 @@ impl Engine {
             history.defines_lastval = defines_lastval || preserves_lastval;
         }
     }
-    pub(super) fn open_nontransactional_sequence_session(
+    pub(super) fn open_independent_catalog_session(
         &self,
     ) -> StorageBackendResult<Option<uqa_storage::PersistentStorageSession>> {
         if !self.versioned_backend_transactions()

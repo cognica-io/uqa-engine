@@ -89,6 +89,7 @@ impl Engine {
             sequences: self.sequence_privilege_inquiry(),
             catalog: self.catalog_execution(),
             registry: self,
+            snapshots: self,
         }
     }
 }
