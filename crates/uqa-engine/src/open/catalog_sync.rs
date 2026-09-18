@@ -196,23 +196,18 @@ impl Engine {
         current: &crate::DurableCatalogSnapshot,
         latest: &Engine,
     ) -> StorageBackendResult<crate::DurableCatalogSnapshot> {
-        use uqa_execution::catalog::security::{
-            roles::persistence::RoleCatalogSnapshot, system_relations,
-        };
+        use uqa_execution::catalog::security::system_relations;
         let mut snapshot = latest.durable.snapshot();
-        let roles = RoleCatalogSnapshot {
-            roles: snapshot.roles,
-            memberships: snapshot.role_memberships,
-        }
-        .merge_private(
+        let sequences = snapshot.sequence_read_snapshot().merge_private(
             self.storage.catalog.as_deref(),
-            &RoleCatalogSnapshot {
-                roles: Arc::clone(&current.roles),
-                memberships: Arc::clone(&current.role_memberships),
-            },
+            &current.sequence_read_snapshot(),
         )?;
-        snapshot.roles = roles.roles;
-        snapshot.role_memberships = roles.memberships;
+        snapshot.roles = sequences.roles.roles;
+        snapshot.role_memberships = sequences.roles.memberships;
+        snapshot.sequences = sequences.sequences;
+        snapshot.sequence_object_ids = sequences.object_ids;
+        snapshot.sequence_persistence = sequences.persistence;
+        snapshot.sequence_security = sequences.security;
         snapshot.system_relation_security = Arc::new(system_relations::merge_private(
             self.storage.catalog.as_deref(),
             &current.system_relation_security,
@@ -238,58 +233,11 @@ impl Engine {
             .filter(|(_, view)| view.persistence == uqa_sql::ast::RelationPersistence::Temporary)
             .map(|(relation, view)| (relation.clone(), view.clone()))
             .collect::<BTreeMap<_, _>>();
-        let temporary_sequence_persistence = self
-            .durable
-            .sequence_persistence
-            .read()
-            .iter()
-            .filter(|(_, persistence)| {
-                **persistence == uqa_sql::ast::RelationPersistence::Temporary
-            })
-            .map(|(relation, persistence)| (relation.clone(), *persistence))
-            .collect::<BTreeMap<_, _>>();
-        let temporary_sequences = self
-            .durable
-            .sequences
-            .read()
-            .iter()
-            .filter(|(relation, _)| temporary_sequence_persistence.contains_key(*relation))
-            .map(|(relation, state)| (relation.clone(), *state))
-            .collect::<BTreeMap<_, _>>();
-        let temporary_sequence_object_ids = self
-            .durable
-            .sequence_object_ids
-            .read()
-            .iter()
-            .filter(|(relation, _)| temporary_sequence_persistence.contains_key(*relation))
-            .map(|(relation, object_id)| (relation.clone(), *object_id))
-            .collect::<BTreeMap<_, _>>();
-        let temporary_sequence_security = self
-            .durable
-            .sequence_security
-            .read()
-            .iter()
-            .filter(|(relation, _)| temporary_sequence_persistence.contains_key(*relation))
-            .map(|(relation, security)| (relation.clone(), security.clone()))
-            .collect::<BTreeMap<_, _>>();
         let latest_durable =
             self.latest_catalog_snapshot_with_private_records(&previous_durable, latest)?;
         self.durable.restore(&latest_durable);
         self.rebind_graph_stores()?;
         self.durable.views.write().extend(temporary_views);
-        self.durable.sequences.write().extend(temporary_sequences);
-        self.durable
-            .sequence_object_ids
-            .write()
-            .extend(temporary_sequence_object_ids);
-        self.durable
-            .sequence_persistence
-            .write()
-            .extend(temporary_sequence_persistence);
-        self.durable
-            .sequence_security
-            .write()
-            .extend(temporary_sequence_security);
         let previous_versions = self.swap_seen_catalog_versions(target_versions);
         let rollback = || {
             *self.storage.tables.write() = previous_tables.clone();

@@ -8,6 +8,8 @@ use super::*;
 use std::cell::Cell;
 use uqa_storage::{KeyValueCatalog, KeyValueStorageBackend, KeyValueStore, MemoryKeyValueStore};
 
+mod private;
+
 fn session() -> PersistentStorageSession {
     let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
     PersistentStorageSession::new(

@@ -7,7 +7,10 @@
 //! Retain sequence definitions and authorization from one committed view plus private records.
 
 use super::{
-    restoration::{load_sequence_value_rows, prepare_sequence_rows, RestoredSequenceRegistry},
+    restoration::{
+        load_sequence_value_rows, prepare_sequence_rows, select_sequence_records,
+        RestoredSequenceRegistry,
+    },
     SequenceState,
 };
 use crate::catalog::security::roles::persistence::{self, RoleCatalogSnapshot};
@@ -43,6 +46,11 @@ pub trait SequenceSnapshotSource {
     fn sequence_read_snapshot(&self) -> StorageBackendResult<SequenceReadSnapshot>;
 }
 
+enum SequenceSource {
+    Current,
+    Committed,
+}
+
 impl RoleCatalogGuards for SequenceReadSnapshot {
     fn role_definitions(&self) -> RoleDefinitionRead<'_> {
         Box::new(self.roles.roles.as_ref())
@@ -60,6 +68,77 @@ impl SequenceSecurityCatalog for SequenceReadSnapshot {
 }
 
 impl SequenceReadSnapshot {
+    /// Keep the latest coherent definitions and roles while retaining complete private sequence records and session-local temporary entries. No catalog rows are reloaded from another committed view.
+    pub fn merge_private(
+        mut self,
+        catalog: Option<&dyn CatalogFacade>,
+        current: &Self,
+    ) -> StorageBackendResult<Self> {
+        self.roles = self.roles.merge_private(catalog, &current.roles)?;
+        self.merge_sequence_records(current, |relation, object_id| {
+            catalog.map_or(Ok(false), |catalog| {
+                catalog.sequence_has_private_changes(relation, object_id)
+            })
+        })
+    }
+
+    fn merge_sequence_records(
+        mut self,
+        current: &Self,
+        mut private: impl FnMut(&RelationIdentity, [u8; 16]) -> StorageBackendResult<bool>,
+    ) -> StorageBackendResult<Self> {
+        let selected = select_sequence_records(
+            current.object_ids.iter().map(|(relation, object_id)| {
+                (relation.clone(), (SequenceSource::Current, *object_id))
+            }),
+            self.object_ids.iter().map(|(relation, object_id)| {
+                (relation.clone(), (SequenceSource::Committed, *object_id))
+            }),
+            |relation, (source, object_id)| {
+                let snapshot = match source {
+                    SequenceSource::Current => current,
+                    SequenceSource::Committed => &self,
+                };
+                if snapshot.persistence.get(relation) == Some(&RelationPersistence::Temporary) {
+                    return Ok(true);
+                }
+                private(relation, *object_id)
+            },
+        )?;
+        let removed = self
+            .object_ids
+            .keys()
+            .filter(|relation| !selected.contains_key(*relation))
+            .cloned()
+            .collect::<Vec<_>>();
+        for relation in removed {
+            Arc::make_mut(&mut self.sequences).remove(&relation);
+            Arc::make_mut(&mut self.object_ids).remove(&relation);
+            Arc::make_mut(&mut self.persistence).remove(&relation);
+            Arc::make_mut(&mut self.security).remove(&relation);
+        }
+        for (relation, (source, object_id)) in selected {
+            if matches!(source, SequenceSource::Committed) {
+                continue;
+            }
+            let (Some(state), Some(persistence), Some(security)) = (
+                current.sequences.get(&relation),
+                current.persistence.get(&relation),
+                current.security.get(&relation),
+            ) else {
+                return Err(StorageBackendError::Other(format!(
+                    "sequence `{}` has incomplete private catalog metadata",
+                    relation.qualified_name()
+                )));
+            };
+            Arc::make_mut(&mut self.sequences).insert(relation.clone(), *state);
+            Arc::make_mut(&mut self.object_ids).insert(relation.clone(), object_id);
+            Arc::make_mut(&mut self.persistence).insert(relation.clone(), *persistence);
+            Arc::make_mut(&mut self.security).insert(relation, security.clone());
+        }
+        Ok(self)
+    }
+
     pub fn privileges<'a>(
         &'a self,
         inquiry: &'a SequencePrivilegeInquiry<'_>,

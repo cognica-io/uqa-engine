@@ -85,18 +85,32 @@ fn select_sequence_value_rows(
     committed: Vec<SequenceRow>,
     mut private: impl FnMut(&SequenceRow) -> StorageBackendResult<bool>,
 ) -> StorageBackendResult<Vec<SequenceRow>> {
+    select_sequence_records(
+        bound.into_iter().map(|row| (row.relation.clone(), row)),
+        committed.into_iter().map(|row| (row.relation.clone(), row)),
+        |_, row| private(row),
+    )
+    .map(|rows| rows.into_values().collect())
+}
+
+/// Select complete records from the committed catalog or the caller's private view, including renamed and deleted records.
+pub(super) fn select_sequence_records<T>(
+    bound: impl IntoIterator<Item = (RelationIdentity, T)>,
+    committed: impl IntoIterator<Item = (RelationIdentity, T)>,
+    mut private: impl FnMut(&RelationIdentity, &T) -> StorageBackendResult<bool>,
+) -> StorageBackendResult<BTreeMap<RelationIdentity, T>> {
     let mut rows = BTreeMap::new();
-    for row in committed {
-        if !private(&row)? {
-            rows.insert(row.relation.clone(), row);
+    for (relation, row) in committed {
+        if !private(&relation, &row)? {
+            rows.insert(relation, row);
         }
     }
-    for row in bound {
-        if private(&row)? {
-            rows.insert(row.relation.clone(), row);
+    for (relation, row) in bound {
+        if private(&relation, &row)? {
+            rows.insert(relation, row);
         }
     }
-    Ok(rows.into_values().collect())
+    Ok(rows)
 }
 
 /// Initial-open migration; the allocator must return a fresh nonzero object identity.

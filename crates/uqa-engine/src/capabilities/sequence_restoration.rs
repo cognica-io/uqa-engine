@@ -31,6 +31,23 @@ impl SequenceRestoreRegistry for Engine {
     }
 }
 
+impl crate::DurableCatalogSnapshot {
+    pub(crate) fn sequence_read_snapshot(
+        &self,
+    ) -> uqa_execution::catalog::sequence::snapshot::SequenceReadSnapshot {
+        uqa_execution::catalog::sequence::snapshot::SequenceReadSnapshot {
+            sequences: self.sequences.clone(),
+            object_ids: self.sequence_object_ids.clone(),
+            persistence: self.sequence_persistence.clone(),
+            security: self.sequence_security.clone(),
+            roles: uqa_execution::catalog::security::roles::persistence::RoleCatalogSnapshot {
+                roles: self.roles.clone(),
+                memberships: self.role_memberships.clone(),
+            },
+        }
+    }
+}
+
 impl uqa_execution::catalog::sequence::snapshot::SequenceSnapshotSource for Engine {
     fn sequence_read_snapshot(
         &self,

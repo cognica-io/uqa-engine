@@ -14,6 +14,8 @@ use uqa_execution::catalog::sequence::{restoration::restore_sequence_rows, Seque
 use uqa_sql::{ast::RelationPersistence, catalog::security::SequenceSecurity};
 use uqa_storage::SequenceRow;
 
+mod refresh;
+
 #[derive(Debug, PartialEq)]
 struct Snapshot {
     sequences: BTreeMap<RelationIdentity, SequenceState>,
