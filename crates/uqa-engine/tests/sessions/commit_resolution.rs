@@ -525,3 +525,59 @@ fn a_lost_abort_reply_resolves_as_a_known_abort_and_restores_private_catalog_cha
         assert_eq!(count(&root, "items"), Value::Int(1));
     }
 }
+
+#[test]
+fn temporary_role_dependencies_follow_failed_and_resolved_commit_outcomes() {
+    for fault in [REJECT_OTHER, LOSE_COMMITTED_REPLY, LOSE_UNCOMMITTED_REPLY] {
+        let (_directory, fixtures) = fixtures();
+        for persistence in fixtures {
+            let root = engine(persistence.clone());
+            root.sql("CREATE ROLE previous_owner; CREATE ROLE added_owner; CREATE TABLE durable(v int); CREATE TEMP TABLE existing(v int); ALTER TABLE existing OWNER TO previous_owner", &[]).unwrap();
+            let peer = root.new_session().unwrap();
+            root.sql("BEGIN; INSERT INTO durable VALUES(1); DROP TABLE existing; SET LOCAL ROLE added_owner; CREATE TEMP TABLE added(v int)", &[]).unwrap();
+            persistence.fault.store(fault, Ordering::Release);
+            let failure = root.sql("COMMIT", &[]).unwrap_err();
+            if fault == REJECT_OTHER {
+                assert_eq!(failure.sqlstate(), Some("XX000"));
+            } else {
+                assert_unknown(&failure);
+                assert!(root.pending_commit().is_some());
+            }
+            persistence.fault.store(HEALTHY, Ordering::Release);
+            if fault != REJECT_OTHER {
+                root.sql(
+                    if fault == LOSE_COMMITTED_REPLY {
+                        "COMMIT"
+                    } else {
+                        "ROLLBACK"
+                    },
+                    &[],
+                )
+                .unwrap();
+            }
+            assert!(root.pending_commit().is_none());
+            assert_eq!(root.transaction_depth(), 0);
+            let (retained, retired, present, absent) = if fault == LOSE_COMMITTED_REPLY {
+                ("added_owner", "previous_owner", "added", "existing")
+            } else {
+                ("previous_owner", "added_owner", "existing", "added")
+            };
+            assert_eq!(
+                peer.sql(&format!("DROP ROLE {retained}"), &[])
+                    .unwrap_err()
+                    .sqlstate(),
+                Some("2BP01")
+            );
+            peer.sql(&format!("DROP ROLE {retired}"), &[]).unwrap();
+            root.sql(&format!("SELECT * FROM {present}"), &[]).unwrap();
+            assert_eq!(
+                root.sql(&format!("SELECT * FROM {absent}"), &[])
+                    .unwrap_err()
+                    .sqlstate(),
+                Some("42P01")
+            );
+            root.sql(&format!("DROP TABLE {present}"), &[]).unwrap();
+            peer.sql(&format!("DROP ROLE {retained}"), &[]).unwrap();
+        }
+    }
+}

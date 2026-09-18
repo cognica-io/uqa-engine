@@ -85,6 +85,7 @@ impl Catalog {
             publication: self,
             dependencies: self,
             locks: self,
+            temporary_roles: self,
         }
     }
     pub fn role(&self, name: &str, attributes: &[RoleAttribute]) {
@@ -115,6 +116,11 @@ impl Catalog {
     }
     fn event(&self, value: &str) {
         self.events.borrow_mut().push(value.into());
+    }
+}
+impl crate::catalog::security::roles::temporary::TemporaryRoleDependencyReads for Catalog {
+    fn peer_temporary_role_reference(&self, _: u32) -> Result<bool, SQLError> {
+        Ok(false)
     }
 }
 pub(super) fn create(name: &str) -> CreateRoleStmt {

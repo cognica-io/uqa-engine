@@ -11,10 +11,17 @@ use super::{
     configuration::{self, RoutineConfigurationSession},
     definition::{compile_catalog_bound_routine, RoutineDefinitionContext},
 };
-use std::{collections::BTreeMap, sync::Arc};
+use crate::catalog::security::roles::{
+    dependencies::{prepare_role_dependencies, RoleDependencyCandidate},
+    locking::RoleLockContext,
+};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 use uqa_sql::{
     ast::{AlterRoutineStmt, CreateFunction, RoleAttribute},
-    catalog::roles::{require_role_exists, role_inherits},
+    catalog::roles::role_inherits,
     routines::{
         declaration::{resolve_alter_routine_identity_types, resolve_routine_type_references},
         dependencies::RoutineCompilationMode,
@@ -57,13 +64,18 @@ pub fn register_sql_function(
     context: &RoutineRegistrationContext<'_>,
     mut def: CreateFunction,
 ) -> Result<(), SQLError> {
-    context.catalog.writer.prepare_writer()?;
+    let current_user = context.catalog.names.current_user_name();
+    if def.owner.is_empty() {
+        def.owner.clone_from(&current_user);
+    }
+    let locks = RoleLockContext {
+        roles: context.catalog.roles,
+        session: context.namespace.locks,
+    };
+    let owner = locks.bind(&def.owner)?;
     let requested_name = def.name.clone();
     def.name = context.namespace.persistent_name(&requested_name)?;
     resolve_routine_type_references(context.definition.compilation.analysis.types, &mut def)?;
-    if def.owner.is_empty() {
-        def.owner = context.catalog.names.current_user_name();
-    }
     if let Some(support) = def.support.as_deref() {
         analysis::validate_routine_support(context.support, support)?;
     }
@@ -75,42 +87,67 @@ pub fn register_sql_function(
     )?;
     let name = def.name.clone();
     let signature = routine_signature_types(&def);
-    let current_user = context.catalog.names.current_user_name();
-    let roles = context.catalog.roles.role_definitions();
-    require_role_exists(&roles, &def.owner)?;
-    let current_user_is_superuser = roles
-        .get(&current_user)
-        .is_some_and(|role| role.has(RoleAttribute::Superuser));
-    let memberships = context.catalog.roles.role_memberships();
-    analysis::validate_routine_security_attributes(&def, current_user_is_superuser)?;
-    let mut registry = context.catalog.registry.routines_write();
-    let mut next = registry.clone();
-    {
-        let overloads = next.entry(name.clone()).or_default();
-        if let Some(pos) = overloads
-            .iter()
-            .position(|function| routine_signature_types(&function.def) == signature)
-        {
-            let existing = &overloads[pos].def;
-            analysis::prepare_routine_replacement(
-                existing,
-                &mut def,
-                &requested_name,
-                &current_user,
-                &roles,
-                &memberships,
-            )?;
-            overloads[pos] = Arc::new(SQLUserFunction { def, compiled });
-        } else {
-            def.object_id = Some(allocate_routine_object_id(&registry, &name)?);
-            overloads.push(Arc::new(SQLUserFunction { def, compiled }));
-        }
-        overloads.sort_by(|left, right| {
-            routine_signature_types(&left.def)
-                .cmp(&routine_signature_types(&right.def))
-                .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
-        });
-    }
+    let RoleDependencyCandidate {
+        roles,
+        memberships,
+        value: (mut registry, next),
+        ..
+    } = prepare_role_dependencies(
+        &locks,
+        || context.catalog.writer.prepare_writer(),
+        || {
+            locks.revalidate(&owner)?;
+            context.namespace.ensure_create(&name)?;
+            let roles = context.catalog.roles.role_definitions();
+            owner.revalidate(&roles)?;
+            let current_user_is_superuser = roles
+                .get(&current_user)
+                .is_some_and(|role| role.has(RoleAttribute::Superuser));
+            let memberships = context.catalog.roles.role_memberships();
+            analysis::validate_routine_security_attributes(&def, current_user_is_superuser)?;
+            let registry = context.catalog.registry.routines_write();
+            let mut next = registry.clone();
+            let mut def = def.clone();
+            let overloads = next.entry(name.clone()).or_default();
+            let mut dependencies = BTreeSet::new();
+            if let Some(pos) = overloads
+                .iter()
+                .position(|function| routine_signature_types(&function.def) == signature)
+            {
+                let existing = &overloads[pos].def;
+                analysis::prepare_routine_replacement(
+                    existing,
+                    &mut def,
+                    &requested_name,
+                    &current_user,
+                    &roles,
+                    &memberships,
+                )?;
+                overloads[pos] = Arc::new(SQLUserFunction {
+                    def,
+                    compiled: compiled.clone(),
+                });
+            } else {
+                dependencies.insert(owner.name.clone());
+                def.object_id = Some(allocate_routine_object_id(&registry, &name)?);
+                overloads.push(Arc::new(SQLUserFunction {
+                    def,
+                    compiled: compiled.clone(),
+                }));
+            }
+            overloads.sort_by(|left, right| {
+                routine_signature_types(&left.def)
+                    .cmp(&routine_signature_types(&right.def))
+                    .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
+            });
+            Ok(RoleDependencyCandidate {
+                value: (registry, next),
+                memberships,
+                roles,
+                dependencies,
+            })
+        },
+    )?;
     context
         .catalog
         .publication

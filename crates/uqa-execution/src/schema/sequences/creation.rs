@@ -26,6 +26,7 @@ pub trait SequenceCreationPublication {
         relation: &RelationIdentity,
         state: SequenceState,
         persistence: RelationPersistence,
+        role_owner: &str,
     ) -> Result<bool, SQLError>;
 }
 
@@ -62,6 +63,7 @@ pub fn create_sequence(
     ownership: &SequenceOwnership,
 ) -> Result<bool, SQLError> {
     validate_sequence_definition(&state.definition(), None)?;
+    let role_owner = context.creation.bind_owner()?;
     let name = if persistence == RelationPersistence::Temporary {
         context.creation.temporary_name(name)?
     } else {
@@ -80,10 +82,26 @@ pub fn create_sequence(
         return sequence_create_collision(&name, if_not_exists);
     }
     state.owner = bind_sequence_owner(context.owners, &name, ownership)?;
-    if !context
-        .publication
-        .insert_sequence(&name, &relation, state, persistence)?
+    context.creation.retain_owner(&role_owner)?;
+    if persistence == RelationPersistence::Temporary {
+        context.creation.ensure_temporary_privilege()?;
+    } else {
+        context.creation.ensure_create(&name)?;
+    }
+    if context
+        .namespace
+        .relation_exists(&name)
+        .map_err(|error| SQLError::Internal(format!("resolve relation `{name}`: {error}")))?
     {
+        return sequence_create_collision(&name, if_not_exists);
+    }
+    if !context.publication.insert_sequence(
+        &name,
+        &relation,
+        state,
+        persistence,
+        &role_owner.name,
+    )? {
         return sequence_create_collision(&name, if_not_exists);
     }
     Ok(true)

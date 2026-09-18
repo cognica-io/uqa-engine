@@ -18,7 +18,7 @@ use uqa_core::RelationIdentity;
 use uqa_sql::{
     catalog::{
         regrole_dependencies::StoredRegroleConstants,
-        view::{create_view_output_columns, named_view_schema},
+        view::{create_view_output_columns, named_view_schema, validate_view_column_types},
     },
     plan::{QueryPlan, UnifiedPlan},
     schema::view_creation::{
@@ -138,6 +138,7 @@ fn register_view_plan_inner(
         .catalog
         .synchronize()
         .map_err(|err| SQLError::Internal(format!("refresh view catalog: {err}")))?;
+    let owner = context.namespace.bind_owner()?;
     context.bindings.lock_relations(&plan)?;
     let uses_temporary_relation = context.bindings.bind_relations(&mut plan)?;
     let (name, persistence) = view_creation_target(
@@ -151,15 +152,15 @@ fn register_view_plan_inner(
     let query_schema = context.bindings.bind_routines(&mut plan, params)?;
     reject_regrole_constants(context, &mut plan)?;
     let output_columns = create_view_output_columns(&query_schema, column_names)?;
-    for (position, column) in output_columns.iter().enumerate() {
-        if let Some(ty) = query_schema.column_type(position) {
-            uqa_sql::schema::columns::validate_postgres_relation_column_type(column, ty)?;
-        }
-    }
+    validate_view_column_types(&query_schema, &output_columns)?;
     let replacement_schema = named_view_schema(&query_schema, &output_columns)?;
     let existing_view =
         replacement_view(context, &name, &relation, or_replace, &replacement_schema)?;
+    if existing_view.is_none() {
+        context.namespace.retain_owner(&owner)?;
+    }
     context.locks.prepare_definition_write()?;
+    context.namespace.ensure_create(&name)?;
     let object_id = if let Some(existing) = existing_view.as_ref() {
         existing.object_id
     } else {
@@ -169,10 +170,9 @@ fn register_view_plan_inner(
     };
     let view = StoredView {
         object_id,
-        role_owner: existing_view.as_ref().map_or_else(
-            || context.access.current_user_name(),
-            |view| view.role_owner.clone(),
-        ),
+        role_owner: existing_view
+            .as_ref()
+            .map_or_else(|| owner.name.clone(), |view| view.role_owner.clone()),
         acl: existing_view.as_ref().and_then(|view| view.acl.clone()),
         column_acls: existing_view
             .as_ref()

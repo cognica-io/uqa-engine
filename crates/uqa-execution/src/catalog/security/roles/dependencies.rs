@@ -35,6 +35,20 @@ pub fn prepare_role_dependencies<'a, T>(
     prepare_dependencies(context, prepare_writer, prepare, |_| true)
 }
 
+/// Retain a new object's owner until transaction completion, without lending registry guards to its remaining definition work.
+pub fn retain_created_owner(
+    context: RoleLockContext<'_>,
+    owner: &RoleBinding,
+) -> Result<(), SQLError> {
+    drop(prepare_role_owner(
+        context,
+        owner,
+        || Ok(()),
+        |_, _| Ok(Some(())),
+    )?);
+    Ok(())
+}
+
 /// Bind the requested owner before the caller's relevant waits and retain that incarnation through publication.
 pub fn prepare_role_owner<'a, T>(
     context: RoleLockContext<'a>,

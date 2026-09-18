@@ -83,10 +83,6 @@ impl ViewPlanBinding for Engine {
 }
 
 impl MaterializedViewAccess for Engine {
-    fn current_user_name(&self) -> String {
-        self.current_user_name()
-    }
-
     fn ensure_maintenance(&self, name: &str, view: &StoredView) -> Result<(), SQLError> {
         uqa_sql::catalog::security::view_ownership::ensure_materialized_view_maintenance(
             self.view_ownership_context(),

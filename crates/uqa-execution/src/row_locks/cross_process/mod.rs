@@ -234,6 +234,27 @@ mod fallback {
             Ok(Self {})
         }
 
+        pub(in crate::row_locks) fn retain_temporary_role(
+            &self,
+            _session: u64,
+            _role: u32,
+            cancel: &uqa_core::CancellationToken,
+        ) -> Result<(), uqa_sql::SQLError> {
+            cancel.check()?;
+            Ok(())
+        }
+
+        pub(in crate::row_locks) fn release_temporary_role(&self, _session: u64, _role: u32) {}
+
+        pub(in crate::row_locks) fn foreign_temporary_role_reference(
+            &self,
+            _role: u32,
+            cancel: &uqa_core::CancellationToken,
+        ) -> Result<bool, uqa_sql::SQLError> {
+            cancel.check()?;
+            Ok(false)
+        }
+
         pub(in crate::row_locks) fn try_claim(
             &self,
             _session: u64,

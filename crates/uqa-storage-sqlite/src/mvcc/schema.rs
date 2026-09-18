@@ -18,7 +18,7 @@ use uqa_storage::mvcc::{DatabaseId, VersionError};
 use super::{codec, PhysicalResult};
 
 const TABLES: [(&str, &str); 5] = [
-    ("_uqa_mvcc_metadata", "CREATE TABLE _uqa_mvcc_metadata (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 15), database_id BLOB NOT NULL CHECK(typeof(database_id) = 'blob' AND length(database_id) = 16), allocated BLOB NOT NULL CHECK(typeof(allocated) = 'blob' AND length(allocated) = 8), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8), mapping INTEGER NOT NULL DEFAULT 0 CHECK(mapping IN (0, 1)))"),
+    ("_uqa_mvcc_metadata", "CREATE TABLE _uqa_mvcc_metadata (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 16), database_id BLOB NOT NULL CHECK(typeof(database_id) = 'blob' AND length(database_id) = 16), allocated BLOB NOT NULL CHECK(typeof(allocated) = 'blob' AND length(allocated) = 8), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8), mapping INTEGER NOT NULL DEFAULT 0 CHECK(mapping IN (0, 1)))"),
     ("_uqa_mvcc_heads", "CREATE TABLE _uqa_mvcc_heads (key BLOB PRIMARY KEY CHECK(typeof(key) = 'blob'), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8 AND sequence > x'0000000000000000')) WITHOUT ROWID"),
     ("_uqa_mvcc_versions", "CREATE TABLE _uqa_mvcc_versions (key BLOB NOT NULL CHECK(typeof(key) = 'blob'), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8 AND sequence > x'0000000000000000'), value BLOB CHECK(value IS NULL OR typeof(value) = 'blob'), PRIMARY KEY(key, sequence)) WITHOUT ROWID"),
     ("_uqa_mvcc_transactions", "CREATE TABLE _uqa_mvcc_transactions (allocation BLOB PRIMARY KEY CHECK(typeof(allocation) = 'blob' AND length(allocation) = 8 AND allocation > x'0000000000000000'), status INTEGER NOT NULL CHECK(status IN (0, 1, 2)), sequence BLOB, fingerprint BLOB, CHECK((status IN (0, 1) AND sequence IS NULL AND fingerprint IS NULL) OR (status = 2 AND typeof(sequence) = 'blob' AND length(sequence) = 8 AND typeof(fingerprint) = 'blob' AND length(fingerprint) = 32))) WITHOUT ROWID"),
@@ -111,12 +111,12 @@ pub(super) fn initialize_in(transaction: &Connection) -> PhysicalResult<Initiali
         if let Some(matches) = definition_matches(transaction, name, expected)? {
             if !matches {
                 if name == TABLES[0].0 {
-                    for format in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] {
+                    for format in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] {
                         if definition_matches(
                             transaction,
                             name,
                             &expected.replace(
-                                "CHECK(format = 15)",
+                                "CHECK(format = 16)",
                                 &format!("CHECK(format = {format})"),
                             ),
                         )? == Some(true)
@@ -164,7 +164,7 @@ pub(super) fn initialize_in(transaction: &Connection) -> PhysicalResult<Initiali
             )
         })?;
         transaction.execute(
-            "INSERT INTO _uqa_mvcc_metadata (singleton, format, database_id, allocated, sequence) VALUES (1, 15, ?1, ?2, ?2)",
+            "INSERT INTO _uqa_mvcc_metadata (singleton, format, database_id, allocated, sequence) VALUES (1, 16, ?1, ?2, ?2)",
             params![identity.as_slice(), 0_u64.to_be_bytes().as_slice()],
         )?;
         return Ok(Initialization {
@@ -228,7 +228,7 @@ fn upgrade_metadata(transaction: &Connection, format: i64) -> PhysicalResult<()>
     transaction
         .execute_batch("ALTER TABLE _uqa_mvcc_metadata RENAME TO _uqa_mvcc_previous_metadata")?;
     transaction.execute_batch(TABLES[0].1)?;
-    transaction.execute_batch("INSERT INTO _uqa_mvcc_metadata SELECT singleton, 15, database_id, allocated, sequence, mapping FROM _uqa_mvcc_previous_metadata; DROP TABLE _uqa_mvcc_previous_metadata;")?;
+    transaction.execute_batch("INSERT INTO _uqa_mvcc_metadata SELECT singleton, 16, database_id, allocated, sequence, mapping FROM _uqa_mvcc_previous_metadata; DROP TABLE _uqa_mvcc_previous_metadata;")?;
     for action in ["INSERT", "UPDATE", "DELETE"] {
         transaction.execute_batch(&trigger(TABLES[0].0, action).1)?;
     }

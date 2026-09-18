@@ -12,10 +12,14 @@ use std::{cell::RefCell, ops::Deref, rc::Rc, sync::Arc};
 pub(super) type Events = Rc<RefCell<Vec<String>>>;
 pub(super) struct Table {
     pub name: String,
+    pub persistence: crate::ast::RelationPersistence,
     pub security: TableSecurity,
     pub events: Events,
 }
 impl RoleTableSecurity for Table {
+    fn persistence(&self) -> crate::ast::RelationPersistence {
+        self.persistence
+    }
     fn security(&self) -> TableSecurity {
         self.events
             .borrow_mut()
@@ -58,6 +62,7 @@ pub(super) struct Catalog {
     pub foreign_tables: BTreeMap<RelationIdentity, TableSecurity>,
     pub system_relations: crate::catalog::security::system_relations::SystemRelationSecurities,
     pub sequences: BTreeMap<RelationIdentity, SequenceSecurity>,
+    pub sequence_persistence: BTreeMap<RelationIdentity, crate::ast::RelationPersistence>,
     pub routines: BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
     pub events: Events,
 }
@@ -71,6 +76,7 @@ impl Catalog {
             foreign_tables: BTreeMap::new(),
             system_relations: BTreeMap::new(),
             sequences: BTreeMap::new(),
+            sequence_persistence: BTreeMap::new(),
             routines: BTreeMap::new(),
             events: Rc::default(),
         }
@@ -88,10 +94,22 @@ impl Catalog {
             RelationIdentity::new("public", name),
             Table {
                 name: name.into(),
+                persistence: crate::ast::RelationPersistence::Permanent,
                 security: TableSecurity::owner(owner),
                 events: self.events.clone(),
             },
         );
+    }
+}
+
+impl super::super::context::TemporaryRoleDependencyCatalog for Catalog {
+    fn temporary_namespace_allocated(&self) -> bool {
+        true
+    }
+    fn sequence_persistence(
+        &self,
+    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, crate::ast::RelationPersistence>> {
+        Box::new(self.read("sequence persistence", &self.sequence_persistence))
     }
 }
 impl RoleDependencyCatalog for Catalog {

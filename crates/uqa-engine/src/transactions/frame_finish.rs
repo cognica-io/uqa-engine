@@ -12,7 +12,15 @@ use super::{
     TransactionDirtyState, TransactionFrame, TransactionIntent, TransactionStatus,
 };
 use crate::notifications::NotificationCommitGuard;
+use uqa_execution::row_locks::{temporary_roles::TemporaryRolePublication, RowChangePublication};
 use uqa_storage::mvcc::CommitErrorOutcome;
+
+// Drop temporary additions before the notification and row-publication guards are released.
+struct TransactionPublication<'a> {
+    temporary_roles: Option<TemporaryRolePublication<'a>>,
+    notifications: Option<NotificationCommitGuard<'a>>,
+    changes: Option<RowChangePublication<'a>>,
+}
 
 impl Engine {
     pub(super) fn commit_transaction_frame(
@@ -37,31 +45,13 @@ impl Engine {
             .last()
             .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?;
         let read_only = frame.intent == TransactionIntent::ReadOnly;
-        let status = frame.status;
-        let has_row_changes = !frame.row_changes.is_empty();
         let statistics_changes =
             (storage_savepoint.is_none() && !resolving).then(|| frame.statistics_changes.clone());
         if !resolving {
             self.validate_read_only_commit(stack, read_only, storage_savepoint.is_none())?;
         }
-        let change_publication = if storage_savepoint.is_none()
-            && (has_row_changes || (self.versioned_backend_transactions() && !read_only))
-        {
-            Some(
-                self.row_locks
-                    .begin_change_publication(&self.runtime.cancellation)
-                    .map_err(|error| match status {
-                        TransactionStatus::CommitPending(transaction) => {
-                            Self::pending_commit_error(transaction, error)
-                        }
-                        _ => error,
-                    })?,
-            )
-        } else {
-            None
-        };
-        let notification_commit =
-            self.prepare_notification_commit(stack, storage_savepoint.is_none())?;
+        let mut publication =
+            self.prepare_transaction_publication(stack, storage_savepoint.is_none())?;
         let savepoints_deferred = Self::backend_savepoints_deferred(stack);
         if let Some(statistics_changes) = statistics_changes {
             // Maintenance counters are derived at publication, after any earlier publisher. A savepoint can restore an older command base, and concurrent commands must not overwrite each other's accumulated maintenance state.
@@ -79,8 +69,7 @@ impl Engine {
             if let Err(error) =
                 refresh.and_then(|()| self.persist_statistics_changes(&statistics_changes))
             {
-                drop(notification_commit);
-                drop(change_publication);
+                drop(publication);
                 return Err(self.rollback_failed_statistics_preparation(stack, &error));
             }
         }
@@ -95,8 +84,7 @@ impl Engine {
                 backend.commit_transaction()
             };
             if let Err(error) = commit_result {
-                drop(notification_commit);
-                drop(change_publication);
+                drop(publication);
                 if let Some(error) = Self::retain_pending_commit(stack, &error) {
                     return Err(error);
                 }
@@ -112,15 +100,71 @@ impl Engine {
                 ));
             }
         }
+        if let Some(temporary_roles) = publication.temporary_roles.take() {
+            temporary_roles.commit();
+        }
         let committed = stack
             .pop()
             .ok_or_else(|| SQLError::Internal("COMMIT lost its transaction frame".into()))?;
         self.publish_committed_transaction_frame(
             stack,
             committed,
-            change_publication,
-            notification_commit,
+            publication.changes,
+            publication.notifications,
         )
+    }
+
+    fn prepare_transaction_publication<'a>(
+        &'a self,
+        stack: &mut Vec<TransactionFrame>,
+        outer: bool,
+    ) -> Result<TransactionPublication<'a>, SQLError> {
+        let frame = stack
+            .last()
+            .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?;
+        let read_only = frame.intent == TransactionIntent::ReadOnly;
+        let status = frame.status;
+        let has_row_changes = !frame.row_changes.is_empty();
+        let change_publication = if outer
+            && (has_row_changes || (self.versioned_backend_transactions() && !read_only))
+        {
+            Some(
+                self.row_locks
+                    .begin_change_publication(&self.runtime.cancellation)
+                    .map_err(|error| match status {
+                        TransactionStatus::CommitPending(transaction) => {
+                            Self::pending_commit_error(transaction, error)
+                        }
+                        _ => error,
+                    })?,
+            )
+        } else {
+            None
+        };
+        let notification_commit = self.prepare_notification_commit(stack, outer)?;
+        let temporary_roles = if outer {
+            match self.prepare_temporary_role_publication() {
+                Ok(publication) => publication,
+                Err(error) => {
+                    drop(notification_commit);
+                    drop(change_publication);
+                    if let TransactionStatus::CommitPending(transaction) = status {
+                        return Err(Self::pending_commit_error(transaction, error));
+                    }
+                    return Err(match self.rollback_transaction_frame(stack) {
+                        Ok(()) => error,
+                        Err(rollback) => SQLError::Internal(format!("{error}; temporary catalog preparation rollback also failed: {rollback}")),
+                    });
+                }
+            }
+        } else {
+            None
+        };
+        Ok(TransactionPublication {
+            temporary_roles,
+            notifications: notification_commit,
+            changes: change_publication,
+        })
     }
 
     fn rollback_failed_statistics_preparation(

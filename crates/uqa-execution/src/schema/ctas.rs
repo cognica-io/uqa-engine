@@ -34,6 +34,7 @@ pub trait TableAsPublication {
         name: &str,
         persistence: RelationPersistence,
         on_commit: OnCommitAction,
+        owner: &crate::catalog::security::roles::locking::RoleBinding,
     ) -> Result<(), SQLError>;
     fn create_vector_field(
         &self,
@@ -74,6 +75,7 @@ pub fn run_create_table_as<S: Clone>(
     context: &CreateTableAsContext<'_, S>,
     execution: &CreateTableAsExecution<'_>,
 ) -> Result<SQLResult, SQLError> {
+    let owner = context.creation.bind_owner()?;
     // PostgreSQL analyzes the CTAS source before target namespace resolution, collisions, or schema CREATE. Source execution still follows target validation, so an existing target wins over runtime expression errors and row locks.
     let temporary_privilege_error =
         if execution.persistence == uqa_sql::ast::RelationPersistence::Temporary {
@@ -103,6 +105,7 @@ pub fn run_create_table_as<S: Clone>(
     if execution.persistence != uqa_sql::ast::RelationPersistence::Temporary {
         context.creation.ensure_create(&preliminary_name)?;
     }
+    context.creation.retain_owner(&owner)?;
     let executable = if execution.with_no_data {
         None
     } else {
@@ -148,6 +151,7 @@ pub fn run_create_table_as<S: Clone>(
         &columns,
         execution.persistence,
         execution.on_commit,
+        &owner,
     )?;
     let affected = result.as_ref().map_or(Ok(0), |result| {
         materialize_create_table_as_rows(
@@ -200,8 +204,9 @@ fn create_table_as_relation(
     columns: &[uqa_sql::ast::ColumnDef],
     persistence: uqa_sql::ast::RelationPersistence,
     on_commit: uqa_sql::ast::OnCommitAction,
+    owner: &crate::catalog::security::roles::locking::RoleBinding,
 ) -> Result<(), SQLError> {
-    publication.create_relation(name, persistence, on_commit)?;
+    publication.create_relation(name, persistence, on_commit, owner)?;
     for column in columns {
         if let ColumnType::Vector(dimensions) | ColumnType::Tensor(dimensions) = column.ty {
             publication.create_vector_field(name, &column.name, dimensions)?;

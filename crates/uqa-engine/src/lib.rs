@@ -719,6 +719,7 @@ impl Drop for Engine {
                     let _ = backend.rollback_transaction();
                 }
             }
+            self.row_locks.close_temporary_roles(self.session_id);
             self.row_locks.release_session(self.session_id);
             self.notification_hub.unregister(self.session_id);
             self.release_automatic_statistics_client();

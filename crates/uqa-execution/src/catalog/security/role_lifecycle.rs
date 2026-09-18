@@ -164,6 +164,20 @@ pub fn drop_roles(
     let mut memberships = context.registry.write_memberships();
     definition::ensure_no_grantor_dependencies(&memberships, &names_set)?;
     ensure_roles_have_no_object_dependencies(context.dependencies, &names)?;
+    for name in &names {
+        let role = super::roles::locking::RoleBinding::from_definition(&snapshot[name])?;
+        if context
+            .temporary_roles
+            .peer_temporary_role_reference(role.oid)?
+        {
+            return Err(SQLError::Routine {
+                sqlstate: "2BP01".into(),
+                message: format!(
+                    "role \"{name}\" cannot be dropped because some objects depend on it"
+                ),
+            });
+        }
+    }
     let mut next_roles = snapshot;
     for name in &names {
         next_roles.remove(name);

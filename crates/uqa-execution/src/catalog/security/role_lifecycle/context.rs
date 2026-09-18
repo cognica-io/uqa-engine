@@ -44,4 +44,5 @@ pub struct RoleExecutionContext<'a> {
     pub publication: &'a dyn RolePublication,
     pub dependencies: &'a dyn RoleDependencyCatalog,
     pub locks: &'a dyn crate::row_locks::shared_objects::SharedObjectLockSession,
+    pub temporary_roles: &'a dyn super::super::roles::temporary::TemporaryRoleDependencyReads,
 }

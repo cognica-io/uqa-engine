@@ -11,8 +11,8 @@ use uqa_execution::schema::namespaces::{
     privileges::{
         SchemaPrivilegeContext, SchemaPrivilegeNotices, SchemaPrivilegeRegistry, SchemaRegistryRead,
     },
-    NamespaceCatalogChanges, NamespaceCatalogRefresh, SchemaAuthority, SchemaCreationContext,
-    SchemaOwnerContext, SchemaRegistration, SchemaRegistrationPersistence, SchemaRegistrationState,
+    NamespaceCatalogChanges, NamespaceCatalogRefresh, SchemaCreationContext, SchemaOwnerContext,
+    SchemaRegistration, SchemaRegistrationPersistence, SchemaRegistrationState,
     SchemaRegistryWrite, SchemaSecurityCatalog, SchemaSecurityPersistence,
     SchemaSecurityPublication, SchemaStatementWriter,
 };
@@ -27,7 +27,8 @@ impl Engine {
             roles: self,
             catalog: self,
             notices: self,
-            authority: self,
+            locks: self,
+            database: self,
             registration: self,
         }
     }
@@ -67,14 +68,6 @@ impl SchemaStatementWriter for Engine {
 impl NamespaceCatalogRefresh for Engine {
     fn refresh_catalog(&self) -> StorageBackendResult<()> {
         self.synchronize_catalog_registries()
-    }
-}
-impl SchemaAuthority for Engine {
-    fn ensure_database_create(&self, role: &str) -> Result<(), SQLError> {
-        self.ensure_database_privilege(
-            role,
-            uqa_sql::catalog::security::database::DatabaseAclPrivilege::Create,
-        )
     }
 }
 impl SchemaRegistrationState for MutationCoordinator<'_> {

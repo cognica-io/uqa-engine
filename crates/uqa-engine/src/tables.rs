@@ -131,12 +131,17 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         let raw_name = name.into();
         self.with_implicit_storage_transaction(move |engine| {
+            let owner = engine
+                .relation_creation_context()
+                .bind_owner()
+                .map_err(|error| StorageBackendError::backend("CREATE TABLE owner", error))?;
             engine.create_table_inner(
                 &raw_name,
                 analyzer,
                 fts_fields,
                 uqa_sql::ast::RelationPersistence::Permanent,
                 uqa_sql::ast::OnCommitAction::PreserveRows,
+                &owner,
             )
         })
     }
@@ -148,13 +153,21 @@ impl Engine {
         fts_fields: Vec<FieldName>,
         persistence: uqa_sql::ast::RelationPersistence,
         on_commit: uqa_sql::ast::OnCommitAction,
+        owner: &uqa_execution::catalog::security::roles::locking::RoleBinding,
     ) -> StorageBackendResult<()> {
         if persistence == uqa_sql::ast::RelationPersistence::Temporary {
-            return self.create_table_inner(name, analyzer, fts_fields, persistence, on_commit);
+            return self.create_table_inner(
+                name,
+                analyzer,
+                fts_fields,
+                persistence,
+                on_commit,
+                owner,
+            );
         }
         let name = name.to_string();
         self.with_implicit_storage_transaction(move |engine| {
-            engine.create_table_inner(&name, analyzer, fts_fields, persistence, on_commit)
+            engine.create_table_inner(&name, analyzer, fts_fields, persistence, on_commit, owner)
         })
     }
 
@@ -165,6 +178,7 @@ impl Engine {
         fts_fields: Vec<FieldName>,
         persistence: uqa_sql::ast::RelationPersistence,
         on_commit: uqa_sql::ast::OnCommitAction,
+        owner: &uqa_execution::catalog::security::roles::locking::RoleBinding,
     ) -> StorageBackendResult<()> {
         let name = if persistence == uqa_sql::ast::RelationPersistence::Temporary {
             self.relation_creation_context()
@@ -211,7 +225,10 @@ impl Engine {
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: crate::new_table_object_id()?,
             security: crate::state::CatalogCell::new(TableSecurity {
-                role_owner: self.current_user_name(),
+                role_owner: self
+                    .relation_creation_context()
+                    .owner_for_publication(owner)
+                    .map_err(|error| StorageBackendError::backend("CREATE TABLE owner", error))?,
                 acl: None,
                 column_acls: BTreeMap::new(),
             }),

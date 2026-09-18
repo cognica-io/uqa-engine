@@ -91,10 +91,10 @@ impl SequenceCreationPublication for Engine {
         relation: &RelationIdentity,
         mut state: SequenceState,
         persistence: RelationPersistence,
+        role_owner: &str,
     ) -> Result<bool, SQLError> {
-        let role_owner = self.current_user_name();
         let security = SequenceSecurity {
-            role_owner,
+            role_owner: role_owner.to_string(),
             acl: None,
         };
         let object_id = crate::new_sequence_object_id().map_err(|error| {

@@ -81,6 +81,7 @@ pub(in crate::row_locks) struct FileLockCoordinator {
     change_file: std::fs::File,
     change_journal: Mutex<()>,
     transaction_xids: Mutex<()>,
+    temporary_role_slots: Mutex<temporary_roles::Slots>,
     state: Mutex<CoordinatorState>,
 }
 
@@ -88,6 +89,7 @@ mod claims;
 mod journal;
 mod platform;
 mod relations;
+mod temporary_roles;
 mod waits;
 mod xids;
 
@@ -129,6 +131,7 @@ impl FileLockCoordinator {
             change_file,
             change_journal: Mutex::new(()),
             transaction_xids: Mutex::new(()),
+            temporary_role_slots: Mutex::new(temporary_roles::Slots::default()),
             state: Mutex::new(CoordinatorState {
                 claims: HashMap::new(),
                 holders: HashMap::new(),

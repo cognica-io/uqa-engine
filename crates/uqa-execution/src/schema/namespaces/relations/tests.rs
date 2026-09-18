@@ -57,6 +57,7 @@ impl Fixture {
         RelationCreationContext {
             names: self,
             roles: self,
+            locks: self,
             schemas: self,
             database: self,
             state: self,
@@ -71,6 +72,18 @@ impl Fixture {
         } else {
             Ok(())
         }
+    }
+}
+impl SharedObjectLockSession for Fixture {
+    fn acquire_shared_catalog(
+        &self,
+        _: crate::row_locks::shared_objects::SharedCatalogLock<'_>,
+        _: crate::row_locks::RelationLockMode,
+    ) -> Result<crate::row_locks::ScopedRelationLock<'_>, SQLError> {
+        panic!("namespace resolution does not retain role dependencies")
+    }
+    fn refresh_shared_catalog(&self) -> Result<(), SQLError> {
+        panic!("namespace resolution does not refresh through role locks")
     }
 }
 struct EmptyNames;

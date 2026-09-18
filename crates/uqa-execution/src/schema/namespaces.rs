@@ -33,9 +33,6 @@ pub trait NamespaceCatalogRefresh {
 pub trait NamespaceCatalogChanges {
     fn catalog_registry_changed(&self);
 }
-pub trait SchemaAuthority {
-    fn ensure_database_create(&self, role: &str) -> Result<(), SQLError>;
-}
 
 pub type SchemaRegistryWrite<'a> =
     Box<dyn DerefMut<Target = BTreeMap<String, SchemaSecurity>> + 'a>;
@@ -91,10 +88,58 @@ pub struct SchemaCreationContext<'a> {
     pub writer: &'a dyn SchemaStatementWriter,
     pub session: &'a dyn RoleReferenceNames,
     pub roles: &'a dyn RoleCatalogGuards,
-    pub authority: &'a dyn SchemaAuthority,
+    pub locks: &'a dyn SharedObjectLockSession,
+    pub database: &'a dyn uqa_sql::catalog::security::database_inquiry::DatabasePrivilegeCatalog,
     pub registration: &'a dyn SchemaRegistration,
     pub catalog: &'a dyn SchemaSecurityCatalog,
     pub notices: &'a dyn crate::catalog::notices::CatalogNotices,
+}
+
+/// The host API keeps its declaration rules while sharing transactional owner dependency publication with SQL.
+pub fn register_api_schema(
+    context: &SchemaCreationContext<'_>,
+    name: &str,
+    if_not_exists: bool,
+) -> Result<bool, SQLError> {
+    context.locks.refresh_shared_catalog()?;
+    uqa_sql::schema::namespaces::validate_schema_name(name).map_err(SQLError::Internal)?;
+    let locks = RoleLockContext {
+        roles: context.roles,
+        session: context.locks,
+    };
+    let owner = locks.bind(&context.session.current_user_name())?;
+    let RoleDependencyCandidate {
+        roles,
+        memberships,
+        value,
+        ..
+    } = prepare_role_owner(
+        locks,
+        &owner,
+        || context.writer.prepare_writer(),
+        |_, _| {
+            Ok(context
+                .catalog
+                .schema_security(name)
+                .is_none()
+                .then_some(()))
+        },
+    )?;
+    let created = if value.is_some() {
+        context
+            .registration
+            .register_schema(name, if_not_exists, &owner.name)
+            .map_err(|error| uqa_sql::catalog::errors::storage_error("CREATE SCHEMA", &error))?
+    } else if if_not_exists {
+        false
+    } else {
+        return Err(SQLError::Internal(format!(
+            "schema `{name}` already exists"
+        )));
+    };
+    drop(memberships);
+    drop(roles);
+    Ok(created)
 }
 
 pub fn create_schema(
@@ -103,7 +148,6 @@ pub fn create_schema(
     if_not_exists: bool,
     authorization: Option<&uqa_sql::ast::SchemaAuthorization>,
 ) -> Result<SQLResult, SQLError> {
-    context.writer.prepare_writer()?;
     let current_user = context.session.current_user_name();
     let target = uqa_sql::schema::namespaces::creation::schema_creation_target(
         context.session,
@@ -112,24 +156,49 @@ pub fn create_schema(
         name,
         authorization,
     )?;
-    context.authority.ensure_database_create(&current_user)?;
-    roles::require_set_role(
-        &context.roles.role_definitions(),
-        &context.roles.role_memberships(),
-        &current_user,
-        &target.role_owner,
+    let locks = RoleLockContext {
+        roles: context.roles,
+        session: context.locks,
+    };
+    let owner = locks.bind(&target.role_owner)?;
+    let RoleDependencyCandidate {
+        roles,
+        memberships,
+        value,
+        ..
+    } = prepare_role_owner(
+        locks,
+        &owner,
+        || context.writer.prepare_writer(),
+        |roles, memberships| {
+            uqa_sql::catalog::security::ownership::OwnerChangeAuthority {
+                roles,
+                memberships,
+                current_user: &current_user,
+                new_owner: &owner.name,
+            }
+            .require_database_create(&context.database.security())?;
+            roles::require_set_role(roles, memberships, &current_user, &owner.name)?;
+            uqa_sql::schema::namespaces::creation::validate_schema_creation_name(&target.name)?;
+            Ok(context
+                .catalog
+                .schema_security(&target.name)
+                .is_none()
+                .then_some(()))
+        },
     )?;
-    uqa_sql::schema::namespaces::creation::validate_schema_creation_name(&target.name)?;
-    let created = if context.catalog.schema_security(&target.name).is_some() {
+    let created = if value.is_none() {
         false
     } else {
         context
             .registration
-            .register_schema(&target.name, true, &target.role_owner)
+            .register_schema(&target.name, true, &owner.name)
             .map_err(|error| {
                 SQLError::Internal(format!("CREATE SCHEMA catalog write failed: {error}"))
             })?
     };
+    drop(memberships);
+    drop(roles);
     if !created {
         if !if_not_exists {
             return Err(SQLError::Routine {

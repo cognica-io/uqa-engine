@@ -368,6 +368,9 @@ impl Engine {
         }
         if matches!(target, DiscardTarget::All | DiscardTarget::Temp) {
             self.discard_temporary_relations();
+            if self.transaction_depth() == 0 {
+                self.row_locks.close_temporary_roles(self.session_id);
+            }
         }
         if matches!(target, DiscardTarget::All | DiscardTarget::Sequences) {
             self.discard_sequence_session_values();

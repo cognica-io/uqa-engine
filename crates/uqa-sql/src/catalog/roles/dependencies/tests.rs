@@ -6,6 +6,7 @@
 
 use super::*;
 mod fixtures;
+mod temporary;
 use fixtures::Catalog;
 
 #[test]

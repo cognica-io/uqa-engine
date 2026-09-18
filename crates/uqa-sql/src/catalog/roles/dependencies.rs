@@ -16,6 +16,7 @@ use crate::{
 use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 pub mod context;
+pub mod temporary;
 use context::RoleDependencyCatalog;
 
 pub fn ensure_roles_have_no_object_dependencies(

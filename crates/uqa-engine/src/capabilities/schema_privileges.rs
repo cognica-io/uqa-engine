@@ -140,6 +140,7 @@ impl Engine {
         RelationCreationContext {
             names: self,
             roles: self,
+            locks: self,
             schemas: self,
             database: self,
             state: self,

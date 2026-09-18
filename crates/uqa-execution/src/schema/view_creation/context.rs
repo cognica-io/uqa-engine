@@ -31,7 +31,6 @@ pub trait ViewPlanBinding {
     ) -> Result<RowSchema, SQLError>;
 }
 pub trait MaterializedViewAccess {
-    fn current_user_name(&self) -> String;
     fn ensure_maintenance(&self, name: &str, view: &StoredView) -> Result<(), SQLError>;
 }
 pub type ViewOwnerQuery<'a> =

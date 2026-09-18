@@ -6,6 +6,11 @@
 
 //! Schedule creation namespace resolution and writer retries without owning session state.
 
+use crate::catalog::security::roles::{
+    dependencies::retain_created_owner,
+    locking::{RoleBinding, RoleLockContext},
+};
+use crate::row_locks::shared_objects::SharedObjectLockSession;
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     catalog::{
@@ -38,6 +43,7 @@ pub trait RelationCreationRuntime {
 pub struct RelationCreationContext<'a> {
     pub names: &'a dyn RoleReferenceNames,
     pub roles: &'a dyn RoleCatalogGuards,
+    pub locks: &'a dyn SharedObjectLockSession,
     pub schemas: &'a dyn SchemaPrivilegeCatalog,
     pub database: &'a dyn DatabasePrivilegeCatalog,
     pub state: &'a dyn RelationCandidateState,
@@ -46,6 +52,22 @@ pub struct RelationCreationContext<'a> {
 }
 
 impl RelationCreationContext<'_> {
+    fn role_locks(&self) -> RoleLockContext<'_> {
+        RoleLockContext {
+            roles: self.roles,
+            session: self.locks,
+        }
+    }
+    pub fn bind_owner(&self) -> Result<RoleBinding, SQLError> {
+        self.role_locks().bind(&self.names.current_user_name())
+    }
+    pub fn retain_owner(&self, owner: &RoleBinding) -> Result<(), SQLError> {
+        retain_created_owner(self.role_locks(), owner)
+    }
+    pub fn owner_for_publication(&self, owner: &RoleBinding) -> Result<String, SQLError> {
+        self.retain_owner(owner)?;
+        Ok(owner.name.clone())
+    }
     fn schema_privileges(&self) -> SchemaPrivilegeInquiry<'_> {
         SchemaPrivilegeInquiry {
             catalog: self.schemas,

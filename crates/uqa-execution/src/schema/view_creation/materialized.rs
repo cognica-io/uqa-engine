@@ -15,7 +15,10 @@ use crate::row_locks::{
     RelationLockMode,
 };
 use uqa_core::RelationIdentity;
-use uqa_sql::{catalog::view::create_view_output_columns, SQLError};
+use uqa_sql::{
+    catalog::view::{create_view_output_columns, validate_view_column_types},
+    SQLError,
+};
 
 fn materialized_rows(
     result: &uqa_sql::SQLResult,
@@ -69,6 +72,7 @@ pub fn register_materialized_view_plan(
         context.catalog.synchronize().map_err(|error| {
             SQLError::Internal(format!("refresh materialized-view catalog: {error}"))
         })?;
+        let owner = context.namespace.bind_owner()?;
         context.bindings.lock_relations(&plan)?;
         if context.bindings.bind_relations(&mut plan)? {
             return Err(SQLError::Routine {
@@ -82,11 +86,7 @@ pub fn register_materialized_view_plan(
         for column in &output_columns {
             uqa_sql::schema::columns::validate_postgres_column_name(column)?;
         }
-        for (position, column) in output_columns.iter().enumerate() {
-            if let Some(ty) = query_schema.column_type(position) {
-                uqa_sql::schema::columns::validate_postgres_relation_column_type(column, ty)?;
-            }
-        }
+        validate_view_column_types(&query_schema, &output_columns)?;
         let name = context.namespace.resolve_persistent_name(name)?;
         let binding = bind_relation(
             context.locks,
@@ -115,6 +115,8 @@ pub fn register_materialized_view_plan(
         if binding.is_none() {
             return Ok(None);
         }
+        context.namespace.retain_owner(&owner)?;
+        context.namespace.ensure_create(&name)?;
         let materialized_column_types = query_schema.column_types().to_vec();
         let materialized_rows = if with_no_data {
             Vec::new()
@@ -129,13 +131,14 @@ pub fn register_materialized_view_plan(
             SQLError::Internal(format!("invalid materialized-view name: {error}"))
         })?;
         context.locks.prepare_definition_write()?;
+        context.namespace.ensure_create(&name)?;
         let view = StoredView {
             object_id: context.catalog.allocate_identity().map_err(|error| {
                 SQLError::Internal(format!(
                     "allocate materialized view `{name}` identity: {error}"
                 ))
             })?,
-            role_owner: context.access.current_user_name(),
+            role_owner: owner.name,
             acl: None,
             column_acls: std::collections::BTreeMap::new(),
             query: plan,

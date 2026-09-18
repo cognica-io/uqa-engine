@@ -56,6 +56,7 @@ impl Engine {
             publication: self,
             dependencies: self,
             locks: self,
+            temporary_roles: self,
         }
     }
 }
@@ -102,6 +103,9 @@ struct RoleTableRegistryRead<'a>(
     parking_lot::RwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>,
 );
 impl RoleTableSecurity for TableState {
+    fn persistence(&self) -> uqa_sql::ast::RelationPersistence {
+        self.persistence
+    }
     fn security(&self) -> TableSecurity {
         TableState::security(self)
     }
@@ -136,5 +140,45 @@ impl RoleDependencyCatalog for Engine {
     }
     fn routines(&self) -> RoleDependencyRead<'_, BTreeMap<String, Vec<Arc<SQLUserFunction>>>> {
         Box::new(self.durable.sql_user_functions.read())
+    }
+}
+
+impl uqa_sql::catalog::roles::dependencies::context::TemporaryRoleDependencyCatalog for Engine {
+    fn temporary_namespace_allocated(&self) -> bool {
+        self.session.state.read().temporary_namespace_allocated
+    }
+    fn sequence_persistence(
+        &self,
+    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>> {
+        Box::new(self.durable.sequence_persistence.read())
+    }
+}
+
+impl uqa_execution::catalog::security::roles::temporary::TemporaryRoleDependencyReads for Engine {
+    fn peer_temporary_role_reference(&self, oid: u32) -> Result<bool, SQLError> {
+        self.row_locks.peer_temporary_role_reference(
+            self.session_id,
+            oid,
+            &self.runtime.cancellation,
+        )
+    }
+}
+
+impl Engine {
+    pub(crate) fn prepare_temporary_role_publication(
+        &self,
+    ) -> Result<
+        Option<uqa_execution::row_locks::temporary_roles::TemporaryRolePublication<'_>>,
+        SQLError,
+    > {
+        uqa_execution::catalog::security::roles::temporary::prepare_temporary_roles(
+            uqa_execution::catalog::security::roles::temporary::TemporaryRoleContext {
+                catalog: self,
+                roles: self,
+                manager: &self.row_locks,
+                session: self.session_id,
+                cancellation: &self.runtime.cancellation,
+            },
+        )
     }
 }

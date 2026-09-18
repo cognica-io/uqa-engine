@@ -35,6 +35,7 @@ pub trait TableCreationPublication {
         name: &str,
         persistence: RelationPersistence,
         on_commit: OnCommitAction,
+        owner: &crate::catalog::security::roles::locking::RoleBinding,
     ) -> StorageBackendResult<()>;
     fn create_vector_field(
         &self,
@@ -66,24 +67,26 @@ pub fn run_create_table(
     mut table: CreateTable,
 ) -> Result<SQLResult, SQLError> {
     validate_create_table_columns(&table)?;
+    let owner = context.creation.bind_owner()?;
     let Some(name) = preflight(context, &table.name, table.persistence, table.if_not_exists)?
     else {
         return Ok(SQLResult::empty());
     };
     table.name = name;
-    create_after_preflight(context, table)
+    create_after_preflight(context, table, &owner)
 }
 pub fn run_create_table_if_not_exists(
     context: &CreateTableContext<'_>,
     deferred: DeferredCreateTable,
 ) -> Result<SQLResult, SQLError> {
+    let owner = context.creation.bind_owner()?;
     let Some(name) = preflight(context, &deferred.name, deferred.persistence, true)? else {
         return Ok(SQLResult::empty());
     };
     let mut table = uqa_sql::resolve_deferred_create_table(&deferred)?;
     validate_create_table_columns(&table)?;
     table.name = name;
-    create_after_preflight(context, table)
+    create_after_preflight(context, table, &owner)
 }
 fn preflight(
     context: &CreateTableContext<'_>,
@@ -120,8 +123,13 @@ fn preflight(
 fn create_after_preflight(
     context: &CreateTableContext<'_>,
     mut table: CreateTable,
+    owner: &crate::catalog::security::roles::locking::RoleBinding,
 ) -> Result<SQLResult, SQLError> {
     declaration::prepare_create_table_declaration(&context.analysis, &mut table)?;
+    context.creation.retain_owner(owner)?;
+    if preflight(context, &table.name, table.persistence, table.if_not_exists)?.is_none() {
+        return Ok(SQLResult::empty());
+    }
     implicit::materialize_implicit_sequences(
         &context.sequences,
         "CREATE TABLE",
@@ -141,7 +149,7 @@ fn create_after_preflight(
     }
     context
         .publication
-        .create_table(&table.name, table.persistence, table.on_commit)
+        .create_table(&table.name, table.persistence, table.on_commit, owner)
         .map_err(|error| storage_error("CREATE TABLE", error))?;
     for (field, dimensions) in vector_fields {
         context

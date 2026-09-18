@@ -20,6 +20,7 @@ mod physical_changes;
 mod registry;
 mod relation;
 pub mod shared_objects;
+pub mod temporary_roles;
 mod waits;
 
 pub use change_gate::RowChangePublication;
@@ -83,6 +84,7 @@ pub struct RowLockManager {
     next_acquisition: AtomicU64,
     change_gate: RwLock<()>,
     state: Mutex<LockTable>,
+    temporary_roles: Mutex<HashMap<u64, std::collections::BTreeSet<u32>>>,
     wake: Condvar,
     cross: Option<CrossAttachment>,
 }

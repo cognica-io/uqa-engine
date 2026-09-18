@@ -37,11 +37,12 @@ impl Engine {
     /// schema was created and `false` only for `IF NOT EXISTS`.
     pub fn register_schema(&self, name: &str, if_not_exists: bool) -> StorageBackendResult<bool> {
         self.with_implicit_storage_transaction(|engine| {
-            engine.synchronize_catalog_registries()?;
-            let role_owner = engine.current_user_name();
-            engine
-                .mutation_coordinator()
-                .register_schema(name, if_not_exists, &role_owner)
+            uqa_execution::schema::namespaces::register_api_schema(
+                &engine.schema_creation_context(),
+                name,
+                if_not_exists,
+            )
+            .map_err(|error| uqa_storage::StorageBackendError::backend("CREATE SCHEMA", error))
         })
     }
 

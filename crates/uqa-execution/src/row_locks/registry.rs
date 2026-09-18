@@ -35,6 +35,7 @@ impl RowLockManager {
             next_table: AtomicU64::new(1),
             next_acquisition: AtomicU64::new(1),
             change_gate: RwLock::new(()),
+            temporary_roles: Mutex::new(HashMap::new()),
             state: Mutex::new(LockTable {
                 rows: HashMap::new(),
                 waiting: HashMap::new(),
