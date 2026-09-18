@@ -75,11 +75,13 @@ pub fn install_sql_function_restore_placeholders(
     let Some(json) = catalog.get_metadata(FUNCTIONS_METADATA_KEY)? else {
         return Ok(None);
     };
-    let defs = serde_json::from_str::<BTreeMap<String, Vec<CreateFunction>>>(&json)?;
-    let (canonical_defs, migrated) = canonicalize_persisted_sql_functions(context.schemas, defs)?;
+    let (defs, format_migrated) = super::catalog::encoding::decode(&json)?;
+    let (canonical_defs, identities_migrated) =
+        canonicalize_persisted_sql_functions(context.schemas, defs)?;
+    let migrated = format_migrated || identities_migrated;
     if migrated && !allows_migration {
         return Err(StorageBackendError::Other(
-            "routine catalog requires an initial-open object-identity migration".into(),
+            "routine catalog requires an initial-open object-identity migration or ACL format migration".into(),
         ));
     }
 

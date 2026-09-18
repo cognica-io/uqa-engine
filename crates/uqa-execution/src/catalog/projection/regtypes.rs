@@ -27,7 +27,10 @@ use super::pg_namespace::build_pg_namespace;
 use super::pg_proc::build_pg_proc;
 use super::relation_catalog::build_pg_class;
 
+mod procedures;
 mod type_names;
+use procedures::lookup_regprocedure_oid;
+pub use procedures::resolve_regprocedure_input_oid;
 
 pub use type_names::{resolve_catalog_column_type, resolve_catalog_domain_type_by_oid};
 
@@ -107,15 +110,6 @@ pub fn resolve_regclass_kind_by_oid(
     Ok(None)
 }
 
-fn parse_regprocedure_name(
-    name: &str,
-) -> Result<Option<uqa_sql::ParsedRegprocedureName>, SQLError> {
-    match uqa_sql::parse_regprocedure_name(name) {
-        Ok(parsed) => Ok(parsed),
-        Err(_) => Ok(None),
-    }
-}
-
 fn object_name(names: &[String]) -> Result<(Option<&str>, &str), SQLError> {
     match names {
         [local] => Ok((None, local)),
@@ -193,56 +187,6 @@ fn parsed_regtype_oid(
         .map_err(|error| SQLError::Internal(error.to_string()))?
     {
         if let Some(oid) = type_oid_in_schema(catalog, &schema, local, parsed.array_dimensions) {
-            return Ok(Some(oid));
-        }
-    }
-    Ok(None)
-}
-
-fn lookup_regprocedure_oid(
-    context: &CatalogContext<'_>,
-    name: &str,
-) -> Result<Option<i64>, SQLError> {
-    match numeric_regobject_oid(name) {
-        NumericRegobjectOid::Valid(oid) => return Ok(Some(oid)),
-        NumericRegobjectOid::InvalidSyntax | NumericRegobjectOid::OutOfRange => return Ok(None),
-        NumericRegobjectOid::NotNumeric => {}
-    }
-    let Some(parsed) = parse_regprocedure_name(name)? else {
-        return Ok(None);
-    };
-    let Some(argument_types) = parsed.argument_types.as_ref() else {
-        return Ok(None);
-    };
-    let (schema, local) = object_name(&parsed.names)?;
-    let catalog = regtype_output_catalog(context)?;
-    let argument_oids = argument_types
-        .iter()
-        .map(|type_name| parsed_regtype_oid(context, &catalog, type_name))
-        .collect::<Result<Option<Vec<_>>, _>>()?;
-    let Some(argument_oids) = argument_oids else {
-        return Ok(None);
-    };
-    let find_in_schema = |schema: &str| {
-        let namespace_oid = catalog
-            .namespaces
-            .iter()
-            .find_map(|(oid, name)| (name == schema).then_some(*oid))?;
-        catalog.procs.iter().find_map(|(oid, entry)| {
-            (entry.namespace_oid == namespace_oid
-                && entry.name == *local
-                && entry.argument_types == argument_oids)
-                .then_some(*oid)
-        })
-    };
-    if let Some(schema) = schema {
-        return Ok(find_in_schema(schema));
-    }
-    for schema in context
-        .current_schema_names(true)
-        .map_err(|error| SQLError::Internal(error.to_string()))?
-    {
-        if let Some(oid) = find_in_schema(&schema) {
             return Ok(Some(oid));
         }
     }
@@ -620,6 +564,10 @@ fn regtype_output_catalog(
     context
         .cache
         .get_or_try_init(|| RegtypeOutputCatalog::build(context))
+}
+
+pub fn routine_oid_exists(context: &CatalogContext<'_>, oid: i64) -> Result<bool, SQLError> {
+    Ok(regtype_output_catalog(context)?.procs.contains_key(&oid))
 }
 
 fn namespace_name(catalog: &RegtypeOutputCatalog, oid: i64) -> Option<&str> {

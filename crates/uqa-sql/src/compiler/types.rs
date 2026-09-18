@@ -169,12 +169,14 @@ pub fn parse_regprocedure_name(input: &str) -> Result<Option<ParsedRegprocedureN
         }
     });
     let Some(left_parenthesis) = left_parenthesis else {
-        return Ok(
-            parse_regobject_name(input).map(|names| ParsedRegprocedureName {
-                names,
-                argument_types: None,
-            }),
-        );
+        return parse_regobject_name(input)
+            .map(|names| {
+                Some(ParsedRegprocedureName {
+                    names,
+                    argument_types: None,
+                })
+            })
+            .ok_or_else(|| regprocedure_syntax_error("expected a left parenthesis".into()));
     };
     let Some(names) = parse_regobject_name(&input[..left_parenthesis]) else {
         return Ok(None);
@@ -186,11 +188,23 @@ pub fn parse_regprocedure_name(input: &str) -> Result<Option<ParsedRegprocedureN
         end -= 1;
     }
     if end <= left_parenthesis + 1 || bytes[end - 1] != b')' {
-        return Err(SQLError::Parse(format!(
+        return Err(regprocedure_syntax_error(format!(
             "expected a right parenthesis in routine identity \"{input}\""
         )));
     }
     let arguments = &input[left_parenthesis + 1..end - 1];
+    let argument_types = parse_regprocedure_argument_types(input, arguments)?;
+
+    Ok(Some(ParsedRegprocedureName {
+        names,
+        argument_types: Some(argument_types),
+    }))
+}
+
+fn parse_regprocedure_argument_types(
+    input: &str,
+    arguments: &str,
+) -> Result<Vec<ParsedRegtypeName>> {
     let argument_bytes = arguments.as_bytes();
     let mut argument_types = Vec::new();
     let mut offset = 0usize;
@@ -204,7 +218,7 @@ pub fn parse_regprocedure_name(input: &str) -> Result<Option<ParsedRegprocedureN
         }
         if offset == argument_bytes.len() {
             if had_comma {
-                return Err(SQLError::Parse(format!(
+                return Err(regprocedure_syntax_error(format!(
                     "expected a type name in routine identity \"{input}\""
                 )));
             }
@@ -229,7 +243,7 @@ pub fn parse_regprocedure_name(input: &str) -> Result<Option<ParsedRegprocedureN
             offset += 1;
         }
         if quoted || nesting != 0 {
-            return Err(SQLError::Parse(format!(
+            return Err(regprocedure_syntax_error(format!(
                 "improper type name in routine identity \"{input}\""
             )));
         }
@@ -238,12 +252,15 @@ pub fn parse_regprocedure_name(input: &str) -> Result<Option<ParsedRegprocedureN
             type_end -= 1;
         }
         let Some(type_name) = parse_regtype_name(&arguments[start..type_end])? else {
-            return Ok(None);
+            return Err(SQLError::Parse(format!(
+                "invalid type name in routine identity \"{input}\""
+            )));
         };
         if argument_types.len() == POSTGRES_FUNCTION_MAX_ARGUMENTS {
-            return Err(SQLError::Parse(format!(
-                "too many arguments in routine identity \"{input}\""
-            )));
+            return Err(SQLError::Routine {
+                sqlstate: "54023".into(),
+                message: format!("too many arguments in routine identity \"{input}\""),
+            });
         }
         argument_types.push(type_name);
         had_comma = argument_bytes.get(offset) == Some(&b',');
@@ -252,10 +269,14 @@ pub fn parse_regprocedure_name(input: &str) -> Result<Option<ParsedRegprocedureN
         }
     }
 
-    Ok(Some(ParsedRegprocedureName {
-        names,
-        argument_types: Some(argument_types),
-    }))
+    Ok(argument_types)
+}
+
+fn regprocedure_syntax_error(message: String) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "22P02".into(),
+        message,
+    }
 }
 
 pub(super) fn compile_foreign_key_action(raw: &str) -> Result<crate::ast::ForeignKeyAction> {

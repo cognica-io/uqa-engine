@@ -167,6 +167,7 @@ fn is_catalog_scalar(name: &str) -> bool {
             | "has_database_privilege"
             | "has_schema_privilege"
             | "has_sequence_privilege"
+            | "has_function_privilege"
     )
 }
 
@@ -231,6 +232,12 @@ pub fn catalog_scalar_value(
             .has_column_privilege_value(arguments),
         "has_database_privilege" => context.database.has_database_privilege_value(arguments),
         "has_schema_privilege" => context.schemas.has_schema_privilege_value(arguments),
+        "has_function_privilege" => {
+            crate::catalog::security::routine_inquiry::has_function_privilege_value(
+                &context.catalog,
+                arguments,
+            )
+        }
         "has_sequence_privilege" => context
             .sequence_privileges
             .has_sequence_privilege_value(arguments),

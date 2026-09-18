@@ -56,7 +56,9 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         "has_column_privilege" if matches!(argument_count, 3 | 4) => Some(true),
         "has_database_privilege" if matches!(argument_count, 2 | 3) => Some(true),
         "has_schema_privilege" if matches!(argument_count, 2 | 3) => Some(true),
-        "has_sequence_privilege" if matches!(argument_count, 2 | 3) => Some(true),
+        "has_sequence_privilege" | "has_function_privilege" if matches!(argument_count, 2 | 3) => {
+            Some(true)
+        }
         "pg_get_sequence_data" | "pg_sequence_last_value" | "pg_sequence_parameters"
             if argument_count == 1 =>
         {

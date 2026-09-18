@@ -54,15 +54,13 @@ pub fn ensure_routine_execute_privilege_named(
     display_name: &str,
 ) -> Result<(), SQLError> {
     let current = authority.current_user_name();
-    let allowed = authority.current_user_is_superuser()
-        || authority.current_user_has_role_privileges(&definition.owner)
-        || definition.execute_acl.as_ref().is_none_or(|acl| {
-            acl.iter().any(|entry| {
-                entry.role == "PUBLIC"
-                    || entry.role == current
-                    || authority.current_user_has_role_privileges(&entry.role)
-            })
-        });
+    let allowed = routine_privilege_allowed(
+        &definition.owner,
+        definition.execute_acl.as_deref(),
+        false,
+        authority.current_user_is_superuser(),
+        |role| role == current || authority.current_user_has_role_privileges(role),
+    );
     if allowed {
         Ok(())
     } else {
@@ -74,6 +72,38 @@ pub fn ensure_routine_execute_privilege_named(
                 display_name
             ),
         })
+    }
+}
+
+/// Ownership retains grant options even when the owner's explicit EXECUTE was revoked.
+pub fn routine_privilege_allowed(
+    owner: &str,
+    acl: Option<&[RoutineAclEntry]>,
+    grant_option: bool,
+    superuser: bool,
+    has_role: impl Fn(&str) -> bool,
+) -> bool {
+    if superuser || (grant_option && has_role(owner)) {
+        return true;
+    }
+    acl.map_or(!grant_option, |acl| {
+        acl.iter().any(|entry| {
+            (!grant_option || entry.grant_option)
+                && ((entry.role == "PUBLIC" && !grant_option) || has_role(&entry.role))
+        })
+    })
+}
+
+/// Legacy stored ACLs represented owner EXECUTE implicitly, including empty explicit ACLs.
+pub fn migrate_implicit_routine_owner_acl(definition: &mut CreateFunction) {
+    if let Some(acl) = definition.execute_acl.as_mut() {
+        if !acl.iter().any(|entry| entry.role == definition.owner) {
+            acl.push(RoutineAclEntry {
+                role: definition.owner.clone(),
+                grantor: Some(definition.owner.clone()),
+                grant_option: false,
+            });
+        }
     }
 }
 
@@ -121,11 +151,18 @@ fn routine_acl_grantor<'a>(entry: &'a RoutineAclEntry, owner: &'a str) -> &'a st
 
 fn materialize_routine_acl(definition: &mut CreateFunction) -> &mut Vec<RoutineAclEntry> {
     if definition.execute_acl.is_none() {
-        definition.execute_acl = Some(vec![RoutineAclEntry {
-            role: "PUBLIC".into(),
-            grantor: Some(definition.owner.clone()),
-            grant_option: false,
-        }]);
+        definition.execute_acl = Some(vec![
+            RoutineAclEntry {
+                role: "PUBLIC".into(),
+                grantor: Some(definition.owner.clone()),
+                grant_option: false,
+            },
+            RoutineAclEntry {
+                role: definition.owner.clone(),
+                grantor: Some(definition.owner.clone()),
+                grant_option: false,
+            },
+        ]);
     }
     definition
         .execute_acl
@@ -188,9 +225,6 @@ pub fn grant_routine_acl(
     grantor: &str,
     grant_option: bool,
 ) {
-    if grantee == definition.owner {
-        return;
-    }
     if definition.execute_acl.is_none()
         && grantee == "PUBLIC"
         && grantor == definition.owner
@@ -221,9 +255,6 @@ pub fn revoke_routine_acl(
     grant_option_only: bool,
     cascade: bool,
 ) -> Result<bool, SQLError> {
-    if grantee == definition.owner {
-        return Ok(false);
-    }
     let owner = definition.owner.clone();
     let before_grant_options = routine_grant_option_roles(definition);
     let acl = materialize_routine_acl(definition);

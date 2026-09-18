@@ -119,7 +119,7 @@ fn restored_triggers_use_bound_routine_names_without_creation_privileges() {
 #[test]
 fn routine_execute_denial_precedes_trigger_return_type_validation() {
     let mut catalog = Catalog {
-        allow_owner: false,
+        allow_owner: true,
         ..Catalog::default()
     };
     let function = std::sync::Arc::make_mut(&mut catalog.routines[0]);
@@ -145,7 +145,6 @@ fn routine_execute_denial_precedes_trigger_return_type_validation() {
             "routine-visible:handler",
             "current-user",
             "superuser",
-            "inherits:owner"
         ]
     );
     assert_eq!(definition.function, "handler");

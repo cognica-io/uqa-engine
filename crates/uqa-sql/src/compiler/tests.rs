@@ -8,6 +8,27 @@ use super::*;
 use crate::ast::{ColumnType, FromClause, JoinKind, OrderBy, Projection, TableKeyConstraintKind};
 
 #[test]
+fn regprocedure_input_errors_preserve_signature_and_argument_type_sqlstates() {
+    for (signature, state) in [
+        ("", "22P02"),
+        ("abs(", "22P02"),
+        ("abs(integer,)", "22P02"),
+        ("abs(999)", "42601"),
+    ] {
+        assert_eq!(
+            parse_regprocedure_name(signature).unwrap_err().sqlstate(),
+            Some(state),
+            "{signature}"
+        );
+    }
+    let signature = format!("abs({})", vec!["integer"; 101].join(","));
+    assert_eq!(
+        parse_regprocedure_name(&signature).unwrap_err().sqlstate(),
+        Some("54023")
+    );
+}
+
+#[test]
 fn bundled_parser_is_postgresql_18_4() {
     let parsed = pg_query::parse("SELECT 1").expect("parser accepts a scalar query");
     assert_eq!(parsed.protobuf.version, 180_004);

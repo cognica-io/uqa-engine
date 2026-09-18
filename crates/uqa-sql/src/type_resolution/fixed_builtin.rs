@@ -334,6 +334,7 @@ fn builtin_binding_is_non_immutable(binding: &FunctionBinding) -> bool {
                 | "has_database_privilege"
                 | "has_schema_privilege"
                 | "has_sequence_privilege"
+                | "has_function_privilege"
                 | "to_regproc"
                 | "to_regprocedure"
                 | "to_regclass"
@@ -797,7 +798,8 @@ fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
         "has_table_privilege"
         | "has_database_privilege"
         | "has_schema_privilege"
-        | "has_sequence_privilege" => vec![
+        | "has_sequence_privilege"
+        | "has_function_privilege" => vec![
             overload(
                 &local,
                 &[ColumnType::Name, ColumnType::Text, ColumnType::Text],
@@ -900,6 +902,7 @@ fn local_name(name: &str) -> Option<String> {
             | "has_database_privilege"
             | "has_schema_privilege"
             | "has_sequence_privilege"
+            | "has_function_privilege"
     )
     .then(|| local.to_string())
 }

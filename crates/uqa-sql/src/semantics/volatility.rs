@@ -161,6 +161,7 @@ pub fn function_volatility_with_binding(
                 | "has_database_privilege"
                 | "has_schema_privilege"
                 | "has_sequence_privilege"
+                | "has_function_privilege"
         )
         || (lower == "age" && argument_count == 1)
     {

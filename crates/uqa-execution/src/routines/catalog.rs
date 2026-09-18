@@ -6,6 +6,8 @@
 
 //! Routine registry snapshots, retained write guards, and durable publication.
 
+pub(crate) mod encoding;
+
 use std::ops::DerefMut;
 use uqa_sql::{routines::lifecycle::RoutineRegistry, SQLError};
 
@@ -52,7 +54,7 @@ pub fn persist_sql_functions_snapshot(
             )
         })
         .collect();
-    let json = serde_json::to_string(&defs)
+    let json = encoding::encode(defs)
         .map_err(|err| SQLError::Internal(format!("serialize function catalog: {err}")))?;
     catalog
         .set_metadata(FUNCTIONS_METADATA_KEY, &json)

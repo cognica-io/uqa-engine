@@ -176,7 +176,7 @@ pub struct CreateFunction {
     /// Creation-time configuration actions awaiting engine/session resolution. Registration consumes this list before persistence.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub config_actions: Vec<RoutineConfigAction>,
-    /// Explicit execution privileges. `None` means the `PostgreSQL` default (`PUBLIC=EXECUTE`).
+    /// Explicit execution privileges, including the owner's revocable EXECUTE. `None` means the `PostgreSQL` default (PUBLIC and owner EXECUTE); ownership always retains implicit grant options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execute_acl: Option<Vec<RoutineAclEntry>>,
 }
