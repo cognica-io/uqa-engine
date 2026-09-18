@@ -7,7 +7,7 @@
 //! Built-in relation identity, bootstrap security and ordered view references.
 
 use super::{
-    security::{TableAclEntry, TablePrivileges, TableSecurity},
+    security::{table_binding::BoundTableAclEntry, BoundTableSecurity, TablePrivileges},
     VirtualRelation,
 };
 mod columns;
@@ -68,7 +68,6 @@ macro_rules! system_relations {
 }
 
 system_relations! {
-    PgAuthid => ("pg_catalog", "pg_authid", 1260, "table"),
     PgDbRoleSetting => ("pg_catalog", "pg_db_role_setting", 2964, "table"),
     PgShadow => ("pg_catalog", "pg_shadow", 12005, "view"),
     PgTablespace => ("pg_catalog", "pg_tablespace", 1213, "table"),
@@ -97,23 +96,24 @@ impl SystemRelation {
         identity
     }
 
-    pub fn bootstrap_security(self) -> TableSecurity {
-        let mut security = TableSecurity::owner(super::oids::current_user_name());
-        let mut acl = vec![TableAclEntry {
-            role: security.role_owner.clone(),
-            grantor: Some(security.role_owner.clone()),
+    pub fn bootstrap_security(self) -> BoundTableSecurity {
+        let mut security = BoundTableSecurity::owner(super::roles::RoleIdentity::BOOTSTRAP);
+        let mut acl = vec![BoundTableAclEntry {
+            role: Some(security.role_owner),
+            grantor: security.role_owner,
             privileges: TablePrivileges::ALL,
             grant_options: TablePrivileges::default(),
         }];
         if !matches!(
             self,
-            Self::PgAuthid
-                | Self::PgShadow
-                | Self::Projected(VirtualRelation::AgGraph | VirtualRelation::AgLabel)
+            Self::PgShadow
+                | Self::Projected(
+                    VirtualRelation::PgAuthid | VirtualRelation::AgGraph | VirtualRelation::AgLabel
+                )
         ) {
-            acl.push(TableAclEntry {
-                role: "PUBLIC".into(),
-                grantor: Some(security.role_owner.clone()),
+            acl.push(BoundTableAclEntry {
+                role: None,
+                grantor: security.role_owner,
                 privileges: TablePrivileges {
                     select: true,
                     update: self == Self::Projected(VirtualRelation::PgSettings),
@@ -134,7 +134,9 @@ impl SystemRelation {
             PgNamespace, PgProc, PgRewrite, PgTrigger, PgType,
         };
         match self {
-            P(VirtualRelation::InformationSchemata) => &[P(PgNamespace), Self::PgAuthid],
+            P(VirtualRelation::InformationSchemata) => {
+                &[P(PgNamespace), Self::Projected(VirtualRelation::PgAuthid)]
+            }
             P(VirtualRelation::InformationTables) => {
                 &[P(PgNamespace), P(PgClass), P(PgType), P(PgNamespace)]
             }
@@ -154,13 +156,13 @@ impl SystemRelation {
             ],
             P(InformationColumnPrivileges) => &[
                 P(PgNamespace),
-                Self::PgAuthid,
+                Self::Projected(VirtualRelation::PgAuthid),
                 P(PgAttribute),
                 P(PgClass),
                 P(PgClass),
                 P(PgAttribute),
                 P(PgClass),
-                Self::PgAuthid,
+                Self::Projected(VirtualRelation::PgAuthid),
             ],
             P(VirtualRelation::InformationRoleColumnGrants) => &[
                 P(InformationColumnPrivileges),
@@ -210,12 +212,13 @@ impl SystemRelation {
                 P(PgNamespace),
                 Self::PgTablespace,
             ],
-            P(VirtualRelation::PgRoles) | Self::PgShadow => {
-                &[Self::PgAuthid, Self::PgDbRoleSetting]
-            }
+            P(VirtualRelation::PgRoles) | Self::PgShadow => &[
+                Self::Projected(VirtualRelation::PgAuthid),
+                Self::PgDbRoleSetting,
+            ],
             P(VirtualRelation::PgUser) => &[Self::PgShadow],
             P(VirtualRelation::PgSequences) => &[Self::PgSequence, P(PgClass), P(PgNamespace)],
-            Self::InformationEnabledRoles => &[Self::PgAuthid],
+            Self::InformationEnabledRoles => &[Self::Projected(VirtualRelation::PgAuthid)],
             _ => &[],
         }
     }

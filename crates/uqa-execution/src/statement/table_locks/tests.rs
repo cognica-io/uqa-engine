@@ -20,7 +20,8 @@ struct Fixture {
     rename_after_acquire: RefCell<Option<(&'static str, &'static str)>>,
     fail: Option<&'static str>,
     acquired: RefCell<Vec<String>>,
-    roles: BTreeMap<String, RoleDefinition>,
+    roles: RefCell<BTreeMap<String, RoleDefinition>>,
+    rename_bootstrap_on: Option<&'static str>,
     memberships: BTreeMap<RoleMembershipKey, RoleMembership>,
     manager: crate::row_locks::RowLockManager,
     cancel: uqa_core::CancellationToken,
@@ -40,7 +41,11 @@ impl Fixture {
             rename_after_acquire: RefCell::new(None),
             fail: None,
             acquired: RefCell::new(Vec::new()),
-            roles: BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]),
+            roles: RefCell::new(BTreeMap::from([(
+                "uqa".into(),
+                RoleDefinition::bootstrap(),
+            )])),
+            rename_bootstrap_on: None,
             memberships: BTreeMap::new(),
             manager: crate::row_locks::RowLockManager::new(),
             cancel: uqa_core::CancellationToken::new(),
@@ -66,7 +71,7 @@ impl Fixture {
 
 impl RoleCatalogGuards for Fixture {
     fn role_definitions(&self) -> RoleDefinitionRead<'_> {
-        Box::new(&self.roles)
+        Box::new(self.roles.borrow())
     }
     fn role_memberships(&self) -> RoleMembershipRead<'_> {
         Box::new(&self.memberships)
@@ -90,10 +95,14 @@ impl TableLockCatalog for Fixture {
             },
         )
     }
-    fn table(&self, name: &str) -> Result<Option<TableLockMetadata>, SQLError> {
+    fn table(
+        &self,
+        name: &str,
+        _: &BTreeMap<String, RoleDefinition>,
+    ) -> Result<Option<TableLockMetadata>, SQLError> {
         Ok(self.tables.borrow().get(name).map(|id| TableLockMetadata {
             object_id: *id,
-            security: TableSecurity::owner("uqa"),
+            security: BoundTableSecurity::owner(uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP),
         }))
     }
     fn view(&self, _: &str) -> Result<Option<StoredView>, SQLError> {
@@ -129,6 +138,18 @@ impl RelationLockSession for Fixture {
         nowait: bool,
     ) -> Result<Option<ScopedRelationLock<'_>>, SQLError> {
         self.acquired.borrow_mut().push(name.into());
+        if self.rename_bootstrap_on == Some(name) {
+            let mut roles = self.roles.borrow_mut();
+            if let Some(mut original) = roles.remove("uqa") {
+                original.name = "renamed_uqa".into();
+                roles.insert(original.name.clone(), original);
+                let mut replacement = RoleDefinition::bootstrap();
+                replacement.oid = 30_001;
+                replacement.object_id = [42; 16];
+                replacement.attributes.clear();
+                roles.insert("uqa".into(), replacement);
+            }
+        }
         let rename = *self.rename_after_acquire.borrow();
         if let Some((from, to)) = rename.filter(|(from, _)| *from == name) {
             self.rename_after_acquire.borrow_mut().take();
@@ -283,7 +304,7 @@ fn system_views_recurse_with_their_owner_and_preserve_reference_order() {
     reader.oid = 20_001;
     reader.object_id = [1; 16];
     reader.attributes.clear();
-    fixture.roles.insert("reader".into(), reader);
+    fixture.roles.borrow_mut().insert("reader".into(), reader);
     fixture.user = "reader".into();
     fixture
         .execute("LOCK pg_catalog.pg_user IN ACCESS SHARE MODE")
@@ -375,4 +396,38 @@ fn system_view_source_nowait_conflict_keeps_earlier_locks_until_transaction_end(
             &fixture.cancel
         )
         .unwrap());
+}
+
+#[test]
+fn system_view_owner_identity_survives_rename_and_name_reuse_during_source_wait() {
+    let mut fixture = Fixture::new();
+    let mut reader = RoleDefinition::bootstrap();
+    reader.name = "reader".into();
+    reader.oid = 20_001;
+    reader.object_id = [1; 16];
+    reader.attributes.clear();
+    fixture
+        .roles
+        .borrow_mut()
+        .insert(reader.name.clone(), reader);
+    fixture.user = "reader".into();
+    fixture.rename_bootstrap_on = Some("pg_catalog.pg_shadow");
+    fixture
+        .execute("LOCK pg_catalog.pg_user IN ACCESS SHARE MODE")
+        .unwrap();
+    let roles = fixture.roles.borrow();
+    assert_eq!(
+        roles["renamed_uqa"].identity(),
+        uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP
+    );
+    assert_ne!(roles["uqa"].identity(), roles["renamed_uqa"].identity());
+    assert_eq!(
+        *fixture.acquired.borrow(),
+        [
+            "pg_catalog.pg_user",
+            "pg_catalog.pg_shadow",
+            "pg_catalog.pg_authid",
+            "pg_catalog.pg_db_role_setting"
+        ]
+    );
 }

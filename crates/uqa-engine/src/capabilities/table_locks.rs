@@ -42,18 +42,28 @@ impl TableLockCatalog for Engine {
         }
     }
 
-    fn table(&self, name: &str) -> Result<Option<TableLockMetadata>, SQLError> {
+    fn table(
+        &self,
+        name: &str,
+        roles: &std::collections::BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+    ) -> Result<Option<TableLockMetadata>, SQLError> {
         let relation =
             uqa_core::RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
-        Ok(self
-            .storage
+        self.storage
             .tables
             .read()
             .get(&relation)
-            .map(|table| TableLockMetadata {
-                object_id: table.object_id(),
-                security: table.security(),
-            }))
+            .map(|table| {
+                Ok(TableLockMetadata {
+                    object_id: table.object_id(),
+                    security: uqa_sql::catalog::security::BoundTableSecurity::bind(
+                        &table.security(),
+                        roles,
+                    )
+                    .map_err(SQLError::Internal)?,
+                })
+            })
+            .transpose()
     }
 
     fn view(&self, name: &str) -> Result<Option<StoredView>, SQLError> {

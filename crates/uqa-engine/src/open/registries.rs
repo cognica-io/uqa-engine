@@ -26,6 +26,7 @@ impl Engine {
             uqa_execution::catalog::security::system_relations::restore(
                 catalog,
                 &self.durable.roles.read(),
+                mode.allows_migration(),
             )?;
         self.restore_database_security_from_metadata(catalog, mode.allows_migration())?;
         // Install definition-only routine placeholders before any stored expression is rebound. Final compilation waits until every row-producing relation registry is present, which also permits views and routines to bind each other without recursive catalog synchronization.

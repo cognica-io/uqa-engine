@@ -15,7 +15,7 @@ use uqa_sql::{
             ForeignTablePrivilegeUpdate, ResolvedTableGrantTarget, TableGrantApplication,
             ViewPrivilegeUpdate,
         },
-        TableSecurity,
+        BoundTableSecurity, TableSecurity,
     },
     SQLError,
 };
@@ -38,7 +38,11 @@ pub(super) fn system_privilege_updates(
             &relation.column_names(),
             application.requested,
         )?;
-        let current = context.system.system_relation_security(relation);
+        let current = context
+            .system
+            .system_relation_security(relation)
+            .resolve(application.roles)
+            .map_err(SQLError::Internal)?;
         let (next, grantable) = application.apply(&current)?;
         uqa_sql::catalog::security::dependencies::added_table_acl_roles(
             &current,
@@ -52,9 +56,11 @@ pub(super) fn system_privilege_updates(
         )
         .map_err(SQLError::Internal)?;
         application.record_warning(grantable, &target.relation, notices);
+        let bound =
+            BoundTableSecurity::bind(&next, application.roles).map_err(SQLError::Internal)?;
         if !application.requested.table.is_empty() {
             updates.push(
-                SystemPrivilegeUpdate::new(relation, None, next.acl.clone().unwrap_or_default())
+                SystemPrivilegeUpdate::new(relation, None, bound.acl.clone().unwrap_or_default())
                     .map_err(|error| SQLError::Internal(error.to_string()))?,
             );
         }
@@ -76,7 +82,7 @@ pub(super) fn system_privilege_updates(
                 .cloned(),
         );
         for column in columns {
-            let acl = next.column_acls.get(&column).cloned().unwrap_or_default();
+            let acl = bound.column_acls.get(&column).cloned().unwrap_or_default();
             updates.push(
                 SystemPrivilegeUpdate::new(relation, Some(column), acl)
                     .map_err(|error| SQLError::Internal(error.to_string()))?,

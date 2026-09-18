@@ -18,20 +18,6 @@ impl SystemRelation {
                     .map(|(name, _)| name)
                     .collect()
             }
-            Self::PgAuthid => &[
-                "oid",
-                "rolname",
-                "rolsuper",
-                "rolinherit",
-                "rolcreaterole",
-                "rolcreatedb",
-                "rolcanlogin",
-                "rolreplication",
-                "rolbypassrls",
-                "rolconnlimit",
-                "rolpassword",
-                "rolvaliduntil",
-            ],
             Self::PgDbRoleSetting => &["setdatabase", "setrole", "setconfig"],
             Self::PgShadow => &[
                 "usename",

@@ -20,7 +20,7 @@ use uqa_core::RelationIdentity;
 use uqa_sql::{
     catalog::{
         resolution::RelationResolution,
-        roles::{guards::RoleCatalogGuards, RoleReferenceNames},
+        roles::{guards::RoleCatalogGuards, RoleDefinition, RoleReferenceNames},
         security::{
             sequence_inquiry::SequencePrivilegeInquiry,
             table_inquiry::{
@@ -88,11 +88,14 @@ impl TablePrivilegeCatalog for TablePrivilegeContext<'_> {
     fn table_privilege_security(
         &self,
         target: &ResolvedTablePrivilegeTarget,
+        roles: &BTreeMap<String, RoleDefinition>,
     ) -> Result<TableSecurity, SQLError> {
         match target {
-            ResolvedTablePrivilegeTarget::System(relation) => {
-                Ok(self.registry.system_relation_security(*relation))
-            }
+            ResolvedTablePrivilegeTarget::System(relation) => self
+                .registry
+                .system_relation_security(*relation)
+                .resolve(roles)
+                .map_err(SQLError::Internal),
             ResolvedTablePrivilegeTarget::Table(relation) => self
                 .registry
                 .tables()
@@ -120,11 +123,16 @@ impl TablePrivilegeCatalog for TablePrivilegeContext<'_> {
     fn column_privilege_relation(
         &self,
         target: &ResolvedTablePrivilegeTarget,
+        roles: &BTreeMap<String, RoleDefinition>,
     ) -> Result<ColumnPrivilegeRelation, SQLError> {
         match target {
             ResolvedTablePrivilegeTarget::System(relation) => Ok(ColumnPrivilegeRelation {
                 relation: RelationIdentity::new(relation.namespace(), relation.name()),
-                security: self.registry.system_relation_security(*relation),
+                security: self
+                    .registry
+                    .system_relation_security(*relation)
+                    .resolve(roles)
+                    .map_err(SQLError::Internal)?,
                 columns: relation.column_names(),
                 has_system_columns: relation.kind() == "table",
             }),
@@ -171,7 +179,7 @@ impl TablePrivilegeCatalog for TablePrivilegeContext<'_> {
                     .ok_or_else(|| disappeared("foreign table", relation))?;
                 Ok(ColumnPrivilegeRelation {
                     relation: relation.clone(),
-                    security: self.table_privilege_security(target)?,
+                    security: self.table_privilege_security(target, roles)?,
                     columns: table
                         .columns
                         .iter()

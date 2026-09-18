@@ -17,7 +17,6 @@ use crate::catalog::{
 #[test]
 fn system_acl_masks_relation_writes_but_preserves_attribute_grants_and_grant_options() {
     let relation = SystemRelation::Projected(VirtualRelation::PgClass);
-    let mut security = relation.bootstrap_security();
     let mut reader = RoleDefinition::bootstrap();
     reader.name = "reader".into();
     reader.oid = 20_001;
@@ -27,6 +26,7 @@ fn system_acl_masks_relation_writes_but_preserves_attribute_grants_and_grant_opt
         ("uqa".into(), RoleDefinition::bootstrap()),
         ("reader".into(), reader),
     ]);
+    let mut security = relation.bootstrap_security().resolve(&roles).unwrap();
     let memberships = BTreeMap::new();
     for privilege in TableAclPrivilege::ALL {
         grant_acl(&mut security, privilege, &["reader".into()], "uqa", true);
@@ -99,7 +99,7 @@ fn system_acl_masks_relation_writes_but_preserves_attribute_grants_and_grant_opt
     let settings = SystemRelation::Projected(VirtualRelation::PgSettings);
     assert!(has_table_privilege(
         settings,
-        &settings.bootstrap_security(),
+        &settings.bootstrap_security().resolve(&roles).unwrap(),
         "reader",
         check,
         &roles,
@@ -109,9 +109,9 @@ fn system_acl_masks_relation_writes_but_preserves_attribute_grants_and_grant_opt
 
 #[test]
 fn system_acl_validation_rejects_orphan_roles_wrong_owners_and_missing_columns() {
-    let relation = SystemRelation::PgAuthid;
+    let relation = SystemRelation::Projected(crate::catalog::VirtualRelation::PgAuthid);
     let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
-    let baseline = relation.bootstrap_security();
+    let baseline = relation.bootstrap_security().resolve(&roles).unwrap();
     validate_security(relation, &baseline, &roles).unwrap();
     let mut invalid = baseline.clone();
     invalid.role_owner = "missing".into();
@@ -135,4 +135,43 @@ fn system_acl_validation_rejects_orphan_roles_wrong_owners_and_missing_columns()
         false,
     );
     assert!(validate_security(relation, &invalid, &roles).is_err());
+}
+
+#[test]
+fn system_defaults_follow_bootstrap_identity_after_rename_and_name_reuse() {
+    let mut bootstrap = RoleDefinition::bootstrap();
+    bootstrap.name = "renamed_bootstrap".into();
+    let mut replacement = RoleDefinition::bootstrap();
+    replacement.oid = 20_001;
+    replacement.object_id = [1; 16];
+    replacement.attributes.clear();
+    let roles = BTreeMap::from([
+        (bootstrap.name.clone(), bootstrap),
+        (replacement.name.clone(), replacement),
+    ]);
+    let relation = SystemRelation::Projected(crate::catalog::VirtualRelation::PgAuthid);
+    let bound = relation.bootstrap_security();
+    let named = bound.resolve(&roles).unwrap();
+    assert_eq!(named.role_owner, "renamed_bootstrap");
+    validate_security(relation, &named, &roles).unwrap();
+    let check = TablePrivilegeCheck {
+        privilege: TableAclPrivilege::Select,
+        grant_option: false,
+    };
+    assert!(has_table_privilege(
+        relation,
+        &named,
+        "renamed_bootstrap",
+        check,
+        &roles,
+        &BTreeMap::new()
+    ));
+    assert!(!has_table_privilege(
+        relation,
+        &named,
+        "uqa",
+        check,
+        &roles,
+        &BTreeMap::new()
+    ));
 }

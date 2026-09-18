@@ -13,7 +13,7 @@ use crate::{
         roles::guards::RoleCatalogGuards,
         security::{
             table::{role_has_table_privilege, TableAclPrivilege},
-            TableSecurity,
+            BoundTableSecurity,
         },
     },
     plan::QueryPlan,
@@ -22,7 +22,7 @@ use crate::{
 
 pub fn ensure_lock_privilege(
     roles: &dyn RoleCatalogGuards,
-    security: &TableSecurity,
+    security: &BoundTableSecurity,
     subject: &RoleReference,
     mode: TableLockMode,
     name: &str,
@@ -30,13 +30,14 @@ pub fn ensure_lock_privilege(
 ) -> Result<(), SQLError> {
     let definitions = roles.role_definitions();
     let memberships = roles.role_memberships();
+    let security = security.resolve(&definitions).map_err(SQLError::Internal)?;
     let system = crate::catalog::SystemRelation::from_qualified_name(name);
     if TableAclPrivilege::ALL.into_iter().any(|privilege| {
         lock_privilege_permits(privilege, mode)
             && system.map_or_else(
                 || {
                     role_has_table_privilege(
-                        security,
+                        &security,
                         subject,
                         privilege,
                         &definitions,
@@ -46,7 +47,7 @@ pub fn ensure_lock_privilege(
                 |relation| {
                     crate::catalog::security::system_relations::has_table_privilege(
                         relation,
-                        security,
+                        &security,
                         subject,
                         crate::catalog::security::table::TablePrivilegeCheck {
                             privilege,

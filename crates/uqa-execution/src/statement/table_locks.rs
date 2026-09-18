@@ -16,8 +16,8 @@ use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::{LockTableStmt, LockTableTarget, TableLockMode},
     catalog::{
-        resolution::RelationResolution, roles::guards::RoleCatalogGuards, security::TableSecurity,
-        stored_view::StoredView, SystemRelation,
+        resolution::RelationResolution, roles::guards::RoleCatalogGuards,
+        security::BoundTableSecurity, stored_view::StoredView, SystemRelation,
     },
     semantics::table_locks::{ensure_lock_privilege, view_lock_targets},
     SQLError, SQLResult,
@@ -25,14 +25,18 @@ use uqa_sql::{
 
 pub struct TableLockMetadata {
     pub object_id: [u8; 16],
-    pub security: TableSecurity,
+    pub security: BoundTableSecurity,
 }
 
 pub trait TableLockCatalog:
     RelationLockCatalog + uqa_sql::catalog::security::system_relations::SystemRelationSecurityCatalog
 {
     fn resolve(&self, name: &str, bound: bool) -> Result<RelationResolution, SQLError>;
-    fn table(&self, name: &str) -> Result<Option<TableLockMetadata>, SQLError>;
+    fn table(
+        &self,
+        name: &str,
+        roles: &std::collections::BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+    ) -> Result<Option<TableLockMetadata>, SQLError>;
     fn view(&self, name: &str) -> Result<Option<StoredView>, SQLError>;
     fn descendants(&self, name: &str) -> Result<Vec<String>, SQLError>;
 }
@@ -93,22 +97,32 @@ impl TableLockContext<'_> {
         match kind {
             "table" => self
                 .catalog
-                .table(&canonical)?
+                .table(&canonical, &self.roles.role_definitions())?
                 .map(|metadata| BoundRelation {
                     name: canonical,
                     kind,
                     metadata,
                     source: RelationSource::Table,
                 }),
-            "view" => self.catalog.view(&canonical)?.map(|view| BoundRelation {
-                name: canonical,
-                kind,
-                metadata: TableLockMetadata {
-                    object_id: view.object_id,
-                    security: view.security(),
-                },
-                source: RelationSource::View(Box::new(view)),
-            }),
+            "view" => self
+                .catalog
+                .view(&canonical)?
+                .map(|view| {
+                    Ok::<_, SQLError>(BoundRelation {
+                        name: canonical,
+                        kind,
+                        metadata: TableLockMetadata {
+                            object_id: view.object_id,
+                            security: BoundTableSecurity::bind(
+                                &view.security(),
+                                &self.roles.role_definitions(),
+                            )
+                            .map_err(SQLError::Internal)?,
+                        },
+                        source: RelationSource::View(Box::new(view)),
+                    })
+                })
+                .transpose()?,
             _ if view_source => return Ok(None),
             _ => {
                 let (_, local) = uqa_core::RelationIdentity::parse_reference(&canonical)
@@ -195,7 +209,10 @@ impl TableLockContext<'_> {
                 if view.security_invoker() {
                     self.session.current_role()
                 } else {
-                    view.role_owner.clone().into()
+                    relation
+                        .metadata
+                        .security
+                        .owner_reference(&self.roles.role_definitions())?
                 },
             ),
             RelationSource::System(system) => (
@@ -207,7 +224,10 @@ impl TableLockContext<'_> {
                         include_descendants: false,
                     })
                     .collect(),
-                relation.metadata.security.role_owner.into(),
+                relation
+                    .metadata
+                    .security
+                    .owner_reference(&self.roles.role_definitions())?,
             ),
         };
         ancestors.push(relation.metadata.object_id);

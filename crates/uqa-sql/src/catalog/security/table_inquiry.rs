@@ -32,10 +32,12 @@ pub trait TablePrivilegeCatalog {
     fn table_privilege_security(
         &self,
         target: &ResolvedTablePrivilegeTarget,
+        roles: &BTreeMap<String, RoleDefinition>,
     ) -> Result<TableSecurity, SQLError>;
     fn column_privilege_relation(
         &self,
         target: &ResolvedTablePrivilegeTarget,
+        roles: &BTreeMap<String, RoleDefinition>,
     ) -> Result<ColumnPrivilegeRelation, SQLError>;
 }
 pub struct TablePrivilegeInquiry<'a> {
@@ -197,8 +199,8 @@ impl TablePrivilegeInquiry<'_> {
             }
             return Ok(Value::Bool(false));
         }
-        let security = self.catalog.table_privilege_security(&target)?;
         let roles = self.roles.role_definitions();
+        let security = self.catalog.table_privilege_security(&target, &roles)?;
         let memberships = self.roles.role_memberships();
         Ok(Value::Bool(checks.into_iter().any(|check| {
             if let ResolvedTablePrivilegeTarget::System(relation) = target {
@@ -243,7 +245,8 @@ impl TablePrivilegeInquiry<'_> {
                 privilege_value,
             );
         }
-        let metadata = self.catalog.column_privilege_relation(&target)?;
+        let roles = self.roles.role_definitions();
+        let metadata = self.catalog.column_privilege_relation(&target, &roles)?;
         let Some(column) = resolve_column_privilege_target(
             &metadata.relation,
             &metadata.columns,
@@ -265,7 +268,6 @@ impl TablePrivilegeInquiry<'_> {
         let Some(subject) = subject else {
             return Ok(Value::Bool(false));
         };
-        let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
         Ok(Value::Bool(checks.into_iter().any(|check| {
             if let ResolvedTablePrivilegeTarget::System(relation) = target {

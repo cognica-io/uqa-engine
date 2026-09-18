@@ -92,7 +92,10 @@ impl PrivilegeCatalog for CatalogReadView {
                     system_relations::{self, SystemRelationSecurityCatalog},
                     table::TablePrivilegeCheck,
                 };
-                let security = self.system_relation_security(system);
+                let security = self
+                    .system_relation_security(system)
+                    .resolve(&self.snapshot.definitions.roles)
+                    .map_err(SQLError::Internal)?;
                 let check = TablePrivilegeCheck {
                     privilege,
                     grant_option: false,

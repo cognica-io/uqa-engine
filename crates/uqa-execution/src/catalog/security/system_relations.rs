@@ -21,6 +21,8 @@ use uqa_sql::catalog::{
 };
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
+mod persistence;
+
 pub trait SystemRelationSecurityState: SystemRelationSecurityCatalog {
     fn system_relation_securities_write(
         &self,
@@ -30,8 +32,10 @@ pub trait SystemRelationSecurityState: SystemRelationSecurityCatalog {
 pub fn restore(
     catalog: &dyn CatalogFacade,
     roles: &BTreeMap<String, RoleDefinition>,
+    allow_migration: bool,
 ) -> StorageBackendResult<SystemRelationSecurities> {
     let mut result = SystemRelationSecurities::new();
+    let mut migrations = Vec::new();
     for (key, json) in catalog.metadata_with_prefix(METADATA_PREFIX)? {
         let (name, column) = key
             .strip_prefix(METADATA_PREFIX)
@@ -39,11 +43,14 @@ pub fn restore(
             .ok_or_else(|| StorageBackendError::Other("invalid system ACL metadata key".into()))?;
         let relation = SystemRelation::from_qualified_name(name)
             .ok_or_else(|| StorageBackendError::Other("unknown system ACL relation".into()))?;
-        let entry: SystemAcl = serde_json::from_str(&json)?;
+        let (entry, migrated) = persistence::decode(&json, roles, allow_migration)?;
         if entry.revision == [0; 16] {
             return Err(StorageBackendError::Other(
                 "invalid system ACL tuple identity".into(),
             ));
+        }
+        if migrated {
+            migrations.push((key.clone(), persistence::encode(&entry)?));
         }
         let security = result
             .entry(RelationIdentity::new(relation.namespace(), relation.name()))
@@ -61,8 +68,14 @@ pub fn restore(
     for (identity, entry) in &result {
         let relation = SystemRelation::at(&identity.schema, &identity.name)
             .expect("validated system identity");
-        validate_security(relation, &entry.security(relation), roles)
+        let security = entry
+            .security(relation)
+            .resolve(roles)
             .map_err(StorageBackendError::Other)?;
+        validate_security(relation, &security, roles).map_err(StorageBackendError::Other)?;
+    }
+    for (key, value) in migrations {
+        catalog.set_metadata(&key, &value)?;
     }
     Ok(result)
 }
@@ -76,7 +89,7 @@ impl SystemPrivilegeUpdate {
     pub fn new(
         relation: SystemRelation,
         column: Option<String>,
-        acl: Vec<uqa_sql::catalog::security::TableAclEntry>,
+        acl: Vec<uqa_sql::catalog::security::table_binding::BoundTableAclEntry>,
     ) -> StorageBackendResult<Self> {
         let revision = crate::catalog::identity::new_nonzero_catalog_identity(
             &relation.qualified_name(),
@@ -92,7 +105,7 @@ impl SystemPrivilegeUpdate {
         if let Some(catalog) = catalog {
             catalog.set_metadata(
                 &metadata_key(self.relation, self.column.as_deref()),
-                &serde_json::to_string(&self.entry)?,
+                &persistence::encode(&self.entry)?,
             )?;
         }
         Ok(())

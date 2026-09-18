@@ -40,6 +40,7 @@ impl VirtualRelation {
                 | Self::PgRange
                 | Self::PgProc
                 | Self::PgDatabase
+                | Self::PgAuthid
                 | Self::PgAuthMembers
                 | Self::PgDescription
                 | Self::AgGraph
@@ -490,6 +491,20 @@ impl VirtualRelation {
                 "daticurules" => ColumnType::Text,
                 "datcollversion" => ColumnType::Text,
                 "datacl" => array(ColumnType::AclItem),
+            ],
+            Self::PgAuthid => columns![
+                "oid" => ColumnType::Oid,
+                "rolname" => ColumnType::Name,
+                "rolsuper" => ColumnType::Boolean,
+                "rolinherit" => ColumnType::Boolean,
+                "rolcreaterole" => ColumnType::Boolean,
+                "rolcreatedb" => ColumnType::Boolean,
+                "rolcanlogin" => ColumnType::Boolean,
+                "rolreplication" => ColumnType::Boolean,
+                "rolbypassrls" => ColumnType::Boolean,
+                "rolconnlimit" => ColumnType::Integer,
+                "rolpassword" => ColumnType::Text,
+                "rolvaliduntil" => ColumnType::TimestampTz,
             ],
             Self::PgAuthMembers => columns![
                 "oid" => ColumnType::Oid,

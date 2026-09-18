@@ -68,7 +68,10 @@ fn system_identities_are_unique_and_reference_graph_is_closed_and_acyclic() {
     }
     assert_eq!(SystemRelation::at("pg_catalog", "PG_AUTHID"), None);
     assert_eq!(SystemRelation::from_qualified_name("pg_authid"), None);
-    assert_eq!(SystemRelation::PgAuthid.oid(), 1260);
+    assert_eq!(
+        SystemRelation::Projected(crate::catalog::VirtualRelation::PgAuthid).oid(),
+        1260
+    );
     assert_eq!(SystemRelation::PgSequence.oid(), 2224);
 }
 
@@ -89,7 +92,7 @@ fn system_security_preserves_public_settings_updates_and_private_role_catalogs()
         ("reader".into(), reader),
     ]);
     for relation in SystemRelation::all() {
-        let security = relation.bootstrap_security();
+        let security = relation.bootstrap_security().resolve(&roles).unwrap();
         for privilege in TableAclPrivilege::ALL {
             assert!(role_has_table_privilege(
                 &security,
@@ -101,7 +104,7 @@ fn system_security_preserves_public_settings_updates_and_private_role_catalogs()
             let expected = (privilege == TableAclPrivilege::Select
                 && !matches!(
                     relation,
-                    SystemRelation::PgAuthid
+                    SystemRelation::Projected(crate::catalog::VirtualRelation::PgAuthid)
                         | SystemRelation::PgShadow
                         | SystemRelation::Projected(
                             VirtualRelation::AgGraph | VirtualRelation::AgLabel

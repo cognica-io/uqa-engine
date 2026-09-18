@@ -14,7 +14,7 @@ use crate::catalog::CatalogReadView;
 
 use super::super::helpers::rows::{bool_value, int_value, row, str_value};
 
-pub fn build_pg_roles(catalog: &CatalogReadView) -> Vec<ResultRow> {
+pub fn build_pg_authid(catalog: &CatalogReadView) -> Vec<ResultRow> {
     catalog
         .roles()
         .map(|role| {
@@ -34,14 +34,24 @@ pub fn build_pg_roles(catalog: &CatalogReadView) -> Vec<ResultRow> {
                     bool_value(role.has(RoleAttribute::Replication)),
                 ),
                 ("rolconnlimit", int_value(i64::from(role.connection_limit))),
-                ("rolpassword", str_value("********")),
+                ("rolpassword", Value::Null),
                 ("rolvaliduntil", Value::Null),
                 (
                     "rolbypassrls",
                     bool_value(role.has(RoleAttribute::BypassRls)),
                 ),
-                ("rolconfig", Value::Null),
             ])
+        })
+        .collect()
+}
+
+pub fn build_pg_roles(catalog: &CatalogReadView) -> Vec<ResultRow> {
+    build_pg_authid(catalog)
+        .into_iter()
+        .map(|mut role| {
+            role.insert("rolpassword".into(), str_value("********"));
+            role.insert("rolconfig".into(), Value::Null);
+            role
         })
         .collect()
 }
@@ -85,3 +95,6 @@ pub fn build_pg_user(catalog: &CatalogReadView) -> Vec<ResultRow> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests;

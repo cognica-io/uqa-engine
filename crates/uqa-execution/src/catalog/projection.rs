@@ -73,6 +73,7 @@ pub fn build_info_schema_rows(
         VirtualRelation::PgRange => build_pg_range(),
         VirtualRelation::PgProc => build_pg_proc(catalog)?,
         VirtualRelation::PgDatabase => build_pg_database(catalog)?,
+        VirtualRelation::PgAuthid => build_pg_authid(catalog),
         VirtualRelation::PgAuthMembers => build_pg_auth_members(catalog)?,
         VirtualRelation::PgRoles => build_pg_roles(catalog),
         VirtualRelation::PgUser => build_pg_user(catalog),
@@ -280,10 +281,10 @@ pub fn snapshot_table_relation_oid(
     pg_catalog::table_relation_oid_from(catalog, resolution, table)
 }
 use pg_catalog::{
-    build_pg_attrdef, build_pg_attribute, build_pg_auth_members, build_pg_constraint,
-    build_pg_database, build_pg_index, build_pg_indexes, build_pg_matviews, build_pg_range,
-    build_pg_roles, build_pg_sequences, build_pg_tables, build_pg_type, build_pg_user,
-    build_pg_views,
+    build_pg_attrdef, build_pg_attribute, build_pg_auth_members, build_pg_authid,
+    build_pg_constraint, build_pg_database, build_pg_index, build_pg_indexes, build_pg_matviews,
+    build_pg_range, build_pg_roles, build_pg_sequences, build_pg_tables, build_pg_type,
+    build_pg_user, build_pg_views,
 };
 use pg_namespace::build_pg_namespace;
 use pg_proc::build_pg_proc;

@@ -11,7 +11,7 @@ use super::{
         role_has_privilege, validate_table_security_invariants, TableAclPrivilege,
         TablePrivilegeCheck,
     },
-    TableSecurity,
+    BoundTableSecurity, TableSecurity,
 };
 use crate::catalog::roles::identity::RoleSubject;
 use crate::{
@@ -28,15 +28,15 @@ use uqa_core::RelationIdentity;
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SystemAcl {
     pub revision: [u8; 16],
-    pub acl: Vec<super::TableAclEntry>,
+    pub acl: Vec<super::table_binding::BoundTableAclEntry>,
 }
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SystemRelationSecurity {
     pub table: Option<SystemAcl>,
     pub columns: BTreeMap<String, SystemAcl>,
 }
 impl SystemRelationSecurity {
-    pub fn security(&self, relation: SystemRelation) -> TableSecurity {
+    pub fn security(&self, relation: SystemRelation) -> BoundTableSecurity {
         let mut security = relation.bootstrap_security();
         if let Some(table) = &self.table {
             security.acl = Some(table.acl.clone());
@@ -58,12 +58,15 @@ pub type SystemRelationSecurityRead<'a> = Box<dyn Deref<Target = SystemRelationS
 
 pub trait SystemRelationSecurityCatalog {
     fn system_relation_securities(&self) -> SystemRelationSecurityRead<'_>;
-    fn system_relation_security(&self, relation: SystemRelation) -> TableSecurity {
+    fn system_relation_security(&self, relation: SystemRelation) -> BoundTableSecurity {
         security(&self.system_relation_securities(), relation)
     }
 }
 
-pub fn security(securities: &SystemRelationSecurities, relation: SystemRelation) -> TableSecurity {
+pub fn security(
+    securities: &SystemRelationSecurities,
+    relation: SystemRelation,
+) -> BoundTableSecurity {
     securities
         .get(&RelationIdentity::new(
             relation.namespace(),
@@ -89,7 +92,9 @@ pub fn validate_security(
     security: &TableSecurity,
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> Result<(), String> {
-    if security.role_owner != crate::catalog::oids::current_user_name() {
+    if super::role_bindings::bind_role(roles, &security.role_owner, "system relation")?
+        != crate::catalog::roles::RoleIdentity::BOOTSTRAP
+    {
         return Err(format!(
             "system relation `{}` has an invalid owner",
             relation.qualified_name()
