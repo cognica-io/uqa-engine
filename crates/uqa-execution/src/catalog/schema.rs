@@ -25,15 +25,18 @@ pub fn virtual_relation_schema(
     resolution: &RelationNameResolution,
     name: &str,
 ) -> Result<Option<Vec<(String, ColumnType)>>, uqa_sql::SQLError> {
-    if let Some(relation) = resolve_virtual_relation(resolution, name) {
+    if let Some(relation) = catalog.virtual_relation_resolved(resolution, name)? {
         return Ok(Some(relation.schema()));
     }
     super::graph::age_label_relation_schema(catalog, resolution, name)
 }
 
 pub fn virtual_relation_accepts_row_lock(
+    catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     name: &str,
-) -> Option<bool> {
-    resolve_virtual_relation(resolution, name).map(VirtualRelation::accepts_row_lock)
+) -> Result<Option<bool>, uqa_sql::SQLError> {
+    Ok(catalog
+        .virtual_relation_resolved(resolution, name)?
+        .map(VirtualRelation::accepts_row_lock))
 }

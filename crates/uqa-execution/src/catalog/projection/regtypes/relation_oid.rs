@@ -7,8 +7,8 @@
 //! Relation OID resolution for SQL names and already-bound dependency identities.
 
 use super::{
-    catalog_index_relations, numeric_regobject_oid, qualified_name, relation_name,
-    resolve_virtual_regclass, CatalogContext, NumericRegobjectOid, SQLError,
+    catalog_index_relations, numeric_regobject_oid, qualified_name, relation_name, CatalogContext,
+    NumericRegobjectOid, SQLError,
 };
 
 pub fn lookup_regclass_oid(
@@ -24,9 +24,6 @@ pub fn lookup_regclass_oid(
         return Ok(None);
     };
     let (schema, local) = relation_name(&names)?;
-    if let Some((oid, _, _)) = resolve_virtual_regclass(context, schema, local)? {
-        return Ok(Some(oid));
-    }
     let reference = schema.map_or_else(
         || uqa_sql::expr::quote_ident(local),
         |schema| qualified_name(schema, local),
@@ -52,6 +49,9 @@ fn resolved_regclass_oid(
     canonical: &str,
     kind: &str,
 ) -> Result<Option<i64>, SQLError> {
+    if let Some(relation) = uqa_sql::catalog::VirtualRelation::from_qualified_name(canonical) {
+        return Ok(Some(relation.oid()));
+    }
     if kind == "sequence" {
         let object_id = context
             .sequence_object_id(canonical)

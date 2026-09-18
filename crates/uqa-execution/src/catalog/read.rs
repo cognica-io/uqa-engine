@@ -9,6 +9,9 @@
 mod indexes;
 mod privileges;
 
+#[cfg(test)]
+mod tests;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -73,7 +76,8 @@ impl CatalogReadView {
     }
 
     fn relation_exists(&self, relation: &uqa_core::RelationIdentity) -> bool {
-        self.snapshot.tables.contains_key(relation)
+        uqa_sql::catalog::VirtualRelation::at(&relation.schema, &relation.name).is_some()
+            || self.snapshot.tables.contains_key(relation)
             || self.snapshot.definitions.views.contains_key(relation)
             || self.snapshot.definitions.sequences.contains_key(relation)
             || self
@@ -111,7 +115,11 @@ impl CatalogReadView {
             }
         }
         for relation in self.relation_lookup_candidates(resolution, name)? {
-            let kind = if self.snapshot.tables.contains_key(&relation) {
+            let kind = if let Some(virtual_relation) =
+                uqa_sql::catalog::VirtualRelation::at(&relation.schema, &relation.name)
+            {
+                Some(virtual_relation.kind())
+            } else if self.snapshot.tables.contains_key(&relation) {
                 Some("table")
             } else if let Some(view) = self.snapshot.definitions.views.get(&relation) {
                 Some(match view.kind {
@@ -143,6 +151,24 @@ impl CatalogReadView {
             }
         }
         Ok(RelationResolution::MissingRelation)
+    }
+
+    pub fn virtual_relation_resolved(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+    ) -> Result<Option<uqa_sql::catalog::VirtualRelation>, SQLError> {
+        for relation in self.relation_lookup_candidates(resolution, name)? {
+            if let Some(relation) =
+                uqa_sql::catalog::VirtualRelation::at(&relation.schema, &relation.name)
+            {
+                return Ok(Some(relation));
+            }
+            if self.relation_exists(&relation) {
+                return Ok(None);
+            }
+        }
+        Ok(None)
     }
 
     pub fn all_schema_names(&self, resolution: &RelationNameResolution) -> Vec<String> {
@@ -347,19 +373,7 @@ impl CatalogReadView {
                         }),
                 }));
             }
-            if self.snapshot.tables.contains_key(&relation)
-                || self.snapshot.definitions.views.contains_key(&relation)
-                || self
-                    .snapshot
-                    .definitions
-                    .foreign_tables
-                    .contains_key(&relation)
-                || self
-                    .snapshot
-                    .definitions
-                    .catalog_indexes
-                    .contains_key(&relation)
-            {
+            if self.relation_exists(&relation) {
                 return Ok(None);
             }
         }

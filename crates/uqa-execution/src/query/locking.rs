@@ -296,6 +296,9 @@ fn lock_named_query_relation<S: Clone + Send + Sync + 'static>(
     };
     let canonical = binding.name;
     locked.insert(canonical.clone());
+    if uqa_sql::catalog::VirtualRelation::from_qualified_name(&canonical).is_some() {
+        return Ok(());
+    }
     match binding.value {
         "table" => lock_descendants(
             context.catalog,

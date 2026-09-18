@@ -17,145 +17,8 @@ pub mod type_metadata;
 /// Namespace of the Apache AGE catalog relations, types, and functions.
 pub const AG_CATALOG_SCHEMA: &str = "ag_catalog";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum VirtualRelation {
-    InformationSchemaCatalogName,
-    InformationSchemata,
-    InformationTables,
-    InformationColumns,
-    InformationColumnPrivileges,
-    InformationRoleColumnGrants,
-    InformationViews,
-    InformationRoutines,
-    InformationSequences,
-    InformationTableConstraints,
-    InformationKeyColumnUsage,
-    PgNamespace,
-    PgClass,
-    PgInherits,
-    PgPartitionedTable,
-    PgAttribute,
-    PgAttrdef,
-    PgConstraint,
-    PgIndex,
-    PgTrigger,
-    PgRewrite,
-    PgRules,
-    PgTables,
-    PgViews,
-    PgIndexes,
-    PgType,
-    PgRange,
-    PgProc,
-    PgDatabase,
-    PgAuthMembers,
-    PgRoles,
-    PgUser,
-    PgSettings,
-    PgPreparedStatements,
-    PgDescription,
-    PgMatviews,
-    PgSequences,
-    AgGraph,
-    AgLabel,
-}
-
-/// Resolve a relation reference to one of the engine's virtual catalog
-/// relations. `information_schema` and `pg_catalog` names resolve
-/// qualified or bare because `PostgreSQL` always searches `pg_catalog`;
-/// the AGE relations resolve bare only while `ag_catalog` is on the
-/// session `search_path`, exactly like the extension's schema.
-pub fn resolve_virtual_relation(search_path: &[String], name: &str) -> Option<VirtualRelation> {
-    let lower = name.to_ascii_lowercase();
-    if let Some(local) = lower.strip_prefix("ag_catalog.") {
-        return resolve_ag_catalog_relation(local);
-    }
-    if !lower.contains('.') && search_path.iter().any(|schema| schema == AG_CATALOG_SCHEMA) {
-        if let Some(relation) = resolve_ag_catalog_relation(&lower) {
-            return Some(relation);
-        }
-    }
-    let is_information_schema = lower.starts_with("information_schema.");
-    let is_pg_catalog = lower.starts_with("pg_catalog.");
-    let stripped = lower
-        .strip_prefix("information_schema.")
-        .or_else(|| lower.strip_prefix("pg_catalog."))
-        .unwrap_or(&lower);
-    match (is_information_schema, is_pg_catalog, stripped) {
-        (true, _, "information_schema_catalog_name") => {
-            Some(VirtualRelation::InformationSchemaCatalogName)
-        }
-        (true, _, "schemata") => Some(VirtualRelation::InformationSchemata),
-        (true, _, "tables") => Some(VirtualRelation::InformationTables),
-        (true, _, "columns") => Some(VirtualRelation::InformationColumns),
-        (true, _, "column_privileges") => Some(VirtualRelation::InformationColumnPrivileges),
-        (true, _, "role_column_grants") => Some(VirtualRelation::InformationRoleColumnGrants),
-        (true, _, "views") => Some(VirtualRelation::InformationViews),
-        (true, _, "routines") => Some(VirtualRelation::InformationRoutines),
-        (true, _, "sequences") => Some(VirtualRelation::InformationSequences),
-        (true, _, "table_constraints") => Some(VirtualRelation::InformationTableConstraints),
-        (true, _, "key_column_usage") => Some(VirtualRelation::InformationKeyColumnUsage),
-        (_, true, "pg_namespace") | (false, false, "pg_namespace") => {
-            Some(VirtualRelation::PgNamespace)
-        }
-        (_, true, "pg_class") | (false, false, "pg_class") => Some(VirtualRelation::PgClass),
-        (_, true, "pg_inherits") | (false, false, "pg_inherits") => {
-            Some(VirtualRelation::PgInherits)
-        }
-        (_, true, "pg_partitioned_table") | (false, false, "pg_partitioned_table") => {
-            Some(VirtualRelation::PgPartitionedTable)
-        }
-        (_, true, "pg_attribute") | (false, false, "pg_attribute") => {
-            Some(VirtualRelation::PgAttribute)
-        }
-        (_, true, "pg_attrdef") | (false, false, "pg_attrdef") => Some(VirtualRelation::PgAttrdef),
-        (_, true, "pg_constraint") | (false, false, "pg_constraint") => {
-            Some(VirtualRelation::PgConstraint)
-        }
-        (_, true, "pg_index") | (false, false, "pg_index") => Some(VirtualRelation::PgIndex),
-        (_, true, "pg_trigger") | (false, false, "pg_trigger") => Some(VirtualRelation::PgTrigger),
-        (_, true, "pg_rewrite") | (false, false, "pg_rewrite") => Some(VirtualRelation::PgRewrite),
-        (_, true, "pg_rules") | (false, false, "pg_rules") => Some(VirtualRelation::PgRules),
-        (_, true, "pg_tables") | (false, false, "pg_tables") => Some(VirtualRelation::PgTables),
-        (_, true, "pg_views") | (false, false, "pg_views") => Some(VirtualRelation::PgViews),
-        (_, true, "pg_indexes") | (false, false, "pg_indexes") => Some(VirtualRelation::PgIndexes),
-        (_, true, "pg_type") | (false, false, "pg_type") => Some(VirtualRelation::PgType),
-        (_, true, "pg_range") | (false, false, "pg_range") => Some(VirtualRelation::PgRange),
-        (_, true, "pg_proc") | (false, false, "pg_proc") => Some(VirtualRelation::PgProc),
-        (_, true, "pg_database") | (false, false, "pg_database") => {
-            Some(VirtualRelation::PgDatabase)
-        }
-        (_, true, "pg_auth_members") | (false, false, "pg_auth_members") => {
-            Some(VirtualRelation::PgAuthMembers)
-        }
-        (_, true, "pg_roles") | (false, false, "pg_roles") => Some(VirtualRelation::PgRoles),
-        (_, true, "pg_user") | (false, false, "pg_user") => Some(VirtualRelation::PgUser),
-        (_, true, "pg_settings") | (false, false, "pg_settings") => {
-            Some(VirtualRelation::PgSettings)
-        }
-        (_, true, "pg_prepared_statements") | (false, false, "pg_prepared_statements") => {
-            Some(VirtualRelation::PgPreparedStatements)
-        }
-        (_, true, "pg_description") | (false, false, "pg_description") => {
-            Some(VirtualRelation::PgDescription)
-        }
-        (_, true, "pg_matviews") | (false, false, "pg_matviews") => {
-            Some(VirtualRelation::PgMatviews)
-        }
-        (_, true, "pg_sequences") | (false, false, "pg_sequences") => {
-            Some(VirtualRelation::PgSequences)
-        }
-        _ => None,
-    }
-}
-
-fn resolve_ag_catalog_relation(local: &str) -> Option<VirtualRelation> {
-    match local {
-        "ag_graph" => Some(VirtualRelation::AgGraph),
-        "ag_label" => Some(VirtualRelation::AgLabel),
-        _ => None,
-    }
-}
+mod virtual_relations;
+pub use virtual_relations::{resolve_virtual_relation, VirtualRelation};
 
 impl VirtualRelation {
     pub const fn accepts_row_lock(self) -> bool {
@@ -172,6 +35,7 @@ impl VirtualRelation {
                 | Self::PgTrigger
                 | Self::PgRewrite
                 | Self::PgType
+                | Self::PgRange
                 | Self::PgProc
                 | Self::PgDatabase
                 | Self::PgAuthMembers

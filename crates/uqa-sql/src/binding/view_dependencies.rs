@@ -14,52 +14,8 @@ use crate::{
 use uqa_core::{RelationIdentity, Value};
 
 pub fn canonical_virtual_relation_reference(reference: &str) -> Option<String> {
-    let (schema, relation) = RelationIdentity::parse_reference(reference).ok()?;
-    let relation = relation.to_ascii_lowercase();
-    let schema = schema.map(|schema| schema.to_ascii_lowercase());
-    let information_schema = matches!(
-        relation.as_str(),
-        "schemata"
-            | "tables"
-            | "columns"
-            | "column_privileges"
-            | "role_column_grants"
-            | "views"
-            | "routines"
-            | "sequences"
-            | "table_constraints"
-            | "key_column_usage"
-    );
-    let pg_catalog = matches!(
-        relation.as_str(),
-        "pg_namespace"
-            | "pg_class"
-            | "pg_inherits"
-            | "pg_partitioned_table"
-            | "pg_attribute"
-            | "pg_attrdef"
-            | "pg_constraint"
-            | "pg_index"
-            | "pg_tables"
-            | "pg_views"
-            | "pg_indexes"
-            | "pg_type"
-            | "pg_proc"
-            | "pg_database"
-            | "pg_roles"
-            | "pg_user"
-            | "pg_settings"
-            | "pg_description"
-            | "pg_matviews"
-            | "pg_sequences"
-    );
-    match schema.as_deref() {
-        Some("information_schema") if information_schema => {
-            Some(format!("information_schema.{relation}"))
-        }
-        Some("pg_catalog") | None if pg_catalog => Some(format!("pg_catalog.{relation}")),
-        _ => None,
-    }
+    crate::catalog::resolve_virtual_relation(&[], reference)
+        .map(crate::catalog::VirtualRelation::qualified_name)
 }
 
 pub fn sequence_function_reference_mut(expression: &mut ScalarExpr) -> Option<&mut String> {

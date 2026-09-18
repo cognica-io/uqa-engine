@@ -201,12 +201,12 @@ fn cte_syntax_and_rule_errors_precede_read_only_observation_and_snapshot_marking
     assert!(
         matches!(error, SQLError::Unsupported(message) if message == "WITH clause containing a data-modifying statement must be at the top level")
     );
-    assert_eq!(*inputs.events.lock(), ["resolution"]);
+    assert!(inputs.events.lock().is_empty());
     inputs.events.lock().clear();
     let query = plan("WITH moved AS (DELETE FROM items RETURNING id) SELECT id FROM moved");
     let error = validate_plan(&inputs.context(), &cancellation, &query).unwrap_err();
     assert!(matches!(error, SQLError::Internal(message) if message == "rule catalog unavailable"));
-    assert_eq!(*inputs.events.lock(), ["resolution", "target", "rules"]);
+    assert_eq!(*inputs.events.lock(), ["target", "rules"]);
 }
 
 #[test]
@@ -217,14 +217,7 @@ fn effects_are_captured_after_cte_rules_and_snapshot_marking_requires_success() 
     validate_plan(&inputs.context(), &cancellation, &query).unwrap();
     assert_eq!(
         *inputs.events.lock(),
-        [
-            "resolution",
-            "target",
-            "rules",
-            "effects",
-            "read-only",
-            "snapshot"
-        ]
+        ["target", "rules", "effects", "read-only", "snapshot"]
     );
     let reader = Inputs {
         read_only: true,
@@ -237,8 +230,5 @@ fn effects_are_captured_after_cte_rules_and_snapshot_marking_requires_success() 
     )
     .unwrap_err();
     assert!(matches!(error, SQLError::Routine { sqlstate, .. } if sqlstate == "25006"));
-    assert_eq!(
-        *reader.events.lock(),
-        ["resolution", "effects", "read-only"]
-    );
+    assert_eq!(*reader.events.lock(), ["effects", "read-only"]);
 }

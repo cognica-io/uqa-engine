@@ -25,9 +25,7 @@ impl Deparser<'_> {
             .relation_kind_resolution(&self.dynamic, &quote_ident(&local))?
             .into_found()
             .is_some_and(|(visible, _)| visible == name);
-        let virtual_visible = schema == "pg_catalog"
-            && super::super::resolve_virtual_relation(&self.dynamic, &local).is_some();
-        if (visible || virtual_visible) && !scope.ctes.contains_key(&local) {
+        if visible && !scope.ctes.contains_key(&local) {
             Ok(quote_ident(&local))
         } else {
             Ok(format!("{}.{}", quote_ident(&schema), quote_ident(&local)))

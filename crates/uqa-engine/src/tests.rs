@@ -41,6 +41,7 @@ mod catalog;
 mod prepared;
 mod queries;
 mod table_locks;
+mod virtual_catalog_names;
 
 mod direct_drop_locks;
 mod drop_locks;

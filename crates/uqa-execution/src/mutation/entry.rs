@@ -109,10 +109,11 @@ pub fn execute_cte_command<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     ctes: &CteScope<S>,
 ) -> Result<SQLResult, SQLError> {
-    if let Some(error) = uqa_sql::semantics::virtual_relation_mutation_error(
+    if let Some(error) = crate::catalog::projection::virtual_relation_mutation_error(
+        &ctes.catalog_read_view()?,
         &ctes.relation_name_resolution()?,
         command,
-    ) {
+    )? {
         crate::query::binding::analyze_command_parameters(context.routines, command, params, ctes)?;
         return Err(error);
     }

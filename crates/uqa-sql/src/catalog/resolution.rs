@@ -76,17 +76,11 @@ impl RelationNameResolution {
             };
             return Ok(vec![uqa_core::RelationIdentity::new(schema, relation)]);
         }
-        let mut candidates = vec![uqa_core::RelationIdentity::new(
+        Ok(candidates::unqualified_candidates(
             &self.temporary_schema,
+            &self.search_path,
             &relation,
-        )];
-        candidates.extend(
-            self.search_path
-                .iter()
-                .filter(|schema| *schema != "pg_catalog" && *schema != "information_schema")
-                .map(|schema| uqa_core::RelationIdentity::new(schema, &relation)),
-        );
-        Ok(candidates)
+        ))
     }
 }
 

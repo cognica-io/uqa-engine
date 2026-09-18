@@ -45,12 +45,6 @@ fn bind_catalog_relation_reference(
     context: &str,
     dependencies: &mut BTreeSet<RelationIdentity>,
 ) -> Result<(), SQLError> {
-    if let Some(canonical) =
-        crate::binding::view_dependencies::canonical_virtual_relation_reference(reference)
-    {
-        *reference = canonical;
-        return Ok(());
-    }
     if lookup_mode == RelationLookupMode::Dynamic {
         if let Some(canonical) = catalog.resolve_age_label_relation_name(reference)? {
             let relation = RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
@@ -95,7 +89,9 @@ fn bind_catalog_relation_reference(
         SQLError::Internal(format!("decode bound rule source `{canonical}`: {error}"))
     })?;
     *reference = canonical;
-    dependencies.insert(relation);
+    if crate::catalog::VirtualRelation::at(&relation.schema, &relation.name).is_none() {
+        dependencies.insert(relation);
+    }
     Ok(())
 }
 

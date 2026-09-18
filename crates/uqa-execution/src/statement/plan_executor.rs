@@ -403,19 +403,22 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         reason = "preserves SELECT schema and row identity"
     )]
     fn execute_command(&self, command: &CommandPlan) -> Result<SQLResult, SQLError> {
-        if let Some(error) = uqa_sql::semantics::virtual_relation_mutation_error(
-            &self.context.validation.session.relation_name_resolution(),
-            command,
-        ) {
-            // Semantic errors precede the view's rewrite-time mutation rejection.
+        if uqa_sql::semantics::virtual_relation_mutation_candidate(command) {
             let ctes = self.context.queries.statement_scope(None);
-            crate::query::binding::analyze_command_parameters(
-                self.context.routines.resolution,
+            if let Some(error) = crate::catalog::projection::virtual_relation_mutation_error(
+                &ctes.catalog_read_view()?,
+                &ctes.relation_name_resolution()?,
                 command,
-                self.params,
-                &ctes,
-            )?;
-            return Err(error);
+            )? {
+                // Semantic errors precede the view's rewrite-time mutation rejection.
+                crate::query::binding::analyze_command_parameters(
+                    self.context.routines.resolution,
+                    command,
+                    self.params,
+                    &ctes,
+                )?;
+                return Err(error);
+            }
         }
         match command {
             CommandPlan::CreateTable(statement) => {

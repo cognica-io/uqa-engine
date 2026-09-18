@@ -28,16 +28,35 @@ pub fn relation_lookup_candidates(
         }
         return Ok(vec![RelationIdentity::new(schema, relation)]);
     }
+    let temporary = state.temporary_schema_name();
+    let path = state.search_path();
+    Ok(unqualified_candidates(&temporary, &path, &relation))
+}
+
+pub(super) fn unqualified_candidates(
+    temporary: &str,
+    path: &[String],
+    relation: &str,
+) -> Vec<RelationIdentity> {
     let mut candidates = Vec::new();
-    candidates.push(RelationIdentity::new(
-        state.temporary_schema_name(),
-        &relation,
-    ));
-    for schema in state.search_path().iter() {
-        if schema == "pg_catalog" || schema == "information_schema" {
-            continue;
-        }
-        candidates.push(RelationIdentity::new(schema, &relation));
+    if !path
+        .iter()
+        .any(|schema| schema == "pg_temp" || schema == temporary)
+    {
+        candidates.push(RelationIdentity::new(temporary, relation));
     }
-    Ok(candidates)
+    if !path.iter().any(|schema| schema == "pg_catalog") {
+        candidates.push(RelationIdentity::new("pg_catalog", relation));
+    }
+    candidates.extend(path.iter().map(|schema| {
+        RelationIdentity::new(
+            if schema == "pg_temp" {
+                temporary
+            } else {
+                schema
+            },
+            relation,
+        )
+    }));
+    candidates
 }

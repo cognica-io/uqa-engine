@@ -27,7 +27,7 @@ pub fn build_info_schema_rows(
     session: &dyn CatalogSession,
     name: &str,
 ) -> Result<Option<Vec<ResultRow>>, SQLError> {
-    let Some(relation) = resolve_virtual_relation(resolution, name) else {
+    let Some(relation) = catalog.virtual_relation_resolved(resolution, name)? else {
         return ag_catalog::build_age_label_relation_rows(catalog, resolution, name);
     };
     let mut catalog_resolution = resolution.clone();

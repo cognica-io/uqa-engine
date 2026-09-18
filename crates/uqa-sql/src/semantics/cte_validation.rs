@@ -7,7 +7,6 @@
 //! `PostgreSQL` statement ownership rules for data-modifying WITH definitions.
 
 use super::rules::RuleCatalog;
-use crate::catalog::resolution::RelationNameResolution;
 use crate::plan::{
     CommandPlan, CtePlan, CtePlanBody, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan,
 };
@@ -15,7 +14,6 @@ use crate::SQLError;
 
 pub struct CteValidationContext<'a> {
     pub catalog: &'a dyn RuleCatalog,
-    pub resolution: &'a RelationNameResolution,
 }
 
 pub fn validate_plan(
@@ -190,11 +188,11 @@ fn validate_command_rules(
         ),
         _ => return Ok(()),
     };
-    if crate::catalog::resolve_virtual_relation(&context.resolution.search_path, table).is_some() {
+    let table = context.catalog.resolve_mutation_target(table, bound)?;
+    if crate::catalog::VirtualRelation::from_qualified_name(&table).is_some() {
         // Virtual catalog relations have no entries in the stored rewrite-rule registry.
         return Ok(());
     }
-    let table = context.catalog.resolve_mutation_target(table, bound)?;
     let rules = context.catalog.rules_for(&table, event)?;
     if rules.is_empty() {
         return Ok(());
