@@ -9,21 +9,19 @@
 use std::collections::BTreeSet;
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
-    ast::{
-        AlterRoleStmt, CreateRoleStmt, DropRoleStmt, GrantRoleStmt, RoleMembershipAction,
-        RoleMembershipOptions,
-    },
+    ast::{AlterRoleStmt, CreateRoleStmt, DropRoleStmt, GrantRoleStmt},
     catalog::roles::{
         definition::{self, require_role_creation},
         dependencies::ensure_roles_have_no_object_dependencies,
-        memberships::{apply_grant_role_statement, require_role_attribute_authority},
-        resolve_role_reference, role_can_set,
+        memberships::require_role_attribute_authority,
+        resolve_role_specification, role_can_set,
     },
     SQLError,
 };
 pub mod context;
 mod identity;
 mod locking;
+mod memberships;
 use context::RoleExecutionContext;
 
 pub fn set_role(
@@ -117,56 +115,33 @@ pub fn create_role(
     }
     let definition = identity::reserve_definition(context, statement)?;
     require_role_creation(&context.analysis)?;
-    context.publication.prepare_writer()?;
-    let mut roles = context.registry.write_roles();
+    let roles = context.analysis.roles.role_definitions();
     require_role_attribute_authority(
         &roles,
         &current,
         statement.attributes.iter().copied(),
         "create role",
     )?;
-    let (next_roles, current_is_superuser) =
-        definition::create_role_candidate(&roles, &current, definition)?;
-    let mut memberships = context.registry.write_memberships();
-    let mut next_memberships = memberships.clone();
-    definition::apply_create_role_memberships(
-        &context.analysis,
-        statement,
-        &current,
-        current_is_superuser,
-        &next_roles,
-        &mut next_memberships,
-    )?;
-    context.publication.persist_roles(&roles, &next_roles)?;
-    if **memberships != next_memberships {
-        context.publication.persist_memberships(&next_memberships)?;
-    }
-    **roles = next_roles;
-    **memberships = next_memberships;
-    drop(memberships);
+    let (_, current_is_superuser) =
+        definition::create_role_candidate(&roles, &current, definition.clone())?;
     drop(roles);
-    context.publication.catalog_changed();
-    Ok(())
+    memberships::create(
+        context,
+        current,
+        statement,
+        definition,
+        current_is_superuser,
+    )
 }
 
 pub fn alter_role(
     context: &RoleExecutionContext<'_>,
     statement: &AlterRoleStmt,
 ) -> Result<(), SQLError> {
-    if let Some(action) = statement.membership_action {
-        return grant_roles(
-            context,
-            &GrantRoleStmt {
-                granted_roles: vec![statement.name.clone()],
-                grantee_roles: statement.members.clone(),
-                is_grant: action == RoleMembershipAction::Add,
-                options: RoleMembershipOptions::default(),
-                grantor: None,
-                cascade: false,
-            },
-        );
+    if statement.membership_action.is_some() {
+        return memberships::alter_group(context, statement);
     }
-    let name = resolve_role_reference(context.analysis.names, &statement.name);
+    let name = resolve_role_specification(context.analysis.names, &statement.name);
     let current = context.analysis.names.current_role();
     context.publication.prepare_writer()?;
     let mut roles = context.registry.write_roles();
@@ -203,9 +178,12 @@ pub fn drop_roles(
             name,
         )?;
     }
-    let names_set = names.iter().cloned().collect::<BTreeSet<_>>();
+    let identities = names
+        .iter()
+        .map(|name| snapshot[name].identity())
+        .collect::<BTreeSet<_>>();
     let mut memberships = context.registry.write_memberships();
-    definition::ensure_no_grantor_dependencies(&memberships, &names_set)?;
+    definition::ensure_no_grantor_dependencies(&memberships, &identities)?;
     ensure_roles_have_no_object_dependencies(context.dependencies, &names)?;
     for name in &names {
         let role = super::roles::locking::RoleBinding::from_definition(&snapshot[name])?;
@@ -227,12 +205,14 @@ pub fn drop_roles(
     }
     let mut next_memberships = memberships.clone();
     next_memberships.retain(|_, membership| {
-        !names_set.contains(&membership.role)
-            && !names_set.contains(&membership.member)
-            && !names_set.contains(&membership.grantor)
+        !identities.contains(&membership.role.identity())
+            && !identities.contains(&membership.member.identity())
+            && !identities.contains(&membership.grantor.identity())
     });
     context.publication.persist_roles(&roles, &next_roles)?;
-    context.publication.persist_memberships(&next_memberships)?;
+    context
+        .publication
+        .persist_memberships(&memberships, &next_memberships)?;
     **roles = next_roles;
     **memberships = next_memberships;
     drop(memberships);
@@ -245,20 +225,16 @@ pub fn grant_roles(
     context: &RoleExecutionContext<'_>,
     statement: &GrantRoleStmt,
 ) -> Result<(), SQLError> {
-    context.publication.prepare_writer()?;
-    let roles = context.analysis.roles.role_definitions();
-    let resolved =
-        definition::bind_grant_role_statement(context.analysis.names, &roles, statement)?;
-    let current = context.analysis.names.current_role();
-    let mut memberships = context.registry.write_memberships();
-    let mut next = memberships.clone();
-    apply_grant_role_statement(&roles, &mut next, &current, &resolved)?;
-    context.publication.persist_memberships(&next)?;
-    **memberships = next;
-    drop(memberships);
-    drop(roles);
-    context.publication.catalog_changed();
-    Ok(())
+    memberships::grant(
+        context,
+        statement,
+        statement
+            .granted_roles
+            .iter()
+            .cloned()
+            .map(RoleReference::Named)
+            .collect(),
+    )
 }
 
 #[cfg(test)]

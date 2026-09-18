@@ -36,7 +36,12 @@ fn role_metadata_restoration_preserves_legacy_values_and_round_trips_membership_
     let destination = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
     let initial = restore_and_migrate(&destination).unwrap();
     persist_roles(Some(&destination), &initial.roles, &restored.roles).unwrap();
-    persist_memberships(Some(&destination), &restored.memberships).unwrap();
+    persist_memberships(
+        Some(&destination),
+        &initial.memberships,
+        &restored.memberships,
+    )
+    .unwrap();
     let reopened = restore(&destination).unwrap();
     assert_eq!(reopened.roles, restored.roles);
     assert_eq!(reopened.memberships, restored.memberships);

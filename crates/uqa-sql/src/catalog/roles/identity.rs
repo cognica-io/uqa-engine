@@ -11,6 +11,13 @@ use crate::SQLError;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
 
+/// A role endpoint is independent of its display name and of later OID reuse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct RoleIdentity {
+    pub oid: i64,
+    pub object_id: [u8; 16],
+}
+
 /// A selected role keeps its incarnation even if another role later reuses its name or OID.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoleBinding {
@@ -89,7 +96,17 @@ impl RoleSubject for RoleReference {
 }
 
 impl RoleBinding {
+    pub fn identity(&self) -> RoleIdentity {
+        RoleIdentity {
+            oid: i64::from(self.oid),
+            object_id: self.object_id,
+        }
+    }
+
     pub fn from_definition(role: &RoleDefinition) -> Result<Self, SQLError> {
+        if role.oid <= 0 {
+            return Err(SQLError::Internal("invalid role OID".into()));
+        }
         if role.object_id == [0; 16] {
             return Err(SQLError::Internal("role has no object identity".into()));
         }

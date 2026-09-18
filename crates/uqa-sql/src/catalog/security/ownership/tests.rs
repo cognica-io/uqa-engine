@@ -17,9 +17,12 @@ impl RelationOwnerSchemas for Schemas {
 fn roles() -> BTreeMap<String, RoleDefinition> {
     ["actor", "original", "target"]
         .into_iter()
-        .map(|name| {
+        .enumerate()
+        .map(|(index, name)| {
             let mut role = RoleDefinition::bootstrap();
             role.name = name.into();
+            role.oid = 20_001 + index as i64;
+            role.object_id = [index as u8 + 1; 16];
             role.attributes = BTreeSet::from([RoleAttribute::Inherit]);
             (name.into(), role)
         })
@@ -27,11 +30,13 @@ fn roles() -> BTreeMap<String, RoleDefinition> {
 }
 
 fn membership(role: &str, inherit: bool, set: bool) -> RoleMembership {
+    use crate::catalog::roles::identity::RoleBinding;
+    let roles = roles();
     RoleMembership {
         oid: 20_000,
-        role: role.into(),
-        member: "actor".into(),
-        grantor: "uqa".into(),
+        role: RoleBinding::from_definition(&roles[role]).unwrap(),
+        member: RoleBinding::from_definition(&roles["actor"]).unwrap(),
+        grantor: RoleBinding::from_definition(&RoleDefinition::bootstrap()).unwrap(),
         admin_option: false,
         inherit_option: inherit,
         set_option: set,

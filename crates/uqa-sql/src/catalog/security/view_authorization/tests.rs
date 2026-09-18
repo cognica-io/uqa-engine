@@ -21,13 +21,35 @@ use std::{
     collections::BTreeMap,
 };
 
-#[derive(Default)]
 struct Catalog {
     roles: RefCell<BTreeMap<String, RoleDefinition>>,
     memberships: RefCell<BTreeMap<RoleMembershipKey, RoleMembership>>,
     calls: RefCell<Vec<&'static str>>,
     reads: Cell<usize>,
     promote_on_recheck: bool,
+}
+impl Default for Catalog {
+    fn default() -> Self {
+        let roles = ["reader", "owner"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| {
+                let mut role = RoleDefinition::bootstrap();
+                role.name = name.into();
+                role.oid = 20_001 + index as i64;
+                role.object_id = [index as u8 + 1; 16];
+                role.attributes.clear();
+                (name.into(), role)
+            })
+            .collect();
+        Self {
+            roles: RefCell::new(roles),
+            memberships: RefCell::default(),
+            calls: RefCell::default(),
+            reads: Cell::new(0),
+            promote_on_recheck: false,
+        }
+    }
 }
 impl Catalog {
     fn context(&self) -> ViewAuthorizationContext<'_> {

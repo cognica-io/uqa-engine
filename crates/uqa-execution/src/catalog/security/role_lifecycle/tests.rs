@@ -7,9 +7,10 @@
 use super::*;
 mod fixtures;
 mod identity;
+mod memberships;
 use fixtures::{create, Catalog};
 use std::collections::BTreeMap;
-use uqa_sql::ast::RoleAttribute;
+use uqa_sql::ast::{RoleAttribute, RoleMembershipOptions};
 
 #[test]
 fn create_keeps_both_write_guards_and_publishes_only_after_both_persistence_calls() {
@@ -140,33 +141,32 @@ fn alter_holds_role_write_while_checking_membership_administration() {
 }
 
 #[test]
-fn grant_prepares_writer_before_binding_names_and_retains_authorization_through_publication() {
+fn grant_releases_catalog_guards_for_locks_then_persists_before_publication() {
     let catalog = Catalog::new();
     catalog.role("team", &[]);
     let statement = GrantRoleStmt {
         granted_roles: vec!["team".into()],
-        grantee_roles: vec!["CURRENT_USER".into()],
+        grantee_roles: vec![uqa_sql::ast::RoleSpecification::CurrentUser],
         is_grant: true,
         options: RoleMembershipOptions::default(),
         grantor: None,
         cascade: false,
     };
     grant_roles(&catalog.context(), &statement).unwrap();
-    assert_eq!(
-        *catalog.events.borrow(),
-        [
-            "writer",
-            "read roles",
-            "current",
-            "current",
-            "write memberships",
-            "persist memberships",
-            "publish memberships",
-            "release memberships",
-            "release roles",
-            "epoch"
-        ]
-    );
+    let events = catalog.events.borrow();
+    let writer = events.iter().position(|event| event == "writer").unwrap();
+    let refreshed = events.iter().rposition(|event| event == "refresh").unwrap();
+    assert!(refreshed < writer);
+    assert!(events.ends_with(&[
+        "writer".into(),
+        "write roles".into(),
+        "write memberships".into(),
+        "persist memberships".into(),
+        "publish memberships".into(),
+        "release memberships".into(),
+        "release roles".into(),
+        "epoch".into(),
+    ]));
     assert_eq!(catalog.memberships.borrow().len(), 1);
 }
 

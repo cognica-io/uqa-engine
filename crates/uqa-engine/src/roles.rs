@@ -118,9 +118,10 @@ impl Engine {
 
     pub(crate) fn persist_role_memberships_snapshot(
         &self,
+        before: &BTreeMap<RoleMembershipKey, RoleMembership>,
         memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
     ) -> Result<(), SQLError> {
-        role_catalog::persist_memberships(self.storage.catalog.as_deref(), memberships)
+        role_catalog::persist_memberships(self.storage.catalog.as_deref(), before, memberships)
     }
 
     pub(crate) fn restore_roles_from_metadata(

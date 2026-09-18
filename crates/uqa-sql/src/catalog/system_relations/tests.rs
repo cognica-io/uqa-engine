@@ -81,6 +81,8 @@ fn system_security_preserves_public_settings_updates_and_private_role_catalogs()
     use std::collections::BTreeMap;
     let mut reader = RoleDefinition::bootstrap();
     reader.name = "reader".into();
+    reader.oid = 20_001;
+    reader.object_id = [1; 16];
     reader.attributes.clear();
     let roles = BTreeMap::from([
         ("uqa".into(), RoleDefinition::bootstrap()),

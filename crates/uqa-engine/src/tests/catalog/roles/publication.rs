@@ -55,7 +55,7 @@ fn independent_role_writers_commit_before_the_other_transaction_finishes() {
                 assert!(!catalog
                     .metadata_has_private_changes("sql_roles_json")
                     .unwrap());
-                assert!(catalog
+                assert!(!catalog
                     .metadata_has_private_changes("sql_role_memberships_json")
                     .unwrap());
                 sql(&first, finish);
@@ -77,6 +77,8 @@ fn independent_role_writers_commit_before_the_other_transaction_finishes() {
         }
     }
 }
+
+mod memberships;
 
 #[test]
 fn private_role_attributes_refresh_over_an_external_role_deletion() {

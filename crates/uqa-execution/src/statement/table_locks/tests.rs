@@ -280,6 +280,8 @@ fn system_views_recurse_with_their_owner_and_preserve_reference_order() {
     let mut fixture = Fixture::new();
     let mut reader = RoleDefinition::bootstrap();
     reader.name = "reader".into();
+    reader.oid = 20_001;
+    reader.object_id = [1; 16];
     reader.attributes.clear();
     fixture.roles.insert("reader".into(), reader);
     fixture.user = "reader".into();

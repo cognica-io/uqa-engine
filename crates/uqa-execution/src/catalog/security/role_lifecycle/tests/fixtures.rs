@@ -8,6 +8,7 @@ use super::super::context::{
     RoleDefinitionWrite, RoleMembershipWrite, RolePublication, RoleRegistry,
 };
 use super::*;
+use crate::row_locks::shared_objects::SharedCatalogLock;
 use std::{
     cell::{Cell, Ref, RefCell, RefMut},
     collections::BTreeMap,
@@ -43,6 +44,10 @@ pub(super) struct Catalog {
     pub locks: crate::row_locks::RowLockManager,
     pub cancel: uqa_core::CancellationToken,
     pub refreshed_roles: RefCell<std::collections::VecDeque<BTreeMap<String, RoleDefinition>>>,
+    pub refreshed_memberships:
+        RefCell<std::collections::VecDeque<BTreeMap<RoleMembershipKey, RoleMembership>>>,
+    pub writer_memberships: RefCell<Option<BTreeMap<RoleMembershipKey, RoleMembership>>>,
+    pub catalog_locks: RefCell<Vec<(u32, Option<u32>, crate::row_locks::RelationLockMode)>>,
     database: DatabaseSecurity,
     schemas: BTreeMap<String, SchemaSecurity>,
     views: BTreeMap<RelationIdentity, StoredView>,
@@ -66,6 +71,9 @@ impl Catalog {
             locks: crate::row_locks::RowLockManager::new(),
             cancel: uqa_core::CancellationToken::new(),
             refreshed_roles: RefCell::new(std::collections::VecDeque::new()),
+            refreshed_memberships: RefCell::new(std::collections::VecDeque::new()),
+            writer_memberships: RefCell::new(None),
+            catalog_locks: RefCell::new(Vec::new()),
             database: DatabaseSecurity::bootstrap(),
             schemas: BTreeMap::new(),
             views: BTreeMap::new(),
@@ -98,11 +106,13 @@ impl Catalog {
         self.roles.borrow_mut().insert(name.into(), definition);
     }
     pub fn membership(&self, role: &str, member: &str, grantor: &str) {
+        use uqa_sql::catalog::roles::identity::RoleBinding;
+        let roles = self.roles.borrow();
         let membership = RoleMembership {
-            oid: 31,
-            role: role.into(),
-            member: member.into(),
-            grantor: grantor.into(),
+            oid: 30_000 + self.memberships.borrow().len() as i64,
+            role: RoleBinding::from_definition(&roles[role]).unwrap(),
+            member: RoleBinding::from_definition(&roles[member]).unwrap(),
+            grantor: RoleBinding::from_definition(&roles[grantor]).unwrap(),
             admin_option: true,
             inherit_option: false,
             set_option: false,
@@ -220,7 +230,11 @@ impl RoleRegistry for Catalog {
 }
 impl RolePublication for Catalog {
     fn prepare_writer(&self) -> Result<(), SQLError> {
+        self.released();
         self.event("writer");
+        if let Some(memberships) = self.writer_memberships.borrow_mut().take() {
+            *self.memberships.borrow_mut() = memberships;
+        }
         Ok(())
     }
     fn persist_roles(
@@ -234,6 +248,7 @@ impl RolePublication for Catalog {
     }
     fn persist_memberships(
         &self,
+        _: &BTreeMap<RoleMembershipKey, RoleMembership>,
         _: &BTreeMap<RoleMembershipKey, RoleMembership>,
     ) -> Result<(), SQLError> {
         assert!(self.roles.try_borrow_mut().is_err());
@@ -319,6 +334,10 @@ impl crate::row_locks::shared_objects::SharedObjectLockSession for Catalog {
     ) -> Result<crate::row_locks::ScopedRelationLock<'_>, SQLError> {
         self.released();
         self.event("lock role");
+        self.catalog_locks.borrow_mut().push(match target {
+            SharedCatalogLock::Object { class_id, oid } => (class_id, Some(oid), mode),
+            SharedCatalogLock::Name { class_id, .. } => (class_id, None, mode),
+        });
         self.locks.acquire_scoped_relation(
             1,
             self.locks.shared_catalog_key(target),
@@ -332,6 +351,9 @@ impl crate::row_locks::shared_objects::SharedObjectLockSession for Catalog {
         self.event("refresh");
         if let Some(roles) = self.refreshed_roles.borrow_mut().pop_front() {
             *self.roles.borrow_mut() = roles;
+        }
+        if let Some(memberships) = self.refreshed_memberships.borrow_mut().pop_front() {
+            *self.memberships.borrow_mut() = memberships;
         }
         Ok(())
     }

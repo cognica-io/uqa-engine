@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::{FunctionVolatility, RoutineColumnTypeReference};
+use super::{FunctionVolatility, RoleSpecification, RoutineColumnTypeReference};
 
 /// `PARALLEL UNSAFE`, `PARALLEL RESTRICTED`, or `PARALLEL SAFE` routine metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -143,10 +143,10 @@ pub struct RoleMembershipOptions {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GrantRoleStmt {
     pub granted_roles: Vec<String>,
-    pub grantee_roles: Vec<String>,
+    pub grantee_roles: Vec<RoleSpecification>,
     pub is_grant: bool,
     pub options: RoleMembershipOptions,
-    pub grantor: Option<String>,
+    pub grantor: Option<RoleSpecification>,
     pub cascade: bool,
 }
 
@@ -167,11 +167,11 @@ pub struct CreateRoleStmt {
     pub attributes: BTreeSet<RoleAttribute>,
     pub connection_limit: i32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub in_roles: Vec<String>,
+    pub in_roles: Vec<RoleSpecification>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub role_members: Vec<String>,
+    pub role_members: Vec<RoleSpecification>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub admin_members: Vec<String>,
+    pub admin_members: Vec<RoleSpecification>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -182,15 +182,15 @@ pub enum RoleMembershipAction {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AlterRoleStmt {
-    pub name: String,
+    pub name: RoleSpecification,
     pub attributes: BTreeMap<RoleAttribute, bool>,
     pub connection_limit: Option<i32>,
     pub membership_action: Option<RoleMembershipAction>,
-    pub members: Vec<String>,
+    pub members: Vec<RoleSpecification>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DropRoleStmt {
-    pub names: Vec<String>,
+    pub names: Vec<RoleSpecification>,
     pub if_exists: bool,
 }

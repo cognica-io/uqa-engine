@@ -34,6 +34,9 @@ fn roles() -> BTreeMap<String, RoleDefinition> {
         let mut role = RoleDefinition::bootstrap();
         role.name = name.into();
         role.oid += index as i64;
+        if name != "uqa" {
+            role.object_id = [index as u8 + 1; 16];
+        }
         (name.into(), role)
     })
     .collect()

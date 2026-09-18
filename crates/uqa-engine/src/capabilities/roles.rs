@@ -93,9 +93,10 @@ impl RolePublication for Engine {
     }
     fn persist_memberships(
         &self,
+        before: &BTreeMap<RoleMembershipKey, RoleMembership>,
         memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
     ) -> Result<(), SQLError> {
-        self.persist_role_memberships_snapshot(memberships)
+        self.persist_role_memberships_snapshot(before, memberships)
     }
     fn catalog_changed(&self) {
         self.note_catalog_registry_changed();

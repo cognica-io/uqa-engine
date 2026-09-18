@@ -13,6 +13,7 @@ use uqa_sql::{
 };
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
+mod memberships;
 mod records;
 
 pub const ROLES_METADATA_KEY: &str = "sql_roles_json";
@@ -29,7 +30,7 @@ pub struct RoleCatalogSnapshot {
 }
 
 impl RoleCatalogSnapshot {
-    /// Preserve private role records, including deletions, while taking untouched roles from the latest committed catalog. Memberships still occupy one aggregate record.
+    /// Preserve private role and membership records, including deletions, while taking untouched records from the latest committed catalog.
     pub fn merge_private(
         mut self,
         catalog: Option<&dyn CatalogFacade>,
@@ -52,9 +53,22 @@ impl RoleCatalogSnapshot {
                 }
             }
             self.roles = roles;
-            if catalog.metadata_has_private_changes(ROLE_MEMBERSHIPS_METADATA_KEY)? {
-                self.memberships = Arc::clone(&current.memberships);
+            let identities = self
+                .memberships
+                .keys()
+                .chain(current.memberships.keys())
+                .collect::<std::collections::BTreeSet<_>>();
+            let mut memberships = Arc::clone(&self.memberships);
+            for identity in identities {
+                if catalog.metadata_has_private_changes(&memberships::key(identity))? {
+                    if let Some(membership) = current.memberships.get(identity) {
+                        Arc::make_mut(&mut memberships).insert(*identity, membership.clone());
+                    } else {
+                        Arc::make_mut(&mut memberships).remove(identity);
+                    }
+                }
             }
+            self.memberships = memberships;
         }
         Ok(self)
     }
@@ -77,20 +91,8 @@ fn restore_catalog(
     if format != records::RoleRecordFormat::Aggregate {
         records::validate_oids(catalog, &roles)?;
     }
-    let memberships = match catalog.get_metadata(ROLE_MEMBERSHIPS_METADATA_KEY)? {
-        Some(json) => serde_json::from_str::<Vec<RoleMembership>>(&json)?,
-        None => Vec::new(),
-    };
-    let memberships = restoration::restore_role_memberships(&roles, memberships)
-        .map_err(StorageBackendError::Other)?;
-    if format == records::RoleRecordFormat::Identities {
-        restoration::validate_role_identities(&roles).map_err(StorageBackendError::Other)?;
-    } else {
-        if !allow_migration {
-            return Err(StorageBackendError::Other(
-                "role metadata requires initial-open record migration".into(),
-            ));
-        }
+    if format != records::RoleRecordFormat::Identities {
+        // Complete a candidate catalog before binding legacy membership names. No metadata is written until both candidates have been validated.
         for (name, role) in &mut roles {
             if role.object_id == [0; 16] {
                 role.object_id = if name == "uqa" {
@@ -100,8 +102,22 @@ fn restore_catalog(
                 };
             }
         }
-        restoration::validate_role_identities(&roles).map_err(StorageBackendError::Other)?;
+    }
+    restoration::validate_role_identities(&roles).map_err(StorageBackendError::Other)?;
+    let (memberships, membership_format) = memberships::read(catalog, &roles)?;
+    if !allow_migration
+        && (format != records::RoleRecordFormat::Identities
+            || membership_format != memberships::MembershipFormat::Records)
+    {
+        return Err(StorageBackendError::Other(
+            "role metadata requires initial-open record migration".into(),
+        ));
+    }
+    if format != records::RoleRecordFormat::Identities {
         records::migrate(catalog, &roles)?;
+    }
+    if membership_format != memberships::MembershipFormat::Records {
+        memberships::migrate(catalog, &memberships)?;
     }
     Ok(RoleCatalogValues { roles, memberships })
 }
@@ -119,18 +135,13 @@ pub fn persist_roles(
 
 pub fn persist_memberships(
     catalog: Option<&dyn CatalogFacade>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    before: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    after: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> Result<(), SQLError> {
     let Some(catalog) = catalog else {
         return Ok(());
     };
-    let stored = memberships.values().cloned().collect::<Vec<_>>();
-    let json = serde_json::to_string(&stored).map_err(|error| {
-        SQLError::Internal(format!("serialize role membership catalog: {error}"))
-    })?;
-    catalog
-        .set_metadata(ROLE_MEMBERSHIPS_METADATA_KEY, &json)
-        .map_err(|error| SQLError::Internal(format!("persist role membership catalog: {error}")))
+    memberships::persist(catalog, before, after)
 }
 
 #[cfg(test)]

@@ -33,6 +33,7 @@ pub trait RolePublication {
     ) -> Result<(), SQLError>;
     fn persist_memberships(
         &self,
+        before: &BTreeMap<RoleMembershipKey, RoleMembership>,
         memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
     ) -> Result<(), SQLError>;
     fn catalog_changed(&self);

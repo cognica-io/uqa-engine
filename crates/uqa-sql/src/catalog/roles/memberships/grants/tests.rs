@@ -4,8 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use super::super::test_support::{apply_grant_role_statement, insert_membership};
 use super::super::*;
-use crate::ast::CreateRoleStmt;
+use crate::ast::{CreateRoleStmt, GrantRoleStmt, RoleMembershipOptions};
 
 fn roles() -> BTreeMap<String, RoleDefinition> {
     let mut roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
@@ -50,7 +51,7 @@ fn statement(target: &str, members: &[&str], grantor: Option<&str>, admin: bool)
     GrantRoleStmt {
         granted_roles: vec![target.into()],
         grantee_roles: members.iter().map(|s| (*s).into()).collect(),
-        grantor: grantor.map(str::to_owned),
+        grantor: grantor.map(Into::into),
         is_grant: true,
         options: RoleMembershipOptions {
             admin: admin.then_some(true),
@@ -68,7 +69,7 @@ fn edge(
     grantor: &str,
     options: RoleMembershipOptions,
 ) {
-    insert_membership(memberships, role, member, grantor, options, roles);
+    insert_membership(memberships, role, member, grantor, options, roles).unwrap();
 }
 
 fn admins(roles: &BTreeMap<String, RoleDefinition>) -> BTreeMap<RoleMembershipKey, RoleMembership> {
@@ -107,10 +108,11 @@ fn admins(roles: &BTreeMap<String, RoleDefinition>) -> BTreeMap<RoleMembershipKe
 }
 
 fn key(member: &str, grantor: &str) -> RoleMembershipKey {
+    let roles = roles();
     RoleMembershipKey {
-        role: "target".into(),
-        member: member.into(),
-        grantor: grantor.into(),
+        role: roles["target"].identity(),
+        member: roles[member].identity(),
+        grantor: roles[grantor].identity(),
     }
 }
 
@@ -181,7 +183,11 @@ fn explicit_revoke_uses_inherited_grantor_privileges_without_own_admin() {
     assert!(!members.contains_key(&key("recipient", "admin")));
     grant.grantor = Some("root2".into());
     apply_grant_role_statement(&roles, &mut members, "root2", &grant).unwrap();
-    assert!(!role_has_admin(&members, "root2", "target"));
+    assert!(!role_has_admin(
+        &members,
+        roles["root2"].identity(),
+        roles["target"].identity()
+    ));
 }
 
 #[test]

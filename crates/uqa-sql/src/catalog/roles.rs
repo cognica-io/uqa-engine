@@ -12,7 +12,8 @@ use std::collections::BTreeSet;
 
 pub mod identity;
 pub mod session;
-pub use identity::RoleReference;
+use identity::RoleBinding;
+pub use identity::{RoleIdentity, RoleReference};
 pub mod memberships;
 pub use memberships::{role_can_set, role_inherits};
 
@@ -27,19 +28,19 @@ pub struct RoleDefinition {
     pub connection_limit: i32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct RoleMembershipKey {
-    pub role: String,
-    pub member: String,
-    pub grantor: String,
+    pub role: RoleIdentity,
+    pub member: RoleIdentity,
+    pub grantor: RoleIdentity,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoleMembership {
     pub oid: i64,
-    pub role: String,
-    pub member: String,
-    pub grantor: String,
+    pub role: RoleBinding,
+    pub member: RoleBinding,
+    pub grantor: RoleBinding,
     pub admin_option: bool,
     pub inherit_option: bool,
     pub set_option: bool,
@@ -48,14 +49,21 @@ pub struct RoleMembership {
 impl RoleMembership {
     pub fn key(&self) -> RoleMembershipKey {
         RoleMembershipKey {
-            role: self.role.clone(),
-            member: self.member.clone(),
-            grantor: self.grantor.clone(),
+            role: self.role.identity(),
+            member: self.member.identity(),
+            grantor: self.grantor.identity(),
         }
     }
 }
 
 impl RoleDefinition {
+    pub fn identity(&self) -> RoleIdentity {
+        RoleIdentity {
+            oid: self.oid,
+            object_id: self.object_id,
+        }
+    }
+
     pub fn bootstrap() -> Self {
         Self {
             oid: 10,
@@ -101,6 +109,16 @@ pub fn resolve_role_reference(names: &dyn RoleReferenceNames, name: &str) -> Rol
         "CURRENT_USER" => names.current_role(),
         "SESSION_USER" => names.session_role(),
         other => other.into(),
+    }
+}
+pub fn resolve_role_specification(
+    names: &dyn RoleReferenceNames,
+    specification: &crate::ast::RoleSpecification,
+) -> RoleReference {
+    match specification {
+        crate::ast::RoleSpecification::Named(name) => name.clone().into(),
+        crate::ast::RoleSpecification::CurrentUser => names.current_role(),
+        crate::ast::RoleSpecification::SessionUser => names.session_role(),
     }
 }
 pub fn require_role_exists(

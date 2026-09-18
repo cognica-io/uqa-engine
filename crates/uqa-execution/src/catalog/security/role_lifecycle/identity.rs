@@ -11,6 +11,43 @@ use super::context::RoleExecutionContext;
 use crate::row_locks::{shared_objects::SharedCatalogLock, RelationLockMode};
 use uqa_sql::{catalog::roles::RoleDefinition, SQLError};
 
+pub(super) const MEMBERSHIP_CATALOG_CLASS_ID: u32 = 1261;
+
+pub(super) fn reserve_membership_oid(
+    context: &RoleExecutionContext<'_>,
+    staged: &std::collections::BTreeSet<i64>,
+    mut allocate: impl FnMut() -> Result<i64, SQLError>,
+) -> Result<i64, SQLError> {
+    let assigned = |oid| {
+        let _roles = context.analysis.roles.role_definitions();
+        let memberships = context.analysis.roles.role_memberships();
+        staged.contains(&oid) || memberships.values().any(|membership| membership.oid == oid)
+    };
+    loop {
+        let oid = allocate()?;
+        let public_oid = u32::try_from(oid)
+            .ok()
+            .filter(|oid| *oid >= 16_384)
+            .ok_or_else(|| SQLError::Internal("invalid role membership OID allocation".into()))?;
+        if assigned(oid) {
+            continue;
+        }
+        let guard = context.locks.acquire_shared_catalog(
+            SharedCatalogLock::Object {
+                class_id: MEMBERSHIP_CATALOG_CLASS_ID,
+                oid: public_oid,
+            },
+            RelationLockMode::AccessExclusive,
+        )?;
+        context.locks.refresh_shared_catalog()?;
+        if assigned(oid) {
+            continue;
+        }
+        guard.retain();
+        return Ok(oid);
+    }
+}
+
 pub(super) fn allocate_oid() -> Result<i64, SQLError> {
     loop {
         let mut bytes = [0; 4];

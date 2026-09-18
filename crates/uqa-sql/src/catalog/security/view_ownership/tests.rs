@@ -25,9 +25,23 @@ struct Catalog {
 }
 impl Catalog {
     fn new(user: &str) -> Self {
+        let roles = ["view_owner", "schema_owner", user]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| {
+                let mut role = RoleDefinition::bootstrap();
+                role.name = name.into();
+                role.oid = 20_001 + index as i64;
+                role.object_id = [index as u8 + 1; 16];
+                role.attributes.clear();
+                (name.into(), role)
+            })
+            .collect();
         Self {
             user: user.into(),
-            roles: RefCell::new(BTreeMap::new()),
+            roles: RefCell::new(roles),
             memberships: RefCell::new(BTreeMap::new()),
             calls: RefCell::new(Vec::new()),
         }

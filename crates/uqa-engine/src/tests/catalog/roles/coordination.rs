@@ -56,7 +56,10 @@ pub(super) fn after_wait(
     }
     let worker = task.join().unwrap();
     released.unwrap();
-    assert!(waited, "expected shared catalog wait on {target:?}");
+    assert!(
+        waited,
+        "expected shared catalog wait on {target:?}, received {result:?}"
+    );
     (worker, result.unwrap())
 }
 

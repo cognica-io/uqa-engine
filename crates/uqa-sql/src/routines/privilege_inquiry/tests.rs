@@ -35,10 +35,12 @@ fn roles() -> BTreeMap<String, RoleDefinition> {
     let mut owner = RoleDefinition::bootstrap();
     owner.name = "owner".into();
     owner.oid = 11;
+    owner.object_id = [1; 16];
     owner.attributes.remove(&RoleAttribute::Superuser);
     let mut reader = owner.clone();
     reader.name = "reader".into();
     reader.oid = 12;
+    reader.object_id = [2; 16];
     [RoleDefinition::bootstrap(), owner, reader]
         .into_iter()
         .map(|role| (role.name.clone(), role))

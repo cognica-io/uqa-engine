@@ -52,9 +52,9 @@ pub fn build_pg_auth_members(catalog: &CatalogReadView) -> Result<Vec<ResultRow>
         .map(|membership| {
             Ok(row([
                 ("oid", int_value(membership.oid)),
-                ("roleid", int_value(catalog.role_oid(&membership.role)?)),
-                ("member", int_value(catalog.role_oid(&membership.member)?)),
-                ("grantor", int_value(catalog.role_oid(&membership.grantor)?)),
+                ("roleid", int_value(i64::from(membership.role.oid))),
+                ("member", int_value(i64::from(membership.member.oid))),
+                ("grantor", int_value(i64::from(membership.grantor.oid))),
                 ("admin_option", bool_value(membership.admin_option)),
                 ("inherit_option", bool_value(membership.inherit_option)),
                 ("set_option", bool_value(membership.set_option)),

@@ -20,6 +20,8 @@ fn system_acl_masks_relation_writes_but_preserves_attribute_grants_and_grant_opt
     let mut security = relation.bootstrap_security();
     let mut reader = RoleDefinition::bootstrap();
     reader.name = "reader".into();
+    reader.oid = 20_001;
+    reader.object_id = [1; 16];
     reader.attributes.clear();
     let roles = BTreeMap::from([
         ("uqa".into(), RoleDefinition::bootstrap()),

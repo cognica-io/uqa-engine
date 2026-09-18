@@ -6,7 +6,11 @@
 
 use super::super::guards::{RoleDefinitionRead, RoleMembershipRead};
 use super::*;
-use crate::catalog::roles::RoleReference;
+use crate::ast::{CreateRoleStmt, GrantRoleStmt, RoleMembershipOptions, RoleSpecification};
+use crate::catalog::roles::{
+    memberships::command::{creator_membership, MembershipRecipients},
+    RoleReference,
+};
 use std::cell::{Cell, RefCell};
 
 struct Inputs {
@@ -89,20 +93,16 @@ fn role_creation_grants_creator_administration_without_inherit_or_set() {
     )
     .unwrap();
     assert!(!superuser);
-    let mut memberships = BTreeMap::new();
-    apply_create_role_memberships(
-        &inputs.context(),
-        &statement,
-        "creator",
-        superuser,
-        &roles,
-        &mut memberships,
-    )
-    .unwrap();
-    assert_eq!(memberships.len(), 1);
-    let membership = memberships.values().next().unwrap();
+    let membership = creator_membership(&roles, "creator", &roles["created"])
+        .unwrap()
+        .with_oid(31_000)
+        .unwrap();
     assert_eq!(
-        (&*membership.role, &*membership.member, &*membership.grantor),
+        (
+            membership.role.name.as_str(),
+            membership.member.name.as_str(),
+            membership.grantor.name.as_str()
+        ),
         ("created", "creator", "uqa")
     );
     assert!(membership.admin_option);
@@ -115,7 +115,7 @@ fn role_creation_grants_creator_administration_without_inherit_or_set() {
 fn drop_missing_role_notice_precedes_a_later_current_user_error() {
     let inputs = Inputs::new();
     let statement = DropRoleStmt {
-        names: vec!["absent".into(), "SESSION_USER".into()],
+        names: vec!["absent".into(), RoleSpecification::SessionUser],
         if_exists: true,
     };
     let error = resolve_drop_role_names(&inputs.context(), &statement, "uqa", "uqa", &inputs.roles)
@@ -133,19 +133,25 @@ fn drop_missing_role_notice_precedes_a_later_current_user_error() {
 }
 
 #[test]
-fn grant_binds_each_live_role_reference_in_granted_grantee_grantor_order() {
-    let inputs = Inputs::new();
+fn grant_binds_explicit_grantor_before_recipients_without_aliasing_target_names() {
+    let mut inputs = Inputs::new();
+    for index in 0..2 {
+        let mut role = RoleDefinition::bootstrap();
+        role.name = format!("current_{index}");
+        role.oid = 20_001 + index;
+        role.object_id = [index as u8 + 1; 16];
+        inputs.roles.insert(role.name.clone(), role);
+    }
     let statement = GrantRoleStmt {
         granted_roles: vec!["CURRENT_USER".into()],
-        grantee_roles: vec!["CURRENT_USER".into()],
-        grantor: Some("CURRENT_USER".into()),
+        grantee_roles: vec![RoleSpecification::CurrentUser],
+        grantor: Some(RoleSpecification::CurrentUser),
         is_grant: true,
         options: RoleMembershipOptions::default(),
         cascade: false,
     };
-    let bound = bind_grant_role_statement(&inputs, &inputs.roles, &statement).unwrap();
-    assert_eq!(bound.granted_roles, ["current_0"]);
-    assert_eq!(bound.grantee_roles, ["current_1"]);
-    assert_eq!(bound.grantor.as_deref(), Some("current_2"));
-    assert_eq!(inputs.current_reads.get(), 3);
+    let bound = MembershipRecipients::bind(&inputs, &inputs.roles, &statement).unwrap();
+    assert_eq!(bound.grantor.unwrap().name, "current_0");
+    assert_eq!(bound.members[0].name, "current_1");
+    assert_eq!(inputs.current_reads.get(), 2);
 }

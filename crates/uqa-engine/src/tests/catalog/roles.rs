@@ -10,6 +10,7 @@ mod coordination;
 mod creation;
 mod dependencies;
 mod identity;
+mod memberships;
 mod migration;
 mod ownership;
 mod publication;
@@ -41,8 +42,8 @@ fn role_registry_and_memberships_restore_together_after_reopen() {
         assert!(roles["managed"].has(uqa_sql::ast::RoleAttribute::Login));
         assert!(memberships
             .values()
-            .any(|membership| membership.role == "managed"
-                && membership.member == "creator"
+            .any(|membership| membership.role.name == "managed"
+                && membership.member.name == "creator"
                 && membership.admin_option
                 && !membership.inherit_option
                 && !membership.set_option));

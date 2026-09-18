@@ -194,7 +194,8 @@ fn unchanged_owners_follow_object_permission_rules_without_new_role_dependency_l
             } else {
                 sql(&first, &target.alter("dependent"));
             }
-            sql(&first, "RESET ROLE; GRANT dependent TO outsider WITH INHERIT TRUE, SET FALSE; SET ROLE outsider; BEGIN");
+            sql(&first, "RESET ROLE; GRANT dependent TO outsider WITH INHERIT TRUE, SET FALSE; SET ROLE outsider");
+            sql(&first, "BEGIN");
             sql(&first, &target.alter("dependent"));
             let key = first.row_locks.shared_catalog_key(role_lock(&first));
             assert!(

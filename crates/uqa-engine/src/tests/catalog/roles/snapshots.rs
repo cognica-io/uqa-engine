@@ -86,7 +86,7 @@ fn private_role_refresh_merges_only_the_metadata_record_changed_by_this_transact
                     .role_memberships
                     .read()
                     .values()
-                    .any(|entry| entry.role == "kept" && entry.member == "member"));
+                    .any(|entry| entry.role.name == "kept" && entry.member.name == "member"));
                 sql(&first, "COMMIT");
             }
         }
@@ -122,13 +122,13 @@ fn private_role_refresh_observes_savepoint_and_transaction_undo() {
                 .role_memberships
                 .read()
                 .values()
-                .any(|entry| entry.role == "outer_role"));
+                .any(|entry| entry.role.name == "outer_role"));
             assert!(!first
                 .durable
                 .role_memberships
                 .read()
                 .values()
-                .any(|entry| entry.role == "inner_role"));
+                .any(|entry| entry.role.name == "inner_role"));
             sql(
                 &first,
                 "ROLLBACK; SELECT * FROM pg_roles; SELECT * FROM pg_auth_members",
