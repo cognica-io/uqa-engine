@@ -59,18 +59,23 @@ fn view() -> StoredView {
         panic!("query fixture");
     };
     StoredView {
-        object_id: [7; 16],
-        role_owner: "owner".into(),
-        acl: None,
-        column_acls: BTreeMap::new(),
-        query: *query,
-        output_columns: Some(vec!["value".into()]),
-        persistence: RelationPersistence::Permanent,
-        options: Vec::new(),
-        kind: StoredViewKind::View,
-        materialized_rows: Vec::new(),
-        materialized_column_types: Vec::new(),
-        populated: true,
+        security: crate::catalog::security::BoundTableSecurity::owner(
+            crate::catalog::roles::RoleIdentity {
+                oid: 42,
+                object_id: [42; 16],
+            },
+        ),
+        definition: crate::catalog::stored_view::StoredViewDefinition {
+            object_id: [7; 16],
+            query: *query,
+            output_columns: Some(vec!["value".into()]),
+            persistence: RelationPersistence::Permanent,
+            options: Vec::new(),
+            kind: StoredViewKind::View,
+            materialized_rows: Vec::new(),
+            materialized_column_types: Vec::new(),
+            populated: true,
+        },
     }
 }
 
@@ -84,7 +89,10 @@ fn restored_view_decoder_preserves_current_and_query_only_formats() {
     };
     assert_eq!(current.object_id, original.object_id);
     assert_eq!(current.output_columns, original.output_columns);
-    assert!(current.role_owner.is_empty());
+    assert!(serde_json::to_value(&current)
+        .unwrap()
+        .get("role_owner")
+        .is_none());
     let RestoredView::Legacy(legacy) =
         serde_json::from_str(&serde_json::to_string(&original.query).unwrap()).unwrap()
     else {
@@ -92,7 +100,7 @@ fn restored_view_decoder_preserves_current_and_query_only_formats() {
     };
     assert_eq!(
         serde_json::to_value(legacy).unwrap(),
-        serde_json::to_value(original.query).unwrap()
+        serde_json::to_value(original.definition.query).unwrap()
     );
 }
 
@@ -118,11 +126,11 @@ fn restored_view_security_keeps_owner_and_public_metadata_error_precedence() {
     let roles = Roles::new();
     let mut candidate = view();
     validate_restored_view_security(&roles, "public.v", &candidate).unwrap();
-    assert_eq!(roles.reads.get(), 2);
+    assert_eq!(roles.reads.get(), 1);
     roles.reads.set(0);
-    candidate.role_owner = "missing".into();
+    candidate.security.role_owner.object_id = [99; 16];
     let error = validate_restored_view_security(&roles, "public.v", &candidate).unwrap_err();
-    assert!(error.contains("owned by missing role `missing`"));
+    assert!(error.contains("missing role incarnation"));
     assert_eq!(roles.reads.get(), 1);
     roles.reads.set(0);
     candidate.output_columns = None;

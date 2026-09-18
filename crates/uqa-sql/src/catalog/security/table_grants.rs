@@ -13,7 +13,7 @@ use super::{
         grant_acl, revoke_acl, select_acl_grantor, validate_table_security_invariants,
         RequestedTablePrivileges, TableAclPrivilege,
     },
-    TableSecurity,
+    BoundTableSecurity, TableSecurity,
 };
 use crate::catalog::roles::identity::RoleSubject;
 use crate::catalog::{
@@ -28,8 +28,12 @@ use std::collections::BTreeMap;
 use uqa_core::catalog_acl::AclGrantee;
 use uqa_core::RelationIdentity;
 pub type ViewPrivilegeUpdate = (RelationIdentity, StoredView);
-pub type ForeignTablePrivilegeUpdate = (RelationIdentity, TableSecurity);
-pub type ForeignTableGrantTarget<'a> = (&'a ResolvedTableGrantTarget, TableSecurity, Vec<String>);
+pub type ForeignTablePrivilegeUpdate = (RelationIdentity, BoundTableSecurity);
+pub type ForeignTableGrantTarget<'a> = (
+    &'a ResolvedTableGrantTarget,
+    BoundTableSecurity,
+    Vec<String>,
+);
 pub mod targets;
 pub struct ResolvedTableGrantTarget {
     pub requested: String,
@@ -381,7 +385,10 @@ pub fn view_privilege_updates(
 ) -> Result<Vec<ViewPrivilegeUpdate>, SQLError> {
     let mut updates = Vec::new();
     for (target, mut view) in targets {
-        let current = view.security();
+        let current = view
+            .security
+            .resolve(application.roles)
+            .map_err(SQLError::Internal)?;
         let (next, grantable) = application.apply(&current)?;
         crate::catalog::security::dependencies::added_table_acl_roles(
             &current,
@@ -404,7 +411,9 @@ pub fn view_privilege_updates(
         )?;
         application.record_warning(grantable, &target.relation, notices);
         if next != current {
-            view.set_security(next);
+            view.set_security(
+                BoundTableSecurity::bind(&next, application.roles).map_err(SQLError::Internal)?,
+            );
             updates.push((target.relation.clone(), view));
         }
     }
@@ -418,6 +427,9 @@ pub fn foreign_table_privilege_updates(
 ) -> Result<Vec<ForeignTablePrivilegeUpdate>, SQLError> {
     let mut updates = Vec::new();
     for (target, current, columns) in targets {
+        let current = current
+            .resolve(application.roles)
+            .map_err(SQLError::Internal)?;
         let (next, grantable) = application.apply(&current)?;
         crate::catalog::security::dependencies::added_table_acl_roles(
             &current,
@@ -434,7 +446,10 @@ pub fn foreign_table_privilege_updates(
         )?;
         application.record_warning(grantable, &target.relation, notices);
         if next != current {
-            updates.push((target.relation.clone(), next));
+            updates.push((
+                target.relation.clone(),
+                BoundTableSecurity::bind(&next, application.roles).map_err(SQLError::Internal)?,
+            ));
         }
     }
     Ok(updates)

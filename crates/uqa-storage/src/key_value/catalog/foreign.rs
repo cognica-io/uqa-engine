@@ -10,8 +10,7 @@ use super::{
     decode_relation_key, decode_value, encode_value, key_with_tag, read_str, relation_key,
     single_str_key, ForeignTableRow, KeyValueCatalog, RelationIdentity, RelationKind,
     StorageBackendError, StorageBackendResult, StoredForeignServer, StoredForeignTable,
-    TableAclEntry, STORED_FOREIGN_TABLE_SECURITY_VERSION, TAG_FOREIGN_SERVER, TAG_FOREIGN_TABLE,
-    TAG_RELATION,
+    STORED_FOREIGN_TABLE_SECURITY_VERSION, TAG_FOREIGN_SERVER, TAG_FOREIGN_TABLE, TAG_RELATION,
 };
 
 impl KeyValueCatalog {
@@ -59,9 +58,7 @@ impl KeyValueCatalog {
             &relation_key(TAG_FOREIGN_TABLE, &row.relation)?,
             &encode_value(&StoredForeignTable {
                 security_version: STORED_FOREIGN_TABLE_SECURITY_VERSION,
-                role_owner: row.role_owner.clone(),
-                acl: row.acl.clone(),
-                column_acls: row.column_acls.clone(),
+                security: row.security.clone(),
                 server_name: row.server_name.clone(),
                 columns_json: row.columns_json.clone(),
                 options_json: row.options_json.clone(),
@@ -73,9 +70,7 @@ impl KeyValueCatalog {
     pub(super) fn update_foreign_table_security_impl(
         &self,
         relation: &RelationIdentity,
-        role_owner: &str,
-        acl: Option<&[TableAclEntry]>,
-        column_acls: &std::collections::BTreeMap<String, Vec<TableAclEntry>>,
+        security: &crate::RelationSecurityRow,
     ) -> StorageBackendResult<bool> {
         let key = relation_key(TAG_FOREIGN_TABLE, relation)?;
         let Some(value) = self.store.get(&key)? else {
@@ -89,9 +84,7 @@ impl KeyValueCatalog {
                 stored.security_version
             )));
         }
-        stored.role_owner = role_owner.to_string();
-        stored.acl = acl.map(<[TableAclEntry]>::to_vec);
-        stored.column_acls.clone_from(column_acls);
+        stored.security = security.clone();
         self.store.put(&key, &encode_value(&stored)?)?;
         Ok(true)
     }
@@ -155,9 +148,7 @@ impl KeyValueCatalog {
             }
             rows.push(ForeignTableRow {
                 relation,
-                role_owner: stored.role_owner,
-                acl: stored.acl,
-                column_acls: stored.column_acls,
+                security: stored.security,
                 server_name: stored.server_name,
                 columns_json: stored.columns_json,
                 options_json: stored.options_json,

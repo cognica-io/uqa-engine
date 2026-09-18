@@ -6,6 +6,7 @@
 
 use super::super::context::{RoleDependencyRead, RoleTableSecurity, RoleTablesRead};
 use super::*;
+use crate::catalog::security::BoundTableSecurity;
 use crate::catalog::{roles::RoleDefinition, security::database::BoundDatabaseSecurity};
 use crate::{catalog::stored_view::StoredView, routines::SQLUserFunction};
 use std::{cell::RefCell, ops::Deref, rc::Rc, sync::Arc};
@@ -14,14 +15,14 @@ pub(super) type Events = Rc<RefCell<Vec<String>>>;
 pub(super) struct Table {
     pub name: String,
     pub persistence: crate::ast::RelationPersistence,
-    pub security: TableSecurity,
+    pub security: BoundTableSecurity,
     pub events: Events,
 }
 impl RoleTableSecurity for Table {
     fn persistence(&self) -> crate::ast::RelationPersistence {
         self.persistence
     }
-    fn security(&self) -> TableSecurity {
+    fn security(&self) -> BoundTableSecurity {
         self.events
             .borrow_mut()
             .push(format!("security {}", self.name));
@@ -61,7 +62,7 @@ pub(super) struct Catalog {
     pub schemas: BTreeMap<String, BoundSchemaSecurity>,
     pub tables: BTreeMap<RelationIdentity, Table>,
     pub views: BTreeMap<RelationIdentity, StoredView>,
-    pub foreign_tables: BTreeMap<RelationIdentity, TableSecurity>,
+    pub foreign_tables: BTreeMap<RelationIdentity, BoundTableSecurity>,
     pub system_relations: crate::catalog::security::system_relations::SystemRelationSecurities,
     pub sequences: BTreeMap<RelationIdentity, SequenceSecurity>,
     pub sequence_persistence: BTreeMap<RelationIdentity, crate::ast::RelationPersistence>,
@@ -105,13 +106,13 @@ impl Catalog {
             events: self.events.clone(),
         }
     }
-    pub fn table(&mut self, name: &str, owner: &str) {
+    pub fn table(&mut self, name: &str, owner: crate::catalog::roles::RoleIdentity) {
         self.tables.insert(
             RelationIdentity::new("public", name),
             Table {
                 name: name.into(),
                 persistence: crate::ast::RelationPersistence::Permanent,
-                security: TableSecurity::owner(owner),
+                security: BoundTableSecurity::owner(owner),
                 events: self.events.clone(),
             },
         );
@@ -141,7 +142,9 @@ impl RoleDependencyCatalog for Catalog {
     fn views(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, StoredView>> {
         Box::new(self.read("views", &self.views))
     }
-    fn foreign_tables(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, TableSecurity>> {
+    fn foreign_tables(
+        &self,
+    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundTableSecurity>> {
         Box::new(self.read("foreign", &self.foreign_tables))
     }
     fn sequences(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, SequenceSecurity>> {

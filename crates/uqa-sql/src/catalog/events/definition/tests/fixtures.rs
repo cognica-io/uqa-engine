@@ -100,9 +100,15 @@ impl EventRelationCatalog for Catalog {
     fn event_relation_owner(
         &self,
         relation: &RelationIdentity,
-    ) -> Result<(String, &'static str), SQLError> {
+    ) -> Result<(crate::catalog::roles::RoleIdentity, &'static str), SQLError> {
         self.record(format!("owner:{}", relation.qualified_name()));
-        Ok(("owner".into(), self.kind))
+        Ok((
+            crate::catalog::roles::RoleIdentity {
+                oid: 42,
+                object_id: [42; 16],
+            },
+            self.kind,
+        ))
     }
     fn view_kind(&self, _: &RelationIdentity) -> Option<StoredViewKind> {
         self.record("view-kind");
@@ -213,14 +219,38 @@ impl RoutineExecutionAuthority for Catalog {
         self.record("current-user");
         "reader".into()
     }
+    fn current_user_has_role_identity_privileges(
+        &self,
+        role: crate::catalog::roles::RoleIdentity,
+    ) -> bool {
+        assert_eq!(
+            role,
+            crate::catalog::roles::RoleIdentity {
+                oid: 42,
+                object_id: [42; 16]
+            }
+        );
+        self.record("inherits:owner");
+        self.allow_owner
+    }
     fn current_user_has_role_privileges(&self, role: &str) -> bool {
         self.record(format!("inherits:{role}"));
         self.allow_owner
     }
 }
 impl ViewPrivilegeCatalog for Catalog {
-    fn bind_role(&self, name: &str) -> Result<RoleReference, SQLError> {
-        Ok(name.into())
+    fn bound_role(
+        &self,
+        identity: crate::catalog::roles::RoleIdentity,
+    ) -> Result<RoleReference, SQLError> {
+        assert_eq!(identity.oid, 42);
+        Ok(RoleReference::Bound(Arc::new(
+            crate::catalog::roles::identity::RoleBinding {
+                name: "owner".into(),
+                oid: 42,
+                object_id: identity.object_id,
+            },
+        )))
     }
     fn view_definition(&self, _: &str) -> Result<Option<StoredView>, SQLError> {
         panic!("unexpected visible view")

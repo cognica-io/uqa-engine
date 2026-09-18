@@ -274,9 +274,7 @@ fn verify_catalog_lifecycle(
             let schema = TableSchema {
                 relation: RelationIdentity::from_legacy_name(&table)
                     .expect("valid fixture relation"),
-                role_owner: "uqa".into(),
-                acl: None,
-                column_acls: std::collections::BTreeMap::new(),
+                security: crate::RelationSecurityRow::legacy("uqa"),
                 object_id: [1
                     + case * 4
                     + u8::from(reverse) * 2

@@ -137,7 +137,7 @@ impl EventLookupContext<'_> {
         self.analysis
             .catalog
             .event_relation_owner(&relation)
-            .and_then(|(owner, _)| self.analysis.privileges.bind_role(&owner))
+            .and_then(|(owner, _)| self.analysis.privileges.bound_role(owner))
     }
     pub fn constraint_trigger_by_constraint_name(
         &self,

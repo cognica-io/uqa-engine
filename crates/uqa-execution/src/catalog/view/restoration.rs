@@ -65,17 +65,17 @@ fn validate_and_persist_restored_views(
     catalog: &dyn ViewRowsStorage,
     views: &BTreeMap<RelationIdentity, StoredView>,
     migrated_views: &BTreeSet<RelationIdentity>,
-    dispatch_upgraded_views: &[RelationIdentity],
+    revised_rows: &BTreeSet<RelationIdentity>,
 ) -> StorageBackendResult<()> {
     analysis::validate_migrated_view_security(context.roles, views)
         .map_err(StorageBackendError::Other)?;
-    for relation in dispatch_upgraded_views {
+    for relation in revised_rows {
         if migrated_views.contains(relation) {
             continue;
         }
         let view = views.get(relation).ok_or_else(|| {
             StorageBackendError::Other(format!(
-                "dispatch-upgraded view `{}` disappeared during restoration",
+                "updated view `{}` disappeared during restoration",
                 relation.qualified_name()
             ))
         })?;
@@ -83,6 +83,50 @@ fn validate_and_persist_restored_views(
     }
     Ok(())
 }
+fn restore_view(
+    context: &ViewRestoreContext<'_>,
+    row: &ViewRow,
+    allows_migration: bool,
+) -> StorageBackendResult<(StoredView, bool)> {
+    let view_name = row.relation.qualified_name();
+    let (definition, legacy_query) =
+        match serde_json::from_str::<RestoredView>(&row.definition_json)? {
+            RestoredView::Current(view) => (view, false),
+            RestoredView::Legacy(query) => (
+                uqa_sql::catalog::stored_view::StoredViewDefinition {
+                    object_id: [0; 16],
+                    query,
+                    output_columns: None,
+                    persistence: uqa_sql::ast::RelationPersistence::Permanent,
+                    options: Vec::new(),
+                    kind: StoredViewKind::View,
+                    materialized_rows: Vec::new(),
+                    materialized_column_types: Vec::new(),
+                    populated: true,
+                },
+                true,
+            ),
+        };
+    let security = crate::catalog::security::relation_restoration::restore_security(
+        &row.security,
+        definition.output_columns.as_deref(),
+        &context.roles.role_definitions(),
+        allows_migration,
+    )
+    .map_err(|error| {
+        StorageBackendError::Other(format!(
+            "view `{view_name}` has invalid security metadata: {error}"
+        ))
+    })?;
+    Ok((
+        StoredView {
+            security,
+            definition,
+        },
+        legacy_query,
+    ))
+}
+
 pub fn restore_views_from_catalog(
     context: &ViewRestoreContext<'_>,
     catalog: &dyn ViewRowsStorage,
@@ -96,32 +140,16 @@ pub fn restore_views_from_catalog(
     let mut routine_binding_migrations = BTreeSet::new();
     let mut missing_output_columns = Vec::new();
     let mut missing_object_ids = Vec::new();
-    let mut dispatch_upgraded_views = Vec::new();
+    let mut revised_rows = BTreeSet::new();
     for row in rows {
         let view_name = row.relation.qualified_name();
-        let mut view = match serde_json::from_str::<RestoredView>(&row.definition_json)? {
-            RestoredView::Current(view) => view,
-            RestoredView::Legacy(query) => {
-                routine_binding_migrations.insert(row.relation.clone());
-                StoredView {
-                    object_id: [0; 16],
-                    role_owner: row.role_owner.clone(),
-                    acl: row.acl.clone(),
-                    column_acls: row.column_acls.clone(),
-                    query,
-                    output_columns: None,
-                    persistence: uqa_sql::ast::RelationPersistence::Permanent,
-                    options: Vec::new(),
-                    kind: StoredViewKind::View,
-                    materialized_rows: Vec::new(),
-                    materialized_column_types: Vec::new(),
-                    populated: true,
-                }
-            }
-        };
-        view.role_owner = row.role_owner;
-        view.acl = row.acl;
-        view.column_acls = row.column_acls;
+        let (mut view, legacy_query) = restore_view(context, &row, allows_migration)?;
+        if legacy_query {
+            routine_binding_migrations.insert(row.relation.clone());
+        }
+        if matches!(row.security, uqa_storage::RelationSecurityRow::Legacy(_)) {
+            revised_rows.insert(row.relation.clone());
+        }
         if view.object_id == [0; 16] {
             view.object_id = context.identities.allocate_identity()?;
             missing_object_ids.push(row.relation.clone());
@@ -129,10 +157,8 @@ pub fn restore_views_from_catalog(
         if view.kind == StoredViewKind::View && view.output_columns.is_none() {
             missing_output_columns.push(row.relation.clone());
         }
-        analysis::validate_restored_view_security(context.roles, &view_name, &view)
-            .map_err(StorageBackendError::Other)?;
         if upgrade_legacy_view_dispatches(&mut view.query) {
-            dispatch_upgraded_views.push(row.relation.clone());
+            revised_rows.insert(row.relation.clone());
         }
         if query_plan_has_legacy_routine_identity(&view.query) {
             routine_binding_migrations.insert(row.relation.clone());
@@ -154,7 +180,7 @@ pub fn restore_views_from_catalog(
         && (!routine_binding_migrations.is_empty()
             || !missing_output_columns.is_empty()
             || !missing_object_ids.is_empty()
-            || !dispatch_upgraded_views.is_empty())
+            || !revised_rows.is_empty())
     {
         return Err(StorageBackendError::Other(
             "view catalog requires an initial-open metadata migration".into(),
@@ -174,13 +200,7 @@ pub fn restore_views_from_catalog(
         .chain(&missing_object_ids)
         .cloned()
         .collect::<BTreeSet<_>>();
-    validate_and_persist_restored_views(
-        context,
-        catalog,
-        &views,
-        &migrated_views,
-        &dispatch_upgraded_views,
-    )?;
+    validate_and_persist_restored_views(context, catalog, &views, &migrated_views, &revised_rows)?;
     **context.registry.views_write() = views;
     Ok(())
 }

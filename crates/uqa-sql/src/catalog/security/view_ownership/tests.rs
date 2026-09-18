@@ -86,31 +86,33 @@ impl ViewOwnerSchemas for Catalog {
         })
     }
 }
-fn view(kind: StoredViewKind) -> StoredView {
+fn view(catalog: &Catalog, kind: StoredViewKind) -> StoredView {
     let statement = crate::compile("SELECT 1 AS value").unwrap().remove(0);
     let UnifiedPlan::Query(query) = UnifiedPlan::lower(statement) else {
         panic!("query fixture");
     };
     StoredView {
-        object_id: [1; 16],
-        role_owner: "view_owner".into(),
-        acl: None,
-        column_acls: BTreeMap::new(),
-        query: *query,
-        output_columns: Some(vec!["value".into()]),
-        persistence: RelationPersistence::Permanent,
-        options: Vec::new(),
-        kind,
-        materialized_rows: Vec::new(),
-        materialized_column_types: Vec::new(),
-        populated: true,
+        security: crate::catalog::security::BoundTableSecurity::owner(
+            catalog.roles.borrow()["view_owner"].identity(),
+        ),
+        definition: crate::catalog::stored_view::StoredViewDefinition {
+            object_id: [1; 16],
+            query: *query,
+            output_columns: Some(vec!["value".into()]),
+            persistence: RelationPersistence::Permanent,
+            options: Vec::new(),
+            kind,
+            materialized_rows: Vec::new(),
+            materialized_column_types: Vec::new(),
+            populated: true,
+        },
     }
 }
 
 #[test]
 fn view_owner_success_precedes_name_parsing_and_retains_role_guard_order() {
     let catalog = Catalog::new("view_owner");
-    let view = view(StoredViewKind::View);
+    let view = view(&catalog, StoredViewKind::View);
     assert_eq!(
         ensure_view_owner(catalog.context(), "\"unterminated", &view).unwrap(),
         "view_owner"
@@ -126,7 +128,7 @@ fn view_owner_success_precedes_name_parsing_and_retains_role_guard_order() {
 #[test]
 fn schema_owner_drop_authority_does_not_grant_view_replacement_or_maintenance() {
     let catalog = Catalog::new("schema_owner");
-    let regular = view(StoredViewKind::View);
+    let regular = view(&catalog, StoredViewKind::View);
     ensure_view_drop_authority(catalog.context(), "public.v", &regular).unwrap();
     assert_eq!(
         *catalog.calls.borrow(),
@@ -146,7 +148,7 @@ fn schema_owner_drop_authority_does_not_grant_view_replacement_or_maintenance() 
     let error = ensure_materialized_view_maintenance(
         catalog.context(),
         "public.mv",
-        &view(StoredViewKind::Materialized),
+        &view(&catalog, StoredViewKind::Materialized),
     )
     .unwrap_err();
     assert_eq!(error.sqlstate(), Some("42501"));
@@ -161,7 +163,7 @@ fn view_drop_parses_the_target_before_reading_role_or_schema_catalogs() {
     let error = ensure_view_drop_authority(
         catalog.context(),
         "\"unterminated",
-        &view(StoredViewKind::View),
+        &view(&catalog, StoredViewKind::View),
     )
     .unwrap_err();
     assert!(error.to_string().contains("resolve view"));

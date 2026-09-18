@@ -19,9 +19,7 @@ fn fresh() -> Catalog {
 fn empty_table(schema: &str, name: &str) -> TableSchema {
     TableSchema {
         relation: RelationIdentity::new(schema, name),
-        role_owner: "uqa".into(),
-        acl: None,
-        column_acls: std::collections::BTreeMap::default(),
+        security: uqa_storage::RelationSecurityRow::legacy("uqa"),
         object_id: [1; 16],
         storage_generation: [1; 16],
         analyzer_json: "{}".into(),
@@ -46,6 +44,15 @@ fn sample_sequence_acl() -> Vec<uqa_storage::catalog::SequenceAclEntry> {
             ..uqa_storage::catalog::SequencePrivileges::default()
         },
     }]
+}
+
+fn legacy_security(
+    row: &uqa_storage::RelationSecurityRow,
+) -> &uqa_core::catalog_acl::LegacyRelationSecurity {
+    let uqa_storage::RelationSecurityRow::Legacy(security) = row else {
+        panic!("legacy fixture unexpectedly acquired role identities");
+    };
+    security
 }
 
 fn sample_table_acl() -> Vec<uqa_storage::catalog::TableAclEntry> {
@@ -73,9 +80,13 @@ fn view_rows_round_trip_role_ownership() {
     catalog
         .save_view(&ViewRow {
             relation: RelationIdentity::new("application", "owned_view"),
-            role_owner: "view_owner".into(),
-            acl: Some(acl.clone()),
-            column_acls: column_acls.clone(),
+            security: uqa_storage::RelationSecurityRow::Legacy(
+                uqa_core::catalog_acl::LegacyRelationSecurity {
+                    role_owner: "view_owner".into(),
+                    acl: Some(acl.clone()),
+                    column_acls: column_acls.clone(),
+                },
+            ),
             definition_json: r#"{"query":"definition"}"#.into(),
         })
         .unwrap();
@@ -85,9 +96,9 @@ fn view_rows_round_trip_role_ownership() {
         view.relation,
         RelationIdentity::new("application", "owned_view")
     );
-    assert_eq!(view.role_owner, "view_owner");
-    assert_eq!(view.acl, Some(acl));
-    assert_eq!(view.column_acls, column_acls);
+    assert_eq!(legacy_security(&view.security).role_owner, "view_owner");
+    assert_eq!(legacy_security(&view.security).acl, Some(acl));
+    assert_eq!(legacy_security(&view.security).column_acls, column_acls);
     assert_eq!(view.definition_json, r#"{"query":"definition"}"#);
 }
 
@@ -102,18 +113,14 @@ fn view_and_foreign_table_renames_move_rows_and_relation_claims_atomically() {
     catalog
         .save_view(&ViewRow {
             relation: view.clone(),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::new(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             definition_json: "view-definition".into(),
         })
         .unwrap();
     catalog
         .save_foreign_table(&ForeignTableRow {
             relation: foreign.clone(),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::new(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             server_name: "memory".into(),
             columns_json: "[]".into(),
             options_json: "{}".into(),
@@ -139,18 +146,14 @@ fn view_and_foreign_table_renames_move_rows_and_relation_claims_atomically() {
     catalog
         .save_view(&ViewRow {
             relation: view,
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::new(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             definition_json: "replacement-view-definition".into(),
         })
         .unwrap();
     catalog
         .save_foreign_table(&ForeignTableRow {
             relation: foreign,
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::new(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             server_name: "memory".into(),
             columns_json: "[]".into(),
             options_json: "{}".into(),
@@ -183,9 +186,13 @@ fn save_load_round_trip() {
     let column_acls = std::collections::BTreeMap::from([("title".to_string(), sample_table_acl())]);
     let schema = TableSchema {
         relation: RelationIdentity::new("public", "articles"),
-        role_owner: "article_owner".into(),
-        acl: Some(acl.clone()),
-        column_acls: column_acls.clone(),
+        security: uqa_storage::RelationSecurityRow::Legacy(
+            uqa_core::catalog_acl::LegacyRelationSecurity {
+                role_owner: "article_owner".into(),
+                acl: Some(acl.clone()),
+                column_acls: column_acls.clone(),
+            },
+        ),
         object_id: [1; 16],
         storage_generation: [1; 16],
         analyzer_json:
@@ -203,9 +210,15 @@ fn save_load_round_trip() {
     let loaded = cat.load_tables().unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].relation.qualified_name(), "public.articles");
-    assert_eq!(loaded[0].role_owner, "article_owner");
-    assert_eq!(loaded[0].acl, Some(acl));
-    assert_eq!(loaded[0].column_acls, column_acls);
+    assert_eq!(
+        legacy_security(&loaded[0].security).role_owner,
+        "article_owner"
+    );
+    assert_eq!(legacy_security(&loaded[0].security).acl, Some(acl));
+    assert_eq!(
+        legacy_security(&loaded[0].security).column_acls,
+        column_acls
+    );
     assert_eq!(loaded[0].object_id, [1; 16]);
     assert_eq!(loaded[0].storage_generation, [1; 16]);
     assert_eq!(loaded[0].fts_fields, vec!["title", "body"]);
@@ -222,9 +235,7 @@ fn catalog_facade_trait_object_round_trips_table() {
     let facade: &dyn CatalogFacade = &cat;
     let schema = TableSchema {
         relation: RelationIdentity::new("public", "facade_articles"),
-        role_owner: "facade_owner".into(),
-        acl: None,
-        column_acls: std::collections::BTreeMap::default(),
+        security: uqa_storage::RelationSecurityRow::legacy("facade_owner"),
         object_id: [2; 16],
         storage_generation: [2; 16],
         analyzer_json:
@@ -245,7 +256,10 @@ fn catalog_facade_trait_object_round_trips_table() {
         loaded[0].relation.qualified_name(),
         "public.facade_articles"
     );
-    assert_eq!(loaded[0].role_owner, "facade_owner");
+    assert_eq!(
+        legacy_security(&loaded[0].security).role_owner,
+        "facade_owner"
+    );
 }
 
 #[test]

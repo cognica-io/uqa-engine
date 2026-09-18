@@ -240,9 +240,7 @@ fn verify_binary_terms(native: bool) {
     catalog
         .save_table(&TableSchema {
             relation: RelationIdentity::from_legacy_name("public.docs").unwrap(),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: BTreeMap::new(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             object_id: [1; 16],
             storage_generation: [1; 16],
             analyzer_json: serde_json::to_string(&config).unwrap(),

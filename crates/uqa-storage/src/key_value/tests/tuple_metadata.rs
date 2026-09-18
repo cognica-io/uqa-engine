@@ -61,9 +61,7 @@ fn key_value_document_migration_separates_xmin_and_preserves_user_collisions() {
     catalog
         .save_table(&TableSchema {
             relation: crate::catalog::RelationIdentity::new("public", "system_xmin"),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: BTreeMap::new(),
+            security: crate::RelationSecurityRow::legacy("uqa"),
             object_id: [1; 16],
             storage_generation: [2; 16],
             analyzer_json: "{}".into(),
@@ -76,9 +74,7 @@ fn key_value_document_migration_separates_xmin_and_preserves_user_collisions() {
     catalog
         .save_table(&TableSchema {
             relation: crate::catalog::RelationIdentity::new("public", "user_xmin"),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: BTreeMap::new(),
+            security: crate::RelationSecurityRow::legacy("uqa"),
             object_id: [3; 16],
             storage_generation: [4; 16],
             analyzer_json: "{}".into(),
@@ -91,9 +87,7 @@ fn key_value_document_migration_separates_xmin_and_preserves_user_collisions() {
     catalog
         .save_table(&TableSchema {
             relation: crate::catalog::RelationIdentity::new("public", "schemaless_user_xmin"),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: BTreeMap::new(),
+            security: crate::RelationSecurityRow::legacy("uqa"),
             object_id: [5; 16],
             storage_generation: [6; 16],
             analyzer_json: "{}".into(),

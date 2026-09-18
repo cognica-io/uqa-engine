@@ -58,9 +58,7 @@ fn fixture() -> (ManagedConnection, Catalog) {
     catalog
         .save_table(&TableSchema {
             relation: RelationIdentity::new("app", "docs"),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::default(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             object_id: [1; 16],
             storage_generation: [2; 16],
             analyzer_json: "{}".into(),
@@ -73,9 +71,7 @@ fn fixture() -> (ManagedConnection, Catalog) {
     catalog
         .save_view(&ViewRow {
             relation: RelationIdentity::new("app", "visible"),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::default(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             definition_json: "{}".into(),
         })
         .unwrap();
@@ -99,9 +95,7 @@ fn fixture() -> (ManagedConnection, Catalog) {
     catalog
         .save_foreign_table(&ForeignTableRow {
             relation: RelationIdentity::new("app", "remote"),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::default(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             server_name: "remote".into(),
             columns_json: "[]".into(),
             options_json: "{}".into(),

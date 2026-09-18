@@ -474,11 +474,12 @@ fn insert_view_column_privileges(
     for (view_name, view) in catalog.views_of_kind(crate::catalog::view::StoredViewKind::View) {
         let (schema, table) = split_schema_name(&view_name)?;
         let columns = view_columns_for(context, catalog, resolution, &view)?;
+        let security = catalog.relation_security_names(&view.security)?;
         let default_view_acl;
-        let view_acl = if let Some(acl) = view.acl.as_deref() {
+        let view_acl = if let Some(acl) = security.acl.as_deref() {
             acl
         } else {
-            default_view_acl = [default_table_acl_entry(&view.role_owner)];
+            default_view_acl = [default_table_acl_entry(&security.role_owner)];
             &default_view_acl
         };
         for column in &columns {
@@ -488,18 +489,18 @@ fn insert_view_column_privileges(
                     &schema,
                     &table,
                     &column.name,
-                    &view.role_owner,
+                    &security.role_owner,
                     entry,
                 );
             }
-            if let Some(column_acl) = view.column_acls.get(&column.name) {
+            if let Some(column_acl) = security.column_acls.get(&column.name) {
                 for entry in column_acl {
                     insert_column_privilege_rows(
                         privileges,
                         &schema,
                         &table,
                         &column.name,
-                        &view.role_owner,
+                        &security.role_owner,
                         entry,
                     );
                 }
@@ -522,11 +523,12 @@ pub fn build_info_column_privileges(
             .table(resolution, &table_name)?
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
         let (schema, table) = split_schema_name(&table_name)?;
+        let security = catalog.relation_security_names(&table_snapshot.security)?;
         let default_table_acl;
-        let table_acl = if let Some(acl) = table_snapshot.security.acl.as_deref() {
+        let table_acl = if let Some(acl) = security.acl.as_deref() {
             acl
         } else {
-            default_table_acl = [default_table_acl_entry(&table_snapshot.security.role_owner)];
+            default_table_acl = [default_table_acl_entry(&security.role_owner)];
             &default_table_acl
         };
         for column in table_snapshot.columns.iter() {
@@ -536,18 +538,18 @@ pub fn build_info_column_privileges(
                     &schema,
                     &table,
                     &column.name,
-                    &table_snapshot.security.role_owner,
+                    &security.role_owner,
                     entry,
                 );
             }
-            if let Some(column_acl) = table_snapshot.security.column_acls.get(&column.name) {
+            if let Some(column_acl) = security.column_acls.get(&column.name) {
                 for entry in column_acl {
                     insert_column_privilege_rows(
                         &mut privileges,
                         &schema,
                         &table,
                         &column.name,
-                        &table_snapshot.security.role_owner,
+                        &security.role_owner,
                         entry,
                     );
                 }
@@ -614,14 +616,15 @@ pub fn build_info_views(
         let trigger_deletable = context
             .views
             .has_instead_of_trigger(&name, uqa_sql::ast::TriggerEvent::Delete)?;
-        let definition =
-            if catalog.role_is_enabled_for(resolution.current_user(), &stored.role_owner) {
-                str_value(super::view_definition::view_definition(
-                    catalog, resolution, &stored, false, 0,
-                )?)
-            } else {
-                Value::Null
-            };
+        let definition = if catalog
+            .role_is_enabled_for(resolution.current_user(), &stored.security.role_owner)
+        {
+            str_value(super::view_definition::view_definition(
+                catalog, resolution, &stored, false, 0,
+            )?)
+        } else {
+            Value::Null
+        };
         rows.push(row([
             ("table_catalog", catalog_name()),
             ("table_schema", str_value(schema)),

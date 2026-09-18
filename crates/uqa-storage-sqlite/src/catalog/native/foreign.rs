@@ -9,9 +9,7 @@
 use super::{
     optional_text, string, text, Catalog, Family, NativeRecordOwner, RelationRecord, Result,
 };
-use crate::catalog::{ForeignTableRow, RelationIdentity, TableAclEntry};
-use rusqlite::types::ValueRef;
-use std::collections::BTreeMap;
+use crate::catalog::{ForeignTableRow, RelationIdentity};
 
 type ServerRow = (String, String, String);
 
@@ -39,8 +37,8 @@ impl Catalog {
         if !self.conn.is_native_record_session() {
             return Ok(None);
         }
-        let acl = row.acl.as_deref().map(serde_json::to_string).transpose()?;
-        let columns = serde_json::to_string(&row.column_acls)?;
+        let (security_owner, acl, columns) =
+            super::super::role_security::encode_relation(&row.security)?;
         self.save_native_relation(
             RelationRecord::ForeignTable,
             &row.relation,
@@ -51,7 +49,7 @@ impl Catalog {
                 text(&row.server_name),
                 text(&row.columns_json),
                 text(&row.options_json),
-                text(&row.role_owner),
+                (&security_owner).into(),
                 optional_text(acl.as_deref()),
                 text(&columns),
             ],
@@ -61,13 +59,11 @@ impl Catalog {
     pub(in crate::catalog) fn update_native_foreign_security(
         &self,
         relation: &RelationIdentity,
-        role_owner: &str,
-        acl: Option<&[TableAclEntry]>,
-        column_acls: &BTreeMap<String, Vec<TableAclEntry>>,
+        security: &uqa_storage::RelationSecurityRow,
     ) -> Result<Option<bool>> {
         self.conn.with_native_write(|snapshot, batch| {
-            let acl = acl.map(serde_json::to_string).transpose()?;
-            let columns = serde_json::to_string(column_acls)?;
+            let (security_owner, acl, columns) =
+                super::super::role_security::encode_relation(security)?;
             let owner = NativeRecordOwner::Database(snapshot.database);
             Ok(snapshot
                 .read_row(
@@ -86,7 +82,7 @@ impl Catalog {
                                 row[3],
                                 row[4],
                                 row[5],
-                                text(role_owner),
+                                (&security_owner).into(),
                                 optional_text(acl.as_deref()),
                                 text(&columns),
                             ],
@@ -112,13 +108,9 @@ impl Catalog {
                         server_name: string(row[3])?,
                         columns_json: string(row[4])?,
                         options_json: string(row[5])?,
-                        role_owner: string(row[6])?,
-                        acl: if row[7] == ValueRef::Null {
-                            None
-                        } else {
-                            Some(serde_json::from_str(&string(row[7])?)?)
-                        },
-                        column_acls: serde_json::from_str(&string(row[8])?)?,
+                        security: super::super::role_security::decode_relation_cells(
+                            row[6], row[7], row[8],
+                        )?,
                     });
                     Ok(())
                 },

@@ -7,7 +7,7 @@
 //! Catalog snapshots resolve persistent and virtual names in one namespace.
 
 use super::*;
-use crate::catalog::{security::TableSecurity, test_support::empty_catalog};
+use crate::catalog::{security::BoundTableSecurity, test_support::empty_catalog};
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::VirtualRelation;
 
@@ -18,7 +18,9 @@ fn catalog() -> CatalogReadView {
             RelationIdentity::new(schema, "pg_class"),
             CatalogTableSnapshot {
                 object_id: [1; 16],
-                security: Arc::new(TableSecurity::owner("uqa")),
+                security: Arc::new(BoundTableSecurity::owner(
+                    uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
+                )),
                 columns: Arc::default(),
                 columns_declared: true,
                 checks: Arc::default(),

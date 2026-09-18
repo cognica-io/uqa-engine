@@ -9,7 +9,8 @@
 use crate::{
     catalog::{
         security::{
-            database::BoundDatabaseSecurity, BoundSchemaSecurity, SequenceSecurity, TableSecurity,
+            database::BoundDatabaseSecurity, BoundSchemaSecurity, BoundTableSecurity,
+            SequenceSecurity,
         },
         stored_view::StoredView,
     },
@@ -21,7 +22,7 @@ use uqa_core::RelationIdentity;
 pub type RoleDependencyRead<'a, T> = Box<dyn Deref<Target = T> + 'a>;
 /// Table security is read lazily at each visited role and relation pair.
 pub trait RoleTableSecurity {
-    fn security(&self) -> TableSecurity;
+    fn security(&self) -> BoundTableSecurity;
     fn persistence(&self) -> crate::ast::RelationPersistence;
 }
 /// The iterator borrows its entries while the original table registry guard is retained.
@@ -35,7 +36,9 @@ pub trait RoleDependencyCatalog:
     fn schemas(&self) -> RoleDependencyRead<'_, BTreeMap<String, BoundSchemaSecurity>>;
     fn tables(&self) -> Box<dyn RoleTablesRead + '_>;
     fn views(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, StoredView>>;
-    fn foreign_tables(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, TableSecurity>>;
+    fn foreign_tables(
+        &self,
+    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundTableSecurity>>;
     fn sequences(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, SequenceSecurity>>;
     fn routines(&self) -> RoleDependencyRead<'_, BTreeMap<String, Vec<Arc<SQLUserFunction>>>>;
 }

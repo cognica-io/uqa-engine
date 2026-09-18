@@ -99,10 +99,11 @@ impl ViewPrivilegeCatalog for Engine {
     fn current_role(&self) -> RoleReference {
         self.current_role()
     }
-    fn bind_role(&self, name: &str) -> Result<RoleReference, SQLError> {
-        RoleReference::from(name)
-            .bind(&self.durable.roles.read())
-            .map(|role| RoleReference::Bound(Arc::new(role)))
+    fn bound_role(
+        &self,
+        identity: uqa_sql::catalog::roles::RoleIdentity,
+    ) -> Result<RoleReference, SQLError> {
+        RoleReference::from_identity(identity, &self.durable.roles.read())
     }
     fn ensure_view_privilege_for(
         &self,

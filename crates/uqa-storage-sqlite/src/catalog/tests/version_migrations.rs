@@ -60,9 +60,7 @@ fn migration_16_adds_backward_compatible_table_constraints() {
     current
         .save_table(&TableSchema {
             relation: RelationIdentity::new("public", "legacy"),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::default(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             object_id: [1; 16],
             storage_generation: [1; 16],
             analyzer_json: "{}".into(),
@@ -97,9 +95,7 @@ fn migration_24_adds_persistent_table_storage_generations() {
     current
         .save_table(&TableSchema {
             relation: RelationIdentity::new("public", "legacy_generation"),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::default(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             object_id: [7; 16],
             storage_generation: [7; 16],
             analyzer_json: "{}".into(),
@@ -138,9 +134,7 @@ fn migration_24_preserves_a_storage_generation_installed_before_its_version_mark
     current
         .save_table(&TableSchema {
             relation: RelationIdentity::new("public", "early_generation"),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::default(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             object_id: [11; 16],
             storage_generation: [11; 16],
             analyzer_json: "{}".into(),
@@ -184,9 +178,7 @@ fn migration_25_adds_persistent_table_object_identities() {
     current
         .save_table(&TableSchema {
             relation: RelationIdentity::new("public", "legacy_object"),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::default(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             object_id: [7; 16],
             storage_generation: [8; 16],
             analyzer_json: "{}".into(),

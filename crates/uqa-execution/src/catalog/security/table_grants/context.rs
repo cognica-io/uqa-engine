@@ -25,14 +25,18 @@ use uqa_core::RelationIdentity;
 use uqa_sql::catalog::{
     roles::{guards::RoleCatalogGuards, RoleReferenceNames},
     security::{
-        grants::GrantNamespace, table_grants::targets::TableGrantResolution, TableSecurity,
+        grants::GrantNamespace, table_grants::targets::TableGrantResolution, BoundTableSecurity,
     },
 };
 use uqa_storage::{CatalogFacade, StorageBackendResult};
-pub type TableSecurityWrite<'a> = Box<dyn DerefMut<Target = TableSecurity> + 'a>;
+pub type TableSecurityWrite<'a> = Box<dyn DerefMut<Target = BoundTableSecurity> + 'a>;
 pub trait TableGrantState: TablePrivilegeState {
     fn security_write(&self) -> TableSecurityWrite<'_>;
-    fn persist_security(&self, name: &str, security: &TableSecurity) -> StorageBackendResult<()>;
+    fn persist_security(
+        &self,
+        name: &str,
+        security: &BoundTableSecurity,
+    ) -> StorageBackendResult<()>;
 }
 pub trait TableGrantRead<'a> {
     fn keys(&self) -> Box<dyn Iterator<Item = &RelationIdentity> + '_>;

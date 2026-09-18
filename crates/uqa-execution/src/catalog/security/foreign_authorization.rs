@@ -17,7 +17,7 @@ use uqa_sql::{
         security::{
             ownership::RelationOwnerSchemas,
             table::{role_has_table_privilege, TableAclPrivilege},
-            TableSecurity,
+            BoundTableSecurity,
         },
     },
     SQLError,
@@ -33,7 +33,10 @@ impl ForeignAuthorizationContext<'_> {
     pub fn ensure_foreign_table_owner(&self, name: &str) -> Result<String, SQLError> {
         let (relation, security) = bound_foreign_table_security(self.catalog, name)?;
         if self.current_user_has_role_privileges(&security.role_owner) {
-            return Ok(security.role_owner);
+            return security
+                .resolve(&self.roles.role_definitions())
+                .map(|security| security.role_owner)
+                .map_err(SQLError::Internal);
         }
         Err(SQLError::Routine {
             sqlstate: "42501".into(),
@@ -49,7 +52,7 @@ impl ForeignAuthorizationContext<'_> {
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
         if role_has_table_privilege(
-            &security,
+            &security.resolve(&roles).map_err(SQLError::Internal)?,
             &self.names.current_role(),
             privilege,
             &roles,
@@ -87,18 +90,13 @@ impl ForeignAuthorizationContext<'_> {
 pub fn persist_foreign_table_security(
     catalog: Option<&dyn CatalogFacade>,
     relation: &RelationIdentity,
-    security: &TableSecurity,
+    security: &BoundTableSecurity,
 ) -> Result<(), SQLError> {
     let Some(catalog) = catalog else {
         return Ok(());
     };
     let updated = catalog
-        .update_foreign_table_security(
-            relation,
-            &security.role_owner,
-            security.acl.as_deref(),
-            &security.column_acls,
-        )
+        .update_foreign_table_security(relation, &security.row().into())
         .map_err(|error| {
             SQLError::Internal(format!(
                 "persist foreign table security for `{}`: {error}",

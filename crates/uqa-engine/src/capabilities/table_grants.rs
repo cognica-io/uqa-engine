@@ -19,7 +19,7 @@ use uqa_execution::catalog::security::{
 use uqa_sql::{
     catalog::{
         resolution::RelationResolution,
-        security::{table_grants::targets::TableGrantResolution, TableSecurity},
+        security::{table_grants::targets::TableGrantResolution, BoundTableSecurity},
     },
     SQLError,
 };
@@ -54,13 +54,13 @@ impl<'a> TableGrantRead<'a> for GrantTables<'a> {
     }
 }
 impl TablePrivilegeState for GrantTable<'_> {
-    fn role_owner(&self) -> String {
+    fn role_owner(&self) -> uqa_sql::catalog::roles::RoleIdentity {
         self.state.role_owner()
     }
     fn columns(&self) -> uqa_execution::catalog::security::table_inquiry::TableColumnsRead<'_> {
         Box::new(self.state.columns.read())
     }
-    fn security(&self) -> TableSecurity {
+    fn security(&self) -> BoundTableSecurity {
         self.state.security()
     }
     fn column_names(&self) -> Vec<String> {
@@ -71,7 +71,11 @@ impl TableGrantState for GrantTable<'_> {
     fn security_write(&self) -> TableSecurityWrite<'_> {
         Box::new(self.state.security.write())
     }
-    fn persist_security(&self, name: &str, security: &TableSecurity) -> StorageBackendResult<()> {
+    fn persist_security(
+        &self,
+        name: &str,
+        security: &BoundTableSecurity,
+    ) -> StorageBackendResult<()> {
         let table = self.state.as_ref();
         let columns = table.columns.read().clone();
         let constraints = uqa_sql::ast::TableConstraintSet {

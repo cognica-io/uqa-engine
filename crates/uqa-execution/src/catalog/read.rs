@@ -255,6 +255,23 @@ impl CatalogReadView {
         self.snapshot.definitions.roles.values()
     }
 
+    pub fn relation_security_names(
+        &self,
+        security: &crate::catalog::security::BoundTableSecurity,
+    ) -> Result<crate::catalog::security::TableSecurity, SQLError> {
+        security
+            .resolve(&self.snapshot.definitions.roles)
+            .map_err(SQLError::Internal)
+    }
+
+    pub fn view_owner(
+        &self,
+        view: &crate::catalog::view::StoredView,
+    ) -> Result<RoleReference, SQLError> {
+        view.security
+            .owner_reference(&self.snapshot.definitions.roles)
+    }
+
     pub fn bind_role(&self, name: &str) -> Result<RoleReference, SQLError> {
         RoleReference::from(name)
             .bind(&self.snapshot.definitions.roles)
@@ -477,7 +494,7 @@ impl CatalogReadView {
     pub fn foreign_table_security(
         &self,
         name: &str,
-    ) -> Result<&crate::catalog::security::TableSecurity, SQLError> {
+    ) -> Result<crate::catalog::security::TableSecurity, SQLError> {
         let relation = uqa_core::RelationIdentity::from_legacy_name(name).map_err(|error| {
             SQLError::Internal(format!("resolve catalog foreign table `{name}`: {error}"))
         })?;
@@ -489,7 +506,9 @@ impl CatalogReadView {
                 SQLError::Internal(format!(
                     "catalog foreign table `{name}` has no security metadata"
                 ))
-            })
+            })?
+            .resolve(&self.snapshot.definitions.roles)
+            .map_err(SQLError::Internal)
     }
 
     pub fn catalog_indexes(&self) -> impl Iterator<Item = &uqa_storage::CatalogIndexRow> {

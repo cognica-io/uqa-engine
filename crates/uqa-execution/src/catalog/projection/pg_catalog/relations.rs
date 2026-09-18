@@ -37,7 +37,11 @@ pub fn build_pg_tables(
             ("tablename", str_value(table)),
             (
                 "tableowner",
-                str_value(table_snapshot.security.role_owner.clone()),
+                str_value(
+                    catalog
+                        .relation_security_names(&table_snapshot.security)?
+                        .role_owner,
+                ),
             ),
             ("tablespace", Value::Null),
             (
@@ -222,7 +226,14 @@ pub fn build_pg_views(
         rows.push(row([
             ("schemaname", str_value(schema)),
             ("viewname", str_value(view)),
-            ("viewowner", str_value(stored.role_owner)),
+            (
+                "viewowner",
+                str_value(
+                    catalog
+                        .relation_security_names(&stored.security)?
+                        .role_owner,
+                ),
+            ),
             ("definition", str_value(definition)),
         ]));
     }
@@ -240,7 +251,14 @@ pub fn build_pg_matviews(
         rows.push(row([
             ("schemaname", str_value(schema)),
             ("matviewname", str_value(matview)),
-            ("matviewowner", str_value(&stored.role_owner)),
+            (
+                "matviewowner",
+                str_value(
+                    catalog
+                        .relation_security_names(&stored.security)?
+                        .role_owner,
+                ),
+            ),
             ("tablespace", Value::Null),
             ("hasindexes", bool_value(false)),
             ("ispopulated", bool_value(stored.populated)),

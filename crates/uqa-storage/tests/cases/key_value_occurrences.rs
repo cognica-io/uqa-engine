@@ -367,9 +367,7 @@ fn binary_nori_terms_and_source_metadata_follow_column_and_table_lifecycles() {
     catalog
         .save_table(&TableSchema {
             relation: RelationIdentity::from_legacy_name("public.docs").unwrap(),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: BTreeMap::new(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             object_id: [1; 16],
             storage_generation: [1; 16],
             analyzer_json: serde_json::to_string(&config).unwrap(),

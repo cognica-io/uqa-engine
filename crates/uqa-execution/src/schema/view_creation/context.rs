@@ -36,8 +36,11 @@ pub trait MaterializedViewAccess {
 pub type ViewOwnerQuery<'a> =
     Box<dyn FnOnce(&dyn TableAsQuerySource) -> Result<SQLResult, SQLError> + 'a>;
 pub trait ViewQueryOwners {
-    fn with_owner(&self, owner: &str, operation: ViewOwnerQuery<'_>)
-        -> Result<SQLResult, SQLError>;
+    fn with_owner(
+        &self,
+        owner: &uqa_sql::catalog::roles::RoleReference,
+        operation: ViewOwnerQuery<'_>,
+    ) -> Result<SQLResult, SQLError>;
 }
 pub struct ViewCreationContext<'a> {
     pub catalog: &'a dyn ViewCreationCatalog,

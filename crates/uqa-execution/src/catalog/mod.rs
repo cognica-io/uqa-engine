@@ -12,7 +12,7 @@ pub mod security;
 pub mod sequence;
 pub mod view;
 
-use security::{BoundDatabaseSecurity, BoundSchemaSecurity, SequenceSecurity, TableSecurity};
+use security::{BoundDatabaseSecurity, BoundSchemaSecurity, BoundTableSecurity, SequenceSecurity};
 use sequence::SequenceState;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -41,7 +41,7 @@ pub struct CatalogReadSnapshot {
 #[derive(Clone)]
 pub struct CatalogTableSnapshot {
     pub object_id: [u8; 16],
-    pub security: Arc<crate::catalog::security::TableSecurity>,
+    pub security: Arc<crate::catalog::security::BoundTableSecurity>,
     pub columns: Arc<Vec<uqa_sql::ast::ColumnDef>>,
     pub columns_declared: bool,
     pub checks: Arc<Vec<uqa_sql::ast::TableCheck>>,
@@ -83,7 +83,7 @@ pub struct CatalogDefinitionSnapshot {
     pub sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
     pub sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
     pub sequence_security: Arc<BTreeMap<RelationIdentity, SequenceSecurity>>,
-    pub foreign_table_security: Arc<BTreeMap<RelationIdentity, TableSecurity>>,
+    pub foreign_table_security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
     pub system_relation_security:
         Arc<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
     pub roles: Arc<BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>>,

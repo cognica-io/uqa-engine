@@ -42,13 +42,13 @@ impl EventRelationCatalog for Engine {
     fn event_relation_owner(
         &self,
         relation: &RelationIdentity,
-    ) -> Result<(String, &'static str), SQLError> {
+    ) -> Result<(uqa_sql::catalog::roles::RoleIdentity, &'static str), SQLError> {
         if let Some(table) = self.storage.tables.read().get(relation) {
             return Ok((table.role_owner(), "table"));
         }
         if let Some(view) = self.durable.views.read().get(relation) {
             return Ok((
-                view.role_owner.clone(),
+                view.security.role_owner,
                 match view.kind {
                     StoredViewKind::View => "view",
                     StoredViewKind::Materialized => "materialized view",
@@ -61,7 +61,7 @@ impl EventRelationCatalog for Engine {
                 .foreign_table_security
                 .read()
                 .get(relation)
-                .map(|security| security.role_owner.clone())
+                .map(|security| security.role_owner)
                 .ok_or_else(|| {
                     SQLError::Internal(format!(
                         "foreign trigger relation `{}` has no security metadata",

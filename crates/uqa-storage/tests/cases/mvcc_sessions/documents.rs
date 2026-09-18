@@ -21,9 +21,7 @@ fn fields(n: i64) -> BTreeMap<String, Value> {
 fn schema(name: &str) -> TableSchema {
     TableSchema {
         relation: RelationIdentity::new("public", name),
-        role_owner: "owner".into(),
-        acl: None,
-        column_acls: BTreeMap::new(),
+        security: uqa_storage::RelationSecurityRow::legacy("owner"),
         object_id: [0; 16],
         storage_generation: [0; 16],
         analyzer_json: "{}".into(),

@@ -12,9 +12,9 @@ use fixtures::Catalog;
 #[test]
 fn table_dependencies_visit_requested_roles_first_and_read_security_lazily() {
     let mut catalog = Catalog::new();
-    catalog.table("a", "second");
-    catalog.table("b", "first");
-    catalog.table("c", "first");
+    catalog.table("a", catalog.roles["second"].identity());
+    catalog.table("b", catalog.roles["first"].identity());
+    catalog.table("c", catalog.roles["first"].identity());
     let error = ensure_roles_have_no_object_dependencies(
         &catalog,
         &["first".into(), "second".into()],

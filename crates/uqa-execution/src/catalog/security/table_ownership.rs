@@ -22,7 +22,9 @@ use crate::schema::{
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::{ColumnDef, RelationPersistence, TableConstraintSet},
-    catalog::security::{ownership::OwnerChangeAuthority, table::rewrite_acl_owner, TableSecurity},
+    catalog::security::{
+        ownership::OwnerChangeAuthority, table::rewrite_acl_owner, BoundTableSecurity,
+    },
     SQLError,
 };
 use uqa_storage::StorageBackendResult;
@@ -38,7 +40,7 @@ pub trait TableOwnerState: TablePrivilegeState {
         &self,
         name: &str,
         schema: &TableOwnerSchema,
-        security: &TableSecurity,
+        security: &BoundTableSecurity,
     ) -> StorageBackendResult<()>;
     fn security_write(&self) -> TableSecurityWrite<'_>;
 }
@@ -79,7 +81,10 @@ impl TableOwnershipContext<'_> {
             || self.writer.prepare_writer(),
             |roles, memberships| {
                 let (relation, table) = self.bound_table_for_security(name)?;
-                let mut security = table.security();
+                let mut security = table
+                    .security()
+                    .resolve(roles)
+                    .map_err(SQLError::Internal)?;
                 if security.role_owner == owner.name {
                     return Ok(None);
                 }
@@ -92,7 +97,10 @@ impl TableOwnershipContext<'_> {
                 authority.require_owner_change(&security.role_owner, "table", &relation.name)?;
                 authority.require_schema_create(self.roles.schemas, &relation.schema)?;
                 rewrite_acl_owner(&mut security, &owner.name);
-                Ok(Some((table, security)))
+                Ok(Some((
+                    table,
+                    BoundTableSecurity::bind(&security, roles).map_err(SQLError::Internal)?,
+                )))
             },
         )?;
         let Some((table, table_security)) = value else {

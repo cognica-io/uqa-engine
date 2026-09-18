@@ -17,7 +17,7 @@ pub use uqa_sql::catalog::security::database::{
 
 pub use uqa_sql::catalog::security::SequenceSecurity;
 
-pub use uqa_sql::catalog::security::TableSecurity;
+pub use uqa_sql::catalog::security::{BoundTableSecurity, TableSecurity};
 
 pub use uqa_sql::catalog::security::{BoundSchemaSecurity, SchemaSecurity};
 
@@ -39,3 +39,5 @@ pub mod table_authorization;
 pub mod table_maintenance;
 
 pub mod table_ownership;
+
+pub mod relation_restoration;

@@ -25,6 +25,14 @@ pub struct TableSecurity {
 }
 
 impl TableSecurity {
+    pub fn from_legacy(row: uqa_core::catalog_acl::LegacyRelationSecurity) -> Self {
+        Self {
+            role_owner: row.role_owner,
+            acl: row.acl,
+            column_acls: row.column_acls,
+        }
+    }
+
     pub fn owner(role_owner: impl Into<String>) -> Self {
         Self {
             role_owner: role_owner.into(),

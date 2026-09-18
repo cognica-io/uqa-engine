@@ -8,7 +8,7 @@
 use crate::Engine;
 use uqa_core::RelationIdentity;
 use uqa_execution::{
-    catalog::{foreign::StoredForeignTable, security::TableSecurity},
+    catalog::{foreign::StoredForeignTable, security::BoundTableSecurity},
     schema::{
         foreign_table_alteration::{
             ForeignMemoryRegistryWrite, ForeignSecurityRegistryWrite, ForeignTableAlterAccess,
@@ -49,7 +49,7 @@ impl ForeignTableAlterCatalog for Engine {
     fn contains_table(&self, relation: &RelationIdentity) -> bool {
         self.durable.foreign_tables.read().contains_key(relation)
     }
-    fn security(&self, relation: &RelationIdentity) -> Option<TableSecurity> {
+    fn security(&self, relation: &RelationIdentity) -> Option<BoundTableSecurity> {
         self.durable
             .foreign_table_security
             .read()
@@ -97,7 +97,7 @@ impl ForeignTableAlterPublication for Engine {
     fn persist_security(
         &self,
         relation: &RelationIdentity,
-        security: &TableSecurity,
+        security: &BoundTableSecurity,
     ) -> Result<(), SQLError> {
         self.persist_foreign_table_security(relation, security)
     }

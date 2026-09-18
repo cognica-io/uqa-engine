@@ -9,7 +9,7 @@
 use super::native::{text, RelationRecord};
 use super::{
     params, Catalog, CatalogIndexRow, ForeignTableRow, RelationIdentity, RelationKind, Result,
-    SQLiteError, TableAclEntry,
+    SQLiteError,
 };
 use crate::mvcc::native::NativeRecordFamily as Family;
 
@@ -88,8 +88,7 @@ impl Catalog {
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
             Self::claim_relation(&tx, &row.relation, RelationKind::ForeignTable)?;
-            let acl_json = row.acl.as_deref().map(serde_json::to_string).transpose()?;
-            let column_acls_json = serde_json::to_string(&row.column_acls)?;
+            let (role_owner, acl_json, column_acls_json) = super::role_security::encode_relation(&row.security)?;
             tx.execute(
                 "INSERT OR REPLACE INTO _foreign_tables \
                     (schema_name, relation_name, kind, role_owner, acl_json, column_acls_json, server_name, columns_json, options) \
@@ -97,7 +96,7 @@ impl Catalog {
                 params![
                     row.relation.schema,
                     row.relation.name,
-                    row.role_owner,
+                    role_owner,
                     acl_json,
                     column_acls_json,
                     row.server_name,
@@ -113,18 +112,14 @@ impl Catalog {
     pub fn update_foreign_table_security(
         &self,
         relation: &RelationIdentity,
-        role_owner: &str,
-        acl: Option<&[TableAclEntry]>,
-        column_acls: &std::collections::BTreeMap<String, Vec<TableAclEntry>>,
+        security: &uqa_storage::RelationSecurityRow,
     ) -> Result<bool> {
-        if let Some(updated) =
-            self.update_native_foreign_security(relation, role_owner, acl, column_acls)?
-        {
+        if let Some(updated) = self.update_native_foreign_security(relation, security)? {
             return Ok(updated);
         }
         self.conn.with_mut(|connection| {
-            let acl_json = acl.map(serde_json::to_string).transpose()?;
-            let column_acls_json = serde_json::to_string(column_acls)?;
+            let (role_owner, acl_json, column_acls_json) =
+                super::role_security::encode_relation(security)?;
             Ok(connection.execute(
                 "UPDATE _foreign_tables
                     SET role_owner = ?3, acl_json = ?4, column_acls_json = ?5
@@ -228,7 +223,7 @@ impl Catalog {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
+                    r.get::<_, rusqlite::types::Value>(2)?,
                     r.get::<_, Option<String>>(3)?,
                     r.get::<_, String>(4)?,
                     r.get::<_, String>(5)?,
@@ -241,12 +236,7 @@ impl Catalog {
                 let (schema, name, owner, acl_json, column_acls_json, server, cols, opts) = row?;
                 out.push(ForeignTableRow {
                     relation: RelationIdentity::new(schema, name),
-                    role_owner: owner,
-                    acl: acl_json
-                        .as_deref()
-                        .map(serde_json::from_str)
-                        .transpose()?,
-                    column_acls: serde_json::from_str(&column_acls_json)?,
+                    security: super::role_security::decode_relation((&owner).into(), acl_json.as_deref(), Some(&column_acls_json))?,
                     server_name: server,
                     columns_json: cols,
                     options_json: opts,

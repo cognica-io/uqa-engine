@@ -47,8 +47,17 @@ pub fn ensure_view_owner(
     canonical_name: &str,
     view: &StoredView,
 ) -> Result<String, SQLError> {
-    if current_user_has_role_privileges(context, &view.role_owner) {
-        return Ok(view.role_owner.clone());
+    {
+        let current = context.session.current_role();
+        let roles = context.roles.role_definitions();
+        let memberships = context.roles.role_memberships();
+        if role_inherits(&roles, &memberships, &current, &view.security.role_owner) {
+            return view
+                .security
+                .resolve(&roles)
+                .map(|security| security.role_owner)
+                .map_err(SQLError::Internal);
+        }
     }
     let relation = RelationIdentity::from_legacy_name(canonical_name)
         .map_err(|error| SQLError::Internal(format!("resolve view `{canonical_name}`: {error}")))?;
@@ -69,7 +78,7 @@ pub fn ensure_view_drop_authority(
 ) -> Result<(), SQLError> {
     let relation = RelationIdentity::from_legacy_name(canonical_name)
         .map_err(|error| SQLError::Internal(format!("resolve view `{canonical_name}`: {error}")))?;
-    if current_user_has_role_privileges(context, &view.role_owner)
+    if current_user_has_role_privileges(context, &view.security.role_owner)
         || context
             .schemas
             .schema_security(&relation.schema)
@@ -97,7 +106,7 @@ pub fn ensure_materialized_view_maintenance(
     let roles = context.roles.role_definitions();
     let memberships = context.roles.role_memberships();
     if role_has_table_privilege(
-        &view.security(),
+        &view.security.resolve(&roles).map_err(SQLError::Internal)?,
         &current_user,
         TableAclPrivilege::Maintain,
         &roles,

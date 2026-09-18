@@ -194,9 +194,8 @@ impl Catalog {
         let vectors = serde_json::to_string(&schema.vector_fields)?;
         let columns = schema.columns_json.clone();
         let constraints = schema.constraints_json.clone();
-        let role_owner = schema.role_owner.clone();
-        let acl_json = schema.acl.as_ref().map(serde_json::to_string).transpose()?;
-        let column_acls_json = serde_json::to_string(&schema.column_acls)?;
+        let (role_owner, acl_json, column_acls_json) =
+            super::role_security::encode_relation(&schema.security)?;
         let object_id = schema.object_id;
         let storage_generation = schema.storage_generation;
         self.conn.with_mut(|c| {
@@ -261,7 +260,7 @@ impl Catalog {
                     r.get::<_, String>(6)?,
                     r.get::<_, Vec<u8>>(7)?,
                     r.get::<_, Vec<u8>>(8)?,
-                    r.get::<_, String>(9)?,
+                    r.get::<_, rusqlite::types::Value>(9)?,
                     r.get::<_, Option<String>>(10)?,
                     r.get::<_, Option<String>>(11)?,
                 ))
@@ -296,18 +295,10 @@ impl Catalog {
                         value.len()
                     ))
                 })?;
-                let acl = acl_json
-                    .map(|json| serde_json::from_str(&json))
-                    .transpose()?;
-                let column_acls = column_acls_json
-                    .map(|json| serde_json::from_str(&json))
-                    .transpose()?
-                    .unwrap_or_default();
+                let security = super::role_security::decode_relation((&role_owner).into(), acl_json.as_deref(), column_acls_json.as_deref())?;
                 out.push(TableSchema {
                     relation: RelationIdentity::new(schema_name, relation_name),
-                    role_owner,
-                    acl,
-                    column_acls,
+                    security,
                     object_id,
                     storage_generation,
                     analyzer_json,

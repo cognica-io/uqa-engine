@@ -9,9 +9,7 @@ use super::*;
 fn table(name: &str, columns_json: &str) -> TableSchema {
     TableSchema {
         relation: RelationIdentity::new("public", name),
-        role_owner: "uqa".into(),
-        acl: None,
-        column_acls: std::collections::BTreeMap::default(),
+        security: uqa_storage::RelationSecurityRow::legacy("uqa"),
         object_id: [name.len() as u8; 16],
         storage_generation: [name.len() as u8 + 1; 16],
         analyzer_json: "{}".into(),

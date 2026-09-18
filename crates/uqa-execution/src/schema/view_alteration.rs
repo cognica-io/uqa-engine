@@ -195,7 +195,7 @@ fn alter_view_role_owner(
                     "{kind} `{canonical_name}` disappeared during owner change"
                 ))
             })?;
-            if view.role_owner == owner.name {
+            if view.security.role_owner == owner.identity() {
                 return Ok(None);
             }
             let authority = OwnerChangeAuthority {
@@ -204,9 +204,9 @@ fn alter_view_role_owner(
                 current_user: &current_user,
                 new_owner: &owner.name,
             };
-            authority.require_owner_change(&view.role_owner, kind, &relation.name)?;
+            let mut security = view.security.resolve(roles).map_err(SQLError::Internal)?;
+            authority.require_owner_change(&security.role_owner, kind, &relation.name)?;
             authority.require_schema_create(context.roles.schemas, &relation.schema)?;
-            let mut security = view.security();
             rewrite_acl_owner(&mut security, &owner.name);
             let output_columns = view.output_columns.as_deref().ok_or_else(|| {
                 SQLError::Internal(format!(
@@ -215,7 +215,10 @@ fn alter_view_role_owner(
             })?;
             validate_table_security_invariants(&security, Some(output_columns), roles)
                 .map_err(|error| SQLError::Internal(format!("view `{canonical_name}` produced invalid privilege metadata after owner transfer: {error}")))?;
-            view.set_security(security);
+            view.set_security(
+                uqa_sql::catalog::security::BoundTableSecurity::bind(&security, roles)
+                    .map_err(SQLError::Internal)?,
+            );
             Ok(Some(view))
         },
     )?;

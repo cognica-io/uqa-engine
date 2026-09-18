@@ -238,9 +238,7 @@ fn native_catalog_schema_ownership_and_format_version_survive_failed_operations(
     catalog
         .save_table(&TableSchema {
             relation: RelationIdentity::new("occupied", "existing"),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: BTreeMap::new(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             object_id: [1; 16],
             storage_generation: [2; 16],
             analyzer_json: "{}".into(),

@@ -34,6 +34,7 @@ impl ViewAuthorizationContext<'_> {
         let security = view.security();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
+        let security = security.resolve(&roles).map_err(SQLError::Internal)?;
         if role_has_privilege(
             &security,
             subject,
@@ -70,6 +71,7 @@ impl ViewAuthorizationContext<'_> {
         let security = view.security();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
+        let security = security.resolve(&roles).map_err(SQLError::Internal)?;
         if column_privilege_check(
             &security,
             column,
@@ -105,6 +107,7 @@ impl ViewAuthorizationContext<'_> {
         let security = view.security();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
+        let security = security.resolve(&roles).map_err(SQLError::Internal)?;
         let check = TablePrivilegeCheck {
             privilege,
             grant_option: false,

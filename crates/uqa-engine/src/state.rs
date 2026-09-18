@@ -31,7 +31,7 @@ pub(super) struct StorageContext {
 }
 
 pub(crate) use uqa_execution::catalog::security::{
-    BoundDatabaseSecurity, BoundSchemaSecurity, SequenceSecurity, TableSecurity,
+    BoundDatabaseSecurity, BoundSchemaSecurity, BoundTableSecurity, SequenceSecurity,
 };
 
 impl StorageContext {
@@ -90,7 +90,7 @@ pub(super) struct DurableCatalogState {
     pub(super) foreign_servers: CatalogCell<BTreeMap<String, uqa_fdw::ForeignServer>>,
     pub(super) foreign_tables:
         CatalogCell<BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>>,
-    pub(super) foreign_table_security: CatalogCell<BTreeMap<RelationIdentity, TableSecurity>>,
+    pub(super) foreign_table_security: CatalogCell<BTreeMap<RelationIdentity, BoundTableSecurity>>,
     pub(super) system_relation_security:
         CatalogCell<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
     pub(super) sql_user_functions:
@@ -124,7 +124,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) table_field_analyzers: Arc<TableFieldAnalyzerRegistry>,
     pub(super) foreign_servers: Arc<BTreeMap<String, uqa_fdw::ForeignServer>>,
     pub(super) foreign_tables: Arc<BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>>,
-    pub(super) foreign_table_security: Arc<BTreeMap<RelationIdentity, TableSecurity>>,
+    pub(super) foreign_table_security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
     pub(super) system_relation_security:
         Arc<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
     pub(super) sql_user_functions:

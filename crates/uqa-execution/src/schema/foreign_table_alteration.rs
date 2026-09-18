@@ -16,7 +16,7 @@ use super::{
     },
 };
 use crate::catalog::security::roles::dependencies::{prepare_role_owner, RoleDependencyCandidate};
-use crate::catalog::{foreign::StoredForeignTable, security::TableSecurity};
+use crate::catalog::{foreign::StoredForeignTable, security::BoundTableSecurity};
 use crate::row_locks::{
     binding::{bind_relation, RelationBinding, RelationDefinitionSession},
     RelationLockMode,
@@ -35,13 +35,13 @@ use uqa_storage::StorageBackendResult;
 pub type ForeignTableRegistryWrite<'a> =
     Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, StoredForeignTable>> + 'a>;
 pub type ForeignSecurityRegistryWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, TableSecurity>> + 'a>;
+    Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, BoundTableSecurity>> + 'a>;
 pub type ForeignMemoryRegistryWrite<'a> =
     Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, Vec<uqa_fdw::Row>>> + 'a>;
 
 pub trait ForeignTableAlterCatalog {
     fn contains_table(&self, relation: &RelationIdentity) -> bool;
-    fn security(&self, relation: &RelationIdentity) -> Option<TableSecurity>;
+    fn security(&self, relation: &RelationIdentity) -> Option<BoundTableSecurity>;
     fn table(&self, relation: &RelationIdentity) -> Option<StoredForeignTable>;
 }
 pub trait ForeignTableAlterAccess {
@@ -63,7 +63,7 @@ pub trait ForeignTableAlterPublication {
     fn persist_security(
         &self,
         relation: &RelationIdentity,
-        security: &TableSecurity,
+        security: &BoundTableSecurity,
     ) -> Result<(), SQLError>;
 }
 pub struct ForeignTableAlterContext<'a> {
@@ -89,7 +89,7 @@ pub trait ForeignTableAlterTransactions {
 pub fn bound_foreign_table_security(
     catalog: &dyn ForeignTableAlterCatalog,
     name: &str,
-) -> Result<(RelationIdentity, TableSecurity), SQLError> {
+) -> Result<(RelationIdentity, BoundTableSecurity), SQLError> {
     let relation = RelationIdentity::from_legacy_name(name)
         .map_err(|error| SQLError::Internal(format!("resolve foreign table `{name}`: {error}")))?;
     if !catalog.contains_table(&relation) {
@@ -178,7 +178,8 @@ fn alter_foreign_table_role_owner(
         &owner,
         || context.writer.prepare_writer(),
         |roles, memberships| {
-            let (relation, mut security) = bound_foreign_table_security(context.catalog, name)?;
+            let (relation, bound) = bound_foreign_table_security(context.catalog, name)?;
+            let mut security = bound.resolve(roles).map_err(SQLError::Internal)?;
             if security.role_owner == owner.name {
                 return Ok(None);
             }
@@ -205,7 +206,11 @@ fn alter_foreign_table_role_owner(
                 .collect::<Vec<_>>();
             validate_table_security_invariants(&security, Some(&columns), roles)
                 .map_err(|error| SQLError::Internal(format!("foreign table `{name}` produced invalid ownership metadata after owner transfer: {error}")))?;
-            Ok(Some((relation, table.object_id, security)))
+            Ok(Some((
+                relation,
+                table.object_id,
+                BoundTableSecurity::bind(&security, roles).map_err(SQLError::Internal)?,
+            )))
         },
     )?;
     let Some((relation, object_id, security)) = value else {

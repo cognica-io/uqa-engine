@@ -24,7 +24,8 @@ use uqa_sql::{
             RoleDefinition, RoleMembership, RoleMembershipKey,
         },
         security::{
-            database::BoundDatabaseSecurity, BoundSchemaSecurity, SequenceSecurity, TableSecurity,
+            database::BoundDatabaseSecurity, BoundSchemaSecurity, BoundTableSecurity,
+            SequenceSecurity,
         },
         stored_view::StoredView,
     },
@@ -126,7 +127,7 @@ impl RoleTableSecurity for TableState {
     fn persistence(&self) -> uqa_sql::ast::RelationPersistence {
         self.persistence
     }
-    fn security(&self) -> TableSecurity {
+    fn security(&self) -> BoundTableSecurity {
         TableState::security(self)
     }
 }
@@ -152,7 +153,9 @@ impl RoleDependencyCatalog for Engine {
     fn views(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, StoredView>> {
         Box::new(self.durable.views.read())
     }
-    fn foreign_tables(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, TableSecurity>> {
+    fn foreign_tables(
+        &self,
+    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundTableSecurity>> {
         Box::new(self.durable.foreign_table_security.read())
     }
     fn sequences(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, SequenceSecurity>> {

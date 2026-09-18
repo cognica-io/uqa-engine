@@ -94,7 +94,7 @@ impl MaterializedViewAccess for Engine {
 impl ViewQueryOwners for Engine {
     fn with_owner(
         &self,
-        owner: &str,
+        owner: &uqa_sql::catalog::roles::RoleReference,
         operation: ViewOwnerQuery<'_>,
     ) -> Result<SQLResult, SQLError> {
         self.with_current_user_context(owner, || operation(self))

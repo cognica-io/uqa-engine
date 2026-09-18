@@ -16,7 +16,10 @@ use uqa_execution::catalog::security::{
 use uqa_execution::schema::sequences::role_ownership::{
     OwnedSequenceSecurityCatalog, OwnedSequenceSecurityRead,
 };
-use uqa_sql::{ast::RelationPersistence, catalog::security::TableSecurity};
+use uqa_sql::{
+    ast::RelationPersistence,
+    catalog::security::{BoundTableSecurity, TableSecurity},
+};
 use uqa_sql::{catalog::security::SequenceSecurity, SQLError};
 use uqa_storage::StorageBackendError;
 use uqa_storage::StorageBackendResult;
@@ -28,7 +31,10 @@ struct SecuritySnapshot {
 }
 fn snapshot(engine: &Engine) -> SecuritySnapshot {
     SecuritySnapshot {
-        table: engine.storage.tables.read()[&RelationIdentity::new("public", "items")].security(),
+        table: engine.storage.tables.read()[&RelationIdentity::new("public", "items")]
+            .security()
+            .resolve(&engine.durable.roles.read())
+            .unwrap(),
         sequences: engine.durable.sequence_security.read().clone(),
     }
 }
@@ -63,10 +69,10 @@ impl TableOwnerRegistry for FailedTables<'_> {
     }
 }
 impl TablePrivilegeState for FailedTable<'_> {
-    fn role_owner(&self) -> String {
+    fn role_owner(&self) -> uqa_sql::catalog::roles::RoleIdentity {
         self.table.role_owner()
     }
-    fn security(&self) -> TableSecurity {
+    fn security(&self) -> BoundTableSecurity {
         self.table.security()
     }
     fn columns(&self) -> TableColumnsRead<'_> {
@@ -93,9 +99,12 @@ impl TableOwnerState for FailedTable<'_> {
         &self,
         _name: &str,
         schema: &TableOwnerSchema,
-        security: &TableSecurity,
+        security: &BoundTableSecurity,
     ) -> StorageBackendResult<()> {
-        assert_eq!(security.role_owner, "target");
+        assert_eq!(
+            security.role_owner,
+            self.observer.engine.durable.roles.read()["target"].identity()
+        );
         assert_eq!(
             serde_json::to_value((&schema.columns, &schema.constraints)).unwrap(),
             self.observer.schema_before
@@ -112,7 +121,15 @@ impl TableOwnerState for FailedTable<'_> {
             sequences.iter().all(|row| row.role_owner == "target"),
             "all owned sequences must be saved before the table"
         );
-        assert_eq!(catalog.load_tables().unwrap()[0].role_owner, "uqa");
+        let uqa_storage::RelationSecurityRow::Bound(stored) =
+            &catalog.load_tables().unwrap()[0].security
+        else {
+            panic!("bound table security")
+        };
+        assert_eq!(
+            stored.role_owner,
+            uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP
+        );
         self.observer.reached.set(true);
         Err(StorageBackendError::Other(
             "injected table ownership persistence failure".into(),
@@ -256,10 +273,10 @@ fn owner_authorization_rebinds_after_retaining_the_table_generation() {
             context.alter_table_role_owner("public.items", &"target".into())
         })
         .unwrap();
-    assert_eq!(retained.role_owner(), "uqa", "fresh owner authorization observes the replacement and returns before mutating the retained generation");
+    assert_eq!(retained.role_owner(), uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP, "fresh owner authorization observes the replacement and returns before mutating the retained generation");
     assert_eq!(
         engine.storage.tables.read()[&RelationIdentity::new("public", "items")].role_owner(),
-        "target"
+        engine.durable.roles.read()["target"].identity()
     );
 }
 

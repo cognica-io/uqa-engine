@@ -151,7 +151,14 @@ fn direct_view_drop_waits_and_revalidates_owner_and_name() {
                 _ => {
                     assert_eq!(result.unwrap_err().sqlstate(), Some("42501"));
                     assert_eq!(
-                        first.view_definition("v").unwrap().unwrap().role_owner,
+                        first
+                            .view_definition("v")
+                            .unwrap()
+                            .unwrap()
+                            .security
+                            .resolve(&first.durable.roles.read())
+                            .unwrap()
+                            .role_owner,
                         "after_owner"
                     );
                 }

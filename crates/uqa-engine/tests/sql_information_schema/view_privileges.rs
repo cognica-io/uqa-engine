@@ -665,7 +665,10 @@ fn legacy_view_column_metadata_is_migrated_before_acl_state_can_reference_it() {
     assert!(migrated
         .definition_json
         .contains(r#""output_columns":["id","value"]"#));
-    assert!(migrated.column_acls.contains_key("id"));
+    let uqa_storage::RelationSecurityRow::Bound(security) = migrated.security else {
+        panic!("migrated view security must retain identities")
+    };
+    assert!(security.column_acls.contains_key("id"));
     drop(catalog);
 
     let reopened = Engine::open(&database).unwrap();
@@ -699,13 +702,20 @@ fn broken_view_acl_grant_chains_are_rejected_during_open() {
             .iter_mut()
             .find(|view| view.relation.qualified_name() == "view_acl.items")
             .unwrap();
-        view.acl
+        let roles = uqa_execution::catalog::security::roles::persistence::restore(&catalog)
+            .unwrap()
+            .roles;
+        let uqa_storage::RelationSecurityRow::Bound(security) = &mut view.security else {
+            panic!("bound view security")
+        };
+        security
+            .acl
             .as_mut()
             .unwrap()
             .iter_mut()
-            .find(|entry| entry.role.role_name() == Some("view_acl_reader"))
+            .find(|entry| entry.role == Some(roles["view_acl_reader"].identity()))
             .unwrap()
-            .grantor = Some("view_acl_delegate".into());
+            .grantor = roles["view_acl_delegate"].identity();
         catalog.save_view(view).unwrap();
     }
 

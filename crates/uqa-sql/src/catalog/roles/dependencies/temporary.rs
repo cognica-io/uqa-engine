@@ -11,7 +11,7 @@ use crate::{
     ast::RelationPersistence,
     catalog::{
         roles::RoleDefinition,
-        security::{dependencies::AclRoleReferences, TableSecurity},
+        security::{dependencies::AclRoleReferences, BoundTableSecurity},
     },
     SQLError,
 };
@@ -58,19 +58,21 @@ pub fn role_dependencies(
 }
 
 fn table_dependencies(
-    security: &TableSecurity,
+    security: &BoundTableSecurity,
     roles: &BTreeMap<String, RoleDefinition>,
     limit: usize,
     referenced: &mut BTreeSet<u32>,
 ) -> Result<(), SQLError> {
-    add_role(&security.role_owner, roles, limit, referenced)?;
+    // Validate every captured endpoint before publishing native OID leases.
+    let named = security.resolve(roles).map_err(SQLError::Internal)?;
+    add_role(&named.role_owner, roles, limit, referenced)?;
     acl_dependencies(
-        security.acl.as_deref().unwrap_or_default(),
+        named.acl.as_deref().unwrap_or_default(),
         roles,
         limit,
         referenced,
     )?;
-    for acl in security.column_acls.values() {
+    for acl in named.column_acls.values() {
         acl_dependencies(acl, roles, limit, referenced)?;
     }
     Ok(())

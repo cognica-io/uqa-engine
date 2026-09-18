@@ -10,7 +10,7 @@ use super::{
     Catalog, CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow,
     ForeignTableRow, GraphSnapshot, OptionalExtension, RelationIdentity, Result, SQLiteError,
     SequenceReservationResult, SequenceRow, SequenceSetValueResult, StorageBackendError,
-    StorageBackendResult, TableAclEntry, TableSchema, ViewRow,
+    StorageBackendResult, TableSchema, ViewRow,
 };
 
 fn into_storage_result<T>(result: Result<T>) -> StorageBackendResult<T> {
@@ -671,16 +671,10 @@ impl CatalogFacade for Catalog {
     fn update_foreign_table_security(
         &self,
         relation: &RelationIdentity,
-        role_owner: &str,
-        acl: Option<&[TableAclEntry]>,
-        column_acls: &std::collections::BTreeMap<String, Vec<TableAclEntry>>,
+        security: &uqa_storage::RelationSecurityRow,
     ) -> StorageBackendResult<bool> {
         into_storage_result(Catalog::update_foreign_table_security(
-            self,
-            relation,
-            role_owner,
-            acl,
-            column_acls,
+            self, relation, security,
         ))
     }
 

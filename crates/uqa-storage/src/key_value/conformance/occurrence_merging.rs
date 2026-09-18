@@ -196,9 +196,7 @@ fn verify_catalog_lifecycle(
         let destination = format!("{table}_renamed");
         catalog.save_table(&TableSchema {
             relation: RelationIdentity::from_legacy_name(&table).expect("valid test relation"),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: BTreeMap::new(),
+            security: crate::RelationSecurityRow::legacy("uqa"),
             object_id: [case + 1; 16],
             storage_generation: [case + 1; 16],
             analyzer_json: serde_json::to_string(&whitespace_analyzer())?,

@@ -68,6 +68,7 @@ pub fn build_pg_attribute(
         let table = catalog
             .table(resolution, &table_name)?
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
+        let security = catalog.relation_security_names(&table.security)?;
         let hierarchy = &table.hierarchy;
         let mut inherited_columns = Vec::new();
         for parent in &hierarchy.parents {
@@ -89,8 +90,8 @@ pub fn build_pg_attribute(
             attribute.insert(
                 "attacl".into(),
                 super::super::relation_catalog::table_acl_catalog_value(
-                    &table.security.role_owner,
-                    table.security.column_acls.get(&col.name),
+                    &security.role_owner,
+                    security.column_acls.get(&col.name),
                 )?,
             );
             attribute.insert(
@@ -113,6 +114,7 @@ pub fn build_pg_attribute(
         }
     }
     for (_, stored) in catalog.views_of_kind(crate::catalog::view::StoredViewKind::View) {
+        let security = catalog.relation_security_names(&stored.security)?;
         let relid = crate::catalog::projection::view_relation_oid(&stored);
         let columns = view_columns_for(context, catalog, resolution, &stored)?;
         for (idx, col) in columns.iter().enumerate() {
@@ -124,14 +126,15 @@ pub fn build_pg_attribute(
             attribute.insert(
                 "attacl".into(),
                 super::super::relation_catalog::table_acl_catalog_value(
-                    &stored.role_owner,
-                    stored.column_acls.get(&col.name),
+                    &security.role_owner,
+                    security.column_acls.get(&col.name),
                 )?,
             );
             out.push(attribute);
         }
     }
     for (_, stored) in catalog.views_of_kind(crate::catalog::view::StoredViewKind::Materialized) {
+        let security = catalog.relation_security_names(&stored.security)?;
         let relid = crate::catalog::projection::view_relation_oid(&stored);
         let columns = view_columns_for(context, catalog, resolution, &stored)?;
         for (idx, col) in columns.iter().enumerate() {
@@ -143,8 +146,8 @@ pub fn build_pg_attribute(
             attribute.insert(
                 "attacl".into(),
                 super::super::relation_catalog::table_acl_catalog_value(
-                    &stored.role_owner,
-                    stored.column_acls.get(&col.name),
+                    &security.role_owner,
+                    security.column_acls.get(&col.name),
                 )?,
             );
             out.push(attribute);

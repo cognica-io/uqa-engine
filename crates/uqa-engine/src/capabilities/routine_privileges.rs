@@ -15,6 +15,12 @@ impl RoutineExecutionAuthority for Engine {
     fn current_role(&self) -> RoleReference {
         Engine::current_role(self)
     }
+    fn current_user_has_role_identity_privileges(
+        &self,
+        role: uqa_sql::catalog::roles::RoleIdentity,
+    ) -> bool {
+        Engine::current_user_has_role_privileges(self, &role)
+    }
     fn current_user_has_role_privileges(&self, role: &str) -> bool {
         Engine::current_user_has_role_privileges(self, role)
     }

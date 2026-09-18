@@ -42,9 +42,10 @@ impl TableAuthorizationContext<'_> {
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         let (relation, table) = self.bound_table_for_security(name)?;
-        let security = table.security();
+        let bound = table.security();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
+        let security = bound.resolve(&roles).map_err(SQLError::Internal)?;
         if role_has_privilege(
             &security,
             subject,
@@ -88,9 +89,10 @@ impl TableAuthorizationContext<'_> {
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         let (relation, table) = self.bound_table_for_security(name)?;
-        let security = table.security();
+        let bound = table.security();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
+        let security = bound.resolve(&roles).map_err(SQLError::Internal)?;
         if column_privilege_check(
             &security,
             column,
@@ -124,9 +126,10 @@ impl TableAuthorizationContext<'_> {
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         let (relation, table) = self.bound_table_for_security(name)?;
-        let security = table.security();
+        let bound = table.security();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
+        let security = bound.resolve(&roles).map_err(SQLError::Internal)?;
         let table_check = TablePrivilegeCheck {
             privilege,
             grant_option: false,
@@ -154,7 +157,11 @@ impl TableAuthorizationContext<'_> {
         let (relation, table) = self.bound_table_for_security(name)?;
         let owner = table.role_owner();
         if self.current_user_has_role_privileges(&owner) {
-            return Ok(owner);
+            return table
+                .security()
+                .resolve(&self.roles.role_definitions())
+                .map(|security| security.role_owner)
+                .map_err(SQLError::Internal);
         }
         Err(SQLError::Routine {
             sqlstate: "42501".into(),

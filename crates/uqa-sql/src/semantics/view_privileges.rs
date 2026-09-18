@@ -48,7 +48,7 @@ fn next_privilege_subject(
     if view.security_invoker() {
         Ok(subject)
     } else {
-        services.bind_role(&view.role_owner)
+        services.bound_role(view.security.role_owner)
     }
 }
 
@@ -370,7 +370,10 @@ pub fn merge_privilege_expressions(stmt: &MergePlan) -> Vec<&crate::ScalarExpr> 
 pub trait ViewPrivilegeCatalog {
     fn view_definition(&self, name: &str) -> Result<Option<StoredView>, SQLError>;
     fn current_role(&self) -> RoleReference;
-    fn bind_role(&self, name: &str) -> Result<RoleReference, SQLError>;
+    fn bound_role(
+        &self,
+        identity: crate::catalog::roles::RoleIdentity,
+    ) -> Result<RoleReference, SQLError>;
     fn ensure_view_privilege_for(
         &self,
         name: &str,

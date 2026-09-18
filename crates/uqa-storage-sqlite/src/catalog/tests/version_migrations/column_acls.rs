@@ -28,9 +28,13 @@ fn migration_37_adds_empty_column_acls_to_legacy_tables() {
     current
         .save_table(&TableSchema {
             relation: RelationIdentity::new("public", "legacy_column_acl"),
-            role_owner: "owner".into(),
-            acl: None,
-            column_acls: column_acl(),
+            security: uqa_storage::RelationSecurityRow::Legacy(
+                uqa_core::catalog_acl::LegacyRelationSecurity {
+                    role_owner: "owner".into(),
+                    acl: None,
+                    column_acls: column_acl(),
+                },
+            ),
             object_id: [37; 16],
             storage_generation: [37; 16],
             analyzer_json: "{}".into(),
@@ -53,7 +57,11 @@ fn migration_37_adds_empty_column_acls_to_legacy_tables() {
         .unwrap();
 
     let upgraded = Catalog::open(connection).unwrap();
-    assert!(upgraded.load_tables().unwrap()[0].column_acls.is_empty());
+    assert!(
+        legacy_security(&upgraded.load_tables().unwrap()[0].security)
+            .column_acls
+            .is_empty()
+    );
 }
 
 #[test]
@@ -64,9 +72,13 @@ fn migration_37_preserves_column_acls_installed_before_its_version_marker() {
     current
         .save_table(&TableSchema {
             relation: RelationIdentity::new("public", "early_column_acl"),
-            role_owner: "owner".into(),
-            acl: None,
-            column_acls: expected.clone(),
+            security: uqa_storage::RelationSecurityRow::Legacy(
+                uqa_core::catalog_acl::LegacyRelationSecurity {
+                    role_owner: "owner".into(),
+                    acl: None,
+                    column_acls: expected.clone(),
+                },
+            ),
             object_id: [38; 16],
             storage_generation: [38; 16],
             analyzer_json: "{}".into(),
@@ -88,5 +100,8 @@ fn migration_37_preserves_column_acls_installed_before_its_version_marker() {
         .unwrap();
 
     let upgraded = Catalog::open(connection).unwrap();
-    assert_eq!(upgraded.load_tables().unwrap()[0].column_acls, expected);
+    assert_eq!(
+        legacy_security(&upgraded.load_tables().unwrap()[0].security).column_acls,
+        expected
+    );
 }

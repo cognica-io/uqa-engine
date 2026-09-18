@@ -66,9 +66,7 @@ fn opening_seeds_document_ids_from_legacy_reservations_and_existing_rows() {
                     .unwrap();
                 session.catalog.save_table(&TableSchema {
                     relation: RelationIdentity::new("public", "docs"),
-                    role_owner: "uqa".into(),
-                    acl: None,
-                    column_acls: BTreeMap::new(),
+                    security: uqa_storage::RelationSecurityRow::bootstrap(),
                     object_id: [21; 16],
                     storage_generation: [22; 16],
                     analyzer_json: serde_json::to_string(&uqa_analysis::Analyzer::default()).unwrap(),

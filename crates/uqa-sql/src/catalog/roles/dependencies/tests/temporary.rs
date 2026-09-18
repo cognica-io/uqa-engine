@@ -9,7 +9,7 @@ use crate::{
     ast::RelationPersistence,
     catalog::{
         roles::{dependencies::temporary::role_dependencies, RoleDefinition},
-        security::{TableAclEntry, TablePrivileges},
+        security::{BoundTableSecurity, TableAclEntry, TablePrivileges, TableSecurity},
         stored_view::StoredView,
         view::StoredViewKind,
     },
@@ -55,24 +55,61 @@ fn entry(role: impl Into<AclGrantee>, grantor: Option<&str>) -> TableAclEntry {
     }
 }
 
+fn temporary_view() -> StoredView {
+    let UnifiedPlan::Query(query) =
+        UnifiedPlan::lower(crate::compile("SELECT 1").unwrap().remove(0))
+    else {
+        panic!("query fixture")
+    };
+    StoredView {
+        security: crate::catalog::security::BoundTableSecurity::bind(
+            &crate::catalog::security::TableSecurity {
+                role_owner: "view_owner".into(),
+                acl: Some(vec![entry("reader", Some("uqa"))]),
+                column_acls: BTreeMap::new(),
+            },
+            &roles(),
+        )
+        .unwrap(),
+        definition: crate::catalog::stored_view::StoredViewDefinition {
+            object_id: [7; 16],
+            query: *query,
+            output_columns: None,
+            persistence: RelationPersistence::Temporary,
+            options: Vec::new(),
+            kind: StoredViewKind::View,
+            materialized_rows: Vec::new(),
+            materialized_column_types: Vec::new(),
+            populated: true,
+        },
+    }
+}
+
 #[test]
 fn temporary_dependencies_include_owners_grantees_and_grantors_only_once() {
     let mut catalog = Catalog::new();
-    catalog.table("permanent", "missing_permanent_owner");
-    catalog.table("temporary", "owner");
+    catalog.table(
+        "permanent",
+        crate::catalog::roles::RoleIdentity {
+            oid: 99,
+            object_id: [99; 16],
+        },
+    );
+    catalog.table("temporary", roles()["owner"].identity());
     let table = catalog
         .tables
         .get_mut(&RelationIdentity::new("public", "temporary"))
         .unwrap();
     table.persistence = RelationPersistence::Temporary;
-    table.security.acl = Some(vec![
+    let mut named = TableSecurity::owner("owner");
+    named.acl = Some(vec![
         entry("reader", Some("grantor")),
         entry(AclGrantee::Public, None),
     ]);
-    table
-        .security
+    named
         .column_acls
         .insert("v".into(), vec![entry("column_reader", Some("owner"))]);
+    table.security = BoundTableSecurity::bind(&named, &roles()).unwrap();
     let sequence = RelationIdentity::new("pg_temp_1", "seq");
     catalog
         .sequence_persistence
@@ -99,28 +136,9 @@ fn temporary_dependencies_include_owners_grantees_and_grantors_only_once() {
             acl: None,
         },
     );
-    let UnifiedPlan::Query(query) =
-        UnifiedPlan::lower(crate::compile("SELECT 1").unwrap().remove(0))
-    else {
-        panic!("query fixture")
-    };
-    catalog.views.insert(
-        RelationIdentity::new("pg_temp_1", "view"),
-        StoredView {
-            object_id: [7; 16],
-            role_owner: "view_owner".into(),
-            acl: Some(vec![entry("reader", Some("uqa"))]),
-            column_acls: BTreeMap::new(),
-            query: *query,
-            output_columns: None,
-            persistence: RelationPersistence::Temporary,
-            options: Vec::new(),
-            kind: StoredViewKind::View,
-            materialized_rows: Vec::new(),
-            materialized_column_types: Vec::new(),
-            populated: true,
-        },
-    );
+    catalog
+        .views
+        .insert(RelationIdentity::new("pg_temp_1", "view"), temporary_view());
     assert_eq!(
         role_dependencies(&catalog, &roles(), 6).unwrap(),
         BTreeSet::from([11, 12, 13, 14, 15, 16])
@@ -150,13 +168,19 @@ fn temporary_dependencies_include_owners_grantees_and_grantors_only_once() {
 #[test]
 fn dangling_temporary_roles_fail_without_reading_later_catalogs() {
     let mut catalog = Catalog::new();
-    catalog.table("temporary", "missing");
+    catalog.table(
+        "temporary",
+        crate::catalog::roles::RoleIdentity {
+            oid: 99,
+            object_id: [99; 16],
+        },
+    );
     catalog.tables.values_mut().next().unwrap().persistence = RelationPersistence::Temporary;
     assert_eq!(
         role_dependencies(&catalog, &roles(), 10)
             .unwrap_err()
             .sqlstate(),
-        Some("42704")
+        Some("XX000")
     );
     assert_eq!(
         *catalog.events.borrow(),
@@ -182,10 +206,12 @@ fn named_public_temporary_owners_grantees_and_grantors_retain_dependencies() {
         ),
     ] {
         let mut catalog = Catalog::new();
-        catalog.table("temporary", owner);
+        catalog.table("temporary", roles[owner].identity());
         let table = catalog.tables.values_mut().next().unwrap();
         table.persistence = RelationPersistence::Temporary;
-        table.security.acl = acl.map(|entry| vec![entry]);
+        let mut named = TableSecurity::owner(owner);
+        named.acl = acl.map(|entry| vec![entry]);
+        table.security = BoundTableSecurity::bind(&named, &roles).unwrap();
         assert_eq!(role_dependencies(&catalog, &roles, 10).unwrap(), expected);
     }
 }

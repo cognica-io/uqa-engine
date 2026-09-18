@@ -12,6 +12,20 @@ use crate::key_value::index_keys::{
     ivf_centroid_key, ivf_metadata_key,
 };
 use crate::key_value::MemoryKeyValueStore;
+use crate::{RelationSecurityRow, TableAclEntry};
+use std::collections::BTreeMap;
+
+fn legacy_security(
+    role_owner: &str,
+    acl: Option<Vec<TableAclEntry>>,
+    column_acls: BTreeMap<String, Vec<TableAclEntry>>,
+) -> RelationSecurityRow {
+    RelationSecurityRow::Legacy(uqa_core::catalog_acl::LegacyRelationSecurity {
+        role_owner: role_owner.into(),
+        acl,
+        column_acls,
+    })
+}
 
 fn legacy_table_value(name: &str) -> Vec<u8> {
     serde_json::to_vec(&serde_json::json!({
@@ -100,24 +114,18 @@ fn view_rows_round_trip_role_ownership_and_migration_rewrites_it_atomically() {
     let column_acls = std::collections::BTreeMap::from([("title".to_string(), sample_table_acl())]);
     let expected = ViewRow {
         relation: RelationIdentity::new("public", "owned_view"),
-        role_owner: "view_owner".into(),
-        acl: Some(acl.clone()),
-        column_acls: column_acls.clone(),
+        security: legacy_security("view_owner", Some(acl.clone()), column_acls.clone()),
         definition_json: r#"{"query":"definition"}"#.into(),
     };
     catalog.save_view(&expected).unwrap();
     let loaded = catalog.load_views().unwrap().remove(0);
     assert_eq!(loaded.relation, expected.relation);
-    assert_eq!(loaded.role_owner, expected.role_owner);
-    assert_eq!(loaded.acl, Some(acl));
-    assert_eq!(loaded.column_acls, column_acls);
+    assert_eq!(loaded.security, expected.security);
     assert_eq!(loaded.definition_json, expected.definition_json);
 
     catalog.migrate_relation_namespace().unwrap();
     let migrated = catalog.load_views().unwrap().remove(0);
-    assert_eq!(migrated.role_owner, "view_owner");
-    assert_eq!(migrated.acl, expected.acl);
-    assert_eq!(migrated.column_acls, expected.column_acls);
+    assert_eq!(migrated.security, expected.security);
     assert_eq!(migrated.definition_json, expected.definition_json);
 }
 
@@ -138,7 +146,7 @@ fn legacy_view_ownership_is_assigned_only_by_the_explicit_catalog_migration() {
     catalog.migrate_relation_namespace().unwrap();
     let migrated = catalog.load_views().unwrap().remove(0);
     assert_eq!(migrated.relation, relation);
-    assert_eq!(migrated.role_owner, "uqa");
+    assert_eq!(migrated.security, RelationSecurityRow::legacy("uqa"));
     assert_eq!(migrated.definition_json, r#"{"query":"definition"}"#);
 }
 
@@ -172,9 +180,7 @@ fn foreign_table_rows_round_trip_security_and_migration_rewrites_it_atomically()
     catalog
         .save_foreign_table(&ForeignTableRow {
             relation: relation.clone(),
-            role_owner: "foreign_owner".into(),
-            acl: Some(acl.clone()),
-            column_acls: column_acls.clone(),
+            security: legacy_security("foreign_owner", Some(acl.clone()), column_acls.clone()),
             server_name: "memory".into(),
             columns_json: "[]".into(),
             options_json: "{}".into(),
@@ -182,27 +188,30 @@ fn foreign_table_rows_round_trip_security_and_migration_rewrites_it_atomically()
         .unwrap();
     let loaded = catalog.load_foreign_tables().unwrap().remove(0);
     assert_eq!(loaded.relation, relation);
-    assert_eq!(loaded.role_owner, "foreign_owner");
-    assert_eq!(loaded.acl, Some(acl.clone()));
-    assert_eq!(loaded.column_acls, column_acls);
+    assert_eq!(
+        loaded.security,
+        legacy_security("foreign_owner", Some(acl.clone()), column_acls.clone())
+    );
     assert_eq!(loaded.server_name, "memory");
     assert!(catalog
-        .update_foreign_table_security(&relation, "next_foreign_owner", Some(&acl), &column_acls,)
+        .update_foreign_table_security(
+            &relation,
+            &legacy_security("next_foreign_owner", Some(acl.clone()), column_acls.clone())
+        )
         .unwrap());
     assert!(!catalog
         .update_foreign_table_security(
             &RelationIdentity::new("public", "missing_foreign_table"),
-            "next_foreign_owner",
-            None,
-            &std::collections::BTreeMap::new(),
+            &RelationSecurityRow::legacy("next_foreign_owner"),
         )
         .unwrap());
 
     catalog.migrate_relation_namespace().unwrap();
     let migrated = catalog.load_foreign_tables().unwrap().remove(0);
-    assert_eq!(migrated.role_owner, "next_foreign_owner");
-    assert_eq!(migrated.acl, Some(acl));
-    assert_eq!(migrated.column_acls, column_acls);
+    assert_eq!(
+        migrated.security,
+        legacy_security("next_foreign_owner", Some(acl), column_acls)
+    );
     assert_eq!(migrated.server_name, "memory");
 }
 
@@ -218,18 +227,14 @@ fn view_and_foreign_table_renames_move_rows_and_relation_claims_atomically() {
     catalog
         .save_view(&ViewRow {
             relation: view.clone(),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::new(),
+            security: legacy_security("uqa", None, std::collections::BTreeMap::new()),
             definition_json: "view-definition".into(),
         })
         .unwrap();
     catalog
         .save_foreign_table(&ForeignTableRow {
             relation: foreign.clone(),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::new(),
+            security: legacy_security("uqa", None, std::collections::BTreeMap::new()),
             server_name: "memory".into(),
             columns_json: "[]".into(),
             options_json: "{}".into(),
@@ -255,18 +260,14 @@ fn view_and_foreign_table_renames_move_rows_and_relation_claims_atomically() {
     catalog
         .save_view(&ViewRow {
             relation: view,
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::new(),
+            security: legacy_security("uqa", None, std::collections::BTreeMap::new()),
             definition_json: "replacement-view-definition".into(),
         })
         .unwrap();
     catalog
         .save_foreign_table(&ForeignTableRow {
             relation: foreign,
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::new(),
+            security: legacy_security("uqa", None, std::collections::BTreeMap::new()),
             server_name: "memory".into(),
             columns_json: "[]".into(),
             options_json: "{}".into(),
@@ -293,9 +294,10 @@ fn owned_foreign_table_acl_defaults_are_assigned_only_by_explicit_catalog_migrat
     catalog.migrate_relation_namespace().unwrap();
     let migrated = catalog.load_foreign_tables().unwrap().remove(0);
     assert_eq!(migrated.relation, relation);
-    assert_eq!(migrated.role_owner, "foreign_owner");
-    assert_eq!(migrated.acl, None);
-    assert!(migrated.column_acls.is_empty());
+    assert_eq!(
+        migrated.security,
+        RelationSecurityRow::legacy("foreign_owner")
+    );
 }
 
 #[test]
@@ -315,9 +317,7 @@ fn legacy_foreign_table_ownership_is_assigned_only_by_explicit_catalog_migration
     catalog.migrate_relation_namespace().unwrap();
     let migrated = catalog.load_foreign_tables().unwrap().remove(0);
     assert_eq!(migrated.relation, relation);
-    assert_eq!(migrated.role_owner, "uqa");
-    assert_eq!(migrated.acl, None);
-    assert!(migrated.column_acls.is_empty());
+    assert_eq!(migrated.security, RelationSecurityRow::legacy("uqa"));
     assert_eq!(migrated.server_name, "memory");
 }
 
@@ -335,9 +335,7 @@ fn view_rows_without_acl_fields_keep_the_valid_default_acl() {
         .unwrap();
 
     let view = catalog.load_views().unwrap().remove(0);
-    assert_eq!(view.role_owner, "view_owner");
-    assert_eq!(view.acl, None);
-    assert!(view.column_acls.is_empty());
+    assert_eq!(view.security, RelationSecurityRow::legacy("view_owner"));
 }
 
 #[test]
@@ -372,7 +370,10 @@ fn relation_namespace_migration_is_one_batch_and_moves_public_data() {
         catalog.load_tables().unwrap()[0].relation,
         RelationIdentity::new("public", "docs")
     );
-    assert_eq!(catalog.load_tables().unwrap()[0].role_owner, "uqa");
+    assert_eq!(
+        catalog.load_tables().unwrap()[0].security,
+        RelationSecurityRow::legacy("uqa")
+    );
     let sequence = &catalog.load_sequence_rows().unwrap()[0];
     assert_eq!(sequence.relation, RelationIdentity::new("public", "seq"));
     assert_eq!(sequence.object_id, [0; 16]);
@@ -386,7 +387,10 @@ fn relation_namespace_migration_is_one_batch_and_moves_public_data() {
         catalog.load_views().unwrap()[0].relation,
         RelationIdentity::new("public", "report")
     );
-    assert_eq!(catalog.load_views().unwrap()[0].role_owner, "uqa");
+    assert_eq!(
+        catalog.load_views().unwrap()[0].security,
+        RelationSecurityRow::legacy("uqa")
+    );
     assert!(catalog
         .load_schemas()
         .unwrap()

@@ -100,7 +100,14 @@ fn view_changes_recheck_ownership_after_waiting_on_the_same_identity() {
             let (_, result) = after_wait(&first, second, statement, "public.v", "COMMIT");
             assert_eq!(result.unwrap_err().sqlstate(), Some("42501"));
             assert_eq!(
-                first.view_definition("v").unwrap().unwrap().role_owner,
+                first
+                    .view_definition("v")
+                    .unwrap()
+                    .unwrap()
+                    .security
+                    .resolve(&first.durable.roles.read())
+                    .unwrap()
+                    .role_owner,
                 "after_owner"
             );
             assert_eq!(sql(&first, "SELECT * FROM v").rows[0]["v"], Value::Int(1));

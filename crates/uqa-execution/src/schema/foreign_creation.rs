@@ -5,7 +5,7 @@
 //
 
 //! Foreign server and table creation inside the caller's existing catalog transaction.
-use crate::catalog::{foreign::StoredForeignTable, security::TableSecurity};
+use crate::catalog::{foreign::StoredForeignTable, security::BoundTableSecurity};
 use crate::schema::{
     foreign_table_alteration::ForeignTableAlterPublication,
     publication::dependencies::CatalogPublicationChanges,
@@ -244,7 +244,7 @@ impl ForeignCreationContext<'_> {
             checks,
             options: opt_map,
         };
-        let security = TableSecurity::owner(target.owner.name);
+        let security = BoundTableSecurity::owner(target.owner.identity());
         let mut tables = self.publication.tables_write();
         let mut table_security = self.publication.security_write();
         if tables.contains_key(&relation) || table_security.contains_key(&relation) {

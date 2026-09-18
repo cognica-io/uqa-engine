@@ -133,22 +133,22 @@ pub fn register_materialized_view_plan(
         context.locks.prepare_definition_write()?;
         context.namespace.ensure_create(&name)?;
         let view = StoredView {
-            object_id: context.catalog.allocate_identity().map_err(|error| {
-                SQLError::Internal(format!(
-                    "allocate materialized view `{name}` identity: {error}"
-                ))
-            })?,
-            role_owner: owner.name,
-            acl: None,
-            column_acls: std::collections::BTreeMap::new(),
-            query: plan,
-            output_columns: Some(output_columns),
-            persistence: uqa_sql::ast::RelationPersistence::Permanent,
-            options: options.to_vec(),
-            kind: StoredViewKind::Materialized,
-            materialized_rows,
-            materialized_column_types,
-            populated: !with_no_data,
+            security: uqa_sql::catalog::security::BoundTableSecurity::owner(owner.identity()),
+            definition: uqa_sql::catalog::stored_view::StoredViewDefinition {
+                object_id: context.catalog.allocate_identity().map_err(|error| {
+                    SQLError::Internal(format!(
+                        "allocate materialized view `{name}` identity: {error}"
+                    ))
+                })?,
+                query: plan,
+                output_columns: Some(output_columns),
+                persistence: uqa_sql::ast::RelationPersistence::Permanent,
+                options: options.to_vec(),
+                kind: StoredViewKind::Materialized,
+                materialized_rows,
+                materialized_column_types,
+                populated: !with_no_data,
+            },
         };
         publication::publish_materialized_view(
             context.publication,
@@ -217,8 +217,11 @@ pub fn refresh_materialized_view(
             Vec::new()
         } else {
             context.bindings.lock_relations(&view.query)?;
+            let owner = view
+                .security
+                .owner_reference(&context.namespace.roles.role_definitions())?;
             let result = context.query_owners.with_owner(
-                &view.role_owner,
+                &owner,
                 Box::new(|queries| queries.execute(&view.query, &[])),
             )?;
             let output_columns = view.output_columns.as_deref().ok_or_else(|| {

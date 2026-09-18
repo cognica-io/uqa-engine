@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 
 mod grantee;
 pub use grantee::AclGrantee;
+mod relation_security;
+pub use relation_security::{BoundRelationSecurity, LegacyRelationSecurity};
 
 /// Grantable privileges carried by one table-shaped relation ACL path.
 #[expect(

@@ -530,7 +530,7 @@ struct EngineDataSnapshot {
 #[expect(clippy::struct_excessive_bools, reason = "independent snapshot flags")]
 struct TableDataSnapshot {
     state: Arc<TableState>,
-    security: state::TableSecurity,
+    security: state::BoundTableSecurity,
     storage_generation: [u8; 16],
     document_store: Arc<dyn DocumentStore>,
     inverted_index: Arc<dyn InvertedIndex>,
@@ -561,7 +561,7 @@ pub(crate) struct TableState {
     /// Durable logical relation identity used by `PostgreSQL` catalogs. Renames, schema changes, `TRUNCATE`, and reopen preserve it.
     object_id: [u8; 16],
     /// Durable SQL role ownership and ACL. Mutations publish this value atomically and preserve the relation's logical and physical identities.
-    security: state::CatalogCell<state::TableSecurity>,
+    security: state::CatalogCell<state::BoundTableSecurity>,
     /// Durable physical-storage generation shared by every session. Schema-only changes preserve it; CREATE and TRUNCATE replace it so a fixed transaction snapshot never aliases a different physical relation lifetime.
     storage_generation: RwLock<[u8; 16]>,
     pub(crate) document_store: RwLock<Box<dyn DocumentStore>>,
@@ -620,11 +620,11 @@ impl TableState {
         self.object_id
     }
 
-    fn role_owner(&self) -> String {
-        self.security.read().role_owner.clone()
+    fn role_owner(&self) -> uqa_sql::catalog::roles::RoleIdentity {
+        self.security.read().role_owner
     }
 
-    fn security(&self) -> state::TableSecurity {
+    fn security(&self) -> state::BoundTableSecurity {
         self.security.read().clone()
     }
 

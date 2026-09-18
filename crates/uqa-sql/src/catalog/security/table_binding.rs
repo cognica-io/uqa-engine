@@ -22,6 +22,22 @@ pub struct BoundTableSecurity {
 }
 
 impl BoundTableSecurity {
+    pub fn from_row(row: uqa_core::catalog_acl::BoundRelationSecurity) -> Self {
+        Self {
+            role_owner: row.role_owner,
+            acl: row.acl,
+            column_acls: row.column_acls,
+        }
+    }
+
+    pub fn row(&self) -> uqa_core::catalog_acl::BoundRelationSecurity {
+        uqa_core::catalog_acl::BoundRelationSecurity {
+            role_owner: self.role_owner,
+            acl: self.acl.clone(),
+            column_acls: self.column_acls.clone(),
+        }
+    }
+
     pub fn owner(role_owner: RoleIdentity) -> Self {
         Self {
             role_owner,

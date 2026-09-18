@@ -68,3 +68,81 @@ fn invalid_role_wire_values_and_mixed_acl_generations_are_rejected() {
         .is_err());
     }
 }
+
+#[test]
+fn relation_role_cells_preserve_legacy_names_and_all_bound_acl_endpoints() {
+    use uqa_core::{catalog_acl::TablePrivileges, catalog_role::BoundAclEntry};
+    let owner = RoleIdentity::BOOTSTRAP;
+    let reader = RoleIdentity {
+        oid: 20001,
+        object_id: [7; 16],
+    };
+    let mut bound = BoundRelationSecurity::owner(owner);
+    let named = BoundAclEntry {
+        role: Some(reader),
+        grantor: owner,
+        privileges: TablePrivileges::ALL,
+        grant_options: TablePrivileges::default(),
+    };
+    let public = BoundAclEntry {
+        role: None,
+        grantor: reader,
+        ..named.clone()
+    };
+    bound.acl = Some(vec![named]);
+    bound.column_acls.insert("value".into(), vec![public]);
+    let named_like_json = serde_json::to_string(&owner).unwrap();
+    for row in [
+        RelationSecurityRow::legacy(named_like_json),
+        RelationSecurityRow::Bound(bound),
+    ] {
+        let (owner, acl, columns) = encode_relation(&row).unwrap();
+        assert_eq!(
+            matches!(owner, Value::Blob(_)),
+            matches!(row, RelationSecurityRow::Bound(_))
+        );
+        assert_eq!(
+            decode_relation((&owner).into(), acl.as_deref(), Some(&columns)).unwrap(),
+            row
+        );
+        assert_eq!(
+            decode_relation_cells(
+                (&owner).into(),
+                super::super::native::optional_text(acl.as_deref()),
+                ValueRef::Text(columns.as_bytes())
+            )
+            .unwrap(),
+            row
+        );
+    }
+}
+
+#[test]
+fn bound_relation_cells_reject_missing_column_acls_and_mixed_generations() {
+    let (owner, _, columns) = encode_relation(&RelationSecurityRow::bootstrap()).unwrap();
+    assert!(decode_relation((&owner).into(), None, None).is_err());
+    assert!(decode_relation_cells(
+        (&owner).into(),
+        ValueRef::Integer(0),
+        ValueRef::Text(columns.as_bytes())
+    )
+    .is_err());
+    assert!(decode_relation_cells((&owner).into(), ValueRef::Null, ValueRef::Blob(b"{}")).is_err());
+    assert!(decode_relation(
+        (&owner).into(),
+        Some(r#"[{"role":"reader","grantor":"uqa"}]"#),
+        Some(&columns)
+    )
+    .is_err());
+    for owner in [
+        ValueRef::Null,
+        ValueRef::Integer(10),
+        ValueRef::Blob(&[1, 2, 3]),
+    ] {
+        assert!(decode_relation(owner, None, Some("{}")).is_err());
+    }
+    assert_eq!(
+        decode_relation(ValueRef::Text(b"uqa"), None, None).unwrap(),
+        RelationSecurityRow::legacy("uqa")
+    );
+}

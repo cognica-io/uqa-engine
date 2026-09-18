@@ -212,9 +212,9 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                             message: format!("materialized view \"{name}\" has not been populated"),
                         });
                     }
-                    let columns = view.output_columns.unwrap_or_default();
-                    let types = view.materialized_column_types;
-                    let rows = view.materialized_rows;
+                    let columns = view.definition.output_columns.unwrap_or_default();
+                    let types = view.definition.materialized_column_types;
+                    let rows = view.definition.materialized_rows;
                     let scan: Box<dyn PhysicalOperator + 'a> = Box::new(
                         crate::TableScan::from_typed_rows(columns.clone(), types, rows),
                     );
@@ -229,7 +229,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 let privilege_subject = if view.security_invoker() {
                     ctes.privilege_subject()?.clone()
                 } else {
-                    catalog.bind_role(&view.role_owner)?
+                    catalog.view_owner(&view)?
                 };
                 let mut privilege_scope = ctes.enter_privilege_subject(privilege_subject);
                 let ctes: &mut CteScope<S> = &mut privilege_scope;

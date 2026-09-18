@@ -113,11 +113,7 @@ impl TableLockContext<'_> {
                         kind,
                         metadata: TableLockMetadata {
                             object_id: view.object_id,
-                            security: BoundTableSecurity::bind(
-                                &view.security(),
-                                &self.roles.role_definitions(),
-                            )
-                            .map_err(SQLError::Internal)?,
+                            security: view.security(),
                         },
                         source: RelationSource::View(Box::new(view)),
                     })

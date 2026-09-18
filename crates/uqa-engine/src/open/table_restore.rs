@@ -204,10 +204,20 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         self.restore_roles_from_metadata(catalog, mode.allows_migration())?;
         self.restore_schemas_from_catalog(catalog, mode)?;
-        let schemas = catalog.load_tables()?;
-        for schema in schemas {
+        if mode.allows_migration() {
+            uqa_execution::schema::foreign_definitions::migration::migrate_foreign_table_identities(catalog, &self.durable.roles.read())?;
+            uqa_execution::schema::sequences::owner_migration::migrate_implicit_sequence_owners(
+                catalog,
+            )?;
+        }
+        let schemas = uqa_execution::catalog::security::relation_restoration::restore_tables(
+            catalog,
+            &self.durable.roles.read(),
+            mode.allows_migration(),
+        )?;
+        for (schema, security) in schemas {
             let relation = schema.relation.clone();
-            let table = Self::load_session_table(catalog, backend, schema)?;
+            let table = Self::load_session_table(catalog, backend, schema, security)?;
             self.storage.tables.write().insert(relation, table);
         }
         self.synchronize_partition_identity_watermarks()?;
@@ -261,10 +271,7 @@ impl Engine {
             catalog,
             crate::new_sequence_object_id,
         )?;
-        uqa_execution::schema::foreign_definitions::migration::migrate_foreign_table_identities(
-            catalog,
-        )?;
-        uqa_execution::schema::sequences::owner_migration::migrate_implicit_sequence_owners(catalog)
+        Ok(())
     }
 
     fn migrate_table_identities(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
@@ -376,6 +383,7 @@ impl Engine {
         catalog: &dyn CatalogFacade,
         backend: &dyn PersistentStorageBackend,
         schema: TableSchema,
+        security: crate::state::BoundTableSecurity,
     ) -> StorageBackendResult<Arc<TableState>> {
         let table_name = schema.relation.qualified_name();
         let analyzer: Analyzer = serde_json::from_str(&schema.analyzer_json)?;
@@ -430,11 +438,7 @@ impl Engine {
         Ok(Arc::new(TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: schema.object_id,
-            security: crate::state::CatalogCell::new(crate::state::TableSecurity {
-                role_owner: schema.role_owner,
-                acl: schema.acl,
-                column_acls: schema.column_acls,
-            }),
+            security: crate::state::CatalogCell::new(security),
             storage_generation: RwLock::new(schema.storage_generation),
             document_store: RwLock::new(docs),
             inverted_index: RwLock::new(inv),

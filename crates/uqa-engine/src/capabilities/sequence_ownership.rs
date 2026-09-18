@@ -9,7 +9,7 @@ use crate::Engine;
 use uqa_execution::schema::sequences::owner_publication::{
     SequenceOwnerNames, SequenceOwnerPublicationContext,
 };
-use uqa_sql::{ast::ColumnDef, SQLError};
+use uqa_sql::SQLError;
 use uqa_storage::{SequenceOwner, StorageBackendResult};
 impl SequenceOwnerNames for Engine {
     fn resolve_sequence_name(&self, name: &str) -> StorageBackendResult<Option<String>> {
@@ -25,15 +25,6 @@ impl Engine {
             definitions: self,
             publication: self,
         }
-    }
-    pub(crate) fn validate_implicit_sequence_owners_for_columns(
-        &self,
-        table_name: &str,
-        table_object_id: [u8; 16],
-        columns: &[ColumnDef],
-    ) -> StorageBackendResult<()> {
-        self.sequence_owner_publication_context()
-            .validate_implicit_sequence_owners_for_columns(table_name, table_object_id, columns)
     }
     pub(crate) fn attach_sequence_owner_identity(
         &self,

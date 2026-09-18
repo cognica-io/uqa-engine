@@ -82,12 +82,12 @@ impl EventLifecycleContext<'_> {
                     "ON SELECT rule action lowered to a command".into(),
                 ));
             };
-            let output_columns = existing.output_columns.unwrap_or_default();
+            let output_columns = existing.output_columns.as_deref().unwrap_or_default();
             crate::schema::view_creation::register_view_plan(
                 self.views,
                 crate::schema::view_creation::ViewRegistration {
                     name: &definition.table,
-                    column_names: &output_columns,
+                    column_names: output_columns,
                     plan: *plan,
                     or_replace: true,
                     persistence: existing.persistence,

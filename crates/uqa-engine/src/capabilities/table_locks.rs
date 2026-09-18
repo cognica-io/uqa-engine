@@ -45,7 +45,7 @@ impl TableLockCatalog for Engine {
     fn table(
         &self,
         name: &str,
-        roles: &std::collections::BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+        _roles: &std::collections::BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
     ) -> Result<Option<TableLockMetadata>, SQLError> {
         let relation =
             uqa_core::RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
@@ -56,11 +56,7 @@ impl TableLockCatalog for Engine {
             .map(|table| {
                 Ok(TableLockMetadata {
                     object_id: table.object_id(),
-                    security: uqa_sql::catalog::security::BoundTableSecurity::bind(
-                        &table.security(),
-                        roles,
-                    )
-                    .map_err(SQLError::Internal)?,
+                    security: table.security(),
                 })
             })
             .transpose()

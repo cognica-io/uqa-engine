@@ -23,18 +23,23 @@ fn view(sql: &str, persistence: RelationPersistence) -> StoredView {
     })
     .unwrap();
     StoredView {
-        object_id: [7; 16],
-        role_owner: "owner".into(),
-        acl: None,
-        column_acls: BTreeMap::new(),
-        query: *query,
-        output_columns: Some(vec!["public_value".into()]),
-        persistence,
-        options: Vec::new(),
-        kind: StoredViewKind::View,
-        materialized_rows: Vec::new(),
-        materialized_column_types: Vec::new(),
-        populated: true,
+        security: crate::catalog::security::BoundTableSecurity::owner(
+            crate::catalog::roles::RoleIdentity {
+                oid: 42,
+                object_id: [42; 16],
+            },
+        ),
+        definition: crate::catalog::stored_view::StoredViewDefinition {
+            object_id: [7; 16],
+            query: *query,
+            output_columns: Some(vec!["public_value".into()]),
+            persistence,
+            options: Vec::new(),
+            kind: StoredViewKind::View,
+            materialized_rows: Vec::new(),
+            materialized_column_types: Vec::new(),
+            populated: true,
+        },
     }
 }
 

@@ -8,7 +8,7 @@
 
 use crate::{
     catalog::{
-        security::{BoundSchemaSecurity, SequenceSecurity, TableSecurity},
+        security::{BoundSchemaSecurity, SequenceSecurity},
         view::StoredViewKind,
     },
     SQLError,
@@ -56,30 +56,17 @@ pub fn ensure_roles_have_no_object_dependencies(
     }
     drop(schema_security);
 
-    let tables = catalog.tables();
-    for name in names {
-        if let Some(relation) = tables.iter().find_map(|(relation, table)| {
-            table_security_depends_on_role(&table.security(), name).then_some(relation)
-        }) {
-            return Err(SQLError::Routine {
-                sqlstate: "2BP01".into(),
-                message: format!(
-                    "role \"{name}\" cannot be dropped because some objects depend on it: table {}",
-                    relation.qualified_name()
-                ),
-            });
-        }
-    }
-    drop(tables);
+    ensure_roles_have_no_table_dependencies(catalog, names, roles)?;
 
     ensure_roles_have_no_system_relation_dependencies(catalog, names, roles)?;
 
     let views = catalog.views();
     for name in names {
-        if let Some((relation, view)) = views
-            .iter()
-            .find(|(_, view)| table_security_depends_on_role(&view.security(), name))
-        {
+        if let Some((relation, view)) = views.iter().find(|(_, view)| {
+            roles
+                .get(name)
+                .is_some_and(|role| view.security.depends_on(role.identity()))
+        }) {
             let kind = match view.kind {
                 StoredViewKind::View => "view",
                 StoredViewKind::Materialized => "materialized view",
@@ -95,7 +82,7 @@ pub fn ensure_roles_have_no_object_dependencies(
     }
     drop(views);
 
-    ensure_roles_have_no_foreign_table_dependencies(catalog, names)?;
+    ensure_roles_have_no_foreign_table_dependencies(catalog, names, roles)?;
 
     let sequence_security = catalog.sequences();
     for name in names {
@@ -132,6 +119,33 @@ pub fn ensure_roles_have_no_object_dependencies(
     Ok(())
 }
 
+fn ensure_roles_have_no_table_dependencies(
+    catalog: &dyn RoleDependencyCatalog,
+    names: &[String],
+    roles: &BTreeMap<String, super::RoleDefinition>,
+) -> Result<(), SQLError> {
+    let tables = catalog.tables();
+    for name in names {
+        if let Some(relation) = tables.iter().find_map(|(relation, table)| {
+            roles
+                .get(name)
+                .is_some_and(|role| table.security().depends_on(role.identity()))
+                .then_some(relation)
+        }) {
+            return Err(SQLError::Routine {
+                sqlstate: "2BP01".into(),
+                message: format!(
+                    "role \"{name}\" cannot be dropped because some objects depend on it: table {}",
+                    relation.qualified_name()
+                ),
+            });
+        }
+    }
+    drop(tables);
+
+    Ok(())
+}
+
 fn ensure_roles_have_no_system_relation_dependencies(
     catalog: &dyn RoleDependencyCatalog,
     names: &[String],
@@ -165,13 +179,15 @@ fn ensure_roles_have_no_system_relation_dependencies(
 fn ensure_roles_have_no_foreign_table_dependencies(
     catalog: &dyn RoleDependencyCatalog,
     names: &[String],
+    roles: &BTreeMap<String, super::RoleDefinition>,
 ) -> Result<(), SQLError> {
     let foreign_tables = catalog.foreign_tables();
     for name in names {
-        if let Some((relation, _)) = foreign_tables
-            .iter()
-            .find(|(_, security)| table_security_depends_on_role(security, name))
-        {
+        if let Some((relation, _)) = foreign_tables.iter().find(|(_, security)| {
+            roles
+                .get(name)
+                .is_some_and(|role| security.depends_on(role.identity()))
+        }) {
             return Err(SQLError::Routine {
                 sqlstate: "2BP01".into(),
                 message: format!(
@@ -182,22 +198,6 @@ fn ensure_roles_have_no_foreign_table_dependencies(
         }
     }
     Ok(())
-}
-
-fn table_security_depends_on_role(security: &TableSecurity, role: &str) -> bool {
-    let acl_dependency = security.acl.as_ref().is_some_and(|acl| {
-        acl.iter().any(|entry| {
-            entry.role.role_name() == Some(role)
-                || entry.grantor.as_deref().unwrap_or(&security.role_owner) == role
-        })
-    });
-    let column_acl_dependency = security.column_acls.values().any(|acl| {
-        acl.iter().any(|entry| {
-            entry.role.role_name() == Some(role)
-                || entry.grantor.as_deref().unwrap_or(&security.role_owner) == role
-        })
-    });
-    security.role_owner == role || acl_dependency || column_acl_dependency
 }
 
 fn dependent_sequence_for_role<'a>(

@@ -9,9 +9,11 @@
 use super::{Result, SQLiteError, SchemaRow};
 use rusqlite::types::{Value, ValueRef};
 use uqa_core::{
+    catalog_acl::{BoundRelationSecurity, LegacyRelationSecurity},
     catalog_role::RoleIdentity,
     catalog_schema::{BoundSchemaRow, SchemaRow as LegacySchemaRow},
 };
+use uqa_storage::RelationSecurityRow;
 
 fn encode_identity(identity: RoleIdentity) -> Result<Value> {
     if !identity.is_valid() {
@@ -80,6 +82,66 @@ pub(super) fn decode_schema(
             "schema owner has an invalid storage class".into(),
         )),
     }
+}
+
+pub(super) fn encode_relation(
+    row: &RelationSecurityRow,
+) -> Result<(Value, Option<String>, String)> {
+    match row {
+        RelationSecurityRow::Bound(row) => Ok((
+            encode_identity(row.role_owner)?,
+            row.acl.as_ref().map(serde_json::to_string).transpose()?,
+            serde_json::to_string(&row.column_acls)?,
+        )),
+        RelationSecurityRow::Legacy(row) => Ok((
+            Value::Text(row.role_owner.clone()),
+            row.acl.as_ref().map(serde_json::to_string).transpose()?,
+            serde_json::to_string(&row.column_acls)?,
+        )),
+    }
+}
+
+pub(super) fn decode_relation(
+    owner: ValueRef<'_>,
+    acl: Option<&str>,
+    columns: Option<&str>,
+) -> Result<RelationSecurityRow> {
+    match owner {
+        ValueRef::Text(_) => Ok(RelationSecurityRow::Legacy(LegacyRelationSecurity {
+            role_owner: super::native::string(owner)?,
+            acl: acl.map(serde_json::from_str).transpose()?,
+            column_acls: columns
+                .map(serde_json::from_str)
+                .transpose()?
+                .unwrap_or_default(),
+        })),
+        ValueRef::Blob(bytes) => Ok(RelationSecurityRow::Bound(BoundRelationSecurity {
+            role_owner: decode_identity(bytes)?,
+            acl: acl.map(serde_json::from_str).transpose()?,
+            column_acls: serde_json::from_str(columns.ok_or_else(|| {
+                SQLiteError::StorageBackend("bound relation security has no column ACL map".into())
+            })?)?,
+        })),
+        _ => Err(SQLiteError::StorageBackend(
+            "relation owner has an invalid storage class".into(),
+        )),
+    }
+}
+
+pub(super) fn decode_relation_cells(
+    owner: ValueRef<'_>,
+    acl: ValueRef<'_>,
+    columns: ValueRef<'_>,
+) -> Result<RelationSecurityRow> {
+    fn optional_text(value: ValueRef<'_>) -> Result<Option<&str>> {
+        if value == ValueRef::Null {
+            return Ok(None);
+        }
+        value.as_str().map(Some).map_err(|_| {
+            SQLiteError::StorageBackend("relation ACL has an invalid text storage class".into())
+        })
+    }
+    decode_relation(owner, optional_text(acl)?, optional_text(columns)?)
 }
 
 #[cfg(test)]

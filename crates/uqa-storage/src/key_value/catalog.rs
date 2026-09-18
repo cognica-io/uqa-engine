@@ -6,7 +6,6 @@
 
 //! Catalog facade implementation for key/value-backed persistence.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -15,8 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::catalog::{
     CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
     GraphSnapshot, RelationIdentity, RelationKind, SchemaRow, SequenceOptions,
-    SequenceReservationResult, SequenceRow, SequenceSetValueResult, TableAclEntry, TableSchema,
-    ViewRow,
+    SequenceReservationResult, SequenceRow, SequenceSetValueResult, TableSchema, ViewRow,
 };
 use crate::{StorageBackendError, StorageBackendResult};
 
@@ -644,11 +642,9 @@ impl CatalogFacade for KeyValueCatalog {
     fn update_foreign_table_security(
         &self,
         relation: &RelationIdentity,
-        role_owner: &str,
-        acl: Option<&[TableAclEntry]>,
-        column_acls: &BTreeMap<String, Vec<TableAclEntry>>,
+        security: &crate::RelationSecurityRow,
     ) -> StorageBackendResult<bool> {
-        self.update_foreign_table_security_impl(relation, role_owner, acl, column_acls)
+        self.update_foreign_table_security_impl(relation, security)
     }
 
     fn drop_foreign_table(&self, relation: &RelationIdentity) -> StorageBackendResult<()> {

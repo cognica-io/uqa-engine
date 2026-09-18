@@ -44,6 +44,7 @@ pub fn build_pg_class(
             .table(resolution, &name)?
             .ok_or_else(|| SQLError::UnknownTable(name.clone()))?;
         let columns = &table_snapshot.columns;
+        let security = catalog.relation_security_names(&table_snapshot.security)?;
         let hierarchy = &table_snapshot.hierarchy;
         let relkind = if hierarchy.partition_spec.is_some() {
             "p"
@@ -86,14 +87,11 @@ pub fn build_pg_class(
         );
         row.insert(
             "relowner".into(),
-            int_value(catalog.role_oid(&table_snapshot.security.role_owner)?),
+            int_value(table_snapshot.security.role_owner.oid),
         );
         row.insert(
             "relacl".into(),
-            table_acl_catalog_value(
-                &table_snapshot.security.role_owner,
-                table_snapshot.security.acl.as_ref(),
-            )?,
+            table_acl_catalog_value(&security.role_owner, security.acl.as_ref())?,
         );
         row.insert(
             "relispartition".into(),
@@ -127,6 +125,7 @@ pub fn build_pg_class(
     }
     for (name, definition) in catalog.views_of_kind(crate::catalog::view::StoredViewKind::View) {
         let (schema, view) = split_schema_name(&name)?;
+        let security = catalog.relation_security_names(&definition.security)?;
         let columns = view_columns_for(context, catalog, resolution, &definition)?;
         let mut row = pg_class_row_with_lifecycle(
             &schema,
@@ -153,11 +152,11 @@ pub fn build_pg_class(
         );
         row.insert(
             "relowner".into(),
-            int_value(catalog.role_oid(&definition.role_owner)?),
+            int_value(definition.security.role_owner.oid),
         );
         row.insert(
             "relacl".into(),
-            table_acl_catalog_value(&definition.role_owner, definition.acl.as_ref())?,
+            table_acl_catalog_value(&security.role_owner, security.acl.as_ref())?,
         );
         out.push(row);
     }
@@ -165,6 +164,7 @@ pub fn build_pg_class(
         catalog.views_of_kind(crate::catalog::view::StoredViewKind::Materialized)
     {
         let (schema, view) = split_schema_name(&name)?;
+        let security = catalog.relation_security_names(&definition.security)?;
         let columns = view_columns_for(context, catalog, resolution, &definition)?;
         let mut row = pg_class_row_with_lifecycle(
             &schema,
@@ -187,11 +187,11 @@ pub fn build_pg_class(
         );
         row.insert(
             "relowner".into(),
-            int_value(catalog.role_oid(&definition.role_owner)?),
+            int_value(definition.security.role_owner.oid),
         );
         row.insert(
             "relacl".into(),
-            table_acl_catalog_value(&definition.role_owner, definition.acl.as_ref())?,
+            table_acl_catalog_value(&security.role_owner, security.acl.as_ref())?,
         );
         out.push(row);
     }
@@ -265,10 +265,7 @@ pub fn build_pg_class(
         let table = catalog
             .table(resolution, &index.table_name)?
             .ok_or_else(|| SQLError::UnknownTable(index.table_name.clone()))?;
-        index_row.insert(
-            "relowner".into(),
-            int_value(catalog.role_oid(&table.security.role_owner)?),
-        );
+        index_row.insert("relowner".into(), int_value(table.security.role_owner.oid));
         index_row.insert("relispartition".into(), bool_value(index.is_partition));
         index_row.insert("relhassubclass".into(), bool_value(index.has_children));
         out.push(index_row);

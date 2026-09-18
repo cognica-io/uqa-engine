@@ -29,7 +29,7 @@ use uqa_sql::{
     ast::{GrantTableStmt, Statement},
     catalog::{
         roles::guards::{RoleCatalogGuards, RoleDefinitionRead, RoleMembershipRead},
-        security::TableSecurity,
+        security::BoundTableSecurity,
     },
     SQLError,
 };
@@ -44,7 +44,7 @@ fn statement(sql: &str) -> GrantTableStmt {
 fn setup(engine: &Engine, foreign_column: &str) {
     engine.sql(&format!("CREATE ROLE reader; CREATE TABLE items(id integer); CREATE VIEW visible AS SELECT id FROM items; CREATE SERVER source FOREIGN DATA WRAPPER memory_fdw; CREATE FOREIGN TABLE remote({foreign_column} integer) SERVER source"),&[]).unwrap();
 }
-fn security(engine: &Engine) -> (TableSecurity, TableSecurity, TableSecurity) {
+fn security(engine: &Engine) -> (BoundTableSecurity, BoundTableSecurity, BoundTableSecurity) {
     let table = engine.storage.tables.read()[&RelationIdentity::new("public", "items")].security();
     let view = engine.durable.views.read()[&RelationIdentity::new("public", "visible")].security();
     let foreign = engine.durable.foreign_table_security.read()
@@ -135,7 +135,7 @@ impl SharedObjectLockSession for Authorization<'_> {
 
 struct FailedForeignWrite<'a> {
     authorization: &'a Authorization<'a>,
-    before: (TableSecurity, TableSecurity, TableSecurity),
+    before: (BoundTableSecurity, BoundTableSecurity, BoundTableSecurity),
     reached: Cell<bool>,
 }
 impl ForeignTableAlterPublication for FailedForeignWrite<'_> {
@@ -161,13 +161,17 @@ impl ForeignTableAlterPublication for FailedForeignWrite<'_> {
     fn persist_security(
         &self,
         _relation: &RelationIdentity,
-        _security: &TableSecurity,
+        _security: &BoundTableSecurity,
     ) -> Result<(), SQLError> {
         assert!(self.authorization.roles_held.get() && self.authorization.memberships_held.get());
         assert_eq!(security(self.authorization.engine), self.before);
         let catalog = self.authorization.engine.storage.catalog.as_ref().unwrap();
-        assert!(catalog.load_tables().unwrap()[0].acl.is_some());
-        assert!(catalog.load_views().unwrap()[0].acl.is_some());
+        assert!(
+            matches!(&catalog.load_tables().unwrap()[0].security, uqa_storage::RelationSecurityRow::Bound(security) if security.acl.is_some())
+        );
+        assert!(
+            matches!(&catalog.load_views().unwrap()[0].security, uqa_storage::RelationSecurityRow::Bound(security) if security.acl.is_some())
+        );
         self.reached.set(true);
         Err(SQLError::Internal(
             "injected foreign ACL persistence failure".into(),
@@ -223,9 +227,15 @@ fn final_foreign_persistence_failure_rolls_back_prior_writes_without_publishing_
         assert!(!authorization.roles_held.get() && !authorization.memberships_held.get());
         assert_eq!(security(&engine), before);
         let catalog = engine.storage.catalog.as_ref().unwrap();
-        assert!(catalog.load_tables().unwrap()[0].acl.is_none());
-        assert!(catalog.load_views().unwrap()[0].acl.is_none());
-        assert!(catalog.load_foreign_tables().unwrap()[0].acl.is_none());
+        assert!(
+            matches!(&catalog.load_tables().unwrap()[0].security, uqa_storage::RelationSecurityRow::Bound(security) if security.acl.is_none())
+        );
+        assert!(
+            matches!(&catalog.load_views().unwrap()[0].security, uqa_storage::RelationSecurityRow::Bound(security) if security.acl.is_none())
+        );
+        assert!(
+            matches!(&catalog.load_foreign_tables().unwrap()[0].security, uqa_storage::RelationSecurityRow::Bound(security) if security.acl.is_none())
+        );
     }
     drop(engine);
     let reopened = Engine::open(&path).unwrap();

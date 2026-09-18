@@ -153,7 +153,7 @@ impl Engine {
     pub(crate) fn persist_foreign_table_security(
         &self,
         relation: &uqa_core::RelationIdentity,
-        security: &uqa_sql::catalog::security::TableSecurity,
+        security: &uqa_sql::catalog::security::BoundTableSecurity,
     ) -> Result<(), SQLError> {
         uqa_execution::catalog::security::foreign_authorization::persist_foreign_table_security(
             self.storage.catalog.as_deref(),

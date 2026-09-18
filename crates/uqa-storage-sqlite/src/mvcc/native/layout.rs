@@ -215,7 +215,7 @@ pub(super) const LAYOUTS: &[NativeRecordLayout] = &[
             "acl_json",
             "column_acls_json",
         ],
-        column_types: &[Text, Text, Text, Text, Text, Text, Text, Text, Text],
+        column_types: &[Text, Text, Text, Text, Text, Text, TextOrBlob, Text, Text],
         nullable: &[false, false, false, false, false, false, false, true, false],
         primary_key: &[0, 1],
         identity_columns: &[0, 1],
@@ -638,7 +638,7 @@ pub(super) const LAYOUTS: &[NativeRecordLayout] = &[
             "column_acls_json",
         ],
         column_types: &[
-            Text, Text, Text, Text, Text, Text, Text, Text, Blob, Blob, Text, Text, Text,
+            Text, Text, Text, Text, Text, Text, Text, Text, Blob, Blob, TextOrBlob, Text, Text,
         ],
         nullable: &[
             false, false, false, false, false, false, true, false, false, false, false, true, true,
@@ -669,7 +669,7 @@ pub(super) const LAYOUTS: &[NativeRecordLayout] = &[
             "acl_json",
             "column_acls_json",
         ],
-        column_types: &[Text, Text, Text, Text, Text, Text, Text],
+        column_types: &[Text, Text, Text, Text, TextOrBlob, Text, Text],
         nullable: &[false, false, false, false, false, true, true],
         primary_key: &[0, 1],
         identity_columns: &[0, 1],

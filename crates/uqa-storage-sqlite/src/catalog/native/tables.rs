@@ -65,8 +65,8 @@ impl Catalog {
             }
             let fields = serde_json::to_string(&schema.fts_fields)?;
             let vectors = serde_json::to_string(&schema.vector_fields)?;
-            let acl = schema.acl.as_ref().map(serde_json::to_string).transpose()?;
-            let columns = serde_json::to_string(&schema.column_acls)?;
+            let (security_owner, acl, columns) =
+                super::super::role_security::encode_relation(&schema.security)?;
             snapshot.put_row(
                 batch,
                 Family::Tables,
@@ -82,7 +82,7 @@ impl Catalog {
                     text(&schema.constraints_json),
                     ValueRef::Blob(&generation),
                     ValueRef::Blob(&identity),
-                    text(&schema.role_owner),
+                    (&security_owner).into(),
                     optional_text(acl.as_deref()),
                     text(&columns),
                 ],
@@ -116,17 +116,9 @@ impl Catalog {
                     constraints_json: string(row[7])?,
                     storage_generation: identity(row[8])?,
                     object_id: identity(row[9])?,
-                    role_owner: string(row[10])?,
-                    acl: if row[11] == ValueRef::Null {
-                        None
-                    } else {
-                        Some(serde_json::from_str(&string(row[11])?)?)
-                    },
-                    column_acls: if row[12] == ValueRef::Null {
-                        std::collections::BTreeMap::new()
-                    } else {
-                        serde_json::from_str(&string(row[12])?)?
-                    },
+                    security: super::super::role_security::decode_relation_cells(
+                        row[10], row[11], row[12],
+                    )?,
                 });
                 Ok(())
             })?;

@@ -15,11 +15,12 @@ use uqa_sql::{
             ForeignTablePrivilegeUpdate, ResolvedTableGrantTarget, TableGrantApplication,
             ViewPrivilegeUpdate,
         },
-        BoundTableSecurity, TableSecurity,
+        BoundTableSecurity,
     },
     SQLError,
 };
-pub(super) type TablePrivilegeUpdate<'a> = (String, Box<dyn TableGrantState + 'a>, TableSecurity);
+pub(super) type TablePrivilegeUpdate<'a> =
+    (String, Box<dyn TableGrantState + 'a>, BoundTableSecurity);
 
 pub(super) fn system_privilege_updates(
     context: &TableGrantContext<'_>,
@@ -99,7 +100,10 @@ pub(super) fn table_privilege_updates<'a>(
 ) -> Result<Vec<TablePrivilegeUpdate<'a>>, SQLError> {
     let mut updates = Vec::new();
     for (target, table) in targets {
-        let current = table.security();
+        let current = table
+            .security()
+            .resolve(application.roles)
+            .map_err(SQLError::Internal)?;
         let (next, grantable) = application.apply(&current)?;
         uqa_sql::catalog::security::dependencies::added_table_acl_roles(
             &current,
@@ -108,7 +112,11 @@ pub(super) fn table_privilege_updates<'a>(
         );
         application.record_warning(grantable, &target.relation, notices);
         if next != current {
-            updates.push((target.name.clone(), table, next));
+            updates.push((
+                target.name.clone(),
+                table,
+                BoundTableSecurity::bind(&next, application.roles).map_err(SQLError::Internal)?,
+            ));
         }
     }
     Ok(updates)

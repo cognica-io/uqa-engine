@@ -144,11 +144,11 @@ impl Engine {
 
     pub(crate) fn with_current_user_context<T>(
         &self,
-        current_user: &str,
+        current_user: &uqa_sql::catalog::roles::RoleReference,
         execute: impl FnOnce() -> Result<T, SQLError>,
     ) -> Result<T, SQLError> {
         let _guard = self.routine_session_state_guard();
-        let role = RoleReference::from(current_user).bind(&self.durable.roles.read())?;
+        let role = current_user.bind(&self.durable.roles.read())?;
         self.session
             .state
             .write()

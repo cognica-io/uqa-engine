@@ -457,17 +457,30 @@ fn foreign_acl_candidates_validate_columns_without_mutating_the_source_security(
     let target = target("foreign table");
     let security = TableSecurity::owner("uqa");
     let updates = foreign_table_privilege_updates(
-        vec![(&target, security.clone(), vec!["id".into()])],
+        vec![(
+            &target,
+            BoundTableSecurity::bind(&security, &roles).unwrap(),
+            vec!["id".into()],
+        )],
         &application,
         &mut Vec::new(),
         &mut std::collections::BTreeSet::new(),
     )
     .unwrap();
     assert_eq!(updates.len(), 1);
-    assert!(column_allowed(&updates[0].1, "id", "reader", &roles));
+    assert!(column_allowed(
+        &updates[0].1.resolve(&roles).unwrap(),
+        "id",
+        "reader",
+        &roles
+    ));
     assert_eq!(security, TableSecurity::owner("uqa"));
     assert!(foreign_table_privilege_updates(
-        vec![(&target, security, vec!["different".into()])],
+        vec![(
+            &target,
+            BoundTableSecurity::bind(&security, &roles).unwrap(),
+            vec!["different".into()]
+        )],
         &application,
         &mut Vec::new(),
         &mut std::collections::BTreeSet::new()

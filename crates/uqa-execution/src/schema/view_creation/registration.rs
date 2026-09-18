@@ -169,24 +169,21 @@ fn register_view_plan_inner(
         })?
     };
     let view = StoredView {
-        object_id,
-        role_owner: existing_view
-            .as_ref()
-            .map_or_else(|| owner.name.clone(), |view| view.role_owner.clone()),
-        acl: existing_view.as_ref().and_then(|view| view.acl.clone()),
-        column_acls: existing_view
-            .as_ref()
-            .map_or_else(std::collections::BTreeMap::new, |view| {
-                view.column_acls.clone()
-            }),
-        query: plan,
-        output_columns: Some(output_columns),
-        persistence,
-        options: options.to_vec(),
-        kind: StoredViewKind::View,
-        materialized_rows: Vec::new(),
-        materialized_column_types: Vec::new(),
-        populated: true,
+        security: existing_view.as_ref().map_or_else(
+            || uqa_sql::catalog::security::BoundTableSecurity::owner(owner.identity()),
+            |view| view.security.clone(),
+        ),
+        definition: uqa_sql::catalog::stored_view::StoredViewDefinition {
+            object_id,
+            query: plan,
+            output_columns: Some(output_columns),
+            persistence,
+            options: options.to_vec(),
+            kind: StoredViewKind::View,
+            materialized_rows: Vec::new(),
+            materialized_column_types: Vec::new(),
+            populated: true,
+        },
     };
     uqa_sql::semantics::view_rewrite::validate_view_definition_check_option(
         context.rewrite,

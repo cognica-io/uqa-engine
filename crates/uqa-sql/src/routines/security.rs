@@ -22,6 +22,10 @@ use uqa_core::catalog_acl::AclGrantee;
 pub trait RoutineExecutionAuthority: RoutineSupportAuthority {
     fn current_role(&self) -> RoleReference;
     fn current_user_has_role_privileges(&self, role: &str) -> bool;
+    fn current_user_has_role_identity_privileges(
+        &self,
+        role: crate::catalog::roles::RoleIdentity,
+    ) -> bool;
 }
 
 pub fn routine_owner_identity(stmt: &AlterRoutineOwnerStmt) -> AlterRoutineStmt {

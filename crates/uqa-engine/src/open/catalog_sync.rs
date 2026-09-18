@@ -36,8 +36,7 @@ impl Engine {
         };
         let security = table.security();
         serde_json::to_vec(&(
-            security.role_owner,
-            security.acl,
+            security.row(),
             table.analyzer.read().clone(),
             table.fts_fields.read().clone(),
             vector_dimensions,
@@ -495,6 +494,7 @@ impl Engine {
             ));
         };
 
+        self.restore_roles_from_metadata(catalog.as_ref(), false)?;
         let existing_lifetimes = self
             .storage
             .tables
@@ -508,9 +508,16 @@ impl Engine {
             })
             .collect::<BTreeMap<_, _>>();
         let mut rebound = BTreeMap::new();
-        for schema in catalog.load_tables()? {
+        for (schema, security) in
+            uqa_execution::catalog::security::relation_restoration::restore_tables(
+                catalog.as_ref(),
+                &self.durable.roles.read(),
+                false,
+            )?
+        {
             let relation = schema.relation.clone();
-            let table = Self::load_session_table(catalog.as_ref(), backend.as_ref(), schema)?;
+            let table =
+                Self::load_session_table(catalog.as_ref(), backend.as_ref(), schema, security)?;
             if let Some((lifecycle_id, storage_generation)) = existing_lifetimes.get(&relation) {
                 if *storage_generation == table.storage_generation() {
                     table

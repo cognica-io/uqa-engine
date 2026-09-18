@@ -18,9 +18,7 @@ use uqa_core::Value;
 fn schema(name: &str) -> TableSchema {
     TableSchema {
         relation: RelationIdentity::new("public", name),
-        role_owner: "owner".into(),
-        acl: None,
-        column_acls: BTreeMap::new(),
+        security: crate::RelationSecurityRow::legacy("owner"),
         object_id: [0; 16],
         storage_generation: [0; 16],
         analyzer_json: "{}".into(),
@@ -95,7 +93,7 @@ pub fn verify_document_ownership(
         b.begin_transaction()?;
         first.put(3, fields(3))?;
         let mut changed = original.clone();
-        changed.role_owner = "changed".into();
+        changed.security = crate::RelationSecurityRow::legacy("changed");
         other.save_table(&changed)?;
         if structure_first {
             b.commit_transaction()?;

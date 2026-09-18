@@ -31,9 +31,7 @@ fn bind(connection: &ManagedConnection) {
 pub(super) fn schema(name: &str, identity: u8, generation: u8) -> TableSchema {
     TableSchema {
         relation: RelationIdentity::new("public", name),
-        role_owner: "owner".into(),
-        acl: None,
-        column_acls: BTreeMap::new(),
+        security: uqa_storage::RelationSecurityRow::legacy("owner"),
         object_id: [identity; 16],
         storage_generation: [generation; 16],
         analyzer_json: "{}".into(),
@@ -67,7 +65,7 @@ pub(super) fn index(name: &str, table: &str) -> CatalogIndexRow {
 
 fn write(connection: &ManagedConnection, catalog: &Catalog, name: &str, id: u8, n: i64) {
     let mut row = schema(name, id, id);
-    row.role_owner = format!("owner_{n}");
+    row.security = uqa_storage::RelationSecurityRow::legacy(format!("owner_{n}"));
     let table = row.relation.qualified_name();
     catalog.save_table(&row).unwrap();
     catalog
@@ -98,8 +96,8 @@ fn assert_value(
     let rows = catalog.load_tables().unwrap();
     let row = rows.iter().find(|row| row.relation.name == name);
     assert_eq!(
-        row.map(|row| row.role_owner.clone()),
-        expected.map(|n| format!("owner_{n}"))
+        row.map(|row| row.security.clone()),
+        expected.map(|n| uqa_storage::RelationSecurityRow::legacy(format!("owner_{n}")))
     );
     assert_eq!(
         SQLiteDocumentStore::new(connection.clone(), &table)

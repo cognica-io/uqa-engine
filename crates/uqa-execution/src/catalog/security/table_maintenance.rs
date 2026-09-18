@@ -33,6 +33,7 @@ impl TableMaintenanceContext<'_> {
         let mut permitted = Vec::new();
         let mut denied = Vec::new();
         for (relation, security) in tables {
+            let security = security.resolve(&roles).map_err(SQLError::Internal)?;
             if role_has_privilege(
                 &security,
                 &current_user,

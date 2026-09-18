@@ -41,6 +41,18 @@ impl From<&str> for RoleReference {
 }
 
 impl RoleReference {
+    pub fn from_identity(
+        identity: RoleIdentity,
+        roles: &BTreeMap<String, RoleDefinition>,
+    ) -> Result<Self, SQLError> {
+        let name = identity.role_name(roles).ok_or_else(|| {
+            SQLError::Internal("role identity references a missing or replaced incarnation".into())
+        })?;
+        Ok(Self::Bound(Arc::new(RoleBinding::from_definition(
+            &roles[name],
+        )?)))
+    }
+
     pub fn require_name<'a>(
         &'a self,
         roles: &'a BTreeMap<String, RoleDefinition>,

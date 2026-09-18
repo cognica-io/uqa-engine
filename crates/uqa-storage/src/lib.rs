@@ -47,8 +47,8 @@ pub use btree_index::BTreeIndex;
 pub use catalog::{
     sequence_value_reservation, CatalogCacheRevisions, CatalogFacade, CatalogIndexRow,
     ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow, GraphEntityFilter, GraphEntityKind,
-    GraphSnapshot, GraphVertexRow, RelationIdentity, RelationKind, SchemaAclEntry,
-    SchemaPrivileges, SchemaRow, SequenceAclEntry, SequenceOptions, SequenceOwner,
+    GraphSnapshot, GraphVertexRow, RelationIdentity, RelationKind, RelationSecurityRow,
+    SchemaAclEntry, SchemaPrivileges, SchemaRow, SequenceAclEntry, SequenceOptions, SequenceOwner,
     SequenceOwnerDependency, SequencePrivileges, SequenceReservationResult, SequenceRow,
     SequenceSetValueResult, SequenceValuePosition, SequenceValueReservation, TableAclEntry,
     TablePrivileges, TableSchema, VectorFieldSchema, ViewRow, MAX_GRAPH_ID_PAGE,

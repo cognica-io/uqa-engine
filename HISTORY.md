@@ -19,6 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Retain table, view, materialized-view and foreign-table owner/ACL role incarnations through catalog snapshots, refresh, undo and reopen. Initial restoration converts legacy names atomically; malformed current identities never rebind to replacement roles. Include column ACLs in table refresh fingerprints so unrelated catalog publication preserves private grants. Development record format 22 excludes prior writers.
 - Preserve quoted role names in object grants, grantor paths and owner transfers. A role named `"PUBLIC"` has independent privileges from the PUBLIC recipient, and quoted session-keyword names remain literal through rollback, refresh and reopen. Typed ACL and statement encodings retain legacy meanings; development record format 21 excludes incompatible writers. See the [unreleased role catalog upgrade notes](docs/manual/reference/10-upgrading.md#unreleased-role-catalog-records).
 - Merge independent native SQLite HNSW document writers through the common vector journal and resolver. Preserve serial node allocation, topology and compaction, retained snapshots, savepoint undo and atomic publication retries. Share IVF/HNSW native codecs, staging and document/lifecycle guards. Native mapping format 7 upgrades formats 1–6 atomically, retaining existing row encodings and family 49 guard histories; older writers reject the new marker. Concurrent Engine SQL remains in progress.
 

@@ -20,8 +20,8 @@ use uqa_storage::backend::{StorageBackendError, StorageBackendResult};
 use uqa_storage::catalog::{
     CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
     GraphSnapshot, RelationIdentity, RelationKind, SchemaRow, SequenceOptions,
-    SequenceReservationResult, SequenceRow, SequenceSetValueResult, TableAclEntry, TableSchema,
-    VectorFieldSchema, ViewRow,
+    SequenceReservationResult, SequenceRow, SequenceSetValueResult, TableSchema, VectorFieldSchema,
+    ViewRow,
 };
 
 use super::catalog_lifecycle::{

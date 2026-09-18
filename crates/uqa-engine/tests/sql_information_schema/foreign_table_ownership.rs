@@ -301,7 +301,12 @@ fn engine_open_rejects_foreign_table_with_missing_owner_role() {
     let Err(error) = Engine::open(&database) else {
         panic!("invalid owner must reject catalog open");
     };
-    assert!(error.to_string().contains("missing owner role"), "{error}");
+    assert!(
+        error
+            .to_string()
+            .contains("missing role `missing_foreign_owner`"),
+        "{error}"
+    );
 }
 
 fn setup_foreign_table_acl(engine: &Engine) {
@@ -735,9 +740,10 @@ fn engine_open_rejects_foreign_table_acl_with_missing_role() {
         setup_foreign_table_acl(&engine);
     }
     let connection = rusqlite::Connection::open(&database).unwrap();
+    // Keep the legacy owner and ACL encoding together so restoration reaches role binding.
     connection
         .execute(
-            "UPDATE _foreign_tables SET acl_json = '[{\"role\":\"missing_foreign_acl_role\",\"grantor\":\"foreign_acl_owner\",\"privileges\":{\"select\":true}}]' WHERE relation_name = 'items'",
+            "UPDATE _foreign_tables SET role_owner = 'foreign_acl_owner', acl_json = '[{\"role\":\"missing_foreign_acl_role\",\"grantor\":\"foreign_acl_owner\",\"privileges\":{\"select\":true}}]' WHERE relation_name = 'items'",
             [],
         )
         .unwrap();
@@ -747,7 +753,9 @@ fn engine_open_rejects_foreign_table_acl_with_missing_role() {
         panic!("invalid foreign-table ACL must reject catalog open");
     };
     assert!(
-        error.to_string().contains("missing grantee role"),
+        error
+            .to_string()
+            .contains("missing role `missing_foreign_acl_role`"),
         "{error}"
     );
 }

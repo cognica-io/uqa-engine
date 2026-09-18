@@ -22,6 +22,7 @@ pub mod graph_identifiers;
 pub(crate) mod graph_snapshot;
 mod identity;
 mod relation;
+mod relation_security;
 mod schema;
 
 pub use cache_revisions::CatalogCacheRevisions;
@@ -31,6 +32,7 @@ pub use graph_access::{
 };
 pub use identity::new_nonzero_catalog_identity;
 pub use relation::RelationIdentity;
+pub use relation_security::{BoundRelationSecurity, LegacyRelationSecurity, RelationSecurityRow};
 mod table;
 
 pub use schema::{BoundSchemaRow, SchemaAclEntry, SchemaPrivileges, SchemaRow};
@@ -61,15 +63,8 @@ impl RelationKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableSchema {
     pub relation: RelationIdentity,
-    /// SQL role that owns the relation. Catalogs created before table role ownership was persisted belong to the bootstrap role.
-    #[serde(default = "legacy_table_role_owner")]
-    pub role_owner: String,
-    /// Explicit table ACL paths. `None` represents `PostgreSQL`'s null default ACL, in which the owner has every ordinary table privilege.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub acl: Option<Vec<TableAclEntry>>,
-    /// Explicit per-column ACL paths keyed by the current column name. A missing key represents `PostgreSQL`'s null default `attacl`; an empty entry represents an explicitly empty ACL.
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub column_acls: std::collections::BTreeMap<String, Vec<TableAclEntry>>,
+    #[serde(flatten)]
+    pub security: RelationSecurityRow,
     /// Stable logical relation identity. `CREATE TABLE` allocates a new value, while renames, schema changes, `TRUNCATE`, and reopen preserve it. A zero value marks a legacy catalog row that the engine upgrades during open.
     #[serde(default)]
     pub object_id: [u8; 16],
@@ -89,10 +84,6 @@ pub struct TableSchema {
     /// created before durable table constraints were introduced.
     #[serde(default)]
     pub constraints_json: String,
-}
-
-fn legacy_table_role_owner() -> String {
-    "uqa".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,12 +124,7 @@ pub struct GraphSnapshot {
 #[derive(Debug, Clone)]
 pub struct ForeignTableRow {
     pub relation: RelationIdentity,
-    /// SQL role that owns the foreign table. Catalogs created before foreign-table role ownership was persisted belong to the bootstrap role.
-    pub role_owner: String,
-    /// Explicit relation-wide ACL. `None` preserves `PostgreSQL`'s implicit owner-only default ACL.
-    pub acl: Option<Vec<TableAclEntry>>,
-    /// Explicit per-column ACL paths keyed by the foreign table's public column name.
-    pub column_acls: std::collections::BTreeMap<String, Vec<TableAclEntry>>,
+    pub security: RelationSecurityRow,
     pub server_name: String,
     pub columns_json: String,
     pub options_json: String,
@@ -149,12 +135,7 @@ pub struct ForeignTableRow {
 #[derive(Debug, Clone)]
 pub struct ViewRow {
     pub relation: RelationIdentity,
-    /// SQL role that owns the view. Catalogs created before view role ownership was persisted belong to the bootstrap role.
-    pub role_owner: String,
-    /// Explicit relation-wide ACL. `None` preserves `PostgreSQL`'s implicit owner-only default ACL.
-    pub acl: Option<Vec<TableAclEntry>>,
-    /// Explicit per-column ACL paths keyed by the view's public column name.
-    pub column_acls: std::collections::BTreeMap<String, Vec<TableAclEntry>>,
+    pub security: RelationSecurityRow,
     pub definition_json: String,
 }
 
@@ -720,9 +701,7 @@ pub trait CatalogFacade: Send + Sync {
     fn update_foreign_table_security(
         &self,
         relation: &RelationIdentity,
-        role_owner: &str,
-        acl: Option<&[TableAclEntry]>,
-        column_acls: &std::collections::BTreeMap<String, Vec<TableAclEntry>>,
+        security: &RelationSecurityRow,
     ) -> StorageBackendResult<bool>;
     fn drop_foreign_table(&self, relation: &RelationIdentity) -> StorageBackendResult<()>;
     fn load_foreign_tables(&self) -> StorageBackendResult<Vec<ForeignTableRow>>;

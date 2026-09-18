@@ -27,7 +27,7 @@ use uqa_sql::{
                 ColumnPrivilegeRelation, ResolvedTablePrivilegeTarget, TablePrivilegeCatalog,
                 TablePrivilegeInquiry,
             },
-            TableSecurity,
+            BoundTableSecurity, TableSecurity,
         },
     },
     SQLError,
@@ -36,14 +36,16 @@ use uqa_storage::StorageBackendResult;
 
 pub type TableColumnsRead<'a> = Box<dyn Deref<Target = Vec<uqa_sql::ast::ColumnDef>> + 'a>;
 pub trait TablePrivilegeState {
-    fn role_owner(&self) -> String;
+    fn role_owner(&self) -> uqa_sql::catalog::roles::RoleIdentity;
     fn columns(&self) -> TableColumnsRead<'_>;
-    fn security(&self) -> TableSecurity;
+    fn security(&self) -> BoundTableSecurity;
     fn column_names(&self) -> Vec<String>;
 }
 /// Borrowed lookups hold the registry guard; retained lookups keep the selected table generation after releasing it.
 pub trait TablePrivilegeRead {
-    fn security_entries(&self) -> Box<dyn Iterator<Item = (RelationIdentity, TableSecurity)> + '_>;
+    fn security_entries(
+        &self,
+    ) -> Box<dyn Iterator<Item = (RelationIdentity, BoundTableSecurity)> + '_>;
     fn keys(&self) -> Box<dyn Iterator<Item = &RelationIdentity> + '_>;
     fn get(&self, relation: &RelationIdentity) -> Option<&dyn TablePrivilegeState>;
     fn retained(&self, relation: &RelationIdentity) -> Option<Arc<dyn TablePrivilegeState>>;
@@ -53,7 +55,7 @@ pub type PrivilegeViewsRead<'a> =
 pub type PrivilegeForeignTablesRead<'a> =
     Box<dyn Deref<Target = BTreeMap<RelationIdentity, StoredForeignTable>> + 'a>;
 pub type PrivilegeForeignSecurityRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RelationIdentity, TableSecurity>> + 'a>;
+    Box<dyn Deref<Target = BTreeMap<RelationIdentity, BoundTableSecurity>> + 'a>;
 pub trait TablePrivilegeRegistry:
     uqa_sql::catalog::security::system_relations::SystemRelationSecurityCatalog
 {
@@ -101,19 +103,25 @@ impl TablePrivilegeCatalog for TablePrivilegeContext<'_> {
                 .tables()
                 .get(relation)
                 .map(TablePrivilegeState::security)
-                .ok_or_else(|| disappeared("table", relation)),
+                .ok_or_else(|| disappeared("table", relation))?
+                .resolve(roles)
+                .map_err(SQLError::Internal),
             ResolvedTablePrivilegeTarget::View(relation) => self
                 .registry
                 .views()
                 .get(relation)
                 .map(StoredView::security)
-                .ok_or_else(|| disappeared("view", relation)),
+                .ok_or_else(|| disappeared("view", relation))?
+                .resolve(roles)
+                .map_err(SQLError::Internal),
             ResolvedTablePrivilegeTarget::ForeignTable(relation) => self
                 .registry
                 .foreign_security()
                 .get(relation)
                 .cloned()
-                .ok_or_else(|| missing_foreign_table_security(relation)),
+                .ok_or_else(|| missing_foreign_table_security(relation))?
+                .resolve(roles)
+                .map_err(SQLError::Internal),
             ResolvedTablePrivilegeTarget::Sequence(_) => Err(SQLError::Internal(
                 "sequence reached table-shaped privilege lookup".into(),
             )),
@@ -145,7 +153,10 @@ impl TablePrivilegeCatalog for TablePrivilegeContext<'_> {
                 let columns = table.column_names();
                 Ok(ColumnPrivilegeRelation {
                     relation: relation.clone(),
-                    security: table.security(),
+                    security: table
+                        .security()
+                        .resolve(roles)
+                        .map_err(SQLError::Internal)?,
                     columns,
                     has_system_columns: true,
                 })
@@ -165,7 +176,7 @@ impl TablePrivilegeCatalog for TablePrivilegeContext<'_> {
                 })?;
                 Ok(ColumnPrivilegeRelation {
                     relation: relation.clone(),
-                    security: view.security(),
+                    security: view.security.resolve(roles).map_err(SQLError::Internal)?,
                     columns,
                     has_system_columns: false,
                 })

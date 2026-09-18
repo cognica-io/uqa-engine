@@ -14,6 +14,15 @@ use uqa_storage::{
 };
 use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
+fn legacy_security(
+    row: &uqa_storage::RelationSecurityRow,
+) -> &uqa_core::catalog_acl::LegacyRelationSecurity {
+    let uqa_storage::RelationSecurityRow::Legacy(security) = row else {
+        panic!("legacy fixture unexpectedly acquired role identities");
+    };
+    security
+}
+
 fn bind(connection: &ManagedConnection) {
     connection
         .bind_native_records(VersionedSessionOptions::default())
@@ -42,9 +51,13 @@ fn acl() -> Vec<TableAclEntry> {
 fn view(name: &str, value: &str) -> ViewRow {
     ViewRow {
         relation: relation(name),
-        role_owner: "owner".into(),
-        acl: Some(acl()),
-        column_acls: BTreeMap::from([("field".into(), acl())]),
+        security: uqa_storage::RelationSecurityRow::Legacy(
+            uqa_core::catalog_acl::LegacyRelationSecurity {
+                role_owner: "owner".into(),
+                acl: Some(acl()),
+                column_acls: BTreeMap::from([("field".into(), acl())]),
+            },
+        ),
         definition_json: value.into(),
     }
 }
@@ -52,9 +65,13 @@ fn view(name: &str, value: &str) -> ViewRow {
 fn foreign(name: &str, server: &str, value: &str) -> ForeignTableRow {
     ForeignTableRow {
         relation: relation(name),
-        role_owner: "owner".into(),
-        acl: Some(acl()),
-        column_acls: BTreeMap::from([("field".into(), acl())]),
+        security: uqa_storage::RelationSecurityRow::Legacy(
+            uqa_core::catalog_acl::LegacyRelationSecurity {
+                role_owner: "owner".into(),
+                acl: Some(acl()),
+                column_acls: BTreeMap::from([("field".into(), acl())]),
+            },
+        ),
         server_name: server.into(),
         columns_json: "[{\"name\":\"field\"}]".into(),
         options_json: value.into(),
@@ -91,14 +108,20 @@ fn assert_value(catalog: &Catalog, name: &str, value: Option<&str>) {
         value
     );
     if let Some(v) = v {
-        assert_eq!(v.role_owner, "owner");
-        assert_eq!(v.acl, Some(acl()));
-        assert_eq!(v.column_acls, BTreeMap::from([("field".into(), acl())]));
+        assert_eq!(legacy_security(&v.security).role_owner, "owner");
+        assert_eq!(legacy_security(&v.security).acl, Some(acl()));
+        assert_eq!(
+            legacy_security(&v.security).column_acls,
+            BTreeMap::from([("field".into(), acl())])
+        );
     }
     if let Some(f) = f {
-        assert_eq!(f.role_owner, "owner");
-        assert_eq!(f.acl, Some(acl()));
-        assert_eq!(f.column_acls, BTreeMap::from([("field".into(), acl())]));
+        assert_eq!(legacy_security(&f.security).role_owner, "owner");
+        assert_eq!(legacy_security(&f.security).acl, Some(acl()));
+        assert_eq!(
+            legacy_security(&f.security).column_acls,
+            BTreeMap::from([("field".into(), acl())])
+        );
         assert_eq!(f.columns_json, "[{\"name\":\"field\"}]");
         assert_eq!(f.server_name, name);
     }
@@ -244,9 +267,7 @@ fn native_and_legacy_relation_lifecycle_preserve_claims_security_and_sorted_read
         assert!(catalog
             .update_foreign_table_security(
                 &relation("renamed_foreign"),
-                "bob",
-                None,
-                &BTreeMap::new()
+                &uqa_storage::RelationSecurityRow::legacy("bob")
             )
             .unwrap());
         let updated = catalog
@@ -255,14 +276,17 @@ fn native_and_legacy_relation_lifecycle_preserve_claims_security_and_sorted_read
             .into_iter()
             .find(|row| row.relation.name == "renamed_foreign")
             .unwrap();
-        assert_eq!(updated.role_owner, "bob");
-        assert_eq!(updated.acl, None);
-        assert!(updated.column_acls.is_empty());
+        assert_eq!(legacy_security(&updated.security).role_owner, "bob");
+        assert_eq!(legacy_security(&updated.security).acl, None);
+        assert!(legacy_security(&updated.security).column_acls.is_empty());
         assert_eq!(updated.options_json, "a");
         assert_eq!(updated.server_name, "a");
         assert_eq!(updated.columns_json, "[{\"name\":\"field\"}]");
         assert!(!catalog
-            .update_foreign_table_security(&relation("missing"), "bob", None, &BTreeMap::new())
+            .update_foreign_table_security(
+                &relation("missing"),
+                &uqa_storage::RelationSecurityRow::legacy("bob")
+            )
             .unwrap());
         // Both former names are available to a different kind inside this transaction.
         catalog.save_view(&view("f_a", "reused")).unwrap();
@@ -290,9 +314,9 @@ fn native_and_legacy_relation_lifecycle_preserve_claims_security_and_sorted_read
             .find(|row| row.relation.name == "renamed_view")
             .unwrap();
         assert_eq!(renamed.definition_json, "a");
-        assert_eq!(renamed.acl, Some(acl()));
+        assert_eq!(legacy_security(&renamed.security).acl, Some(acl()));
         assert_eq!(
-            renamed.column_acls,
+            legacy_security(&renamed.security).column_acls,
             BTreeMap::from([("field".into(), acl())])
         );
         for row in catalog.load_views().unwrap() {
@@ -338,8 +362,8 @@ fn converted_nullable_view_acls_survive_rename_and_other_session_replacement() {
         .rename_view(&relation("legacy"), &relation("renamed"))
         .unwrap());
     let renamed = b.load_views().unwrap().remove(0);
-    assert_eq!(renamed.acl, None);
-    assert!(renamed.column_acls.is_empty());
+    assert_eq!(legacy_security(&renamed.security).acl, None);
+    assert!(legacy_security(&renamed.security).column_acls.is_empty());
     other.with_physical(|sqlite| {
         let nulls: (bool, bool) = sqlite.query_row("SELECT acl_json IS NULL, column_acls_json IS NULL FROM _views WHERE relation_name = 'renamed'", [], |row| Ok((row.get(0)?, row.get(1)?)))?;
         assert_eq!(nulls, (true, true));
@@ -349,13 +373,13 @@ fn converted_nullable_view_acls_survive_rename_and_other_session_replacement() {
     let retained = catalog.load_views().unwrap().remove(0);
     assert_eq!(retained.relation.name, "legacy");
     assert_eq!(retained.definition_json, "original");
-    assert_eq!(retained.acl, None);
-    assert!(retained.column_acls.is_empty());
+    assert_eq!(legacy_security(&retained.security).acl, None);
+    assert!(legacy_security(&retained.security).column_acls.is_empty());
     connection.rollback_transaction().unwrap();
     let latest = catalog.load_views().unwrap().remove(0);
     assert_eq!(latest.relation.name, "renamed");
     assert_eq!(latest.definition_json, "replacement");
-    assert_eq!(latest.acl, Some(acl()));
+    assert_eq!(legacy_security(&latest.security).acl, Some(acl()));
 }
 
 #[test]

@@ -732,9 +732,7 @@ fn clustered_postings_follow_key_value_table_rename_and_drop() {
     catalog
         .save_table(&TableSchema {
             relation: crate::catalog::RelationIdentity::new("public", "articles"),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::default(),
+            security: crate::RelationSecurityRow::legacy("uqa"),
             object_id: [1; 16],
             storage_generation: [1; 16],
             analyzer_json: "{}".into(),

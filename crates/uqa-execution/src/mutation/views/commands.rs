@@ -63,9 +63,7 @@ pub fn materialize_view_rows<S: Clone + Send + Sync + 'static>(
     let privilege_subject = if target.definition.security_invoker() {
         scope.privilege_subject()?.clone()
     } else {
-        scope
-            .catalog_read_view()?
-            .bind_role(&target.definition.role_owner)?
+        scope.catalog_read_view()?.view_owner(&target.definition)?
     };
     let mut privilege_scope = scope.enter_privilege_subject(privilege_subject);
     let result = crate::query::statement::execute_query_plan_with_ctes(

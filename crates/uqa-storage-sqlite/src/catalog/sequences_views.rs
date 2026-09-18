@@ -422,8 +422,7 @@ impl Catalog {
         self.conn.with_mut(|connection| {
             let tx = connection.savepoint()?;
             Self::claim_relation(&tx, &view.relation, RelationKind::View)?;
-            let acl_json = view.acl.as_ref().map(serde_json::to_string).transpose()?;
-            let column_acls_json = serde_json::to_string(&view.column_acls)?;
+            let (role_owner, acl_json, column_acls_json) = super::role_security::encode_relation(&view.security)?;
             tx.execute(
                 "INSERT OR REPLACE INTO _views
                     (schema_name, relation_name, kind, role_owner, acl_json, column_acls_json, definition_json)
@@ -431,7 +430,7 @@ impl Catalog {
                 params![
                     view.relation.schema,
                     view.relation.name,
-                    view.role_owner,
+                    role_owner,
                     acl_json,
                     column_acls_json,
                     view.definition_json
@@ -524,7 +523,7 @@ impl Catalog {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
+                    row.get::<_, rusqlite::types::Value>(2)?,
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, String>(5)?,
@@ -535,16 +534,7 @@ impl Catalog {
                 let (schema, name, role_owner, acl_json, column_acls_json, definition_json) = row?;
                 views.push(ViewRow {
                     relation: RelationIdentity::new(schema, name),
-                    role_owner,
-                    acl: acl_json
-                        .as_deref()
-                        .map(serde_json::from_str)
-                        .transpose()?,
-                    column_acls: column_acls_json
-                        .as_deref()
-                        .map(serde_json::from_str)
-                        .transpose()?
-                        .unwrap_or_default(),
+                    security: super::role_security::decode_relation((&role_owner).into(), acl_json.as_deref(), column_acls_json.as_deref())?,
                     definition_json,
                 });
             }
