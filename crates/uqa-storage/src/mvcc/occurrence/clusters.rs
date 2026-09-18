@@ -96,6 +96,53 @@ impl Resolver<'_> {
         )?)
     }
 
+    fn validate_cluster(
+        &self,
+        cluster: u64,
+        key: &[u8],
+        value: Option<&[u8]>,
+        peer: Option<(&[u8], Option<&[u8]>)>,
+    ) -> VersionResult<()> {
+        if let Some((score, positions)) = self.encoded_cluster(key, value, peer)? {
+            validate_occurrence_cluster(cluster, score, positions, || {
+                self.control.cancellation().check()?;
+                Ok(())
+            })?;
+        }
+        Ok(())
+    }
+
+    fn validate_base_cluster(
+        &self,
+        cluster: u64,
+        write: &PreparedRecordWrite,
+        peer: Option<&PreparedRecordWrite>,
+    ) -> VersionResult<()> {
+        if let Some(peer) = peer {
+            // Retain only the compact score stream before borrowing positions. The visitor never reenters the provider's read window.
+            let score = self.base.get(write.key(), self.control)?;
+            self.base
+                .visit_value(peer.key(), self.control, &mut |positions| {
+                    self.validate_cluster(
+                        cluster,
+                        write.key(),
+                        super::resolve::bytes(score.as_ref()),
+                        Some((peer.key(), positions.and_then(|record| record.value))),
+                    )
+                })
+        } else {
+            self.base
+                .visit_value(write.key(), self.control, &mut |record| {
+                    self.validate_cluster(
+                        cluster,
+                        write.key(),
+                        record.and_then(|record| record.value),
+                        None,
+                    )
+                })
+        }
+    }
+
     fn select_postings<'a>(
         &self,
         base: &'a [OccurrencePosting],
@@ -153,30 +200,22 @@ impl Resolver<'_> {
         peer: Option<&PreparedRecordWrite>,
         cluster: u64,
     ) -> VersionResult<()> {
-        let (base_value, base_peer) = self.cluster_view(self.base, write, peer)?;
         if self.base.sequence() == self.current.sequence() {
             // The publication boundary has not advanced since evaluation. Validate both complete graphs, then share the evaluated bytes instead of decoding, merging and encoding them again.
-            for (value, peer_value) in [
-                (borrowed(base_value.as_ref()), borrowed(base_peer.as_ref())),
-                (write.value(), peer.and_then(PreparedRecordWrite::value)),
-            ] {
-                if let Some((score, positions)) = self.encoded_cluster(
-                    write.key(),
-                    value,
-                    peer.map(|peer| (peer.key(), peer_value)),
-                )? {
-                    validate_occurrence_cluster(cluster, score, positions, || {
-                        self.control.cancellation().check()?;
-                        Ok(())
-                    })?;
-                }
-            }
+            self.validate_base_cluster(cluster, write, peer)?;
+            self.validate_cluster(
+                cluster,
+                write.key(),
+                write.value(),
+                peer.map(|peer| (peer.key(), peer.value())),
+            )?;
             self.preserve(write)?;
             if let Some(peer) = peer {
                 self.preserve(peer)?;
             }
             return Ok(());
         }
+        let (base_value, base_peer) = self.cluster_view(self.base, write, peer)?;
         let (current_value, current_peer) = self.cluster_view(self.current, write, peer)?;
         let base = self.decode_cluster(
             cluster,

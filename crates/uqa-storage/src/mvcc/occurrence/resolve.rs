@@ -222,6 +222,10 @@ impl Resolver<'_> {
     }
 
     fn validate(&self, mutation: usize, write: &PreparedRecordWrite) -> VersionResult<()> {
+        // Publication preserves these canonical preconditions for the physical writer's atomic validation. Command refresh must check them before exposing a new private view.
+        if self.mode == ResolutionMode::Publication {
+            return Ok(());
+        }
         let actual = revision(self.current, write.key(), self.control)?;
         if actual != write.expected() {
             return Err(VersionError::WriteConflict {
