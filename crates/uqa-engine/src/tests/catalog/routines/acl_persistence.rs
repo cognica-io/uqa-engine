@@ -107,7 +107,7 @@ fn legacy_routine_owner_acl_migration_is_initial_open_only_and_rolls_back_atomic
                 definition["execute_acl"]
                     .as_array_mut()
                     .unwrap()
-                    .retain(|entry| entry["role"] != owner);
+                    .retain(|entry| entry["role"]["name"] != owner);
             }
         }
         let legacy = serde_json::to_string(&legacy).unwrap();
@@ -155,7 +155,10 @@ fn legacy_routine_owner_acl_migration_is_initial_open_only_and_rolls_back_atomic
             .unwrap()[0]
             .clone();
         assert_eq!(definition["execute_acl"].as_array().unwrap().len(), 1);
-        assert_eq!(definition["execute_acl"][0]["role"], "acl_owner");
+        assert_eq!(
+            definition["execute_acl"][0]["role"],
+            serde_json::json!({"kind": "role", "name": "acl_owner"})
+        );
         sql(
             &reopened,
             "REVOKE EXECUTE ON FUNCTION acl_routine() FROM acl_owner",

@@ -9,6 +9,7 @@
 use super::{role_bindings, TableAclEntry, TablePrivileges, TableSecurity};
 use crate::catalog::roles::{identity::RoleBinding, RoleDefinition, RoleIdentity, RoleReference};
 use std::collections::BTreeMap;
+use uqa_core::catalog_acl::AclGrantee;
 use uqa_core::catalog_role::BoundAclEntry;
 
 pub type BoundTableAclEntry = BoundAclEntry<TablePrivileges>;
@@ -50,9 +51,7 @@ impl BoundTableSecurity {
                 .iter()
                 .map(|entry| {
                     Ok(BoundTableAclEntry {
-                        role: (entry.role != "PUBLIC")
-                            .then(|| bind(&entry.role))
-                            .transpose()?,
+                        role: entry.role.role_name().map(bind).transpose()?,
                         grantor: bind(entry.grantor.as_deref().unwrap_or(&security.role_owner))?,
                         privileges: entry.privileges,
                         grant_options: entry.grant_options,
@@ -82,7 +81,11 @@ impl BoundTableSecurity {
                 .iter()
                 .map(|entry| {
                     Ok(TableAclEntry {
-                        role: entry.role.map_or_else(|| Ok("PUBLIC".into()), &name)?,
+                        role: entry
+                            .role
+                            .map(&name)
+                            .transpose()?
+                            .map_or(AclGrantee::Public, AclGrantee::Role),
                         grantor: Some(name(entry.grantor)?),
                         privileges: entry.privileges,
                         grant_options: entry.grant_options,

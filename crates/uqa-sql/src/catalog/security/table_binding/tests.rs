@@ -111,10 +111,63 @@ fn bound_table_validation_preserves_column_and_grant_path_rules() {
     bound.validate(Some(&["id".into()]), &roles).unwrap();
     assert_eq!(
         bound.resolve(&roles).unwrap().column_acls["id"][0].role,
-        "PUBLIC"
+        AclGrantee::Public
     );
     bound.column_acls.get_mut("id").unwrap()[0]
         .grant_options
         .select = true;
     assert!(bound.validate(Some(&["id".into()]), &roles).is_err());
+}
+
+#[test]
+fn named_public_and_public_paths_bind_and_resolve_independently() {
+    let mut roles = roles();
+    let mut named_public = roles["reader"].clone();
+    named_public.name = "PUBLIC".into();
+    named_public.oid += 100;
+    named_public.object_id = [9; 16];
+    roles.insert(named_public.name.clone(), named_public.clone());
+    let mut named = TableSecurity::owner("owner");
+    grant_acl(
+        &mut named,
+        TableAclPrivilege::Select,
+        &["PUBLIC".into()],
+        "owner",
+        true,
+    );
+    grant_acl(
+        &mut named,
+        TableAclPrivilege::Select,
+        &[AclGrantee::Public],
+        "owner",
+        false,
+    );
+    grant_column_acl(
+        &mut named,
+        "id",
+        TableAclPrivilege::Select,
+        &["reader".into()],
+        "PUBLIC",
+        false,
+    );
+    let bound = BoundTableSecurity::bind(&named, &roles).unwrap();
+    bound.validate(Some(&["id".into()]), &roles).unwrap();
+    assert_eq!(bound.resolve(&roles).unwrap(), named);
+    assert!(bound.depends_on(named_public.identity()));
+
+    roles.remove("PUBLIC");
+    named_public.name = "renamed_public".into();
+    roles.insert(named_public.name.clone(), named_public);
+    let restored = bound.resolve(&roles).unwrap();
+    let acl = restored.acl.as_ref().unwrap();
+    assert!(acl.iter().any(|entry| entry.role == AclGrantee::Public));
+    assert!(acl.iter().any(
+        |entry| entry.role.role_name() == Some("renamed_public") && entry.grant_options.select
+    ));
+    assert_eq!(
+        restored.column_acls["id"][0].grantor.as_deref(),
+        Some("renamed_public")
+    );
+    bound.validate(Some(&["id".into()]), &roles).unwrap();
+    assert_eq!(BoundTableSecurity::bind(&restored, &roles).unwrap(), bound);
 }

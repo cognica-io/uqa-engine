@@ -41,7 +41,12 @@ impl std::fmt::Display for RoleSpecification {
 impl<'de> Deserialize<'de> for RoleSpecification {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
-        #[serde(tag = "kind", content = "name", rename_all = "snake_case")]
+        #[serde(
+            tag = "kind",
+            content = "name",
+            rename_all = "snake_case",
+            deny_unknown_fields
+        )]
         enum Tagged {
             Named(String),
             CurrentUser,

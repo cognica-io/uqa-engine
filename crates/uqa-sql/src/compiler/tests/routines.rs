@@ -219,7 +219,10 @@ fn routine_security_ownership_acl_role_and_refcursor_statements_compile() {
     };
     assert_eq!(owner.name, "app.open_cursor");
     assert_eq!(owner.arg_types.as_deref().unwrap(), ["refcursor"]);
-    assert_eq!(owner.new_owner, "routine_owner");
+    assert_eq!(
+        owner.new_owner,
+        crate::ast::RoleSpecification::from("routine_owner")
+    );
 
     let Statement::GrantRoutine(grant) = first(
         "GRANT ALL PRIVILEGES ON FUNCTION app.open_cursor(refcursor) TO routine_caller, PUBLIC WITH GRANT OPTION",
@@ -228,7 +231,13 @@ fn routine_security_ownership_acl_role_and_refcursor_statements_compile() {
     };
     assert!(grant.is_grant);
     assert!(grant.grant_option);
-    assert_eq!(grant.grantees, ["routine_caller", "PUBLIC"]);
+    assert_eq!(
+        grant.grantees,
+        [
+            "routine_caller".into(),
+            crate::ast::AclRoleSpecification::Public
+        ]
+    );
     assert_eq!(grant.items[0].arg_types.as_deref().unwrap(), ["refcursor"]);
     assert_eq!(grant.grantor, None);
     assert_eq!(grant.revoke_behavior, RoutineRevokeBehavior::Restrict);
@@ -240,7 +249,10 @@ fn routine_security_ownership_acl_role_and_refcursor_statements_compile() {
     };
     assert!(!revoke.is_grant);
     assert!(revoke.grant_option_only);
-    assert_eq!(revoke.grantor.as_deref(), Some("CURRENT_USER"));
+    assert_eq!(
+        revoke.grantor,
+        Some(crate::ast::RoleSpecification::CurrentUser)
+    );
     assert_eq!(revoke.revoke_behavior, RoutineRevokeBehavior::Cascade);
 
     assert!(matches!(

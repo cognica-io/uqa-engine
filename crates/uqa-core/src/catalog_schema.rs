@@ -87,7 +87,7 @@ impl SchemaPrivileges {
 /// One explicit schema ACL path. `None` on [`SchemaRow::acl`] retains the owner-only default privileges of an ordinary newly created schema.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SchemaAclEntry {
-    pub role: String,
+    pub role: crate::catalog_acl::AclGrantee,
     /// Legacy persisted entries without an explicit grantor originate from the schema owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grantor: Option<String>,
@@ -122,7 +122,7 @@ impl SchemaRow {
                     grant_options: SchemaPrivileges::default(),
                 },
                 SchemaAclEntry {
-                    role: "PUBLIC".into(),
+                    role: crate::catalog_acl::AclGrantee::Public,
                     grantor: Some("uqa".into()),
                     privileges: SchemaPrivileges {
                         usage: true,

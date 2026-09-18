@@ -130,7 +130,7 @@ fn system_acl_validation_rejects_orphan_roles_wrong_owners_and_missing_columns()
         &mut invalid,
         "absent",
         TableAclPrivilege::Select,
-        &["PUBLIC".into()],
+        &[uqa_core::catalog_acl::AclGrantee::Public],
         "uqa",
         false,
     );

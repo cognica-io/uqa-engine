@@ -13,6 +13,7 @@ use super::{
 use crate::catalog::roles::{RoleDefinition, RoleIdentity};
 use std::collections::BTreeMap;
 use uqa_core::{
+    catalog_acl::AclGrantee,
     catalog_role::BoundAclEntry,
     catalog_schema::{BoundSchemaRow, SchemaAclEntry, SchemaPrivileges},
 };
@@ -74,9 +75,7 @@ impl BoundSchemaSecurity {
                         .iter()
                         .map(|entry| {
                             Ok(BoundAclEntry {
-                                role: (entry.role != "PUBLIC")
-                                    .then(|| bind(&entry.role))
-                                    .transpose()?,
+                                role: entry.role.role_name().map(bind).transpose()?,
                                 grantor: bind(
                                     entry.grantor.as_deref().unwrap_or(&security.role_owner),
                                 )?,
@@ -105,7 +104,11 @@ impl BoundSchemaSecurity {
                         .iter()
                         .map(|entry| {
                             Ok(SchemaAclEntry {
-                                role: entry.role.map_or_else(|| Ok("PUBLIC".into()), &name)?,
+                                role: entry
+                                    .role
+                                    .map(&name)
+                                    .transpose()?
+                                    .map_or(AclGrantee::Public, AclGrantee::Role),
                                 grantor: Some(name(entry.grantor)?),
                                 privileges: entry.privileges,
                                 grant_options: entry.grant_options,

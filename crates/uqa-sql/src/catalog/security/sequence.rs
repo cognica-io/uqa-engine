@@ -8,6 +8,7 @@
 
 use crate::catalog::roles::identity::RoleSubject;
 use std::collections::{BTreeMap, BTreeSet};
+use uqa_core::catalog_acl::AclGrantee;
 
 use crate::ast::{RoleAttribute, SequencePrivilege};
 use crate::SQLError;
@@ -107,7 +108,7 @@ fn acl_grantor<'a>(entry: &'a SequenceAclEntry, owner: &'a str) -> &'a str {
 fn materialize_acl(security: &mut SequenceSecurity) {
     if security.acl.is_none() {
         security.acl = Some(vec![SequenceAclEntry {
-            role: security.role_owner.clone(),
+            role: security.role_owner.clone().into(),
             grantor: Some(security.role_owner.clone()),
             privileges: SequencePrivileges::ALL,
             grant_options: SequencePrivileges::default(),
@@ -123,11 +124,13 @@ fn grant_option_roles(security: &SequenceSecurity, privilege: AclPrivilege) -> B
     loop {
         let mut changed = false;
         for entry in acl {
-            if entry.role != "PUBLIC"
-                && entry.grant_options.intersects(privilege.mask())
+            let Some(role) = entry.role.role_name() else {
+                continue;
+            };
+            if entry.grant_options.intersects(privilege.mask())
                 && reachable.contains(acl_grantor(entry, &security.role_owner))
             {
-                changed |= reachable.insert(entry.role.clone());
+                changed |= reachable.insert(role.to_owned());
             }
         }
         if !changed {
@@ -153,9 +156,10 @@ pub fn select_acl_grantor(
     }
     security.acl.as_ref().and_then(|acl| {
         acl.iter()
-            .filter(|entry| entry.role != "PUBLIC" && grant_options.contains(&entry.role))
-            .find(|entry| role_inherits(roles, memberships, current_user, &entry.role))
-            .map(|entry| entry.role.clone())
+            .filter_map(|entry| entry.role.role_name())
+            .filter(|role| grant_options.contains(*role))
+            .find(|role| role_inherits(roles, memberships, current_user, *role))
+            .map(str::to_owned)
     })
 }
 
@@ -182,7 +186,7 @@ pub fn role_has_privilege(
         None => false,
         Some(acl) => acl.iter().any(|entry| {
             entry.privileges.intersects(check.privilege.mask())
-                && (entry.role == "PUBLIC"
+                && (entry.role.is_public()
                     || role_inherits(roles, memberships, subject, &entry.role))
         }),
     }
@@ -191,7 +195,7 @@ pub fn role_has_privilege(
 pub fn grant_acl(
     security: &mut SequenceSecurity,
     privilege: AclPrivilege,
-    grantees: &[String],
+    grantees: &[AclGrantee],
     grantor: &str,
     grant_option: bool,
 ) {
@@ -216,7 +220,7 @@ pub fn grant_acl(
             });
         let entry = &mut acl[position];
         entry.privileges.insert(privilege.mask());
-        if grant_option && grantee != "PUBLIC" && grantee != &owner {
+        if grant_option && grantee.role_name().is_some_and(|name| name != owner) {
             entry.grant_options.insert(privilege.mask());
         }
     }
@@ -225,7 +229,7 @@ pub fn grant_acl(
 pub fn revoke_acl(
     security: &mut SequenceSecurity,
     privilege: AclPrivilege,
-    grantees: &[String],
+    grantees: &[AclGrantee],
     grantor: &str,
     grant_option_only: bool,
     cascade: bool,
@@ -307,8 +311,8 @@ pub fn rewrite_acl_owner(security: &mut SequenceSecurity, new_owner: &str) {
         return;
     };
     for entry in acl.iter_mut() {
-        if entry.role == old_owner {
-            entry.role = new_owner.to_string();
+        if entry.role.role_name() == Some(old_owner.as_str()) {
+            entry.role = new_owner.into();
         }
         if entry.grantor.as_deref() == Some(&old_owner) {
             entry.grantor = Some(new_owner.to_string());

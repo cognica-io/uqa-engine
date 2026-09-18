@@ -84,7 +84,9 @@ fn acl_dependencies<T: AclRoleReferences>(
 ) -> Result<(), SQLError> {
     for entry in acl {
         let (grantee, grantor) = entry.role_references();
-        add_role(grantee, roles, limit, referenced)?;
+        if let Some(grantee) = grantee {
+            add_role(grantee, roles, limit, referenced)?;
+        }
         if let Some(grantor) = grantor {
             add_role(grantor, roles, limit, referenced)?;
         }
@@ -98,9 +100,6 @@ fn add_role(
     limit: usize,
     referenced: &mut BTreeSet<u32>,
 ) -> Result<(), SQLError> {
-    if name == "PUBLIC" {
-        return Ok(());
-    }
     let role = roles.get(name).ok_or_else(|| SQLError::Routine {
         sqlstate: "42704".into(),
         message: format!("role \"{name}\" does not exist"),

@@ -346,11 +346,10 @@ fn routine_acl_catalog_value(def: &uqa_sql::ast::CreateFunction) -> Result<Value
     let entries = acl
         .iter()
         .map(|entry| {
-            let grantee = if entry.role == "PUBLIC" {
-                String::new()
-            } else {
-                acl_identifier(&entry.role)
-            };
+            let grantee = entry
+                .role
+                .role_name()
+                .map_or_else(String::new, acl_identifier);
             let grantor = acl_identifier(entry.grantor.as_deref().unwrap_or(&def.owner));
             str_value(format!(
                 "{grantee}=X{}/{grantor}",

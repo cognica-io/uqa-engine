@@ -180,7 +180,7 @@ fn native_sequence_value_access_does_not_load_unrelated_catalog_payloads() {
     catalog.create_sequence_row(&selected).unwrap();
     let mut huge = sequence("unrelated", 1);
     huge.acl = Some(vec![SequenceAclEntry {
-        role: "x".repeat(1024 * 1024),
+        role: "x".repeat(1024 * 1024).into(),
         grantor: None,
         privileges: SequencePrivileges::ALL,
         grant_options: SequencePrivileges::default(),

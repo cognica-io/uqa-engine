@@ -219,9 +219,9 @@ struct Permissions {
 }
 
 impl Permissions {
-    fn new(grantee: &str) -> Self {
-        let grantees = [grantee.to_string()];
-        let grant = grantee != "PUBLIC";
+    fn new(grantee: uqa_core::catalog_acl::AclGrantee) -> Self {
+        let grant = !grantee.is_public();
+        let grantees = [grantee];
         let mut relation = TableSecurity::owner("uqa");
         let mut column = TableSecurity::owner("uqa");
         let mut namespace = SchemaSecurity {
@@ -416,7 +416,8 @@ fn deleted_role_retains_public_access_without_replacement_acl_or_grant_options()
     let selected = RoleBinding::from_definition(&original).unwrap();
     let mut replacement = original.clone();
     replacement.object_id = [2; 16];
-    for grantee in ["actor", "PUBLIC"] {
+    for grantee in ["actor".into(), uqa_core::catalog_acl::AclGrantee::Public] {
+        let public = grantee.is_public();
         let permissions = Permissions::new(grantee);
         for role in [Some(original.clone()), None, Some(replacement.clone())] {
             let live = role
@@ -426,8 +427,8 @@ fn deleted_role_retains_public_access_without_replacement_acl_or_grant_options()
                 .into_iter()
                 .map(|role| (role.name.clone(), role))
                 .collect();
-            let grant = live && grantee != "PUBLIC";
-            permissions.assert_privileges(&selected, &roles, false, live || grantee == "PUBLIC");
+            let grant = live && !public;
+            permissions.assert_privileges(&selected, &roles, false, live || public);
             permissions.assert_privileges(&selected, &roles, true, grant);
             permissions.assert_grantor(&selected, &roles, grant.then(|| "actor".to_string()));
         }

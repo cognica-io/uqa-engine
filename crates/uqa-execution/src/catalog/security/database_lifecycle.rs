@@ -15,7 +15,7 @@ use std::{collections::BTreeSet, ops::DerefMut};
 use uqa_sql::{
     ast::GrantDatabaseStmt,
     catalog::{
-        roles::{guards::RoleCatalogGuards, resolve_role_reference, RoleReferenceNames},
+        roles::{guards::RoleCatalogGuards, resolve_role_specification, RoleReferenceNames},
         security::{
             database::{
                 apply_database_acl, database_acl_warning, requested_acl_privileges,
@@ -110,12 +110,14 @@ fn prepare_privileges<'a>(
     let grantees = statement
         .grantees
         .iter()
-        .map(|role| resolve_role_reference(context.names, role).catalog_name(&roles))
+        .map(|role| {
+            uqa_sql::catalog::roles::resolve_acl_role_specification(context.names, role, &roles)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let requested_grantor = statement
         .grantor
         .as_ref()
-        .map(|role| resolve_role_reference(context.names, role).catalog_name(&roles))
+        .map(|role| resolve_role_specification(context.names, role).catalog_name(&roles))
         .transpose()?;
     let current_user = context.names.current_role();
     validate_database_acl_roles(

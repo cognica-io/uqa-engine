@@ -17,6 +17,7 @@ use crate::{
     SQLError,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use uqa_core::catalog_acl::AclGrantee;
 
 pub trait RoutineExecutionAuthority: RoutineSupportAuthority {
     fn current_role(&self) -> RoleReference;
@@ -90,7 +91,8 @@ pub fn routine_privilege_allowed(
     acl.map_or(!grant_option, |acl| {
         acl.iter().any(|entry| {
             (!grant_option || entry.grant_option)
-                && ((entry.role == "PUBLIC" && !grant_option) || has_role(&entry.role))
+                && ((entry.role.is_public() && !grant_option)
+                    || entry.role.role_name().is_some_and(&has_role))
         })
     })
 }
@@ -98,9 +100,12 @@ pub fn routine_privilege_allowed(
 /// Legacy stored ACLs represented owner EXECUTE implicitly, including empty explicit ACLs.
 pub fn migrate_implicit_routine_owner_acl(definition: &mut CreateFunction) {
     if let Some(acl) = definition.execute_acl.as_mut() {
-        if !acl.iter().any(|entry| entry.role == definition.owner) {
+        if !acl
+            .iter()
+            .any(|entry| entry.role.role_name() == Some(definition.owner.as_str()))
+        {
             acl.push(RoutineAclEntry {
-                role: definition.owner.clone(),
+                role: definition.owner.clone().into(),
                 grantor: Some(definition.owner.clone()),
                 grant_option: false,
             });
@@ -110,20 +115,23 @@ pub fn migrate_implicit_routine_owner_acl(definition: &mut CreateFunction) {
 
 pub fn validate_routine_acl_roles(
     stmt: &GrantRoutineStmt,
-    grantees: &[String],
+    grantees: &[AclGrantee],
     requested_grantor: Option<&str>,
     current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> Result<(), SQLError> {
     for role in grantees {
-        if role != "PUBLIC" && !roles.contains_key(role) {
+        if role
+            .role_name()
+            .is_some_and(|name| !roles.contains_key(name))
+        {
             return Err(SQLError::Routine {
                 sqlstate: "42704".into(),
                 message: format!("role \"{role}\" does not exist"),
             });
         }
     }
-    if stmt.is_grant && stmt.grant_option && grantees.iter().any(|role| role == "PUBLIC") {
+    if stmt.is_grant && stmt.grant_option && grantees.iter().any(AclGrantee::is_public) {
         return Err(SQLError::Routine {
             sqlstate: "0LP01".into(),
             message: "grant options can only be granted to roles".into(),
@@ -154,12 +162,12 @@ fn materialize_routine_acl(definition: &mut CreateFunction) -> &mut Vec<RoutineA
     if definition.execute_acl.is_none() {
         definition.execute_acl = Some(vec![
             RoutineAclEntry {
-                role: "PUBLIC".into(),
+                role: AclGrantee::Public,
                 grantor: Some(definition.owner.clone()),
                 grant_option: false,
             },
             RoutineAclEntry {
-                role: definition.owner.clone(),
+                role: definition.owner.clone().into(),
                 grantor: Some(definition.owner.clone()),
                 grant_option: false,
             },
@@ -186,11 +194,11 @@ fn routine_grant_option_roles_for(
     loop {
         let mut changed = false;
         for entry in acl {
-            if entry.role != "PUBLIC"
-                && entry.grant_option
-                && reachable.contains(routine_acl_grantor(entry, owner))
-            {
-                changed |= reachable.insert(entry.role.clone());
+            let Some(role) = entry.role.role_name() else {
+                continue;
+            };
+            if entry.grant_option && reachable.contains(routine_acl_grantor(entry, owner)) {
+                changed |= reachable.insert(role.to_owned());
             }
         }
         if !changed {
@@ -217,20 +225,21 @@ pub fn select_routine_acl_grantor(
     }
     definition.execute_acl.as_ref().and_then(|acl| {
         acl.iter()
-            .filter(|entry| entry.role != "PUBLIC" && grant_options.contains(&entry.role))
-            .find(|entry| role_inherits(roles, memberships, current_user, &entry.role))
-            .map(|entry| entry.role.clone())
+            .filter_map(|entry| entry.role.role_name())
+            .filter(|role| grant_options.contains(*role))
+            .find(|role| role_inherits(roles, memberships, current_user, *role))
+            .map(str::to_owned)
     })
 }
 
 pub fn grant_routine_acl(
     definition: &mut CreateFunction,
-    grantee: &str,
+    grantee: &AclGrantee,
     grantor: &str,
     grant_option: bool,
 ) {
     if definition.execute_acl.is_none()
-        && grantee == "PUBLIC"
+        && grantee.is_public()
         && grantor == definition.owner
         && !grant_option
     {
@@ -240,12 +249,12 @@ pub fn grant_routine_acl(
     let acl = materialize_routine_acl(definition);
     if let Some(entry) = acl
         .iter_mut()
-        .find(|entry| entry.role == grantee && routine_acl_grantor(entry, &owner) == grantor)
+        .find(|entry| entry.role == *grantee && routine_acl_grantor(entry, &owner) == grantor)
     {
         entry.grant_option |= grant_option;
     } else {
         acl.push(RoutineAclEntry {
-            role: grantee.to_string(),
+            role: grantee.clone(),
             grantor: Some(grantor.to_string()),
             grant_option,
         });
@@ -254,7 +263,7 @@ pub fn grant_routine_acl(
 
 pub fn revoke_routine_acl(
     definition: &mut CreateFunction,
-    grantee: &str,
+    grantee: &AclGrantee,
     grantor: &str,
     grant_option_only: bool,
     cascade: bool,
@@ -264,7 +273,7 @@ pub fn revoke_routine_acl(
     let acl = materialize_routine_acl(definition);
     let Some(position) = acl
         .iter()
-        .position(|entry| entry.role == grantee && routine_acl_grantor(entry, &owner) == grantor)
+        .position(|entry| entry.role == *grantee && routine_acl_grantor(entry, &owner) == grantor)
     else {
         return Ok(false);
     };
@@ -325,8 +334,8 @@ pub fn rewrite_routine_acl_owner(
         return;
     };
     for entry in acl.iter_mut() {
-        if entry.role == old_owner {
-            entry.role = new_owner.to_string();
+        if entry.role.role_name() == Some(old_owner) {
+            entry.role = new_owner.into();
         }
         if entry.grantor.as_deref() == Some(old_owner) {
             entry.grantor = Some(new_owner.to_string());

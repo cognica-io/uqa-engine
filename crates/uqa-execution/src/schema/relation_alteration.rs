@@ -72,8 +72,11 @@ impl<'a> RoleTransferContext<'a> {
         }
     }
 
-    pub fn bind(&self, requested: &str) -> Result<RoleBinding, SQLError> {
+    pub fn bind(
+        &self,
+        requested: &uqa_sql::ast::RoleSpecification,
+    ) -> Result<RoleBinding, SQLError> {
         self.lock_context()
-            .bind(&roles::resolve_role_reference(self.session, requested))
+            .bind(&roles::resolve_role_specification(self.session, requested))
     }
 }

@@ -11,6 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
+mod acl_role_specification;
 mod constraints;
 mod cte;
 mod domains;
@@ -31,6 +32,7 @@ mod routines;
 mod sequence;
 mod types;
 
+pub use acl_role_specification::AclRoleSpecification;
 pub use constraints::*;
 pub use cte::*;
 pub use domains::*;
@@ -218,7 +220,7 @@ pub enum AlterTableAction {
         persistence: RelationPersistence,
     },
     ChangeOwner {
-        owner: String,
+        owner: RoleSpecification,
     },
     SetSchema {
         schema: String,
@@ -568,7 +570,7 @@ pub enum Statement {
     },
     AlterSchemaOwner {
         name: String,
-        new_owner: String,
+        new_owner: RoleSpecification,
     },
     /// `NOTIFY channel [, 'payload']` queues one asynchronous notification for delivery when the outer transaction commits.
     Notify {

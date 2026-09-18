@@ -393,7 +393,16 @@ pub fn build_info_columns(
     Ok(out)
 }
 
-type ColumnPrivilegeCatalogRow = (String, String, String, String, String, String, String, bool);
+type ColumnPrivilegeCatalogRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    uqa_core::catalog_acl::AclGrantee,
+    String,
+    bool,
+);
 
 fn insert_column_privilege_rows(
     rows: &mut BTreeSet<ColumnPrivilegeCatalogRow>,
@@ -443,7 +452,7 @@ fn insert_column_privilege_rows(
 
 fn default_table_acl_entry(owner: &str) -> TableAclEntry {
     TableAclEntry {
-        role: owner.to_string(),
+        role: owner.into(),
         grantor: Some(owner.to_string()),
         privileges: TablePrivileges {
             select: true,
@@ -553,17 +562,22 @@ pub fn build_info_column_privileges(
         .filter_map(
             |(schema, table, column, owner, grantor, grantee, privilege_type, grantable)| {
                 let grantor_enabled = catalog.role_is_enabled_for(current_user, &grantor);
-                let grantee_enabled =
-                    grantee != "PUBLIC" && catalog.role_is_enabled_for(current_user, &grantee);
-                if (role_grants_only || grantee != "PUBLIC") && !grantor_enabled && !grantee_enabled
+                let grantee_name = grantee.to_string();
+                // PostgreSQL's information-schema views filter the displayed recipient name. Grantability below still distinguishes the role from PUBLIC.
+                let grantee_enabled = catalog.role_is_enabled_for(current_user, &grantee_name);
+                if (role_grants_only || grantee_name != "PUBLIC")
+                    && !grantor_enabled
+                    && !grantee_enabled
                 {
                     return None;
                 }
                 let is_grantable = grantable
-                    || grantee != "PUBLIC" && catalog.role_is_enabled_for(&grantee, &owner);
+                    || grantee
+                        .role_name()
+                        .is_some_and(|name| catalog.role_is_enabled_for(name, &owner));
                 Some(row([
                     ("grantor", str_value(grantor)),
-                    ("grantee", str_value(grantee)),
+                    ("grantee", str_value(grantee_name)),
                     ("table_catalog", catalog_name()),
                     ("table_schema", str_value(schema)),
                     ("table_name", str_value(table)),

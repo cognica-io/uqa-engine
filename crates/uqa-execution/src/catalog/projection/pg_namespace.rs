@@ -51,11 +51,10 @@ fn schema_acl_catalog_value(
     catalog_array(
         acl.iter()
             .map(|entry| {
-                let grantee = if entry.role == "PUBLIC" {
-                    String::new()
-                } else {
-                    acl_identifier(&entry.role)
-                };
+                let grantee = entry
+                    .role
+                    .role_name()
+                    .map_or_else(String::new, acl_identifier);
                 let grantor =
                     acl_identifier(entry.grantor.as_deref().unwrap_or(&security.role_owner));
                 let mut privileges = String::new();

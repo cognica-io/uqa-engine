@@ -51,7 +51,10 @@ fn legacy_routine_acl_entries_default_the_grantor_to_the_owner() {
         "grant_option": true
     }))
     .unwrap();
-    assert_eq!(entry.role, "routine_caller");
+    assert_eq!(
+        entry.role,
+        uqa_core::catalog_acl::AclGrantee::from("routine_caller")
+    );
     assert_eq!(entry.grantor, None);
     assert!(entry.grant_option);
 }
@@ -113,7 +116,7 @@ fn alter_sequence_restart_reads_legacy_and_current_serde_shapes() {
 }
 
 #[test]
-fn alter_foreign_table_preserves_owner_serde_and_round_trips_rename() {
+fn alter_foreign_table_reads_legacy_owners_and_round_trips_current_actions() {
     let legacy: AlterForeignTableStmt =
         serde_json::from_str(r#"{"name":"items","if_exists":true,"owner":"new_owner"}"#).unwrap();
     assert_eq!(
@@ -125,7 +128,7 @@ fn alter_foreign_table_preserves_owner_serde_and_round_trips_rename() {
         serde_json::json!({
             "name": "items",
             "if_exists": true,
-            "owner": "new_owner"
+            "owner": {"kind": "named", "name": "new_owner"}
         })
     );
 

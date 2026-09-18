@@ -176,9 +176,16 @@ fn revoking_owner_execute_preserves_grant_authority_and_delegated_privileges() {
         panic!("routine definition");
     };
     definition.owner = "owner".into();
-    grant_routine_acl(&mut definition, "reader", "owner", true);
-    revoke_routine_acl(&mut definition, "PUBLIC", "owner", false, false).unwrap();
-    revoke_routine_acl(&mut definition, "owner", "owner", false, false).unwrap();
+    grant_routine_acl(&mut definition, &"reader".into(), "owner", true);
+    revoke_routine_acl(
+        &mut definition,
+        &uqa_core::catalog_acl::AclGrantee::Public,
+        "owner",
+        false,
+        false,
+    )
+    .unwrap();
+    revoke_routine_acl(&mut definition, &"owner".into(), "owner", false, false).unwrap();
     let has = |subject: &str, option| {
         routine_privilege_allowed(
             &definition.owner,
@@ -191,7 +198,7 @@ fn revoking_owner_execute_preserves_grant_authority_and_delegated_privileges() {
     assert!(!has("owner", false));
     assert!(has("owner", true));
     assert!(has("reader", true));
-    grant_routine_acl(&mut definition, "owner", "owner", false);
+    grant_routine_acl(&mut definition, &"owner".into(), "owner", false);
     assert!(routine_privilege_allowed(
         &definition.owner,
         definition.execute_acl.as_deref(),

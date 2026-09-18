@@ -16,6 +16,7 @@ use crate::{
     plan::UnifiedPlan,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use uqa_core::catalog_acl::AclGrantee;
 use uqa_core::catalog_sequence::{SequenceAclEntry, SequencePrivileges};
 
 fn roles() -> BTreeMap<String, RoleDefinition> {
@@ -42,7 +43,7 @@ fn roles() -> BTreeMap<String, RoleDefinition> {
     .collect()
 }
 
-fn entry(role: &str, grantor: Option<&str>) -> TableAclEntry {
+fn entry(role: impl Into<AclGrantee>, grantor: Option<&str>) -> TableAclEntry {
     TableAclEntry {
         role: role.into(),
         grantor: grantor.map(str::to_string),
@@ -66,7 +67,7 @@ fn temporary_dependencies_include_owners_grantees_and_grantors_only_once() {
     table.persistence = RelationPersistence::Temporary;
     table.security.acl = Some(vec![
         entry("reader", Some("grantor")),
-        entry("PUBLIC", None),
+        entry(AclGrantee::Public, None),
     ]);
     table
         .security
@@ -161,4 +162,30 @@ fn dangling_temporary_roles_fail_without_reading_later_catalogs() {
         *catalog.events.borrow(),
         ["read tables", "security temporary", "release tables"]
     );
+}
+
+#[test]
+fn named_public_temporary_owners_grantees_and_grantors_retain_dependencies() {
+    let mut roles = roles();
+    let mut named = RoleDefinition::bootstrap();
+    named.name = "PUBLIC".into();
+    named.oid = 17;
+    named.object_id = [17; 16];
+    roles.insert(named.name.clone(), named);
+    for (owner, acl, expected) in [
+        ("PUBLIC", None, BTreeSet::from([17])),
+        ("uqa", Some(entry("PUBLIC", None)), BTreeSet::from([17])),
+        (
+            "uqa",
+            Some(entry("reader", Some("PUBLIC"))),
+            BTreeSet::from([12, 17]),
+        ),
+    ] {
+        let mut catalog = Catalog::new();
+        catalog.table("temporary", owner);
+        let table = catalog.tables.values_mut().next().unwrap();
+        table.persistence = RelationPersistence::Temporary;
+        table.security.acl = acl.map(|entry| vec![entry]);
+        assert_eq!(role_dependencies(&catalog, &roles, 10).unwrap(), expected);
+    }
 }

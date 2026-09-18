@@ -39,7 +39,7 @@ fn database_catalog_snapshots_keep_owner_oids_and_project_current_acl_names() {
                 grant_options: create,
             },
             DatabaseAclEntry {
-                role: "PUBLIC".into(),
+                role: uqa_core::catalog_acl::AclGrantee::Public,
                 grantor: None,
                 privileges: DatabasePrivileges {
                     connect: true,

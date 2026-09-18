@@ -18,7 +18,7 @@ use std::sync::Arc;
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::AlterRoutineOwnerStmt,
-    catalog::roles::{require_set_role, resolve_role_reference, role_inherits},
+    catalog::roles::{require_set_role, resolve_role_specification, role_inherits},
     catalog::security::ownership::OwnerChangeAuthority,
     routines::{
         declaration::resolve_alter_routine_identity_types,
@@ -36,7 +36,10 @@ pub fn alter_sql_routine_owner(
         roles: context.catalog.roles,
         session: context.locks,
     };
-    let owner = locks.bind(&resolve_role_reference(context.role_names, &stmt.new_owner))?;
+    let owner = locks.bind(&resolve_role_specification(
+        context.role_names,
+        &stmt.new_owner,
+    ))?;
     let identity = analysis::routine_owner_identity(stmt);
     let requested_types = resolve_alter_routine_identity_types(context.types, &identity)?;
     let target = lock_owner_target(context, stmt, requested_types.as_deref())?;

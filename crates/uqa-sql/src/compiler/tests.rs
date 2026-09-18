@@ -377,6 +377,7 @@ fn null_literal_node() -> Node {
     }
 }
 
+mod acl_roles;
 mod compiler_invariants;
 mod data_commands;
 mod ddl_lifecycle;

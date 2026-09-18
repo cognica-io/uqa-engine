@@ -14,7 +14,7 @@ pub use schema_binding::BoundSchemaSecurity;
 pub mod table;
 pub mod table_binding;
 pub use table_binding::BoundTableSecurity;
-pub use uqa_core::catalog_acl::{TableAclEntry, TablePrivileges};
+pub use uqa_core::catalog_acl::{AclGrantee, TableAclEntry, TablePrivileges};
 
 /// Complete table-shaped relation security state. Ownership and ACL changes are published through one value so readers cannot observe a torn authorization state.
 #[derive(Debug, Clone, PartialEq, Eq)]

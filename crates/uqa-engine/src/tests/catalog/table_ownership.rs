@@ -139,7 +139,7 @@ fn failed_table_owner_save_rolls_back_prior_sequence_writes_without_publishing_l
             .with_implicit_transaction(|engine| {
                 let mut context = engine.table_ownership_context();
                 context.tables = &tables;
-                context.alter_table_role_owner("public.items", "target")
+                context.alter_table_role_owner("public.items", &"target".into())
             })
             .unwrap_err();
         assert!(
@@ -253,7 +253,7 @@ fn owner_authorization_rebinds_after_retaining_the_table_generation() {
         .with_implicit_definition_transaction(|engine| {
             let mut context = engine.table_ownership_context();
             context.tables = &tables;
-            context.alter_table_role_owner("public.items", "target")
+            context.alter_table_role_owner("public.items", &"target".into())
         })
         .unwrap();
     assert_eq!(retained.role_owner(), "uqa", "fresh owner authorization observes the replacement and returns before mutating the retained generation");
@@ -290,12 +290,15 @@ fn unchanged_table_owner_skips_owned_sequence_catalogs_after_role_validation() {
     let mut context = engine.table_ownership_context();
     context.owned_sequences = &sequences;
     context
-        .alter_table_role_owner("public.items", "CURRENT_USER")
+        .alter_table_role_owner(
+            "public.items",
+            &uqa_sql::ast::RoleSpecification::CurrentUser,
+        )
         .unwrap();
     assert_eq!(sequences.reads.get(), 0);
     assert_eq!(snapshot(&engine), before);
     let error: SQLError = context
-        .alter_table_role_owner("public.items", "missing_owner")
+        .alter_table_role_owner("public.items", &"missing_owner".into())
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("42704"));
     assert_eq!(sequences.reads.get(), 0);

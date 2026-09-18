@@ -56,7 +56,10 @@ fn existing_grantee_or_grantor_and_public_or_owner_do_not_add_dependencies() {
     let entries = after.acl.as_mut().unwrap();
     entries[0].privileges.update = true;
     entries.push(acl("grantor", "reader"));
-    entries.push(acl("PUBLIC", "owner"));
+    entries.push(TableAclEntry {
+        role: uqa_core::catalog_acl::AclGrantee::Public,
+        ..acl("unused", "owner")
+    });
     entries.push(acl("owner", "owner"));
     let mut added = BTreeSet::new();
     added_table_acl_roles(&before, &after, &mut added);
@@ -68,6 +71,15 @@ fn existing_grantee_or_grantor_and_public_or_owner_do_not_add_dependencies() {
         .push(acl("reader", "new_grantor"));
     added_table_acl_roles(&before, &after, &mut added);
     assert_eq!(added, BTreeSet::from(["new_grantor".into()]));
+}
+
+#[test]
+fn named_public_grantees_and_grantors_are_role_dependencies() {
+    for entry in [acl("PUBLIC", "owner"), acl("owner", "PUBLIC")] {
+        let mut added = BTreeSet::new();
+        added_acl_roles(&[], "owner", &[entry], "owner", &mut added);
+        assert_eq!(added, BTreeSet::from(["PUBLIC".into()]));
+    }
 }
 
 #[test]

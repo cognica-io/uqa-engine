@@ -61,7 +61,10 @@ fn legacy_database_acl_is_bound_once_during_initial_restore() {
     let restored = restore(&catalog, &roles, true).unwrap();
     let names = restored.resolve(&roles).unwrap();
     let acl = names.acl.as_ref().unwrap();
-    assert_eq!(acl[0].role, "reader");
+    assert_eq!(
+        acl[0].role,
+        uqa_core::catalog_acl::AclGrantee::from("reader")
+    );
     assert_eq!(acl[0].grantor.as_deref(), Some("uqa"));
     assert!(acl[0].privileges.create);
     let converted = catalog
@@ -107,7 +110,7 @@ fn restoring_renamed_database_roles_does_not_rewrite_metadata_or_rebind_names() 
             .acl
             .unwrap()[0]
             .role,
-        "renamed"
+        uqa_core::catalog_acl::AclGrantee::from("renamed")
     );
     assert_eq!(
         catalog
@@ -204,7 +207,7 @@ fn initial_default_security_and_invalid_legacy_references_preserve_atomic_valida
     let mut invalid_grantee = security.clone();
     invalid_grantee.acl.as_mut().unwrap()[0].role = "missing".into();
     let mut invalid_grantor = security;
-    invalid_grantor.acl.as_mut().unwrap()[0].role = "PUBLIC".into();
+    invalid_grantor.acl.as_mut().unwrap()[0].role = uqa_core::catalog_acl::AclGrantee::Public;
     invalid_grantor.acl.as_mut().unwrap()[0].grantor = Some("missing".into());
     for (invalid, expected) in [
         (

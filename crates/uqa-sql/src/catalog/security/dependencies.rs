@@ -11,36 +11,36 @@ use std::collections::BTreeSet;
 use uqa_core::{catalog_schema::SchemaAclEntry, catalog_sequence::SequenceAclEntry};
 
 pub trait AclRoleReferences {
-    fn role_references(&self) -> (&str, Option<&str>);
+    fn role_references(&self) -> (Option<&str>, Option<&str>);
 }
 
 impl AclRoleReferences for TableAclEntry {
-    fn role_references(&self) -> (&str, Option<&str>) {
-        (&self.role, self.grantor.as_deref())
+    fn role_references(&self) -> (Option<&str>, Option<&str>) {
+        (self.role.role_name(), self.grantor.as_deref())
     }
 }
 
 impl AclRoleReferences for SchemaAclEntry {
-    fn role_references(&self) -> (&str, Option<&str>) {
-        (&self.role, self.grantor.as_deref())
+    fn role_references(&self) -> (Option<&str>, Option<&str>) {
+        (self.role.role_name(), self.grantor.as_deref())
     }
 }
 
 impl AclRoleReferences for SequenceAclEntry {
-    fn role_references(&self) -> (&str, Option<&str>) {
-        (&self.role, self.grantor.as_deref())
+    fn role_references(&self) -> (Option<&str>, Option<&str>) {
+        (self.role.role_name(), self.grantor.as_deref())
     }
 }
 
 impl AclRoleReferences for DatabaseAclEntry {
-    fn role_references(&self) -> (&str, Option<&str>) {
-        (&self.role, self.grantor.as_deref())
+    fn role_references(&self) -> (Option<&str>, Option<&str>) {
+        (self.role.role_name(), self.grantor.as_deref())
     }
 }
 
 impl AclRoleReferences for crate::ast::RoutineAclEntry {
-    fn role_references(&self) -> (&str, Option<&str>) {
-        (&self.role, self.grantor.as_deref())
+    fn role_references(&self) -> (Option<&str>, Option<&str>) {
+        (self.role.role_name(), self.grantor.as_deref())
     }
 }
 
@@ -48,9 +48,9 @@ fn acl_roles<'a, T: AclRoleReferences>(acl: &'a [T], owner: &'a str) -> BTreeSet
     acl.iter()
         .flat_map(|entry| {
             let (role, grantor) = entry.role_references();
-            [role, grantor.unwrap_or(owner)]
+            [role, Some(grantor.unwrap_or(owner))].into_iter().flatten()
         })
-        .filter(|role| *role != "PUBLIC" && *role != owner)
+        .filter(|role| *role != owner)
         .collect()
 }
 

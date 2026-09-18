@@ -62,7 +62,7 @@ impl TableOwnershipContext<'_> {
     pub fn alter_table_role_owner(
         &self,
         name: &str,
-        requested_owner: &str,
+        requested_owner: &uqa_sql::ast::RoleSpecification,
     ) -> Result<(), SQLError> {
         // The ALTER entry retains the table lock; bind the new owner from the catalog current after that wait.
         self.roles.locks.refresh_shared_catalog()?;

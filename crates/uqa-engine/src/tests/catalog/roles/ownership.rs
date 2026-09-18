@@ -17,6 +17,7 @@ use uqa_execution::{
     row_locks::{shared_objects::SharedCatalogLock, RelationLockMode},
 };
 
+mod quoted_names;
 mod target_wait;
 
 struct Target {

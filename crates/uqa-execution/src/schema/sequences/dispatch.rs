@@ -42,7 +42,7 @@ pub fn alter_sequence(
     };
     let relation = RelationIdentity::from_legacy_name(&name)
         .map_err(|error| SQLError::Internal(format!("resolve sequence `{name}`: {error}")))?;
-    if let Some(role_owner) = alter.role_owner.as_deref() {
+    if let Some(role_owner) = alter.role_owner.as_ref() {
         uqa_sql::schema::sequences::actions::validate_sequence_role_owner_shape(alter)?;
         let Some(binding) = bind_relation(
             context.roles.writer,

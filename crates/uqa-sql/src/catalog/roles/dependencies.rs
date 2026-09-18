@@ -117,7 +117,7 @@ pub fn ensure_roles_have_no_object_dependencies(
             let owns = function.def.owner == *name;
             let has_acl = function.def.execute_acl.as_ref().is_some_and(|acl| {
                 acl.iter().any(|entry| {
-                    entry.role == *name
+                    entry.role.role_name() == Some(name.as_str())
                         || entry.grantor.as_deref().unwrap_or(&function.def.owner) == name
                 })
             });
@@ -187,12 +187,14 @@ fn ensure_roles_have_no_foreign_table_dependencies(
 fn table_security_depends_on_role(security: &TableSecurity, role: &str) -> bool {
     let acl_dependency = security.acl.as_ref().is_some_and(|acl| {
         acl.iter().any(|entry| {
-            entry.role == role || entry.grantor.as_deref().unwrap_or(&security.role_owner) == role
+            entry.role.role_name() == Some(role)
+                || entry.grantor.as_deref().unwrap_or(&security.role_owner) == role
         })
     });
     let column_acl_dependency = security.column_acls.values().any(|acl| {
         acl.iter().any(|entry| {
-            entry.role == role || entry.grantor.as_deref().unwrap_or(&security.role_owner) == role
+            entry.role.role_name() == Some(role)
+                || entry.grantor.as_deref().unwrap_or(&security.role_owner) == role
         })
     });
     security.role_owner == role || acl_dependency || column_acl_dependency
@@ -205,7 +207,7 @@ fn dependent_sequence_for_role<'a>(
     sequences.iter().find_map(|(relation, security)| {
         let acl_dependency = security.acl.as_ref().is_some_and(|acl| {
             acl.iter().any(|entry| {
-                entry.role == role
+                entry.role.role_name() == Some(role)
                     || entry.grantor.as_deref().unwrap_or(&security.role_owner) == role
             })
         });

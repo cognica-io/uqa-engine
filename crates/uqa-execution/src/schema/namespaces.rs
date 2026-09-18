@@ -244,13 +244,13 @@ pub struct SchemaOwnerContext<'a> {
 pub fn alter_schema_owner(
     context: &SchemaOwnerContext<'_>,
     name: &str,
-    requested: &str,
+    requested: &uqa_sql::ast::RoleSpecification,
 ) -> Result<(), SQLError> {
     context
         .refresh
         .refresh_catalog()
         .map_err(|error| SQLError::Internal(error.to_string()))?;
-    let new_owner = roles::resolve_role_reference(context.session, requested);
+    let new_owner = roles::resolve_role_specification(context.session, requested);
     let locks = RoleLockContext {
         roles: context.roles,
         session: context.locks,

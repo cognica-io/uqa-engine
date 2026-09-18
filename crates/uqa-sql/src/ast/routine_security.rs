@@ -10,7 +10,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::{FunctionVolatility, RoleSpecification, RoutineColumnTypeReference};
+use super::{
+    AclRoleSpecification, FunctionVolatility, RoleSpecification, RoutineColumnTypeReference,
+};
 
 /// `PARALLEL UNSAFE`, `PARALLEL RESTRICTED`, or `PARALLEL SAFE` routine metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -35,7 +37,7 @@ pub struct RoutineSecurityAttributes {
 /// One explicit `EXECUTE` ACL entry. `None` on `CreateFunction::execute_acl` retains `PostgreSQL`'s default public execution privilege.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoutineAclEntry {
-    pub role: String,
+    pub role: uqa_core::catalog_acl::AclGrantee,
     /// Grantor for this ACL path. Legacy persisted definitions omit the field and therefore use the routine owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grantor: Option<String>,
@@ -89,7 +91,7 @@ pub struct AlterRoutineOwnerStmt {
     pub name: String,
     pub arg_types: Option<Vec<String>>,
     pub arg_type_references: Vec<Option<RoutineColumnTypeReference>>,
-    pub new_owner: String,
+    pub new_owner: RoleSpecification,
 }
 
 /// `ALTER FUNCTION | PROCEDURE | ROUTINE name[(input_types)] RENAME TO new_name`.
@@ -124,9 +126,9 @@ pub struct GrantRoutineStmt {
     pub grant_option: bool,
     pub grant_option_only: bool,
     pub items: Vec<GrantRoutineItem>,
-    pub grantees: Vec<String>,
+    pub grantees: Vec<AclRoleSpecification>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grantor: Option<String>,
+    pub grantor: Option<RoleSpecification>,
     #[serde(default)]
     pub revoke_behavior: RoutineRevokeBehavior,
 }

@@ -153,7 +153,7 @@ fn database_acl_persistence_failure_leaves_security_and_epoch_unchanged() {
         grant_option_only: false,
         privileges: vec![DatabasePrivilege::Create],
         databases: vec!["uqa".into()],
-        grantees: vec!["PUBLIC".into()],
+        grantees: vec![uqa_sql::ast::AclRoleSpecification::Public],
         grantor: None,
         revoke_behavior: DatabaseRevokeBehavior::Restrict,
     };

@@ -205,6 +205,19 @@ impl RoleSubject for String {
     }
 }
 
+impl RoleSubject for uqa_core::catalog_acl::AclGrantee {
+    fn role_name<'a>(&'a self, _roles: &'a BTreeMap<String, RoleDefinition>) -> Option<&'a str> {
+        self.role_name()
+    }
+
+    fn role_definition<'a>(
+        &self,
+        roles: &'a BTreeMap<String, RoleDefinition>,
+    ) -> Option<&'a RoleDefinition> {
+        self.role_name().and_then(|name| roles.get(name))
+    }
+}
+
 impl RoleSubject for RoleBinding {
     fn role_name<'a>(&'a self, roles: &'a BTreeMap<String, RoleDefinition>) -> Option<&'a str> {
         self.role_definition(roles).map(|role| role.name.as_str())

@@ -809,7 +809,7 @@ fn relation_forms_and_options_preserve_lifecycle_semantics() {
             kind: crate::ast::AlterViewKind::View,
             action: crate::ast::AlterViewAction::OwnerTo(owner),
             ..
-        }) if owner == "next_owner"
+        }) if owner == crate::ast::RoleSpecification::from("next_owner")
     ));
     assert!(matches!(
         first("ALTER MATERIALIZED VIEW reports OWNER TO CURRENT_USER"),
@@ -817,7 +817,7 @@ fn relation_forms_and_options_preserve_lifecycle_semantics() {
             kind: crate::ast::AlterViewKind::MaterializedView,
             action: crate::ast::AlterViewAction::OwnerTo(owner),
             ..
-        }) if owner == "CURRENT_USER"
+        }) if owner == crate::ast::RoleSpecification::CurrentUser
     ));
 }
 

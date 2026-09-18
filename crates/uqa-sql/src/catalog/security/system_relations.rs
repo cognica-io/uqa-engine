@@ -159,7 +159,7 @@ pub fn has_column_privilege(
     security.column_acls.get(column).is_some_and(|acl| {
         acl.iter().any(|entry| {
             entry.privileges.intersects(check.privilege.mask())
-                && (entry.role == "PUBLIC"
+                && (entry.role.is_public()
                     || crate::catalog::roles::role_inherits(
                         roles,
                         memberships,

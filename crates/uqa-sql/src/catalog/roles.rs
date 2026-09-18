@@ -104,13 +104,6 @@ pub trait RoleReferenceNames {
         self.session_role()
     }
 }
-pub fn resolve_role_reference(names: &dyn RoleReferenceNames, name: &str) -> RoleReference {
-    match name {
-        "CURRENT_USER" => names.current_role(),
-        "SESSION_USER" => names.session_role(),
-        other => other.into(),
-    }
-}
 pub fn resolve_role_specification(
     names: &dyn RoleReferenceNames,
     specification: &crate::ast::RoleSpecification,
@@ -121,6 +114,22 @@ pub fn resolve_role_specification(
         crate::ast::RoleSpecification::SessionUser => names.session_role(),
     }
 }
+
+pub fn resolve_acl_role_specification(
+    names: &dyn RoleReferenceNames,
+    specification: &crate::ast::AclRoleSpecification,
+    roles: &std::collections::BTreeMap<String, RoleDefinition>,
+) -> Result<uqa_core::catalog_acl::AclGrantee, crate::SQLError> {
+    use crate::ast::AclRoleSpecification;
+    use uqa_core::catalog_acl::AclGrantee;
+    match specification {
+        AclRoleSpecification::Public => Ok(AclGrantee::Public),
+        AclRoleSpecification::Role(role) => resolve_role_specification(names, role)
+            .catalog_name(roles)
+            .map(AclGrantee::Role),
+    }
+}
+
 pub fn require_role_exists(
     roles: &std::collections::BTreeMap<String, RoleDefinition>,
     name: &str,

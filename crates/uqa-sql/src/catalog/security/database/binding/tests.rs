@@ -56,7 +56,7 @@ fn fixture() -> (BTreeMap<String, RoleDefinition>, DatabaseSecurity) {
                 grant_options: DatabasePrivileges::default(),
             },
             DatabaseAclEntry {
-                role: "PUBLIC".into(),
+                role: uqa_core::catalog_acl::AclGrantee::Public,
                 grantor: None,
                 privileges: DatabasePrivileges {
                     connect: true,
@@ -89,16 +89,19 @@ fn database_references_follow_renames_without_rebinding_reused_names_or_oids() {
     assert_eq!(restored.role_owner, "renamed_owner");
     let acl = restored.acl.as_ref().unwrap();
     assert_eq!(
-        (&*acl[0].role, acl[0].grantor.as_deref()),
-        ("renamed_delegate", Some("renamed_owner"))
+        (acl[0].role.role_name(), acl[0].grantor.as_deref()),
+        (Some("renamed_delegate"), Some("renamed_owner"))
     );
     assert_eq!(
-        (&*acl[1].role, acl[1].grantor.as_deref()),
-        ("renamed_reader", Some("renamed_delegate"))
+        (acl[1].role.role_name(), acl[1].grantor.as_deref()),
+        (Some("renamed_reader"), Some("renamed_delegate"))
     );
     assert_eq!(
-        (&*acl[2].role, acl[2].grantor.as_deref()),
-        ("PUBLIC", Some("renamed_owner"))
+        (&acl[2].role, acl[2].grantor.as_deref()),
+        (
+            &uqa_core::catalog_acl::AclGrantee::Public,
+            Some("renamed_owner")
+        )
     );
     assert_eq!(
         BoundDatabaseSecurity::bind(&restored, &roles).unwrap(),
@@ -155,7 +158,7 @@ fn resolved_grantor_chains_keep_cascade_and_public_privileges_after_rename() {
     };
     let (revoked, granted) = apply_database_acl(
         &statement,
-        &statement.grantees,
+        &["renamed_delegate".into()],
         &[DatabaseAclPrivilege::Create],
         "owner",
         &roles,
@@ -165,7 +168,10 @@ fn resolved_grantor_chains_keep_cascade_and_public_privileges_after_rename() {
     .unwrap();
     assert_eq!(granted, 1);
     assert_eq!(revoked.acl.as_ref().unwrap().len(), 1);
-    assert_eq!(revoked.acl.as_ref().unwrap()[0].role, "PUBLIC");
+    assert_eq!(
+        revoked.acl.as_ref().unwrap()[0].role,
+        uqa_core::catalog_acl::AclGrantee::Public
+    );
     assert!(role_has_privilege(
         &revoked,
         "reader",

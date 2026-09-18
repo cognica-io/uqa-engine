@@ -703,7 +703,7 @@ fn broken_view_acl_grant_chains_are_rejected_during_open() {
             .as_mut()
             .unwrap()
             .iter_mut()
-            .find(|entry| entry.role == "view_acl_reader")
+            .find(|entry| entry.role.role_name() == Some("view_acl_reader"))
             .unwrap()
             .grantor = Some("view_acl_delegate".into());
         catalog.save_view(view).unwrap();

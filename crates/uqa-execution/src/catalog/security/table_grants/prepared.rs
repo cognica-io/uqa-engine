@@ -20,7 +20,7 @@ use crate::catalog::security::{
 use uqa_sql::{
     ast::{GrantTableStmt, GrantTableTarget},
     catalog::{
-        roles::resolve_role_reference,
+        roles::resolve_role_specification,
         security::{
             table::{requested_acl_privileges, RequestedTablePrivileges},
             table_grants::{
@@ -51,12 +51,14 @@ pub(super) fn prepare<'a>(
     let grantees = statement
         .grantees
         .iter()
-        .map(|role| resolve_role_reference(context.names, role).catalog_name(&roles))
+        .map(|role| {
+            uqa_sql::catalog::roles::resolve_acl_role_specification(context.names, role, &roles)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let requested_grantor = statement
         .grantor
         .as_ref()
-        .map(|role| resolve_role_reference(context.names, role).catalog_name(&roles))
+        .map(|role| resolve_role_specification(context.names, role).catalog_name(&roles))
         .transpose()?;
     let current_user = context.names.current_role();
     validate_table_acl_roles(

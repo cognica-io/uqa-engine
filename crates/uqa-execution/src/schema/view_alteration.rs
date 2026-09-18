@@ -176,7 +176,7 @@ fn alter_view_role_owner(
     relation: &RelationIdentity,
     canonical_name: &str,
     kind: &str,
-    requested_owner: &str,
+    requested_owner: &uqa_sql::ast::RoleSpecification,
 ) -> Result<(), SQLError> {
     let owner = context.roles.bind(requested_owner)?;
     let current_user = context.roles.session.current_role();

@@ -61,9 +61,9 @@ pub fn alter_sequence_role_owner(
     context: &SequenceRoleOwnershipContext<'_>,
     name: &str,
     relation: &RelationIdentity,
-    requested_owner: &str,
+    requested_owner: &uqa_sql::ast::RoleSpecification,
 ) -> Result<(), SQLError> {
-    let new_owner = roles::resolve_role_reference(context.session, requested_owner);
+    let new_owner = roles::resolve_role_specification(context.session, requested_owner);
     let locks = RoleLockContext {
         roles: context.roles,
         session: context.locks,

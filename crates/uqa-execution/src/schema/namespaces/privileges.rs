@@ -25,7 +25,7 @@ use std::{
 use uqa_sql::{
     ast::GrantSchemaStmt,
     catalog::{
-        roles::{resolve_role_reference, RoleReferenceNames},
+        roles::{resolve_role_specification, RoleReferenceNames},
         security::{
             dependencies::added_acl_roles,
             schema::{
@@ -121,12 +121,14 @@ fn prepare_privileges<'a>(
     let grantees = statement
         .grantees
         .iter()
-        .map(|role| resolve_role_reference(context.session, role).catalog_name(&roles))
+        .map(|role| {
+            uqa_sql::catalog::roles::resolve_acl_role_specification(context.session, role, &roles)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let requested_grantor = statement
         .grantor
         .as_ref()
-        .map(|role| resolve_role_reference(context.session, role).catalog_name(&roles))
+        .map(|role| resolve_role_specification(context.session, role).catalog_name(&roles))
         .transpose()?;
     let current_user = context.session.current_role();
     validate_schema_acl_roles(

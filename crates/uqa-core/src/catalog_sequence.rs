@@ -52,7 +52,7 @@ impl SequencePrivileges {
 /// One explicit sequence ACL path. `None` on `SequenceRow::acl` retains `PostgreSQL`'s default owner-only privileges.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SequenceAclEntry {
-    pub role: String,
+    pub role: crate::catalog_acl::AclGrantee,
     /// Legacy persisted entries without an explicit grantor originate from the sequence owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grantor: Option<String>,

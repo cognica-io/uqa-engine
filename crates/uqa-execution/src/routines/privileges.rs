@@ -17,7 +17,9 @@ use crate::{
 use std::{collections::BTreeSet, sync::Arc};
 use uqa_sql::{
     ast::{GrantRoutineStmt, RoutineRevokeBehavior},
-    catalog::roles::{resolve_role_reference, RoleReferenceNames},
+    catalog::roles::{
+        resolve_acl_role_specification, resolve_role_specification, RoleReferenceNames,
+    },
     catalog::security::dependencies::added_acl_roles,
     routines::lifecycle::RoutineRegistry,
     routines::{
@@ -93,12 +95,12 @@ fn prepare_privileges<'a>(
     let grantees = stmt
         .grantees
         .iter()
-        .map(|role| resolve_role_reference(context.role_names, role).catalog_name(&roles))
+        .map(|role| resolve_acl_role_specification(context.role_names, role, &roles))
         .collect::<Result<Vec<_>, _>>()?;
     let requested_grantor = stmt
         .grantor
         .as_ref()
-        .map(|role| resolve_role_reference(context.role_names, role).catalog_name(&roles))
+        .map(|role| resolve_role_specification(context.role_names, role).catalog_name(&roles))
         .transpose()?;
     let current_user = context.catalog.names.current_role();
     analysis::validate_routine_acl_roles(

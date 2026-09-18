@@ -40,6 +40,18 @@ fn roles() -> BTreeMap<String, RoleDefinition> {
 }
 type AppliedGrant = (TableSecurity, usize, Vec<(&'static str, String)>);
 
+struct SessionRole<'a>(&'a str);
+
+impl crate::catalog::roles::RoleReferenceNames for SessionRole<'_> {
+    fn current_role(&self) -> crate::catalog::roles::RoleReference {
+        self.0.into()
+    }
+
+    fn session_role(&self) -> crate::catalog::roles::RoleReference {
+        self.current_role()
+    }
+}
+
 fn apply(
     sql: &str,
     user: &str,
@@ -47,11 +59,18 @@ fn apply(
     current: &TableSecurity,
 ) -> Result<AppliedGrant, SQLError> {
     let statement = statement(sql);
+    let grantees = statement
+        .grantees
+        .iter()
+        .map(|role| {
+            crate::catalog::roles::resolve_acl_role_specification(&SessionRole(user), role, roles)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let requested = requested_acl_privileges(&statement.privileges)?;
     let memberships = BTreeMap::new();
     let application = TableGrantApplication {
         statement: &statement,
-        grantees: &statement.grantees,
+        grantees: &grantees,
         requested: &requested,
         current_user: &user,
         roles,
@@ -247,7 +266,7 @@ fn role_errors_precede_public_grant_options_and_explicit_grantor_validation() {
     assert_eq!(
         validate_table_acl_roles(
             &grant,
-            &["absent".into(), "PUBLIC".into()],
+            &["absent".into(), uqa_core::catalog_acl::AclGrantee::Public],
             Some("absent"),
             "uqa",
             &roles
@@ -257,9 +276,15 @@ fn role_errors_precede_public_grant_options_and_explicit_grantor_validation() {
         Some("42704")
     );
     assert_eq!(
-        validate_table_acl_roles(&grant, &["PUBLIC".into()], Some("absent"), "uqa", &roles)
-            .unwrap_err()
-            .sqlstate(),
+        validate_table_acl_roles(
+            &grant,
+            &[uqa_core::catalog_acl::AclGrantee::Public],
+            Some("absent"),
+            "uqa",
+            &roles
+        )
+        .unwrap_err()
+        .sqlstate(),
         Some("0LP01")
     );
     grant.grant_option = false;
@@ -275,7 +300,14 @@ fn role_errors_precede_public_grant_options_and_explicit_grantor_validation() {
             .sqlstate(),
         Some("0A000")
     );
-    validate_table_acl_roles(&grant, &["PUBLIC".into()], Some("uqa"), "uqa", &roles).unwrap();
+    validate_table_acl_roles(
+        &grant,
+        &[uqa_core::catalog_acl::AclGrantee::Public],
+        Some("uqa"),
+        "uqa",
+        &roles,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -416,7 +448,7 @@ fn foreign_acl_candidates_validate_columns_without_mutating_the_source_security(
     let memberships = BTreeMap::new();
     let application = TableGrantApplication {
         statement: &statement,
-        grantees: &statement.grantees,
+        grantees: &["reader".into()],
         requested: &requested,
         current_user: &"uqa",
         roles: &roles,

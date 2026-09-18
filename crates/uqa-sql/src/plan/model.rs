@@ -547,7 +547,7 @@ pub enum CommandPlan {
     },
     AlterSchemaOwner {
         name: String,
-        new_owner: String,
+        new_owner: crate::ast::RoleSpecification,
     },
     Notify {
         channel: String,

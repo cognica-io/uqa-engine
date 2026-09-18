@@ -23,7 +23,7 @@ fn system_acl_restoration_round_trips_independent_table_and_attribute_tuples() {
     grant_acl(
         &mut expected,
         TableAclPrivilege::Select,
-        &["PUBLIC".into()],
+        &[uqa_core::catalog_acl::AclGrantee::Public],
         "uqa",
         false,
     );
@@ -31,7 +31,7 @@ fn system_acl_restoration_round_trips_independent_table_and_attribute_tuples() {
         &mut expected,
         "rolname",
         TableAclPrivilege::Update,
-        &["PUBLIC".into()],
+        &[uqa_core::catalog_acl::AclGrantee::Public],
         "uqa",
         false,
     );

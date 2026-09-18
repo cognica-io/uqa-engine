@@ -164,7 +164,7 @@ pub fn alter_foreign_table(
 fn alter_foreign_table_role_owner(
     context: &ForeignTableAlterContext<'_>,
     name: &str,
-    requested_owner: &str,
+    requested_owner: &uqa_sql::ast::RoleSpecification,
 ) -> Result<(), SQLError> {
     let owner = context.roles.bind(requested_owner)?;
     let current_user = context.roles.session.current_role();

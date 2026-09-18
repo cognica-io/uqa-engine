@@ -8,6 +8,9 @@
 
 use serde::{Deserialize, Serialize};
 
+mod grantee;
+pub use grantee::AclGrantee;
+
 /// Grantable privileges carried by one table-shaped relation ACL path.
 #[expect(
     clippy::struct_excessive_bools,
@@ -95,7 +98,7 @@ impl TablePrivileges {
 /// One explicit table-shaped relation ACL path. Legacy entries without an explicit grantor originate from the relation owner.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableAclEntry {
-    pub role: String,
+    pub role: AclGrantee,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grantor: Option<String>,
     #[serde(default)]
