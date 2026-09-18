@@ -26,6 +26,7 @@ SUPPORT = ROOT / "benchmarks/nori/persistent.rs"
 LIMITS = ROOT / "benchmarks/nori/persistent-limits.json"
 EXPECTED = {"commit_batch_256/0": 256, "commit_batch_16/256": 272,
             "commit_batch_16/2048": 2064, "rollback_batch_16/2048": 2048}
+TRANSACTION_MODELS = {"sqlite": "provider_serialized", "redb": "versioned_concurrent"}
 
 
 def target_key(report: dict) -> str:
@@ -50,6 +51,9 @@ def measurements(report: dict, provider: str) -> dict:
         raise RuntimeError("persistent measurements require a complete compiler-flag identity")
     if provider == "redb" and report.get("target_os") == "emscripten":
         raise RuntimeError("redb does not provide an Emscripten persistence measurement")
+    model = TRANSACTION_MODELS[provider]
+    if report.get("transaction_model") != model:
+        raise RuntimeError(f"persistent measurements require the provider's transaction model: {model}")
     for name, row in rows.items():
         expected_samples = 1 if allocation_only else index.PROTOCOL["samples"] + 2
         if type(row.get("verified_live_and_reopened_samples")) is not int or row["verified_live_and_reopened_samples"] != expected_samples:
@@ -57,6 +61,14 @@ def measurements(report: dict, provider: str) -> dict:
         for key in ("closed_seed_file_bytes", "closed_result_file_bytes"):
             if type(row.get(key)) is not int or row[key] <= 0:
                 raise RuntimeError(f"invalid persistent file-size observation: {name}/{key}")
+        if "retained_transaction_bytes" not in row:
+            raise RuntimeError(f"missing transaction retention observation: {name}")
+        retained = row["retained_transaction_bytes"]
+        if model == "versioned_concurrent":
+            if type(retained) is not int or retained != 0:
+                raise RuntimeError(f"private transaction retention must return to zero: {name}")
+        elif retained is not None:
+            raise RuntimeError(f"serialized transactions do not report a private MVCC allowance: {name}")
     if not report.get("durability") or not report.get("filesystem"):
         raise RuntimeError("persistent measurements require durability and filesystem scope")
     return rows

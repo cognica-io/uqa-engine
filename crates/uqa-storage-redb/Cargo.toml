@@ -31,9 +31,5 @@ name = "nori_persistent"
 harness = false
 required-features = ["uqa-analysis/nori"]
 
-[[bench]]
-name = "commit_allocation_order"
-harness = false
-
 [lints]
 workspace = true

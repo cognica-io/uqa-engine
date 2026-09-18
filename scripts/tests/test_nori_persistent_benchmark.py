@@ -23,15 +23,17 @@ def fixture(provider="sqlite"):
     rows = [{"name": name, "documents_after": count, "elapsed_ns": [1000] * 7, "median_ns": 1000,
              "allocation": {"count_total": 4, "count_peak": 3, "count_net": 2, "bytes_total": 40, "bytes_peak": 30, "bytes_net": 20},
              "graph_sha256": "a" * 64, "field_length": count * 2, "posting_count": count * 2,
+             "retained_transaction_bytes": 0 if provider == "redb" else None,
              "verified_live_and_reopened_samples": 9, "closed_seed_file_bytes": 4096, "closed_result_file_bytes": 8192}
             for name, count in benchmark.EXPECTED.items()]
     report = {"schema_version": 1, "owner": f"uqa-storage-{provider}", "threads": 1, "pointer_bits": 64,
               "target_arch": "aarch64", "target_os": "macos", "timing_scope": "mutation", "allocation_scope": "mutation",
               "filesystem": "host filesystem", "durability": "provider default",
+              "transaction_model": benchmark.TRANSACTION_MODELS[provider],
               "protocol": dict(benchmark.index.PROTOCOL), "corpus_sha256": benchmark.common.digest(benchmark.common.CORPUS),
               "analyzer_fingerprint": "b" * 64, "measurements": rows,
               "provenance": {"cpu": "CPU", "platform": "platform", "rustc": "rustc", "flags": {}, "flags_sha256": benchmark.common.flags_signature({}), "node": None, "emcc": None, "benchmark_sha256": "c" * 64}}
-    limits = {key: report[key] for key in ("schema_version", "corpus_sha256", "analyzer_fingerprint")}
+    limits = {key: report[key] for key in ("schema_version", "corpus_sha256", "analyzer_fingerprint", "transaction_model")}
     limits.update(schema_version=2, timing_max_ratio=1.25,
                   allocation_ceilings={benchmark.target_key(report): {row["name"]: dict(row["allocation"]) for row in rows}},
                   outputs={row["name"]: {key: row[key] for key in ("graph_sha256", "field_length", "posting_count")} for row in rows})
@@ -50,6 +52,31 @@ def allocation_fixture(provider="sqlite"):
 
 
 class NoriPersistentBenchmarkTest(unittest.TestCase):
+    def test_reports_identify_the_actual_provider_transaction_model(self):
+        for provider in ("sqlite", "redb"):
+            report, limits = allocation_fixture(provider)
+            for model in (None, "unknown", "provider_serialized" if provider == "redb" else "versioned_concurrent"):
+                with self.subTest(provider=provider, model=model):
+                    changed = {**report, "transaction_model": model}
+                    with self.assertRaisesRegex(RuntimeError, "transaction model"):
+                        benchmark.check(changed, limits, provider)
+
+    def test_every_mvcc_transaction_releases_its_private_allowance(self):
+        for offset in range(len(benchmark.EXPECTED)):
+            for retained in (None, True, False, -1, 1, 0.0, "0"):
+                report, limits = allocation_fixture("redb")
+                report["measurements"][offset]["retained_transaction_bytes"] = retained
+                with self.subTest(offset=offset, retained=retained), self.assertRaisesRegex(RuntimeError, "retention must return to zero"):
+                    benchmark.check(report, limits, "redb")
+            report, limits = allocation_fixture("redb")
+            del report["measurements"][offset]["retained_transaction_bytes"]
+            with self.assertRaisesRegex(RuntimeError, "missing transaction retention"):
+                benchmark.check(report, limits, "redb")
+        report, limits = allocation_fixture("sqlite")
+        report["measurements"][0]["retained_transaction_bytes"] = 0
+        with self.assertRaisesRegex(RuntimeError, "serialized transactions"):
+            benchmark.check(report, limits, "sqlite")
+
     def test_all_workload_allocation_excesses_are_reported_in_one_check(self):
         for provider in ("sqlite", "redb"):
             report, limits = allocation_fixture(provider)
@@ -293,6 +320,20 @@ class NoriPersistentBenchmarkTest(unittest.TestCase):
             if "run-nori-persistent-benchmark.py --provider" in command:
                 self.assertIn("--allocation-only", command)
         self.assertNotIn("--measure-only", native + wasm)
+
+    def test_ci_can_collect_allocations_without_timing_or_suppressing_a_provider(self):
+        native = (ROOT / ".github/workflows/ci.yml").read_text()
+        job = native.split("  nori-benchmark:\n", 1)[1].split("  gate:\n", 1)[0]
+        self.assertIn("inputs.run_rust || inputs.run_nori_allocations", job)
+        timed = job.split("      - name: Measure native analysis", 1)[1].split("      - name: Verify SQLite", 1)[0]
+        self.assertIn("if: ${{ github.event_name == 'push' || inputs.run_rust }}", timed)
+        for provider in ("SQLite", "redb"):
+            step = job.split(f"      - name: Verify {provider} allocation and reopened outputs\n", 1)[1].split("      - ", 1)[0]
+            self.assertIn("if: ${{ !cancelled() }}", step)
+            self.assertIn("--allocation-only", step)
+            self.assertNotIn("--measure-only", step)
+            self.assertNotIn("continue-on-error", step)
+        self.assertNotIn("commit_allocation_order", job)
 
 if __name__ == "__main__":
     unittest.main()

@@ -26,10 +26,14 @@ const SAMPLES: usize = 7;
 
 pub trait Session {
     type Index: InvertedIndex;
+    const TRANSACTION_MODEL: &'static str;
     fn open(path: &Path) -> Self;
     fn index(&mut self) -> &mut Self::Index;
     fn begin(&self);
     fn finish(&self, rollback: bool);
+    fn retained_transaction_bytes(&self) -> Option<usize> {
+        None
+    }
 }
 
 fn bind(index: &mut impl InvertedIndex, revision: &Arc<CompiledAnalyzer>) {
@@ -143,6 +147,7 @@ fn probe<S: Session>(
         copy_seed(seed_dir.path(), directory.path());
         let mut session = S::open(&directory.path().join("index.db"));
         bind(session.index(), revision);
+        assert_eq!(session.retained_transaction_bytes().unwrap_or(0), 0);
         (session, directory)
     };
     let mutate = |session: &mut S| {
@@ -151,6 +156,11 @@ fn probe<S: Session>(
         session.finish(rollback);
     };
     let verify = |mut session: S, directory: &Path| {
+        assert_eq!(
+            session.retained_transaction_bytes().unwrap_or(0),
+            0,
+            "completed transaction retained private buffers"
+        );
         let live = graph(session.index(), documents);
         assert_eq!(live, expected, "live provider graph differs from Memory");
         drop(session);
@@ -181,6 +191,7 @@ fn probe<S: Session>(
     }
     let (mut session, directory) = setup();
     let info = measure(|| mutate(&mut session));
+    let retained_transaction_bytes = session.retained_transaction_bytes();
     verify(session, directory.path());
     eprintln!("measured {name}");
     let mut row = json!({
@@ -189,6 +200,7 @@ fn probe<S: Session>(
             "count_total": info.count_total, "count_peak": info.count_max, "count_net": info.count_current,
             "bytes_total": info.bytes_total, "bytes_peak": info.bytes_max, "bytes_net": info.bytes_current,
         },
+        "retained_transaction_bytes": retained_transaction_bytes,
         "graph_sha256": expected["graph_sha256"], "field_length": expected["field_length"],
         "posting_count": expected["posting_count"],
         "verified_live_and_reopened_samples": if allocation_only { 1 } else { SAMPLES + 2 },
@@ -256,6 +268,7 @@ pub fn run<S: Session>(owner: &str, durability: &str) {
         "allocation_scope": "current-thread Rust allocator requests during mutation and transaction; excludes base index, dictionary, C allocator, OS cache, stack and host heap",
         "filesystem": if cfg!(target_os = "emscripten") { "Emscripten virtual filesystem; no host durability measurement" } else { "temporary directory on host filesystem" },
         "durability": durability,
+        "transaction_model": S::TRANSACTION_MODEL,
         "corpus_sha256": format!("{:x}", Sha256::digest(CORPUS.as_bytes())),
         "analyzer_fingerprint": revision.descriptor().fingerprint().to_string(),
         "measurements": measurements,

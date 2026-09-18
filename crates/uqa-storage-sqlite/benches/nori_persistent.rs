@@ -19,10 +19,12 @@ struct Session {
 
 impl persistent::Session for Session {
     type Index = SQLiteInvertedIndex;
+    const TRANSACTION_MODEL: &'static str = "provider_serialized";
 
     fn open(path: &Path) -> Self {
         let connection = ManagedConnection::open(path).unwrap();
         Catalog::open(connection.clone()).unwrap();
+        assert!(!connection.transaction_model().is_versioned());
         let index = SQLiteInvertedIndex::new(
             connection.clone(),
             "docs",

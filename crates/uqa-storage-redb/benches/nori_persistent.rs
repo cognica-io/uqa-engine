@@ -21,10 +21,12 @@ struct Session {
 
 impl persistent::Session for Session {
     type Index = KeyValueInvertedIndex;
+    const TRANSACTION_MODEL: &'static str = "versioned_concurrent";
 
     fn open(path: &Path) -> Self {
         let provider = RedbStorage::open(path).unwrap();
         let store = Arc::new(provider.store());
+        assert!(store.transaction_model().is_versioned());
         let index =
             KeyValueInvertedIndex::new(store.clone(), "docs", uqa_analysis::whitespace_analyzer());
         Self { index, store }
@@ -44,6 +46,10 @@ impl persistent::Session for Session {
         } else {
             self.store.commit_transaction().unwrap();
         }
+    }
+
+    fn retained_transaction_bytes(&self) -> Option<usize> {
+        Some(self.store.retention_control().memory().used())
     }
 }
 
