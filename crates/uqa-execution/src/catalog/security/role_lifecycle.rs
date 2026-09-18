@@ -25,25 +25,24 @@ mod identity;
 mod locking;
 use context::RoleExecutionContext;
 
-pub fn set_role(context: &RoleExecutionContext<'_>, requested: &str) -> Result<(), SQLError> {
+pub fn set_role(
+    context: &RoleExecutionContext<'_>,
+    requested: Option<&str>,
+) -> Result<(), SQLError> {
     if crate::routines::invocation::scopes::security_definer_active() {
         return Err(SQLError::Routine {
             sqlstate: "42501".into(),
             message: "cannot set parameter \"role\" within security-definer function".into(),
         });
     }
-    let target = if requested.is_empty()
-        || requested.eq_ignore_ascii_case("none")
-        || requested.eq_ignore_ascii_case("default")
-    {
-        context.analysis.names.session_user_name()
-    } else {
-        requested.to_string()
+    let target = match requested {
+        None | Some("none") => context.analysis.names.session_user_name(),
+        Some(name) => name.to_string(),
     };
     let roles = context.analysis.roles.role_definitions();
     if !roles.contains_key(&target) {
         return Err(SQLError::Routine {
-            sqlstate: "42704".into(),
+            sqlstate: "22023".into(),
             message: format!("role \"{target}\" does not exist"),
         });
     }

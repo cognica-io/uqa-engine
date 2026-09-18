@@ -13,6 +13,7 @@ mod identity;
 mod migration;
 mod ownership;
 mod publication;
+mod settings;
 mod snapshots;
 
 #[test]

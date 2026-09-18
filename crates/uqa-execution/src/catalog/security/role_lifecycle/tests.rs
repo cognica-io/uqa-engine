@@ -210,7 +210,7 @@ fn set_role_releases_authorization_guards_before_changing_current_identity() {
     catalog.role("reduced", &[]);
     catalog.role("target", &[]);
     *catalog.current.borrow_mut() = "reduced".into();
-    set_role(&catalog.context(), "target").unwrap();
+    set_role(&catalog.context(), Some("target")).unwrap();
     assert_eq!(*catalog.current.borrow(), "target");
     assert_eq!(
         *catalog.events.borrow(),
@@ -224,7 +224,12 @@ fn set_role_releases_authorization_guards_before_changing_current_identity() {
         ]
     );
     catalog.events.borrow_mut().clear();
-    assert!(set_role(&catalog.context(), "missing").is_err());
+    assert_eq!(
+        set_role(&catalog.context(), Some("missing"))
+            .unwrap_err()
+            .sqlstate(),
+        Some("22023")
+    );
     assert_eq!(*catalog.current.borrow(), "target");
     assert_eq!(*catalog.events.borrow(), ["read roles", "release roles"]);
 }
@@ -275,4 +280,22 @@ fn drop_requires_createrole_before_missing_role_notices_or_current_user_checks()
             .iter()
             .any(|event| event.starts_with("NOTICE") || event == "writer" || event == "lock role"));
     }
+}
+
+#[test]
+fn role_reset_is_distinct_from_explicit_role_names() {
+    let catalog = Catalog::new();
+    for name in ["NONE", "DEFAULT", "default"] {
+        catalog.role(name, &[]);
+        set_role(&catalog.context(), Some(name)).unwrap();
+        assert_eq!(*catalog.current.borrow(), name);
+        set_role(&catalog.context(), None).unwrap();
+        assert_eq!(*catalog.current.borrow(), "uqa");
+        set_role(&catalog.context(), Some(name)).unwrap();
+        set_role(&catalog.context(), Some("none")).unwrap();
+        assert_eq!(*catalog.current.borrow(), "uqa");
+    }
+    let error = set_role(&catalog.context(), Some("")).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22023"));
+    assert_eq!(*catalog.current.borrow(), "uqa");
 }
