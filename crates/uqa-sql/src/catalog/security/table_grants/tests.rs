@@ -437,3 +437,90 @@ fn foreign_acl_candidates_validate_columns_without_mutating_the_source_security(
     )
     .is_err());
 }
+
+#[test]
+fn table_revoke_removes_implied_column_grants_and_checks_their_dependent_paths() {
+    let roles = roles();
+    let security = TableSecurity::owner("uqa");
+    let (security, _, _) = apply(
+        "GRANT SELECT(title) ON items TO alice WITH GRANT OPTION",
+        "uqa",
+        &roles,
+        &security,
+    )
+    .unwrap();
+    let (security, _, _) = apply(
+        "GRANT SELECT(title) ON items TO reader",
+        "alice",
+        &roles,
+        &security,
+    )
+    .unwrap();
+    let error = apply(
+        "REVOKE SELECT ON items FROM alice RESTRICT",
+        "uqa",
+        &roles,
+        &security,
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("2BP01"));
+    let (revoked, granted, notices) = apply(
+        "REVOKE SELECT ON items FROM alice CASCADE",
+        "uqa",
+        &roles,
+        &security,
+    )
+    .unwrap();
+    assert_eq!(granted, 1);
+    assert!(notices.is_empty());
+    assert!(revoked.column_acls.is_empty());
+}
+
+#[test]
+fn table_grant_option_revoke_tracks_column_grants_authorized_by_the_table_acl() {
+    let roles = roles();
+    let security = TableSecurity::owner("uqa");
+    let (security, _, _) = apply(
+        "GRANT SELECT ON items TO alice WITH GRANT OPTION",
+        "uqa",
+        &roles,
+        &security,
+    )
+    .unwrap();
+    let (security, _, _) = apply(
+        "GRANT SELECT(title) ON items TO reader",
+        "alice",
+        &roles,
+        &security,
+    )
+    .unwrap();
+    assert_eq!(
+        apply(
+            "REVOKE GRANT OPTION FOR SELECT ON items FROM alice RESTRICT",
+            "uqa",
+            &roles,
+            &security
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("2BP01")
+    );
+    let (security, _, _) = apply(
+        "REVOKE GRANT OPTION FOR SELECT ON items FROM alice CASCADE",
+        "uqa",
+        &roles,
+        &security,
+    )
+    .unwrap();
+    assert!(security.column_acls.is_empty());
+    assert!(role_has_privilege(
+        &security,
+        "alice",
+        TablePrivilegeCheck {
+            privilege: TableAclPrivilege::Select,
+            grant_option: false
+        },
+        &roles,
+        &BTreeMap::new()
+    ));
+}

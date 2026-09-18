@@ -86,14 +86,19 @@ fn apply_table_acl(
 }
 
 fn apply_column_acl(
-    statement: &GrantTableStmt,
-    grantees: &[String],
+    application: &TableGrantApplication<'_>,
     privileges: &[(TableAclPrivilege, String)],
-    current_user: &str,
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    authorization: &TableSecurity,
     current: &TableSecurity,
 ) -> Result<(TableSecurity, usize), SQLError> {
+    let TableGrantApplication {
+        statement,
+        grantees,
+        current_user,
+        roles,
+        memberships,
+        ..
+    } = application;
     let grantors = privileges
         .iter()
         .map(|(privilege, column)| {
@@ -101,7 +106,7 @@ fn apply_column_acl(
                 *privilege,
                 column.clone(),
                 select_column_acl_grantor(
-                    current,
+                    authorization,
                     column,
                     *privilege,
                     current_user,
@@ -113,7 +118,13 @@ fn apply_column_acl(
         .collect::<Vec<_>>();
     let grantable = grantors
         .iter()
-        .filter(|(_, _, grantor)| grantor.is_some())
+        .filter(|(privilege, column, grantor)| {
+            grantor.is_some()
+                && application
+                    .requested
+                    .columns
+                    .contains(&(*privilege, column.clone()))
+        })
         .count();
     let mut next = current.clone();
     for (privilege, column, grantor) in grantors {
@@ -165,15 +176,40 @@ impl TableGrantApplication<'_> {
             self.memberships,
             current,
         )?;
-        let (next, column_grantable) = apply_column_acl(
-            self.statement,
-            self.grantees,
-            &self.requested.columns,
-            self.current_user,
-            self.roles,
-            self.memberships,
-            &next,
-        )?;
+        let mut columns = self.requested.columns.clone();
+        let mut implied = Vec::new();
+        if !self.statement.is_grant {
+            for privilege in &self.requested.table {
+                if matches!(
+                    privilege,
+                    TableAclPrivilege::Select
+                        | TableAclPrivilege::Insert
+                        | TableAclPrivilege::Update
+                        | TableAclPrivilege::References
+                ) {
+                    for column in current.column_acls.keys() {
+                        let key = (*privilege, column.clone());
+                        if !columns.contains(&key) {
+                            columns.push(key.clone());
+                        }
+                        implied.push(key);
+                    }
+                }
+            }
+        }
+        let (mut next, column_grantable) = apply_column_acl(self, &columns, current, &next)?;
+        // Relation grant-option loss also invalidates column grants made through that relation authority.
+        for (privilege, column) in implied {
+            let before = super::columns::column_grant_option_roles(current, &column, privilege);
+            super::columns::revoke_dependent_column_acl(
+                &mut next,
+                &column,
+                privilege,
+                &before,
+                self.statement.revoke_behavior == TableRevokeBehavior::Cascade,
+            )?;
+        }
+        next.column_acls.retain(|_, acl| !acl.is_empty());
         Ok((next, table_grantable + column_grantable))
     }
 

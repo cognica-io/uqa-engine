@@ -152,7 +152,7 @@ pub fn revoke_column_acl(
     revoke_dependent_column_acl(security, column, privilege, &before, cascade)
 }
 
-fn revoke_dependent_column_acl(
+pub(super) fn revoke_dependent_column_acl(
     security: &mut TableSecurity,
     column: &str,
     privilege: TableAclPrivilege,
