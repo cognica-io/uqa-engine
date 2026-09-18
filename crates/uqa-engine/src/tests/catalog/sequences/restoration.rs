@@ -14,6 +14,7 @@ use uqa_execution::catalog::sequence::{restoration::restore_sequence_rows, Seque
 use uqa_sql::{ast::RelationPersistence, catalog::security::SequenceSecurity};
 use uqa_storage::SequenceRow;
 
+mod inspection;
 mod refresh;
 
 #[derive(Debug, PartialEq)]

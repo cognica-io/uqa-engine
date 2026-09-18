@@ -8,6 +8,7 @@ use super::{
     BTreeMap, Engine, RelationIdentity, SQLError, SequenceDataType, SequenceRestart, SequenceState,
     StorageBackendError, StorageBackendResult,
 };
+use uqa_execution::catalog::sequence::snapshot::SequenceSnapshotSource;
 
 impl Engine {
     /// Resolve a sequence reference at DDL binding time using the current
@@ -199,14 +200,8 @@ impl Engine {
 
     /// Snapshot of all registered sequences as `(name, state)` pairs.
     pub fn try_sequences_snapshot(&self) -> StorageBackendResult<BTreeMap<String, SequenceState>> {
-        self.refresh_sequences_from_catalog()?;
-        Ok(self
-            .durable
-            .sequences
-            .read()
-            .iter()
-            .map(|(relation, state)| (relation.qualified_name(), *state))
-            .collect())
+        let _statement = self.runtime.statement_gate.lock();
+        Ok(self.sequence_read_snapshot()?.named_states())
     }
 
     pub fn sequences_snapshot(&self) -> StorageBackendResult<BTreeMap<String, SequenceState>> {
@@ -219,11 +214,8 @@ impl Engine {
         &self,
         name: &str,
     ) -> StorageBackendResult<Option<(String, SequenceState)>> {
-        let Some(canonical) = self.try_resolve_sequence_name(name)? else {
-            return Ok(None);
-        };
-        let relation = Self::resolved_relation_identity(&canonical)?;
-        let seqs = self.durable.sequences.read();
-        Ok(seqs.get(&relation).copied().map(|state| (canonical, state)))
+        let _statement = self.runtime.statement_gate.lock();
+        let snapshot = self.sequence_read_snapshot()?;
+        Ok(snapshot.first_state(&self.relation_lookup_candidates(name)?))
     }
 }

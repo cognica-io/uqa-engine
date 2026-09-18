@@ -138,3 +138,21 @@ fn private_definition_merge_rejects_incomplete_records_and_failed_revision_reads
         .contains_key(&RelationIdentity::new("public", "published")));
     assert_eq!(current.security.len(), 1);
 }
+
+#[test]
+fn detached_sequence_inspection_preserves_candidate_order_and_retained_names() {
+    let mut current = registry(&[("alpha", 1, 10), ("beta", 2, 20)]);
+    let retained = current.clone();
+    let alpha = RelationIdentity::new("public", "alpha");
+    let beta = RelationIdentity::new("public", "beta");
+    let missing = RelationIdentity::new("public", "missing");
+    Arc::make_mut(&mut current.sequences).remove(&alpha);
+    assert_eq!(retained.names(), ["public.alpha", "public.beta"]);
+    assert_eq!(retained.named_states()["public.alpha"].start, 10);
+    assert_eq!(
+        retained.first_state(&[missing.clone(), beta.clone(), alpha]),
+        Some(("public.beta".into(), retained.sequences[&beta]))
+    );
+    assert!(retained.first_state(&[missing]).is_none());
+    assert_eq!(current.names(), ["public.beta"]);
+}

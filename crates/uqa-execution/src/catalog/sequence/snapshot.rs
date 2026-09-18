@@ -68,6 +68,32 @@ impl SequenceSecurityCatalog for SequenceReadSnapshot {
 }
 
 impl SequenceReadSnapshot {
+    pub fn named_states(&self) -> BTreeMap<String, SequenceState> {
+        self.sequences
+            .iter()
+            .map(|(relation, state)| (relation.qualified_name(), *state))
+            .collect()
+    }
+
+    pub fn names(&self) -> Vec<String> {
+        let mut names = self
+            .sequences
+            .keys()
+            .map(RelationIdentity::qualified_name)
+            .collect::<Vec<_>>();
+        names.sort_unstable();
+        names
+    }
+
+    /// Select from SQL's ordered search-path candidates without publishing the detached metadata into live registries.
+    pub fn first_state(&self, candidates: &[RelationIdentity]) -> Option<(String, SequenceState)> {
+        candidates.iter().find_map(|relation| {
+            self.sequences
+                .get(relation)
+                .map(|state| (relation.qualified_name(), *state))
+        })
+    }
+
     /// Keep the latest coherent definitions and roles while retaining complete private sequence records and session-local temporary entries. No catalog rows are reloaded from another committed view.
     pub fn merge_private(
         mut self,

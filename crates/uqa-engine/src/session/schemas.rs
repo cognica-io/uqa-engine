@@ -6,7 +6,8 @@
 
 //! Schema/catalog enumeration and schema lifecycle.
 
-use super::{CatalogIndexRow, Engine, RelationIdentity, StorageBackendResult};
+use super::{CatalogIndexRow, Engine, StorageBackendResult};
+use uqa_execution::catalog::sequence::snapshot::SequenceSnapshotSource;
 
 pub(crate) use uqa_sql::catalog::is_virtual_system_schema;
 
@@ -141,24 +142,10 @@ impl Engine {
     }
 
     pub fn list_sequences(&self) -> StorageBackendResult<Vec<String>> {
+        let _statement = self.runtime.statement_gate.lock();
         if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
-            let mut out = snapshot
-                .sequences
-                .keys()
-                .map(RelationIdentity::qualified_name)
-                .collect::<Vec<_>>();
-            out.sort_unstable();
-            return Ok(out);
+            return Ok(snapshot.sequence_read_snapshot().names());
         }
-        self.refresh_sequences_from_catalog()?;
-        let mut out: Vec<String> = self
-            .durable
-            .sequences
-            .read()
-            .keys()
-            .map(RelationIdentity::qualified_name)
-            .collect();
-        out.sort_unstable();
-        Ok(out)
+        Ok(self.sequence_read_snapshot()?.names())
     }
 }
