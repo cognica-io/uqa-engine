@@ -280,21 +280,86 @@ impl Engine {
         Ok(constraints)
     }
 
-    /// Allocate the next id from the per-table watermark, returning the
-    /// allocated value. Updates the watermark in place.
+    /// Reserve a physical identity before it is exposed to staged rows, triggers, or RETURNING. Session-local watermarks only select candidates.
     pub(crate) fn allocate_next_id(&self, table: &str) -> Result<u64, SQLError> {
         let t = self
             .try_table(table)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
             .ok_or_else(|| SQLError::Internal(format!("unknown table `{table}`")))?;
-        let mut g = t.next_id.lock();
-        let id = u64::try_from(*g).map_err(|_| {
-            SQLError::Internal(format!(
-                "document id space for table `{table}` is exhausted"
-            ))
-        })?;
-        *g += 1;
-        Ok(id)
+        let next_candidate = || {
+            let mut next = t.next_id.lock();
+            let id = u64::try_from(*next).map_err(|_| {
+                SQLError::Internal(format!(
+                    "document id space for table `{table}` is exhausted"
+                ))
+            })?;
+            *next += 1;
+            Ok(id)
+        };
+        if self.storage.backend.is_none()
+            || t.persistence == uqa_sql::ast::RelationPersistence::Temporary
+        {
+            return next_candidate();
+        }
+        uqa_execution::mutation::identity::reserve_document_id(
+            next_candidate,
+            |id| self.reserve_document_id_candidate(table, id),
+            |id| self.document_identity_is_occupied(table, &t, id),
+            |acquisition| self.rollback_row_lock_acquisition(acquisition),
+        )
+    }
+
+    fn document_identity_is_occupied(
+        &self,
+        table: &str,
+        state: &TableState,
+        id: DocId,
+    ) -> Result<bool, SQLError> {
+        let contains = |store: &dyn uqa_storage::DocumentStore| {
+            store.contains_doc_id(id).map_err(|error| {
+                SQLError::Internal(format!("check document identity in `{table}`: {error}"))
+            })
+        };
+        if contains(state.document_store.read().as_ref())? {
+            return Ok(true);
+        }
+        let backend = self.storage.backend.as_ref().expect("persistent table");
+        if !self.backend_transaction_is_deferred()
+            || !backend
+                .change_version_monitor_is_nonblocking()
+                .map_err(|error| SQLError::Internal(error.to_string()))?
+        {
+            // A writer excludes other commits. A rollback-journal reader also prevents a commit while its physical snapshot remains pinned.
+            return Ok(false);
+        }
+        let canonical = self
+            .try_resolve_table_name(table)
+            .map_err(|error| SQLError::Internal(error.to_string()))?
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        let mut reader = self.storage.document_identity_reader.lock();
+        if reader.is_none() {
+            let session = self
+                .storage
+                .provider
+                .as_ref()
+                .map_or_else(
+                    || backend.open_session(),
+                    |provider| provider.open_session(),
+                )
+                .map_err(|error| {
+                    SQLError::Internal(format!(
+                        "open committed reader for document identity in `{table}`: {error}"
+                    ))
+                })?;
+            *reader = Some(session.backend);
+        }
+        contains(
+            reader
+                .as_ref()
+                .expect("identity reader initialized")
+                .document_store(&canonical)
+                .as_ref(),
+        )
     }
 
     /// Move the watermark past `doc_id` if needed (called after a manual
