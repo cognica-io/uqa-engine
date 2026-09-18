@@ -34,8 +34,10 @@ def target_key(report: dict) -> str:
 
 
 def target_limits(report: dict, limits: dict) -> dict:
-    if limits.get("schema_version") != 2:
-        raise RuntimeError("persistent allocation limits require target-specific calibration")
+    if type(limits.get("schema_version")) is not int or limits["schema_version"] != 3:
+        raise RuntimeError("persistent allocation limits require target-specific and transaction-model calibration")
+    if limits.get("transaction_model") != report["transaction_model"]:
+        raise RuntimeError("persistent allocation limits do not cover the measured transaction model")
     target = target_key(report)
     ceilings = limits.get("allocation_ceilings", {}).get(target)
     if ceilings is None:

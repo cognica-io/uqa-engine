@@ -34,7 +34,7 @@ def fixture(provider="sqlite"):
               "analyzer_fingerprint": "b" * 64, "measurements": rows,
               "provenance": {"cpu": "CPU", "platform": "platform", "rustc": "rustc", "flags": {}, "flags_sha256": benchmark.common.flags_signature({}), "node": None, "emcc": None, "benchmark_sha256": "c" * 64}}
     limits = {key: report[key] for key in ("schema_version", "corpus_sha256", "analyzer_fingerprint", "transaction_model")}
-    limits.update(schema_version=2, timing_max_ratio=1.25,
+    limits.update(schema_version=3, timing_max_ratio=1.25,
                   allocation_ceilings={benchmark.target_key(report): {row["name"]: dict(row["allocation"]) for row in rows}},
                   outputs={row["name"]: {key: row[key] for key in ("graph_sha256", "field_length", "posting_count")} for row in rows})
     return report, limits
@@ -52,7 +52,7 @@ def allocation_fixture(provider="sqlite"):
 
 
 class NoriPersistentBenchmarkTest(unittest.TestCase):
-    def test_reports_identify_the_actual_provider_transaction_model(self):
+    def test_transaction_models_cannot_share_allocation_budgets(self):
         for provider in ("sqlite", "redb"):
             report, limits = allocation_fixture(provider)
             for model in (None, "unknown", "provider_serialized" if provider == "redb" else "versioned_concurrent"):
@@ -60,6 +60,9 @@ class NoriPersistentBenchmarkTest(unittest.TestCase):
                     changed = {**report, "transaction_model": model}
                     with self.assertRaisesRegex(RuntimeError, "transaction model"):
                         benchmark.check(changed, limits, provider)
+                    changed = {**limits, "transaction_model": model}
+                    with self.assertRaisesRegex(RuntimeError, "transaction model"):
+                        benchmark.check(report, changed, provider)
 
     def test_every_mvcc_transaction_releases_its_private_allowance(self):
         for offset in range(len(benchmark.EXPECTED)):
@@ -164,6 +167,8 @@ class NoriPersistentBenchmarkTest(unittest.TestCase):
         mapping = dict(zip(benchmark.EXPECTED, ("build_points/256", "append_batch_16/256", "append_batch_16/2048", "build_points/2048")))
         self.assertEqual(set(limits), {"sqlite", "redb"})
         for provider, rule in limits.items():
+            self.assertEqual(rule["schema_version"], 3)
+            self.assertEqual(rule["transaction_model"], benchmark.TRANSACTION_MODELS[provider])
             targets = {"macos/aarch64/64", "linux/x86_64/64"}
             if provider == "sqlite":
                 targets.add("emscripten/wasm32/32")
@@ -240,9 +245,10 @@ class NoriPersistentBenchmarkTest(unittest.TestCase):
             changed = {**report, key: value}
             with self.subTest(key=key), self.assertRaisesRegex(RuntimeError, "no reviewed.*target"):
                 benchmark.check(changed, limits, "sqlite")
-        limits["schema_version"] = 1
-        with self.assertRaisesRegex(RuntimeError, "target-specific calibration"):
-            benchmark.check(report, limits, "sqlite")
+        for schema in (None, True, False, 1, 2, 3.0, "3"):
+            limits["schema_version"] = schema
+            with self.assertRaisesRegex(RuntimeError, "target-specific.*calibration"):
+                benchmark.check(report, limits, "sqlite")
 
     def test_redb_reviewed_ceilings_reject_even_one_additional_byte_or_allocation(self):
         rule = json.loads(benchmark.LIMITS.read_text())["redb"]
