@@ -15,9 +15,10 @@ use crate::mvcc::graph::OwnedGraphMutation;
 use crate::mvcc::key::RecordKey;
 use crate::mvcc::vector::OwnedVectorMutation;
 use crate::mvcc::{
-    CommitErrorOutcome, CommitFailure, CommitStatus, CommittedRecordSnapshot, MergedRecordSnapshot,
-    PreparedRecordCommit, PrivateRecordChanges, RecordWrite, StorageTransactionId, VersionError,
-    VersionResult, VersionedPersistence,
+    CommitErrorOutcome, CommitFailure, CommitSequence, CommitStatus, CommittedRecordSnapshot,
+    MergedRecordSnapshot, PreparedRecordCommit, PreparedRecordWrite, PrivateRecordChanges,
+    RecordWrite, SharedRecordValue, StorageTransactionId, VersionError, VersionResult,
+    VersionedPersistence,
 };
 use crate::read_control::StorageReadControl;
 use crate::{StorageBackendError, StorageSavepointId};
@@ -107,27 +108,51 @@ impl Transaction {
         kind: RecordWriteKind,
         control: &StorageReadControl,
     ) -> VersionResult<()> {
+        let Some((expected, kind)) = self.record_condition(key, value.is_none(), kind, control)?
+        else {
+            return Ok(());
+        };
+        let write = PreparedRecordWrite::copy_bytes(key, expected, value, control)?.with_kind(kind);
+        self.changes.apply_owned(&[write], control)
+    }
+
+    pub(super) fn write_shared_record(
+        &mut self,
+        key: &RecordKey,
+        value: Option<&SharedRecordValue>,
+        kind: RecordWriteKind,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        let Some((expected, kind)) =
+            self.record_condition(key.bytes(), value.is_none(), kind, control)?
+        else {
+            return Ok(());
+        };
+        let write =
+            PreparedRecordWrite::from_shared(key.clone(), expected, value.cloned()).with_kind(kind);
+        self.changes.apply_owned(&[write], control)
+    }
+
+    fn record_condition(
+        &self,
+        key: &[u8],
+        deleted: bool,
+        kind: RecordWriteKind,
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<(Option<CommitSequence>, RecordWriteKind)>> {
         self.writable()?;
         let record = self.view()?.metadata(key, control)?;
         let expected = record.and_then(|record| record.revision);
         let exists = record.is_some_and(|record| record.live);
-        if value.is_none()
+        if deleted
             && !exists
             && matches!(
                 kind,
                 RecordWriteKind::Canonical | RecordWriteKind::GraphPreview
             )
         {
-            return Ok(());
+            return Ok(None);
         }
-        let prepared = PreparedRecordCommit::new(
-            &[RecordWrite {
-                key,
-                expected,
-                value,
-            }],
-            control,
-        )?;
         let kind = if kind == RecordWriteKind::GraphPreview {
             // A later preview must retain an earlier explicit replacement or canonical write to the same private record.
             self.changes.write_kind(key, control)?.unwrap_or(kind)
@@ -145,8 +170,7 @@ impl Transaction {
         } else {
             kind
         };
-        let write = prepared.records()[0].clone().with_kind(kind);
-        self.changes.apply_owned(&[write], control)
+        Ok(Some((expected, kind)))
     }
 
     pub(super) fn graph_mutation(&mut self, mutation: &OwnedGraphMutation) -> VersionResult<()> {

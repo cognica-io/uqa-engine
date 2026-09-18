@@ -137,14 +137,16 @@ impl Resolver<'_> {
                 "invalid occurrence source marker",
             ));
         }
-        let expected = revision(base, &fence, control)?;
-        let actual = revision(current, &fence, control)?;
-        if expected != actual {
-            return Err(VersionError::WriteConflict {
-                mutation,
-                expected,
-                actual,
-            });
+        if base.sequence() != current.sequence() {
+            let expected = revision(base, &fence, control)?;
+            let actual = revision(current, &fence, control)?;
+            if expected != actual {
+                return Err(VersionError::WriteConflict {
+                    mutation,
+                    expected,
+                    actual,
+                });
+            }
         }
         match (write.kind(), kind) {
             (RecordWriteKind::OccurrenceCache, Kind::Cache) => {}

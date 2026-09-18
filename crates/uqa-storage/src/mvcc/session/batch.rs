@@ -4,12 +4,14 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use std::sync::Arc;
 use uqa_core::memory::BudgetedVec;
 
 use crate::mvcc::commit::RecordWriteKind;
 use crate::mvcc::graph::OwnedGraphMutation;
+use crate::mvcc::key::RecordKey;
 use crate::mvcc::vector::{IndexKind, Key, OwnedVectorMutation};
-use crate::mvcc::VersionError;
+use crate::mvcc::{SharedRecordValue, VersionError};
 use crate::{KeyValueBatch, StorageBackendResult};
 
 use super::transaction::Transaction;
@@ -19,8 +21,6 @@ enum Operation {
     Requirement(BudgetedVec<u8>),
     IdentifierObservation(BudgetedVec<u8>, u64),
     IdentifierInheritance(BudgetedVec<u8>, BudgetedVec<u8>),
-    Put(BudgetedVec<u8>, BudgetedVec<u8>),
-    Delete(BudgetedVec<u8>),
     DeletePrefix(BudgetedVec<u8>, RecordWriteKind),
     OccurrenceReset(BudgetedVec<u8>),
     Fence(BudgetedVec<u8>),
@@ -28,8 +28,8 @@ enum Operation {
     VectorInput(OwnedVectorMutation),
     VectorFence(IndexKind, BudgetedVec<u8>),
     TypedRecord {
-        key: BudgetedVec<u8>,
-        value: Option<BudgetedVec<u8>>,
+        key: RecordKey,
+        value: Option<SharedRecordValue>,
         kind: RecordWriteKind,
     },
 }
@@ -58,86 +58,73 @@ impl<'a> Batch<'a> {
         kind: RecordWriteKind,
     ) -> StorageBackendResult<()> {
         self.operations.push(Operation::TypedRecord {
-            key: self.copy(key)?,
-            value: value.map(|value| self.copy(value)).transpose()?,
+            key: RecordKey::new(key, self.store.control.memory())
+                .map_err(VersionError::into_storage_error)?,
+            value: value
+                .map(|value| self.copy(value).map(Arc::new))
+                .transpose()?,
             kind,
         })?;
         Ok(())
     }
 
     pub(super) fn apply(&self, transaction: &mut Transaction) -> Result<(), VersionError> {
+        let control = &self.store.control;
         transaction.writable()?;
         for operation in self.operations.iter() {
             match operation {
                 Operation::Requirement(key) => {
-                    transaction.require_unchanged(key, &self.store.control)?;
+                    transaction.require_unchanged(key, control)?;
                 }
                 Operation::IdentifierObservation(_, _) | Operation::IdentifierInheritance(_, _) => {
                 }
-                Operation::Put(key, value) => {
-                    transaction.replace(key, Some(value), &self.store.control)?;
-                }
-                Operation::Delete(key) => transaction.replace(key, None, &self.store.control)?,
                 Operation::DeletePrefix(prefix, kind) => {
-                    transaction.delete_prefix_kind(prefix, *kind, &self.store.control)?;
+                    transaction.delete_prefix_kind(prefix, *kind, control)?;
                 }
                 Operation::OccurrenceReset(table) => {
                     let table = std::str::from_utf8(table)
                         .map_err(|_| VersionError::InvalidEncoding("invalid occurrence table"))?;
-                    let key = crate::key_value::occurrence_records::guard(
-                        table,
-                        None,
-                        &self.store.control,
-                    )?;
-                    transaction.replace(&key, Some(b""), &self.store.control)?;
-                    let key =
-                        crate::key_value::occurrence_records::format(table, &self.store.control)?;
-                    transaction.fence_record(&key, &self.store.control)?;
+                    let key = crate::key_value::occurrence_records::guard(table, None, control)?;
+                    transaction.replace(&key, Some(b""), control)?;
+                    let key = crate::key_value::occurrence_records::format(table, control)?;
+                    transaction.fence_record(&key, control)?;
                 }
-                Operation::Fence(key) => transaction.fence_record(key, &self.store.control)?,
+                Operation::Fence(key) => transaction.fence_record(key, control)?,
                 Operation::Graph(mutation) => transaction.graph_mutation(mutation)?,
                 Operation::VectorInput(mutation) => {
                     let guard = mutation.kind.layout(&*self.store.persistence)?.key(
                         mutation.metadata.bytes(),
                         Key::Document(mutation.document),
-                        &self.store.control,
+                        control,
                     )?;
-                    transaction.fence_record(&guard, &self.store.control)?;
+                    transaction.fence_record(&guard, control)?;
                     transaction.vector_mutation(mutation)?;
                 }
                 Operation::VectorFence(kind, prefix) => {
                     let view = transaction.view()?;
                     let mut guards = BudgetedVec::new(self.store.control.memory());
-                    view.visit_keys(
-                        prefix,
-                        None,
-                        usize::MAX,
-                        &self.store.control,
-                        &mut |key, record| {
-                            if record.live {
-                                let layout = kind.layout(&*self.store.persistence)?;
-                                let metadata = layout
-                                    .metadata_key(key, &self.store.control)?
-                                    .ok_or(VersionError::InvalidEncoding(
-                                        "invalid vector metadata prefix",
-                                    ))?;
-                                if &*metadata != key {
-                                    return Err(VersionError::InvalidEncoding(
-                                        "vector fence selected derived rows",
-                                    ));
-                                }
-                                let guard = layout.key(key, Key::Structure, &self.store.control)?;
-                                guards.push(guard)?;
+                    view.visit_keys(prefix, None, usize::MAX, control, &mut |key, record| {
+                        if record.live {
+                            let layout = kind.layout(&*self.store.persistence)?;
+                            let metadata = layout.metadata_key(key, control)?.ok_or(
+                                VersionError::InvalidEncoding("invalid vector metadata prefix"),
+                            )?;
+                            if &*metadata != key {
+                                return Err(VersionError::InvalidEncoding(
+                                    "vector fence selected derived rows",
+                                ));
                             }
-                            Ok(true)
-                        },
-                    )?;
+                            let guard = layout.key(key, Key::Structure, control)?;
+                            guards.push(guard)?;
+                        }
+                        Ok(true)
+                    })?;
                     for guard in guards.iter() {
-                        transaction.fence_record(guard, &self.store.control)?;
+                        transaction.fence_record(guard, control)?;
                     }
                 }
                 Operation::TypedRecord { key, value, kind } => {
-                    transaction.write_record(key, value.as_deref(), *kind, &self.store.control)?;
+                    transaction.write_shared_record(key, value.as_ref(), *kind, control)?;
                 }
             }
         }
@@ -148,19 +135,19 @@ impl<'a> Batch<'a> {
                     self.store.persistence.allocate_identifiers(
                         namespace,
                         crate::mvcc::IdentifierRequest::Observe(*value),
-                        &self.store.control,
+                        control,
                     )?;
                 }
                 Operation::IdentifierInheritance(from, to) => {
                     let source = self.store.persistence.allocate_identifiers(
                         from,
                         crate::mvcc::IdentifierRequest::Observe(0),
-                        &self.store.control,
+                        control,
                     )?;
                     self.store.persistence.allocate_identifiers(
                         to,
                         crate::mvcc::IdentifierRequest::Observe(source.watermark()),
-                        &self.store.control,
+                        control,
                     )?;
                 }
                 _ => {}
@@ -283,13 +270,10 @@ impl KeyValueBatch for Batch<'_> {
         Ok(())
     }
     fn put(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
-        self.operations
-            .push(Operation::Put(self.copy(key)?, self.copy(value)?))?;
-        Ok(())
+        self.typed_record(key, Some(value), RecordWriteKind::Canonical)
     }
     fn delete(&mut self, key: &[u8]) -> StorageBackendResult<()> {
-        self.operations.push(Operation::Delete(self.copy(key)?))?;
-        Ok(())
+        self.typed_record(key, None, RecordWriteKind::Canonical)
     }
     fn delete_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
         self.operations.push(Operation::DeletePrefix(

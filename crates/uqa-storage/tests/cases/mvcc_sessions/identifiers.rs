@@ -116,16 +116,23 @@ fn rejected_record_staging_does_not_consume_queued_identifiers() {
     let persistence = Persistence::new();
     let mut failures = 0;
     let mut successes = 0;
-    for limit in (8192..32768).step_by(512) {
-        let store = persistence.session(limit);
+    for headroom in (0_usize..=8192).step_by(64) {
+        let store = persistence.session(1 << 20);
         store.begin_transaction().unwrap();
         store.put(b"prior", b"kept").unwrap();
         let mut batch = store.batch();
-        let namespace = limit.to_be_bytes();
+        let namespace = headroom.to_be_bytes();
         batch.observe_identifier(&namespace, 100).unwrap();
         batch.put(b"small", b"row").unwrap();
         batch.put(b"large", &[7; 4096]).unwrap();
-        match batch.commit() {
+        let control = store.retention_control();
+        let hold = control
+            .memory()
+            .reserve(control.memory().limit() - control.memory().used() - headroom)
+            .unwrap();
+        let outcome = batch.commit();
+        drop(hold);
+        match outcome {
             Ok(()) => {
                 successes += 1;
                 assert_eq!(

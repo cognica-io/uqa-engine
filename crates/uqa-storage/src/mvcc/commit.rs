@@ -46,6 +46,37 @@ pub(crate) enum RecordWriteKind {
 }
 
 impl PreparedRecordWrite {
+    pub(super) fn from_shared(
+        key: RecordKey,
+        expected: Option<CommitSequence>,
+        value: Option<Arc<BudgetedVec<u8>>>,
+    ) -> Self {
+        Self {
+            key,
+            expected,
+            value,
+            kind: RecordWriteKind::Canonical,
+        }
+    }
+
+    pub(super) fn copy_bytes(
+        key: &[u8],
+        expected: Option<CommitSequence>,
+        value: Option<&[u8]>,
+        control: &StorageReadControl,
+    ) -> VersionResult<Self> {
+        control.cancellation().check()?;
+        let key = RecordKey::new(key, control.memory())?;
+        let value = value
+            .map(|value| {
+                let mut owned = BudgetedVec::new(control.memory());
+                owned.extend_from_slice(value)?;
+                Ok::<_, VersionError>(Arc::new(owned))
+            })
+            .transpose()?;
+        Ok(Self::from_shared(key, expected, value))
+    }
+
     pub fn key(&self) -> &[u8] {
         self.key.bytes()
     }
@@ -120,21 +151,12 @@ impl PreparedRecordCommit {
         let mut prepared = BudgetedVec::new(control.memory());
         prepared.reserve(writes.len())?;
         for write in writes {
-            control.cancellation().check()?;
-            let key = RecordKey::new(write.key, control.memory())?;
-            let value = if let Some(value) = write.value {
-                let mut owned = BudgetedVec::new(control.memory());
-                owned.extend_from_slice(value)?;
-                Some(Arc::new(owned))
-            } else {
-                None
-            };
-            prepared.push(PreparedRecordWrite {
-                key,
-                expected: write.expected,
-                value,
-                kind: RecordWriteKind::Canonical,
-            })?;
+            prepared.push(PreparedRecordWrite::copy_bytes(
+                write.key,
+                write.expected,
+                write.value,
+                control,
+            )?)?;
         }
         control.cancellation().check()?;
         Self::from_unique_owned(prepared, control)

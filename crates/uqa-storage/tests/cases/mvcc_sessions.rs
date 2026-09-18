@@ -6,6 +6,8 @@
 
 //! Session algorithms use a fault-injectable in-memory record owner, without provider dependencies.
 
+#[path = "mvcc_sessions/batches.rs"]
+mod batches;
 #[path = "mvcc_sessions/commands.rs"]
 mod commands;
 #[path = "mvcc_sessions/compound.rs"]
@@ -569,14 +571,21 @@ fn batch_allocation_failure_restores_only_its_private_changes() {
     let persistence = Persistence::new();
     let mut failures = 0;
     let mut successes = 0;
-    for retained_bytes in (8192..32768).step_by(512) {
-        let a = persistence.session(retained_bytes);
+    for headroom in (0_usize..=8192).step_by(64) {
+        let a = persistence.session(1 << 20);
         a.begin_transaction().unwrap();
         a.put(b"prior", b"kept").unwrap();
         let mut batch = a.batch();
         batch.put(b"small", b"new").unwrap();
         batch.put(b"large", &[7; 4096]).unwrap();
-        match batch.commit() {
+        let control = a.retention_control();
+        let hold = control
+            .memory()
+            .reserve(control.memory().limit() - control.memory().used() - headroom)
+            .unwrap();
+        let outcome = batch.commit();
+        drop(hold);
+        match outcome {
             Ok(()) => {
                 successes += 1;
                 assert_eq!(a.get(b"small").unwrap().unwrap(), b"new");
