@@ -29,13 +29,6 @@ use uqa_sql::{
     SQLError,
 };
 
-pub trait SequenceRoleAccess {
-    fn ensure_sequence_owner(
-        &self,
-        name: &str,
-        relation: &RelationIdentity,
-    ) -> Result<String, SQLError>;
-}
 pub trait SequenceSecurityPublication {
     fn security(&self, relation: &RelationIdentity) -> Option<BoundSequenceSecurity>;
     fn persist_security(
@@ -49,7 +42,6 @@ pub trait SequenceSecurityPublication {
 pub struct SequenceRoleOwnershipContext<'a> {
     pub roles: &'a dyn RoleCatalogGuards,
     pub session: &'a dyn RoleReferenceNames,
-    pub access: &'a dyn SequenceRoleAccess,
     pub schemas: &'a dyn RelationOwnerSchemas,
     pub locks: &'a dyn SharedObjectLockSession,
     pub writer: &'a dyn RelationDefinitionSession,

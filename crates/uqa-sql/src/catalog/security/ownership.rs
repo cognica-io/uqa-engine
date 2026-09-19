@@ -20,6 +20,38 @@ pub trait RelationOwnerSchemas {
     fn schema_security(&self, schema: &str) -> Option<BoundSchemaSecurity>;
 }
 
+pub fn require_relation_ownership(
+    name: &str,
+    kind: &str,
+    has_owner_privileges: bool,
+) -> Result<(), SQLError> {
+    if has_owner_privileges {
+        Ok(())
+    } else {
+        Err(SQLError::Routine {
+            sqlstate: "42501".into(),
+            message: format!("must be owner of {kind} {name}"),
+        })
+    }
+}
+
+/// `PostgreSQL` protects pinned catalog relations and TOAST relations after checking ownership. Unpinned catalog views retain ordinary relation validation.
+pub fn reject_system_relation_alter(relation: &uqa_core::RelationIdentity) -> Result<(), SQLError> {
+    let pinned = crate::catalog::SystemRelation::at(&relation.schema, &relation.name)
+        .is_some_and(|system| system.oid() < 12_000);
+    if pinned || relation.schema == "pg_toast" {
+        Err(SQLError::Routine {
+            sqlstate: "42501".into(),
+            message: format!(
+                "permission denied: \"{}\" is a system catalog",
+                relation.name
+            ),
+        })
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -43,12 +75,11 @@ impl OwnerChangeAuthority<'_> {
         kind: &str,
         name: &str,
     ) -> Result<(), SQLError> {
-        if !role_inherits(self.roles, self.memberships, self.current_user, owner) {
-            return Err(SQLError::Routine {
-                sqlstate: "42501".into(),
-                message: format!("must be owner of {kind} {name}"),
-            });
-        }
+        require_relation_ownership(
+            name,
+            kind,
+            role_inherits(self.roles, self.memberships, self.current_user, owner),
+        )?;
         require_set_role(
             self.roles,
             self.memberships,

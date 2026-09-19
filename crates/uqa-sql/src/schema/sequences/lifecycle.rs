@@ -143,16 +143,13 @@ fn reject_sequence_lifecycle_collision(
 
 use crate::catalog::resolution::RelationResolution;
 
-pub fn alter_sequence_target_name(
+/// Resolve absence before execution checks the actual relation's owner, namespace and requested kind.
+pub fn sequence_alter_relation(
     resolution: crate::catalog::resolution::RelationResolution,
     alter: &crate::ast::AlterSequence,
-) -> Result<Option<String>, SQLError> {
+) -> Result<Option<(String, &'static str)>, SQLError> {
     match resolution {
-        RelationResolution::Found(name, "sequence") => Ok(Some(name)),
-        RelationResolution::Found(_name, _kind) => Err(SQLError::Routine {
-            sqlstate: "42809".into(),
-            message: format!("\"{}\" is not a sequence", alter.name),
-        }),
+        RelationResolution::Found(name, kind) => Ok(Some((name, kind))),
         RelationResolution::MissingRelation | RelationResolution::MissingSchema(_)
             if alter.if_exists =>
         {
@@ -167,6 +164,27 @@ pub fn alter_sequence_target_name(
             message: format!("relation \"{}\" does not exist", alter.name),
         }),
     }
+}
+
+pub fn validate_sequence_alter_kind(
+    alter: &crate::ast::AlterSequence,
+    kind: &str,
+    local_name: &str,
+) -> Result<(), SQLError> {
+    if kind == "sequence" {
+        return Ok(());
+    }
+    let definition = alter.lifecycle == SequenceLifecycle::Unchanged
+        && alter.role_owner.is_none()
+        && alter.persistence.is_none();
+    Err(SQLError::Routine {
+        sqlstate: "42809".into(),
+        message: if definition {
+            format!("cannot open relation \"{local_name}\"")
+        } else {
+            format!("\"{local_name}\" is not a sequence")
+        },
+    })
 }
 
 #[cfg(test)]

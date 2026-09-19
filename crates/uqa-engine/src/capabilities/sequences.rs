@@ -261,21 +261,11 @@ impl Engine {
             writer: self,
             roles: self,
             session: self,
-            access: self,
             schemas: self,
             metadata: self,
             security: self,
             changes: self,
         }
-    }
-}
-impl uqa_execution::schema::sequences::role_ownership::SequenceRoleAccess for Engine {
-    fn ensure_sequence_owner(
-        &self,
-        name: &str,
-        relation: &RelationIdentity,
-    ) -> Result<String, SQLError> {
-        Engine::ensure_sequence_owner(self, name, relation)
     }
 }
 impl uqa_execution::schema::sequences::role_ownership::SequenceSecurityPublication for Engine {
@@ -319,6 +309,7 @@ impl Engine {
     ) -> uqa_execution::schema::sequences::dispatch::SequenceAlterContext<'_> {
         uqa_execution::schema::sequences::dispatch::SequenceAlterContext {
             catalog: self,
+            authority: self.table_privilege_context(),
             definition: self.sequence_definition_context(),
             roles: self.sequence_role_ownership_context(),
             lifecycle: self.sequence_lifecycle_context(),

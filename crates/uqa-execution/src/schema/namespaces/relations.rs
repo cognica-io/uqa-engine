@@ -119,22 +119,32 @@ impl RelationCreationContext<'_> {
         }
         let name = target.qualified_name();
         self.lock_relation_namespace(|| {
-            let name = self.persistent_name(&name)?;
-            if target.schema == temporary {
-                self.ensure_temporary_privilege()
-                    .map_err(|error| match error {
-                        SQLError::Routine { sqlstate, .. } if sqlstate == "42501" => {
-                            SQLError::Routine {
-                                sqlstate,
-                                message: format!("permission denied for schema {temporary}"),
-                            }
-                        }
-                        error => error,
-                    })?;
-            }
+            let name = self.resolve_persistent_name(&name)?;
+            self.ensure_namespace_create(&target.schema)?;
             Ok(name)
         })?;
         Ok(target)
+    }
+    /// Check an existing namespace without acquiring a creation dependency. Temporary namespace CREATE follows the current role's database TEMP privilege.
+    pub fn ensure_namespace_create(&self, schema: &str) -> Result<(), SQLError> {
+        if schema == self.state.temporary_schema_name() {
+            return self
+                .ensure_temporary_privilege()
+                .map_err(|error| match error {
+                    SQLError::Routine { sqlstate, .. } if sqlstate == "42501" => {
+                        SQLError::Routine {
+                            sqlstate,
+                            message: format!("permission denied for schema {schema}"),
+                        }
+                    }
+                    error => error,
+                });
+        }
+        self.schema_privileges().require_schema_privilege(
+            schema,
+            &self.names.current_role(),
+            SchemaAclPrivilege::Create,
+        )
     }
     fn lock_relation_namespace(
         &self,

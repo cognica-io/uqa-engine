@@ -7,6 +7,39 @@
 use super::*;
 use std::cell::Cell;
 
+#[test]
+fn alter_binding_defers_kind_validation_until_after_authority() {
+    for suffix in [
+        "INCREMENT BY 2",
+        "RENAME TO renamed",
+        "SET SCHEMA target",
+        "SET LOGGED",
+    ] {
+        let crate::Statement::AlterSequence(alter) =
+            crate::compile(&format!("ALTER SEQUENCE s.wrong {suffix}"))
+                .unwrap()
+                .remove(0)
+        else {
+            panic!("expected sequence alteration");
+        };
+        assert_eq!(
+            sequence_alter_relation(RelationResolution::Found("s.wrong".into(), "table"), &alter)
+                .unwrap(),
+            Some(("s.wrong".into(), "table"))
+        );
+        let error = validate_sequence_alter_kind(&alter, "table", "wrong").unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42809"));
+        assert!(error
+            .to_string()
+            .contains(if suffix.starts_with("INCREMENT") {
+                "cannot open relation \"wrong\""
+            } else {
+                "\"wrong\" is not a sequence"
+            }));
+        validate_sequence_alter_kind(&alter, "sequence", "wrong").unwrap();
+    }
+}
+
 #[derive(Default)]
 struct Catalog {
     owned: bool,

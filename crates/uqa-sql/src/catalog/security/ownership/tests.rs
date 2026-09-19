@@ -7,6 +7,46 @@
 use super::*;
 use std::collections::BTreeSet;
 
+#[test]
+fn relation_ownership_errors_name_the_actual_kind() {
+    for kind in [
+        "table",
+        "view",
+        "materialized view",
+        "foreign table",
+        "index",
+        "sequence",
+    ] {
+        require_relation_ownership("target", kind, true).unwrap();
+        let error = require_relation_ownership("target", kind, false).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42501"));
+        assert!(error
+            .to_string()
+            .contains(&format!("must be owner of {kind} target")));
+    }
+}
+
+#[test]
+fn relation_alteration_protects_pinned_catalogs_but_not_unpinned_views() {
+    for (schema, name, protected) in [
+        ("pg_catalog", "pg_class", true),
+        ("pg_catalog", "pg_authid", true),
+        ("pg_catalog", "pg_shadow", false),
+        ("information_schema", "enabled_roles", false),
+        ("public", "pg_class", false),
+        ("pg_toast", "pg_toast_12345", true),
+    ] {
+        let result = reject_system_relation_alter(&uqa_core::RelationIdentity::new(schema, name));
+        if protected {
+            let error = result.unwrap_err();
+            assert_eq!(error.sqlstate(), Some("42501"));
+            assert!(error.to_string().contains("is a system catalog"));
+        } else {
+            result.unwrap();
+        }
+    }
+}
+
 struct Schemas(BoundSchemaSecurity);
 impl RelationOwnerSchemas for Schemas {
     fn schema_security(&self, _: &str) -> Option<BoundSchemaSecurity> {

@@ -42,4 +42,5 @@ pub mod table_maintenance;
 pub mod table_ownership;
 
 pub mod relation_authority;
+pub mod relation_ownership;
 pub mod relation_restoration;

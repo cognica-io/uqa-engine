@@ -19,6 +19,39 @@ mod fixtures;
 use fixtures::Fixture;
 
 #[test]
+fn relation_ownership_keeps_role_incarnations_and_uses_no_value_snapshot() {
+    let mut fixture = Fixture::new();
+    let relation = RelationIdentity::new("public", "ids");
+    let error = fixture
+        .context()
+        .ensure_relation_owner(&relation, "sequence")
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42501"));
+    let owner = fixture.retained.roles.roles["reader"].identity();
+    Arc::make_mut(&mut fixture.retained.security)
+        .get_mut(&relation)
+        .unwrap()
+        .role_owner = owner;
+    fixture
+        .context()
+        .ensure_relation_owner(&relation, "sequence")
+        .unwrap();
+    Arc::make_mut(&mut fixture.retained.roles.roles)
+        .get_mut("reader")
+        .unwrap()
+        .object_id = [9; 16];
+    let error = fixture
+        .context()
+        .ensure_relation_owner(&relation, "sequence")
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("XX000"));
+    assert!(error
+        .to_string()
+        .contains("missing or replaced incarnation"));
+    assert_eq!(fixture.reads.get(), 0);
+}
+
+#[test]
 fn sequence_oid_binding_and_comma_privileges_keep_one_authority_per_invocation() {
     let fixture = Fixture::new();
     let mut revoked = fixture.retained.clone();

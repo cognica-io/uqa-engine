@@ -111,13 +111,4 @@ impl Engine {
         self.sequence_privilege_context()
             .persist_sequence_security(name, relation, security)
     }
-
-    pub(crate) fn ensure_sequence_owner(
-        &self,
-        name: &str,
-        relation: &RelationIdentity,
-    ) -> Result<String, SQLError> {
-        self.sequence_privilege_inquiry()
-            .ensure_sequence_owner(name, relation)
-    }
 }
