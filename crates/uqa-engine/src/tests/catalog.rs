@@ -9,6 +9,7 @@
 mod alteration_authority;
 mod events;
 mod foreign_tables;
+mod hierarchy_restoration;
 mod relations;
 mod roles;
 mod routines;

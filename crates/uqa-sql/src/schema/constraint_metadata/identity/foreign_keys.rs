@@ -136,7 +136,14 @@ impl LegacyIdentities {
         }
         for index in self.constraints {
             let key = &mut constraints.foreign_keys[index];
+            let previous = key.catalog_identity;
             preserve_oid(relation, key.name.as_deref(), key.catalog_identity.as_mut())?;
+            let identity = key.catalog_identity;
+            for inherited in &mut constraints.hierarchy.partition_inherited_foreign_keys {
+                if inherited.catalog_identity == previous {
+                    inherited.catalog_identity = identity;
+                }
+            }
         }
         super::super::synchronize_partition_inherited_foreign_key_ids(constraints);
         validate(columns, constraints)?;

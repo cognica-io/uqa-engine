@@ -164,3 +164,47 @@ fn current_foreign_key_catalog_identities_reject_missing_invalid_and_duplicate_r
         .to_string()
         .contains("provenance"));
 }
+
+#[test]
+fn legacy_oid_preservation_updates_exact_partition_provenance_without_repairing_other_addresses() {
+    let (mut columns, mut constraints) = declaration();
+    constraints.hierarchy.partition_inherited_foreign_keys = constraints.foreign_keys.clone();
+    let migration = LegacyIdentities::capture(&columns, &constraints);
+    let relation = RelationIdentity::new("public", "child");
+    materialize_constraint_metadata(&relation, &mut columns, &mut constraints, &mut allocator())
+        .unwrap();
+    let row_identity = constraints.foreign_keys[0]
+        .catalog_identity
+        .unwrap()
+        .object_id;
+    migration
+        .preserve_oids(&relation, &mut columns, &mut constraints)
+        .unwrap();
+    assert_eq!(
+        constraints.foreign_keys,
+        constraints.hierarchy.partition_inherited_foreign_keys
+    );
+    assert_eq!(
+        constraints.foreign_keys[0]
+            .catalog_identity
+            .unwrap()
+            .object_id,
+        row_identity
+    );
+    assert_eq!(
+        constraints.foreign_keys[0].catalog_identity.unwrap().oid,
+        crate::catalog::oids::stable_oid("constraint", "public.child.table_fk")
+    );
+
+    constraints.hierarchy.partition_inherited_foreign_keys[0]
+        .catalog_identity
+        .as_mut()
+        .unwrap()
+        .oid += 1;
+    let migration = LegacyIdentities::capture(&columns, &constraints);
+    assert!(migration
+        .preserve_oids(&relation, &mut columns, &mut constraints)
+        .unwrap_err()
+        .to_string()
+        .contains("provenance"));
+}

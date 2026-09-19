@@ -232,3 +232,4 @@ fn load_only_validation_requires_the_marker_and_rejects_cross_relation_duplicate
 
 mod catalog_addresses;
 mod foreign_key_identities;
+mod hierarchy;

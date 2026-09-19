@@ -6,8 +6,6 @@
 
 //! Initial table catalog migration and persistent table hydration.
 
-use std::collections::BTreeSet;
-
 use super::{
     Analyzer, Arc, AtomicBool, BTreeMap, CatalogFacade, Engine, FieldName,
     PersistentStorageBackend, RwLock, StorageBackendError, StorageBackendResult, TableSchema,
@@ -84,7 +82,6 @@ impl Engine {
             catalog.set_metadata("sql_schema_catalog_initialized", "true")?;
         }
         Self::migrate_table_identities(catalog)?;
-        Self::repair_dangling_hierarchy_parents(catalog)?;
         Self::migrate_constraint_names_from_metadata(catalog)?;
         uqa_execution::catalog::sequence::restoration::migrate_legacy_sequences_from_metadata(
             catalog,
@@ -111,84 +108,6 @@ impl Engine {
             if !changed {
                 continue;
             }
-            catalog.save_table(&schema)?;
-        }
-        Ok(())
-    }
-
-    fn repair_dangling_hierarchy_parents(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
-        let schemas = catalog.load_tables()?;
-        let existing = schemas
-            .iter()
-            .map(|schema| schema.relation.qualified_name())
-            .collect::<BTreeSet<_>>();
-        for mut schema in schemas {
-            if schema.constraints_json.is_empty() {
-                continue;
-            }
-            let mut constraints: uqa_sql::ast::TableConstraintSet =
-                serde_json::from_str(&schema.constraints_json)?;
-            let hierarchy = &mut constraints.hierarchy;
-            let mut parents = Vec::with_capacity(hierarchy.parents.len());
-            let mut sequence_numbers = Vec::with_capacity(hierarchy.parents.len());
-            for (index, parent) in hierarchy.parents.iter().enumerate() {
-                let canonical_parent = crate::RelationIdentity::from_legacy_name(parent)
-                    .map_err(StorageBackendError::Other)?
-                    .qualified_name();
-                if existing.contains(&canonical_parent) {
-                    parents.push(canonical_parent);
-                    sequence_numbers.push(hierarchy.parent_sequence_number(index));
-                }
-            }
-            if parents == hierarchy.parents {
-                continue;
-            }
-            hierarchy.parents = parents;
-            hierarchy.parent_sequence_numbers = sequence_numbers;
-            if hierarchy.parents.is_empty() {
-                let mut columns: Vec<uqa_sql::ast::ColumnDef> = if schema.columns_json.is_empty() {
-                    Vec::new()
-                } else {
-                    serde_json::from_str(&schema.columns_json)?
-                };
-                if hierarchy.partition_bound.take().is_some() {
-                    for identity_override in &hierarchy.partition_identity_overrides {
-                        if let Some(column) = columns
-                            .iter_mut()
-                            .find(|column| column.name == identity_override.column)
-                        {
-                            column
-                                .auto_increment
-                                .clone_from(&identity_override.original);
-                        }
-                    }
-                    for inherited in &hierarchy.partition_inherited_key_constraints {
-                        if let Some(index) = constraints
-                            .key_constraints
-                            .iter()
-                            .position(|constraint| constraint == inherited)
-                        {
-                            constraints.key_constraints.remove(index);
-                        }
-                    }
-                    for inherited in &hierarchy.partition_inherited_foreign_keys {
-                        if let Some(index) = constraints
-                            .foreign_keys
-                            .iter()
-                            .position(|constraint| constraint == inherited)
-                        {
-                            constraints.foreign_keys.remove(index);
-                        }
-                    }
-                    hierarchy.partition_identity_overrides.clear();
-                    hierarchy.partition_inherited_key_constraints.clear();
-                    hierarchy.partition_inherited_foreign_keys.clear();
-                }
-                hierarchy.local_columns =
-                    columns.iter().map(|column| column.name.clone()).collect();
-                schema.columns_json = serde_json::to_string(&columns)?;
-            }
-            schema.constraints_json = serde_json::to_string(&constraints)?;
             catalog.save_table(&schema)?;
         }
         Ok(())

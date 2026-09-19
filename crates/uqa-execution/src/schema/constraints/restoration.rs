@@ -17,6 +17,7 @@ pub const FOREIGN_KEY_IDENTITY_METADATA_KEY: &str = "sql_foreign_key_catalog_ide
 pub const CATALOG_ADDRESS_METADATA_KEY: &str = "sql_constraint_catalog_address_version";
 
 mod addresses;
+mod hierarchy;
 
 /// Validate a load-only catalog without allocating identities or publishing repairs.
 pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
@@ -95,7 +96,7 @@ pub fn migrate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBackend
     let address_legacy = addresses::require_format(catalog, true)?;
     let mut migrations =
         load_constraint_metadata_migrations(catalog, legacy, foreign_legacy, address_legacy)?;
-    synchronize_inherited_constraint_object_ids(&mut migrations);
+    hierarchy::repair(&mut migrations)?;
     let mut foreign_migrations = Vec::new();
     for row in catalog.load_foreign_tables()? {
         let (mut table, _) = crate::catalog::foreign::StoredForeignTable::from_catalog(
