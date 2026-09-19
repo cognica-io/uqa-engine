@@ -142,6 +142,7 @@ fn run_analyze_populates_column_stats() {
             not_null: false,
             not_null_explicit: false,
             not_null_name: None,
+            not_null_identity: None,
             not_null_validated: true,
             not_null_no_inherit: false,
             not_null_is_local: true,

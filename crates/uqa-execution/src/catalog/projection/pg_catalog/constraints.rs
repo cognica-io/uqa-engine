@@ -85,7 +85,7 @@ pub fn build_pg_constraint(
             Ok(row([
                 (
                     "oid",
-                    int_value(
+                    int_value(constraint.catalog_oid.unwrap_or_else(|| {
                         constraint
                             .object_id
                             .filter(|_| constraint.kind == ConstraintCatalogKind::Check)
@@ -100,8 +100,8 @@ pub fn build_pg_constraint(
                                     )
                                 },
                                 |object_id| stable_object_oid("constraint", &object_id),
-                            ),
-                    ),
+                            )
+                    })),
                 ),
                 ("conname", str_value(constraint.name)),
                 (

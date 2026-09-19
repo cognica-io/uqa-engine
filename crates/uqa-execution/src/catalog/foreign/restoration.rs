@@ -56,6 +56,10 @@ pub fn restore(
                     "foreign table `{relation_name}` has no object identity and requires an initial-open migration"
                 )));
         }
+        uqa_sql::schema::constraint_metadata::identity::validate_not_null_identities(
+            &table.columns,
+        )
+        .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         let schema_before_binding = table.schema_json()?;
         context
             .schema

@@ -124,6 +124,7 @@ pub fn drop_constraint_one(
             columns[index].not_null = false;
             columns[index].not_null_explicit = false;
             columns[index].not_null_name = None;
+            columns[index].not_null_identity = None;
             columns[index].not_null_validated = true;
             columns[index].not_null_no_inherit = false;
             columns[index].not_null_is_local = true;

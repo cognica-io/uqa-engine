@@ -80,6 +80,7 @@ pub struct ConstraintCatalogRow {
     pub table: String,
     pub name: String,
     pub object_id: Option<[u8; 16]>,
+    pub catalog_oid: Option<i64>,
     pub kind: ConstraintCatalogKind,
     pub columns: Vec<ConstraintCatalogColumn>,
     pub state: ConstraintCatalogState,
@@ -184,6 +185,7 @@ pub struct PendingConstraintCatalogRow {
     pub table: String,
     pub requested_name: Option<String>,
     pub object_id: Option<[u8; 16]>,
+    pub catalog_oid: Option<i64>,
     pub kind: ConstraintCatalogKind,
     pub columns: Vec<ConstraintCatalogColumn>,
     pub state: ConstraintCatalogState,
@@ -215,7 +217,16 @@ pub fn constraint_catalog_rows(
                     schema: schema.clone(),
                     table: table.clone(),
                     requested_name: col.not_null_name.clone(),
-                    object_id: None,
+                    object_id: col.not_null_identity.map(|identity| identity.object_id),
+                    catalog_oid: Some(
+                        col.not_null_identity
+                            .ok_or_else(|| {
+                                SQLError::Internal(
+                                    "NOT NULL constraint has no catalog identity".into(),
+                                )
+                            })?
+                            .oid,
+                    ),
                     kind: ConstraintCatalogKind::NotNull,
                     columns: vec![ConstraintCatalogColumn {
                         name: col.name.clone(),
@@ -236,6 +247,7 @@ pub fn constraint_catalog_rows(
                     table: table.clone(),
                     requested_name: col.check_name.clone(),
                     object_id: col.check_object_id,
+                    catalog_oid: None,
                     kind: ConstraintCatalogKind::Check,
                     columns: check_constraint_columns(expr, &columns, &table_name)?,
                     state: ConstraintCatalogState::new(
@@ -309,6 +321,7 @@ pub fn constraint_catalog_rows(
                 table: table.clone(),
                 requested_name: constraint.name,
                 object_id: None,
+                catalog_oid: None,
                 kind: match constraint.kind {
                     TableKeyConstraintKind::PrimaryKey => ConstraintCatalogKind::PrimaryKey,
                     TableKeyConstraintKind::Unique => ConstraintCatalogKind::Unique {
@@ -332,6 +345,7 @@ pub fn constraint_catalog_rows(
                 table: table.clone(),
                 requested_name: constraint.name.clone(),
                 object_id: constraint.object_id,
+                catalog_oid: None,
                 kind: ConstraintCatalogKind::Check,
                 columns: check_constraint_columns(&constraint.expr, &columns, &table_name)?,
                 state: ConstraintCatalogState::new(
@@ -368,6 +382,7 @@ pub fn constraint_catalog_rows(
                 table: constraint.table,
                 name,
                 object_id: constraint.object_id,
+                catalog_oid: constraint.catalog_oid,
                 kind: constraint.kind,
                 columns: constraint.columns,
                 state: constraint.state,
@@ -387,7 +402,18 @@ pub fn constraint_catalog_rows(
                     schema: schema.clone(),
                     table: table.clone(),
                     requested_name: column.not_null_name.clone(),
-                    object_id: None,
+                    object_id: column.not_null_identity.map(|identity| identity.object_id),
+                    catalog_oid: Some(
+                        column
+                            .not_null_identity
+                            .ok_or_else(|| {
+                                SQLError::Internal(
+                                    "foreign-table NOT NULL constraint has no catalog identity"
+                                        .into(),
+                                )
+                            })?
+                            .oid,
+                    ),
                     kind: ConstraintCatalogKind::NotNull,
                     columns: vec![ConstraintCatalogColumn {
                         name: column.name.clone(),
@@ -408,6 +434,7 @@ pub fn constraint_catalog_rows(
                     table: table.clone(),
                     requested_name: column.check_name.clone(),
                     object_id: column.check_object_id,
+                    catalog_oid: None,
                     kind: ConstraintCatalogKind::Check,
                     columns: check_constraint_columns(expression, &columns, &table_name)?,
                     state: ConstraintCatalogState::new(
@@ -429,6 +456,7 @@ pub fn constraint_catalog_rows(
                 table: table.clone(),
                 requested_name: check.name,
                 object_id: check.object_id,
+                catalog_oid: None,
                 kind: ConstraintCatalogKind::Check,
                 columns: check_constraint_columns(&check.expr, &columns, &table_name)?,
                 state: ConstraintCatalogState::new(
@@ -452,6 +480,7 @@ pub fn constraint_catalog_rows(
                 table: constraint.table,
                 name,
                 object_id: constraint.object_id,
+                catalog_oid: constraint.catalog_oid,
                 kind: constraint.kind,
                 columns: constraint.columns,
                 state: constraint.state,
@@ -539,6 +568,7 @@ fn foreign_key_catalog_row(
         table: table.to_string(),
         requested_name: foreign_key.name.clone(),
         object_id: foreign_key.object_id,
+        catalog_oid: None,
         kind: ConstraintCatalogKind::ForeignKey,
         columns: local_columns,
         state: ConstraintCatalogState::new(

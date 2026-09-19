@@ -8,8 +8,7 @@
 use crate::schema::columns::removal::drop_column;
 use crate::schema::constraints::{
     add_check_constraint, add_foreign_key_constraint, add_not_null_constraint, alter_constraint,
-    checks, drop::drop_constraint, set_not_null_constraint, table_constraint_state,
-    validate_constraint,
+    drop::drop_constraint, set_not_null_constraint, table_constraint_state, validate_constraint,
 };
 use uqa_sql::{
     ast::{AlterTableAction, AlterTableStmt},
@@ -340,7 +339,13 @@ fn run_alter_table_action<S: Clone + 'static>(
             context.events.rename_trigger(&stmt.table, &from, &to)?;
         }
         AlterTableAction::RenameConstraint { from, to } => {
-            if !checks::rename_check(&context.constraints, &stmt.table, &from, &to, stmt.recurse)? {
+            if !crate::schema::constraints::renaming::rename_constraint(
+                &context.constraints,
+                &stmt.table,
+                &from,
+                &to,
+                stmt.recurse,
+            )? {
                 context
                     .events
                     .rename_trigger_constraint(&stmt.table, &from, &to)?;

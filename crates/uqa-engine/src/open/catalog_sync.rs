@@ -487,6 +487,9 @@ impl Engine {
             ));
         };
 
+        uqa_execution::schema::constraints::restoration::validate_constraint_catalog(
+            catalog.as_ref(),
+        )?;
         self.restore_roles_from_metadata(catalog.as_ref(), false)?;
         let existing_lifetimes = self
             .storage

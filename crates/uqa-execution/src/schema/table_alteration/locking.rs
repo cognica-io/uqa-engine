@@ -303,15 +303,16 @@ fn locks_all_descendants<S: Clone + 'static>(
         );
     }
     if let AlterTableAction::RenameConstraint { from: name, .. } = action {
-        let checks = context
-            .constraints
-            .catalog
-            .try_check_constraint_definitions(parent)
-            .map_err(|error| super::ddl_storage_error("ALTER TABLE constraint locks", error))?;
-        return Ok(checks
-            .iter()
-            .find(|check| check.name.as_deref() == Some(name))
-            .is_some_and(|check| !check.no_inherit && recurse));
+        let (columns, constraints) =
+            crate::schema::constraints::table_constraint_state(&context.constraints, parent)?;
+        return Ok(
+            uqa_sql::schema::constraint_changes::inheritance::InheritedConstraint::find(
+                &columns,
+                &constraints,
+                name,
+            )
+            .is_some_and(|constraint| !constraint.no_inherit && recurse),
+        );
     }
     Ok(false)
 }

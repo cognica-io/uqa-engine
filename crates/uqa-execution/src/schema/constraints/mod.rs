@@ -57,6 +57,8 @@ pub mod checks;
 pub mod drop;
 mod inheritance;
 mod lifecycle;
+pub mod renaming;
+pub mod restoration;
 mod validation;
 pub use lifecycle::*;
 pub use validation::validate_constraint;

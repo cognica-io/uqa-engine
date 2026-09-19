@@ -233,14 +233,16 @@ pub(super) fn merge_existing_recursive_action<S: Clone + 'static>(
             let existing_not_null = local.not_null.then(|| {
                 (
                     local.not_null_name.clone(),
+                    local.not_null_identity,
                     local.not_null_validated,
                     local.not_null_no_inherit,
                 )
             });
             let mut merged = column.clone();
             uqa_sql::schema::inheritance::merge_same_column(&mut merged, local)?;
-            if let Some((name, validated, no_inherit)) = existing_not_null {
+            if let Some((name, identity, validated, no_inherit)) = existing_not_null {
                 merged.not_null_name = name;
+                merged.not_null_identity = identity;
                 merged.not_null_validated = validated;
                 merged.not_null_no_inherit = no_inherit;
             }

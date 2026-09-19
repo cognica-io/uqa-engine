@@ -98,6 +98,7 @@ pub fn prepare_create_table_hierarchy(
             .map_err(|error| SQLError::Internal(format!("read inherited row type: {error}")))?
             .ok_or_else(|| SQLError::UnknownTable(parent.clone()))?;
         for column in &mut columns {
+            column.not_null_identity = None;
             if column.not_null_no_inherit {
                 column.not_null = false;
                 column.not_null_explicit = false;
@@ -245,6 +246,7 @@ pub fn merge_same_column(
         || (declared.not_null && declared.not_null_is_local);
     if declared.not_null && (!inherited.not_null || declared.not_null_is_local) {
         inherited.not_null_name.clone_from(&declared.not_null_name);
+        inherited.not_null_identity = declared.not_null_identity;
         inherited.not_null_validated = declared.not_null_validated;
         inherited.not_null_no_inherit = declared.not_null_no_inherit;
     }

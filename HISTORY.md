@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve NOT NULL constraint OIDs through table, column and constraint renames, allocate a new identity after removal/recreation, and share inherited rename locking and diagnostics with CHECK constraints. Initial catalog conversion preserves predecessor OIDs and rolls back with restoration failures; common record format 32 excludes writers that cannot retain the identity.
+
 - Retain AccessExclusive on foreign-key references and every removed partition clone or CASCADE referrer. Follow original relation and constraint identities through waits and name reuse, preserve refreshed metadata, and rebuild DROP INDEX dependencies after its parent lock wait. Savepoint rollback restores the removed constraints and releases their locks.
 
 - Remove inherited NOT NULL constraints through the same origin-aware traversal as CHECK constraints, preserve local and multiply inherited definitions, and make retained ONLY children local. Retain original child identities and per-level locks through waits, restore removals at savepoints, and reject removal beneath primary keys and identity columns with PostgreSQL diagnostics.

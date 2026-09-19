@@ -6,21 +6,22 @@
 
 use super::{exec, Engine, Value};
 
-fn strip_constraint_object_ids(value: &mut serde_json::Value) -> usize {
-    match value {
-        serde_json::Value::Array(values) => {
-            values.iter_mut().map(strip_constraint_object_ids).sum()
-        }
-        serde_json::Value::Object(values) => {
-            let removed = usize::from(values.remove("object_id").is_some());
-            removed
-                + values
-                    .values_mut()
-                    .map(strip_constraint_object_ids)
-                    .sum::<usize>()
-        }
-        _ => 0,
-    }
+fn strip_foreign_key_object_ids(
+    columns: &mut [uqa_sql::ast::ColumnDef],
+    constraints: &mut uqa_sql::ast::TableConstraintSet,
+) -> usize {
+    let inline = columns
+        .iter_mut()
+        .filter_map(|column| column.references.as_mut())
+        .map(|reference| usize::from(reference.object_id.take().is_some()))
+        .sum::<usize>();
+    inline
+        + constraints
+            .foreign_keys
+            .iter_mut()
+            .chain(&mut constraints.hierarchy.partition_inherited_foreign_keys)
+            .map(|constraint| usize::from(constraint.object_id.take().is_some()))
+            .sum::<usize>()
 }
 
 fn named_constraint_object_ids(
@@ -629,17 +630,14 @@ fn legacy_partition_foreign_key_ids_are_synchronized_before_detach() {
         drop(statement);
         let mut removed = 0;
         for (schema, relation, columns, constraints) in rows {
-            let mut columns: serde_json::Value = serde_json::from_str(&columns).unwrap();
-            let mut constraints: serde_json::Value = serde_json::from_str(&constraints).unwrap();
-            removed += strip_constraint_object_ids(&mut columns);
-            removed += strip_constraint_object_ids(&mut constraints);
+            let mut columns: Vec<uqa_sql::ast::ColumnDef> = serde_json::from_str(&columns).unwrap();
+            let mut constraints: uqa_sql::ast::TableConstraintSet =
+                serde_json::from_str(&constraints).unwrap();
+            removed += strip_foreign_key_object_ids(&mut columns, &mut constraints);
             if relation == "legacy_child" {
-                let parents = constraints
-                    .pointer_mut("/hierarchy/parents")
-                    .and_then(serde_json::Value::as_array_mut)
-                    .unwrap();
-                assert_eq!(parents, &[serde_json::json!("public.legacy_parent")]);
-                parents[0] = serde_json::json!("legacy_parent");
+                let parents = &mut constraints.hierarchy.parents;
+                assert_eq!(parents.as_slice(), ["public.legacy_parent"]);
+                parents[0] = "legacy_parent".into();
             }
             connection
                 .execute(

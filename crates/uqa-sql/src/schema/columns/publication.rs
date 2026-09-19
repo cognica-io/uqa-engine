@@ -50,6 +50,7 @@ pub fn set_not_null(
     definition.not_null_no_inherit = false;
     if !not_null {
         definition.not_null_name = None;
+        definition.not_null_identity = None;
     }
     Ok(())
 }

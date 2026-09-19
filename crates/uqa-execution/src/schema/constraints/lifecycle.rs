@@ -181,6 +181,7 @@ pub fn add_not_null_constraint(
     definition.not_null = true;
     definition.not_null_explicit = true;
     definition.not_null_name = name;
+    definition.not_null_identity = None;
     definition.not_null_validated = false;
     definition.not_null_no_inherit = no_inherit;
     definition.not_null_is_local = is_local;

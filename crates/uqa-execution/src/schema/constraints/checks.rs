@@ -4,14 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Execute recursive CHECK merging and renaming.
+//! Execute recursive CHECK merging.
 use super::{
-    constraint_error, ddl_storage_error, ensure_constraint_name_available, find_constraint,
-    publish_constraint_state, table_constraint_state, validate_check_expression,
-    ConstraintAlterContext, ConstraintLocation, SQLError,
+    ddl_storage_error, find_constraint, publish_constraint_state, table_constraint_state,
+    validate_check_expression, ConstraintAlterContext, ConstraintLocation, SQLError,
 };
-use std::collections::BTreeSet;
-use uqa_sql::ast::{TableCheck, TableLockMode};
+use uqa_sql::ast::TableCheck;
 
 fn find_check(
     context: &ConstraintAlterContext<'_>,
@@ -105,88 +103,4 @@ pub fn merge_added_check(
         format!("merging constraint \"{name}\" with inherited definition"),
     ));
     Ok(true)
-}
-
-pub fn rename_check(
-    context: &ConstraintAlterContext<'_>,
-    table: &str,
-    from: &str,
-    to: &str,
-    recurse: bool,
-) -> Result<bool, SQLError> {
-    let Some(check) = find_check(context, table, from)? else {
-        return Ok(false);
-    };
-    if !check.no_inherit
-        && !recurse
-        && !context
-            .rows
-            .partitions
-            .catalog
-            .direct_hierarchy_children(table)?
-            .is_empty()
-    {
-        return Err(constraint_error(
-            "42P16",
-            format!("inherited constraint \"{from}\" must be renamed in child tables too"),
-        ));
-    }
-    let mut targets = if check.no_inherit || !recurse {
-        vec![table.to_string()]
-    } else {
-        context.rows.catalog.hierarchy_scan_tables(table, true)?
-    };
-    // PostgreSQL checks descendants before the directly named constraint, so child ownership and name conflicts precede a root inheritance error.
-    targets.retain(|target| target != table);
-    targets.push(table.to_string());
-    let target_set = targets.iter().cloned().collect::<BTreeSet<_>>();
-    let mut changes = Vec::new();
-    for target in targets {
-        context
-            .locks
-            .lock_relation(&target, TableLockMode::AccessExclusive)?;
-        context.access.ensure_table_owner(&target)?;
-        let (columns, constraints) = table_constraint_state(context, &target)?;
-        let mut check = find_check(context, &target, from)?.ok_or_else(|| {
-            constraint_error(
-                "42704",
-                format!("constraint \"{from}\" for table \"{target}\" does not exist"),
-            )
-        })?;
-        let expected = if target == table {
-            0
-        } else {
-            constraints
-                .hierarchy
-                .parents
-                .iter()
-                .filter(|parent| target_set.contains(*parent))
-                .count()
-        };
-        if !check.no_inherit && parent_count(context, &target, from)? > expected {
-            return Err(constraint_error(
-                "42P16",
-                format!("cannot rename inherited constraint \"{from}\""),
-            ));
-        }
-        ensure_constraint_name_available(&columns, &constraints, Some(to), &target)?;
-        check.name = Some(to.to_string());
-        changes.push((target, check));
-    }
-    for (target, check) in changes {
-        replace_check(context, &target, from, check)?;
-    }
-    Ok(true)
-}
-
-fn parent_count(
-    context: &ConstraintAlterContext<'_>,
-    table: &str,
-    name: &str,
-) -> Result<usize, SQLError> {
-    super::inheritance::parent_count(
-        context,
-        table,
-        uqa_sql::schema::constraint_changes::inheritance::InheritedConstraintKey::Check(name),
-    )
 }
