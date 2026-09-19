@@ -8,7 +8,7 @@
 
 use super::{
     sequence::{self as acl, role_has_privilege, AclPrivilege, PrivilegeCheck},
-    SequenceSecurity,
+    BoundSequenceSecurity,
 };
 use crate::catalog::roles::identity::RoleSubject;
 use crate::{
@@ -22,7 +22,7 @@ use std::{collections::BTreeMap, ops::Deref};
 use uqa_core::{RelationIdentity, Value};
 
 pub type SequenceSecurityRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RelationIdentity, SequenceSecurity>> + 'a>;
+    Box<dyn Deref<Target = BTreeMap<RelationIdentity, BoundSequenceSecurity>> + 'a>;
 pub trait SequenceSecurityCatalog {
     fn security_read(&self) -> SequenceSecurityRead<'_>;
 }
@@ -98,6 +98,7 @@ impl SequencePrivilegeInquiry<'_> {
             })?;
         let current_user = self.names.current_role();
         let roles = self.roles.role_definitions();
+        let security = security.resolve(&roles).map_err(SQLError::Internal)?;
         let memberships = self.roles.role_memberships();
         if privileges.iter().any(|privilege| {
             role_has_privilege(
@@ -187,6 +188,7 @@ impl SequencePrivilegeInquiry<'_> {
                 ))
             })?;
         let roles = self.roles.role_definitions();
+        let security = security.resolve(&roles).map_err(SQLError::Internal)?;
         let memberships = self.roles.role_memberships();
         Ok(checks.any(|check| role_has_privilege(&security, subject, check, &roles, &memberships)))
     }
@@ -196,20 +198,22 @@ impl SequencePrivilegeInquiry<'_> {
         name: &str,
         relation: &RelationIdentity,
     ) -> Result<String, SQLError> {
-        let owner = self
+        let security = self
             .security
             .security_read()
             .get(relation)
-            .map(|security| security.role_owner.clone())
+            .cloned()
             .ok_or_else(|| {
                 SQLError::Internal(format!("sequence `{name}` has no security metadata"))
             })?;
+        let roles = self.roles.role_definitions();
+        let owner = security.owner_reference(&roles)?;
         crate::schema::sequences::ownership::require_sequence_ownership(&relation.name, {
             let current = self.names.current_role();
-            let roles = self.roles.role_definitions();
             let memberships = self.roles.role_memberships();
             crate::catalog::roles::role_inherits(&roles, &memberships, &current, &owner)
         })?;
+        let owner = owner.catalog_name(&roles)?;
         Ok(owner)
     }
 }

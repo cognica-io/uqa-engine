@@ -64,7 +64,7 @@ pub(super) struct Catalog {
     pub views: BTreeMap<RelationIdentity, StoredView>,
     pub foreign_tables: BTreeMap<RelationIdentity, BoundTableSecurity>,
     pub system_relations: crate::catalog::security::system_relations::SystemRelationSecurities,
-    pub sequences: BTreeMap<RelationIdentity, SequenceSecurity>,
+    pub sequences: BTreeMap<RelationIdentity, BoundSequenceSecurity>,
     pub sequence_persistence: BTreeMap<RelationIdentity, crate::ast::RelationPersistence>,
     pub routines: BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
     pub events: Events,
@@ -147,7 +147,9 @@ impl RoleDependencyCatalog for Catalog {
     ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundTableSecurity>> {
         Box::new(self.read("foreign", &self.foreign_tables))
     }
-    fn sequences(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, SequenceSecurity>> {
+    fn sequences(
+        &self,
+    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundSequenceSecurity>> {
         Box::new(self.read("sequences", &self.sequences))
     }
     fn routines(&self) -> RoleDependencyRead<'_, BTreeMap<String, Vec<Arc<SQLUserFunction>>>> {

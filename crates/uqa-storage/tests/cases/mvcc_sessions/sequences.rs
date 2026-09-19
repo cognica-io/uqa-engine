@@ -16,8 +16,14 @@ use uqa_storage::{
 fn sequence() -> SequenceRow {
     SequenceRow {
         relation: RelationIdentity::new("public", "ids"),
-        role_owner: "owner".into(),
-        acl: None,
+        security: uqa_storage::SequenceSecurityRow::Bound(
+            uqa_core::catalog_sequence::BoundSequenceSecurity::owner(
+                uqa_core::catalog_role::RoleIdentity {
+                    oid: 20_001,
+                    object_id: [9; 16],
+                },
+            ),
+        ),
         object_id: [1; 16],
         definition_generation: [2; 16],
         start: 1,

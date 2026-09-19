@@ -18,8 +18,7 @@ fn session() -> PersistentStorageSession {
     catalog
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "ids"),
-            role_owner: "owner".into(),
-            acl: None,
+            security: uqa_storage::SequenceSecurityRow::bootstrap(),
             object_id: [1; 16],
             definition_generation: [2; 16],
             start: 1,

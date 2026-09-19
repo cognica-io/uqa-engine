@@ -49,6 +49,43 @@ fn decode_identity(bytes: &[u8]) -> Result<RoleIdentity> {
     Ok(identity)
 }
 
+pub(super) fn encode_sequence(
+    row: &uqa_storage::SequenceSecurityRow,
+) -> Result<(Value, Option<String>)> {
+    use uqa_storage::SequenceSecurityRow;
+    match row {
+        SequenceSecurityRow::Bound(row) => Ok((
+            encode_identity(row.role_owner)?,
+            row.acl.as_ref().map(serde_json::to_string).transpose()?,
+        )),
+        SequenceSecurityRow::Legacy(row) => Ok((
+            Value::Text(row.role_owner.clone()),
+            row.acl.as_ref().map(serde_json::to_string).transpose()?,
+        )),
+    }
+}
+
+pub(super) fn decode_sequence(
+    owner: ValueRef<'_>,
+    acl: Option<&str>,
+) -> Result<uqa_storage::SequenceSecurityRow> {
+    use uqa_core::catalog_sequence::{BoundSequenceSecurity, LegacySequenceSecurity};
+    use uqa_storage::SequenceSecurityRow;
+    match owner {
+        ValueRef::Text(_) => Ok(SequenceSecurityRow::Legacy(LegacySequenceSecurity {
+            role_owner: super::native::string(owner)?,
+            acl: acl.map(serde_json::from_str).transpose()?,
+        })),
+        ValueRef::Blob(bytes) => Ok(SequenceSecurityRow::Bound(BoundSequenceSecurity {
+            role_owner: decode_identity(bytes)?,
+            acl: acl.map(serde_json::from_str).transpose()?,
+        })),
+        _ => Err(SQLiteError::StorageBackend(
+            "sequence owner has an invalid storage class".into(),
+        )),
+    }
+}
+
 pub(super) fn encode_schema(row: &SchemaRow) -> Result<(Value, Option<String>)> {
     match row {
         SchemaRow::Bound(row) => Ok((

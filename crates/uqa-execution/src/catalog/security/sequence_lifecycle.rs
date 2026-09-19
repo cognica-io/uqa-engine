@@ -36,7 +36,7 @@ use uqa_sql::{
                 SequenceGrantNamespace,
             },
             sequence_inquiry::SequencePrivilegeInquiry,
-            SequenceSecurity,
+            BoundSequenceSecurity,
         },
     },
     SQLError,
@@ -44,7 +44,7 @@ use uqa_sql::{
 use uqa_storage::{CatalogFacade, StorageBackendResult};
 
 pub type SequenceSecurityWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, SequenceSecurity>> + 'a>;
+    Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, BoundSequenceSecurity>> + 'a>;
 pub trait SequencePrivilegePublication {
     fn prepare_writer(&self) -> Result<(), SQLError>;
     fn refresh_catalog(&self) -> StorageBackendResult<()>;
@@ -64,7 +64,7 @@ pub struct SequencePrivilegeContext<'a> {
 
 struct SequencePrivilegeCandidate<'a> {
     registry: SequenceSecurityWrite<'a>,
-    updates: Vec<(String, RelationIdentity, SequenceSecurity)>,
+    updates: Vec<(String, RelationIdentity, BoundSequenceSecurity)>,
     notices: Vec<(&'static str, String)>,
 }
 
@@ -152,6 +152,7 @@ impl SequencePrivilegeContext<'_> {
                     target.name
                 ))
             })?;
+            let current = current.resolve(&roles).map_err(SQLError::Internal)?;
             let (next, grantable) = apply_sequence_acl(
                 statement,
                 &grantees,
@@ -176,6 +177,9 @@ impl SequencePrivilegeContext<'_> {
                 &mut dependencies,
             );
             if next != current {
+                let next =
+                    BoundSequenceSecurity::bind(&next, &roles).map_err(SQLError::Internal)?;
+                next.validate(&roles).map_err(SQLError::Internal)?;
                 updates.push((target.name.clone(), target.relation.clone(), next));
             }
         }
@@ -225,7 +229,7 @@ impl SequencePrivilegeContext<'_> {
         &self,
         name: &str,
         relation: &RelationIdentity,
-        security: &SequenceSecurity,
+        security: &BoundSequenceSecurity,
     ) -> Result<(), SQLError> {
         let state = self
             .sequences

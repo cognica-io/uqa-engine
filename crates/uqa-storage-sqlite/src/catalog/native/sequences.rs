@@ -164,11 +164,7 @@ impl NativeSnapshot {
         }
         let (identity, generation) = owner_id(owner);
         let options = concrete_sequence_options(sequence);
-        let acl = sequence
-            .acl
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()?;
+        let (role_owner, acl) = crate::catalog::role_security::encode_sequence(&sequence.security)?;
         let owner_table = sequence.owner.map(|owner| owner.table_object_id);
         let owner_column = sequence.owner.map(|owner| owner.column_object_id);
         self.put_row(
@@ -198,7 +194,7 @@ impl NativeSnapshot {
                     .as_ref()
                     .map_or(ValueRef::Null, |id| ValueRef::Blob(id)),
                 optional_text(sequence.owner.map(|owner| owner.dependency.catalog_code())),
-                text(&sequence.role_owner),
+                (&role_owner).into(),
                 optional_text(acl.as_deref()),
                 ValueRef::Integer(sequence.log_count),
             ],

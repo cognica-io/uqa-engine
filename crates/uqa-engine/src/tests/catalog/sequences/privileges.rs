@@ -44,6 +44,7 @@ fn sequence_privilege_inquiry_keeps_committed_roles_and_acl_together() {
                     );
                     let roles = engine.durable.roles.read();
                     for security in engine.durable.sequence_security.read().values() {
+                        let security = security.resolve(&roles).unwrap();
                         assert!(
                             roles.contains_key(&security.role_owner),
                             "inquiry split live roles and sequence owners"

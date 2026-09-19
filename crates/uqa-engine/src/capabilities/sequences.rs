@@ -5,7 +5,7 @@
 //
 
 //! Bind sequence catalog consumers to session namespaces and durable registry state.
-use crate::{state::SequenceSecurity, Engine, SequenceState};
+use crate::{state::BoundSequenceSecurity, Engine, SequenceState};
 use uqa_core::RelationIdentity;
 use uqa_execution::schema::sequences::{
     creation::{SequenceCreationContext, SequenceCreationNamespace, SequenceCreationPublication},
@@ -92,12 +92,9 @@ impl SequenceCreationPublication for Engine {
         relation: &RelationIdentity,
         mut state: SequenceState,
         persistence: RelationPersistence,
-        role_owner: &str,
+        role_owner: uqa_core::catalog_role::RoleIdentity,
     ) -> Result<bool, SQLError> {
-        let security = SequenceSecurity {
-            role_owner: role_owner.to_string(),
-            acl: None,
-        };
+        let security = BoundSequenceSecurity::owner(role_owner);
         let object_id = crate::new_sequence_object_id().map_err(|error| {
             SQLError::Internal(format!("allocate sequence `{name}` identity: {error}"))
         })?;
@@ -296,18 +293,18 @@ impl uqa_execution::schema::sequences::role_ownership::SequenceRoleAccess for En
     }
 }
 impl uqa_execution::schema::sequences::role_ownership::SequenceSecurityPublication for Engine {
-    fn security(&self, relation: &RelationIdentity) -> Option<SequenceSecurity> {
+    fn security(&self, relation: &RelationIdentity) -> Option<BoundSequenceSecurity> {
         self.durable.sequence_security.read().get(relation).cloned()
     }
     fn persist_security(
         &self,
         name: &str,
         relation: &RelationIdentity,
-        security: &SequenceSecurity,
+        security: &BoundSequenceSecurity,
     ) -> Result<(), SQLError> {
         self.persist_sequence_security(name, relation, security)
     }
-    fn publish_security(&self, relation: &RelationIdentity, security: SequenceSecurity) {
+    fn publish_security(&self, relation: &RelationIdentity, security: BoundSequenceSecurity) {
         self.durable
             .sequence_security
             .write()

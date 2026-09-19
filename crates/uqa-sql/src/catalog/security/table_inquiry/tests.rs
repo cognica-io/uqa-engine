@@ -18,17 +18,17 @@ use crate::catalog::{
             SequenceSecurityRead,
         },
         table::TableAclPrivilege,
-        AclGrantee, SequenceSecurity, TableAclEntry, TablePrivileges,
+        AclGrantee, BoundSequenceSecurity, TableAclEntry, TablePrivileges,
     },
 };
 use std::cell::{Cell, RefCell};
-use uqa_core::catalog_sequence::{SequenceAclEntry, SequencePrivileges};
+use uqa_core::catalog_sequence::SequencePrivileges;
 
 struct Catalog {
     roles: RefCell<BTreeMap<String, RoleDefinition>>,
     memberships: BTreeMap<RoleMembershipKey, RoleMembership>,
     table_security: TableSecurity,
-    sequences: BTreeMap<RelationIdentity, SequenceSecurity>,
+    sequences: RefCell<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
     replace_subject_on_lookup: Cell<bool>,
 }
 
@@ -43,7 +43,7 @@ impl Catalog {
         Self {
             roles: RefCell::new(BTreeMap::from([
                 (owner.name.clone(), owner),
-                (reader.name.clone(), reader),
+                (reader.name.clone(), reader.clone()),
             ])),
             memberships: BTreeMap::new(),
             table_security: TableSecurity {
@@ -55,18 +55,18 @@ impl Catalog {
                 }]),
                 ..TableSecurity::owner("uqa")
             },
-            sequences: BTreeMap::from([(
+            sequences: RefCell::new(BTreeMap::from([(
                 RelationIdentity::new("public", "ids"),
-                SequenceSecurity {
-                    role_owner: "uqa".into(),
-                    acl: Some(vec![SequenceAclEntry {
-                        role: "reader".into(),
-                        grantor: Some("uqa".into()),
+                BoundSequenceSecurity {
+                    role_owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+                    acl: Some(vec![uqa_core::catalog_role::BoundAclEntry {
+                        role: Some(reader.identity()),
+                        grantor: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
                         privileges: AclPrivilege::Select.mask(),
                         grant_options: SequencePrivileges::default(),
                     }]),
                 },
-            )]),
+            )])),
             replace_subject_on_lookup: Cell::new(false),
         }
     }
@@ -74,6 +74,15 @@ impl Catalog {
     fn lookup(&self) {
         if self.replace_subject_on_lookup.replace(false) {
             self.roles.borrow_mut().get_mut("reader").unwrap().object_id = [2; 16];
+            self.sequences
+                .borrow_mut()
+                .values_mut()
+                .next()
+                .unwrap()
+                .acl
+                .as_mut()
+                .unwrap()[0]
+                .role = Some(self.roles.borrow()["reader"].identity());
         }
     }
 
@@ -118,7 +127,7 @@ impl RoleCatalogGuards for Catalog {
 
 impl SequenceSecurityCatalog for Catalog {
     fn security_read(&self) -> SequenceSecurityRead<'_> {
-        Box::new(&self.sequences)
+        Box::new(self.sequences.borrow())
     }
 }
 
@@ -225,13 +234,14 @@ fn public_subjects_receive_only_applicable_table_column_and_sequence_grants() {
     );
     catalog
         .sequences
+        .get_mut()
         .values_mut()
         .next()
         .unwrap()
         .acl
         .as_mut()
         .unwrap()[0]
-        .role = AclGrantee::Public;
+        .role = None;
     for subject in [text("public"), Value::Int(0), Value::Int(99_999)] {
         for (target, table_select) in [
             (text("items"), false),

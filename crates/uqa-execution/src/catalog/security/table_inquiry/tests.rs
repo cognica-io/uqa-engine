@@ -6,12 +6,12 @@
 
 use super::*;
 use std::cell::Cell;
-use uqa_core::catalog_sequence::{SequenceAclEntry, SequencePrivileges};
+use uqa_core::catalog_sequence::SequencePrivileges;
 use uqa_sql::{
     ast::{RelationPersistence, SequenceDataType},
     catalog::{
         roles::{identity::RoleBinding, RoleReference},
-        security::SequenceSecurity,
+        security::BoundSequenceSecurity,
     },
 };
 
@@ -66,6 +66,14 @@ fn sequence_name_inquiry_reads_roles_and_acl_after_resolution_without_rebinding_
         .get_mut("reader")
         .unwrap()
         .object_id = [2; 16];
+    Arc::make_mut(&mut replaced.security)
+        .values_mut()
+        .next()
+        .unwrap()
+        .acl
+        .as_mut()
+        .unwrap()[0]
+        .role = Some(replaced.roles.roles["reader"].identity());
     *fixture.after_resolution.borrow_mut() = Some(replaced);
     let arguments = [
         Value::Str("reader".into()),

@@ -593,7 +593,7 @@ pub(super) const LAYOUTS: &[NativeRecordLayout] = &[
         ],
         column_types: &[
             Text, Text, Text, Integer, Integer, Integer, Integer, Text, Blob, Text, Integer,
-            Integer, Integer, Integer, Blob, Blob, Blob, Text, Text, Text, Integer,
+            Integer, Integer, Integer, Blob, Blob, Blob, Text, TextOrBlob, Text, Integer,
         ],
         nullable: &[
             false, false, false, false, false, false, false, false, false, false, false, false,

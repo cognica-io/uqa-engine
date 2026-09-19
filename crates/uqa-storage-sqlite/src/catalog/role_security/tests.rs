@@ -7,6 +7,55 @@
 use super::*;
 
 #[test]
+fn sequence_cells_keep_role_storage_classes_and_reject_mixed_acl_endpoints() {
+    use uqa_core::catalog_role::BoundAclEntry;
+    use uqa_core::catalog_sequence::{
+        BoundSequenceSecurity, LegacySequenceSecurity, SequenceAclEntry, SequencePrivileges,
+    };
+    use uqa_storage::SequenceSecurityRow;
+    let owner = RoleIdentity::BOOTSTRAP;
+    let mut bound = BoundSequenceSecurity::owner(owner);
+    bound.acl = Some(vec![BoundAclEntry {
+        role: None,
+        grantor: owner,
+        privileges: SequencePrivileges::ALL,
+        grant_options: SequencePrivileges::default(),
+    }]);
+    let mut legacy = LegacySequenceSecurity::owner(serde_json::to_string(&owner).unwrap());
+    legacy.acl = Some(vec![SequenceAclEntry {
+        role: "reader".into(),
+        grantor: Some(legacy.role_owner.clone()),
+        privileges: SequencePrivileges::ALL,
+        grant_options: SequencePrivileges::default(),
+    }]);
+    let (bound_owner, bound_acl) =
+        encode_sequence(&SequenceSecurityRow::Bound(bound.clone())).unwrap();
+    let (legacy_owner, legacy_acl) =
+        encode_sequence(&SequenceSecurityRow::Legacy(legacy.clone())).unwrap();
+    assert!(matches!(bound_owner, Value::Blob(_)));
+    assert!(matches!(legacy_owner, Value::Text(_)));
+    assert_eq!(
+        decode_sequence((&bound_owner).into(), bound_acl.as_deref()).unwrap(),
+        SequenceSecurityRow::Bound(bound)
+    );
+    assert_eq!(
+        decode_sequence((&legacy_owner).into(), legacy_acl.as_deref()).unwrap(),
+        SequenceSecurityRow::Legacy(legacy)
+    );
+    assert!(decode_sequence((&bound_owner).into(), legacy_acl.as_deref()).is_err());
+    assert!(decode_sequence((&legacy_owner).into(), bound_acl.as_deref()).is_err());
+    for value in [
+        ValueRef::Null,
+        ValueRef::Integer(10),
+        ValueRef::Real(10.0),
+        ValueRef::Blob(b"uqa"),
+        ValueRef::Blob(&[0; 21]),
+    ] {
+        assert!(decode_sequence(value, None).is_err());
+    }
+}
+
+#[test]
 fn schema_role_storage_class_preserves_names_and_bound_identities_without_guessing() {
     let mut legacy = LegacySchemaRow::legacy("ordinary");
     legacy.role_owner = serde_json::to_string(&RoleIdentity::BOOTSTRAP).unwrap();

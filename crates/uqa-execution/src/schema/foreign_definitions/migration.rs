@@ -46,14 +46,11 @@ pub fn migrate_foreign_table_identities(
             roles,
             true,
         )?;
-        let security = security
-            .resolve(roles)
-            .map_err(StorageBackendError::Other)?;
         changed |=
             crate::schema::sequences::migration::materialize_persisted_foreign_implicit_sequences(
                 catalog,
                 &row.relation,
-                &security.role_owner,
+                security.role_owner,
                 table.object_id,
                 &mut table.columns,
             )?;

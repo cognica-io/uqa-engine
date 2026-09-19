@@ -9,6 +9,77 @@
 use super::*;
 use uqa_storage::mvcc::{IdentifierRequest, RecordWrite};
 
+#[test]
+fn sequence_authority_format_upgrade_preserves_records_allocations_and_receipts() {
+    let database = Arc::new(
+        Database::builder()
+            .create_with_backend(InMemoryBackend::new())
+            .unwrap(),
+    );
+    let store = RedbRecordStore::new(database.clone()).unwrap();
+    store.migrate_key_value().unwrap();
+    let identity = store.database_id();
+    let control = StorageReadControl::with_limit(1 << 20);
+    let id = store.allocate_transaction(&control).unwrap();
+    let batch = PreparedRecordCommit::new(
+        &[RecordWrite {
+            key: b"a",
+            expected: None,
+            value: Some(b"authority"),
+        }],
+        &control,
+    )
+    .unwrap();
+    let receipt = store.commit(id, &batch, &control).unwrap();
+    let pending = store.allocate_transaction(&control).unwrap();
+    store
+        .allocate_identifiers(b"rows", IdentifierRequest::Observe(77), &control)
+        .unwrap();
+    let retained = store.snapshot(&control).unwrap();
+    {
+        let transaction = physical_writer(&database).unwrap();
+        transaction
+            .open_table(METADATA)
+            .unwrap()
+            .insert("format", 22_u64.to_be_bytes().as_slice())
+            .unwrap();
+        transaction.commit().unwrap();
+    }
+    assert!(store.snapshot(&control).is_err());
+    assert!(retained.get(b"a", &control).is_err());
+    let upgraded = RedbRecordStore::new(database.clone()).unwrap();
+    assert_eq!(upgraded.database_id(), identity);
+    assert_eq!(
+        upgraded.commit_status(id, &control).unwrap(),
+        CommitStatus::Committed(receipt)
+    );
+    assert_eq!(
+        upgraded.commit_status(pending, &control).unwrap(),
+        CommitStatus::Pending
+    );
+    assert_eq!(
+        upgraded.identifier_watermark(b"rows", &control).unwrap(),
+        Some(77)
+    );
+    assert_eq!(upgraded.commit(id, &batch, &control).unwrap(), receipt);
+    let record = upgraded
+        .snapshot(&control)
+        .unwrap()
+        .get(b"a", &control)
+        .unwrap()
+        .unwrap();
+    assert_eq!(record.sequence(), receipt.sequence);
+    assert_eq!(
+        record.value().map(|value| &***value),
+        Some(b"authority".as_slice())
+    );
+    let transaction = database.begin_read().unwrap();
+    assert_eq!(
+        read_u64(&transaction.open_table(METADATA).unwrap(), "format").unwrap(),
+        23
+    );
+}
+
 fn rejected<T>(result: VersionResult<T>, replaced: bool) {
     let error = result.err().expect("incompatible metadata was accepted");
     if replaced {

@@ -12,7 +12,9 @@ pub mod security;
 pub mod sequence;
 pub mod view;
 
-use security::{BoundDatabaseSecurity, BoundSchemaSecurity, BoundTableSecurity, SequenceSecurity};
+use security::{
+    BoundDatabaseSecurity, BoundSchemaSecurity, BoundSequenceSecurity, BoundTableSecurity,
+};
 use sequence::SequenceState;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -60,6 +62,13 @@ pub struct CatalogSequenceSnapshot {
     pub security: crate::catalog::security::SequenceSecurity,
 }
 
+pub type CatalogSequenceMetadata = (
+    String,
+    uqa_sql::ast::RelationPersistence,
+    [u8; 16],
+    security::SequenceSecurity,
+);
+
 pub use uqa_sql::catalog::resolution::RelationResolution;
 
 /// Shared immutable definition maps captured from one catalog generation.
@@ -83,7 +92,7 @@ pub struct CatalogDefinitionSnapshot {
     pub schemas: Arc<BTreeMap<String, BoundSchemaSecurity>>,
     pub sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
     pub sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
-    pub sequence_security: Arc<BTreeMap<RelationIdentity, SequenceSecurity>>,
+    pub sequence_security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
     pub foreign_table_security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
     pub system_relation_security:
         Arc<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,

@@ -79,6 +79,8 @@ pub mod database;
 pub mod database_inquiry;
 
 pub mod sequence;
+pub mod sequence_binding;
+pub use sequence_binding::BoundSequenceSecurity;
 pub mod sequence_grants;
 pub mod sequence_inquiry;
 

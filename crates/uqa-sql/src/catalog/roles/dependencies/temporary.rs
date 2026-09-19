@@ -44,6 +44,7 @@ pub fn role_dependencies(
         let persistence = catalog.sequence_persistence();
         for (name, security) in sequences.iter() {
             if persistence.get(name) == Some(&RelationPersistence::Temporary) {
+                let security = security.resolve(roles).map_err(SQLError::Internal)?;
                 add_role(&security.role_owner, roles, limit, &mut referenced)?;
                 acl_dependencies(
                     security.acl.as_deref().unwrap_or_default(),

@@ -156,11 +156,7 @@ impl Catalog {
             let owner_dependency = sequence
                 .owner
                 .map(|owner| owner.dependency.catalog_code());
-            let acl_json = sequence
-                .acl
-                .as_ref()
-                .map(serde_json::to_string)
-                .transpose()?;
+            let (role_owner, acl_json) = crate::catalog::role_security::encode_sequence(&sequence.security)?;
             tx.execute(
                 "INSERT INTO _sequences
                     (schema_name, relation_name, kind, object_id, definition_generation, start, increment, current, called, persistence, data_type, min_value, max_value, cycle, cache_size, owner_table_object_id, owner_column_object_id, owner_dependency, role_owner, acl_json, log_count)
@@ -183,7 +179,7 @@ impl Catalog {
                     owner_table.as_ref().map(<[u8; 16]>::as_slice),
                     owner_column.as_ref().map(<[u8; 16]>::as_slice),
                     owner_dependency,
-                    sequence.role_owner,
+                    role_owner,
                     acl_json,
                     sequence.log_count,
                 ],
@@ -204,11 +200,7 @@ impl Catalog {
             let owner_dependency = sequence
                 .owner
                 .map(|owner| owner.dependency.catalog_code());
-            let acl_json = sequence
-                .acl
-                .as_ref()
-                .map(serde_json::to_string)
-                .transpose()?;
+            let (role_owner, acl_json) = crate::catalog::role_security::encode_sequence(&sequence.security)?;
             Ok(connection.execute(
                 "UPDATE _sequences
                     SET object_id = ?3, definition_generation = ?4, start = ?5, increment = ?6, current = ?7, called = ?8, persistence = ?9,
@@ -233,7 +225,7 @@ impl Catalog {
                     owner_table.as_ref().map(<[u8; 16]>::as_slice),
                     owner_column.as_ref().map(<[u8; 16]>::as_slice),
                     owner_dependency,
-                    sequence.role_owner,
+                    role_owner,
                     acl_json,
                     sequence.log_count,
                 ],

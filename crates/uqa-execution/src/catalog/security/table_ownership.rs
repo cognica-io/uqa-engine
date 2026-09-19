@@ -111,6 +111,7 @@ impl TableOwnershipContext<'_> {
             self.owned_sequences,
             table.object_id(),
             &owner.name,
+            &roles,
         )?;
         for (sequence, security) in &sequence_updates {
             self.sequences

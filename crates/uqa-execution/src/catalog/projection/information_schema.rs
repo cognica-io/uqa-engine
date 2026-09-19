@@ -834,11 +834,11 @@ pub fn build_info_routines(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, 
 pub fn build_info_sequences(
     catalog: &CatalogReadView,
     session: &dyn CatalogSession,
-) -> Vec<ResultRow> {
+) -> Result<Vec<ResultRow>, SQLError> {
     let current_user = session.current_role();
     let temporary_schema = session.temporary_schema_name();
-    catalog
-        .sequence_states()
+    Ok(catalog
+        .sequence_states()?
         .into_iter()
         .filter(|(relation, state, persistence, security)| {
             (*persistence != uqa_sql::ast::RelationPersistence::Temporary
@@ -877,7 +877,7 @@ pub fn build_info_sequences(
                 ),
             ])
         })
-        .collect()
+        .collect())
 }
 
 pub fn build_info_table_constraints(

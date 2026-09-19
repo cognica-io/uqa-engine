@@ -24,6 +24,7 @@ mod identity;
 mod relation;
 mod relation_security;
 mod schema;
+mod sequence_security;
 
 pub use cache_revisions::CatalogCacheRevisions;
 pub use graph_access::validate_graph_page;
@@ -33,6 +34,7 @@ pub use graph_access::{
 pub use identity::new_nonzero_catalog_identity;
 pub use relation::RelationIdentity;
 pub use relation_security::{BoundRelationSecurity, LegacyRelationSecurity, RelationSecurityRow};
+pub use sequence_security::{BoundSequenceSecurity, LegacySequenceSecurity, SequenceSecurityRow};
 mod table;
 
 pub use schema::{BoundSchemaRow, SchemaAclEntry, SchemaPrivileges, SchemaRow};
@@ -233,12 +235,9 @@ pub use uqa_core::catalog_sequence::{
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SequenceRow {
     pub relation: RelationIdentity,
-    /// SQL role that owns the sequence. Legacy catalogs predate roles and therefore belong to the bootstrap role.
-    #[serde(default = "default_sequence_role_owner")]
-    pub role_owner: String,
-    /// Explicit ACL entries. `None` represents `PostgreSQL`'s null default ACL, in which the owner has all ordinary privileges.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub acl: Option<Vec<SequenceAclEntry>>,
+    /// Captured owner and ACL role identities, or a legacy row awaiting initial-open migration.
+    #[serde(flatten)]
+    pub security: SequenceSecurityRow,
     /// Stable identity of this sequence incarnation. Dropping and recreating the same qualified name must allocate a different value.
     #[serde(default)]
     pub object_id: [u8; 16],
@@ -259,10 +258,6 @@ pub struct SequenceRow {
     pub owner: Option<SequenceOwner>,
     #[serde(default)]
     pub options: SequenceOptions,
-}
-
-fn default_sequence_role_owner() -> String {
-    "uqa".into()
 }
 
 /// Physical sequence position consumed by one atomic reservation.

@@ -20,7 +20,7 @@ impl Engine {
         catalog: &dyn CatalogFacade,
         mode: super::CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
-        self.restore_sequences_from_catalog(catalog)?;
+        self.restore_sequences_from_catalog(catalog, mode.allows_migration())?;
         self.restore_domains_from_catalog(catalog)?;
         *self.durable.system_relation_security.write() =
             uqa_execution::catalog::security::system_relations::restore(

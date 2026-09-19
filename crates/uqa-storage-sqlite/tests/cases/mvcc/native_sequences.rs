@@ -8,11 +8,15 @@
 
 use super::{native_tables::schema, open, MODES};
 use std::{collections::BTreeMap, sync::mpsc, time::Duration};
-use uqa_core::Value;
+use uqa_core::{
+    catalog_role::{BoundAclEntry, RoleIdentity},
+    catalog_sequence::BoundSequenceSecurity,
+    Value,
+};
 use uqa_storage::{
-    mvcc::VersionedSessionOptions, DocumentStore, RelationIdentity, SequenceAclEntry,
-    SequenceOptions, SequenceOwner, SequenceOwnerDependency, SequencePrivileges,
-    SequenceReservationResult, SequenceRow, SequenceValueReservation,
+    mvcc::VersionedSessionOptions, DocumentStore, RelationIdentity, SequenceOptions, SequenceOwner,
+    SequenceOwnerDependency, SequencePrivileges, SequenceReservationResult, SequenceRow,
+    SequenceSecurityRow, SequenceValueReservation,
 };
 use uqa_storage_sqlite::{Catalog, ManagedConnection, SQLiteDocumentStore};
 
@@ -39,8 +43,7 @@ fn memory(native: bool) -> (ManagedConnection, Catalog) {
 fn sequence(name: &str, id: u8) -> SequenceRow {
     SequenceRow {
         relation: RelationIdentity::new("public", name),
-        role_owner: "owner".into(),
-        acl: None,
+        security: SequenceSecurityRow::bootstrap(),
         object_id: [id; 16],
         definition_generation: [id + 64; 16],
         start: 1,
@@ -267,4 +270,23 @@ fn native_sequence_publication_failure_retries_the_evaluated_reservation_exactly
         );
         assert_eq!(reserve(&observer, &renamed).first_value, 4);
     }
+}
+
+fn large_sequence_security() -> SequenceSecurityRow {
+    SequenceSecurityRow::Bound(BoundSequenceSecurity {
+        role_owner: RoleIdentity::BOOTSTRAP,
+        acl: Some(
+            (0..4096)
+                .map(|index| BoundAclEntry {
+                    role: Some(RoleIdentity {
+                        oid: 20_001 + index,
+                        object_id: [9; 16],
+                    }),
+                    grantor: RoleIdentity::BOOTSTRAP,
+                    privileges: SequencePrivileges::ALL,
+                    grant_options: SequencePrivileges::default(),
+                })
+                .collect(),
+        ),
+    })
 }

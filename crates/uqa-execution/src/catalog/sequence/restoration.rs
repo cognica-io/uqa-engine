@@ -11,9 +11,10 @@ use std::{collections::BTreeMap, ops::Deref};
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::{RelationPersistence, SequenceDataType},
-    catalog::security::{sequence_inquiry::SequenceSecurityCatalog, SequenceSecurity},
+    catalog::security::{sequence_inquiry::SequenceSecurityCatalog, BoundSequenceSecurity},
 };
 use uqa_storage::{CatalogFacade, SequenceRow, StorageBackendError, StorageBackendResult};
+mod security;
 pub const SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
 pub type SequencePersistenceRead<'a> =
     Box<dyn Deref<Target = BTreeMap<RelationIdentity, RelationPersistence>> + 'a>;
@@ -21,14 +22,14 @@ pub struct RestoredSequenceRegistry {
     pub sequences: BTreeMap<RelationIdentity, SequenceState>,
     pub object_ids: BTreeMap<RelationIdentity, [u8; 16]>,
     pub persistence: BTreeMap<RelationIdentity, RelationPersistence>,
-    pub security: BTreeMap<RelationIdentity, SequenceSecurity>,
+    pub security: BTreeMap<RelationIdentity, BoundSequenceSecurity>,
 }
 impl RestoredSequenceRegistry {
     pub(super) fn temporary(
         sequences: &BTreeMap<RelationIdentity, SequenceState>,
         object_ids: &BTreeMap<RelationIdentity, [u8; 16]>,
         persistence: &BTreeMap<RelationIdentity, RelationPersistence>,
-        security: &BTreeMap<RelationIdentity, SequenceSecurity>,
+        security: &BTreeMap<RelationIdentity, BoundSequenceSecurity>,
     ) -> Self {
         let temporary = |relation: &RelationIdentity| {
             persistence.get(relation) == Some(&RelationPersistence::Temporary)
@@ -66,6 +67,7 @@ pub struct SequenceRestoreContext<'a> {
     pub sequences: &'a dyn SequenceIntrospectionCatalog,
     pub security: &'a dyn SequenceSecurityCatalog,
     pub registry: &'a dyn SequenceRestoreRegistry,
+    pub roles: &'a dyn uqa_sql::catalog::roles::guards::RoleCatalogGuards,
 }
 
 /// Sequence values use current committed rows while transaction-private creation, rename, replacement and deletion keep their selected scope. This does not advance the caller's ordinary row snapshot.
@@ -131,10 +133,7 @@ pub fn migrate_legacy_sequences_from_metadata(
                     new_object_id()?,
                     state,
                     uqa_sql::ast::RelationPersistence::Permanent,
-                    &SequenceSecurity {
-                        role_owner: "uqa".into(),
-                        acl: None,
-                    },
+                    &BoundSequenceSecurity::owner(uqa_core::catalog_role::RoleIdentity::BOOTSTRAP),
                 )?)?;
             }
             catalog.set_metadata(SEQUENCES_METADATA_KEY, "{}")?;
@@ -238,6 +237,38 @@ pub fn sequence_state_from_row(
         })?;
     Ok((row.relation, state))
 }
+/// Initial restoration validates the complete candidate before writing conversions or publishing registries.
+/// The caller retains the complete catalog-open transaction until all other catalogs validate.
+pub fn restore_sequence_catalog(
+    context: &SequenceRestoreContext<'_>,
+    catalog: &dyn CatalogFacade,
+    allow_migration: bool,
+) -> StorageBackendResult<()> {
+    let roles = context.roles.role_definitions();
+    let temporary = RestoredSequenceRegistry::temporary(
+        &context.sequences.states(),
+        &context.sequences.object_ids(),
+        &context.registry.persistence(),
+        &context.security.security_read(),
+    );
+    let (registry, migrations) = prepare_sequence_rows_with_migration(
+        temporary,
+        catalog.load_sequence_rows()?,
+        &roles,
+        allow_migration,
+    )?;
+    for row in migrations {
+        if !catalog.replace_sequence_row(&row)? {
+            return Err(StorageBackendError::Other(format!(
+                "sequence `{}` disappeared during security migration",
+                row.relation.qualified_name()
+            )));
+        }
+    }
+    context.registry.install(registry);
+    Ok(())
+}
+
 pub fn restore_sequence_rows(
     context: &SequenceRestoreContext<'_>,
     rows: Vec<SequenceRow>,
@@ -248,7 +279,7 @@ pub fn restore_sequence_rows(
         &context.registry.persistence(),
         &context.security.security_read(),
     );
-    let registry = prepare_sequence_rows(temporary, rows)?;
+    let registry = prepare_sequence_rows(temporary, rows, &context.roles.role_definitions())?;
     context.registry.install(registry);
     Ok(())
 }
@@ -256,24 +287,36 @@ pub fn restore_sequence_rows(
 pub(super) fn prepare_sequence_rows(
     temporary: RestoredSequenceRegistry,
     rows: Vec<SequenceRow>,
+    roles: &BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
 ) -> StorageBackendResult<RestoredSequenceRegistry> {
+    prepare_sequence_rows_with_migration(temporary, rows, roles, false)
+        .map(|(registry, _)| registry)
+}
+
+fn prepare_sequence_rows_with_migration(
+    temporary: RestoredSequenceRegistry,
+    rows: Vec<SequenceRow>,
+    roles: &BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+    allow_migration: bool,
+) -> StorageBackendResult<(RestoredSequenceRegistry, Vec<SequenceRow>)> {
+    let mut migrations = Vec::new();
     let RestoredSequenceRegistry {
         mut sequences,
         mut object_ids,
         mut persistence,
         mut security,
     } = temporary;
+    for authority in security.values() {
+        authority
+            .validate(roles)
+            .map_err(StorageBackendError::Other)?;
+    }
     let mut seen_object_ids = object_ids
         .values()
         .copied()
         .collect::<std::collections::BTreeSet<_>>();
-    for row in rows {
+    for mut row in rows {
         let name = row.relation.qualified_name();
-        if row.role_owner.is_empty() {
-            return Err(StorageBackendError::Other(format!(
-                "corrupt sequence `{name}` has an empty role owner"
-            )));
-        }
         if row.object_id == [0; 16] {
             return Err(StorageBackendError::Other(format!(
                 "corrupt sequence `{name}` has no object identity"
@@ -294,20 +337,31 @@ pub(super) fn prepare_sequence_rows(
                 )))
             }
         };
-        let role_owner = row.role_owner.clone();
-        let acl = row.acl.clone();
+        let authority =
+            security::restore_security(&row.security, roles, allow_migration).map_err(|error| {
+                StorageBackendError::Other(format!(
+                    "corrupt sequence `{name}` has invalid security metadata: {error}"
+                ))
+            })?;
+        if matches!(row.security, uqa_storage::SequenceSecurityRow::Legacy(_)) {
+            row.security = authority.row().into();
+            migrations.push(row.clone());
+        }
         let (relation, state) = sequence_state_from_row(row)?;
         persistence.insert(relation.clone(), stored);
         object_ids.insert(relation.clone(), object_id);
-        security.insert(relation.clone(), SequenceSecurity { role_owner, acl });
+        security.insert(relation.clone(), authority);
         sequences.insert(relation, state);
     }
-    Ok(RestoredSequenceRegistry {
-        sequences,
-        object_ids,
-        persistence,
-        security,
-    })
+    Ok((
+        RestoredSequenceRegistry {
+            sequences,
+            object_ids,
+            persistence,
+            security,
+        },
+        migrations,
+    ))
 }
 
 #[cfg(test)]

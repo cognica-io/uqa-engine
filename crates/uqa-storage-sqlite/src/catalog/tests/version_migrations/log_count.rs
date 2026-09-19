@@ -13,8 +13,7 @@ fn migration_adds_the_sequence_log_counter_without_changing_values() {
     current
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "legacy_log_count"),
-            role_owner: "uqa".into(),
-            acl: None,
+            security: uqa_storage::SequenceSecurityRow::bootstrap(),
             object_id: [41; 16],
             definition_generation: [42; 16],
             start: 7,

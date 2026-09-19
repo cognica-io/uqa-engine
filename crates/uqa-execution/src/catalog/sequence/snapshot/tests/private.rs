@@ -33,10 +33,7 @@ fn registry(entries: &[(&str, u8, i64)]) -> SequenceReadSnapshot {
             .insert(relation.clone(), RelationPersistence::Permanent);
         Arc::make_mut(&mut snapshot.security).insert(
             relation,
-            SequenceSecurity {
-                role_owner: "uqa".into(),
-                acl: None,
-            },
+            BoundSequenceSecurity::owner(uqa_core::catalog_role::RoleIdentity::BOOTSTRAP),
         );
     }
     snapshot

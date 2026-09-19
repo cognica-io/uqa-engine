@@ -46,7 +46,7 @@ pub fn build_info_schema_rows(
         }
         VirtualRelation::InformationViews => build_info_views(context, catalog, resolution)?,
         VirtualRelation::InformationRoutines => build_info_routines(catalog)?,
-        VirtualRelation::InformationSequences => build_info_sequences(catalog, session),
+        VirtualRelation::InformationSequences => build_info_sequences(catalog, session)?,
         VirtualRelation::InformationTableConstraints => {
             build_info_table_constraints(catalog, resolution)?
         }

@@ -21,7 +21,7 @@ pub fn build_pg_sequences(
     let temporary_schema = session.temporary_schema_name();
     let current_user = session.current_role();
     let mut rows = catalog
-        .sequence_states()
+        .sequence_states()?
         .into_iter()
         .filter(|(relation, _, persistence, _)| {
             *persistence != uqa_sql::ast::RelationPersistence::Temporary

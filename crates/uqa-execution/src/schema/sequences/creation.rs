@@ -26,7 +26,7 @@ pub trait SequenceCreationPublication {
         relation: &RelationIdentity,
         state: SequenceState,
         persistence: RelationPersistence,
-        role_owner: &str,
+        role_owner: uqa_core::catalog_role::RoleIdentity,
     ) -> Result<bool, SQLError>;
 }
 
@@ -100,7 +100,7 @@ pub fn create_sequence(
         &relation,
         state,
         persistence,
-        &role_owner.name,
+        role_owner.identity(),
     )? {
         return sequence_create_collision(&name, if_not_exists);
     }

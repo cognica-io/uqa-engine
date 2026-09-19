@@ -231,7 +231,7 @@ pub fn build_pg_class(
         );
         out.push(row);
     }
-    for (sequence, persistence, object_id, security) in catalog.sequences() {
+    for (sequence, persistence, object_id, security) in catalog.sequences()? {
         let (schema, name) = split_schema_name(&sequence)?;
         let mut row =
             pg_class_row_with_lifecycle(&schema, &name, "S", 3, 0.0, false, persistence, true, &[]);

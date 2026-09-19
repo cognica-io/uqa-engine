@@ -17,6 +17,9 @@ use uqa_core::catalog_sequence::{SequenceAclEntry, SequencePrivileges};
 use super::SequenceSecurity;
 use crate::catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey};
 
+mod invariants;
+pub use invariants::validate_sequence_security_invariants;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AclPrivilege {
     Select,

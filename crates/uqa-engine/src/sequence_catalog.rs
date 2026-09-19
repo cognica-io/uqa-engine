@@ -9,7 +9,7 @@
 use super::{
     CatalogFacade, Engine, RelationIdentity, SequenceRow, SequenceState, StorageBackendResult,
 };
-use crate::state::SequenceSecurity;
+use crate::state::BoundSequenceSecurity;
 use uqa_execution::catalog::sequence::snapshot::SequenceSnapshotSource;
 
 impl Engine {
@@ -18,7 +18,7 @@ impl Engine {
         object_id: [u8; 16],
         state: SequenceState,
         persistence: uqa_sql::ast::RelationPersistence,
-        security: &SequenceSecurity,
+        security: &BoundSequenceSecurity,
     ) -> StorageBackendResult<SequenceRow> {
         uqa_execution::catalog::sequence::sequence_row(
             name,
@@ -35,22 +35,16 @@ impl Engine {
         Ok(())
     }
 
-    /// Restore the typed sequence registry without modifying the catalog.
-    /// This is safe for initial hydration, pinned snapshots, external-commit
-    /// refreshes, and rollback cleanup alike.
+    /// Restore sequence state and authority inside the caller's catalog transaction.
     pub(crate) fn restore_sequences_from_catalog(
         &self,
         catalog: &dyn CatalogFacade,
+        allow_migration: bool,
     ) -> StorageBackendResult<()> {
-        let rows = catalog.load_sequence_rows()?;
-        self.install_durable_sequence_rows(rows)?;
-        Ok(())
-    }
-
-    fn install_durable_sequence_rows(&self, rows: Vec<SequenceRow>) -> StorageBackendResult<()> {
-        uqa_execution::catalog::sequence::restoration::restore_sequence_rows(
+        uqa_execution::catalog::sequence::restoration::restore_sequence_catalog(
             &self.sequence_restore_context(),
-            rows,
+            catalog,
+            allow_migration,
         )
     }
 }

@@ -5,6 +5,8 @@
 //
 
 use super::*;
+
+mod authority;
 use uqa_storage::{SequenceOwner, SequenceOwnerDependency};
 
 fn row() -> SequenceRow {
@@ -31,10 +33,7 @@ fn row() -> SequenceRow {
         [2; 16],
         state,
         RelationPersistence::Permanent,
-        &SequenceSecurity {
-            role_owner: "uqa".into(),
-            acl: None,
-        },
+        &BoundSequenceSecurity::owner(uqa_core::catalog_role::RoleIdentity::BOOTSTRAP),
     )
     .unwrap()
 }
@@ -102,10 +101,15 @@ fn durable_sequence_row_round_trip_preserves_all_allocation_and_owner_fields() {
         original.object_id,
         state,
         RelationPersistence::Permanent,
-        &SequenceSecurity {
-            role_owner: original.role_owner.clone(),
-            acl: original.acl.clone(),
-        },
+        &security::restore_security(
+            &original.security,
+            &BTreeMap::from([(
+                "uqa".into(),
+                uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
+            )]),
+            false,
+        )
+        .unwrap(),
     )
     .unwrap();
     assert_eq!(

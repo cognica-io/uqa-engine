@@ -10,15 +10,12 @@ use crate::catalog::roles::{
     RoleDefinition, RoleMembership, RoleMembershipKey, RoleReference,
 };
 use std::cell::Cell;
-use uqa_core::{
-    catalog_acl::AclGrantee,
-    catalog_sequence::{SequenceAclEntry, SequencePrivileges},
-};
+use uqa_core::catalog_sequence::SequencePrivileges;
 
 struct Catalog {
     roles: BTreeMap<String, RoleDefinition>,
     memberships: BTreeMap<RoleMembershipKey, RoleMembership>,
-    security: BTreeMap<RelationIdentity, SequenceSecurity>,
+    security: BTreeMap<RelationIdentity, BoundSequenceSecurity>,
     lookups: Cell<usize>,
 }
 
@@ -31,15 +28,18 @@ impl Catalog {
         reader.object_id = [1; 16];
         reader.attributes.clear();
         Self {
-            roles: BTreeMap::from([(owner.name.clone(), owner), (reader.name.clone(), reader)]),
+            roles: BTreeMap::from([
+                (owner.name.clone(), owner),
+                (reader.name.clone(), reader.clone()),
+            ]),
             memberships: BTreeMap::new(),
             security: BTreeMap::from([(
                 RelationIdentity::new("public", "ids"),
-                SequenceSecurity {
-                    role_owner: "uqa".into(),
-                    acl: Some(vec![SequenceAclEntry {
-                        role: "reader".into(),
-                        grantor: Some("uqa".into()),
+                BoundSequenceSecurity {
+                    role_owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+                    acl: Some(vec![uqa_core::catalog_role::BoundAclEntry {
+                        role: Some(reader.identity()),
+                        grantor: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
                         privileges: AclPrivilege::Usage.mask(),
                         grant_options: SequencePrivileges::default(),
                     }]),
@@ -156,7 +156,7 @@ fn public_and_unknown_role_oids_use_only_public_grants() {
         .acl
         .as_mut()
         .unwrap()[0]
-        .role = AclGrantee::Public;
+        .role = None;
     for subject in [text("public"), Value::Int(0), Value::Int(99_999)] {
         for (privilege, expected) in [
             ("USAGE", true),
@@ -194,6 +194,14 @@ fn a_selected_inquiry_role_never_follows_a_reused_name_or_oid() {
             .unwrap();
         catalog.roles.get_mut("reader").unwrap().object_id = [2; 16];
         let relation = RelationIdentity::new("public", "ids");
+        catalog
+            .security
+            .get_mut(&relation)
+            .unwrap()
+            .acl
+            .as_mut()
+            .unwrap()[0]
+            .role = Some(catalog.roles["reader"].identity());
         assert_eq!(
             request.evaluate(&relation, &catalog, &catalog).unwrap(),
             Value::Bool(false)
@@ -212,7 +220,7 @@ fn a_selected_inquiry_role_never_follows_a_reused_name_or_oid() {
             .acl
             .as_mut()
             .unwrap()[0]
-            .role = AclGrantee::Public;
+            .role = None;
         assert_eq!(
             request.evaluate(&relation, &catalog, &catalog).unwrap(),
             Value::Bool(true)

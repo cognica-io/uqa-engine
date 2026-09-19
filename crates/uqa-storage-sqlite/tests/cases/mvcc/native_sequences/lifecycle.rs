@@ -38,15 +38,21 @@ fn sequence_catalog_lifecycle_preserves_security_and_names_in_legacy_and_native_
                 column_object_id: [21; 16],
                 dependency,
             });
-            row.acl = Some(vec![SequenceAclEntry {
-                role: "reader".into(),
-                grantor: Some("owner".into()),
-                privileges: SequencePrivileges::ALL,
-                grant_options: SequencePrivileges {
-                    usage: true,
-                    ..SequencePrivileges::default()
-                },
-            }]);
+            row.security = SequenceSecurityRow::Bound(BoundSequenceSecurity {
+                role_owner: RoleIdentity::BOOTSTRAP,
+                acl: Some(vec![BoundAclEntry {
+                    role: Some(RoleIdentity {
+                        oid: 20_001,
+                        object_id: [1; 16],
+                    }),
+                    grantor: RoleIdentity::BOOTSTRAP,
+                    privileges: SequencePrivileges::ALL,
+                    grant_options: SequencePrivileges {
+                        usage: true,
+                        ..SequencePrivileges::default()
+                    },
+                }]),
+            });
             row.increment = -2;
             row.start = i64::MIN + 2;
             row.current = row.start;
@@ -81,8 +87,13 @@ fn sequence_catalog_lifecycle_preserves_security_and_names_in_legacy_and_native_
                 from
             );
             assert!(catalog.rename_sequence_row(&from, &to).unwrap());
-            row.role_owner = "new_owner".into();
-            row.acl = Some(vec![]);
+            row.security = SequenceSecurityRow::Bound(BoundSequenceSecurity {
+                role_owner: RoleIdentity {
+                    oid: 20_002,
+                    object_id: [2; 16],
+                },
+                acl: Some(vec![]),
+            });
             assert!(catalog.replace_sequence_row(&row).unwrap());
             connection.commit_transaction().unwrap();
             assert_eq!(
@@ -270,7 +281,7 @@ fn native_sequence_budget_failure_does_not_stage_a_name_or_retire_a_definition()
         .unwrap();
     connection.begin_transaction().unwrap();
     let mut huge = sequence("s", 1);
-    huge.role_owner = "x".repeat(1024 * 1024);
+    huge.security = large_sequence_security();
     assert!(catalog.create_sequence_row(&huge).is_err());
     assert!(catalog.load_sequence_rows().unwrap().is_empty());
     let original = sequence("s", 1);

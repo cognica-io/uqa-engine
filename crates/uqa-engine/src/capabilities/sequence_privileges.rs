@@ -20,7 +20,7 @@ use uqa_sql::{
                 SequencePrivilegeInquiry, SequencePrivilegeResolution, SequenceSecurityCatalog,
                 SequenceSecurityRead,
             },
-            SequenceSecurity,
+            BoundSequenceSecurity,
         },
     },
     SQLError,
@@ -106,7 +106,7 @@ impl Engine {
         &self,
         name: &str,
         relation: &RelationIdentity,
-        security: &SequenceSecurity,
+        security: &BoundSequenceSecurity,
     ) -> Result<(), SQLError> {
         self.sequence_privilege_context()
             .persist_sequence_security(name, relation, security)

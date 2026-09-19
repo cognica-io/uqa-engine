@@ -118,6 +118,7 @@ impl SequencePrivilegeRequest<'_> {
                 ))
             })?;
         let definitions = roles.role_definitions();
+        let security = security.resolve(&definitions).map_err(SQLError::Internal)?;
         let memberships = roles.role_memberships();
         let subject: &dyn RoleSubject = self
             .subject

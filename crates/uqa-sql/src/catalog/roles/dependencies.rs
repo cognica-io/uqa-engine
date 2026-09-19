@@ -8,7 +8,7 @@
 
 use crate::{
     catalog::{
-        security::{BoundSchemaSecurity, SequenceSecurity},
+        security::{BoundSchemaSecurity, BoundSequenceSecurity},
         view::StoredViewKind,
     },
     SQLError,
@@ -86,7 +86,10 @@ pub fn ensure_roles_have_no_object_dependencies(
 
     let sequence_security = catalog.sequences();
     for name in names {
-        if let Some(relation) = dependent_sequence_for_role(&sequence_security, name) {
+        if let Some(relation) = roles
+            .get(name)
+            .and_then(|role| dependent_sequence_for_role(&sequence_security, role.identity()))
+        {
             return Err(SQLError::Routine {
                 sqlstate: "2BP01".into(),
                 message: format!(
@@ -200,19 +203,13 @@ fn ensure_roles_have_no_foreign_table_dependencies(
     Ok(())
 }
 
-fn dependent_sequence_for_role<'a>(
-    sequences: &'a BTreeMap<RelationIdentity, SequenceSecurity>,
-    role: &str,
-) -> Option<&'a RelationIdentity> {
-    sequences.iter().find_map(|(relation, security)| {
-        let acl_dependency = security.acl.as_ref().is_some_and(|acl| {
-            acl.iter().any(|entry| {
-                entry.role.role_name() == Some(role)
-                    || entry.grantor.as_deref().unwrap_or(&security.role_owner) == role
-            })
-        });
-        (security.role_owner == role || acl_dependency).then_some(relation)
-    })
+fn dependent_sequence_for_role(
+    sequences: &BTreeMap<RelationIdentity, BoundSequenceSecurity>,
+    role: super::RoleIdentity,
+) -> Option<&RelationIdentity> {
+    sequences
+        .iter()
+        .find_map(|(relation, security)| security.depends_on(role).then_some(relation))
 }
 
 fn dependent_schema_for_role(

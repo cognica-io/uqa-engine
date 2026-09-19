@@ -17,7 +17,7 @@ use uqa_sql::{
     catalog::{
         resolution::RelationResolution,
         roles::{identity::RoleBinding, RoleDefinition, RoleReference, RoleReferenceNames},
-        security::{sequence_inquiry::SequencePrivilegeResolution, SequenceSecurity},
+        security::{sequence_inquiry::SequencePrivilegeResolution, BoundSequenceSecurity},
     },
 };
 use uqa_storage::StorageBackendResult;
@@ -50,11 +50,11 @@ impl Catalog {
             )])),
             security: Arc::new(BTreeMap::from([(
                 relation,
-                SequenceSecurity {
-                    role_owner: "uqa".into(),
-                    acl: Some(vec![uqa_core::catalog_sequence::SequenceAclEntry {
-                        role: "reader".into(),
-                        grantor: Some("uqa".into()),
+                BoundSequenceSecurity {
+                    role_owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+                    acl: Some(vec![uqa_core::catalog_role::BoundAclEntry {
+                        role: Some(reader.identity()),
+                        grantor: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
                         privileges: SequencePrivileges::ALL,
                         grant_options: SequencePrivileges::default(),
                     }]),
@@ -139,6 +139,14 @@ fn inquiry_refresh_keeps_selected_role_identity_across_name_resolution() {
             .get_mut("reader")
             .unwrap()
             .object_id = [2; 16];
+        Arc::make_mut(&mut replaced.security)
+            .values_mut()
+            .next()
+            .unwrap()
+            .acl
+            .as_mut()
+            .unwrap()[0]
+            .role = Some(replaced.roles.roles["reader"].identity());
         *catalog.after_resolution.borrow_mut() = Some(replaced);
         let mut arguments = subject.into_iter().collect::<Vec<_>>();
         arguments.extend([Value::Str("ids".into()), Value::Str("USAGE".into())]);
@@ -209,6 +217,7 @@ fn inquiry_binds_a_new_committed_role_before_target_resolution() {
         role.name = "new_reader".into();
         role.oid = 20_001;
         role.object_id = [2; 16];
+        let new_reader = role.identity();
         Arc::make_mut(&mut snapshot.roles.roles).insert(role.name.clone(), role);
         Arc::make_mut(&mut snapshot.security)
             .values_mut()
@@ -217,7 +226,7 @@ fn inquiry_binds_a_new_committed_role_before_target_resolution() {
             .acl
             .as_mut()
             .unwrap()[0]
-            .role = "new_reader".into();
+            .role = Some(new_reader);
     }
     for subject in [Value::Str("new_reader".into()), Value::Int(20_001)] {
         for target in [

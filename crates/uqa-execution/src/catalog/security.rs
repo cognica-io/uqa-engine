@@ -15,7 +15,7 @@ pub use uqa_sql::catalog::security::database::{
     BoundDatabaseSecurity, DatabaseAclEntry, DatabasePrivileges, DatabaseSecurity,
 };
 
-pub use uqa_sql::catalog::security::SequenceSecurity;
+pub use uqa_sql::catalog::security::{BoundSequenceSecurity, SequenceSecurity};
 
 pub use uqa_sql::catalog::security::{BoundTableSecurity, TableSecurity};
 

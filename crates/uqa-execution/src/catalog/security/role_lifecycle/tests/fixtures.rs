@@ -29,8 +29,8 @@ use uqa_sql::{
             RoleDefinition, RoleMembership, RoleMembershipKey, RoleReferenceNames,
         },
         security::{
-            database::BoundDatabaseSecurity, BoundSchemaSecurity, BoundTableSecurity,
-            SequenceSecurity,
+            database::BoundDatabaseSecurity, BoundSchemaSecurity, BoundSequenceSecurity,
+            BoundTableSecurity,
         },
         stored_view::StoredView,
     },
@@ -56,7 +56,7 @@ pub(super) struct Catalog {
     views: BTreeMap<RelationIdentity, StoredView>,
     foreign_tables: BTreeMap<RelationIdentity, BoundTableSecurity>,
     system_relations: uqa_sql::catalog::security::system_relations::SystemRelationSecurities,
-    sequences: BTreeMap<RelationIdentity, SequenceSecurity>,
+    sequences: BTreeMap<RelationIdentity, BoundSequenceSecurity>,
     routines: BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
 }
 impl Catalog {
@@ -313,7 +313,9 @@ impl RoleDependencyCatalog for Catalog {
         self.event("foreign");
         Box::new(&self.foreign_tables)
     }
-    fn sequences(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, SequenceSecurity>> {
+    fn sequences(
+        &self,
+    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundSequenceSecurity>> {
         self.event("sequences");
         Box::new(&self.sequences)
     }

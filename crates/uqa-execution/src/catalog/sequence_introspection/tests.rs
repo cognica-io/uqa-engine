@@ -46,7 +46,10 @@ fn sequence_introspection_retains_metadata_and_roles_together_and_rejects_missin
                 relation.clone(),
                 RelationPersistence::Unlogged,
             )])),
-            security: Arc::new(BTreeMap::from([(relation.clone(), security.clone())])),
+            security: Arc::new(BTreeMap::from([(
+                relation.clone(),
+                uqa_sql::catalog::security::BoundSequenceSecurity::bind(&security, &roles).unwrap(),
+            )])),
             roles: RoleCatalogSnapshot {
                 roles: Arc::new(roles),
                 memberships: Arc::new(BTreeMap::new()),

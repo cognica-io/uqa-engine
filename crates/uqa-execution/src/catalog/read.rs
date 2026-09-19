@@ -293,20 +293,13 @@ impl CatalogReadView {
         self.snapshot.definitions.role_memberships.values()
     }
 
-    pub fn sequences(
-        &self,
-    ) -> Vec<(
-        String,
-        uqa_sql::ast::RelationPersistence,
-        [u8; 16],
-        crate::catalog::security::SequenceSecurity,
-    )> {
+    pub fn sequences(&self) -> Result<Vec<super::CatalogSequenceMetadata>, SQLError> {
         self.snapshot
             .definitions
             .sequences
             .keys()
             .map(|identity| {
-                (
+                Ok((
                     identity.qualified_name(),
                     self.snapshot
                         .definitions
@@ -320,34 +313,29 @@ impl CatalogReadView {
                         .get(identity)
                         .copied()
                         .unwrap_or_default(),
-                    self.snapshot
-                        .definitions
-                        .sequence_security
-                        .get(identity)
-                        .cloned()
-                        .unwrap_or_else(|| crate::catalog::security::SequenceSecurity {
-                            role_owner: "uqa".into(),
-                            acl: None,
-                        }),
-                )
+                    self.sequence_security(identity)?,
+                ))
             })
             .collect()
     }
 
     pub fn sequence_states(
         &self,
-    ) -> Vec<(
-        uqa_core::RelationIdentity,
-        crate::catalog::sequence::SequenceState,
-        uqa_sql::ast::RelationPersistence,
-        crate::catalog::security::SequenceSecurity,
-    )> {
+    ) -> Result<
+        Vec<(
+            uqa_core::RelationIdentity,
+            crate::catalog::sequence::SequenceState,
+            uqa_sql::ast::RelationPersistence,
+            crate::catalog::security::SequenceSecurity,
+        )>,
+        SQLError,
+    > {
         self.snapshot
             .definitions
             .sequences
             .iter()
             .map(|(identity, state)| {
-                (
+                Ok((
                     identity.clone(),
                     *state,
                     self.snapshot
@@ -356,18 +344,28 @@ impl CatalogReadView {
                         .get(identity)
                         .copied()
                         .unwrap_or_default(),
-                    self.snapshot
-                        .definitions
-                        .sequence_security
-                        .get(identity)
-                        .cloned()
-                        .unwrap_or_else(|| crate::catalog::security::SequenceSecurity {
-                            role_owner: "uqa".into(),
-                            acl: None,
-                        }),
-                )
+                    self.sequence_security(identity)?,
+                ))
             })
             .collect()
+    }
+
+    fn sequence_security(
+        &self,
+        relation: &uqa_core::RelationIdentity,
+    ) -> Result<crate::catalog::security::SequenceSecurity, SQLError> {
+        self.snapshot
+            .definitions
+            .sequence_security
+            .get(relation)
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "sequence `{}` has no security metadata",
+                    relation.qualified_name()
+                ))
+            })?
+            .resolve(&self.snapshot.definitions.roles)
+            .map_err(SQLError::Internal)
     }
 
     pub fn sequence_is_visible_to(
@@ -419,16 +417,7 @@ impl CatalogReadView {
                 return Ok(Some(CatalogSequenceSnapshot {
                     relation: relation.clone(),
                     state: *state,
-                    security: self
-                        .snapshot
-                        .definitions
-                        .sequence_security
-                        .get(&relation)
-                        .cloned()
-                        .unwrap_or_else(|| crate::catalog::security::SequenceSecurity {
-                            role_owner: "uqa".into(),
-                            acl: None,
-                        }),
+                    security: self.sequence_security(&relation)?,
                 }));
             }
             if self.relation_exists(&relation) {

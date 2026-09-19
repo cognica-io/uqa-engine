@@ -45,6 +45,7 @@ fn live_sequence_refresh_keeps_roles_and_private_dependencies_with_current_value
                 let roles = engine.durable.roles.read();
                 assert!(roles.contains_key("private_reader"));
                 for security in engine.durable.sequence_security.read().values() {
+                    let security = security.resolve(&roles).unwrap();
                     assert!(
                         roles.contains_key(&security.role_owner),
                         "{provider}: {isolation}: {api}: missing live owner {}",

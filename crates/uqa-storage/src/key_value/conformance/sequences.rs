@@ -16,8 +16,14 @@ use crate::{
 fn sequence(name: &str, id: u8) -> SequenceRow {
     SequenceRow {
         relation: RelationIdentity::new("public", name),
-        role_owner: "owner".into(),
-        acl: None,
+        security: crate::SequenceSecurityRow::Bound(
+            uqa_core::catalog_sequence::BoundSequenceSecurity::owner(
+                uqa_core::catalog_role::RoleIdentity {
+                    oid: 20_001,
+                    object_id: [9; 16],
+                },
+            ),
+        ),
         object_id: [id; 16],
         definition_generation: [id + 64; 16],
         start: 1,

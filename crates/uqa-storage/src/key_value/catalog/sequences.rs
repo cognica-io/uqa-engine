@@ -48,8 +48,7 @@ fn validate_sequence_persistence(code: &str) -> StorageBackendResult<()> {
 
 fn stored_sequence(sequence: &SequenceRow) -> StoredSequence {
     StoredSequence {
-        role_owner: sequence.role_owner.clone(),
-        acl: sequence.acl.clone(),
+        security: sequence.security.clone(),
         object_id: sequence.object_id,
         definition_generation: sequence.definition_generation,
         start: sequence.start,
@@ -173,8 +172,7 @@ impl KeyValueCatalog {
                 let stored: StoredSequence = decode_value(value)?;
                 rows.push(SequenceRow {
                     relation,
-                    role_owner: stored.role_owner,
-                    acl: stored.acl,
+                    security: stored.security,
                     object_id: stored.object_id,
                     definition_generation: stored.definition_generation,
                     start: stored.start,

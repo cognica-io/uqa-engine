@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{Catalog, RelationIdentity, SequenceSecurity};
+use super::{BoundSequenceSecurity, Catalog, RelationIdentity};
 use crate::{
     ast::RelationPersistence,
     catalog::{
@@ -17,7 +17,7 @@ use crate::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::catalog_acl::AclGrantee;
-use uqa_core::catalog_sequence::{SequenceAclEntry, SequencePrivileges};
+use uqa_core::catalog_sequence::SequencePrivileges;
 
 fn roles() -> BTreeMap<String, RoleDefinition> {
     [
@@ -116,11 +116,11 @@ fn temporary_dependencies_include_owners_grantees_and_grantors_only_once() {
         .insert(sequence.clone(), RelationPersistence::Temporary);
     catalog.sequences.insert(
         sequence,
-        SequenceSecurity {
-            role_owner: "uqa".into(),
-            acl: Some(vec![SequenceAclEntry {
-                role: "sequence_reader".into(),
-                grantor: Some("grantor".into()),
+        BoundSequenceSecurity {
+            role_owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+            acl: Some(vec![uqa_core::catalog_role::BoundAclEntry {
+                role: Some(roles()["sequence_reader"].identity()),
+                grantor: roles()["grantor"].identity(),
                 privileges: SequencePrivileges {
                     usage: true,
                     ..Default::default()
@@ -131,8 +131,11 @@ fn temporary_dependencies_include_owners_grantees_and_grantors_only_once() {
     );
     catalog.sequences.insert(
         RelationIdentity::new("public", "permanent"),
-        SequenceSecurity {
-            role_owner: "missing_permanent_owner".into(),
+        BoundSequenceSecurity {
+            role_owner: uqa_core::catalog_role::RoleIdentity {
+                oid: 999,
+                object_id: [99; 16],
+            },
             acl: None,
         },
     );

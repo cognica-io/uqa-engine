@@ -19,6 +19,7 @@ mod quoted_acl_roles;
 mod relation_security;
 mod routine_settings;
 mod schema_security;
+mod sequence_security;
 mod session_identity;
 mod settings;
 mod snapshots;

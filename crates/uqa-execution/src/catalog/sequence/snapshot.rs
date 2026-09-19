@@ -27,7 +27,7 @@ use uqa_sql::{
             sequence_inquiry::{
                 SequencePrivilegeInquiry, SequenceSecurityCatalog, SequenceSecurityRead,
             },
-            SequenceSecurity,
+            BoundSequenceSecurity,
         },
     },
 };
@@ -40,7 +40,7 @@ pub struct SequenceReadSnapshot {
     pub sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
     pub object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
     pub persistence: Arc<BTreeMap<RelationIdentity, RelationPersistence>>,
-    pub security: Arc<BTreeMap<RelationIdentity, SequenceSecurity>>,
+    pub security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
     pub roles: RoleCatalogSnapshot,
 }
 
@@ -186,7 +186,7 @@ impl SequenceReadSnapshot {
             &self.persistence,
             &self.security,
         );
-        let registry = prepare_sequence_rows(temporary, rows)?;
+        let registry = prepare_sequence_rows(temporary, rows, &self.roles.roles)?;
         Ok(Self {
             sequences: Arc::new(registry.sequences),
             object_ids: Arc::new(registry.object_ids),

@@ -8,6 +8,9 @@
 
 use serde::{Deserialize, Serialize};
 
+mod security;
+pub use security::{BoundSequenceSecurity, LegacySequenceSecurity};
+
 /// Grantable privileges carried by one sequence ACL path.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SequencePrivileges {

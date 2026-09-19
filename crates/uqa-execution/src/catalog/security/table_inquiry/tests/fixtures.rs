@@ -60,11 +60,11 @@ impl Fixture {
             )])),
             security: Arc::new(BTreeMap::from([(
                 relation,
-                SequenceSecurity {
-                    role_owner: "uqa".into(),
-                    acl: Some(vec![SequenceAclEntry {
-                        role: "reader".into(),
-                        grantor: Some("uqa".into()),
+                BoundSequenceSecurity {
+                    role_owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+                    acl: Some(vec![uqa_core::catalog_role::BoundAclEntry {
+                        role: Some(reader.identity()),
+                        grantor: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
                         privileges: SequencePrivileges {
                             update: true,
                             ..SequencePrivileges::default()

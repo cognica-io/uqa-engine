@@ -16,6 +16,7 @@ impl Engine {
             sequences: self,
             security: self,
             registry: self,
+            roles: self,
         }
     }
 

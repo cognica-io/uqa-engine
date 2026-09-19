@@ -24,8 +24,8 @@ use uqa_sql::{
             RoleDefinition, RoleMembership, RoleMembershipKey,
         },
         security::{
-            database::BoundDatabaseSecurity, BoundSchemaSecurity, BoundTableSecurity,
-            SequenceSecurity,
+            database::BoundDatabaseSecurity, BoundSchemaSecurity, BoundSequenceSecurity,
+            BoundTableSecurity,
         },
         stored_view::StoredView,
     },
@@ -179,7 +179,9 @@ impl RoleDependencyCatalog for Engine {
     ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundTableSecurity>> {
         Box::new(self.durable.foreign_table_security.read())
     }
-    fn sequences(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, SequenceSecurity>> {
+    fn sequences(
+        &self,
+    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundSequenceSecurity>> {
         Box::new(self.durable.sequence_security.read())
     }
     fn routines(&self) -> RoleDependencyRead<'_, BTreeMap<String, Vec<Arc<SQLUserFunction>>>> {

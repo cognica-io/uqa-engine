@@ -78,8 +78,7 @@ fn fixture() -> (ManagedConnection, Catalog) {
     catalog
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("app", "ids"),
-            role_owner: "uqa".into(),
-            acl: None,
+            security: uqa_storage::SequenceSecurityRow::bootstrap(),
             object_id: [3; 16],
             definition_generation: [4; 16],
             start: 1,

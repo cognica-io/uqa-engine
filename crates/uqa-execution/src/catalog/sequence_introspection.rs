@@ -260,6 +260,9 @@ fn read_sequence(
             relation.qualified_name()
         ))
     })?;
+    let security = security
+        .resolve(&snapshot.roles.roles)
+        .map_err(SQLError::Internal)?;
     let persistence = snapshot
         .persistence
         .get(&relation)

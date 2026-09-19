@@ -87,7 +87,7 @@ pub(super) struct RawSequenceRow {
     owner_table_object_id: Option<Vec<u8>>,
     owner_column_object_id: Option<Vec<u8>>,
     owner_dependency: Option<String>,
-    role_owner: String,
+    role_owner: rusqlite::types::Value,
     acl_json: Option<String>,
     log_count: i64,
 }
@@ -134,11 +134,10 @@ pub(super) fn decode_sequence_identity(
 pub(super) fn decode_raw_sequence_row(raw: RawSequenceRow) -> Result<SequenceRow> {
     let relation = RelationIdentity::new(raw.schema, raw.name);
     Ok(SequenceRow {
-        role_owner: raw.role_owner,
-        acl: raw
-            .acl_json
-            .map(|json| serde_json::from_str(&json))
-            .transpose()?,
+        security: crate::catalog::role_security::decode_sequence(
+            (&raw.role_owner).into(),
+            raw.acl_json.as_deref(),
+        )?,
         owner: decode_sequence_owner(
             &relation,
             raw.owner_table_object_id,

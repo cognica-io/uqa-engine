@@ -216,8 +216,12 @@ fn alter_foreign_table_role_owner(
     let Some((relation, object_id, security)) = value else {
         return Ok(());
     };
-    let sequence_updates =
-        table_owned_sequence_owner_updates(context.owned_sequences, object_id, &owner.name)?;
+    let sequence_updates = table_owned_sequence_owner_updates(
+        context.owned_sequences,
+        object_id,
+        &owner.name,
+        &roles,
+    )?;
     for (sequence, sequence_security) in &sequence_updates {
         context.sequence_publication.persist_security(
             &sequence.qualified_name(),
