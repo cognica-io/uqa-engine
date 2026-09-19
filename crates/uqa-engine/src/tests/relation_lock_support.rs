@@ -111,7 +111,11 @@ pub(super) fn after_operation_wait<T: Send + 'static>(
     }
     let worker = task.join().unwrap();
     released.unwrap();
-    assert!(waited, "expected a logical wait on {relation}");
+    assert!(
+        waited,
+        "expected a logical wait on {relation}; operation error: {:?}",
+        result.as_ref().map(|result| result.as_ref().err())
+    );
     (worker, result.unwrap())
 }
 

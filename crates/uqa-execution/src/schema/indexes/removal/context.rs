@@ -26,9 +26,6 @@ pub trait IndexRemovalPrivileges {
 pub trait IndexRemovalReferrers {
     fn referrers_to(&self, table: &str) -> StorageBackendResult<Vec<(String, ForeignKey)>>;
 }
-pub trait IndexRemovalLocks {
-    fn lock_exclusive(&self, table: &str) -> Result<(), SQLError>;
-}
 pub trait IndexRemovalPublication {
     fn drop_catalog_index_relation(
         &self,
@@ -53,7 +50,6 @@ pub struct IndexRemovalContext<'a> {
     pub catalog: &'a dyn IndexRemovalCatalog,
     pub privileges: &'a dyn IndexRemovalPrivileges,
     pub referrers: &'a dyn IndexRemovalReferrers,
-    pub locks: &'a dyn IndexRemovalLocks,
     pub publication: &'a dyn IndexRemovalPublication,
     pub constraints: ConstraintAlterContext<'a>,
     pub transactions: &'a dyn IndexRemovalTransactions,

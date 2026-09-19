@@ -8,8 +8,8 @@
 use crate::Engine;
 use uqa_core::RelationIdentity;
 use uqa_execution::schema::indexes::removal::{
-    IndexRemovalCatalog, IndexRemovalContext, IndexRemovalLocks, IndexRemovalPrivileges,
-    IndexRemovalPublication, IndexRemovalReferrers, IndexRemovalTransactions, IndexRemovalWrite,
+    IndexRemovalCatalog, IndexRemovalContext, IndexRemovalPrivileges, IndexRemovalPublication,
+    IndexRemovalReferrers, IndexRemovalTransactions, IndexRemovalWrite,
 };
 use uqa_sql::{
     ast::{ColumnType, ForeignKey},
@@ -23,7 +23,6 @@ impl Engine {
             catalog: self,
             privileges: self,
             referrers: self,
-            locks: self,
             publication: self,
             constraints: self.constraint_alter_context(),
             transactions: self,
@@ -65,11 +64,6 @@ impl IndexRemovalPrivileges for Engine {
 impl IndexRemovalReferrers for Engine {
     fn referrers_to(&self, table: &str) -> StorageBackendResult<Vec<(String, ForeignKey)>> {
         self.try_referrers_to(table)
-    }
-}
-impl IndexRemovalLocks for Engine {
-    fn lock_exclusive(&self, table: &str) -> Result<(), SQLError> {
-        self.lock_relation(table, crate::row_locks::RelationLockMode::AccessExclusive)
     }
 }
 impl IndexRemovalPublication for Engine {

@@ -7,6 +7,7 @@
 //! Execute bound index removal, dependent constraints and physical field publication.
 use uqa_sql::{ast::DropStmt, SQLError, SQLResult};
 use uqa_storage::CatalogIndexRow;
+mod binding;
 mod context;
 pub use context::*;
 
@@ -14,47 +15,28 @@ pub fn run_drop_index(
     context: &IndexRemovalContext<'_>,
     stmt: DropStmt,
 ) -> Result<SQLResult, SQLError> {
-    let mut indexes = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
-    for requested in &stmt.names {
-        if let Some(canonical) = uqa_sql::schema::indexes::removal::resolve_drop_index_name(
-            context.catalog.resolve_relation_kind(requested)?,
-            requested,
-            stmt.if_exists,
-            &mut |message| {
-                context
-                    .notices
-                    .lock()
-                    .push(("NOTICE".to_string(), message.to_string()));
-            },
-        )? {
-            let relation = uqa_core::RelationIdentity::from_legacy_name(&canonical)
-                .map_err(SQLError::Internal)?;
-            if !seen.insert(relation.clone()) {
-                continue;
-            }
-            let row = context
-                .catalog
-                .bound_catalog_index(&canonical)
-                .map_err(|error| ddl_storage_error("DROP INDEX", error))?
-                .ok_or_else(|| {
-                    SQLError::Internal(format!(
-                        "resolved index `{canonical}` has no bound catalog row"
-                    ))
-                })?;
-            context.privileges.ensure_drop_authority(&row)?;
-            uqa_sql::schema::indexes::removal::ensure_index_not_constraint_owned(
-                &row.relation,
-                &row.table_name,
-                context.catalog.has_constraint_index(&row.relation),
-            )?;
-            indexes.push(row);
-        }
+    let indexes = binding::bind_drop_targets(
+        context.catalog,
+        context.privileges,
+        context.constraints.lock_session,
+        &stmt,
+        &mut |message| {
+            context
+                .notices
+                .lock()
+                .push(("NOTICE".to_string(), message.to_string()));
+        },
+    )?;
+    for index in &indexes {
+        lock_index_partitions(context, &index.table_name)?;
     }
-    for row in &indexes {
-        context.locks.lock_exclusive(&row.table_name)?;
+    for index in &indexes {
+        uqa_sql::schema::indexes::removal::ensure_index_not_constraint_owned(
+            &index.relation,
+            &index.table_name,
+            context.catalog.has_constraint_index(&index.relation),
+        )?;
     }
-    context.constraints.lock_session.refresh_after_wait()?;
     let mut dependents = std::collections::BTreeSet::new();
     for index in &indexes {
         let referrers = context
@@ -94,6 +76,31 @@ pub fn run_drop_index(
 
 fn ddl_storage_error(action: &str, err: impl std::error::Error + 'static) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, &err)
+}
+
+fn lock_index_partitions(context: &IndexRemovalContext<'_>, table: &str) -> Result<(), SQLError> {
+    if context
+        .constraints
+        .relations
+        .table_hierarchy(table)
+        .map_err(|error| ddl_storage_error("DROP INDEX hierarchy", error))?
+        .partition_spec
+        .is_none()
+    {
+        return Ok(());
+    }
+    let descendants = context
+        .constraints
+        .rows
+        .catalog
+        .hierarchy_scan_tables(table, true)?;
+    crate::row_locks::binding::lock_descendants(
+        context.constraints.lock_catalog,
+        context.constraints.lock_session,
+        descendants.into_iter().filter(|child| child != table),
+        crate::row_locks::RelationLockMode::AccessExclusive,
+        false,
+    )
 }
 
 fn drop_index_side_effects(
