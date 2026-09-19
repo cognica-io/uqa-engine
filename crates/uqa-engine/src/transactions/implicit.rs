@@ -17,28 +17,36 @@ impl Engine {
         &self,
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
+        self.transaction_with_error(f, std::convert::identity)
+    }
+
+    pub(crate) fn transaction_with_error<R, E: std::fmt::Display>(
+        &self,
+        f: impl FnOnce(&Self) -> Result<R, E>,
+        map_transaction_error: impl Fn(SQLError) -> E,
+    ) -> Result<R, E> {
         let _statement = self.runtime.statement_gate.lock();
-        let mut scope = TransactionScope::begin(self)?;
+        let mut scope = TransactionScope::begin(self).map_err(&map_transaction_error)?;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)));
         match result {
             Ok(Ok(value)) => {
-                scope.commit()?;
+                scope.commit().map_err(&map_transaction_error)?;
                 Ok(value)
             }
             Ok(Err(err)) => {
                 if let Err(rollback_err) = scope.rollback() {
-                    return Err(SQLError::Internal(format!(
+                    return Err(map_transaction_error(SQLError::Internal(format!(
                         "transaction rollback after error failed: {rollback_err}; original error: {err}"
-                    )));
+                    ))));
                 }
                 Err(err)
             }
             Err(payload) => match scope.rollback() {
                 Ok(()) => std::panic::resume_unwind(payload),
-                Err(rollback_err) => Err(SQLError::Internal(format!(
+                Err(rollback_err) => Err(map_transaction_error(SQLError::Internal(format!(
                     "transaction rollback after panic failed: {rollback_err}; original panic: {}",
                     panic_description(payload.as_ref())
-                ))),
+                )))),
             },
         }
     }

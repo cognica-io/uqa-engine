@@ -9,6 +9,39 @@
 use super::*;
 
 #[test]
+fn enclosing_retention_preserves_only_the_requested_mode_across_savepoint_undo() {
+    use RelationLockMode::{AccessExclusive, AccessShare, RowExclusive, Share};
+    for already_held in [false, true] {
+        let manager = RowLockManager::new();
+        let table = manager.table_key("s");
+        let cancel = uqa_core::CancellationToken::new();
+        manager
+            .acquire_relation(1, table, AccessExclusive, 1, &cancel)
+            .unwrap();
+        if already_held {
+            manager
+                .acquire_relation(1, table, RowExclusive, 1, &cancel)
+                .unwrap();
+        }
+        manager
+            .acquire_scoped_relation(1, table, RowExclusive, (1, 2), &cancel)
+            .unwrap()
+            .retain_at(0);
+        manager.release_mark_above(1, 0);
+        assert!(manager
+            .try_acquire_relation(2, table, AccessShare, 0, &cancel)
+            .unwrap());
+        assert!(!manager
+            .try_acquire_relation(2, table, Share, 0, &cancel)
+            .unwrap());
+        manager.release_session(1);
+        assert!(manager
+            .try_acquire_relation(2, table, AccessExclusive, 0, &cancel)
+            .unwrap());
+    }
+}
+
+#[test]
 fn retained_binding_locks_keep_the_transaction_mark_and_failed_bindings_leave_it_alone() {
     use RelationLockMode::{RowExclusive, Share};
     let manager = RowLockManager::new();

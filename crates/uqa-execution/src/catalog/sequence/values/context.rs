@@ -13,9 +13,16 @@ use super::super::{
     SequenceState,
 };
 use crate::catalog::sequence::snapshot::SequenceSnapshotSource;
+use crate::row_locks::binding::RelationLockSession;
 use std::{collections::BTreeMap, ops::DerefMut};
 use uqa_core::RelationIdentity;
-use uqa_sql::{catalog::security::sequence_inquiry::SequencePrivilegeInquiry, SQLError};
+use uqa_sql::{
+    catalog::{
+        security::sequence_inquiry::SequencePrivilegeInquiry,
+        sequence_functions::value_error::SequenceValueError,
+    },
+    SQLError,
+};
 use uqa_storage::{CatalogFacade, PersistentStorageSession, StorageBackendResult};
 pub type SequenceStatesWrite<'a> =
     Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, SequenceState>> + 'a>;
@@ -48,7 +55,20 @@ pub trait SequenceValueRuntime {
         defines_lastval: bool,
     );
 }
+
+pub type SequenceValueOperation<'a> = Box<dyn FnOnce() -> Result<i64, SequenceValueError> + 'a>;
+
+pub trait SequenceValueTransactions {
+    fn with_value_transaction(
+        &self,
+        operation: SequenceValueOperation<'_>,
+    ) -> Result<i64, SequenceValueError>;
+    fn transaction_lock_mark(&self) -> u32;
+}
+
 pub struct SequenceValueContext<'a> {
+    pub locks: &'a dyn RelationLockSession,
+    pub transactions: &'a dyn SequenceValueTransactions,
     pub snapshots: &'a dyn SequenceSnapshotSource,
     pub privileges: SequencePrivilegeInquiry<'a>,
     pub runtime: &'a dyn SequenceValueRuntime,

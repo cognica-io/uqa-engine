@@ -14,7 +14,7 @@ use super::{
     SequenceState,
 };
 use context::SequenceValueContext;
-use resolution::ValueAccess;
+use resolution::{BoundSequenceValue, ValueAccess};
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::sequence_functions::value_error::SequenceValueError;
 struct NextvalTarget {
@@ -27,9 +27,18 @@ struct NextvalTarget {
 
 impl SequenceValueContext<'_> {
     pub fn nextval(&self, name: &str) -> Result<i64, SequenceValueError> {
+        self.transactions
+            .with_value_transaction(Box::new(|| self.nextval_locked(name)))
+    }
+
+    fn nextval_locked(&self, name: &str) -> Result<i64, SequenceValueError> {
+        let bound = self.bind_sequence_value_reference(name)?;
         loop {
             self.runtime.cancellation().check()?;
-            let target = self.resolve_nextval_target(name)?;
+            let target = self.lock_sequence_value_target(&bound, ValueAccess::Next)?;
+            if self.runtime.current_transaction_is_read_only() && !target.temporary {
+                return Err(SequenceValueError::ReadOnly("nextval"));
+            }
             let mut caches = self.runtime.caches();
             if let Some((current, autonomous)) = Self::take_cached_nextval(&target, &mut caches)? {
                 drop(caches);
@@ -60,7 +69,13 @@ impl SequenceValueContext<'_> {
         }
     }
     pub fn currval(&self, name: &str) -> Result<i64, SequenceValueError> {
-        let target = self.resolve_sequence_value_target(name, ValueAccess::Current)?;
+        self.transactions
+            .with_value_transaction(Box::new(|| self.currval_locked(name)))
+    }
+
+    fn currval_locked(&self, name: &str) -> Result<i64, SequenceValueError> {
+        let bound = self.bind_sequence_value_reference(name)?;
+        let target = self.lock_sequence_value_target(&bound, ValueAccess::Current)?;
         self.runtime
             .session_read()
             .currvals()
@@ -70,6 +85,11 @@ impl SequenceValueContext<'_> {
             .ok_or(SequenceValueError::CurrvalUndefined(target.relation.name))
     }
     pub fn lastval(&self) -> Result<i64, SequenceValueError> {
+        self.transactions
+            .with_value_transaction(Box::new(|| self.lastval_locked()))
+    }
+
+    fn lastval_locked(&self) -> Result<i64, SequenceValueError> {
         let snapshot = self.read_snapshot()?;
         let session = self.runtime.session_read();
         let last = session.last().ok_or(SequenceValueError::LastvalUndefined)?;
@@ -86,10 +106,13 @@ impl SequenceValueContext<'_> {
             .iter()
             .find_map(|(relation, candidate)| (*candidate == object_id).then(|| relation.clone()))
             .ok_or(SequenceValueError::LastvalUndefined)?;
-        let name = relation.qualified_name();
-        snapshot
-            .privileges(&self.privileges)
-            .ensure_sequence_currval_privilege(&name, &relation)?;
+        self.lock_sequence_value_target(
+            &BoundSequenceValue {
+                name: relation.qualified_name(),
+                object_id,
+            },
+            ValueAccess::Current,
+        )?;
         Ok(value)
     }
     pub fn setval(
@@ -98,9 +121,20 @@ impl SequenceValueContext<'_> {
         value: i64,
         is_called: bool,
     ) -> Result<i64, SequenceValueError> {
+        self.transactions
+            .with_value_transaction(Box::new(|| self.setval_locked(name, value, is_called)))
+    }
+
+    fn setval_locked(
+        &self,
+        name: &str,
+        value: i64,
+        is_called: bool,
+    ) -> Result<i64, SequenceValueError> {
+        let bound = self.bind_sequence_value_reference(name)?;
         loop {
             self.runtime.cancellation().check()?;
-            let target = self.resolve_sequence_value_target(name, ValueAccess::Set)?;
+            let target = self.lock_sequence_value_target(&bound, ValueAccess::Set)?;
             if self.runtime.current_transaction_is_read_only() && !target.temporary {
                 return Err(SequenceValueError::ReadOnly("setval"));
             }

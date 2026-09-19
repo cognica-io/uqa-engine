@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::sequence::values::context::{
     SequenceCachesWrite, SequenceSessionRead, SequenceSessionWrite, SequenceStatesWrite,
-    SequenceValueContext, SequenceValueRuntime,
+    SequenceValueContext, SequenceValueOperation, SequenceValueRuntime, SequenceValueTransactions,
 };
 use uqa_sql::{catalog::sequence_functions::value_error::SequenceValueError, SQLError};
 use uqa_storage::{PersistentStorageSession, StorageBackendResult};
@@ -60,7 +60,7 @@ impl SequenceValueRuntime for Engine {
         Engine::open_independent_catalog_session(self, Some(&self.runtime.cancellation))
     }
     fn prepare_explicit_transaction_writer(&self) -> Result<(), SQLError> {
-        Engine::prepare_explicit_transaction_writer(self).map(|_| ())
+        self.prepare_transaction_writer().map(|_| ())
     }
     fn record_nontransactional_sequence_value(
         &self,
@@ -76,9 +76,35 @@ impl SequenceValueRuntime for Engine {
         );
     }
 }
+
+impl SequenceValueTransactions for Engine {
+    fn with_value_transaction(
+        &self,
+        operation: SequenceValueOperation<'_>,
+    ) -> Result<i64, SequenceValueError> {
+        // Query workers already belong to the caller's transaction and must not reenter its thread-owned statement gate.
+        if self.transaction_depth() != 0 {
+            self.ensure_transaction_usable()?;
+            operation()
+        } else {
+            self.transaction_with_error(|_| operation(), SequenceValueError::from)
+        }
+    }
+
+    fn transaction_lock_mark(&self) -> u32 {
+        self.session
+            .transactions
+            .lock()
+            .first()
+            .map_or(0, |frame| frame.begin_lock_mark)
+    }
+}
+
 impl Engine {
     pub(crate) fn sequence_value_context(&self) -> SequenceValueContext<'_> {
         SequenceValueContext {
+            locks: self,
+            transactions: self,
             snapshots: self,
             privileges: self.sequence_privilege_inquiry(),
             runtime: self,

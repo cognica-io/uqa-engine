@@ -10,7 +10,7 @@ use crate::{
     tests::relation_lock_support::{sessions, sql},
     Engine,
 };
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use uqa_core::{RelationIdentity, Value};
 use uqa_execution::catalog::sequence::snapshot::{SequenceReadSnapshot, SequenceSnapshotSource};
 use uqa_sql::{
@@ -147,12 +147,16 @@ fn cached_values_and_introspection_observe_committed_membership_revocation() {
 
 struct AfterSnapshot<'a> {
     engine: &'a Engine,
+    skip_identity_snapshot: Cell<bool>,
     publish: RefCell<Option<Box<dyn FnOnce() + 'a>>>,
 }
 
 impl SequenceSnapshotSource for AfterSnapshot<'_> {
     fn sequence_read_snapshot(&self) -> StorageBackendResult<SequenceReadSnapshot> {
         let snapshot = self.engine.sequence_read_snapshot()?;
+        if self.skip_identity_snapshot.replace(false) {
+            return Ok(snapshot);
+        }
         if let Some(publish) = self.publish.borrow_mut().take() {
             publish();
         }
@@ -161,23 +165,35 @@ impl SequenceSnapshotSource for AfterSnapshot<'_> {
 }
 
 #[test]
-fn retained_value_authority_is_not_replaced_by_a_later_membership_commit() {
+fn value_authority_refreshes_after_locking_and_retains_its_coherent_snapshot() {
     for provider in 0..3 {
-        let (_directory, engine, peer) = sessions(provider);
-        sql(&engine, "CREATE ROLE reader; CREATE ROLE readers; GRANT readers TO reader; CREATE SEQUENCE ids; GRANT USAGE ON SEQUENCE ids TO readers; SET ROLE reader; SELECT nextval('ids')");
-        let source = AfterSnapshot {
-            engine: &engine,
-            publish: RefCell::new(Some(Box::new(|| {
-                sql(&peer, "REVOKE readers FROM reader");
-            }))),
-        };
-        let mut values = engine.sequence_value_context();
-        values.snapshots = &source;
-        assert_eq!(values.lastval().unwrap(), 1);
-        assert_eq!(
-            values.lastval().unwrap_err().into_sql_error().sqlstate(),
-            Some("42501")
-        );
+        for after_lock in [false, true] {
+            let (_directory, engine, peer) = sessions(provider);
+            sql(&engine, "CREATE ROLE reader; CREATE ROLE readers; GRANT readers TO reader; CREATE SEQUENCE ids; GRANT USAGE ON SEQUENCE ids TO readers; SET ROLE reader; SELECT nextval('ids')");
+            let source = AfterSnapshot {
+                engine: &engine,
+                // The initial read binds identity; only the post-lock snapshot supplies value authority.
+                skip_identity_snapshot: Cell::new(after_lock),
+                publish: RefCell::new(Some(Box::new(|| {
+                    sql(&peer, "REVOKE readers FROM reader");
+                }))),
+            };
+            let mut values = engine.sequence_value_context();
+            values.snapshots = &source;
+            let result = values.lastval();
+            if after_lock {
+                assert_eq!(result.unwrap(), 1);
+            } else {
+                assert_eq!(
+                    result.unwrap_err().into_sql_error().sqlstate(),
+                    Some("42501")
+                );
+            }
+            assert_eq!(
+                values.lastval().unwrap_err().into_sql_error().sqlstate(),
+                Some("42501")
+            );
+        }
     }
 }
 
@@ -198,6 +214,8 @@ fn setval_by_oid_returns_a_committed_value_before_the_live_registry_contains_the
         row.object_id = [31; 16];
         row.definition_generation = [32; 16];
         let oid = uqa_execution::catalog::projection::sequence_relation_oid(row.object_id);
+        // Inspect the value boundary before transaction completion can refresh the live registry.
+        engine.begin().unwrap();
         let resolution = AfterResolution {
             engine: &engine,
             publish: RefCell::new(Some(Box::new(|| {
@@ -213,6 +231,7 @@ fn setval_by_oid_returns_a_committed_value_before_the_live_registry_contains_the
         values.privileges.resolution = &resolution;
         assert_eq!(values.setval(&oid.to_string(), 42, true).unwrap(), 42);
         assert!(!engine.durable.sequences.read().contains_key(&row.relation));
+        engine.rollback().unwrap();
         assert_eq!(peer.nextval("late_ids").unwrap(), 43);
     }
 }

@@ -11,17 +11,21 @@ use uqa_execution::catalog::sequence::values::context::{
     SequenceCachesWrite, SequenceSessionRead, SequenceSessionWrite, SequenceStatesWrite,
     SequenceValueRuntime,
 };
+use uqa_execution::row_locks::{
+    binding::RelationLockSession, RelationLockMode, ScopedRelationLock,
+};
 use uqa_sql::{catalog::sequence_functions::value_error::SequenceValueError, SQLError};
 use uqa_storage::{PersistentStorageSession, StorageBackendResult};
 
 mod authority;
+mod locks;
 
 struct RuntimeObserver<'a> {
     engine: &'a Engine,
     allocating: bool,
     fail_writer: bool,
     events: RefCell<Vec<&'static str>>,
-    before_open: RefCell<Option<Box<dyn FnOnce() + 'a>>>,
+    before_lock: RefCell<Option<Box<dyn FnOnce() + 'a>>>,
 }
 impl SequenceValueRuntime for RuntimeObserver<'_> {
     fn cancellation(&self) -> &uqa_core::CancellationToken {
@@ -52,9 +56,6 @@ impl SequenceValueRuntime for RuntimeObserver<'_> {
         );
         assert!(!self.engine.durable.sequences.is_locked());
         self.events.borrow_mut().push("open");
-        if let Some(before_open) = self.before_open.borrow_mut().take() {
-            before_open();
-        }
         SequenceValueRuntime::open_nontransactional_sequence_session(self.engine)
     }
     fn prepare_explicit_transaction_writer(&self) -> Result<(), SQLError> {
@@ -88,18 +89,36 @@ impl SequenceValueRuntime for RuntimeObserver<'_> {
         );
     }
 }
+impl RelationLockSession for RuntimeObserver<'_> {
+    fn acquire(
+        &self,
+        name: &str,
+        mode: RelationLockMode,
+        nowait: bool,
+    ) -> Result<Option<ScopedRelationLock<'_>>, SQLError> {
+        if let Some(before_lock) = self.before_lock.borrow_mut().take() {
+            before_lock();
+        }
+        RelationLockSession::acquire(self.engine, name, mode, nowait)
+    }
+
+    fn refresh_after_wait(&self) -> Result<(), SQLError> {
+        RelationLockSession::refresh_after_wait(self.engine)
+    }
+}
+
 fn observer(engine: &Engine, allocating: bool, fail_writer: bool) -> RuntimeObserver<'_> {
     RuntimeObserver {
         engine,
         allocating,
         fail_writer,
         events: RefCell::new(Vec::new()),
-        before_open: RefCell::new(None),
+        before_lock: RefCell::new(None),
     }
 }
 
 #[test]
-fn setval_rechecks_bounds_if_the_definition_changes_after_resolution() {
+fn setval_rechecks_bounds_if_the_definition_changes_before_relation_locking() {
     use std::sync::Arc;
     use uqa_storage_redb::RedbStorage;
     use uqa_storage_sqlite::{
@@ -131,12 +150,14 @@ fn setval_rechecks_bounds_if_the_definition_changes_after_resolution() {
                 engine.begin().unwrap();
             }
             let runtime = observer(engine, false, false);
-            *runtime.before_open.borrow_mut() = Some(Box::new(move || {
+            *runtime.before_lock.borrow_mut() = Some(Box::new(move || {
                 peer.sql("ALTER SEQUENCE ids MAXVALUE 50", &[]).unwrap();
             }));
             let mut context = engine.sequence_value_context();
             context.runtime = &runtime;
+            context.locks = &runtime;
             let error = context.setval("ids", 75, true).unwrap_err();
+            assert!(runtime.events.borrow().is_empty());
             assert!(matches!(
                 error,
                 SequenceValueError::SetvalOutOfBounds {

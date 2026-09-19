@@ -10,6 +10,8 @@ use crate::SQLError;
 pub enum SequenceValueError {
     #[error("relation \"{0}\" does not exist")]
     Undefined(String),
+    #[error("could not open relation with OID {0}")]
+    MissingOid(i64),
     #[error("cannot open relation \"{name}\": this operation is not supported for {kind}s")]
     WrongKind { name: String, kind: &'static str },
     #[error("currval of sequence \"{0}\" is not yet defined in this session")]
@@ -43,6 +45,7 @@ impl SequenceValueError {
     pub fn into_sql_error(self) -> SQLError {
         let sqlstate = match self {
             Self::Undefined(_) => "42P01",
+            Self::MissingOid(_) => "XX000",
             Self::WrongKind { .. } => "42809",
             Self::CurrvalUndefined(_) | Self::LastvalUndefined => "55000",
             Self::SetvalOutOfBounds { .. } => "22003",

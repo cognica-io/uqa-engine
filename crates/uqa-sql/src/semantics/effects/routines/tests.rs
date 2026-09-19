@@ -47,8 +47,8 @@ impl QueryEffectCatalog for Catalog {
     fn domain_by_oid(&self, _: u32) -> Option<StoredDomain> {
         None
     }
-    fn sequence_persistence(&self, _: &str) -> Result<Option<RelationPersistence>, String> {
-        Ok(None)
+    fn sequence_persistence(&self, name: &str) -> Result<Option<RelationPersistence>, String> {
+        Ok((name == "temp_ids").then_some(RelationPersistence::Temporary))
     }
     fn table_persistence(&self, _: &str) -> Result<Option<RelationPersistence>, String> {
         Ok(Some(RelationPersistence::Permanent))
@@ -112,5 +112,23 @@ fn query_portals_preserve_mutation_effects_in_their_query_and_body() {
         "DECLARE rec record; BEGIN FOR rec IN SELECT v FROM items LOOP INSERT INTO output VALUES (rec.v); END LOOP; RETURN 1; END",
     ] {
         assert_eq!(effects(body), [true; 3], "{body}");
+    }
+}
+
+#[test]
+fn sequence_values_require_lock_scopes_without_reclassifying_read_only_effects() {
+    for (expression, mutates) in [
+        ("currval('ids')", false),
+        ("lastval()", false),
+        ("nextval('temp_ids')", false),
+        ("setval('temp_ids',42)", false),
+        ("nextval('ids')", true),
+        ("setval('ids',42)", true),
+    ] {
+        assert_eq!(
+            effects(&format!("BEGIN PERFORM {expression}; RETURN 1; END")),
+            [true, mutates, false],
+            "{expression}"
+        );
     }
 }

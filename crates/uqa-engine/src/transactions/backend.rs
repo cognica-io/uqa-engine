@@ -303,6 +303,11 @@ impl Engine {
 
     pub(crate) fn prepare_explicit_transaction_writer(&self) -> Result<bool, SQLError> {
         let _statement = self.runtime.statement_gate.lock();
+        self.prepare_transaction_writer()
+    }
+
+    /// Prepare storage from the active statement or one of its workers without reentering the parent's thread-owned gate.
+    pub(crate) fn prepare_transaction_writer(&self) -> Result<bool, SQLError> {
         let mut stack = self.session.transactions.lock();
         if stack
             .first()

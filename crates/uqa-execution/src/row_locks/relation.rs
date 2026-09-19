@@ -50,13 +50,21 @@ pub struct ScopedRelationLock<'a> {
     manager: &'a RowLockManager,
     session_id: u64,
     table: u64,
+    mode: RelationLockMode,
     keep_mark: u32,
     retained: bool,
 }
 
 impl ScopedRelationLock<'_> {
     /// Keep the successful binding acquisition in the caller's transaction/savepoint after catalog revalidation. No unrelated locks may be acquired while the temporary guard is alive.
-    pub fn retain(mut self) {
+    pub fn retain(self) {
+        let mark = self.keep_mark;
+        self.retain_at(mark);
+    }
+
+    /// Retain this mode at an enclosing transaction mark without extending any other mode already held on the relation.
+    pub fn retain_at(mut self, mark: u32) {
+        let mark = mark.min(self.keep_mark);
         let mut state = self.manager.state.lock();
         if let Some(grant) = state.relations.get_mut(&self.table).and_then(|grants| {
             grants
@@ -64,7 +72,9 @@ impl ScopedRelationLock<'_> {
                 .find(|grant| grant.session_id == self.session_id)
         }) {
             for acquisition in &mut grant.acquisitions {
-                acquisition.mark = acquisition.mark.min(self.keep_mark);
+                if acquisition.mode == self.mode {
+                    acquisition.mark = acquisition.mark.min(mark);
+                }
             }
         }
         self.retained = true;
@@ -129,6 +139,7 @@ impl RowLockManager {
             manager: self,
             session_id,
             table,
+            mode,
             keep_mark,
             retained: false,
         })
@@ -154,6 +165,7 @@ impl RowLockManager {
                 manager: self,
                 session_id,
                 table,
+                mode,
                 keep_mark,
                 retained: false,
             }))

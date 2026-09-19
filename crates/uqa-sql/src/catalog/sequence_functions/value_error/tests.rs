@@ -10,6 +10,11 @@ use super::*;
 fn sequence_value_errors_keep_sqlstate_and_direct_api_diagnostics() {
     let cases = [
         (
+            SequenceValueError::MissingOid(12345),
+            "XX000",
+            "could not open relation with OID 12345",
+        ),
+        (
             SequenceValueError::Undefined("missing".into()),
             "42P01",
             "relation \"missing\" does not exist",
