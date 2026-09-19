@@ -19,6 +19,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Select default cursor scrollability from the execution plan's native backward-scan support, matching PostgreSQL 18. For example, `SELECT 1` defaults to forward-only; explicit `SCROLL` retains the existing materialization behavior.
+
 - Compact eligible current SQLite MVCC records into bounded lossless runs while preserving exact keys, values, revisions, snapshots and conditional-write conflicts. Split and restore individual predecessors atomically on later writes. Development record format 29 adds guarded run storage; redb retains its existing physical layout.
 - Reclaim obsolete MVCC history while retaining live snapshots across SQLite sessions and native processes, and across redb adapters. Preserve deletion conflicts and every commit receipt; compact SQLite head tombstones without duplicating their keys in history, and restore deleted revisions before later replacements. Share native file coordination primitives below execution. Development record format 28 rejects readers and writers that do not register snapshot leases.
 

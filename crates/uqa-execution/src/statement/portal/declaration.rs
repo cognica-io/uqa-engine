@@ -13,8 +13,10 @@ use crate::{
     query::{
         binding::analyze_query_plan_schema,
         locking::{lock_query_relations, query_has_row_locks, validate_query_row_locks},
+        statement::directional_support::query_plan_backward_scan_support,
     },
     statement::context::session::StatementPortals,
+    BackwardScanSupport,
 };
 use uqa_sql::{
     plan::{CommandPlan, QueryPlan, UnifiedPlan},
@@ -193,12 +195,26 @@ fn prepare_session_portal<S: Clone + Send + Sync + 'static>(
             params: params.to_vec(),
             columns: schema.columns().to_vec(),
             column_types: schema.column_types().to_vec(),
-            scrollable: scroll.unwrap_or(!has_row_locks),
+            scrollable: query_scrollable(inputs.routines, query, scroll),
             holdable: hold,
             binary,
         })?;
     Ok(())
 }
+
+fn query_scrollable(
+    routines: &dyn uqa_sql::routines::RoutineResolution,
+    query: &QueryPlan,
+    requested: Option<bool>,
+) -> bool {
+    requested.unwrap_or_else(|| {
+        !query_has_row_locks(query)
+            && query_plan_backward_scan_support(routines, query) == BackwardScanSupport::Native
+    })
+}
+
+#[cfg(test)]
+mod tests;
 
 fn cursor_command_returning_schema<S: Clone + 'static>(
     inputs: &PortalExecutionContext<'_, S>,
