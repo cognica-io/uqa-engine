@@ -370,10 +370,7 @@ pub fn build_pg_type(catalog: &CatalogReadView) -> Vec<ResultRow> {
     ]);
     for domain in catalog.domains() {
         let ty = domain.column_type();
-        let owner = catalog
-            .roles()
-            .find(|role| role.name == domain.owner)
-            .map_or_else(current_user_oid, |role| role.oid);
+        let owner = domain.owner.oid;
         let base = &domain.definition.base;
         let mut scalar = base;
         while let ColumnType::Domain { base, .. } = scalar {

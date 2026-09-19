@@ -58,6 +58,7 @@ pub(super) struct Catalog {
     system_relations: uqa_sql::catalog::security::system_relations::SystemRelationSecurities,
     sequences: BTreeMap<RelationIdentity, BoundSequenceSecurity>,
     routines: BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    domains: BTreeMap<String, uqa_sql::catalog::domain::StoredDomain>,
 }
 impl Catalog {
     pub fn new() -> Self {
@@ -84,6 +85,7 @@ impl Catalog {
             system_relations: BTreeMap::new(),
             sequences: BTreeMap::new(),
             routines: BTreeMap::new(),
+            domains: BTreeMap::new(),
         }
     }
     pub fn context(&self) -> RoleExecutionContext<'_> {
@@ -322,6 +324,12 @@ impl RoleDependencyCatalog for Catalog {
     fn routines(&self) -> RoleDependencyRead<'_, BTreeMap<String, Vec<Arc<SQLUserFunction>>>> {
         self.event("routines");
         Box::new(&self.routines)
+    }
+    fn domains(
+        &self,
+    ) -> RoleDependencyRead<'_, BTreeMap<String, uqa_sql::catalog::domain::StoredDomain>> {
+        self.event("domains");
+        Box::new(&self.domains)
     }
 }
 

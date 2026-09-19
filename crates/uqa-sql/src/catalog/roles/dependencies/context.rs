@@ -43,6 +43,9 @@ pub trait RoleDependencyCatalog:
         &self,
     ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundSequenceSecurity>>;
     fn routines(&self) -> RoleDependencyRead<'_, BTreeMap<String, Vec<Arc<SQLUserFunction>>>>;
+    fn domains(
+        &self,
+    ) -> RoleDependencyRead<'_, BTreeMap<String, crate::catalog::domain::StoredDomain>>;
 }
 
 pub trait TemporaryRoleDependencyCatalog: RoleDependencyCatalog {

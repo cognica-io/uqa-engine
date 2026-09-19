@@ -187,6 +187,11 @@ impl RoleDependencyCatalog for Engine {
     fn routines(&self) -> RoleDependencyRead<'_, BTreeMap<String, Vec<Arc<SQLUserFunction>>>> {
         Box::new(self.durable.sql_user_functions.read())
     }
+    fn domains(
+        &self,
+    ) -> RoleDependencyRead<'_, BTreeMap<String, uqa_sql::catalog::domain::StoredDomain>> {
+        Box::new(self.durable.domains.read())
+    }
 }
 
 impl uqa_sql::catalog::roles::dependencies::context::TemporaryRoleDependencyCatalog for Engine {

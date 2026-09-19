@@ -69,6 +69,8 @@ CREATE DOMAIN schema_name.domain_name AS base_type
 
 The schema, default, constraint names, and constraints are optional. A domain retains its own type identity over a scalar, array, or another domain. `VALUE` denotes the value being checked; CHECK expressions must return Boolean, cannot reference other columns or contain subqueries, and accept TRUE or NULL. Multiple CHECK constraints run in alphabetical order of their names, after inherited domain checks. A column default overrides the domain default.
 
+Domain ownership retains the owner role’s OID and incarnation. `DROP ROLE` reports `2BP01` while the role owns a domain; dropping the domain releases the dependency, and transaction or savepoint undo restores it. Reusing an old role name does not transfer domain authority.
+
 Domain creation participates in the surrounding transaction. Definitions, defaults, constraint bindings, and type identities survive SQLite reopen and remain available to new sessions. A duplicate type name reports `42710`; invalid CHECK result types report `42804`, failed checks report `23514`, and a prohibited NULL conversion reports `23502`.
 
 Constraints run when a value is converted into a domain. Assigning an already typed domain value preserves its identity without checking it again, including a typed NULL produced by an empty scalar subquery. Explicit casts follow the base type's explicit conversion rules; assignments enforce its declaration limits. For example, casting to a `varchar(5)` domain truncates an overlength string, while assigning an overlength string to its column reports `22001`.

@@ -27,6 +27,13 @@ struct Target {
 
 const TARGETS: &[Target] = &[
     Target {
+        create: "CREATE DOMAIN created AS integer",
+        catalog: "pg_type",
+        name_column: "typname",
+        owner_column: "typowner",
+        temporary: false,
+    },
+    Target {
         create: "CREATE TABLE created(v int)",
         catalog: "pg_class",
         name_column: "relname",

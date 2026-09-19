@@ -10,6 +10,7 @@ mod coordination;
 mod creation;
 mod database_security;
 mod dependencies;
+mod domain_security;
 mod identity;
 mod memberships;
 mod migration;

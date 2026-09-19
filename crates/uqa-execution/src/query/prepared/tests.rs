@@ -223,7 +223,7 @@ fn domain_constraints_run_at_their_argument_position_after_base_input_conversion
             schema: "public".into(),
             name: "positive".into(),
         },
-        owner: "owner".into(),
+        owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
         definition,
     };
     let target = domain.column_type();

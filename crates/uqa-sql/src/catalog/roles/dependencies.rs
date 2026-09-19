@@ -101,6 +101,8 @@ pub fn ensure_roles_have_no_object_dependencies(
     }
     drop(sequence_security);
 
+    ensure_roles_have_no_domain_dependencies(catalog, names, roles)?;
+
     let routines = catalog.routines();
     for name in names {
         if let Some(dependent) = routines.values().flatten().find_map(|function| {
@@ -119,6 +121,31 @@ pub fn ensure_roles_have_no_object_dependencies(
             });
         }
     }
+    Ok(())
+}
+
+fn ensure_roles_have_no_domain_dependencies(
+    catalog: &dyn RoleDependencyCatalog,
+    names: &[String],
+    roles: &BTreeMap<String, super::RoleDefinition>,
+) -> Result<(), SQLError> {
+    let domains = catalog.domains();
+    for name in names {
+        if let Some(domain) = domains.values().find(|domain| {
+            roles
+                .get(name)
+                .is_some_and(|role| domain.owner == role.identity())
+        }) {
+            return Err(SQLError::Routine {
+                sqlstate: "2BP01".into(),
+                message: format!(
+                    "role \"{name}\" cannot be dropped because some objects depend on it: type {}",
+                    domain.identity.qualified_name()
+                ),
+            });
+        }
+    }
+    drop(domains);
     Ok(())
 }
 

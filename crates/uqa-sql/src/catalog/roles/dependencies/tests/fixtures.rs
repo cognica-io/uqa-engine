@@ -67,6 +67,7 @@ pub(super) struct Catalog {
     pub sequences: BTreeMap<RelationIdentity, BoundSequenceSecurity>,
     pub sequence_persistence: BTreeMap<RelationIdentity, crate::ast::RelationPersistence>,
     pub routines: BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    pub domains: BTreeMap<String, crate::catalog::domain::StoredDomain>,
     pub events: Events,
 }
 impl Catalog {
@@ -95,6 +96,7 @@ impl Catalog {
             sequences: BTreeMap::new(),
             sequence_persistence: BTreeMap::new(),
             routines: BTreeMap::new(),
+            domains: BTreeMap::new(),
             events: Rc::default(),
         }
     }
@@ -154,6 +156,11 @@ impl RoleDependencyCatalog for Catalog {
     }
     fn routines(&self) -> RoleDependencyRead<'_, BTreeMap<String, Vec<Arc<SQLUserFunction>>>> {
         Box::new(self.read("routines", &self.routines))
+    }
+    fn domains(
+        &self,
+    ) -> RoleDependencyRead<'_, BTreeMap<String, crate::catalog::domain::StoredDomain>> {
+        Box::new(self.read("domains", &self.domains))
     }
 }
 

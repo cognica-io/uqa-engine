@@ -208,6 +208,12 @@ impl Engine {
         snapshot.sequence_object_ids = sequences.object_ids;
         snapshot.sequence_persistence = sequences.persistence;
         snapshot.sequence_security = sequences.security;
+        snapshot.domains = uqa_execution::catalog::domain::merge_private(
+            self.storage.catalog.as_deref(),
+            &current.domains,
+            snapshot.domains,
+            &snapshot.roles,
+        )?;
         snapshot.system_relation_security = Arc::new(system_relations::merge_private(
             self.storage.catalog.as_deref(),
             &current.system_relation_security,
