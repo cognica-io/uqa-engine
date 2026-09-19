@@ -24,6 +24,6 @@ pub struct IndexDefinition {
 }
 
 mod enforced_key;
-pub use enforced_key::EnforcedKey;
+pub use enforced_key::{referenceable_keys, EnforcedKey};
 
 pub mod stored;

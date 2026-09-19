@@ -41,3 +41,14 @@ impl From<TableKeyConstraint> for EnforcedKey {
         }
     }
 }
+
+/// Foreign keys may reference only non-partial unique keys composed entirely of ordinary columns.
+pub fn referenceable_keys(keys: Vec<EnforcedKey>) -> Vec<TableKeyConstraint> {
+    keys.into_iter()
+        .filter(|key| key.predicate.is_none() && key.keys.iter().all(|key| key.column().is_some()))
+        .map(|key| key.constraint)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests;

@@ -23,3 +23,6 @@ pub fn index_references_column(
     )
     .map_err(StorageBackendError::from)
 }
+
+mod enforcement;
+pub use enforcement::enforced_keys;
