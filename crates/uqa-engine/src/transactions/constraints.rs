@@ -13,21 +13,7 @@ use uqa_sql::catalog::roles::identity::RoleSubject;
 
 pub(crate) use uqa_sql::catalog::constraints::constraint_identities_match;
 
-fn find_live_constraint_identity<'a>(
-    live: &'a [ConstraintIdentity],
-    live_relations: &BTreeSet<RelationIdentity>,
-    identity: &ConstraintIdentity,
-) -> Option<&'a ConstraintIdentity> {
-    live.iter()
-        .find(|current| *current == identity)
-        .or_else(|| {
-            if live_relations.contains(&identity.relation) {
-                return None;
-            }
-            live.iter()
-                .find(|current| constraint_identities_match(identity, current))
-        })
-}
+use uqa_sql::catalog::constraints::find_live_constraint_identity;
 
 fn constraint_is_deferred(
     modes: &ConstraintModeState,

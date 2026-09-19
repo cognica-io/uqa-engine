@@ -72,5 +72,47 @@ pub fn rename_inherited_constraint(
     Ok(())
 }
 
+/// Foreign-key rename is local even for a partition parent or a partition clone. Enforcement and deferred-event identities remain unchanged.
+pub fn rename_foreign_key(
+    table: &str,
+    columns: &mut [ColumnDef],
+    constraints: &mut TableConstraintSet,
+    from: &str,
+    to: &str,
+) -> Result<bool, SQLError> {
+    let Some(location) = find_constraint(columns, constraints, from).filter(|location| {
+        matches!(
+            location,
+            ConstraintLocation::ColumnForeignKey(_) | ConstraintLocation::TableForeignKey(_)
+        )
+    }) else {
+        return Ok(false);
+    };
+    ensure_constraint_name_available(columns, constraints, Some(to), table)?;
+    let (name, identity) = match location {
+        ConstraintLocation::ColumnForeignKey(index) => {
+            let reference = columns[index]
+                .references
+                .as_mut()
+                .expect("selected foreign key");
+            (&mut reference.name, reference.catalog_identity)
+        }
+        ConstraintLocation::TableForeignKey(index) => {
+            let reference = &mut constraints.foreign_keys[index];
+            (&mut reference.name, reference.catalog_identity)
+        }
+        _ => unreachable!("only foreign-key locations are selected"),
+    };
+    let identity = identity
+        .ok_or_else(|| SQLError::Internal("FOREIGN KEY has no durable catalog identity".into()))?;
+    *name = Some(to.to_string());
+    for inherited in &mut constraints.hierarchy.partition_inherited_foreign_keys {
+        if inherited.catalog_identity == Some(identity) {
+            inherited.name = Some(to.to_string());
+        }
+    }
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests;

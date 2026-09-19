@@ -219,6 +219,7 @@ pub fn column_foreign_key(
         referenced_key: reference.referenced_key.clone(),
         name: reference.name.clone(),
         object_id: reference.object_id,
+        catalog_identity: reference.catalog_identity,
         local_columns: vec![column.name.clone()],
         ref_table: reference.table.clone(),
         ref_columns: reference.column.iter().cloned().collect(),

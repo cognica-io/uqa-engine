@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Rename CHECK and NOT NULL constraints after retaining and validating the complete hierarchy.
+//! Rename local foreign keys and inheritable CHECK/NOT NULL constraints with their original identities.
 
 use super::{
     constraint_error, ensure_constraint_name_available, publish_constraint_state,
@@ -15,7 +15,10 @@ use uqa_sql::{
     ast::TableLockMode,
     schema::constraint_changes::{
         inheritance::InheritedConstraint,
-        renaming::{ensure_recursive_rename, ensure_rename_parents, rename_inherited_constraint},
+        renaming::{
+            ensure_recursive_rename, ensure_rename_parents, rename_foreign_key,
+            rename_inherited_constraint,
+        },
     },
     SQLError,
 };
@@ -27,7 +30,11 @@ pub fn rename_constraint(
     to: &str,
     recurse: bool,
 ) -> Result<bool, SQLError> {
-    let (columns, constraints) = table_constraint_state(context, table)?;
+    let (mut columns, mut constraints) = table_constraint_state(context, table)?;
+    if rename_foreign_key(table, &mut columns, &mut constraints, from, to)? {
+        publish_constraint_state(context, table, columns, constraints)?;
+        return Ok(true);
+    }
     let Some(root) = InheritedConstraint::find(&columns, &constraints, from) else {
         return Ok(false);
     };

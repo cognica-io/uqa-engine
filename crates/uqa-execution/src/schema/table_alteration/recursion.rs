@@ -34,7 +34,15 @@ fn run_alter_action_branch<S: Clone + 'static>(
     }
     context.constraints.access.ensure_table_owner(&table)?;
     if recursing {
-        uqa_sql::schema::table_alteration::normalize_inherited_action(&mut action);
+        let hierarchy = context
+            .constraints
+            .relations
+            .table_hierarchy(&table)
+            .map_err(|error| ddl_storage_error("ALTER TABLE inherited declaration", error))?;
+        uqa_sql::schema::table_alteration::normalize_inherited_action(
+            &mut action,
+            hierarchy.partition_bound.is_some(),
+        );
     }
     if recursing && merge_existing_recursive_action(context, &table, &action)? {
         visiting.remove(&table);

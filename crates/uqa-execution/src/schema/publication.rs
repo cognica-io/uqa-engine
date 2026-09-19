@@ -187,11 +187,13 @@ pub fn replace_constraint_state(
     .map_err(StorageBackendError::Other)?;
     materialize_metadata(context, &table_name, &mut columns, &mut constraints)?;
     state.persist_candidate(&columns, &constraints)?;
+    let hierarchy = std::mem::take(&mut constraints.hierarchy);
     state.publish_columns(
         constraints.columns_declared.unwrap_or(false) || !columns.is_empty(),
         columns,
         constraints,
     );
+    state.publish_hierarchy(hierarchy);
     state.mark_statistics_dirty()?;
     state.refresh_value_indexes()?;
     Ok(())

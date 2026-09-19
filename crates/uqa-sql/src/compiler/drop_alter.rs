@@ -613,6 +613,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                             referenced_key: None,
                             name,
                             object_id: None,
+                            catalog_identity: None,
                             local_columns,
                             ref_table,
                             ref_columns,

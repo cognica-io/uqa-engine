@@ -64,6 +64,8 @@ pub fn materialize_constraint_metadata(
                 &mut used,
             )?;
             changed |= assign_constraint_object_id(&mut reference.object_id, allocate)?;
+            changed |=
+                identity::foreign_keys::materialize(&mut reference.catalog_identity, allocate)?;
         }
     }
     for constraint in &mut constraints.key_constraints {
@@ -100,9 +102,11 @@ pub fn materialize_constraint_metadata(
             &mut used,
         )?;
         changed |= assign_constraint_object_id(&mut constraint.object_id, allocate)?;
+        changed |= identity::foreign_keys::materialize(&mut constraint.catalog_identity, allocate)?;
     }
     changed |= synchronize_partition_inherited_foreign_key_ids(constraints);
     identity::validate_not_null_identities(columns)?;
+    identity::foreign_keys::validate(columns, constraints)?;
     Ok(changed)
 }
 
@@ -178,7 +182,23 @@ pub fn foreign_keys_match_without_object_id(
     let mut right = right.clone();
     left.object_id = None;
     right.object_id = None;
+    left.catalog_identity = None;
+    right.catalog_identity = None;
     left == right
+}
+
+/// Attachment provenance tracks one local row even after its name or enforcement flags change. Legacy entries may still lack the independent catalog identity.
+pub fn foreign_key_provenance_matches(
+    left: &crate::ast::ForeignKey,
+    right: &crate::ast::ForeignKey,
+) -> bool {
+    match (left.catalog_identity, right.catalog_identity) {
+        (Some(left), Some(right)) => left == right,
+        _ => {
+            (left.object_id.is_some() && left.object_id == right.object_id)
+                || foreign_keys_match_without_object_id(left, right)
+        }
+    }
 }
 
 pub fn synchronize_partition_inherited_foreign_key_ids(
@@ -190,7 +210,7 @@ pub fn synchronize_partition_inherited_foreign_key_ids(
         let Some(foreign_key_index) = constraints
             .foreign_keys
             .iter()
-            .position(|foreign_key| foreign_keys_match_without_object_id(foreign_key, inherited))
+            .position(|foreign_key| foreign_key_provenance_matches(foreign_key, inherited))
         else {
             continue;
         };
@@ -206,6 +226,14 @@ pub fn synchronize_partition_inherited_foreign_key_ids(
         {
             constraints.hierarchy.partition_inherited_foreign_keys[inherited_index].object_id =
                 object_id;
+            changed = true;
+        }
+        let catalog_identity = constraints.foreign_keys[foreign_key_index].catalog_identity;
+        if constraints.hierarchy.partition_inherited_foreign_keys[inherited_index].catalog_identity
+            != catalog_identity
+        {
+            constraints.hierarchy.partition_inherited_foreign_keys[inherited_index]
+                .catalog_identity = catalog_identity;
             changed = true;
         }
     }

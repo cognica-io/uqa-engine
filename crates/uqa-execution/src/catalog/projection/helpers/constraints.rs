@@ -260,23 +260,7 @@ pub fn constraint_catalog_rows(
                 });
             }
             if let Some(reference) = &col.references {
-                let foreign_key = ForeignKey {
-                    referenced_key: reference.referenced_key.clone(),
-                    name: reference.name.clone(),
-                    object_id: reference.object_id,
-                    local_columns: vec![col.name.clone()],
-                    ref_table: reference.table.clone(),
-                    ref_columns: reference.column.iter().cloned().collect(),
-                    on_update: reference.on_update,
-                    on_delete: reference.on_delete,
-                    on_delete_set_columns: Vec::new(),
-                    match_type: reference.match_type,
-                    enforced: reference.enforced,
-                    validated: reference.validated,
-                    deferrable: reference.deferrable,
-                    initially_deferred: reference.initially_deferred,
-                    period: reference.period,
-                };
+                let foreign_key = uqa_sql::schema::foreign_keys::column_foreign_key(col, reference);
                 pending.push(foreign_key_catalog_row(
                     catalog,
                     resolution,
@@ -501,6 +485,10 @@ fn foreign_key_catalog_row(
     columns: &[SQLColumnDef],
     foreign_key: &ForeignKey,
 ) -> Result<PendingConstraintCatalogRow, SQLError> {
+    let identity = foreign_key
+        .catalog_identity
+        .filter(|identity| identity.is_valid())
+        .ok_or_else(|| SQLError::Internal("FOREIGN KEY has no valid catalog identity".into()))?;
     let local_columns = named_constraint_columns(&foreign_key.local_columns, columns, table_name)?;
     let referenced_name = catalog
         .table_name(resolution, &foreign_key.ref_table)?
@@ -568,7 +556,7 @@ fn foreign_key_catalog_row(
         table: table.to_string(),
         requested_name: foreign_key.name.clone(),
         object_id: foreign_key.object_id,
-        catalog_oid: None,
+        catalog_oid: Some(identity.oid),
         kind: ConstraintCatalogKind::ForeignKey,
         columns: local_columns,
         state: ConstraintCatalogState::new(

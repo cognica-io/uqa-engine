@@ -246,8 +246,10 @@ pub fn append_inherited_foreign_keys(
             .iter()
             .any(|candidate| foreign_key_equivalent(candidate, constraint))
         {
-            target.push(constraint.clone());
-            appended.push(constraint.clone());
+            let mut clone = constraint.clone();
+            clone.catalog_identity = None;
+            target.push(clone.clone());
+            appended.push(clone);
         }
     }
     appended
@@ -264,11 +266,11 @@ pub fn remove_partition_inherited_constraints(constraints: &mut crate::ast::Tabl
         }
     }
     for inherited in &constraints.hierarchy.partition_inherited_foreign_keys {
-        if let Some(index) = constraints
-            .foreign_keys
-            .iter()
-            .position(|constraint| constraint == inherited)
-        {
+        if let Some(index) = constraints.foreign_keys.iter().position(|constraint| {
+            crate::schema::constraint_metadata::foreign_key_provenance_matches(
+                constraint, inherited,
+            )
+        }) {
             constraints.foreign_keys.remove(index);
         }
     }

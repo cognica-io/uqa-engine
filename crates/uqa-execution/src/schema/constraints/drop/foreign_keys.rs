@@ -8,7 +8,6 @@
 
 use super::{
     ddl_storage_error, publish_constraint_state, table_constraint_state, ConstraintAlterContext,
-    ConstraintLocation,
 };
 use crate::row_locks::{binding::lock_relation_identity, RelationLockMode};
 use std::collections::BTreeSet;
@@ -165,21 +164,19 @@ pub(super) fn drop_one(
     )?;
     // Reference renames rewrite the referring metadata while this acquisition waits.
     let (mut columns, mut constraints) = table_constraint_state(context, table)?;
-    let Some(target) = ForeignKeyTarget::by_id(&columns, &constraints, constraint_id)? else {
+    if ForeignKeyTarget::by_id(&columns, &constraints, constraint_id)?.is_none() {
         return Ok(());
-    };
+    }
     let reference = reference.ok_or_else(|| {
         SQLError::Internal("FOREIGN KEY survived removal of its referenced table".into())
     })?;
     context
         .access
         .ensure_no_pending_events(&reference, "ALTER TABLE")?;
-    match target.location {
-        ConstraintLocation::ColumnForeignKey(index) => columns[index].references = None,
-        ConstraintLocation::TableForeignKey(index) => {
-            constraints.foreign_keys.remove(index);
-        }
-        _ => unreachable!("a foreign-key target has a foreign-key location"),
-    }
+    uqa_sql::schema::constraint_changes::foreign_key_target::remove_foreign_key(
+        &mut columns,
+        &mut constraints,
+        constraint_id,
+    )?;
     publish_constraint_state(context, table, columns, constraints)
 }

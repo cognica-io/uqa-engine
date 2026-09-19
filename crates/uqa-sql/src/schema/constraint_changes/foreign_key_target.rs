@@ -95,5 +95,28 @@ impl<'a> ForeignKeyTarget<'a> {
     }
 }
 
+/// Retire the selected local catalog row and its attachment provenance together.
+pub fn remove_foreign_key(
+    columns: &mut [ColumnDef],
+    constraints: &mut TableConstraintSet,
+    object_id: [u8; 16],
+) -> Result<bool, SQLError> {
+    let Some(target) = ForeignKeyTarget::by_id(columns, constraints, object_id)? else {
+        return Ok(false);
+    };
+    match target.location {
+        ConstraintLocation::ColumnForeignKey(index) => columns[index].references = None,
+        ConstraintLocation::TableForeignKey(index) => {
+            constraints.foreign_keys.remove(index);
+        }
+        _ => unreachable!("a foreign-key target has a foreign-key location"),
+    }
+    constraints
+        .hierarchy
+        .partition_inherited_foreign_keys
+        .retain(|key| key.object_id != Some(object_id));
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests;

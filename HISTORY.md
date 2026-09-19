@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve foreign-key catalog identities through column, table and constraint renames while keeping partition copies independent. Retain deferred modes and queued checks across local renames, and validate all converted rows before initial restoration writes. Common record format 33 excludes writers that cannot preserve those identities.
+
 - Preserve NOT NULL constraint OIDs through table, column and constraint renames, allocate a new identity after removal/recreation, and share inherited rename locking and diagnostics with CHECK constraints. Initial catalog conversion preserves predecessor OIDs and rolls back with restoration failures; common record format 32 excludes writers that cannot retain the identity.
 
 - Retain AccessExclusive on foreign-key references and every removed partition clone or CASCADE referrer. Follow original relation and constraint identities through waits and name reuse, preserve refreshed metadata, and rebuild DROP INDEX dependencies after its parent lock wait. Savepoint rollback restores the removed constraints and releases their locks.

@@ -115,10 +115,12 @@ pub struct ForeignKeyRef {
     pub referenced_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// Durable identity of the catalog constraint object. The engine assigns
-    /// this when the constraint is published; parsed SQL leaves it unset.
+    /// Logical foreign-key identity shared by a partition family for enforcement and deferred events.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub object_id: Option<[u8; 16]>,
+    /// Independent catalog row lifetime and OID, preserved through renames and distinct in each partition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_identity: Option<ConstraintCatalogIdentity>,
     pub table: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub column: Option<String>,
@@ -271,10 +273,12 @@ pub struct ForeignKey {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub referenced_key: Option<String>,
     pub name: Option<String>,
-    /// Durable identity of the catalog constraint object. The engine assigns
-    /// this when the constraint is published; parsed SQL leaves it unset.
+    /// Logical foreign-key identity shared by a partition family for enforcement and deferred events.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub object_id: Option<[u8; 16]>,
+    /// Independent catalog row lifetime and OID, preserved through renames and distinct in each partition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_identity: Option<ConstraintCatalogIdentity>,
     pub local_columns: Vec<String>,
     pub ref_table: String,
     pub ref_columns: Vec<String>,

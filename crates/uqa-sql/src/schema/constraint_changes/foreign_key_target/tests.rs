@@ -112,3 +112,22 @@ fn only_materialized_foreign_keys_can_be_retained() {
             .is_none());
     }
 }
+
+#[test]
+fn removing_a_renamed_foreign_key_retires_only_its_local_attachment_provenance() {
+    let (mut columns, mut constraints) = declaration(false);
+    let mut other = constraints.foreign_keys[0].clone();
+    other.name = Some("other".into());
+    other.object_id = Some([2; 16]);
+    constraints.foreign_keys.push(other);
+    constraints.hierarchy.partition_inherited_foreign_keys = constraints.foreign_keys.clone();
+    constraints.foreign_keys[0].name = Some("renamed".into());
+    assert!(remove_foreign_key(&mut columns, &mut constraints, [1; 16]).unwrap());
+    assert_eq!(constraints.foreign_keys.len(), 1);
+    assert_eq!(
+        constraints.foreign_keys,
+        constraints.hierarchy.partition_inherited_foreign_keys
+    );
+    assert_eq!(constraints.foreign_keys[0].object_id, Some([2; 16]));
+    assert!(!remove_foreign_key(&mut columns, &mut constraints, [1; 16]).unwrap());
+}

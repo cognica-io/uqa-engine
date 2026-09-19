@@ -9,6 +9,8 @@
 use super::{CatalogIdentityAllocator, ConstraintMetadataError, ConstraintMetadataResult};
 use crate::ast::{ColumnDef, ConstraintCatalogIdentity};
 
+pub mod foreign_keys;
+
 pub(super) fn materialize_not_null_identity(
     column: &mut ColumnDef,
     allocate: &mut CatalogIdentityAllocator<'_>,

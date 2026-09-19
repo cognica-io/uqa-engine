@@ -12,6 +12,7 @@ use uqa_core::Value;
 
 mod constraint_rename;
 mod foreign_key_removal;
+mod foreign_key_rename;
 mod removal;
 mod validation;
 

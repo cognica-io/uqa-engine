@@ -235,6 +235,11 @@ impl Engine {
         };
         uqa_sql::schema::constraint_metadata::identity::validate_not_null_identities(&columns)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        uqa_sql::schema::constraint_metadata::identity::foreign_keys::validate(
+            &columns,
+            &constraints,
+        )
+        .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         let column_stats = Self::load_column_stats_from_catalog(catalog, &table_name)?;
         let column_stats_dirty = (column_stats.is_empty() && !columns.is_empty())
             || crate::statistics::MaintenanceState::load_for(

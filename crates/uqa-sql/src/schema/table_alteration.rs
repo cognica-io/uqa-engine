@@ -12,10 +12,17 @@ use crate::{
 };
 use uqa_core::RelationIdentity;
 
-pub fn normalize_inherited_action(action: &mut AlterTableAction) {
+pub fn normalize_inherited_action(action: &mut AlterTableAction, is_partition: bool) {
     if let AlterTableAction::AddColumn { column, .. } = action {
         column.not_null_is_local = !column.not_null;
         column.not_null_identity = None;
+        if is_partition {
+            if let Some(reference) = &mut column.references {
+                reference.catalog_identity = None;
+            }
+        } else {
+            column.references = None;
+        }
         column.check_is_local = column.check.is_none();
         column.check_object_id = None;
         if column.check_no_inherit {
