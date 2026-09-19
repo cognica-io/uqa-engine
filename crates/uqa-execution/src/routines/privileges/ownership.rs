@@ -53,7 +53,7 @@ pub fn alter_sql_routine_owner(
         locks,
         &owner,
         || context.catalog.writer.prepare_writer(),
-        |roles, memberships| {
+        |roles, memberships, new_owner| {
             let registry = context.catalog.registry.routines_write();
             let (name, position, existing) = registry
                 .iter()
@@ -78,7 +78,7 @@ pub fn alter_sql_routine_owner(
                 &existing.def,
                 role_inherits(roles, memberships, &current_user, &previous_owner),
             )?;
-            require_set_role(roles, memberships, &current_user, &owner.name)?;
+            require_set_role(roles, memberships, &current_user, new_owner)?;
             let relation = RelationIdentity::from_legacy_name(name).map_err(|error| {
                 SQLError::Internal(format!("resolve routine owner target: {error}"))
             })?;
@@ -86,7 +86,7 @@ pub fn alter_sql_routine_owner(
                 roles,
                 memberships,
                 current_user: &current_user,
-                new_owner: &owner.name,
+                new_owner,
             }
             .require_schema_create(context.schemas, &relation.schema)?;
             let mut def = existing.def.clone();

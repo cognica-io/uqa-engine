@@ -189,7 +189,7 @@ fn alter_view_role_owner(
         context.roles.lock_context(),
         &owner,
         || context.locks.prepare_definition_write(),
-        |roles, memberships| {
+        |roles, memberships, new_owner| {
             let mut view = context.catalog.view(relation).ok_or_else(|| {
                 SQLError::Internal(format!(
                     "{kind} `{canonical_name}` disappeared during owner change"
@@ -202,12 +202,12 @@ fn alter_view_role_owner(
                 roles,
                 memberships,
                 current_user: &current_user,
-                new_owner: &owner.name,
+                new_owner,
             };
             let mut security = view.security.resolve(roles).map_err(SQLError::Internal)?;
             authority.require_owner_change(&security.role_owner, kind, &relation.name)?;
             authority.require_schema_create(context.roles.schemas, &relation.schema)?;
-            rewrite_acl_owner(&mut security, &owner.name);
+            rewrite_acl_owner(&mut security, new_owner);
             let output_columns = view.output_columns.as_deref().ok_or_else(|| {
                 SQLError::Internal(format!(
                     "loaded view `{canonical_name}` has no durable public column metadata"

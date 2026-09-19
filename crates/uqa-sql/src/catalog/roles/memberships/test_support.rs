@@ -14,6 +14,9 @@ use crate::{
 
 pub(crate) struct Names<'a>(pub &'a str);
 impl RoleReferenceNames for Names<'_> {
+    fn outer_role(&self) -> crate::catalog::roles::RoleReference {
+        self.current_role()
+    }
     fn current_role(&self) -> RoleReference {
         self.0.into()
     }

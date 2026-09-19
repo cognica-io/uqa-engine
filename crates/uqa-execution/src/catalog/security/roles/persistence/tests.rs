@@ -8,6 +8,61 @@ use super::*;
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
 #[test]
+fn role_name_moves_update_the_original_oid_claim_without_rewriting_other_roles() {
+    let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
+    let initial = restore_and_migrate(&catalog).unwrap().roles;
+    let mut before = initial.clone();
+    let mut reader = RoleDefinition::bootstrap();
+    reader.name = "reader".into();
+    reader.oid = 20_001;
+    reader.object_id = [1; 16];
+    before.insert(reader.name.clone(), reader);
+    persist_roles(Some(&catalog), &initial, &before).unwrap();
+    let reader_row = catalog.get_metadata(&records::role_key("reader")).unwrap();
+    let mut after = before.clone();
+    let mut bootstrap = after.remove("uqa").unwrap();
+    bootstrap.name = "renamed".into();
+    bootstrap.advance_revision().unwrap();
+    after.insert(bootstrap.name.clone(), bootstrap);
+    persist_roles(Some(&catalog), &before, &after).unwrap();
+    assert_eq!(
+        catalog
+            .get_metadata("uqa.sql.role_oid.v1:10")
+            .unwrap()
+            .as_deref(),
+        Some("renamed")
+    );
+    assert_eq!(
+        catalog.get_metadata(&records::role_key("uqa")).unwrap(),
+        None
+    );
+    assert_eq!(
+        catalog.get_metadata(&records::role_key("reader")).unwrap(),
+        reader_row
+    );
+    assert_eq!(restore(&catalog).unwrap().roles, after);
+    let before = after.clone();
+    let mut replacement = RoleDefinition::bootstrap();
+    replacement.oid = 20_002;
+    replacement.object_id = [2; 16];
+    after.insert("uqa".into(), replacement);
+    persist_roles(Some(&catalog), &before, &after).unwrap();
+    assert_eq!(restore_and_migrate(&catalog).unwrap().roles, after);
+    let before = after.clone();
+    let mut impostor = after.remove("reader").unwrap();
+    impostor.name = "impostor".into();
+    impostor.object_id = [3; 16];
+    after.insert(impostor.name.clone(), impostor);
+    assert_eq!(
+        persist_roles(Some(&catalog), &before, &after)
+            .unwrap_err()
+            .sqlstate(),
+        Some("23505")
+    );
+    assert_eq!(restore(&catalog).unwrap().roles, before);
+}
+
+#[test]
 fn role_metadata_restoration_preserves_legacy_values_and_round_trips_membership_keys() {
     let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
     let initial = restore_and_migrate(&catalog).unwrap();

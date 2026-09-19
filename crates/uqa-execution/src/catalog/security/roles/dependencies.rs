@@ -44,7 +44,7 @@ pub fn retain_created_owner(
         context,
         owner,
         || Ok(()),
-        |_, _| Ok(Some(())),
+        |_, _, _| Ok(Some(())),
     )?);
     Ok(())
 }
@@ -57,6 +57,7 @@ pub fn prepare_role_owner<'a, T>(
     mut prepare: impl FnMut(
         &BTreeMap<String, RoleDefinition>,
         &BTreeMap<RoleMembershipKey, RoleMembership>,
+        &str,
     ) -> Result<Option<T>, SQLError>,
 ) -> Result<RoleDependencyCandidate<'a, Option<T>>, SQLError> {
     prepare_dependencies(
@@ -66,9 +67,10 @@ pub fn prepare_role_owner<'a, T>(
             let roles = context.roles.role_definitions();
             owner.revalidate(&roles)?;
             let memberships = context.roles.role_memberships();
-            let value = prepare(&roles, &memberships)?;
+            let name = owner.require_name(&roles)?;
+            let value = prepare(&roles, &memberships, name)?;
             let dependencies = if value.is_some() {
-                BTreeSet::from([owner.name.clone()])
+                BTreeSet::from([name.to_owned()])
             } else {
                 BTreeSet::new()
             };

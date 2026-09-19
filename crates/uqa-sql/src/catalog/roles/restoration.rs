@@ -15,9 +15,17 @@ use std::collections::{BTreeMap, BTreeSet};
 pub fn restore_role_definitions(
     roles: &mut BTreeMap<String, RoleDefinition>,
 ) -> Result<(), String> {
-    roles
-        .entry("uqa".into())
-        .or_insert_with(RoleDefinition::bootstrap);
+    if !roles
+        .iter()
+        .any(|(name, role)| role.oid == 10 && role.name == *name)
+    {
+        if roles.get("uqa").is_some_and(|role| role.oid != 10) {
+            return Err("persisted bootstrap role must have OID 10".into());
+        }
+        roles
+            .entry("uqa".into())
+            .or_insert_with(RoleDefinition::bootstrap);
+    }
     let mut oids = BTreeSet::new();
     for (name, role) in roles.iter() {
         if role.name != *name {
@@ -31,9 +39,6 @@ pub fn restore_role_definitions(
                 "persisted role `{name}` has an invalid OID {}",
                 role.oid
             ));
-        }
-        if name == "uqa" && role.oid != 10 {
-            return Err("persisted bootstrap role must have OID 10".into());
         }
         if !oids.insert(role.oid) {
             return Err(format!("persisted role OID {} is duplicated", role.oid));
@@ -153,12 +158,18 @@ pub fn validate_role_identities(roles: &BTreeMap<String, RoleDefinition>) -> Res
         if role.object_id == [0; 16] {
             return Err(format!("persisted role `{name}` has no object identity"));
         }
-        if name == "uqa" && role.object_id != RoleDefinition::bootstrap().object_id {
+        if role.oid == 10 && role.object_id != RoleDefinition::bootstrap().object_id {
             return Err("persisted bootstrap role has an invalid object identity".into());
         }
         if !identities.insert(role.object_id) {
             return Err("persisted role object identity is duplicated".into());
         }
+    }
+    if roles
+        .values()
+        .any(|role| role.oid != 10 && role.object_id == RoleDefinition::bootstrap().object_id)
+    {
+        return Err("persisted bootstrap role has an invalid object identity".into());
     }
     Ok(())
 }

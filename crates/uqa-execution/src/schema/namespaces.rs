@@ -122,7 +122,7 @@ pub fn register_api_schema(
         locks,
         &owner,
         || context.writer.prepare_writer(),
-        |_, _| {
+        |_, _, _| {
             Ok(context
                 .catalog
                 .schema_security(name)
@@ -175,15 +175,15 @@ pub fn create_schema(
         locks,
         &owner,
         || context.writer.prepare_writer(),
-        |roles, memberships| {
+        |roles, memberships, new_owner| {
             uqa_sql::catalog::security::ownership::OwnerChangeAuthority {
                 roles,
                 memberships,
                 current_user: &current_user,
-                new_owner: &owner.name,
+                new_owner,
             }
             .require_database_create(&context.database.security())?;
-            roles::require_set_role(roles, memberships, &current_user, &owner.name)?;
+            roles::require_set_role(roles, memberships, &current_user, new_owner)?;
             uqa_sql::schema::namespaces::creation::validate_schema_creation_name(&target.name)?;
             Ok(context
                 .catalog
@@ -256,7 +256,6 @@ pub fn alter_schema_owner(
         session: context.locks,
     };
     let owner = locks.bind(&new_owner)?;
-    let new_owner = owner.name.clone();
     let current_user = context.session.current_role();
     let RoleDependencyCandidate {
         roles,
@@ -267,7 +266,7 @@ pub fn alter_schema_owner(
         locks,
         &owner,
         || context.writer.prepare_writer(),
-        |roles, memberships| {
+        |roles, memberships, new_owner| {
             let security =
                 context
                     .catalog
@@ -284,11 +283,11 @@ pub fn alter_schema_owner(
                 roles,
                 memberships,
                 current_user: &current_user,
-                new_owner: &new_owner,
+                new_owner,
             };
             authority.require_owner_change(&security.role_owner, "schema", name)?;
             authority.require_database_create(&context.database.security())?;
-            rewrite_schema_acl_owner(&mut security, &new_owner);
+            rewrite_schema_acl_owner(&mut security, new_owner);
             Ok(Some(
                 BoundSchemaSecurity::bind(&security, roles).map_err(SQLError::Internal)?,
             ))

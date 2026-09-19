@@ -69,7 +69,7 @@ pub(super) fn read(
                 let name = key.strip_prefix(ROLE_PREFIX).expect("metadata prefix");
                 roles.insert(name.to_owned(), serde_json::from_str(&json)?);
             }
-            if !roles.contains_key("uqa") {
+            if !roles.values().any(|role: &RoleDefinition| role.oid == 10) {
                 return Err(StorageBackendError::Other(
                     "role records are missing the bootstrap role".into(),
                 ));
@@ -133,14 +133,16 @@ pub(super) fn persist(
     // OID records share the role publication transaction. Even creators that chose the same OID in different snapshots cannot both commit distinct owners of that OID.
     let mut assigned = std::collections::BTreeSet::new();
     for (name, role) in after {
-        if before.get(name).is_some_and(|old| old.oid == role.oid) {
-            continue;
-        }
         if !assigned.insert(role.oid)
-            || catalog
-                .get_metadata(&oid_key(role.oid))
-                .map_err(persist_error)?
-                .is_some()
+            || (before.get(name).is_none_or(|old| old.oid != role.oid)
+                && catalog
+                    .get_metadata(&oid_key(role.oid))
+                    .map_err(persist_error)?
+                    .is_some_and(|claimed| {
+                        before
+                            .get(&claimed)
+                            .is_none_or(|original| original.identity() != role.identity())
+                    }))
         {
             return Err(SQLError::Routine {
                 sqlstate: "23505".into(),

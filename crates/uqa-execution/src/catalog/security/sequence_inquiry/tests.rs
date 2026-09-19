@@ -100,6 +100,9 @@ impl SequenceSnapshotSource for Catalog {
 }
 
 impl RoleReferenceNames for Catalog {
+    fn outer_role(&self) -> uqa_sql::catalog::roles::RoleReference {
+        self.current_role()
+    }
     fn current_role(&self) -> RoleReference {
         RoleReference::Bound(Arc::new(
             RoleBinding::from_definition(&self.retained.roles.roles["reader"]).unwrap(),

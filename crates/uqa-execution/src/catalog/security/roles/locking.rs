@@ -11,8 +11,8 @@ use crate::row_locks::{
     RelationLockMode,
 };
 use std::collections::{BTreeMap, BTreeSet};
-use uqa_sql::catalog::roles::RoleDefinition;
 use uqa_sql::catalog::roles::RoleReference;
+use uqa_sql::catalog::roles::{RoleDefinition, RoleIdentity};
 use uqa_sql::{catalog::roles::guards::RoleCatalogGuards, SQLError};
 
 pub const ROLE_CATALOG_CLASS_ID: u32 = 1260;
@@ -21,7 +21,7 @@ pub use uqa_sql::catalog::roles::identity::RoleBinding;
 
 #[derive(Default)]
 pub struct RoleDependencyLocks {
-    bindings: BTreeMap<String, RoleBinding>,
+    bindings: BTreeMap<RoleIdentity, RoleBinding>,
 }
 
 impl RoleDependencyLocks {
@@ -30,6 +30,9 @@ impl RoleDependencyLocks {
         roles: &BTreeMap<String, RoleDefinition>,
         dependencies: &BTreeSet<String>,
     ) -> Result<Vec<RoleBinding>, SQLError> {
+        for original in self.bindings.values() {
+            original.revalidate(roles)?;
+        }
         let mut pending = Vec::new();
         for name in dependencies {
             let role = roles.get(name).ok_or_else(|| SQLError::Routine {
@@ -41,11 +44,7 @@ impl RoleDependencyLocks {
                 continue;
             }
             let bound = RoleBinding::from_definition(role)?;
-            if let Some(original) = self.bindings.get(name) {
-                if original != &bound {
-                    return Err(concurrently_dropped(original.oid));
-                }
-            } else {
+            if !self.bindings.contains_key(&bound.identity()) {
                 pending.push(bound);
             }
         }
@@ -59,16 +58,9 @@ impl RoleDependencyLocks {
     ) -> Result<(), SQLError> {
         for bound in pending {
             context.lock(&bound, RelationLockMode::AccessShare)?;
-            self.bindings.insert(bound.name.clone(), bound);
+            self.bindings.insert(bound.identity(), bound);
         }
         Ok(())
-    }
-}
-
-fn concurrently_dropped(oid: u32) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "42704".into(),
-        message: format!("role {oid} was concurrently dropped"),
     }
 }
 

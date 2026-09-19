@@ -190,6 +190,9 @@ impl<T> Drop for Write<'_, T> {
     }
 }
 impl RoleReferenceNames for Catalog {
+    fn outer_role(&self) -> uqa_sql::catalog::roles::RoleReference {
+        self.current_role()
+    }
     fn current_role(&self) -> RoleReference {
         self.event("current");
         self.current.borrow().clone().into()

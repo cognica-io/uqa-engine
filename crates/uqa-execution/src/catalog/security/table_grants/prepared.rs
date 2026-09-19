@@ -17,18 +17,15 @@ use super::{
 use crate::catalog::security::{
     roles::dependencies::RoleDependencyCandidate, system_relations::SystemPrivilegeUpdate,
 };
+use uqa_sql::catalog::security::acl_command::{AclCommandRoles, ResolvedAclRoles};
 use uqa_sql::{
     ast::{GrantTableStmt, GrantTableTarget},
-    catalog::{
-        roles::resolve_role_specification,
-        security::{
-            table::{requested_acl_privileges, RequestedTablePrivileges},
-            table_grants::{
-                foreign_table_privilege_updates, validate_table_acl_roles,
-                validate_table_grant_target_kinds, view_privilege_updates,
-                ForeignTablePrivilegeUpdate, ResolvedTableGrantTarget, TableGrantApplication,
-                ViewPrivilegeUpdate,
-            },
+    catalog::security::{
+        table::{requested_acl_privileges, RequestedTablePrivileges},
+        table_grants::{
+            foreign_table_privilege_updates, validate_table_acl_roles,
+            validate_table_grant_target_kinds, view_privilege_updates, ForeignTablePrivilegeUpdate,
+            ResolvedTableGrantTarget, TableGrantApplication, ViewPrivilegeUpdate,
         },
     },
     SQLError,
@@ -46,27 +43,27 @@ pub(super) fn prepare<'a>(
     context: &'a TableGrantContext<'_>,
     statement: &GrantTableStmt,
     targets: &[ResolvedTableGrantTarget],
+    command_roles: &mut AclCommandRoles,
 ) -> Result<RoleDependencyCandidate<'a, PreparedTableGrant<'a>>, SQLError> {
     let roles = context.roles.role_definitions();
-    let grantees = statement
-        .grantees
-        .iter()
-        .map(|role| {
-            uqa_sql::catalog::roles::resolve_acl_role_specification(context.names, role, &roles)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let requested_grantor = statement
-        .grantor
-        .as_ref()
-        .map(|role| resolve_role_specification(context.names, role).catalog_name(&roles))
-        .transpose()?;
-    let current_user = context.names.current_role();
-    validate_table_acl_roles(
-        statement,
-        &grantees,
-        requested_grantor.as_deref(),
-        &current_user,
+    let ResolvedAclRoles {
+        grantees,
+        current_user,
+        ..
+    } = command_roles.resolve_validated(
+        context.names,
         &roles,
+        &statement.grantees,
+        statement.grantor.as_ref(),
+        |resolved| {
+            validate_table_acl_roles(
+                statement,
+                &resolved.grantees,
+                resolved.requested_grantor.as_deref(),
+                &resolved.current_user,
+                &roles,
+            )
+        },
     )?;
 
     validate_table_grant_target_kinds(statement, targets)?;

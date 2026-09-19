@@ -15,11 +15,10 @@ use crate::{
     row_locks::shared_objects::SharedObjectLockSession,
 };
 use std::{collections::BTreeSet, sync::Arc};
+use uqa_sql::catalog::security::acl_command::{AclCommandRoles, ResolvedAclRoles};
 use uqa_sql::{
     ast::{GrantRoutineStmt, RoutineRevokeBehavior},
-    catalog::roles::{
-        resolve_acl_role_specification, resolve_role_specification, RoleReferenceNames,
-    },
+    catalog::roles::RoleReferenceNames,
     routines::lifecycle::RoutineRegistry,
     routines::{
         declaration::RoutineTypeCatalog, lifecycle::binding::resolve_sql_routine_alter_target,
@@ -47,6 +46,7 @@ pub fn grant_sql_routine(
     context: &RoutinePrivilegeContext<'_>,
     stmt: &GrantRoutineStmt,
 ) -> Result<(), SQLError> {
+    let mut command_roles = AclCommandRoles::default();
     let RoleDependencyCandidate {
         roles,
         memberships,
@@ -63,7 +63,7 @@ pub fn grant_sql_routine(
             session: context.locks,
         },
         || context.catalog.writer.prepare_writer(),
-        || prepare_privileges(context, stmt),
+        || prepare_privileges(context, stmt, &mut command_roles),
     )?;
     context
         .catalog
@@ -89,25 +89,27 @@ struct RoutinePrivilegeCandidate<'a> {
 fn prepare_privileges<'a>(
     context: &'a RoutinePrivilegeContext<'_>,
     stmt: &GrantRoutineStmt,
+    command_roles: &mut AclCommandRoles,
 ) -> Result<RoleDependencyCandidate<'a, RoutinePrivilegeCandidate<'a>>, SQLError> {
     let roles = context.catalog.roles.role_definitions();
-    let grantees = stmt
-        .grantees
-        .iter()
-        .map(|role| resolve_acl_role_specification(context.role_names, role, &roles))
-        .collect::<Result<Vec<_>, _>>()?;
-    let requested_grantor = stmt
-        .grantor
-        .as_ref()
-        .map(|role| resolve_role_specification(context.role_names, role).catalog_name(&roles))
-        .transpose()?;
-    let current_user = context.catalog.names.current_role();
-    analysis::validate_routine_acl_roles(
-        stmt,
-        &grantees,
-        requested_grantor.as_deref(),
-        &current_user,
+    let ResolvedAclRoles {
+        grantees,
+        current_user,
+        ..
+    } = command_roles.resolve_validated(
+        context.role_names,
         &roles,
+        &stmt.grantees,
+        stmt.grantor.as_ref(),
+        |resolved| {
+            analysis::validate_routine_acl_roles(
+                stmt,
+                &resolved.grantees,
+                resolved.requested_grantor.as_deref(),
+                &resolved.current_user,
+                &roles,
+            )
+        },
     )?;
     let grantees = analysis::binding::bind_routine_grantees(&grantees, &roles)?;
     let memberships = context.catalog.roles.role_memberships();

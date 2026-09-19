@@ -22,22 +22,20 @@ use std::{
     ops::DerefMut,
 };
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::security::acl_command::{AclCommandRoles, ResolvedAclRoles};
 use uqa_sql::{
     ast::{GrantSequenceStmt, GrantSequenceTarget},
-    catalog::{
-        roles::resolve_role_specification,
-        security::{
-            dependencies::added_acl_roles,
-            sequence::requested_acl_privileges,
-            sequence_grants::{
-                apply_sequence_acl, bind_named_sequence_grants, bind_sequence_grant_schemas,
-                sequence_acl_warning, sequence_grants_in_schemas, validate_sequence_acl_roles,
-                validate_sequence_grant_target_kinds, ResolvedSequenceGrantTarget,
-                SequenceGrantNamespace,
-            },
-            sequence_inquiry::SequencePrivilegeInquiry,
-            BoundSequenceSecurity,
+    catalog::security::{
+        dependencies::added_acl_roles,
+        sequence::requested_acl_privileges,
+        sequence_grants::{
+            apply_sequence_acl, bind_named_sequence_grants, bind_sequence_grant_schemas,
+            sequence_acl_warning, sequence_grants_in_schemas, validate_sequence_acl_roles,
+            validate_sequence_grant_target_kinds, ResolvedSequenceGrantTarget,
+            SequenceGrantNamespace,
         },
+        sequence_inquiry::SequencePrivilegeInquiry,
+        BoundSequenceSecurity,
     },
     SQLError,
 };
@@ -70,6 +68,14 @@ struct SequencePrivilegeCandidate<'a> {
 
 impl SequencePrivilegeContext<'_> {
     pub fn grant_sequence_privileges(&self, statement: &GrantSequenceStmt) -> Result<(), SQLError> {
+        self.grant_sequence_privileges_with_roles(statement, &mut AclCommandRoles::default())
+    }
+
+    pub(crate) fn grant_sequence_privileges_with_roles(
+        &self,
+        statement: &GrantSequenceStmt,
+        command_roles: &mut AclCommandRoles,
+    ) -> Result<(), SQLError> {
         let targets = self.resolve_sequence_grant_targets(&statement.target)?;
         let RoleDependencyCandidate {
             roles,
@@ -87,7 +93,7 @@ impl SequencePrivilegeContext<'_> {
                 session: self.locks,
             },
             || self.publication.prepare_writer(),
-            || self.prepare_privileges(statement, &targets),
+            || self.prepare_privileges(statement, &targets, command_roles),
         )?;
         for (name, relation, security) in &updates {
             self.persist_sequence_security(name, relation, security)?;
@@ -112,31 +118,27 @@ impl SequencePrivilegeContext<'_> {
         &'a self,
         statement: &GrantSequenceStmt,
         targets: &[ResolvedSequenceGrantTarget],
+        command_roles: &mut AclCommandRoles,
     ) -> Result<RoleDependencyCandidate<'a, SequencePrivilegeCandidate<'a>>, SQLError> {
         let roles = self.inquiry.roles.role_definitions();
-        let grantees = statement
-            .grantees
-            .iter()
-            .map(|role| {
-                uqa_sql::catalog::roles::resolve_acl_role_specification(
-                    self.inquiry.names,
-                    role,
+        let ResolvedAclRoles {
+            grantees,
+            current_user,
+            ..
+        } = command_roles.resolve_validated(
+            self.inquiry.names,
+            &roles,
+            &statement.grantees,
+            statement.grantor.as_ref(),
+            |resolved| {
+                validate_sequence_acl_roles(
+                    statement,
+                    &resolved.grantees,
+                    resolved.requested_grantor.as_deref(),
+                    &resolved.current_user,
                     &roles,
                 )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let requested_grantor = statement
-            .grantor
-            .as_ref()
-            .map(|role| resolve_role_specification(self.inquiry.names, role).catalog_name(&roles))
-            .transpose()?;
-        let current_user = self.inquiry.names.current_role();
-        validate_sequence_acl_roles(
-            statement,
-            &grantees,
-            requested_grantor.as_deref(),
-            &current_user,
-            &roles,
+            },
         )?;
         validate_sequence_grant_target_kinds(targets)?;
         let privileges = requested_acl_privileges(&statement.privileges)?;

@@ -64,10 +64,6 @@ impl RelationCreationContext<'_> {
     pub fn retain_owner(&self, owner: &RoleBinding) -> Result<(), SQLError> {
         retain_created_owner(self.role_locks(), owner)
     }
-    pub fn owner_for_publication(&self, owner: &RoleBinding) -> Result<String, SQLError> {
-        self.retain_owner(owner)?;
-        Ok(owner.name.clone())
-    }
     fn schema_privileges(&self) -> SchemaPrivilegeInquiry<'_> {
         SchemaPrivilegeInquiry {
             catalog: self.schemas,

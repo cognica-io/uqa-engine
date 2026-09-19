@@ -102,6 +102,9 @@ impl GraphNamespaceRead for EmptyNames {
     }
 }
 impl RoleReferenceNames for Fixture {
+    fn outer_role(&self) -> uqa_sql::catalog::roles::RoleReference {
+        self.current_role()
+    }
     fn current_role(&self) -> RoleReference {
         self.events.borrow_mut().push("user");
         self.user.clone().into()

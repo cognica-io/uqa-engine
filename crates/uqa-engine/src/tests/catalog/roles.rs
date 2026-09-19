@@ -18,6 +18,7 @@ mod ownership;
 mod publication;
 mod quoted_acl_roles;
 mod relation_security;
+mod rename;
 mod routine_security;
 mod routine_settings;
 mod schema_security;

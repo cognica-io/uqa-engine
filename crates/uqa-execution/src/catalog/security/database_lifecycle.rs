@@ -12,10 +12,11 @@ use super::roles::{
 };
 use crate::row_locks::shared_objects::SharedObjectLockSession;
 use std::{collections::BTreeSet, ops::DerefMut};
+use uqa_sql::catalog::security::acl_command::{AclCommandRoles, ResolvedAclRoles};
 use uqa_sql::{
     ast::GrantDatabaseStmt,
     catalog::{
-        roles::{guards::RoleCatalogGuards, resolve_role_specification, RoleReferenceNames},
+        roles::{guards::RoleCatalogGuards, RoleReferenceNames},
         security::{
             database::{
                 apply_database_acl, database_acl_warning, requested_acl_privileges,
@@ -61,6 +62,7 @@ pub fn grant_database_privileges(
         .publication
         .refresh_catalog()
         .map_err(|error| SQLError::Internal(format!("load database privileges: {error}")))?;
+    let mut command_roles = AclCommandRoles::default();
     let RoleDependencyCandidate {
         roles,
         memberships,
@@ -77,7 +79,7 @@ pub fn grant_database_privileges(
             session: context.locks,
         },
         || context.publication.prepare_writer(),
-        || prepare_privileges(context, statement),
+        || prepare_privileges(context, statement, &mut command_roles),
     )?;
     if next != current {
         let json = persistence::encode(&next, &roles).map_err(|error| {
@@ -104,28 +106,28 @@ struct DatabasePrivilegeCandidate {
 fn prepare_privileges<'a>(
     context: &'a DatabasePrivilegeContext<'_>,
     statement: &GrantDatabaseStmt,
+    command_roles: &mut AclCommandRoles,
 ) -> Result<RoleDependencyCandidate<'a, DatabasePrivilegeCandidate>, SQLError> {
     resolve_database_grant_targets(&statement.databases)?;
     let roles = context.roles.role_definitions();
-    let grantees = statement
-        .grantees
-        .iter()
-        .map(|role| {
-            uqa_sql::catalog::roles::resolve_acl_role_specification(context.names, role, &roles)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let requested_grantor = statement
-        .grantor
-        .as_ref()
-        .map(|role| resolve_role_specification(context.names, role).catalog_name(&roles))
-        .transpose()?;
-    let current_user = context.names.current_role();
-    validate_database_acl_roles(
-        statement,
-        &grantees,
-        requested_grantor.as_deref(),
-        &current_user,
+    let ResolvedAclRoles {
+        grantees,
+        current_user,
+        ..
+    } = command_roles.resolve_validated(
+        context.names,
         &roles,
+        &statement.grantees,
+        statement.grantor.as_ref(),
+        |resolved| {
+            validate_database_acl_roles(
+                statement,
+                &resolved.grantees,
+                resolved.requested_grantor.as_deref(),
+                &resolved.current_user,
+                &roles,
+            )
+        },
     )?;
     let privileges = requested_acl_privileges(&statement.privileges)?;
     let memberships = context.roles.role_memberships();

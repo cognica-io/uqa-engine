@@ -19,7 +19,7 @@ pub(super) fn lock_drop_targets(
     statement: &DropRoleStmt,
     current: &RoleReference,
     session: &RoleReference,
-) -> Result<Vec<String>, SQLError> {
+) -> Result<Vec<RoleBinding>, SQLError> {
     let snapshot = context.analysis.roles.role_definitions().clone();
     let names = definition::resolve_drop_role_names(
         &context.analysis,
@@ -36,7 +36,7 @@ pub(super) fn lock_drop_targets(
         roles: context.analysis.roles,
         session: context.locks,
     };
-    for bound in bindings {
+    for bound in &bindings {
         let guard = context.locks.acquire_shared_catalog(
             SharedCatalogLock::Object {
                 class_id: ROLE_CATALOG_CLASS_ID,
@@ -45,7 +45,7 @@ pub(super) fn lock_drop_targets(
             RelationLockMode::AccessExclusive,
         )?;
         context.locks.refresh_shared_catalog()?;
-        if role_locks.revalidate(&bound).is_err() {
+        if role_locks.revalidate(bound).is_err() {
             return Err(SQLError::Routine {
                 sqlstate: "XX000".into(),
                 message: format!("could not find tuple for role {}", bound.oid),
@@ -53,5 +53,5 @@ pub(super) fn lock_drop_targets(
         }
         guard.retain();
     }
-    Ok(names)
+    Ok(bindings)
 }

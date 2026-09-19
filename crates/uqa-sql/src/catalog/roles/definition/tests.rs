@@ -37,6 +37,9 @@ impl Inputs {
     }
 }
 impl RoleReferenceNames for Inputs {
+    fn outer_role(&self) -> crate::catalog::roles::RoleReference {
+        self.current_role()
+    }
     fn current_role(&self) -> RoleReference {
         let index = self.current_reads.get();
         self.current_reads.set(index + 1);

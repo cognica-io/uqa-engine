@@ -5,6 +5,7 @@
 //
 
 use std::collections::BTreeMap;
+pub mod acl_command;
 pub mod columns;
 pub mod dependencies;
 mod role_bindings;

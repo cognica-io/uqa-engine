@@ -14,7 +14,10 @@ use crate::{
 use uqa_core::Value;
 use uqa_execution::{
     catalog::security::roles::locking::ROLE_CATALOG_CLASS_ID,
-    row_locks::{shared_objects::SharedCatalogLock, RelationLockMode},
+    row_locks::{
+        shared_objects::{SharedCatalogLock, SharedObjectLockSession},
+        RelationLockMode,
+    },
 };
 
 mod quoted_names;
@@ -66,6 +69,47 @@ fn role_lock(engine: &Engine) -> SharedCatalogLock<'static> {
     SharedCatalogLock::Object {
         class_id: ROLE_CATALOG_CLASS_ID,
         oid: u32::try_from(engine.durable.roles.read()["dependent"].oid).unwrap(),
+    }
+}
+
+#[test]
+fn owner_waits_keep_the_original_role_after_rename_and_name_reuse() {
+    for provider in 0..3 {
+        for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
+            for target in TARGETS {
+                let (directory, first, second) = sessions(provider);
+                sql(&first, "CREATE ROLE dependent");
+                sql(&first, target.setup);
+                let original = first.durable.roles.read()["dependent"].identity();
+                let lock = role_lock(&first);
+                sql(&first, "BEGIN");
+                first
+                    .acquire_shared_catalog(lock, RelationLockMode::AccessExclusive)
+                    .unwrap()
+                    .retain();
+                sql(
+                    &second,
+                    &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT 1"),
+                );
+                let (second, result) = after_wait(
+                    &first,
+                    second,
+                    &target.alter("dependent"),
+                    lock,
+                    "ALTER ROLE dependent RENAME TO renamed; CREATE ROLE dependent; COMMIT",
+                );
+                result.unwrap();
+                sql(&second, "COMMIT");
+                target.assert_owner(&first, "renamed");
+                assert_eq!(first.durable.roles.read()["renamed"].identity(), original);
+                drop(second);
+                drop(first);
+                target.assert_owner(
+                    &reopen(provider, &directory.path().join("table-locks.db")),
+                    "renamed",
+                );
+            }
+        }
     }
 }
 

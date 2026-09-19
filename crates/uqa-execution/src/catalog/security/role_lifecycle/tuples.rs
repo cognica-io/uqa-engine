@@ -14,8 +14,8 @@ use crate::{
 use std::collections::BTreeSet;
 use uqa_sql::{
     catalog::roles::{
-        definition, dependencies::ensure_roles_have_no_object_dependencies, tuple::RoleTuple,
-        RoleReference,
+        definition, dependencies::ensure_roles_have_no_object_dependencies, identity::RoleBinding,
+        tuple::RoleTuple, RoleReference,
     },
     SQLError,
 };
@@ -39,12 +39,16 @@ pub(super) fn lock(
 
 pub(super) fn prepare_drop(
     context: &RoleExecutionContext<'_>,
-    names: &[String],
+    bindings: &[RoleBinding],
     current: &RoleReference,
     session: &RoleReference,
 ) -> Result<Vec<RoleTuple>, SQLError> {
     let roles = context.analysis.roles.role_definitions();
-    for name in names {
+    let names = bindings
+        .iter()
+        .map(|bound| bound.require_name(&roles).map(str::to_owned))
+        .collect::<Result<Vec<_>, _>>()?;
+    for name in &names {
         definition::require_role_drop_authority(&context.analysis, &roles, current, session, name)?;
     }
     let identities = names
@@ -53,9 +57,9 @@ pub(super) fn prepare_drop(
         .collect::<BTreeSet<_>>();
     let memberships = context.analysis.roles.role_memberships();
     definition::ensure_no_grantor_dependencies(&memberships, &identities)?;
-    ensure_roles_have_no_object_dependencies(context.dependencies, names, &roles)?;
+    ensure_roles_have_no_object_dependencies(context.dependencies, &names, &roles)?;
     let mut targets = Vec::with_capacity(names.len());
-    for name in names {
+    for name in &names {
         let target = RoleTuple::bind(&roles[name])?;
         if context
             .temporary_roles

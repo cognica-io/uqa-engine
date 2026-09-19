@@ -10,6 +10,31 @@ use crate::ast::{
     RoutineConfigAction, RoutineRevokeBehavior,
 };
 
+#[test]
+fn role_rename_preserves_literal_names_and_unifies_role_user_and_group_aliases() {
+    for alias in ["ROLE", "USER", "GROUP"] {
+        let statement = first(&format!(
+            "ALTER {alias} \"CURRENT_USER\" RENAME TO \"PUBLIC\""
+        ));
+        let Statement::RenameRole(rename) = &statement else {
+            panic!("expected role rename: {statement:?}")
+        };
+        assert_eq!(rename.name, "CURRENT_USER");
+        assert_eq!(rename.new_name, "PUBLIC");
+        let encoded = serde_json::to_string(&statement).unwrap();
+        let Statement::RenameRole(restored) = serde_json::from_str::<Statement>(&encoded).unwrap()
+        else {
+            panic!("expected role rename after decoding")
+        };
+        assert_eq!(&restored, rename);
+    }
+    let Statement::RenameRole(rename) = first("ALTER ROLE Source RENAME TO Destination") else {
+        panic!("expected role rename")
+    };
+    assert_eq!(rename.name, "source");
+    assert_eq!(rename.new_name, "destination");
+}
+
 fn variadic_value(expression: &Expr) -> &Expr {
     crate::expr::variadic_argument_value(expression)
         .unwrap_or_else(|| panic!("expected VARIADIC marker, got {expression:?}"))

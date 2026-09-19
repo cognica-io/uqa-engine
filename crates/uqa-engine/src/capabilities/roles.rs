@@ -62,6 +62,9 @@ impl uqa_execution::catalog::security::roles::RoleCatalogGuards for Engine {
     }
 }
 impl uqa_sql::catalog::roles::RoleReferenceNames for Engine {
+    fn outer_role(&self) -> RoleReference {
+        RoleReference::Bound(self.session.state.read().authorization.outer().clone())
+    }
     fn current_role(&self) -> RoleReference {
         Engine::current_role(self)
     }

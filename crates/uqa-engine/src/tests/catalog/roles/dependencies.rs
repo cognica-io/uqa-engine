@@ -14,7 +14,10 @@ use crate::{
 use uqa_core::Value;
 use uqa_execution::{
     catalog::security::roles::locking::ROLE_CATALOG_CLASS_ID,
-    row_locks::{shared_objects::SharedCatalogLock, RelationLockMode},
+    row_locks::{
+        shared_objects::{SharedCatalogLock, SharedObjectLockSession},
+        RelationLockMode,
+    },
 };
 
 struct Target {
@@ -61,13 +64,18 @@ fn role_exists(engine: &Engine) -> bool {
 }
 
 fn allowed(engine: &Engine, target: &Target) -> bool {
+    allowed_as(engine, target, "dependent")
+}
+
+fn allowed_as(engine: &Engine, target: &Target, role: &str) -> bool {
     match target.access {
         Access::Inquiry(inquiry) => {
+            let inquiry = inquiry.replace("'dependent'", &format!("'{role}'"));
             sql(engine, &format!("SELECT {inquiry} AS allowed")).rows[0]["allowed"]
                 == Value::Bool(true)
         }
         Access::Execute(statement) => {
-            sql(engine, "SET ROLE dependent");
+            sql(engine, &format!("SET ROLE {role}"));
             let result = engine.sql(statement, &[]);
             sql(engine, "RESET ROLE");
             match result {
@@ -76,6 +84,57 @@ fn allowed(engine: &Engine, target: &Target) -> bool {
                     assert_eq!(error.sqlstate(), Some("42501"), "{statement}: {error}");
                     false
                 }
+            }
+        }
+    }
+}
+
+#[test]
+fn acl_waits_keep_the_original_recipient_after_rename_and_name_reuse() {
+    for provider in 0..3 {
+        for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
+            for target in TARGETS {
+                let (directory, first, second) = sessions(provider);
+                sql(&first, "CREATE ROLE dependent");
+                if !target.setup.is_empty() {
+                    sql(&first, target.setup);
+                }
+                let original = first.durable.roles.read()["dependent"].identity();
+                let lock = role_lock(&first);
+                sql(&first, "BEGIN");
+                first
+                    .acquire_shared_catalog(lock, RelationLockMode::AccessExclusive)
+                    .unwrap()
+                    .retain();
+                sql(
+                    &second,
+                    &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT 1"),
+                );
+                let (second, result) = after_wait(
+                    &first,
+                    second,
+                    target.grant,
+                    lock,
+                    "ALTER ROLE dependent RENAME TO renamed; CREATE ROLE dependent; COMMIT",
+                );
+                result.unwrap();
+                sql(&second, "COMMIT");
+                assert!(
+                    allowed_as(&first, target, "renamed"),
+                    "{provider}/{isolation}/{}",
+                    target.grant
+                );
+                assert!(
+                    !allowed(&first, target),
+                    "{provider}/{isolation}/{}",
+                    target.grant
+                );
+                assert_eq!(first.durable.roles.read()["renamed"].identity(), original);
+                drop(second);
+                drop(first);
+                let restored = reopen(provider, &directory.path().join("table-locks.db"));
+                assert!(allowed_as(&restored, target, "renamed"));
+                assert!(!allowed(&restored, target));
             }
         }
     }

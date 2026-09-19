@@ -725,6 +725,7 @@ pub enum Statement {
     GrantRole(GrantRoleStmt),
     CreateRole(CreateRoleStmt),
     AlterRole(AlterRoleStmt),
+    RenameRole(RenameRoleStmt),
     DropRole(DropRoleStmt),
     /// `CREATE [OR REPLACE] TRIGGER ... ON relation`.
     CreateTrigger(CreateTrigger),

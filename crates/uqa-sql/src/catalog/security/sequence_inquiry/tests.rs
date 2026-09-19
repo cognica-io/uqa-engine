@@ -60,6 +60,9 @@ impl Catalog {
 }
 
 impl RoleReferenceNames for Catalog {
+    fn outer_role(&self) -> crate::catalog::roles::RoleReference {
+        self.current_role()
+    }
     fn current_role(&self) -> RoleReference {
         "reader".into()
     }

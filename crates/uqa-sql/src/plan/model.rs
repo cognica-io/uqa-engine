@@ -655,6 +655,7 @@ pub enum CommandPlan {
     GrantRole(crate::ast::GrantRoleStmt),
     CreateRole(crate::ast::CreateRoleStmt),
     AlterRole(crate::ast::AlterRoleStmt),
+    RenameRole(crate::ast::RenameRoleStmt),
     DropRole(crate::ast::DropRoleStmt),
     CreateTrigger(crate::ast::CreateTrigger),
     DropTrigger(crate::ast::DropTrigger),

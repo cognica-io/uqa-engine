@@ -78,6 +78,9 @@ fn pre_authorization_schema_ast_and_plan_json_keep_their_original_representation
 
 struct Catalog(BTreeMap<String, RoleDefinition>);
 impl RoleReferenceNames for Catalog {
+    fn outer_role(&self) -> crate::catalog::roles::RoleReference {
+        self.current_role()
+    }
     fn current_role(&self) -> RoleReference {
         panic!("caller already captured current role")
     }

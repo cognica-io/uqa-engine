@@ -185,7 +185,7 @@ fn owner_binding_survives_target_and_writer_waits_without_rebinding_the_name() {
                     .object_id = [9; 16];
                 Ok(())
             },
-            |_, _| {
+            |_, _, _| {
                 assert!(
                     !replace_before_preflight,
                     "replacement is rejected before authorization"
@@ -214,11 +214,49 @@ fn unchanged_owner_skips_dependency_locks_and_writer_admission() {
         context,
         &owner,
         || panic!("an unchanged owner does not admit a writer"),
-        |_, _| Ok(None::<()>),
+        |_, _, _| Ok(None::<()>),
     )
     .unwrap();
     assert!(result.value.is_none());
     assert_eq!(catalog.acquired.get(), 0);
+    drop(result);
+    catalog.assert_released();
+}
+
+#[test]
+fn owner_preparation_projects_the_original_identity_after_writer_refresh_renames_it() {
+    let catalog = Catalog::new();
+    let context = RoleLockContext {
+        roles: &catalog,
+        session: &catalog,
+    };
+    let owner = context.bind(&"reader".into()).unwrap();
+    let result = prepare_role_owner(
+        context,
+        &owner,
+        || {
+            catalog.assert_released();
+            catalog.writer.set(catalog.writer.get() + 1);
+            let mut roles = catalog.roles.borrow_mut();
+            let mut original = roles.remove("reader").unwrap();
+            let mut replacement = original.clone();
+            replacement.oid += 10;
+            replacement.object_id = [9; 16];
+            original.name = "renamed".into();
+            original.advance_revision().unwrap();
+            roles.insert("renamed".into(), original);
+            roles.insert("reader".into(), replacement);
+            Ok(())
+        },
+        |roles, _, name| {
+            assert_eq!(roles[name].identity(), owner.identity());
+            Ok(Some(name.to_owned()))
+        },
+    )
+    .unwrap();
+    assert_eq!(result.value.as_deref(), Some("renamed"));
+    assert_eq!(catalog.acquired.get(), 1);
+    assert_eq!(catalog.writer.get(), 1);
     drop(result);
     catalog.assert_released();
 }

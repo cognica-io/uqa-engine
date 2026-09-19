@@ -475,6 +475,7 @@ impl UnifiedPlan {
             Statement::GrantRole(value) => Self::Command(Box::new(CommandPlan::GrantRole(value))),
             Statement::CreateRole(value) => Self::Command(Box::new(CommandPlan::CreateRole(value))),
             Statement::AlterRole(value) => Self::Command(Box::new(CommandPlan::AlterRole(value))),
+            Statement::RenameRole(value) => Self::Command(Box::new(CommandPlan::RenameRole(value))),
             Statement::DropRole(value) => Self::Command(Box::new(CommandPlan::DropRole(value))),
             Statement::CreateTrigger(value) => {
                 Self::Command(Box::new(CommandPlan::CreateTrigger(value)))
@@ -580,6 +581,7 @@ impl CommandPlan {
             Self::GrantRole(_) => "GrantRole",
             Self::CreateRole(_) => "CreateRole",
             Self::AlterRole(_) => "AlterRole",
+            Self::RenameRole(_) => "RenameRole",
             Self::DropRole(_) => "DropRole",
             Self::CreateTrigger(_) => "CreateTrigger",
             Self::DropTrigger(_) => "DropTrigger",

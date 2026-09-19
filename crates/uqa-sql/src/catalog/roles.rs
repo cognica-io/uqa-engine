@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 pub mod identity;
+pub mod rename;
 pub mod session;
 pub mod tuple;
 use identity::RoleBinding;
@@ -117,6 +118,8 @@ impl RoleDefinition {
 pub trait RoleReferenceNames {
     fn current_role(&self) -> RoleReference;
     fn session_role(&self) -> RoleReference;
+    /// Session-selected role before any SECURITY DEFINER substitution.
+    fn outer_role(&self) -> RoleReference;
     fn authenticated_role(&self) -> RoleReference {
         self.session_role()
     }

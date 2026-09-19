@@ -45,6 +45,10 @@ impl SessionAuthorization {
         &self.session
     }
 
+    pub fn outer(&self) -> &Arc<RoleBinding> {
+        self.selected.as_ref().unwrap_or(&self.session)
+    }
+
     pub fn current(&self) -> &Arc<RoleBinding> {
         &self.effective
     }

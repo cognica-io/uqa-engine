@@ -55,6 +55,9 @@ impl Catalog {
     }
 }
 impl RoleReferenceNames for Catalog {
+    fn outer_role(&self) -> crate::catalog::roles::RoleReference {
+        self.current_role()
+    }
     fn current_role(&self) -> RoleReference {
         self.calls.borrow_mut().push("current_user");
         self.user.clone().into()

@@ -8,6 +8,7 @@ use super::*;
 mod fixtures;
 mod identity;
 mod memberships;
+mod rename;
 mod tuples;
 use fixtures::{create, Catalog};
 use std::collections::{BTreeMap, BTreeSet};

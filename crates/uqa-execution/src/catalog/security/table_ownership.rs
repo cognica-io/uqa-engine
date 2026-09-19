@@ -79,24 +79,24 @@ impl TableOwnershipContext<'_> {
             self.roles.lock_context(),
             &owner,
             || self.writer.prepare_writer(),
-            |roles, memberships| {
+            |roles, memberships, new_owner| {
                 let (relation, table) = self.bound_table_for_security(name)?;
                 let mut security = table
                     .security()
                     .resolve(roles)
                     .map_err(SQLError::Internal)?;
-                if security.role_owner == owner.name {
+                if security.role_owner == new_owner {
                     return Ok(None);
                 }
                 let authority = OwnerChangeAuthority {
                     roles,
                     memberships,
                     current_user: &current_user,
-                    new_owner: &owner.name,
+                    new_owner,
                 };
                 authority.require_owner_change(&security.role_owner, "table", &relation.name)?;
                 authority.require_schema_create(self.roles.schemas, &relation.schema)?;
-                rewrite_acl_owner(&mut security, &owner.name);
+                rewrite_acl_owner(&mut security, new_owner);
                 Ok(Some((
                     table,
                     BoundTableSecurity::bind(&security, roles).map_err(SQLError::Internal)?,
@@ -110,7 +110,7 @@ impl TableOwnershipContext<'_> {
         let sequence_updates = table_owned_sequence_owner_updates(
             self.owned_sequences,
             table.object_id(),
-            &owner.name,
+            owner.require_name(&roles)?,
             &roles,
         )?;
         for (sequence, security) in &sequence_updates {

@@ -69,7 +69,6 @@ pub fn alter_sequence_role_owner(
         session: context.locks,
     };
     let owner = locks.bind(&new_owner)?;
-    let new_owner = owner.name.clone();
     let current_user = context.session.current_role();
     let RoleDependencyCandidate {
         roles,
@@ -80,7 +79,7 @@ pub fn alter_sequence_role_owner(
         locks,
         &owner,
         || context.writer.prepare_definition_write(),
-        |roles, memberships| {
+        |roles, memberships, new_owner| {
             let security = context.security.security(relation).ok_or_else(|| {
                 SQLError::Internal(format!("sequence `{name}` has no security metadata"))
             })?;
@@ -97,11 +96,11 @@ pub fn alter_sequence_role_owner(
                 roles,
                 memberships,
                 current_user: &current_user,
-                new_owner: &new_owner,
+                new_owner,
             };
             authority.require_owner_change(&security.role_owner, "sequence", &relation.name)?;
             authority.require_schema_create(context.schemas, &relation.schema)?;
-            crate::catalog::security::sequence::rewrite_acl_owner(&mut security, &new_owner);
+            crate::catalog::security::sequence::rewrite_acl_owner(&mut security, new_owner);
             Ok(Some(
                 BoundSequenceSecurity::bind(&security, roles).map_err(SQLError::Internal)?,
             ))

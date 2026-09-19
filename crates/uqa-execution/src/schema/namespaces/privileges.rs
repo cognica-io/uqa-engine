@@ -22,10 +22,11 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     ops::Deref,
 };
+use uqa_sql::catalog::security::acl_command::{AclCommandRoles, ResolvedAclRoles};
 use uqa_sql::{
     ast::GrantSchemaStmt,
     catalog::{
-        roles::{resolve_role_specification, RoleReferenceNames},
+        roles::RoleReferenceNames,
         security::{
             dependencies::added_acl_roles,
             schema::{
@@ -69,6 +70,7 @@ pub fn grant_schema_privileges(
         .map_err(|error| SQLError::Internal(format!("load schemas for privileges: {error}")))?;
     let targets =
         resolve_schema_grant_targets(&context.registry.schemas_read(), &statement.schemas)?;
+    let mut command_roles = AclCommandRoles::default();
     let RoleDependencyCandidate {
         roles,
         memberships,
@@ -85,7 +87,7 @@ pub fn grant_schema_privileges(
             session: context.locks,
         },
         || context.writer.prepare_writer(),
-        || prepare_privileges(context, statement, &targets),
+        || prepare_privileges(context, statement, &targets, &mut command_roles),
     )?;
     for (name, security) in &updates {
         context.persistence.persist_security(name, security)?;
@@ -116,27 +118,27 @@ fn prepare_privileges<'a>(
     context: &'a SchemaPrivilegeContext<'_>,
     statement: &GrantSchemaStmt,
     targets: &[String],
+    command_roles: &mut AclCommandRoles,
 ) -> Result<RoleDependencyCandidate<'a, SchemaPrivilegeCandidate<'a>>, SQLError> {
     let roles = context.roles.role_definitions();
-    let grantees = statement
-        .grantees
-        .iter()
-        .map(|role| {
-            uqa_sql::catalog::roles::resolve_acl_role_specification(context.session, role, &roles)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let requested_grantor = statement
-        .grantor
-        .as_ref()
-        .map(|role| resolve_role_specification(context.session, role).catalog_name(&roles))
-        .transpose()?;
-    let current_user = context.session.current_role();
-    validate_schema_acl_roles(
-        statement,
-        &grantees,
-        requested_grantor.as_deref(),
-        &current_user,
+    let ResolvedAclRoles {
+        grantees,
+        current_user,
+        ..
+    } = command_roles.resolve_validated(
+        context.session,
         &roles,
+        &statement.grantees,
+        statement.grantor.as_ref(),
+        |resolved| {
+            validate_schema_acl_roles(
+                statement,
+                &resolved.grantees,
+                resolved.requested_grantor.as_deref(),
+                &resolved.current_user,
+                &roles,
+            )
+        },
     )?;
     let privileges = requested_acl_privileges(&statement.privileges)?;
     let memberships = context.roles.role_memberships();

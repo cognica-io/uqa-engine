@@ -88,10 +88,7 @@ fn selected_role_follows_attributes_and_rename_but_not_name_or_oid_reuse() {
     renamed.name = "renamed".into();
     roles.insert(renamed.name.clone(), renamed);
     assert_eq!(selected.require_name(&roles).unwrap(), "renamed");
-    assert_eq!(
-        selected.revalidate(&roles).unwrap_err().sqlstate(),
-        Some("42704")
-    );
+    selected.revalidate(&roles).unwrap();
     assert!(role_is_superuser(&roles, &selected));
 
     for (oid, object_id) in [(16_385, [1; 16]), (16_384, [2; 16]), (16_385, [2; 16])] {
@@ -130,11 +127,12 @@ fn reused_original_name_does_not_override_a_renamed_role_identity() {
     assert_eq!(selected.require_name(&roles).unwrap(), "renamed");
     assert!(!role_is_superuser(&roles, &selected));
     assert!(role_is_superuser(&roles, "actor"));
+    selected.revalidate(&roles).unwrap();
+    roles.remove("renamed");
     assert_eq!(
         selected.revalidate(&roles).unwrap_err().sqlstate(),
         Some("42704")
     );
-    roles.remove("renamed");
     assert_eq!(
         selected.require_name(&roles).unwrap_err().sqlstate(),
         Some("42704")

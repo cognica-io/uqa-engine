@@ -97,9 +97,9 @@ fn restore_catalog(
         records::RoleRecordFormat::Aggregate | records::RoleRecordFormat::Definitions
     ) {
         // Complete a candidate catalog before binding legacy membership names. No metadata is written until both candidates have been validated.
-        for (name, role) in &mut roles {
+        for role in roles.values_mut() {
             if role.object_id == [0; 16] {
-                role.object_id = if name == "uqa" {
+                role.object_id = if role.oid == 10 {
                     RoleDefinition::bootstrap().object_id
                 } else {
                     crate::catalog::identity::new_nonzero_catalog_identity("role", "identity")?

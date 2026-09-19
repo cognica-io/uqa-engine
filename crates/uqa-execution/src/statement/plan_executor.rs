@@ -520,6 +520,13 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 )?;
                 Ok(SQLResult::empty())
             }
+            CommandPlan::RenameRole(statement) => {
+                crate::catalog::security::role_lifecycle::rename_role(
+                    &self.context.roles,
+                    statement,
+                )?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::DropRole(statement) => {
                 crate::catalog::security::role_lifecycle::drop_roles(
                     &self.context.roles,

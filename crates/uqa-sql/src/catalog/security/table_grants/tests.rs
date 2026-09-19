@@ -43,6 +43,9 @@ type AppliedGrant = (TableSecurity, usize, Vec<(&'static str, String)>);
 struct SessionRole<'a>(&'a str);
 
 impl crate::catalog::roles::RoleReferenceNames for SessionRole<'_> {
+    fn outer_role(&self) -> crate::catalog::roles::RoleReference {
+        self.current_role()
+    }
     fn current_role(&self) -> crate::catalog::roles::RoleReference {
         self.0.into()
     }

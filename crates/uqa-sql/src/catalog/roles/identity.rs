@@ -124,12 +124,9 @@ impl RoleBinding {
         })
     }
 
-    /// Validate the original name and identity before publishing a stored role reference.
+    /// Retain the original incarnation through name changes before publishing a stored role reference.
     pub fn revalidate(&self, roles: &BTreeMap<String, RoleDefinition>) -> Result<(), SQLError> {
-        if roles
-            .get(&self.name)
-            .is_some_and(|role| self.matches_definition(role))
-        {
+        if self.role_definition(roles).is_some() {
             Ok(())
         } else {
             Err(SQLError::Routine {

@@ -781,6 +781,7 @@ impl Statement {
             | Self::GrantRole(_)
             | Self::CreateRole(_)
             | Self::AlterRole(_)
+            | Self::RenameRole(_)
             | Self::DropRole(_)
             | Self::DropTrigger(_)
             | Self::DropRule(_)

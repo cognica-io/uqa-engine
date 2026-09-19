@@ -211,6 +211,12 @@ pub struct AlterRoleStmt {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenameRoleStmt {
+    pub name: String,
+    pub new_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DropRoleStmt {
     pub names: Vec<RoleSpecification>,
     pub if_exists: bool,

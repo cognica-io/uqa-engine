@@ -14,7 +14,10 @@ use crate::{
 use uqa_core::Value;
 use uqa_execution::{
     catalog::security::roles::locking::ROLE_CATALOG_CLASS_ID,
-    row_locks::shared_objects::SharedCatalogLock,
+    row_locks::{
+        shared_objects::{SharedCatalogLock, SharedObjectLockSession},
+        RelationLockMode,
+    },
 };
 
 struct Target {
@@ -136,10 +139,63 @@ fn setup(engine: &Engine) -> SharedCatalogLock<'static> {
 
 impl Target {
     fn assert_created(&self, engine: &Engine, created: bool) {
+        self.assert_created_as(engine, created, "dependent");
+    }
+
+    fn assert_created_as(&self, engine: &Engine, created: bool, owner: &str) {
         let result = sql(engine, &format!("SELECT r.rolname AS owner FROM {} c JOIN pg_roles r ON r.oid = c.{} WHERE c.{} = 'created'", self.catalog, self.owner_column, self.name_column));
         assert_eq!(result.rows.len(), usize::from(created), "{}", self.create);
         if created {
-            assert_eq!(result.rows[0]["owner"], Value::Str("dependent".into()));
+            assert_eq!(result.rows[0]["owner"], Value::Str(owner.into()));
+        }
+    }
+}
+
+#[test]
+fn creation_waits_retain_owners_through_rename_and_name_reuse() {
+    for provider in 0..3 {
+        for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
+            for target in TARGETS {
+                let (directory, first, second) = sessions(provider);
+                let lock = setup(&first);
+                let original = first.durable.roles.read()["dependent"].identity();
+                sql(&first, "BEGIN");
+                first
+                    .acquire_shared_catalog(lock, RelationLockMode::AccessExclusive)
+                    .unwrap()
+                    .retain();
+                sql(
+                    &second,
+                    &format!("SET ROLE dependent; BEGIN ISOLATION LEVEL {isolation}; SELECT 1"),
+                );
+                let (second, result) = after_wait(
+                    &first,
+                    second,
+                    target.create,
+                    lock,
+                    "ALTER ROLE dependent RENAME TO renamed; CREATE ROLE dependent; COMMIT",
+                );
+                result.unwrap();
+                sql(&second, "COMMIT; RESET ROLE");
+                target.assert_created_as(&second, true, "renamed");
+                if target.create.contains("serial") {
+                    assert_eq!(
+                        sql(
+                            &second,
+                            "SELECT relowner FROM pg_class WHERE relname='created_id_seq'"
+                        )
+                        .rows[0]["relowner"],
+                        Value::Int(original.oid)
+                    );
+                }
+                drop(second);
+                drop(first);
+                target.assert_created_as(
+                    &reopen(provider, &directory.path().join("table-locks.db")),
+                    !target.temporary,
+                    "renamed",
+                );
+            }
         }
     }
 }

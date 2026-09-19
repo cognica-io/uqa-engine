@@ -20,6 +20,8 @@ pub mod context;
 mod identity;
 mod locking;
 mod memberships;
+mod rename;
+pub use rename::rename_role;
 mod tuples;
 use context::RoleExecutionContext;
 
@@ -176,9 +178,9 @@ pub fn drop_roles(
 ) -> Result<(), SQLError> {
     let current = context.analysis.names.current_role();
     let session = context.analysis.names.session_role();
-    let names = locking::lock_drop_targets(context, statement, &current, &session)?;
+    let bindings = locking::lock_drop_targets(context, statement, &current, &session)?;
     context.publication.prepare_writer()?;
-    let targets = tuples::prepare_drop(context, &names, &current, &session)?;
+    let targets = tuples::prepare_drop(context, &bindings, &current, &session)?;
     for target in &targets {
         tuples::lock(context, target)?;
     }

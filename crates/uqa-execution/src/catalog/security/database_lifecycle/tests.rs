@@ -51,6 +51,9 @@ impl DatabaseCatalog {
 }
 
 impl RoleReferenceNames for DatabaseCatalog {
+    fn outer_role(&self) -> uqa_sql::catalog::roles::RoleReference {
+        self.current_role()
+    }
     fn current_role(&self) -> RoleReference {
         "uqa".into()
     }

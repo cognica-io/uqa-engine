@@ -832,6 +832,12 @@ fn collect_reset_reloption_names(nodes: &[Node], kind: AlterViewKind) -> Result<
 
 pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Statement> {
     use pg_query::protobuf::ObjectType;
+    if stmt.rename_type() == ObjectType::ObjectRole {
+        return Ok(Statement::RenameRole(crate::ast::RenameRoleStmt {
+            name: stmt.subname.clone(),
+            new_name: stmt.newname.clone(),
+        }));
+    }
     let (routine_kind, context) = match stmt.rename_type() {
         ObjectType::ObjectFunction => (Some(AlterRoutineKind::Function), "ALTER FUNCTION"),
         ObjectType::ObjectProcedure => (Some(AlterRoutineKind::Procedure), "ALTER PROCEDURE"),

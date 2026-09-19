@@ -122,7 +122,7 @@ pub fn forbidden_command(
         CommandPlan::GrantSchema(_) => Ok(Some("GRANT ON SCHEMA")),
         CommandPlan::GrantRole(_) => Ok(Some("GRANT ROLE")),
         CommandPlan::CreateRole(_) => Ok(Some("CREATE ROLE")),
-        CommandPlan::AlterRole(_) => Ok(Some("ALTER ROLE")),
+        CommandPlan::AlterRole(_) | CommandPlan::RenameRole(_) => Ok(Some("ALTER ROLE")),
         CommandPlan::DropRole(_) => Ok(Some("DROP ROLE")),
         CommandPlan::CreateTrigger(_) => Ok(Some("CREATE TRIGGER")),
         CommandPlan::DropTrigger(_) => Ok(Some("DROP TRIGGER")),

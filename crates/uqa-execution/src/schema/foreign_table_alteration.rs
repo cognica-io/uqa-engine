@@ -177,17 +177,17 @@ fn alter_foreign_table_role_owner(
         context.roles.lock_context(),
         &owner,
         || context.writer.prepare_writer(),
-        |roles, memberships| {
+        |roles, memberships, new_owner| {
             let (relation, bound) = bound_foreign_table_security(context.catalog, name)?;
             let mut security = bound.resolve(roles).map_err(SQLError::Internal)?;
-            if security.role_owner == owner.name {
+            if security.role_owner == new_owner {
                 return Ok(None);
             }
             let authority = OwnerChangeAuthority {
                 roles,
                 memberships,
                 current_user: &current_user,
-                new_owner: &owner.name,
+                new_owner,
             };
             authority.require_owner_change(
                 &security.role_owner,
@@ -198,7 +198,7 @@ fn alter_foreign_table_role_owner(
             let table = context.catalog.table(&relation).ok_or_else(|| {
                 SQLError::Internal(format!("foreign table `{name}` disappeared before update"))
             })?;
-            rewrite_acl_owner(&mut security, &owner.name);
+            rewrite_acl_owner(&mut security, new_owner);
             let columns = table
                 .columns
                 .iter()
@@ -219,7 +219,7 @@ fn alter_foreign_table_role_owner(
     let sequence_updates = table_owned_sequence_owner_updates(
         context.owned_sequences,
         object_id,
-        &owner.name,
+        owner.require_name(&roles)?,
         &roles,
     )?;
     for (sequence, sequence_security) in &sequence_updates {

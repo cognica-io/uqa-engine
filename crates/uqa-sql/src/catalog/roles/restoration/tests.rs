@@ -11,6 +11,31 @@ fn roles() -> BTreeMap<String, RoleDefinition> {
 }
 
 #[test]
+fn restoration_validates_bootstrap_identity_independently_from_its_current_name() {
+    let mut catalog = roles();
+    let mut bootstrap = catalog.remove("uqa").unwrap();
+    bootstrap.name = "renamed".into();
+    bootstrap.advance_revision().unwrap();
+    catalog.insert(bootstrap.name.clone(), bootstrap);
+    restore_role_definitions(&mut catalog).unwrap();
+    validate_role_identities(&catalog).unwrap();
+    assert!(!catalog.contains_key("uqa"));
+    let mut replacement = RoleDefinition::bootstrap();
+    replacement.oid = 20_001;
+    replacement.object_id = [1; 16];
+    catalog.insert("uqa".into(), replacement);
+    restore_role_definitions(&mut catalog).unwrap();
+    validate_role_identities(&catalog).unwrap();
+    assert_eq!(catalog["renamed"].oid, 10);
+    assert_eq!(catalog["uqa"].oid, 20_001);
+    catalog.get_mut("renamed").unwrap().object_id = [2; 16];
+    assert_eq!(
+        validate_role_identities(&catalog).unwrap_err(),
+        "persisted bootstrap role has an invalid object identity"
+    );
+}
+
+#[test]
 fn role_incarnations_reject_missing_duplicate_and_replaced_bootstrap_identities() {
     let mut roles = roles();
     let mut stored = RoleDefinition::bootstrap();

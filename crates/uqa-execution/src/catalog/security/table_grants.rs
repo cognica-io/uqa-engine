@@ -16,6 +16,7 @@ use super::roles::{
     locking::RoleLockContext,
 };
 use updates::persist_table_privilege_updates;
+use uqa_sql::catalog::security::acl_command::AclCommandRoles;
 use uqa_sql::{
     ast::{
         GrantSequenceStmt, GrantSequenceTarget, GrantTableStmt, SequenceRevokeBehavior,
@@ -39,6 +40,7 @@ impl TableGrantContext<'_> {
             roles: self.roles,
             session: self.shared_locks,
         };
+        let mut command_roles = AclCommandRoles::default();
         let RoleDependencyCandidate {
             roles,
             memberships,
@@ -54,7 +56,7 @@ impl TableGrantContext<'_> {
         } = prepare_role_dependencies(
             &role_locks,
             || self.writer.prepare_writer(),
-            || prepared::prepare(self, statement, &targets),
+            || prepared::prepare(self, statement, &targets, &mut command_roles),
         )?;
         persist_table_privilege_updates(self, &updates, &view_updates, &foreign_updates)?;
         for update in &system_updates {
@@ -90,7 +92,7 @@ impl TableGrantContext<'_> {
         drop(memberships);
         drop(roles);
 
-        self.grant_table_syntax_sequence_privileges(statement, &targets)?;
+        self.grant_table_syntax_sequence_privileges(statement, &targets, &mut command_roles)?;
         for (level, message) in notices {
             self.notices.notice(level, &message);
         }
@@ -104,6 +106,7 @@ impl TableGrantContext<'_> {
         &self,
         statement: &GrantTableStmt,
         targets: &[ResolvedTableGrantTarget],
+        command_roles: &mut AclCommandRoles,
     ) -> Result<(), SQLError> {
         let sequence_names = targets
             .iter()
@@ -125,8 +128,8 @@ impl TableGrantContext<'_> {
                 }
             }
             if !sequence_privileges.is_empty() {
-                self.sequences
-                    .grant_sequence_privileges(&GrantSequenceStmt {
+                self.sequences.grant_sequence_privileges_with_roles(
+                    &GrantSequenceStmt {
                         is_grant: statement.is_grant,
                         grant_option: statement.grant_option,
                         grant_option_only: statement.grant_option_only,
@@ -143,7 +146,9 @@ impl TableGrantContext<'_> {
                         } else {
                             SequenceRevokeBehavior::Restrict
                         },
-                    })?;
+                    },
+                    command_roles,
+                )?;
             }
         }
         Ok(())
