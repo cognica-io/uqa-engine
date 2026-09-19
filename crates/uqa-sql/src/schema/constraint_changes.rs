@@ -5,6 +5,7 @@
 //
 
 //! Locate durable constraints and analyze changes to their type, identity, and enforcement metadata.
+pub mod foreign_key_target;
 pub mod inheritance;
 pub mod not_null_removal;
 pub mod validation;

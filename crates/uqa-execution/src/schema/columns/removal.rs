@@ -119,13 +119,11 @@ pub fn drop_column_cascade(
         drop_column_cascade(context, table, &generated, true)?;
     }
     let dependents = foreign_keys_referencing_column(context.catalog, table, column)?;
-    for (referrer, name) in dependents {
-        crate::schema::constraints::drop::drop_constraint_dependency(
-            &context.constraints,
-            &referrer,
-            &name,
-        )?;
-    }
+    let targets = crate::schema::constraints::drop::capture_foreign_key_dependencies(
+        &context.constraints,
+        dependents,
+    )?;
+    crate::schema::constraints::drop::drop_foreign_key_dependencies(&context.constraints, targets)?;
     context
         .state
         .drop_column(table, column, true)
