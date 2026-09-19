@@ -36,10 +36,6 @@ pub fn validate_relation_alter_authority(
     Ok(())
 }
 
-pub trait RelationAlterLocks {
-    fn lock_exclusive(&self, name: &str) -> Result<(), SQLError>;
-}
-
 pub trait RelationRenameDependencies {
     fn rewrite_views(
         &self,

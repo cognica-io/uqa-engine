@@ -349,6 +349,8 @@ Temporal constraints are enforced on insert, update, and delete. A parent update
 
 ## ALTER TABLE
 
+`ALTER TABLE [IF EXISTS] name action` takes a relation identifier and returns the `ALTER TABLE` command tag without rows. Target binding retains the requested name through relation-lock waits, rechecks current ownership and system-catalog protection, and dispatches actions using the resulting relation kind. If the source disappears, `IF EXISTS` emits one notice and makes no change; otherwise a missing relation reports `42P01` and a missing explicit schema reports `3F000`. An unqualified source is resolved again through the search path after a wait. `RENAME TO` additionally requires CREATE on the source schema, including current database TEMP authority for a temporary table, both before and after waiting. Column changes do not require that rename privilege.
+
 Implemented changes include:
 
 - Add a column
@@ -364,6 +366,8 @@ Implemented changes include:
 - Transfer an ordinary table to another role with `OWNER TO`
 - Add or remove an ordinary inheritance edge
 - Attach or detach a partition, including the validated `CONCURRENTLY` boundary
+
+The historical `ALTER TABLE name OWNER TO role` spelling also accepts regular views, materialized views, sequences and foreign tables, with the same owner-transfer checks as their explicit ALTER commands. After a concurrent replacement of the requested name, the current relation kind selects that command's execution path.
 
 Examples:
 

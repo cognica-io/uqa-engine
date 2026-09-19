@@ -15,6 +15,7 @@ use uqa_sql::{
     ast::{AlterTableAction, AlterTableStmt},
     SQLError, SQLResult,
 };
+pub mod binding;
 mod context;
 pub mod entry;
 mod recursion;

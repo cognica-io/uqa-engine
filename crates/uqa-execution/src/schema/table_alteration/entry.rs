@@ -5,23 +5,21 @@
 //
 
 //! Execute bound ALTER TABLE actions through the native relation transaction boundaries.
-use super::{TableAlterContext, TableEventLifecycle};
+use super::{
+    binding::{bind_table_alteration, TableAlterBindingContext},
+    TableAlterContext, TableEventLifecycle,
+};
 use crate::schema::{
     foreign_table_alteration::{
         alter_foreign_table, ForeignTableAlterAccess, ForeignTableAlterTransactions,
     },
-    relation_alteration::RelationAlterLocks,
     sequences::entry::{run_alter_sequence, SequenceAlterTransactions},
     view_alteration::{alter_view, ViewAlterTransactions},
 };
 use uqa_sql::{
     ast::{AlterTableAction, AlterTableStmt},
-    schema::{
-        relation_alteration::RelationAlterNames,
-        table_alteration::{
-            syntax::validate_alter_table_transaction,
-            targets::{bind_table_alteration, BoundTableAlteration},
-        },
+    schema::table_alteration::{
+        syntax::validate_alter_table_transaction, targets::BoundTableAlteration,
     },
     SQLError, SQLResult,
 };
@@ -47,8 +45,7 @@ pub trait RelationEventAlterTransactions {
 
 pub struct TableAlterEntryContext<'a, S: Clone + 'static> {
     pub session: &'a dyn TableAlterSession,
-    pub names: &'a dyn RelationAlterNames,
-    pub locks: &'a dyn RelationAlterLocks,
+    pub binding: TableAlterBindingContext<'a>,
     pub tables: &'a dyn TableAlterTransactions<S>,
     pub events: &'a dyn RelationEventAlterTransactions,
     pub views: &'a dyn ViewAlterTransactions,
@@ -62,22 +59,11 @@ pub fn run_alter_table<S: Clone + 'static>(
     statement: AlterTableStmt,
 ) -> Result<SQLResult, SQLError> {
     validate_alter_table_transaction(&statement, context.session.in_transaction_block())?;
-    let Some(bound) = bind_table_alteration(
-        context.names.resolve_relation_kind(&statement.table)?,
-        statement,
-        &mut |message| {
-            context
-                .notices
-                .lock()
-                .push(("NOTICE".into(), message.into()));
-        },
-    )?
-    else {
+    let Some(bound) = bind_table_alteration(&context.binding, statement)? else {
         return Ok(SQLResult::empty());
     };
     match bound {
         BoundTableAlteration::Table(statement) => {
-            context.locks.lock_exclusive(&statement.table)?;
             context.tables.with_table_write(Box::new(move |context| {
                 super::run_alter_table(context, statement)
             }))

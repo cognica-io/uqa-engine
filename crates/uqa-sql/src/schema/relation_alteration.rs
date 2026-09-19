@@ -27,7 +27,7 @@ pub struct RelationAlterTarget {
 }
 
 impl RelationAlterTarget {
-    fn from_name(canonical: String, kind: &'static str) -> Result<Self, SQLError> {
+    pub(crate) fn from_name(canonical: String, kind: &'static str) -> Result<Self, SQLError> {
         let relation = RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
             SQLError::Internal(format!(
                 "invalid relation ALTER target `{canonical}`: {error}"

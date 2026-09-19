@@ -68,13 +68,22 @@ pub fn alter_sequence_from_table_syntax(
     Ok(alter)
 }
 
-/// Return a native view rename, or None for a valid sequence of view event renames.
+/// Return a native view owner or name change, or None for a valid sequence of view event renames.
 pub fn alter_view_from_table_syntax(
     canonical: &str,
     kind: &str,
     stmt: &AlterTableStmt,
 ) -> Result<Option<crate::ast::AlterViewStmt>, SQLError> {
-    if let [AlterTableAction::RenameTable { to }] = stmt.actions.as_slice() {
+    let action = match stmt.actions.as_slice() {
+        [AlterTableAction::RenameTable { to }] => {
+            Some(crate::ast::AlterViewAction::RenameTo(to.clone()))
+        }
+        [AlterTableAction::ChangeOwner { owner }] => {
+            Some(crate::ast::AlterViewAction::OwnerTo(owner.clone()))
+        }
+        _ => None,
+    };
+    if let Some(action) = action {
         return Ok(Some(crate::ast::AlterViewStmt {
             name: canonical.to_string(),
             kind: if kind == "view" {
@@ -83,7 +92,7 @@ pub fn alter_view_from_table_syntax(
                 crate::ast::AlterViewKind::MaterializedView
             },
             if_exists: stmt.if_exists,
-            action: crate::ast::AlterViewAction::RenameTo(to.clone()),
+            action,
         }));
     }
     if kind == "view"

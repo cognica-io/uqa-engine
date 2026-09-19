@@ -14,6 +14,7 @@ mod roles;
 mod routines;
 mod schemas;
 mod sequences;
+mod table_alteration;
 mod table_authorization;
 mod table_grants;
 mod table_ownership;

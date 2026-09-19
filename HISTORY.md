@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Rebind ordinary ALTER TABLE targets and current authority after definition-lock waits, including name removal, search-path fallback and relation-kind replacement. Table renames require source-schema CREATE or current database TEMP. Historical table owner syntax now reaches regular and materialized views, and missing table/schema errors preserve PostgreSQL SQLSTATEs.
+
 - Apply actual-owner, system-catalog and source-schema CREATE checks before view, materialized-view and foreign-table ALTER kind errors. Recheck authority after relation waits, preserve temporary-view TEMP requirements, and defer foreign-table write admission until definition binding succeeds.
 
 - Check the actual relation owner before ALTER SEQUENCE reports the requested kind, and require source-schema CREATE for sequence renames before and after lock waits. Temporary sequence renames honor current database TEMP authority; pinned system catalogs retain their protection.

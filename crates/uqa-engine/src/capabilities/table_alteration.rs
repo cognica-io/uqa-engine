@@ -13,6 +13,7 @@ use uqa_execution::schema::{
         ColumnRemovalViews,
     },
     table_alteration::{
+        binding::TableAlterBindingContext,
         entry::{
             RelationEventAlterContext, RelationEventAlterTransactions, RelationEventAlterWrite,
             TableAlterEntryContext, TableAlterSession, TableAlterTransactions, TableAlterWrite,
@@ -33,8 +34,14 @@ impl Engine {
     ) -> TableAlterEntryContext<'_, StatementReadSnapshot> {
         TableAlterEntryContext {
             session: self,
-            names: self,
-            locks: self,
+            binding: TableAlterBindingContext {
+                names: self,
+                catalog: self,
+                authority: self.table_privilege_context(),
+                creation: self.relation_creation_context(),
+                locks: self,
+                notices: self.query_runtime_view().notices,
+            },
             tables: self,
             events: self,
             views: self,
