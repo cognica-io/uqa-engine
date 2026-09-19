@@ -365,8 +365,38 @@ fn controlled_reads_and_cancelled_commits_preserve_outcomes_and_release_allowanc
     assert!(snapshot.get(b"large", &control).unwrap().is_some());
 }
 
+fn observe_pending_writer(
+    observer: &ManagedConnection,
+) -> Result<bool, uqa_storage_sqlite::SQLiteError> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let result = observer.with(|connection| {
+            Ok(
+                connection.query_row("SELECT count(*) FROM _uqa_mvcc_versions", [], |row| {
+                    row.get::<_, i64>(0)
+                })?,
+            )
+        });
+        match result {
+            Err(uqa_storage_sqlite::SQLiteError::SQLite(error))
+                if error.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy) =>
+            {
+                return Ok(true)
+            }
+            Err(error) => return Err(error),
+            Ok(0) => {}
+            Ok(_) => return Ok(false),
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(false);
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 #[test]
-fn a_busy_native_commit_is_retained_as_uncertain_and_the_same_batch_can_resolve() {
+fn a_busy_native_commit_waits_for_its_reader_without_repeating_staged_writes() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("busy.db");
     let connection = open(Mode::Compressed, &path);
@@ -377,31 +407,65 @@ fn a_busy_native_commit_is_retained_as_uncertain_and_the_same_batch_can_resolve(
         write(b"a", None, Some(b"one")),
         write(b"b", None, Some(b"two")),
     ]);
-    connection
+    let staged = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&staged);
+    connection.with(|connection| {
+        connection.create_scalar_function(
+            "__uqa_test_record_stage", 0,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_INNOCUOUS,
+            move |_| { counted.fetch_add(1, Ordering::SeqCst); Ok(0_i64) },
+        )?;
+        connection.execute_batch("CREATE TEMP TRIGGER record_stage AFTER INSERT ON main._uqa_mvcc_versions BEGIN SELECT __uqa_test_record_stage(); END")?;
+        Ok(())
+    }).unwrap();
+    let reader = open(Mode::Compressed, &path);
+    let observer = open(Mode::Compressed, &path);
+    observer
         .with(|connection| {
             connection.busy_timeout(Duration::ZERO)?;
             Ok(())
         })
         .unwrap();
-    let reader = open(Mode::Compressed, &path);
     reader.begin_deferred_transaction().unwrap();
     reader.pin_transaction_snapshot().unwrap();
-    assert!(
-        matches!(store.commit(id, &prepared, &control), Err(CommitFailure::Indeterminate { transaction, .. }) if transaction == id)
-    );
-    reader.rollback_transaction().unwrap();
+    let receipt = std::thread::scope(|scope| {
+        let (send, receive) = mpsc::channel();
+        let persistence = &store;
+        let attempt = &prepared;
+        let resources = &control;
+        let worker = scope.spawn(move || {
+            send.send(persistence.commit(id, attempt, resources))
+                .unwrap();
+        });
+        // A PENDING writer denies new readers while the original reader retains its old view.
+        let waiting = observe_pending_writer(&observer);
+        let visible = reader.with(|connection| {
+            Ok(
+                connection.query_row("SELECT count(*) FROM _uqa_mvcc_versions", [], |row| {
+                    row.get::<_, i64>(0)
+                })?,
+            )
+        });
+        reader.rollback_transaction().unwrap();
+        let result = receive.recv_timeout(Duration::from_secs(30));
+        if result.is_err() {
+            control.cancellation().cancel();
+        }
+        worker.join().unwrap();
+        assert!(
+            waiting.unwrap(),
+            "publication never reached the retained reader"
+        );
+        assert_eq!(visible.unwrap(), 0);
+        result.unwrap().unwrap()
+    });
+    assert_eq!(staged.load(Ordering::SeqCst), 2);
     assert_eq!(
         store.commit_status(id, &control).unwrap(),
-        CommitStatus::Pending
+        CommitStatus::Committed(receipt)
     );
-    assert!(store
-        .snapshot(&control)
-        .unwrap()
-        .get(b"a", &control)
-        .unwrap()
-        .is_none());
-    let receipt = store.commit(id, &prepared, &control).unwrap();
     assert_eq!(store.commit(id, &prepared, &control).unwrap(), receipt);
+    assert_eq!(staged.load(Ordering::SeqCst), 2);
     assert_eq!(session(&store).get(b"b").unwrap().unwrap(), b"two");
 }
 

@@ -87,6 +87,10 @@ impl uqa_storage::mvcc::IdentifierAllocator for SQLiteKeyValueStore {
 }
 
 impl KeyValueStore for SQLiteKeyValueStore {
+    fn vacuum(&self) -> StorageBackendResult<()> {
+        self.conn.vacuum().map_err(Into::into)
+    }
+
     fn write_cancellation(&self) -> Option<uqa_core::CancellationToken> {
         self.records.write_cancellation()
     }

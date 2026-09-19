@@ -12,6 +12,8 @@ mod identifiers;
 mod key_value;
 pub mod native;
 mod read;
+mod reclamation;
+mod retention;
 mod schema;
 #[cfg(test)]
 mod tests;
@@ -66,12 +68,13 @@ fn sqlite_error(error: rusqlite::Error) -> VersionError {
 
 /// Record persistence over a managed `SQLite` pool, including `SQLCipher` and compressed connections. Snapshots retain logical sequences; this adapter does not retain physical transactions between operations.
 ///
-/// All versions and receipts are currently retained. The Key/Value provider uses these records directly. `Self::for_native` converts a native catalog and atomically maintains its current rows with their history; `ManagedConnection::bind_native_records` binds catalog and data handles to the same logical session.
+/// Logical snapshot leases protect predecessor histories across bounded reads and native processes; reclamation preserves head tombstones and all commit receipts. The Key/Value provider uses these records directly. `Self::for_native` converts a native catalog and atomically maintains its current rows with their history; `ManagedConnection::bind_native_records` binds catalog and data handles to the same logical session.
 #[derive(Clone)]
 pub struct SQLiteRecordStore {
     connection: ManagedConnection,
     identity: DatabaseId,
     native: bool,
+    snapshots: Arc<uqa_storage::mvcc::SnapshotRegistry>,
 }
 
 impl SQLiteRecordStore {
@@ -87,6 +90,7 @@ impl SQLiteRecordStore {
     ) -> VersionResult<Self> {
         let identity = native::initialize_in(transaction, control).map_err(Error::into_version)?;
         Ok(Self {
+            snapshots: retention::registry(connection, identity)?,
             connection: connection.record_connection(),
             identity,
             native: true,
@@ -105,6 +109,7 @@ impl SQLiteRecordStore {
             .map_err(|error| VersionError::Storage(error.into()))?
             .map_err(Error::into_version)?;
         Ok(Self {
+            snapshots: retention::registry(&connection, identity)?,
             connection,
             identity,
             native: false,
@@ -127,6 +132,7 @@ impl SQLiteRecordStore {
             .map_err(|error| VersionError::Storage(error.into()))?
             .map_err(Error::into_version)?;
         Ok(Self {
+            snapshots: retention::registry(&connection, identity)?,
             connection,
             identity,
             native: true,
@@ -143,6 +149,7 @@ impl SQLiteRecordStore {
             .map_err(|error| VersionError::Storage(error.into()))?
             .map_err(Error::into_version)?;
         Ok(Self {
+            snapshots: retention::registry(&connection, identity)?,
             connection,
             identity,
             native: false,
@@ -283,21 +290,32 @@ impl VersionedPersistence for SQLiteRecordStore {
         control: &StorageReadControl,
     ) -> VersionResult<Arc<dyn CommittedRecordSnapshot>> {
         control.cancellation().check()?;
-        let sequence = self.with(|connection| {
-            let read = connection.unchecked_transaction()?;
-            native::check_mapping(&read, self.native)?;
-            let sequence = codec::header(&read, self.identity)?.sequence;
-            read.commit()?;
-            Ok(sequence)
+        let lease = self.snapshots.capture(control, || {
+            self.with(|connection| {
+                let read = connection.unchecked_transaction()?;
+                native::check_mapping(&read, self.native)?;
+                let sequence = codec::header(&read, self.identity)?.sequence;
+                read.commit()?;
+                Ok(sequence)
+            })
         })?;
         uqa_storage::mvcc::retain_record_snapshot(
             read::Snapshot {
                 store: self.clone(),
-                sequence,
+                sequence: lease.sequence(),
+                _lease: lease,
             },
             control,
         )
     }
+    fn reclaim_versions(&self, control: &StorageReadControl) -> VersionResult<u64> {
+        self.snapshots.reclaim(control, |oldest| {
+            self.with_write(control, |connection| {
+                reclamation::reclaim(connection, self.identity, self.native, oldest, control)
+            })
+        })
+    }
+
     fn commit(
         &self,
         transaction: StorageTransactionId,

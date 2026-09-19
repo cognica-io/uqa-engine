@@ -182,6 +182,11 @@ impl VersionedPersistence for Persistence {
             .insert(id.allocation(), CommitStatus::Pending);
         Ok(id)
     }
+    fn reclaim_versions(&self, control: &StorageReadControl) -> VersionResult<u64> {
+        control.cancellation().check()?;
+        self.store.reclaim().map(|count| count as u64)
+    }
+
     fn snapshot(
         &self,
         control: &StorageReadControl,
@@ -649,4 +654,9 @@ fn sealed_transactions_reject_savepoint_changes_until_the_commit_is_resolved() {
     persistence.state.lock().commit_fault = CommitFault::None;
     session.commit_transaction().unwrap();
     assert_eq!(session.get(b"row").unwrap().unwrap(), b"private");
+}
+
+#[test]
+fn common_reclamation_preserves_reference_snapshots_and_outcomes() {
+    uqa_storage::mvcc::verify_version_reclamation(Persistence::new().as_ref()).unwrap();
 }

@@ -175,6 +175,9 @@ pub trait VersionedPersistence: Send + Sync {
         control: &StorageReadControl,
     ) -> VersionResult<Arc<dyn CommittedRecordSnapshot>>;
 
+    /// Atomically remove obsolete historical revisions under snapshot admission. Preserve the newest revision at/before every live snapshot, all newer revisions, head tombstones and every transaction receipt. Neither visibility nor transaction allocation advances. Wrappers must forward the capability and its resource/cancellation control.
+    fn reclaim_versions(&self, control: &StorageReadControl) -> VersionResult<u64>;
+
     /// Retry the same sealed logical changes and fingerprint. Return a durable matching receipt before validating snapshots or record heads. After verifying a pending receipt under exclusive admission, call `PreparedRecordCommit::validate_snapshot` before validating heads; only its rejection permits common storage to materialize derived effects again. Canonical changes and application callbacks must never be replayed, and mismatched fingerprint reuse is rejected.
     fn commit(
         &self,

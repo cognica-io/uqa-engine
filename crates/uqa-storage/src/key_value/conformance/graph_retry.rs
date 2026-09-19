@@ -66,6 +66,10 @@ impl VersionedPersistence for InterleavingPersistence {
         }
         self.inner.allocate_transaction(control)
     }
+    fn reclaim_versions(&self, control: &StorageReadControl) -> VersionResult<u64> {
+        self.inner.reclaim_versions(control)
+    }
+
     fn snapshot(
         &self,
         control: &StorageReadControl,

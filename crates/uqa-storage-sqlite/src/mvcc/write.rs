@@ -124,9 +124,12 @@ fn stage(
     {
         let mut versions = connection
             .prepare("INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES (?1, ?2, ?3)")?;
-        let mut heads = connection.prepare("INSERT INTO _uqa_mvcc_heads (key, sequence) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence")?;
+        let mut previous = connection.prepare("INSERT INTO _uqa_mvcc_versions (key, sequence, value) SELECT key, sequence, NULL FROM _uqa_mvcc_heads WHERE key = ?1 AND compacted = 1")?;
+        let mut heads = connection.prepare("INSERT INTO _uqa_mvcc_heads (key, sequence, compacted) VALUES (?1, ?2, 0) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence, compacted = 0")?;
         for write in prepared.records() {
             control.cancellation().check().map_err(VersionError::from)?;
+            previous.execute([write.key()])?;
+            previous.clear_bindings();
             versions.execute(params![write.key(), sequence.as_slice(), write.value()])?;
             versions.clear_bindings();
             heads.execute(params![write.key(), sequence.as_slice()])?;
@@ -153,11 +156,12 @@ pub(super) fn stage_record(
     let _bindings =
         crate::read_control::reserve_bindings(control, &[key, value.unwrap_or_default()])?;
     let sequence = sequence.as_u64().to_be_bytes();
+    connection.execute("INSERT INTO _uqa_mvcc_versions (key, sequence, value) SELECT key, sequence, NULL FROM _uqa_mvcc_heads WHERE key = ?1 AND compacted = 1", [key])?;
     connection.execute(
         "INSERT INTO _uqa_mvcc_versions(key, sequence, value) VALUES (?1, ?2, ?3)",
         params![key, sequence.as_slice(), value],
     )?;
-    connection.execute("INSERT INTO _uqa_mvcc_heads(key, sequence) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence", params![key, sequence.as_slice()])?;
+    connection.execute("INSERT INTO _uqa_mvcc_heads(key, sequence, compacted) VALUES (?1, ?2, 0) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence, compacted = 0", params![key, sequence.as_slice()])?;
     Ok(())
 }
 

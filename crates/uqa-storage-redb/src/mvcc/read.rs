@@ -25,6 +25,7 @@ pub(super) struct Snapshot {
     pub(super) database: Arc<Database>,
     pub(super) identity: DatabaseId,
     pub(super) sequence: CommitSequence,
+    pub(super) _lease: Arc<uqa_storage::mvcc::SnapshotLease>,
 }
 
 impl Snapshot {

@@ -22,6 +22,7 @@ use super::{codec, PhysicalResult, SQLiteRecordStore};
 pub(super) struct Snapshot {
     pub(super) store: SQLiteRecordStore,
     pub(super) sequence: CommitSequence,
+    pub(super) _lease: std::sync::Arc<uqa_storage::mvcc::SnapshotLease>,
 }
 
 impl Snapshot {
@@ -209,19 +210,32 @@ fn info(
     key: &[u8],
     boundary: CommitSequence,
 ) -> PhysicalResult<Option<(u64, Option<usize>)>> {
-    let boundary = boundary.as_u64().to_be_bytes();
-    let mut statement = connection.prepare("SELECT sequence, CASE WHEN value IS NULL THEN NULL WHEN typeof(value) = 'blob' THEN length(value) ELSE -1 END FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence <= ?2 ORDER BY sequence DESC LIMIT 1")?;
-    let mut rows = statement.query(params![key, boundary.as_slice()])?;
+    let mut statement = connection.prepare("SELECT h.sequence, h.compacted, v.sequence, CASE WHEN v.value IS NULL THEN NULL WHEN typeof(v.value) = 'blob' THEN length(v.value) ELSE -1 END FROM _uqa_mvcc_heads h LEFT JOIN _uqa_mvcc_versions v ON v.key = h.key AND v.sequence = (SELECT sequence FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence <= ?2 ORDER BY sequence DESC LIMIT 1) WHERE h.key = ?1")?;
+    let mut rows = statement.query(params![key, boundary.as_u64().to_be_bytes().as_slice()])?;
     let Some(row) = rows.next()? else {
         return Ok(None);
     };
-    let revision = codec::integer(codec::bytes(row, 0)?)?;
+    let (head, compacted) = codec::decode_head(row)?;
+    let head_visible = head <= boundary;
+    if head_visible && compacted {
+        return Ok(Some((head.as_u64(), None)));
+    }
+    if matches!(row.get_ref(2)?, ValueRef::Null) {
+        if head_visible {
+            return Err(VersionError::InvalidEncoding("record head has no version").into());
+        }
+        return Ok(None);
+    }
+    let revision = codec::integer(codec::bytes(row, 2)?)?;
+    if head_visible && head.as_u64() != revision {
+        return Err(VersionError::InvalidEncoding("record head has no matching version").into());
+    }
     if revision == 0 {
         return Err(VersionError::InvalidEncoding("zero record revision").into());
     }
     Ok(Some((
         revision,
-        row.get::<_, Option<i64>>(1)?
+        row.get::<_, Option<i64>>(3)?
             .map(payload_length)
             .transpose()?,
     )))
@@ -243,6 +257,14 @@ pub(super) fn value(
         return Ok(());
     };
     control.cancellation().check().map_err(VersionError::from)?;
+    if length.is_none() {
+        visit(Some(BorrowedRecord {
+            revision: Some(CommitSequence::from_u64(revision)),
+            value: None,
+        }))?;
+        control.cancellation().check().map_err(VersionError::from)?;
+        return Ok(());
+    }
     let _payload = control
         .memory()
         .reserve(length.unwrap_or(0))

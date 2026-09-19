@@ -17,9 +17,11 @@ use uqa_storage::mvcc::{DatabaseId, VersionError};
 
 use super::{codec, PhysicalResult};
 
+const PREVIOUS_HEADS: &str = "CREATE TABLE _uqa_mvcc_heads (key BLOB PRIMARY KEY CHECK(typeof(key) = 'blob'), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8 AND sequence > x'0000000000000000')) WITHOUT ROWID";
+
 const TABLES: [(&str, &str); 5] = [
-    ("_uqa_mvcc_metadata", "CREATE TABLE _uqa_mvcc_metadata (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 27), database_id BLOB NOT NULL CHECK(typeof(database_id) = 'blob' AND length(database_id) = 16), allocated BLOB NOT NULL CHECK(typeof(allocated) = 'blob' AND length(allocated) = 8), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8), mapping INTEGER NOT NULL DEFAULT 0 CHECK(mapping IN (0, 1)))"),
-    ("_uqa_mvcc_heads", "CREATE TABLE _uqa_mvcc_heads (key BLOB PRIMARY KEY CHECK(typeof(key) = 'blob'), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8 AND sequence > x'0000000000000000')) WITHOUT ROWID"),
+    ("_uqa_mvcc_metadata", "CREATE TABLE _uqa_mvcc_metadata (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 28), database_id BLOB NOT NULL CHECK(typeof(database_id) = 'blob' AND length(database_id) = 16), allocated BLOB NOT NULL CHECK(typeof(allocated) = 'blob' AND length(allocated) = 8), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8), mapping INTEGER NOT NULL DEFAULT 0 CHECK(mapping IN (0, 1)))"),
+    ("_uqa_mvcc_heads", "CREATE TABLE _uqa_mvcc_heads (key BLOB PRIMARY KEY CHECK(typeof(key) = 'blob'), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8 AND sequence > x'0000000000000000'), compacted INTEGER NOT NULL DEFAULT 0 CHECK(compacted IN (0, 1))) WITHOUT ROWID"),
     ("_uqa_mvcc_versions", "CREATE TABLE _uqa_mvcc_versions (key BLOB NOT NULL CHECK(typeof(key) = 'blob'), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8 AND sequence > x'0000000000000000'), value BLOB CHECK(value IS NULL OR typeof(value) = 'blob'), PRIMARY KEY(key, sequence)) WITHOUT ROWID"),
     ("_uqa_mvcc_transactions", "CREATE TABLE _uqa_mvcc_transactions (allocation BLOB PRIMARY KEY CHECK(typeof(allocation) = 'blob' AND length(allocation) = 8 AND allocation > x'0000000000000000'), status INTEGER NOT NULL CHECK(status IN (0, 1, 2)), sequence BLOB, fingerprint BLOB, CHECK((status IN (0, 1) AND sequence IS NULL AND fingerprint IS NULL) OR (status = 2 AND typeof(sequence) = 'blob' AND length(sequence) = 8 AND typeof(fingerprint) = 'blob' AND length(fingerprint) = 32))) WITHOUT ROWID"),
     super::identifiers::TABLE,
@@ -105,51 +107,7 @@ pub(super) struct Initialization {
 }
 
 pub(super) fn initialize_in(transaction: &Connection) -> PhysicalResult<Initialization> {
-    let mut present = 0;
-    let mut predecessor = None;
-    for (name, expected) in TABLES {
-        if let Some(matches) = definition_matches(transaction, name, expected)? {
-            if !matches {
-                if name == TABLES[0].0 {
-                    for format in 1..=26 {
-                        if definition_matches(
-                            transaction,
-                            name,
-                            &expected.replace(
-                                "CHECK(format = 27)",
-                                &format!("CHECK(format = {format})"),
-                            ),
-                        )? == Some(true)
-                        {
-                            predecessor = Some(format);
-                        }
-                    }
-                }
-                if name != TABLES[0].0 || predecessor.is_none() {
-                    return Err(VersionError::InvalidEncoding(
-                        "unexpected record table definition",
-                    )
-                    .into());
-                }
-            }
-            present += 1;
-        }
-    }
-    let identifier_table = definition_matches(
-        transaction,
-        super::identifiers::TABLE.0,
-        super::identifiers::TABLE.1,
-    )?;
-    if predecessor.is_some_and(|format| format < 5) && identifier_table.is_some() {
-        return Err(VersionError::InvalidEncoding(
-            "predecessor contains unexpected identifier allocations",
-        )
-        .into());
-    }
-    let expected = TABLES.len() - usize::from(predecessor.is_some_and(|format| format < 5));
-    if present != 0 && present != expected {
-        return Err(VersionError::InvalidEncoding("incomplete record table set").into());
-    }
+    let (present, predecessor) = validate_tables(transaction)?;
     if present == 0 {
         for (name, sql) in TABLES {
             transaction.execute_batch(sql)?;
@@ -164,7 +122,7 @@ pub(super) fn initialize_in(transaction: &Connection) -> PhysicalResult<Initiali
             )
         })?;
         transaction.execute(
-            "INSERT INTO _uqa_mvcc_metadata (singleton, format, database_id, allocated, sequence) VALUES (1, 27, ?1, ?2, ?2)",
+            "INSERT INTO _uqa_mvcc_metadata (singleton, format, database_id, allocated, sequence) VALUES (1, 28, ?1, ?2, ?2)",
             params![identity.as_slice(), 0_u64.to_be_bytes().as_slice()],
         )?;
         return Ok(Initialization {
@@ -208,6 +166,66 @@ pub(super) fn initialize_in(transaction: &Connection) -> PhysicalResult<Initiali
     })
 }
 
+fn validate_tables(transaction: &Connection) -> PhysicalResult<(usize, Option<i64>)> {
+    let mut present = 0;
+    let mut predecessor = None;
+    for (name, expected) in TABLES {
+        if let Some(matches) = definition_matches(transaction, name, expected)? {
+            if !matches {
+                if name == TABLES[0].0 {
+                    for format in 1..=27 {
+                        if definition_matches(
+                            transaction,
+                            name,
+                            &expected.replace(
+                                "CHECK(format = 28)",
+                                &format!("CHECK(format = {format})"),
+                            ),
+                        )? == Some(true)
+                        {
+                            predecessor = Some(format);
+                        }
+                    }
+                }
+                let previous_heads = name == TABLES[1].0
+                    && predecessor.is_some()
+                    && definition_matches(transaction, name, PREVIOUS_HEADS)? == Some(true);
+                if (name != TABLES[0].0 || predecessor.is_none()) && !previous_heads {
+                    return Err(VersionError::InvalidEncoding(
+                        "unexpected record table definition",
+                    )
+                    .into());
+                }
+            }
+            present += 1;
+        }
+    }
+    if predecessor.is_some()
+        && definition_matches(transaction, TABLES[1].0, PREVIOUS_HEADS)? != Some(true)
+    {
+        return Err(VersionError::InvalidEncoding(
+            "predecessor has an incompatible record head layout",
+        )
+        .into());
+    }
+    let identifier_table = definition_matches(
+        transaction,
+        super::identifiers::TABLE.0,
+        super::identifiers::TABLE.1,
+    )?;
+    if predecessor.is_some_and(|format| format < 5) && identifier_table.is_some() {
+        return Err(VersionError::InvalidEncoding(
+            "predecessor contains unexpected identifier allocations",
+        )
+        .into());
+    }
+    let expected = TABLES.len() - usize::from(predecessor.is_some_and(|format| format < 5));
+    if present != 0 && present != expected {
+        return Err(VersionError::InvalidEncoding("incomplete record table set").into());
+    }
+    Ok((present, predecessor))
+}
+
 fn upgrade_metadata(transaction: &Connection, format: i64) -> PhysicalResult<()> {
     let valid: bool = transaction.query_row(
         "SELECT count(*) = 1 AND coalesce(min(format) = ?1, 0) FROM _uqa_mvcc_metadata",
@@ -217,7 +235,8 @@ fn upgrade_metadata(transaction: &Connection, format: i64) -> PhysicalResult<()>
     if !valid {
         return Err(VersionError::InvalidEncoding("invalid predecessor record format").into());
     }
-    // Existing histories, heads, identity, receipts and identifier reservations retain their bytes and commit boundaries.
+    transaction.execute_batch("ALTER TABLE _uqa_mvcc_heads ADD COLUMN compacted INTEGER NOT NULL DEFAULT 0 CHECK(compacted IN (0, 1))")?;
+    // Existing key/revision identities, histories, receipts and identifier reservations keep their commit boundaries.
     if format < 5 {
         let (name, sql) = super::identifiers::TABLE;
         transaction.execute_batch(sql)?;
@@ -228,7 +247,7 @@ fn upgrade_metadata(transaction: &Connection, format: i64) -> PhysicalResult<()>
     transaction
         .execute_batch("ALTER TABLE _uqa_mvcc_metadata RENAME TO _uqa_mvcc_previous_metadata")?;
     transaction.execute_batch(TABLES[0].1)?;
-    transaction.execute_batch("INSERT INTO _uqa_mvcc_metadata SELECT singleton, 27, database_id, allocated, sequence, mapping FROM _uqa_mvcc_previous_metadata; DROP TABLE _uqa_mvcc_previous_metadata;")?;
+    transaction.execute_batch("INSERT INTO _uqa_mvcc_metadata SELECT singleton, 28, database_id, allocated, sequence, mapping FROM _uqa_mvcc_previous_metadata; DROP TABLE _uqa_mvcc_previous_metadata;")?;
     for action in ["INSERT", "UPDATE", "DELETE"] {
         transaction.execute_batch(&trigger(TABLES[0].0, action).1)?;
     }

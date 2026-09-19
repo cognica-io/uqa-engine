@@ -23,6 +23,7 @@ mod overlay;
 mod persistence;
 mod projection;
 mod resolution;
+mod retention;
 mod session;
 mod types;
 mod vector;
@@ -48,6 +49,10 @@ pub use overlay::{
 pub use persistence::{
     resolve_prepared_receipt, CommitErrorOutcome, CommitFailure, CommitFingerprint, CommitReceipt,
     CommitResult, CommitStatus, DatabaseId, RecordPage, StorageTransactionId, VersionedPersistence,
+};
+pub use retention::{
+    verify_version_reclamation, ReclamationHorizon, SnapshotLease, SnapshotLeaseTransport,
+    SnapshotRegistry,
 };
 pub use session::{VersionedKeyValueStore, VersionedSessionOptions};
 pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};

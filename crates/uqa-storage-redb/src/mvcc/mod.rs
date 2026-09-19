@@ -10,6 +10,8 @@ mod codec;
 mod identifiers;
 mod migration;
 mod read;
+mod reclamation;
+mod retention;
 #[cfg(test)]
 mod tests;
 
@@ -36,11 +38,12 @@ const TRANSACTIONS: TableDefinition<u64, &[u8]> = TableDefinition::new("uqa_mvcc
 
 /// Physical record persistence over one shared redb file owner. Reads retain logical sequence boundaries, and native writers exist only inside allocation, commit and abort calls.
 ///
-/// This adapter preserves all historical versions and receipts. Logical Key/Value sessions use these records; Engine SQL isolation and shared-index publication require additional coordination.
+/// Retained logical snapshots protect their predecessor histories; reclamation preserves head tombstones and all commit receipts. Logical Key/Value sessions use these records; Engine SQL isolation and shared-index publication require additional coordination.
 #[derive(Clone)]
 pub struct RedbRecordStore {
     database: Arc<Database>,
     identity: DatabaseId,
+    snapshots: Arc<uqa_storage::mvcc::SnapshotRegistry>,
 }
 
 impl RedbRecordStore {
@@ -65,7 +68,7 @@ impl RedbRecordStore {
                 .map(|value| codec::decode_u64(value.value()))
                 .transpose()?;
             if let Some(format) = initialized {
-                if !matches!(format, 1..=27) {
+                if !matches!(format, 1..=28) {
                     return Err(VersionError::InvalidEncoding("unknown record format"));
                 }
                 if present != if format < 5 { 15 } else { 31 } {
@@ -76,9 +79,9 @@ impl RedbRecordStore {
                 read_u64(&metadata, "allocated")?;
                 read_u64(&metadata, "sequence")?;
                 let identity = codec::database_id(&metadata)?;
-                if format < 27 {
+                if format < 28 {
                     metadata
-                        .insert("format", 27_u64.to_be_bytes().as_slice())
+                        .insert("format", 28_u64.to_be_bytes().as_slice())
                         .map_err(redb_error)?;
                 }
                 identity
@@ -124,7 +127,7 @@ impl RedbRecordStore {
                     .insert("database", bytes.as_slice())
                     .map_err(redb_error)?;
                 metadata
-                    .insert("format", 27_u64.to_be_bytes().as_slice())
+                    .insert("format", 28_u64.to_be_bytes().as_slice())
                     .map_err(redb_error)?;
                 metadata
                     .insert("allocated", 0_u64.to_be_bytes().as_slice())
@@ -136,7 +139,12 @@ impl RedbRecordStore {
             }
         };
         transaction.commit().map_err(redb_error)?;
-        Ok(Self { database, identity })
+        let snapshots = retention::registry(&database, identity)?;
+        Ok(Self {
+            database,
+            identity,
+            snapshots,
+        })
     }
 
     fn check_identity(&self, transaction: StorageTransactionId) -> VersionResult<()> {
@@ -286,20 +294,27 @@ impl VersionedPersistence for RedbRecordStore {
         control: &StorageReadControl,
     ) -> VersionResult<Arc<dyn CommittedRecordSnapshot>> {
         control.cancellation().check()?;
-        let transaction = self.database.begin_read().map_err(redb_error)?;
-        let metadata = transaction.open_table(METADATA).map_err(redb_error)?;
-        codec::validate_metadata(&metadata, self.identity)?;
-        let sequence = read_u64(&metadata, "sequence")?;
-        drop(metadata);
-        drop(transaction);
+        let lease = self.snapshots.capture(control, || {
+            let transaction = self.database.begin_read().map_err(redb_error)?;
+            let metadata = transaction.open_table(METADATA).map_err(redb_error)?;
+            codec::validate_metadata(&metadata, self.identity)?;
+            Ok(CommitSequence::from_u64(read_u64(&metadata, "sequence")?))
+        })?;
         uqa_storage::mvcc::retain_record_snapshot(
             read::Snapshot {
                 database: Arc::clone(&self.database),
                 identity: self.identity,
-                sequence: CommitSequence::from_u64(sequence),
+                sequence: lease.sequence(),
+                _lease: lease,
             },
             control,
         )
+    }
+
+    fn reclaim_versions(&self, control: &StorageReadControl) -> VersionResult<u64> {
+        self.snapshots.reclaim(control, |oldest| {
+            reclamation::reclaim(self, oldest, control)
+        })
     }
 
     fn commit(

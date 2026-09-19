@@ -52,6 +52,13 @@ pub struct VersionedKeyValueStore {
 }
 
 impl VersionedKeyValueStore {
+    /// Reclaim committed history without changing an active transaction or its retained readers. The persistence owner supplies atomic snapshot admission and physical deletion.
+    pub fn reclaim_versions(&self) -> StorageBackendResult<u64> {
+        self.persistence
+            .reclaim_versions(&self.write_control())
+            .map_err(VersionError::into_storage_error)
+    }
+
     /// Autonomous watermark visibility follows physical reservations, including reservations made after this session pinned its record snapshot. No write capability is required and no logical transaction is started or finished.
     pub fn identifier_watermark(&self, namespace: &[u8]) -> StorageBackendResult<Option<u64>> {
         self.persistence
@@ -249,6 +256,16 @@ impl super::IdentifierAllocator for VersionedKeyValueStore {
 }
 
 impl KeyValueStore for VersionedKeyValueStore {
+    fn vacuum(&self) -> StorageBackendResult<()> {
+        let active = self.active.lock();
+        if active.is_some() {
+            return Err(StorageBackendError::Other(
+                "vacuum requires an inactive logical session".into(),
+            ));
+        }
+        self.reclaim_versions().map(|_| ())
+    }
+
     fn write_cancellation(&self) -> Option<uqa_core::CancellationToken> {
         Some(self.write_cancellation.clone())
     }

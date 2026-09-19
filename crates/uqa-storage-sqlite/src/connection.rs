@@ -174,6 +174,12 @@ struct PoolState {
 }
 
 struct ConnectionPool {
+    snapshot_registry: Mutex<
+        Option<(
+            uqa_storage::mvcc::DatabaseId,
+            std::sync::Weak<uqa_storage::mvcc::SnapshotRegistry>,
+        )>,
+    >,
     spec: ConnectionSpec,
     max_connections: usize,
     state: Mutex<PoolState>,
@@ -188,6 +194,7 @@ struct ConnectionPool {
 impl ConnectionPool {
     fn new(spec: ConnectionSpec, initial: Connection, max_connections: usize) -> Arc<Self> {
         Arc::new(Self {
+            snapshot_registry: Mutex::new(None),
             spec,
             max_connections: max_connections.max(1),
             state: Mutex::new(PoolState {
@@ -739,6 +746,9 @@ impl ManagedConnection {
                 .is_some_and(|logical| logical.in_transaction())
         {
             return Err(SQLiteError::TransactionAlreadyActive);
+        }
+        if let Some(logical) = self.session.logical.get() {
+            logical.reclaim_versions()?;
         }
         let connection = self.pool.checkout()?;
         connection.connection()?.execute_batch("VACUUM")?;

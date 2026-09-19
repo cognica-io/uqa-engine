@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use rusqlite::{params, types::ValueRef, Connection, OptionalExtension, Row};
+use rusqlite::{params, types::ValueRef, Connection, Row};
 use uqa_storage::mvcc::{
     CommitReceipt, CommitSequence, CommitStatus, DatabaseId, StorageTransactionId, VersionError,
 };
@@ -36,7 +36,7 @@ pub(super) fn header(connection: &Connection, expected: DatabaseId) -> PhysicalR
     let row = rows
         .next()?
         .ok_or(VersionError::InvalidEncoding("missing record metadata"))?;
-    if row.get::<_, i64>(0)? != 27 {
+    if row.get::<_, i64>(0)? != 28 {
         return Err(VersionError::InvalidEncoding("unknown record format").into());
     }
     let database = identity(bytes(row, 1)?)?;
@@ -95,23 +95,27 @@ pub(super) fn status(
 }
 
 pub(super) fn head(connection: &Connection, key: &[u8]) -> PhysicalResult<Option<CommitSequence>> {
+    Ok(head_state(connection, key)?.map(|(sequence, _)| sequence))
+}
+
+pub(super) fn head_state(
+    connection: &Connection,
+    key: &[u8],
+) -> PhysicalResult<Option<(CommitSequence, bool)>> {
     let mut statement =
-        connection.prepare("SELECT sequence FROM _uqa_mvcc_heads WHERE key = ?1")?;
-    statement
-        .query_row(params![key], |row| {
-            Ok(row
-                .get_ref(0)?
-                .as_blob()?
-                .try_into()
-                .map(u64::from_be_bytes)
-                .ok())
-        })
-        .optional()?
-        .map(|sequence| {
-            sequence
-                .filter(|sequence| *sequence != 0)
-                .map(CommitSequence::from_u64)
-                .ok_or_else(|| VersionError::InvalidEncoding("invalid record head").into())
-        })
-        .transpose()
+        connection.prepare("SELECT sequence, compacted FROM _uqa_mvcc_heads WHERE key = ?1")?;
+    let mut rows = statement.query(params![key])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    decode_head(row).map(Some)
+}
+
+pub(super) fn decode_head(row: &Row<'_>) -> PhysicalResult<(CommitSequence, bool)> {
+    let sequence = integer(bytes(row, 0)?)?;
+    let compacted: i64 = row.get(1)?;
+    if sequence == 0 || !matches!(compacted, 0 | 1) {
+        return Err(VersionError::InvalidEncoding("invalid record head").into());
+    }
+    Ok((CommitSequence::from_u64(sequence), compacted == 1))
 }

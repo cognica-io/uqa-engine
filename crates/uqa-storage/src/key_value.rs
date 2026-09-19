@@ -249,6 +249,16 @@ pub trait KeyValueBatch {
 
 /// Ordered byte-key storage used by Key/Value catalog and index backends.
 pub trait KeyValueStore: Send + Sync {
+    /// Reclaim committed history outside this session's transaction. Versioned wrappers must forward maintenance; serialized stores that eagerly remove obsolete values may keep the default.
+    fn vacuum(&self) -> StorageBackendResult<()> {
+        if self.transaction_model().is_versioned() {
+            return Err(StorageBackendError::Other(
+                "versioned KeyValue maintenance is not implemented by this store".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Token shared with the execution that owns this session's writes. Cancellation must not prevent rollback cleanup or diagnostic reads. Versioned wrappers must forward this capability.
     fn write_cancellation(&self) -> Option<uqa_core::CancellationToken> {
         None

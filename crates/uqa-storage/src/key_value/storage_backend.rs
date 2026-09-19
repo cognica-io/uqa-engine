@@ -31,6 +31,10 @@ impl KeyValueStorageBackend {
 }
 
 impl PersistentStorageBackend for KeyValueStorageBackend {
+    fn vacuum(&self) -> StorageBackendResult<()> {
+        self.store.vacuum()
+    }
+
     fn write_cancellation(&self) -> Option<uqa_core::CancellationToken> {
         self.store.write_cancellation()
     }
