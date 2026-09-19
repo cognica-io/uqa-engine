@@ -201,7 +201,14 @@ fn prepare_session_portal<S: Clone + Send + Sync + 'static>(
                 source_sql: inputs.source_sql.map(Into::into),
                 is_holdable: hold,
                 is_binary: binary,
-                is_scrollable: query_scrollable(inputs.routines, query, scroll),
+                is_scrollable: query_scrollable(
+                    inputs.routines,
+                    inputs.queries.query_context().source.volatility,
+                    query,
+                    params,
+                    &ctes,
+                    scroll,
+                )?,
                 created_at_micros: inputs.created_at_micros,
             },
             query: query.clone(),
@@ -212,15 +219,20 @@ fn prepare_session_portal<S: Clone + Send + Sync + 'static>(
     Ok(())
 }
 
-fn query_scrollable(
+fn query_scrollable<S: Clone>(
     routines: &dyn uqa_sql::routines::RoutineResolution,
+    volatility: &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
     query: &QueryPlan,
+    params: &[SQLParam],
+    ctes: &crate::query::CteScope<S>,
     requested: Option<bool>,
-) -> bool {
-    requested.unwrap_or_else(|| {
-        !query_has_row_locks(query)
-            && query_plan_backward_scan_support(routines, query) == BackwardScanSupport::Native
-    })
+) -> Result<bool, SQLError> {
+    if let Some(requested) = requested {
+        return Ok(requested);
+    }
+    Ok(!query_has_row_locks(query)
+        && query_plan_backward_scan_support(routines, volatility, query, params, ctes)?
+            == BackwardScanSupport::Native)
 }
 
 #[cfg(test)]

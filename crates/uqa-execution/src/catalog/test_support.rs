@@ -52,6 +52,24 @@ impl uqa_sql::FunctionTypeResolver for NoRoutines {
 }
 impl uqa_sql::routines::RoutineResolution for NoRoutines {}
 
+impl uqa_sql::semantics::volatility::VolatilityCatalog for NoRoutines {
+    fn host_function_volatility(&self, _: &str) -> Option<uqa_sql::ast::FunctionVolatility> {
+        None
+    }
+
+    fn routine_volatilities(
+        &self,
+        _: &str,
+        _: Option<&FunctionBinding>,
+    ) -> Option<Vec<uqa_sql::ast::FunctionVolatility>> {
+        None
+    }
+
+    fn view_query(&self, _: &str) -> Result<Option<uqa_sql::plan::QueryPlan>, SQLError> {
+        Ok(None)
+    }
+}
+
 pub(crate) fn empty_scope() -> crate::query::CteScope {
     crate::query::CteScope::with_catalog(
         empty_catalog(),

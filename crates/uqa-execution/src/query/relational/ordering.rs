@@ -27,6 +27,8 @@ pub struct FinalProjectionExecution<'context, 'scope, S: Clone + 'static> {
 }
 
 pub use crate::query::ordering::*;
+mod streaming;
+pub(super) use streaming::attach_streaming_order_projection;
 
 pub fn attach_final_projection_order<'a, S: Clone + 'static>(
     mut operator: Box<dyn crate::PhysicalOperator + 'a>,
