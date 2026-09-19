@@ -11,12 +11,11 @@ use super::{
     memberships::{
         insufficient_privilege, require_role_attribute_authority, role_has_admin, role_is_superuser,
     },
-    resolve_role_specification, RoleDefinition, RoleIdentity, RoleMembership, RoleMembershipKey,
-    RoleReferenceNames,
+    RoleDefinition, RoleIdentity, RoleMembership, RoleMembershipKey, RoleReferenceNames,
 };
 use crate::catalog::roles::identity::RoleSubject;
 use crate::{
-    ast::{AlterRoleStmt, DropRoleStmt, RoleAttribute},
+    ast::{AlterRoleStmt, DropRoleStmt, RoleAttribute, RoleSpecification},
     SQLError,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -157,8 +156,17 @@ pub fn resolve_drop_role_names(
     require_createrole(snapshot, current, "drop role")?;
     let mut names = Vec::new();
     for requested in &statement.names {
-        let name = resolve_role_specification(context.names, requested).catalog_name(snapshot)?;
-        if !snapshot.contains_key(&name) {
+        // PostgreSQL treats the exact lowercase name public as a role specifier even when quoted.
+        let name = match requested {
+            RoleSpecification::Named(name) if name != "public" => name,
+            _ => {
+                return Err(SQLError::Routine {
+                    sqlstate: "22023".into(),
+                    message: "cannot use special role specifier in DROP ROLE".into(),
+                });
+            }
+        };
+        if !snapshot.contains_key(name) {
             if statement.if_exists {
                 context.notices.notice(
                     "NOTICE",
@@ -171,8 +179,8 @@ pub fn resolve_drop_role_names(
                 message: format!("role \"{name}\" does not exist"),
             });
         }
-        require_role_drop_authority(context, snapshot, current, session, &name)?;
-        names.push(name);
+        require_role_drop_authority(context, snapshot, current, session, name)?;
+        names.push(name.clone());
     }
     Ok(names)
 }

@@ -9,6 +9,7 @@ use crate::Engine;
 mod coordination;
 mod creation;
 mod database_security;
+mod deletion;
 mod dependencies;
 mod domain_security;
 mod identity;

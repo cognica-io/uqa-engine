@@ -118,7 +118,7 @@ fn role_creation_grants_creator_administration_without_inherit_or_set() {
 fn drop_missing_role_notice_precedes_a_later_current_user_error() {
     let inputs = Inputs::new();
     let statement = DropRoleStmt {
-        names: vec!["absent".into(), RoleSpecification::SessionUser],
+        names: vec!["absent".into(), "uqa".into()],
         if_exists: true,
     };
     let error = resolve_drop_role_names(&inputs.context(), &statement, "uqa", "uqa", &inputs.roles)
@@ -157,6 +157,107 @@ fn grant_binds_explicit_grantor_before_recipients_without_aliasing_target_names(
     assert_eq!(bound.grantor.unwrap().name, "current_0");
     assert_eq!(bound.members[0].name, "current_1");
     assert_eq!(inputs.current_reads.get(), 2);
+}
+
+#[test]
+fn drop_special_role_targets_check_createrole_before_rejecting_specifications() {
+    let mut inputs = Inputs::new();
+    for (index, name) in ["plain", "creator"].into_iter().enumerate() {
+        let mut role = RoleDefinition::bootstrap();
+        role.name = name.into();
+        role.oid = 20_000 + i64::try_from(index).unwrap();
+        role.object_id = [u8::try_from(index + 1).unwrap(); 16];
+        role.attributes = if name == "creator" {
+            BTreeSet::from([RoleAttribute::CreateRole])
+        } else {
+            BTreeSet::new()
+        };
+        inputs.roles.insert(name.into(), role);
+    }
+    for current in ["plain", "creator", "uqa"] {
+        for requested in [
+            RoleSpecification::CurrentUser,
+            RoleSpecification::SessionUser,
+            RoleSpecification::Named("public".into()),
+        ] {
+            for if_exists in [false, true] {
+                let statement = DropRoleStmt {
+                    names: vec![requested.clone()],
+                    if_exists,
+                };
+                let error = resolve_drop_role_names(
+                    &inputs.context(),
+                    &statement,
+                    current,
+                    "uqa",
+                    &inputs.roles,
+                )
+                .unwrap_err();
+                assert_eq!(
+                    error.sqlstate(),
+                    Some(if current == "plain" { "42501" } else { "22023" }),
+                    "{current}/{requested}/{if_exists}"
+                );
+                if current != "plain" {
+                    assert!(
+                        matches!(error, SQLError::Routine { message, .. } if message == "cannot use special role specifier in DROP ROLE")
+                    );
+                }
+            }
+        }
+    }
+    assert_eq!(inputs.current_reads.get(), 0);
+    assert!(inputs.notices.borrow().is_empty());
+}
+
+#[test]
+fn drop_special_role_targets_preserve_prior_missing_name_errors_and_notices() {
+    for if_exists in [false, true] {
+        let inputs = Inputs::new();
+        let statement = DropRoleStmt {
+            names: vec!["absent".into(), RoleSpecification::CurrentUser],
+            if_exists,
+        };
+        let error =
+            resolve_drop_role_names(&inputs.context(), &statement, "uqa", "uqa", &inputs.roles)
+                .unwrap_err();
+        assert_eq!(
+            error.sqlstate(),
+            Some(if if_exists { "22023" } else { "42704" })
+        );
+        assert_eq!(inputs.current_reads.get(), 0);
+        let expected = if if_exists {
+            vec![(
+                "NOTICE".into(),
+                "role \"absent\" does not exist, skipping".into(),
+            )]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(*inputs.notices.borrow(), expected);
+    }
+}
+
+#[test]
+fn drop_special_role_targets_leave_quoted_uppercase_names_literal() {
+    let mut inputs = Inputs::new();
+    let names = ["CURRENT_USER", "CURRENT_ROLE", "SESSION_USER", "PUBLIC"];
+    for (index, name) in names.into_iter().enumerate() {
+        let mut role = RoleDefinition::bootstrap();
+        role.name = name.into();
+        role.oid = 20_000 + i64::try_from(index).unwrap();
+        role.object_id = [u8::try_from(index + 1).unwrap(); 16];
+        inputs.roles.insert(name.into(), role);
+    }
+    let statement = DropRoleStmt {
+        names: names.map(RoleSpecification::from).to_vec(),
+        if_exists: false,
+    };
+    assert_eq!(
+        resolve_drop_role_names(&inputs.context(), &statement, "uqa", "uqa", &inputs.roles)
+            .unwrap(),
+        names.map(str::to_owned)
+    );
 }
 
 #[test]

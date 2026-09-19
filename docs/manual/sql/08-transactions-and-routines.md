@@ -556,7 +556,14 @@ SELECT manual_identity(7);
 
 The durable bootstrap role is initially named `uqa`. The implemented role lifecycle includes `CREATE ROLE` or `CREATE USER`, `ALTER ROLE`, and `DROP ROLE` for the `SUPERUSER`, `INHERIT`, `CREATEROLE`, `CREATEDB`, `LOGIN`, `REPLICATION`, `BYPASSRLS`, and connection-limit attributes. `pg_roles` and `pg_user` expose this state, and a role that owns a routine or appears in its ACL cannot be dropped until that dependency is removed.
 
+`DROP ROLE [IF EXISTS] name [, ...]` takes role identifiers, returns no rows and completes with `DROP ROLE`. Deletions participate in transaction and savepoint rollback and survive reopen when committed; validation failure leaves every requested role intact. CREATEROLE authority is checked first (`42501` on denial), then targets are validated in written order. The special specifiers CURRENT_USER, CURRENT_ROLE, SESSION_USER and PUBLIC, including the exact lowercase quoted name `"public"`, report `22023` instead of resolving a session identity. Quoted uppercase names such as `"CURRENT_USER"` and `"PUBLIC"` are ordinary role identifiers. A missing ordinary name reports `42704`; `IF EXISTS` emits a notice and continues, but does not permit special specifiers. An earlier missing-name error or notice retains its position before a later invalid target.
+
 `DROP ROLE` protects the effective current role, the outer role selected by SET ROLE before any SECURITY DEFINER substitution, and the session user. Deleting any of these identities reports `55006`; the effective/outer role uses the current-user diagnostic, and a distinct session user uses the session-user diagnostic. These checks precede target-administration and object-dependency checks after validating CREATEROLE authority. A rename does not release this protection, and reusing the former name does not transfer it to the replacement role.
+
+```sql execute
+CREATE ROLE manual_drop_target;
+DROP ROLE manual_drop_target;
+```
 
 `ALTER ROLE old_name RENAME TO new_name` changes a role's name; `ALTER USER` and `ALTER GROUP` accept the same rename form. Both arguments are identifiers, including quoted names such as `"CURRENT_USER"`, and are not session-keyword substitutions. The command returns no rows and completes with `ALTER ROLE`. Renaming preserves the role's OID, incarnation, attributes, memberships, owned objects and ACL paths without rewriting dependent catalogs. Existing sessions and stored SECURITY DEFINER owners retain that identity and display its new name. A new role at the former name acquires none of this authority. Changes participate in transaction and savepoint rollback and survive reopen when committed.
 

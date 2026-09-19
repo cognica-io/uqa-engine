@@ -19,6 +19,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reject special role specifiers in DROP ROLE after checking CREATEROLE authority, matching PostgreSQL 18 error and notice order. Preserve quoted uppercase role names and reject invalid multi-target deletions without publishing partial removals.
+
 - Prevent SECURITY DEFINER code from dropping its caller’s selected role. Keep effective, outer-selected and session identity protection distinct, with PostgreSQL 18 error precedence and session-user diagnostics.
 
 - Implement SQL role renaming with retained OIDs, incarnations, memberships, ownership and ACLs. Preserve selected sessions and SECURITY DEFINER authority through name reuse, including bootstrap-role renaming. Bind ACL recipients and new owners before waits so peer renames cannot retarget publication. Coordinate tuple and destination-name conflicts with transaction/savepoint undo; development record format 27 excludes incompatible writers.
