@@ -67,25 +67,14 @@ pub(super) fn reserve_creation(
         });
     }
     name_guard.retain();
-    loop {
-        let oid = crate::catalog::identity::allocate_catalog_oid("schema")?;
-        if oid_in_use(context.schemas, oid) {
-            continue;
-        }
-        let guard = context.locks.acquire_shared_catalog(
-            SharedCatalogLock::Object {
-                class_id: SCHEMA_CATALOG_CLASS_ID,
-                oid: u32::try_from(oid).expect("allocated OID fits in u32"),
-            },
-            RelationLockMode::AccessExclusive,
-        )?;
-        context.locks.refresh_shared_catalog()?;
-        if oid_in_use(context.schemas, oid) {
-            continue;
-        }
-        guard.retain();
-        return new_tuple(oid).map_err(|error| SQLError::Internal(error.to_string()));
-    }
+    let oid = crate::catalog::identity::reserve_catalog_oid(
+        context.locks,
+        SCHEMA_CATALOG_CLASS_ID,
+        "schema",
+        |oid| Ok(oid_in_use(context.schemas, oid)),
+        || crate::catalog::identity::allocate_catalog_oid("schema"),
+    )?;
+    new_tuple(oid).map_err(|error| SQLError::Internal(error.to_string()))
 }
 
 fn oid_in_use(

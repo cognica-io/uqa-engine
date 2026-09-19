@@ -8,6 +8,9 @@
 
 pub use uqa_storage::catalog::new_nonzero_catalog_identity;
 
+mod reservation;
+pub use reservation::reserve_catalog_oid;
+
 pub fn allocate_catalog_oid(kind: &str) -> Result<i64, uqa_sql::SQLError> {
     loop {
         let mut bytes = [0; 4];
