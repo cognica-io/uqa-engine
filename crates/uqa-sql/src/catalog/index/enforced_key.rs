@@ -13,6 +13,7 @@ pub struct EnforcedKey {
     pub constraint: TableKeyConstraint,
     pub keys: Vec<IndexKey>,
     pub index: Option<uqa_core::RelationIdentity>,
+    pub index_catalog: Option<super::IndexCatalogIdentity>,
     pub predicate: Option<Box<Expr>>,
     pub constraint_owned: bool,
 }
@@ -35,6 +36,7 @@ impl From<TableKeyConstraint> for EnforcedKey {
                 .map(IndexKey::Column)
                 .collect(),
             index: None,
+            index_catalog: None,
             constraint,
             predicate: None,
             constraint_owned: true,

@@ -38,18 +38,21 @@ pub type CatalogIdentityAllocator<'a> = dyn CatalogObjectAllocator + 'a;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CatalogOidClass {
     Constraint,
+    Relation,
 }
 
 impl CatalogOidClass {
     pub const fn class_id(self) -> u32 {
         match self {
             Self::Constraint => 2606,
+            Self::Relation => 1259,
         }
     }
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Constraint => "constraint",
+            Self::Relation => "relation",
         }
     }
 }

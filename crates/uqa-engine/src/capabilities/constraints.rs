@@ -152,34 +152,6 @@ impl Engine {
 }
 
 impl Engine {
-    pub(crate) fn index_predicate_accepts(
-        &self,
-        table: &str,
-        predicate: Option<&uqa_sql::ast::Expr>,
-        document: &Document,
-    ) -> Result<bool, SQLError> {
-        uqa_execution::mutation::constraints::index_keys::index_predicate_accepts(
-            self.constraint_execution_context().index_expressions(),
-            table,
-            predicate,
-            document,
-        )
-    }
-
-    pub(crate) fn index_key_values(
-        &self,
-        table: &str,
-        keys: &[uqa_sql::ast::IndexKey],
-        document: &Document,
-    ) -> Result<Vec<Value>, SQLError> {
-        uqa_execution::mutation::constraints::index_keys::index_key_values(
-            self.constraint_execution_context().index_expressions(),
-            table,
-            keys,
-            document,
-        )
-    }
-
     pub(crate) fn validate_deferred_foreign_key_checks(
         &self,
         checks: &[crate::DeferredForeignKeyCheck],

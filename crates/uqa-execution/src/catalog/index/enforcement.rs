@@ -44,6 +44,7 @@ pub fn enforced_keys(
             let index_keys: Vec<IndexKey> = serde_json::from_str(&index.columns_json)?;
             keys.push(EnforcedKey {
                 index: Some(index.relation.clone()),
+                index_catalog: definition.catalog,
                 keys: index_keys.clone(),
                 predicate: definition.predicate,
                 constraint_owned: false,

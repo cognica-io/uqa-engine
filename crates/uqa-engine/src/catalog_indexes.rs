@@ -105,6 +105,13 @@ impl Engine {
             .get(&table_relation)
             .map(|table| table.persistence)
             .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` does not exist")))?;
+        let definition = uqa_execution::schema::indexes::registration::prepare(
+            self.catalog_identity_reservation_context(),
+            &relation,
+            &table_relation,
+            definition,
+        )
+        .map_err(|error| StorageBackendError::backend("index catalog identity", error))?;
         let columns_json = serde_json::to_string(columns).map_err(StorageBackendError::from)?;
         let options_map: std::collections::BTreeMap<String, String> =
             options.iter().cloned().collect();
@@ -116,7 +123,7 @@ impl Engine {
             table_name: table.clone(),
             columns_json: columns_json.clone(),
             parameters_json: parameters_json.clone(),
-            definition_json: Some(serde_json::to_string(definition)?),
+            definition_json: Some(serde_json::to_string(&definition)?),
         };
         let previous = self
             .durable

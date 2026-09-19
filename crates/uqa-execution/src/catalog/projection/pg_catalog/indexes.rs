@@ -36,7 +36,10 @@ pub struct CatalogIndexRelation {
 
 impl CatalogIndexRelation {
     pub fn oid(&self) -> i64 {
-        relation_oid(self.relkind, &self.relation.schema, &self.relation.name)
+        self.definition.catalog.as_ref().map_or_else(
+            || relation_oid(self.relkind, &self.relation.schema, &self.relation.name),
+            |catalog| catalog.identity.oid,
+        )
     }
 }
 
@@ -165,7 +168,10 @@ fn append_index_tree(
                 .remove(&reusable)
                 .ok_or_else(|| SQLError::Internal("partition index disappeared".into()))?
         } else {
+            let mut definition = index.definition.clone();
+            definition.catalog = None;
             CatalogIndexRelation {
+                definition,
                 relation: allocate_derived_index_name(
                     &schema,
                     &table,

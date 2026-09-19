@@ -4,81 +4,48 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Typed physical index policies, expression evaluation, and shared rebuilds.
+//! Retain document guards, index definitions and physical publication handles for execution-owned index work.
 
 use super::{
-    BTreeMap, BTreeSet, ColumnValueIndex, DocId, SQLError, StorageBackendError,
-    StorageBackendResult, TableState, Value, ValueIndexKey,
+    BTreeMap, ColumnValueIndex, DocId, SQLError, StorageBackendResult, TableState, Value,
+    ValueIndexKey,
 };
 use crate::Engine;
-use uqa_sql::ast::IndexKey;
+use uqa_execution::catalog::index::physical::PhysicalIndexDefinitions;
 
-fn storage_error(error: impl std::fmt::Display) -> StorageBackendError {
-    StorageBackendError::Other(error.to_string())
+struct RetainedIndexDocuments<'a>(&'a TableState);
+
+impl uqa_execution::catalog::index::physical::rebuild::IndexDocuments
+    for RetainedIndexDocuments<'_>
+{
+    fn read(&self) -> Box<dyn std::ops::Deref<Target = Box<dyn uqa_storage::DocumentStore>> + '_> {
+        Box::new(self.0.document_store.read())
+    }
 }
 
 impl Engine {
+    fn physical_index_definitions(
+        &self,
+    ) -> StorageBackendResult<std::sync::Arc<PhysicalIndexDefinitions>> {
+        self.runtime
+            .physical_index_cache
+            .bind(self.durable.catalog_indexes.snapshot())
+    }
+
     pub(crate) fn value_indexable_fields(
         &self,
         table: &str,
     ) -> StorageBackendResult<Vec<ValueIndexKey>> {
-        let Some(table_name) = self.try_resolve_table_name(table)? else {
+        let Some(name) = self.try_resolve_table_name(table)? else {
             return Ok(Vec::new());
         };
-        let mut fields = BTreeSet::new();
-        if let Some(table) = self.try_table(&table_name)? {
-            for column in table
-                .columns
-                .read()
-                .iter()
-                .filter(|column| column.primary_key || column.unique)
-            {
-                fields.insert(ValueIndexKey::Column(column.name.clone()));
-            }
-            for constraint in table.key_constraints.read().iter() {
-                fields.extend(
-                    constraint
-                        .columns
-                        .iter()
-                        .cloned()
-                        .map(ValueIndexKey::Column),
-                );
-            }
-        }
-        let rows = self
-            .durable
-            .catalog_indexes
-            .read()
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-        for row in rows {
-            if !row.index_type.eq_ignore_ascii_case("btree") {
-                continue;
-            }
-            let applies = row.table_name == table_name
-                || self
-                    .loaded_table_hierarchy(
-                        &crate::RelationIdentity::from_legacy_name(&row.table_name)
-                            .map_err(storage_error)?,
-                    )
-                    .is_some_and(|hierarchy| hierarchy.partition_spec.is_some())
-                    && self
-                        .hierarchy_scan_tables(&row.table_name, true)
-                        .map_err(storage_error)?
-                        .contains(&table_name);
-            if !applies {
-                continue;
-            }
-            let keys: Vec<IndexKey> = serde_json::from_str(&row.columns_json)?;
-            if keys.iter().any(|key| key.column().is_none()) {
-                fields.insert(ValueIndexKey::Index(row.relation.qualified_name()));
-            }
-            if let Some(IndexKey::Column(column)) = keys.first() {
-                fields.insert(ValueIndexKey::Column(column.clone()));
-            }
-        }
-        Ok(fields.into_iter().collect())
+        let Some(state) = self.try_table(&name)? else {
+            return Ok(Vec::new());
+        };
+        let columns = state.columns.snapshot();
+        let constraints = state.key_constraints.snapshot();
+        self.physical_index_definitions()?
+            .indexable_fields(self, &name, &columns, &constraints)
     }
 
     pub(crate) fn value_index_document_values(
@@ -87,45 +54,14 @@ impl Engine {
         fields: &[ValueIndexKey],
         document: &BTreeMap<String, Value>,
     ) -> Result<BTreeMap<ValueIndexKey, Value>, SQLError> {
-        fields
-            .iter()
-            .map(|field| {
-                let value = match field {
-                    ValueIndexKey::Column(column) => {
-                        document.get(column).cloned().unwrap_or(Value::Null)
-                    }
-                    ValueIndexKey::Index(name) => {
-                        let relation = crate::RelationIdentity::from_legacy_name(name)
-                            .map_err(SQLError::Internal)?;
-                        let row = self
-                            .durable
-                            .catalog_indexes
-                            .read()
-                            .get(&relation)
-                            .cloned()
-                            .ok_or_else(|| {
-                                SQLError::Internal(format!(
-                                    "missing physical index definition {name}"
-                                ))
-                            })?;
-                        let definition = crate::catalog_indexes::index_definition(&row)
-                            .map_err(|error| SQLError::Internal(error.to_string()))?;
-                        if self.index_predicate_accepts(
-                            table,
-                            definition.predicate.as_deref(),
-                            document,
-                        )? {
-                            let keys: Vec<IndexKey> = serde_json::from_str(&row.columns_json)
-                                .map_err(|error| SQLError::Internal(error.to_string()))?;
-                            Value::Row(self.index_key_values(table, &keys, document)?)
-                        } else {
-                            Value::Null
-                        }
-                    }
-                };
-                Ok((field.clone(), value))
-            })
-            .collect()
+        self.physical_index_definitions()
+            .map_err(|error| uqa_sql::catalog::errors::storage_error("index definitions", &error))?
+            .document_values(
+                self.constraint_execution_context().index_expressions(),
+                table,
+                fields,
+                document,
+            )
     }
 
     pub(super) fn project_value_index_rows(
@@ -148,70 +84,14 @@ impl Engine {
         fields: &[ValueIndexKey],
         ids: &[DocId],
     ) -> StorageBackendResult<Vec<Vec<(DocId, Value)>>> {
-        let columns = fields
-            .iter()
-            .map(|field| match field {
-                ValueIndexKey::Column(name) => Some(name.as_str()),
-                ValueIndexKey::Index(_) => None,
-            })
-            .collect::<Option<Vec<_>>>();
-        let mut result = fields
-            .iter()
-            .map(|_| Vec::with_capacity(ids.len()))
-            .collect::<Vec<_>>();
-        for chunk in ids.chunks(256) {
-            if let Some(columns) = &columns {
-                let store = table.document_store.read();
-                let mut projected = store.get_fields_multi(chunk, columns)?;
-                for id in chunk {
-                    let Some(values) = projected.remove(id) else {
-                        if store.get(*id)?.is_none() {
-                            continue;
-                        }
-                        return Err(storage_error(format!(
-                            "value-index rebuild for {table_name} lost document {id}"
-                        )));
-                    };
-                    if values.len() != fields.len() {
-                        return Err(storage_error(format!(
-                            "value-index rebuild for {table_name} returned {} fields; expected {}",
-                            values.len(),
-                            fields.len()
-                        )));
-                    }
-                    for (index, value) in values.into_iter().enumerate() {
-                        result[index].push((*id, value));
-                    }
-                }
-            } else {
-                // Release document storage before evaluating user routines; callbacks can read the same relation.
-                let documents = {
-                    let store = table.document_store.read();
-                    chunk
-                        .iter()
-                        .map(|id| store.get(*id).map(|document| (*id, document)))
-                        .collect::<StorageBackendResult<Vec<_>>>()?
-                };
-                for (id, document) in documents {
-                    let Some(document) = document else {
-                        continue;
-                    };
-                    let values = self
-                        .value_index_document_values(table_name, fields, &document)
-                        .map_err(|error| StorageBackendError::backend("index expression", error))?;
-                    for (index, field) in fields.iter().enumerate() {
-                        result[index].push((
-                            id,
-                            values
-                                .get(field)
-                                .cloned()
-                                .ok_or_else(|| storage_error("missing prepared physical key"))?,
-                        ));
-                    }
-                }
-            }
-        }
-        Ok(result)
+        uqa_execution::catalog::index::physical::rebuild::project(
+            &RetainedIndexDocuments(table),
+            self.physical_index_definitions()?.as_ref(),
+            self.constraint_execution_context().index_expressions(),
+            table_name,
+            fields,
+            ids,
+        )
     }
 
     pub(super) fn rebuild_persistent_value_indexes(

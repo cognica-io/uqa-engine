@@ -17,6 +17,7 @@ use uqa_sql::catalog::constraints::ConstraintIdentity;
 pub use uqa_sql::catalog::domain::domain_object_oid;
 
 mod identity_claims;
+pub(crate) use identity_claims::relation_claims;
 pub use identity_claims::{catalog_oid_in_use, validate_catalog_identity_claim};
 
 pub fn is_virtual_catalog_relation(resolution: &RelationNameResolution, name: &str) -> bool {

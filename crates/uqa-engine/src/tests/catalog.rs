@@ -10,6 +10,7 @@ mod alteration_authority;
 mod events;
 mod foreign_tables;
 mod hierarchy_restoration;
+mod index_identities;
 mod relations;
 mod roles;
 mod routines;

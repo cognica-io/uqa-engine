@@ -274,6 +274,7 @@ pub fn build_pg_class(
             0.0,
             false,
         );
+        index_row.insert("oid".into(), int_value(index.oid()));
         index_row.insert(
             "relam".into(),
             int_value(index_access_method_oid(&index.index_type)),

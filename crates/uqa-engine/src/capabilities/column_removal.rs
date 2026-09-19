@@ -145,12 +145,9 @@ impl ColumnDropIndexes for Engine {
         }
         Ok(())
     }
-    fn remove_value_index(&self, table: &str, name: &RelationIdentity) -> StorageBackendResult<()> {
+    fn remove_value_index(&self, table: &str, key: &ValueIndexKey) -> StorageBackendResult<()> {
         if let Some(state) = self.try_table(table)? {
-            state
-                .value_indexes
-                .write()
-                .remove(&ValueIndexKey::Index(name.qualified_name()));
+            state.value_indexes.write().remove(key);
         }
         Ok(())
     }

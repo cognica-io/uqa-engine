@@ -145,10 +145,10 @@ impl EnforcedKeyExecution for EnforcedKey {
         ignored: Option<DocId>,
     ) -> Result<Option<DocId>, SQLError> {
         if self.keys.iter().any(|key| key.column().is_none()) {
-            let identity = self.index.as_ref().ok_or_else(|| {
+            let identity = self.index_catalog.as_ref().ok_or_else(|| {
                 SQLError::Internal("expression index has no physical identity".into())
             })?;
-            let key = uqa_storage::ValueIndexKey::Index(identity.qualified_name());
+            let key = uqa_storage::ValueIndexKey::Index(identity.physical_key.clone());
             let indexed = context
                 .indexes
                 .value_index_scan_key(

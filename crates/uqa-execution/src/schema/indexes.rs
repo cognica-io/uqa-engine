@@ -82,5 +82,7 @@ pub fn validate_unique_index(
 
 pub mod creation;
 
+pub mod registration;
 pub mod removal;
+pub mod restoration;
 pub mod routines;

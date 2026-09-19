@@ -14,6 +14,9 @@ use uqa_sql::{
     SQLError,
 };
 
+mod relations;
+pub(crate) use relations::relation_claims;
+
 pub fn catalog_oid_in_use(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
@@ -21,6 +24,9 @@ pub fn catalog_oid_in_use(
     oid: i64,
 ) -> Result<bool, SQLError> {
     match class {
+        CatalogOidClass::Relation => Ok(relation_claims(catalog, resolution)?
+            .iter()
+            .any(|claim| claim.oid == oid)),
         CatalogOidClass::Constraint => {
             let snapshot = catalog.snapshot();
             for (relation, table) in &snapshot.tables {
@@ -61,6 +67,25 @@ pub fn validate_catalog_identity_claim(
     identity: ConstraintCatalogIdentity,
 ) -> Result<bool, SQLError> {
     match class {
+        CatalogOidClass::Relation => {
+            let mut found = false;
+            for claim in relation_claims(catalog, resolution)? {
+                if claim.oid == identity.oid || claim.object_id == Some(identity.object_id) {
+                    if &claim.relation != target
+                        || claim.oid != identity.oid
+                        || claim.object_id != Some(identity.object_id)
+                        || found
+                    {
+                        return Err(SQLError::Internal(
+                            "supplied relation catalog identity conflicts with an existing row"
+                                .into(),
+                        ));
+                    }
+                    found = true;
+                }
+            }
+            Ok(found)
+        }
         CatalogOidClass::Constraint => {
             let snapshot = catalog.snapshot();
             let mut found = false;

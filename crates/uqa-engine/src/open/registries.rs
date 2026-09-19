@@ -48,7 +48,7 @@ impl Engine {
             .restore_triggers_from_metadata(catalog, mode.allows_migration())?;
         self.event_restore_context()
             .restore_rules_from_metadata(catalog, mode.allows_migration())?;
-        self.restore_catalog_indexes_from_catalog(catalog)?;
+        self.restore_catalog_indexes_from_catalog(catalog, mode)?;
         self.restore_path_indexes_from_catalog(catalog)?;
         Ok(())
     }
@@ -76,49 +76,17 @@ impl Engine {
     fn restore_catalog_indexes_from_catalog(
         &self,
         catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
-        for row in catalog.load_catalog_indexes()? {
-            crate::catalog_indexes::index_definition(&row)?;
-            let table = crate::RelationIdentity::from_legacy_name(&row.table_name)
-                .map_err(StorageBackendError::Other)?;
-            if row.relation.schema != table.schema {
-                return Err(StorageBackendError::Other(format!(
-                    "catalog index `{}` belongs to schema `{}` but references table `{}` in schema `{}`",
-                    row.relation.qualified_name(),
-                    row.relation.schema,
-                    row.table_name,
-                    table.schema
-                )));
-            }
-            if !self.storage.tables.read().contains_key(&table) {
-                return Err(StorageBackendError::Other(format!(
-                    "catalog index `{}` references missing table `{}`",
-                    row.relation.qualified_name(),
-                    row.table_name
-                )));
-            }
-            let conflicting_kind = if self.storage.tables.read().contains_key(&row.relation) {
-                Some("table")
-            } else if self.durable.views.read().contains_key(&row.relation) {
-                Some("view")
-            } else if self.durable.sequences.read().contains_key(&row.relation) {
-                Some("sequence")
-            } else if self
-                .durable
-                .foreign_tables
-                .read()
-                .contains_key(&row.relation)
-            {
-                Some("foreign table")
-            } else {
-                None
-            };
-            if let Some(kind) = conflicting_kind {
-                return Err(StorageBackendError::Other(format!(
-                    "catalog index `{}` conflicts with existing {kind}",
-                    row.relation.qualified_name()
-                )));
-            }
+        let mut resolution = self.session_execution_view().relation_name_resolution();
+        resolution.set_lookup_mode(crate::capabilities::RelationLookupMode::Bound);
+        let rows = uqa_execution::schema::indexes::restoration::restore(
+            catalog,
+            &self.catalog_read_view(),
+            &resolution,
+            mode.allows_migration(),
+        )?;
+        for row in rows {
             self.durable
                 .catalog_indexes
                 .write()

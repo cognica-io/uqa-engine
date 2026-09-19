@@ -41,8 +41,12 @@ impl Session {
     }
 
     fn available(&self, oid: i64) -> bool {
+        self.available_class(CatalogOidClass::Constraint, oid)
+    }
+
+    fn available_class(&self, class: CatalogOidClass, oid: i64) -> bool {
         let key = self.locks.shared_catalog_key(SharedCatalogLock::Object {
-            class_id: 2606,
+            class_id: class.class_id(),
             oid: u32::try_from(oid).unwrap(),
         });
         let available = self
@@ -58,6 +62,84 @@ impl Session {
         self.locks.release_session(2);
         available
     }
+}
+
+#[test]
+fn relation_addresses_exclude_hidden_relations_before_and_after_wait_and_release_losing_locks() {
+    let object = [90; 16];
+    let candidate = uqa_sql::catalog::oids::stable_object_oid("relation", &object);
+    for after_refresh in [false, true] {
+        let session = Session::new();
+        if after_refresh {
+            *session.refresh.lock() = Some(occupied(50001));
+        } else {
+            *session.current.write() = occupied(50001);
+        }
+        let allocated = session
+            .allocator()
+            .allocate_catalog_oid(CatalogOidClass::Relation, &object)
+            .unwrap();
+        assert_ne!(allocated, candidate);
+        assert!(session.available_class(CatalogOidClass::Relation, candidate));
+        assert!(!session.available_class(CatalogOidClass::Relation, allocated));
+        // Relation and constraint OIDs occupy different lock classes.
+        assert!(session.available(allocated));
+        session.locks.release_mark_above(1, 2);
+        assert!(session.available_class(CatalogOidClass::Relation, allocated));
+    }
+}
+
+#[test]
+fn supplied_relation_addresses_validate_incarnation_owner_and_refreshed_collision() {
+    let existing = ConstraintCatalogIdentity {
+        object_id: [90; 16],
+        oid: uqa_sql::catalog::oids::stable_object_oid("relation", &[90; 16]),
+    };
+    let owner = uqa_core::RelationIdentity::new("hidden_schema", "peer");
+    let session = Session::new();
+    *session.current.write() = occupied(50001);
+    session
+        .allocator()
+        .include_catalog_identity(&owner, CatalogOidClass::Relation, existing)
+        .unwrap();
+    assert!(session.available_class(CatalogOidClass::Relation, existing.oid));
+    let target = uqa_core::RelationIdentity::new("public", "index_target");
+    for (relation, identity) in [
+        (target.clone(), existing),
+        (
+            owner.clone(),
+            ConstraintCatalogIdentity {
+                object_id: [92; 16],
+                ..existing
+            },
+        ),
+        (
+            owner,
+            ConstraintCatalogIdentity {
+                oid: existing.oid + 1,
+                ..existing
+            },
+        ),
+    ] {
+        assert!(session
+            .allocator()
+            .include_catalog_identity(&relation, CatalogOidClass::Relation, identity)
+            .is_err());
+    }
+    let session = Session::new();
+    *session.refresh.lock() = Some(occupied(50001));
+    assert!(session
+        .allocator()
+        .include_catalog_identity(
+            &target,
+            CatalogOidClass::Relation,
+            ConstraintCatalogIdentity {
+                object_id: [92; 16],
+                ..existing
+            }
+        )
+        .is_err());
+    assert!(session.available_class(CatalogOidClass::Relation, existing.oid));
 }
 
 impl CatalogSnapshotSource for Session {
