@@ -468,21 +468,31 @@ fn skipped_creation_and_replacement_do_not_add_a_dependency_on_the_invoking_role
         ] {
             let (_directory, first, second) = sessions(provider);
             let lock = setup(&first);
-            sql(&first, &format!("ALTER ROLE dependent SUPERUSER; {create}; SET ROLE dependent; BEGIN; {replace}"));
-            let key = first.row_locks.shared_catalog_key(lock);
-            assert!(
-                first
-                    .row_locks
-                    .try_acquire_relation(
-                        second.session_id,
-                        key,
-                        uqa_execution::row_locks::RelationLockMode::AccessExclusive,
-                        0,
-                        &second.runtime.cancellation
-                    )
-                    .unwrap(),
-                "{replace}"
+            // Commit role setup before BEGIN so its pg_authid tuple lock cannot mask creation dependencies.
+            sql(
+                &first,
+                &format!("ALTER ROLE dependent SUPERUSER; {create}; SET ROLE dependent"),
             );
+            sql(&first, &format!("BEGIN; {replace}"));
+            let SharedCatalogLock::Object { class_id, oid } = lock else {
+                unreachable!()
+            };
+            for address in [lock, SharedCatalogLock::Tuple { class_id, oid }] {
+                let key = first.row_locks.shared_catalog_key(address);
+                assert!(
+                    first
+                        .row_locks
+                        .try_acquire_relation(
+                            second.session_id,
+                            key,
+                            RelationLockMode::AccessExclusive,
+                            0,
+                            &second.runtime.cancellation
+                        )
+                        .unwrap(),
+                    "{replace}: {address:?}"
+                );
+            }
             first.row_locks.release_session(second.session_id);
             sql(&second, "DROP ROLE dependent");
             sql(&first, "ROLLBACK; RESET ROLE");
