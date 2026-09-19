@@ -4060,6 +4060,7 @@ dependencies = [
  "allocation-counter",
  "criterion",
  "getrandom 0.3.4",
+ "libc",
  "parking_lot",
  "proptest",
  "serde",
@@ -4069,6 +4070,7 @@ dependencies = [
  "thiserror 1.0.69",
  "uqa-analysis",
  "uqa-core",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

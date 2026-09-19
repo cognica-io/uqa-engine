@@ -7,14 +7,6 @@
 //! Native sidecar coordinator and its durable state.
 
 use std::collections::HashMap;
-#[cfg(unix)]
-use std::os::fd::AsRawFd;
-#[cfg(unix)]
-use std::os::unix::fs::FileExt;
-#[cfg(windows)]
-use std::os::windows::fs::FileExt;
-#[cfg(windows)]
-use std::os::windows::io::AsRawHandle;
 use std::path::Path;
 
 use parking_lot::Mutex;

@@ -30,6 +30,10 @@ pub mod inverted_index;
 pub mod ivf_index;
 pub mod key_value;
 pub mod mvcc;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+#[allow(unsafe_code)]
+// Narrow OS file calls; callers retain descriptor ownership and local arbitration.
+pub mod native_file;
 pub mod read_control;
 pub mod spatial_index;
 pub mod statistics_maintenance;
