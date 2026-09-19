@@ -6,13 +6,11 @@
 
 //! Role lifecycle ordering over retained authorization and publication guards.
 
-use std::collections::BTreeSet;
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::{AlterRoleStmt, CreateRoleStmt, DropRoleStmt, GrantRoleStmt},
     catalog::roles::{
         definition::{self, require_role_creation},
-        dependencies::ensure_roles_have_no_object_dependencies,
         memberships::require_role_attribute_authority,
         resolve_role_specification, role_can_set,
     },
@@ -22,6 +20,7 @@ pub mod context;
 mod identity;
 mod locking;
 mod memberships;
+mod tuples;
 use context::RoleExecutionContext;
 
 pub fn set_role(
@@ -143,15 +142,27 @@ pub fn alter_role(
     }
     let name = resolve_role_specification(context.analysis.names, &statement.name);
     let current = context.analysis.names.current_role();
+    let (original, replacement) = {
+        let roles = context.analysis.roles.role_definitions();
+        let name = name.catalog_name(&roles)?;
+        let mut next = definition::alter_role_candidate(
+            &context.analysis,
+            &roles,
+            &current,
+            name.clone(),
+            statement,
+        )?;
+        (
+            uqa_sql::catalog::roles::tuple::RoleTuple::bind(&roles[&name])?,
+            next.remove(&name).expect("validated role alteration"),
+        )
+    };
+    tuples::lock(context, &original)?;
     context.publication.prepare_writer()?;
     let mut roles = context.registry.write_roles();
-    let next = definition::alter_role_candidate(
-        &context.analysis,
-        &roles,
-        &current,
-        name.catalog_name(&roles)?,
-        statement,
-    )?;
+    original.revalidate(&roles)?;
+    let mut next = roles.clone();
+    next.insert(replacement.name.clone(), replacement);
     context.publication.persist_roles(&roles, &next)?;
     **roles = next;
     drop(roles);
@@ -167,42 +178,22 @@ pub fn drop_roles(
     let session = context.analysis.names.session_role();
     let names = locking::lock_drop_targets(context, statement, &current, &session)?;
     context.publication.prepare_writer()?;
+    let targets = tuples::prepare_drop(context, &names, &current, &session)?;
+    for target in &targets {
+        tuples::lock(context, target)?;
+    }
     let mut roles = context.registry.write_roles();
-    let snapshot = roles.clone();
-    for name in &names {
-        definition::require_role_drop_authority(
-            &context.analysis,
-            &snapshot,
-            &current,
-            &session,
-            name,
-        )?;
-    }
-    let identities = names
+    let identities = targets
         .iter()
-        .map(|name| snapshot[name].identity())
-        .collect::<BTreeSet<_>>();
+        .map(|target| {
+            target
+                .revalidate(&roles)
+                .map(uqa_sql::catalog::roles::RoleDefinition::identity)
+        })
+        .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
     let mut memberships = context.registry.write_memberships();
-    definition::ensure_no_grantor_dependencies(&memberships, &identities)?;
-    ensure_roles_have_no_object_dependencies(context.dependencies, &names, &snapshot)?;
-    for name in &names {
-        let role = super::roles::locking::RoleBinding::from_definition(&snapshot[name])?;
-        if context
-            .temporary_roles
-            .peer_temporary_role_reference(role.oid)?
-        {
-            return Err(SQLError::Routine {
-                sqlstate: "2BP01".into(),
-                message: format!(
-                    "role \"{name}\" cannot be dropped because some objects depend on it"
-                ),
-            });
-        }
-    }
-    let mut next_roles = snapshot;
-    for name in &names {
-        next_roles.remove(name);
-    }
+    let mut next_roles = roles.clone();
+    next_roles.retain(|_, role| !identities.contains(&role.identity()));
     let mut next_memberships = memberships.clone();
     next_memberships.retain(|_, membership| {
         !identities.contains(&membership.role.identity())

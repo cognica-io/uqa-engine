@@ -12,6 +12,7 @@ use std::collections::BTreeSet;
 
 pub mod identity;
 pub mod session;
+pub mod tuple;
 use identity::RoleBinding;
 pub use identity::{RoleIdentity, RoleReference};
 pub mod memberships;
@@ -23,6 +24,9 @@ pub struct RoleDefinition {
     /// Durable incarnation independent of the recyclable SQL-visible OID. Zero identifies legacy metadata that requires initial-open migration.
     #[serde(default)]
     pub object_id: [u8; 16],
+    /// Version of this definition tuple; even an attribute assignment of the same value creates a new tuple version. Zero requires initial-open conversion.
+    #[serde(default)]
+    pub revision: u64,
     pub name: String,
     pub attributes: BTreeSet<RoleAttribute>,
     pub connection_limit: i32,
@@ -68,6 +72,7 @@ impl RoleDefinition {
         Self {
             oid: 10,
             object_id: RoleIdentity::BOOTSTRAP.object_id,
+            revision: 1,
             name: "uqa".into(),
             attributes: BTreeSet::from([
                 RoleAttribute::Superuser,
@@ -85,6 +90,7 @@ impl RoleDefinition {
         Self {
             oid,
             object_id,
+            revision: 1,
             name: statement.name.clone(),
             attributes: statement.attributes.clone(),
             connection_limit: statement.connection_limit,
@@ -93,6 +99,17 @@ impl RoleDefinition {
 
     pub fn has(&self, attribute: RoleAttribute) -> bool {
         self.attributes.contains(&attribute)
+    }
+
+    pub fn advance_revision(&mut self) -> Result<(), crate::SQLError> {
+        self.revision = self
+            .revision
+            .checked_add(1)
+            .filter(|_| self.revision != 0)
+            .ok_or_else(|| {
+                crate::SQLError::Internal("invalid or exhausted role tuple revision".into())
+            })?;
+        Ok(())
     }
 }
 

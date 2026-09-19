@@ -51,6 +51,7 @@ pub(super) struct Catalog {
         RefCell<std::collections::VecDeque<BTreeMap<RoleMembershipKey, RoleMembership>>>,
     pub writer_memberships: RefCell<Option<BTreeMap<RoleMembershipKey, RoleMembership>>>,
     pub catalog_locks: RefCell<Vec<(u32, Option<u32>, crate::row_locks::RelationLockMode)>>,
+    pub tuple_locks: RefCell<Vec<(u32, u32, crate::row_locks::RelationLockMode)>>,
     database: BoundDatabaseSecurity,
     schemas: BTreeMap<String, BoundSchemaSecurity>,
     views: BTreeMap<RelationIdentity, StoredView>,
@@ -78,6 +79,7 @@ impl Catalog {
             refreshed_memberships: RefCell::new(std::collections::VecDeque::new()),
             writer_memberships: RefCell::new(None),
             catalog_locks: RefCell::new(Vec::new()),
+            tuple_locks: RefCell::new(Vec::new()),
             database: BoundDatabaseSecurity::bootstrap(),
             schemas: BTreeMap::new(),
             views: BTreeMap::new(),
@@ -348,11 +350,22 @@ impl crate::row_locks::shared_objects::SharedObjectLockSession for Catalog {
         mode: crate::row_locks::RelationLockMode,
     ) -> Result<crate::row_locks::ScopedRelationLock<'_>, SQLError> {
         self.released();
-        self.event("lock role");
-        self.catalog_locks.borrow_mut().push(match target {
-            SharedCatalogLock::Object { class_id, oid } => (class_id, Some(oid), mode),
-            SharedCatalogLock::Name { class_id, .. } => (class_id, None, mode),
-        });
+        match target {
+            SharedCatalogLock::Tuple { class_id, oid } => {
+                self.event("lock role tuple");
+                self.tuple_locks.borrow_mut().push((class_id, oid, mode));
+            }
+            SharedCatalogLock::Object { class_id, oid } => {
+                self.event("lock role");
+                self.catalog_locks
+                    .borrow_mut()
+                    .push((class_id, Some(oid), mode));
+            }
+            SharedCatalogLock::Name { class_id, .. } => {
+                self.event("lock role");
+                self.catalog_locks.borrow_mut().push((class_id, None, mode));
+            }
+        }
         self.locks.acquire_scoped_relation(
             1,
             self.locks.shared_catalog_key(target),

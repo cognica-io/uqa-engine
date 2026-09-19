@@ -21,6 +21,7 @@ fn actor() -> RoleDefinition {
         name: "actor".into(),
         oid: 16_384,
         object_id: [1; 16],
+        revision: 1,
         attributes: [RoleAttribute::Inherit].into(),
         connection_limit: -1,
     }

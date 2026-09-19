@@ -30,6 +30,7 @@ impl Roles {
                 RoleDefinition {
                     oid: 42,
                     object_id: [42; 16],
+                    revision: 1,
                     name: "owner".into(),
                     attributes: BTreeSet::new(),
                     connection_limit: -1,

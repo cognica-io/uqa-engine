@@ -23,6 +23,7 @@ pub(super) enum LockRelationIdentity {
     ScoringParameters(Arc<str>),
     SharedObject { class_id: u32, oid: u32 },
     SharedObjectName { class_id: u32, name: Arc<str> },
+    SharedObjectTuple { class_id: u32, oid: u32 },
 }
 
 impl LockRelationIdentity {
@@ -57,6 +58,12 @@ impl LockRelationIdentity {
                 let mut bytes = b"\xffshared-object-name".to_vec();
                 bytes.extend_from_slice(&class_id.to_be_bytes());
                 bytes.extend_from_slice(name.as_bytes());
+                bytes
+            }
+            Self::SharedObjectTuple { class_id, oid } => {
+                let mut bytes = b"\xffshared-object-tuple".to_vec();
+                bytes.extend_from_slice(&class_id.to_be_bytes());
+                bytes.extend_from_slice(&oid.to_be_bytes());
                 bytes
             }
         }

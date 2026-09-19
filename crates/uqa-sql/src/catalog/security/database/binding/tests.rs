@@ -22,6 +22,7 @@ fn role(name: &str, oid: i64, incarnation: u8) -> RoleDefinition {
         name: name.into(),
         oid,
         object_id: [incarnation; 16],
+        revision: 1,
         attributes: BTreeSet::new(),
         connection_limit: -1,
     }

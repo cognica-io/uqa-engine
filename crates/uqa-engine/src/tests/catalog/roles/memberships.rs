@@ -22,7 +22,7 @@ mod deletion;
 mod endpoints;
 mod locks;
 
-fn before_holder_ends(holder: &Engine, worker: Engine, statement: &str) -> Engine {
+pub(super) fn before_holder_ends(holder: &Engine, worker: Engine, statement: &str) -> Engine {
     use std::{sync::mpsc, thread, time::Duration};
     let statement = statement.to_string();
     let cancel = worker.runtime.cancellation.clone();

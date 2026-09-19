@@ -38,6 +38,10 @@ fn shared_object_lock_addresses_are_typed_stable_and_savepoint_owned() {
             class_id: 1260,
             name: "1260:20001",
         },
+        SharedCatalogLock::Tuple {
+            class_id: 1260,
+            oid: 20_001,
+        },
     ] {
         assert_ne!(
             manager.relation_bytes(key),

@@ -8,8 +8,9 @@ use super::*;
 mod fixtures;
 mod identity;
 mod memberships;
+mod tuples;
 use fixtures::{create, Catalog};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use uqa_sql::ast::{RoleAttribute, RoleMembershipOptions};
 
 #[test]
@@ -107,7 +108,7 @@ fn duplicate_creation_stops_before_membership_write_or_persistence() {
 }
 
 #[test]
-fn alter_holds_role_write_while_checking_membership_administration() {
+fn alter_authorizes_before_tuple_wait_and_holds_the_write_guard_for_publication() {
     let catalog = Catalog::new();
     catalog.role("creator", &[RoleAttribute::CreateRole]);
     catalog.role("managed", &[]);
@@ -121,23 +122,29 @@ fn alter_holds_role_write_while_checking_membership_administration() {
         members: Vec::new(),
     };
     alter_role(&catalog.context(), &statement).unwrap();
-    assert_eq!(
-        *catalog.events.borrow(),
-        [
-            "current",
-            "writer",
-            "write roles",
-            "read memberships",
-            "release memberships",
-            "persist roles",
-            "publish roles",
-            "release roles",
-            "epoch"
-        ]
-    );
+    let events = catalog.events.borrow();
+    let authority = events
+        .iter()
+        .position(|event| event == "read memberships")
+        .unwrap();
+    let locked = events
+        .iter()
+        .position(|event| event == "lock role tuple")
+        .unwrap();
+    let writer = events.iter().position(|event| event == "writer").unwrap();
+    assert!(authority < locked && locked < writer);
+    assert!(events.ends_with(&[
+        "persist roles".into(),
+        "publish roles".into(),
+        "release roles".into(),
+        "epoch".into()
+    ]));
+    assert!(catalog.catalog_locks.borrow().is_empty());
+    assert_eq!(catalog.tuple_locks.borrow().len(), 1);
     let roles = catalog.roles.borrow();
     assert!(roles["managed"].has(RoleAttribute::Login));
     assert_eq!(roles["managed"].connection_limit, 3);
+    assert_eq!(roles["managed"].revision, 2);
 }
 
 #[test]

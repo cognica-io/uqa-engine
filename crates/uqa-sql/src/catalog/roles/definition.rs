@@ -141,6 +141,7 @@ pub fn alter_role_candidate(
     if let Some(value) = statement.connection_limit {
         updated.connection_limit = value;
     }
+    updated.advance_revision()?;
     let mut next = roles.clone();
     next.insert(name, updated);
     Ok(next)

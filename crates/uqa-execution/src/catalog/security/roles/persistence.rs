@@ -92,7 +92,10 @@ fn restore_catalog(
     if format != records::RoleRecordFormat::Aggregate {
         records::validate_oids(catalog, &roles)?;
     }
-    if format != records::RoleRecordFormat::Identities {
+    if matches!(
+        format,
+        records::RoleRecordFormat::Aggregate | records::RoleRecordFormat::Definitions
+    ) {
         // Complete a candidate catalog before binding legacy membership names. No metadata is written until both candidates have been validated.
         for (name, role) in &mut roles {
             if role.object_id == [0; 16] {
@@ -105,16 +108,23 @@ fn restore_catalog(
         }
     }
     restoration::validate_role_identities(&roles).map_err(StorageBackendError::Other)?;
+    if format != records::RoleRecordFormat::Revisions {
+        for role in roles.values_mut() {
+            role.revision = 1;
+        }
+    }
+    uqa_sql::catalog::roles::tuple::validate_revisions(&roles)
+        .map_err(StorageBackendError::Other)?;
     let (memberships, membership_format) = memberships::read(catalog, &roles)?;
     if !allow_migration
-        && (format != records::RoleRecordFormat::Identities
+        && (format != records::RoleRecordFormat::Revisions
             || membership_format != memberships::MembershipFormat::Records)
     {
         return Err(StorageBackendError::Other(
             "role metadata requires initial-open record migration".into(),
         ));
     }
-    if format != records::RoleRecordFormat::Identities {
+    if format != records::RoleRecordFormat::Revisions {
         records::migrate(catalog, &roles)?;
     }
     if membership_format != memberships::MembershipFormat::Records {

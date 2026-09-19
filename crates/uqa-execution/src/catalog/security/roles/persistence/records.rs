@@ -14,13 +14,14 @@ use serde::Deserialize;
 
 pub(super) const ROLE_PREFIX: &str = "uqa.sql.role.v1:";
 const OID_PREFIX: &str = "uqa.sql.role_oid.v1:";
-const FORMAT: &str = r#"{"role_catalog_format":2}"#;
+const FORMAT: &str = r#"{"role_catalog_format":3}"#;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum RoleRecordFormat {
     Aggregate,
     Definitions,
     Identities,
+    Revisions,
 }
 
 #[derive(Deserialize)]
@@ -56,6 +57,7 @@ pub(super) fn read(
             let format = match format.role_catalog_format {
                 1 => RoleRecordFormat::Definitions,
                 2 => RoleRecordFormat::Identities,
+                3 => RoleRecordFormat::Revisions,
                 version => {
                     return Err(StorageBackendError::Other(format!(
                         "unsupported role catalog format {version}"
@@ -148,6 +150,7 @@ pub(super) fn persist(
     }
     uqa_sql::catalog::roles::restoration::validate_role_identities(after)
         .map_err(SQLError::Internal)?;
+    uqa_sql::catalog::roles::tuple::validate_revision_changes(before, after)?;
     for (name, role) in before {
         if after.get(name).is_none_or(|next| next.oid != role.oid) {
             catalog

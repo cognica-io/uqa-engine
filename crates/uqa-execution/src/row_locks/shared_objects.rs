@@ -13,6 +13,7 @@ use uqa_sql::SQLError;
 pub enum SharedCatalogLock<'a> {
     Object { class_id: u32, oid: u32 },
     Name { class_id: u32, name: &'a str },
+    Tuple { class_id: u32, oid: u32 },
 }
 
 pub trait SharedObjectLockSession {

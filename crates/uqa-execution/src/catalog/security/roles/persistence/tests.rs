@@ -93,6 +93,58 @@ fn role_definition_records_gain_stable_incarnations_only_during_initial_open() {
 }
 
 #[test]
+fn role_tuple_revisions_convert_only_legacy_records_and_preserve_current_versions() {
+    let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
+    let original = restore_and_migrate(&catalog).unwrap().roles;
+    for (name, role) in &original {
+        let mut value = serde_json::to_value(role).unwrap();
+        value.as_object_mut().unwrap().remove("revision");
+        catalog
+            .set_metadata(&records::role_key(name), &value.to_string())
+            .unwrap();
+    }
+    catalog
+        .set_metadata(ROLES_METADATA_KEY, r#"{"role_catalog_format":2}"#)
+        .unwrap();
+    let legacy = catalog.metadata_with_prefix(records::ROLE_PREFIX).unwrap();
+    assert!(restore(&catalog).is_err());
+    assert_eq!(
+        catalog.metadata_with_prefix(records::ROLE_PREFIX).unwrap(),
+        legacy
+    );
+    let migrated = restore_and_migrate(&catalog).unwrap().roles;
+    assert_eq!(migrated, original);
+    assert_eq!(
+        catalog.get_metadata(ROLES_METADATA_KEY).unwrap().as_deref(),
+        Some(r#"{"role_catalog_format":3}"#)
+    );
+    let mut changed = migrated.clone();
+    changed.get_mut("uqa").unwrap().advance_revision().unwrap();
+    persist_roles(Some(&catalog), &migrated, &changed).unwrap();
+    assert_eq!(restore(&catalog).unwrap().roles["uqa"].revision, 2);
+    assert_eq!(
+        restore_and_migrate(&catalog).unwrap().roles["uqa"].revision,
+        2
+    );
+    for missing in [false, true] {
+        let mut value = serde_json::to_value(&changed["uqa"]).unwrap();
+        if missing {
+            value.as_object_mut().unwrap().remove("revision");
+        } else {
+            value["revision"] = 0.into();
+        }
+        let json = value.to_string();
+        catalog.set_metadata("uqa.sql.role.v1:uqa", &json).unwrap();
+        assert!(restore(&catalog).is_err());
+        assert!(restore_and_migrate(&catalog).is_err());
+        assert_eq!(
+            catalog.get_metadata("uqa.sql.role.v1:uqa").unwrap(),
+            Some(json)
+        );
+    }
+}
+
+#[test]
 fn role_metadata_restoration_validates_definitions_before_loading_memberships() {
     let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
     catalog
@@ -184,7 +236,7 @@ fn role_records_validate_format_name_and_oid_ownership() {
         let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
         restore_and_migrate(&catalog).unwrap();
         match corruption {
-            0 => catalog.set_metadata(ROLES_METADATA_KEY, r#"{"role_catalog_format":3}"#),
+            0 => catalog.set_metadata(ROLES_METADATA_KEY, r#"{"role_catalog_format":4}"#),
             1 => catalog.delete_metadata("uqa.sql.role_oid.v1:10"),
             2 => catalog.set_metadata("uqa.sql.role_oid.v1:10", "absent"),
             3 => catalog.set_metadata(

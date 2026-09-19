@@ -60,7 +60,7 @@ fn role_record_migration_preserves_legacy_oids_and_rolls_back_on_later_restore_f
                 .get_metadata("sql_roles_json")
                 .unwrap()
                 .as_deref(),
-            Some(r#"{"role_catalog_format":2}"#)
+            Some(r#"{"role_catalog_format":3}"#)
         );
     }
 }
@@ -132,5 +132,68 @@ fn role_incarnation_migration_rolls_back_with_initial_catalog_restoration() {
         drop(reopened);
         let reopened = Engine::from_persistent_provider(factory).unwrap();
         assert_eq!(*reopened.durable.roles.read(), *identities);
+    }
+}
+
+#[test]
+fn role_tuple_revision_conversion_rolls_back_with_later_catalog_restoration() {
+    for provider in 0..3 {
+        let (_directory, first, second) = sessions(provider);
+        sql(
+            &first,
+            "CREATE ROLE legacy LOGIN; CREATE ROLE member; GRANT legacy TO member",
+        );
+        let expected = first.durable.roles.snapshot();
+        let memberships = first.durable.role_memberships.snapshot();
+        let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
+        let raw = factory.open_session().unwrap();
+        raw.backend.begin_transaction().unwrap();
+        let mut legacy = Vec::new();
+        for (key, json) in raw
+            .catalog
+            .metadata_with_prefix("uqa.sql.role.v1:")
+            .unwrap()
+        {
+            let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+            value.as_object_mut().unwrap().remove("revision");
+            let json = value.to_string();
+            raw.catalog.set_metadata(&key, &json).unwrap();
+            legacy.push((key, json));
+        }
+        raw.catalog
+            .set_metadata("sql_roles_json", r#"{"role_catalog_format":2}"#)
+            .unwrap();
+        raw.backend.commit_transaction().unwrap();
+        assert!(first.new_session().is_err());
+        let routines = raw
+            .catalog
+            .get_metadata("sql_functions_json")
+            .unwrap()
+            .unwrap();
+        raw.catalog.set_metadata("sql_functions_json", "{").unwrap();
+        drop(second);
+        drop(first);
+        assert!(Engine::from_persistent_provider(Arc::clone(&factory)).is_err());
+        assert_eq!(
+            raw.catalog
+                .get_metadata("sql_roles_json")
+                .unwrap()
+                .as_deref(),
+            Some(r#"{"role_catalog_format":2}"#)
+        );
+        assert_eq!(
+            raw.catalog
+                .metadata_with_prefix("uqa.sql.role.v1:")
+                .unwrap(),
+            legacy
+        );
+        raw.catalog
+            .set_metadata("sql_functions_json", &routines)
+            .unwrap();
+        let restored = Engine::from_persistent_provider(factory).unwrap();
+        assert_eq!(*restored.durable.roles.read(), *expected);
+        assert_eq!(*restored.durable.role_memberships.read(), *memberships);
+        sql(&restored, "ALTER ROLE legacy NOLOGIN");
+        assert_eq!(restored.durable.roles.read()["legacy"].revision, 2);
     }
 }
