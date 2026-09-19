@@ -138,9 +138,12 @@ impl RoutinePortals for Engine {
         name: &str,
         scroll: Option<bool>,
         plan: &UnifiedPlan,
+        source_sql: &str,
     ) -> Result<(), SQLError> {
         uqa_execution::statement::portal::declaration::open_plpgsql_session_portal(
-            &self.portal_execution_context(),
+            &self
+                .portal_execution_context()
+                .with_source_sql(Some(source_sql)),
             params,
             name,
             scroll,

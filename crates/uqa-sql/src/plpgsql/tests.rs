@@ -11,6 +11,40 @@ use super::parsing::{
 use super::*;
 
 #[test]
+fn cursor_query_lowering_preserves_source_before_variable_binding() {
+    let parsed = parse_plpgsql_text(
+        "CREATE FUNCTION cursor_sources() RETURNS void LANGUAGE plpgsql AS $$
+         DECLARE b CURSOR (seed integer) FOR SELECT seed; c refcursor; r record;
+         BEGIN
+           OPEN c FOR SELECT /* static source */ 42;
+           FOR r IN SELECT  2 LOOP NULL; END LOOP;
+         END $$",
+    )
+    .unwrap();
+    let bound = parsed
+        .datums
+        .iter()
+        .find_map(|datum| match datum {
+            PLpgSQLDatum::Var(variable) => variable.cursor.as_ref(),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(&*bound.source_sql, "SELECT seed");
+    let PLpgSQLStmt::OpenCursor {
+        open: PLpgSQLCursorOpen::Static { source_sql, .. },
+        ..
+    } = &parsed.action.body[0]
+    else {
+        panic!("expected a static OPEN");
+    };
+    assert_eq!(&**source_sql, "SELECT /* static source */ 42");
+    let PLpgSQLStmt::ForQuery { source_sql, .. } = &parsed.action.body[1] else {
+        panic!("expected a query loop");
+    };
+    assert_eq!(&**source_sql, "SELECT  2");
+}
+
+#[test]
 fn plpgsql_synthesized_definition_preserves_variadic_parameters() {
     let mut statements = crate::compile(
         "CREATE FUNCTION variadic_probe(VARIADIC items integer[]) RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RETURN cardinality(items); END $$",

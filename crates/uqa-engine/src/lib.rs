@@ -443,8 +443,8 @@ struct SessionPortalState {
     pinned_transaction_control: PinnedPortalTransactionControl,
     /// A PL/pgSQL row loop pins its portal while user statements run so the loop body cannot close the executor that owns its current tuple batch.
     pin_count: usize,
-    /// The engine carries typed values rather than wire encodings; retaining the declaration format lets a `PostgreSQL` wire adapter request binary result encoding without changing portal execution.
-    _binary: bool,
+    /// Retain live catalog visibility while the executor is temporarily outside the session map.
+    _registration: uqa_execution::statement::portal::PortalRegistration,
 }
 
 use uqa_execution::statement::portal::{SessionPortalCommandDeclaration, SessionPortalDeclaration};

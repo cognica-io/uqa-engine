@@ -16,9 +16,17 @@ use crate::SQLError;
 
 /// Check spelling before requesting a catalog snapshot; an earlier user relation can still take precedence.
 pub fn virtual_relation_mutation_candidate(command: &CommandPlan) -> bool {
-    command.mutation_target().is_some_and(|target| {
-        crate::catalog::resolve_virtual_relation(&[], target)
-            == Some(VirtualRelation::PgPreparedStatements)
+    command
+        .mutation_target()
+        .is_some_and(|target| session_metadata_relation(target).is_some())
+}
+
+fn session_metadata_relation(target: &str) -> Option<VirtualRelation> {
+    crate::catalog::resolve_virtual_relation(&[], target).filter(|relation| {
+        matches!(
+            relation,
+            VirtualRelation::PgPreparedStatements | VirtualRelation::PgCursors
+        )
     })
 }
 
@@ -27,10 +35,10 @@ pub fn virtual_relation_mutation_error(
     resolution: &RelationNameResolution,
     command: &CommandPlan,
 ) -> Result<Option<SQLError>, SQLError> {
-    if !virtual_relation_mutation_candidate(command) {
-        return Ok(None);
-    }
     let Some(target) = command.mutation_target() else {
+        return Ok(None);
+    };
+    let Some(relation) = session_metadata_relation(target) else {
         return Ok(None);
     };
     let bound = match command {
@@ -49,10 +57,10 @@ pub fn virtual_relation_mutation_error(
     {
         return Ok(None);
     }
-    Ok(prepared_mutation_error(command))
+    Ok(mutation_error(command, relation))
 }
 
-fn prepared_mutation_error(command: &CommandPlan) -> Option<SQLError> {
+fn mutation_error(command: &CommandPlan, relation: VirtualRelation) -> Option<SQLError> {
     let action = match command {
         CommandPlan::Insert(_) => "insert into",
         CommandPlan::Update(_) => "update",
@@ -69,6 +77,46 @@ fn prepared_mutation_error(command: &CommandPlan) -> Option<SQLError> {
     };
     Some(SQLError::Routine {
         sqlstate: "55000".into(),
-        message: format!("cannot {action} view \"pg_prepared_statements\""),
+        message: format!("cannot {action} view \"{}\"", relation.name()),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_catalog_mutations_retain_each_views_name_and_operation() {
+        for relation in [
+            VirtualRelation::PgCursors,
+            VirtualRelation::PgPreparedStatements,
+        ] {
+            for (sql, action) in [
+                (
+                    format!("INSERT INTO {} (name) VALUES ('x')", relation.name()),
+                    "insert into",
+                ),
+                (
+                    format!("UPDATE {} SET name = 'x'", relation.name()),
+                    "update",
+                ),
+                (format!("DELETE FROM {}", relation.name()), "delete from"),
+            ] {
+                let crate::plan::UnifiedPlan::Command(command) =
+                    crate::plan::UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0))
+                else {
+                    panic!("mutation fixture produced a query");
+                };
+                assert!(virtual_relation_mutation_candidate(&command));
+                let error = mutation_error(&command, relation).unwrap();
+                assert_eq!(error.sqlstate(), Some("55000"));
+                assert_eq!(
+                    error.to_string(),
+                    format!("cannot {action} view \"{}\"", relation.name())
+                );
+            }
+        }
+        assert_eq!(session_metadata_relation("public.pg_cursors"), None);
+        assert_eq!(session_metadata_relation("pg_catalog.\"PG_CURSORS\""), None);
+    }
 }

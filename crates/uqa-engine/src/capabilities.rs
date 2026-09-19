@@ -45,6 +45,10 @@ pub(crate) struct SessionExecutionView<'a> {
 }
 
 impl SessionExecutionView<'_> {
+    pub(crate) fn cursors(&self) -> Vec<uqa_sql::catalog::session::CursorMetadata> {
+        self.session.portal_registry.snapshot()
+    }
+
     pub(crate) fn prepared_statements(
         &self,
     ) -> Vec<super::statement_cache::PreparedStatementMetadata> {

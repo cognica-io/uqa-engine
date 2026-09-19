@@ -541,6 +541,14 @@ impl VirtualRelation {
                 "valuntil" => ColumnType::TimestampTz,
                 "useconfig" => array(ColumnType::Text),
             ],
+            Self::PgCursors => columns![
+                "name" => ColumnType::Text,
+                "statement" => ColumnType::Text,
+                "is_holdable" => ColumnType::Boolean,
+                "is_binary" => ColumnType::Boolean,
+                "is_scrollable" => ColumnType::Boolean,
+                "creation_time" => ColumnType::TimestampTz,
+            ],
             Self::PgPreparedStatements => columns![
                 "name" => ColumnType::Text,
                 "statement" => ColumnType::Text,

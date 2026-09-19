@@ -72,6 +72,9 @@ impl CatalogSession for Inputs {
     fn runtime_parameter_source(&self, _: &str) -> &'static str {
         panic!("validation must not enumerate settings")
     }
+    fn cursors(&self) -> Vec<uqa_sql::catalog::session::CursorMetadata> {
+        panic!("unexpected cursor catalog read")
+    }
     fn prepared_statements(&self) -> Vec<PreparedStatementMetadata> {
         panic!("validation must not enumerate prepared statements")
     }

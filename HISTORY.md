@@ -19,6 +19,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Expose live SQL and PL/pgSQL cursor declarations in `pg_catalog.pg_cursors`, preserving original SQL, statement start time and declared options through FETCH, hold materialization and transaction cleanup. Keep metadata visible while its executor is detached, isolate sessions, and skip occupied names when allocating unnamed cursors.
+
 - Select default cursor scrollability from the execution plan's native backward-scan support, matching PostgreSQL 18. For example, `SELECT 1` defaults to forward-only; explicit `SCROLL` retains the existing materialization behavior.
 
 - Compact eligible current SQLite MVCC records into bounded lossless runs while preserving exact keys, values, revisions, snapshots and conditional-write conflicts. Split and restore individual predecessors atomically on later writes. Development record format 29 adds guarded run storage; redb retains its existing physical layout.

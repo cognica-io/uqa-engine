@@ -37,10 +37,7 @@ type SessionPortalTableSource = (
 
 impl Engine {
     pub(crate) fn allocate_session_portal_name(&self) -> String {
-        let mut next = self.session.next_portal_id.lock();
-        let name = format!("<unnamed portal {}>", *next);
-        *next += 1;
-        name
+        self.session.portal_registry.allocate_name()
     }
 
     fn allocate_session_portal_transaction_origin(&self) -> u64 {
@@ -55,15 +52,15 @@ impl Engine {
         declaration: SessionPortalDeclaration,
     ) -> Result<(), SQLError> {
         let SessionPortalDeclaration {
-            name,
+            metadata,
             mut query,
             params,
             columns,
             column_types,
-            scrollable,
-            holdable,
-            binary,
         } = declaration;
+        let name = metadata.name.clone();
+        let scrollable = metadata.is_scrollable;
+        let holdable = metadata.is_holdable;
         let table_dependencies =
             uqa_sql::binding::portals::prepare_query(&self.portal_binding_context(), &mut query)?;
         let snapshot_gate = self
@@ -100,10 +97,8 @@ impl Engine {
             catalog_snapshot: std::sync::Arc::clone(&catalog_snapshot),
         });
         let transaction_origin = self.allocate_session_portal_transaction_origin();
+        let registration = self.session.portal_registry.register(metadata)?;
         let mut portals = self.session.portals.lock();
-        if portals.contains_key(&name) {
-            return Err(cursor_error(&name, "already exists", "42P03"));
-        }
         portals.insert(
             name,
             SessionPortalState {
@@ -124,7 +119,7 @@ impl Engine {
                 holdable,
                 pinned_transaction_control: PinnedPortalTransactionControl::MakeHoldable,
                 pin_count: 0,
-                _binary: binary,
+                _registration: registration,
             },
         );
         Ok(())
@@ -135,19 +130,18 @@ impl Engine {
         declaration: SessionPortalCommandDeclaration,
     ) -> Result<(), SQLError> {
         let SessionPortalCommandDeclaration {
-            name,
+            metadata,
             command,
             params,
             columns,
             column_types,
-            scrollable,
             null_returning_values,
         } = declaration;
+        let name = metadata.name.clone();
+        let scrollable = metadata.is_scrollable;
         let transaction_origin = self.allocate_session_portal_transaction_origin();
+        let registration = self.session.portal_registry.register(metadata)?;
         let mut portals = self.session.portals.lock();
-        if portals.contains_key(&name) {
-            return Err(cursor_error(&name, "already exists", "42P03"));
-        }
         portals.insert(
             name,
             SessionPortalState {
@@ -164,17 +158,14 @@ impl Engine {
                 holdable: false,
                 pinned_transaction_control: PinnedPortalTransactionControl::Reject,
                 pin_count: 0,
-                _binary: false,
+                _registration: registration,
             },
         );
         Ok(())
     }
 
     pub(crate) fn ensure_session_portal_available(&self, name: &str) -> Result<(), SQLError> {
-        if self.session.portals.lock().contains_key(name) {
-            return Err(cursor_error(name, "already exists", "42P03"));
-        }
-        Ok(())
+        self.session.portal_registry.ensure_available(name)
     }
 
     pub(crate) fn pin_session_portal(&self, name: &str) -> Result<(), SQLError> {

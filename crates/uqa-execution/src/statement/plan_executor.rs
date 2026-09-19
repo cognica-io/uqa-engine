@@ -759,7 +759,11 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 hold,
                 query,
             } => super::portal::declaration::declare_session_portal(
-                &self.context.portals,
+                &self
+                    .context
+                    .portals
+                    .clone()
+                    .with_source_sql(self.source_sql.as_deref()),
                 self.params,
                 name,
                 *binary,

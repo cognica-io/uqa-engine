@@ -7,6 +7,25 @@
 use super::*;
 use std::collections::BTreeSet;
 
+#[test]
+fn cursor_catalog_has_postgresql_identity_and_typed_declaration_columns() {
+    use crate::ColumnType;
+    let relation = VirtualRelation::PgCursors;
+    assert_eq!(relation.oid(), 12077);
+    assert_eq!(relation.kind(), "view");
+    assert_eq!(
+        relation.schema(),
+        vec![
+            ("name".into(), ColumnType::Text),
+            ("statement".into(), ColumnType::Text),
+            ("is_holdable".into(), ColumnType::Boolean),
+            ("is_binary".into(), ColumnType::Boolean),
+            ("is_scrollable".into(), ColumnType::Boolean),
+            ("creation_time".into(), ColumnType::TimestampTz),
+        ]
+    );
+}
+
 // PostgreSQL 18.4 rewrite range tables, traversed in LockViewRecurse order.
 #[test]
 fn system_view_sources_preserve_postgresql_reference_order() {
@@ -21,6 +40,7 @@ fn system_view_sources_preserve_postgresql_reference_order() {
         ("pg_catalog.pg_indexes", "pg_catalog.pg_index,pg_catalog.pg_class,pg_catalog.pg_class,pg_catalog.pg_namespace,pg_catalog.pg_tablespace"),
         ("pg_catalog.pg_sequences", "pg_catalog.pg_sequence,pg_catalog.pg_class,pg_catalog.pg_namespace"),
         ("pg_catalog.pg_prepared_statements", ""),
+        ("pg_catalog.pg_cursors", ""),
         ("pg_catalog.pg_settings", ""),
         ("information_schema.information_schema_catalog_name", ""),
         ("information_schema.column_privileges", "pg_catalog.pg_namespace,pg_catalog.pg_authid,pg_catalog.pg_attribute,pg_catalog.pg_class,pg_catalog.pg_class,pg_catalog.pg_attribute,pg_catalog.pg_class,pg_catalog.pg_authid"),

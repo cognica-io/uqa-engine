@@ -70,6 +70,7 @@ virtual_relations! {
     PgUser => ("pg_catalog", "pg_user", 12014),
     PgSettings => ("pg_catalog", "pg_settings", 12104),
     PgPreparedStatements => ("pg_catalog", "pg_prepared_statements", 12095),
+    PgCursors => ("pg_catalog", "pg_cursors", 12077),
     PgDescription => ("pg_catalog", "pg_description", 2609),
     PgMatviews => ("pg_catalog", "pg_matviews", 12038),
     PgSequences => ("pg_catalog", "pg_sequences", 12048),

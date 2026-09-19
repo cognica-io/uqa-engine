@@ -110,8 +110,9 @@ impl Interpreter<'_> {
                 label,
                 target,
                 query,
+                source_sql,
                 body,
-            } => self.exec_query_for(label.as_deref(), target, query, body),
+            } => self.exec_query_for(label.as_deref(), target, query, source_sql, body),
             PLpgSQLStmt::ForDynamic {
                 label,
                 target,

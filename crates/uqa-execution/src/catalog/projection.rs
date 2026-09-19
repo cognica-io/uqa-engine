@@ -79,6 +79,7 @@ pub fn build_info_schema_rows(
         VirtualRelation::PgUser => build_pg_user(catalog),
         VirtualRelation::PgSettings => build_pg_settings(session)?,
         VirtualRelation::PgPreparedStatements => prepared_statements::rows(session)?,
+        VirtualRelation::PgCursors => cursors::rows(session),
         VirtualRelation::PgDescription => Vec::new(),
         VirtualRelation::PgMatviews => build_pg_matviews(catalog, resolution)?,
         VirtualRelation::PgSequences => build_pg_sequences(catalog, session)?,
@@ -89,6 +90,7 @@ pub fn build_info_schema_rows(
 
 mod ag_catalog;
 mod builtin_routines;
+mod cursors;
 mod events;
 use uqa_sql::catalog::expression_text;
 mod index_definition;

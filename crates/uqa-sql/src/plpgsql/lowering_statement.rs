@@ -6,7 +6,7 @@
 
 //! Block, statement, INTO-target, and statement-list lowering.
 
-use super::lowering_expression::lower_cursor_arguments;
+use super::lowering_expression::{lower_cursor_arguments, lower_sourced_statement};
 use super::{
     ensure_single_tag, expect_tag, json_bool_or_false, json_kind, json_optional_i64,
     json_optional_str, json_optional_usize, json_usize_or_zero, lower_expr, lower_expr_list,
@@ -271,11 +271,12 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_fors") {
         let target = lower_into_target(require(stmt, "var")?, datums)?;
-        let query = lower_full_statement(require(stmt, "query")?)?;
+        let (query, source_sql) = lower_sourced_statement(require(stmt, "query")?)?;
         return Ok(PLpgSQLStmt::ForQuery {
             label: json_optional_str(stmt, "label")?,
             target,
             query,
+            source_sql: source_sql.into(),
             body: lower_optional_stmt_list(stmt, "body", datums)?,
         });
     }
@@ -438,8 +439,10 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
                     "PL/pgSQL bound cursor OPEN contains a static query".into(),
                 ));
             }
+            let (query, source_sql) = lower_sourced_statement(query)?;
             PLpgSQLCursorOpen::Static {
-                query: Box::new(lower_full_statement(query)?),
+                query: Box::new(query),
+                source_sql: source_sql.into(),
                 scroll: lower_cursor_scroll_options(stmt, "OPEN")?,
             }
         } else if let Some(query) = dynquery {

@@ -109,12 +109,18 @@ fn open_plpgsql_command_portal<S: Clone + Send + Sync + 'static>(
     inputs
         .state
         .open_pending_command_session_portal(SessionPortalCommandDeclaration {
-            name: name.to_string(),
+            metadata: uqa_sql::catalog::session::CursorMetadata {
+                name: name.to_string(),
+                source_sql: inputs.source_sql.map(Into::into),
+                is_holdable: false,
+                is_binary: false,
+                is_scrollable: scroll.unwrap_or(false),
+                created_at_micros: inputs.created_at_micros,
+            },
             command: Box::new(command.clone()),
             params: params.to_vec(),
             columns: schema.columns().to_vec(),
             column_types: schema.column_types().to_vec(),
-            scrollable: scroll.unwrap_or(false),
             null_returning_values,
         })
 }
@@ -190,14 +196,18 @@ fn prepare_session_portal<S: Clone + Send + Sync + 'static>(
     inputs
         .state
         .open_pending_session_portal(SessionPortalDeclaration {
-            name: name.to_string(),
+            metadata: uqa_sql::catalog::session::CursorMetadata {
+                name: name.to_string(),
+                source_sql: inputs.source_sql.map(Into::into),
+                is_holdable: hold,
+                is_binary: binary,
+                is_scrollable: query_scrollable(inputs.routines, query, scroll),
+                created_at_micros: inputs.created_at_micros,
+            },
             query: query.clone(),
             params: params.to_vec(),
             columns: schema.columns().to_vec(),
             column_types: schema.column_types().to_vec(),
-            scrollable: query_scrollable(inputs.routines, query, scroll),
-            holdable: hold,
-            binary,
         })?;
     Ok(())
 }

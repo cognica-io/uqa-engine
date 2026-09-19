@@ -14,7 +14,7 @@ use uqa_execution::catalog::{
     RelationNameResolution,
 };
 use uqa_sql::catalog::roles::RoleReference;
-use uqa_sql::catalog::session::PreparedStatementMetadata;
+use uqa_sql::catalog::session::{CursorMetadata, PreparedStatementMetadata};
 use uqa_sql::SQLError;
 
 impl Engine {
@@ -51,6 +51,9 @@ impl CatalogSession for Engine {
     fn prepared_statements(&self) -> Vec<PreparedStatementMetadata> {
         self.session_execution_view().prepared_statements()
     }
+    fn cursors(&self) -> Vec<CursorMetadata> {
+        self.session_execution_view().cursors()
+    }
 }
 impl CatalogSession for SessionExecutionView<'_> {
     fn current_role(&self) -> RoleReference {
@@ -71,6 +74,9 @@ impl CatalogSession for SessionExecutionView<'_> {
     }
     fn prepared_statements(&self) -> Vec<PreparedStatementMetadata> {
         SessionExecutionView::prepared_statements(self)
+    }
+    fn cursors(&self) -> Vec<CursorMetadata> {
+        SessionExecutionView::cursors(self)
     }
 }
 impl RelationCounts for Engine {
