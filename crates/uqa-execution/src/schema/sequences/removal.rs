@@ -47,18 +47,6 @@ impl SequenceDropDependents {
 }
 
 impl SequenceRemovalContext<'_> {
-    pub fn drop_sequence(&self, name: &str) -> Result<bool, String> {
-        let Some(name) = self
-            .names
-            .resolve_sequence_name(name)
-            .map_err(|err| format!("load sequence catalog: {err}"))?
-        else {
-            return Ok(false);
-        };
-        self.drop_sequences(std::slice::from_ref(&name), false)
-            .map_err(|error| error.to_string())?;
-        Ok(true)
-    }
     pub fn drop_sequences(&self, names: &[String], cascade: bool) -> Result<(), SQLError> {
         self.drop_sequences_with_owner(names, cascade, false)
     }

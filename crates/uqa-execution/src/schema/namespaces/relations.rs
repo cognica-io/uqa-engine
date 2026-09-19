@@ -101,6 +101,41 @@ impl RelationCreationContext<'_> {
     pub fn persistent_relation_name(&self, name: &str) -> Result<String, SQLError> {
         self.lock_relation_namespace(|| self.persistent_name(name))
     }
+    /// Resolve an explicit SET SCHEMA destination, including temporary namespace allocation and authority, before the caller checks whether that namespace permits relocation.
+    pub fn relocation_target(
+        &self,
+        target: &RelationIdentity,
+    ) -> Result<RelationIdentity, SQLError> {
+        let temporary = self.state.temporary_schema_name();
+        let mut target = target.clone();
+        if target.schema == "pg_temp" {
+            if !self.schemas.temporary_namespace_allocated() {
+                self.ensure_temporary_privilege()?;
+                self.runtime.allocate_temporary_namespace();
+            }
+            target.schema.clone_from(&temporary);
+        } else if target.schema == temporary && !self.schemas.temporary_namespace_allocated() {
+            return Err(super::locking::missing(&temporary));
+        }
+        let name = target.qualified_name();
+        self.lock_relation_namespace(|| {
+            let name = self.persistent_name(&name)?;
+            if target.schema == temporary {
+                self.ensure_temporary_privilege()
+                    .map_err(|error| match error {
+                        SQLError::Routine { sqlstate, .. } if sqlstate == "42501" => {
+                            SQLError::Routine {
+                                sqlstate,
+                                message: format!("permission denied for schema {temporary}"),
+                            }
+                        }
+                        error => error,
+                    })?;
+            }
+            Ok(name)
+        })?;
+        Ok(target)
+    }
     fn lock_relation_namespace(
         &self,
         mut resolve: impl FnMut() -> Result<String, SQLError>,

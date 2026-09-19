@@ -5,6 +5,7 @@
 //
 
 mod dependencies;
+mod lifecycle;
 mod ownership;
 mod privileges;
 mod removal;

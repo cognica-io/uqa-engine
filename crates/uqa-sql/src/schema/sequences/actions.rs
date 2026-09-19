@@ -5,8 +5,19 @@
 //
 
 //! Validate combinations of SQL sequence actions and persistence changes.
-use crate::ast::{RelationPersistence, SequenceBound, SequenceRestart};
+use crate::ast::{RelationPersistence, SequenceBound, SequenceRestart, TableLockMode};
 use crate::SQLError;
+
+pub fn sequence_alter_lock_mode(alter: &crate::ast::AlterSequence) -> TableLockMode {
+    if alter.role_owner.is_some()
+        || alter.persistence.is_some()
+        || alter.lifecycle != crate::ast::SequenceLifecycle::Unchanged
+    {
+        TableLockMode::AccessExclusive
+    } else {
+        TableLockMode::ShareRowExclusive
+    }
+}
 
 pub fn altered_sequence_persistence(
     alter: &crate::ast::AlterSequence,
@@ -71,6 +82,28 @@ pub fn validate_sequence_role_owner_shape(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sequence_definition_and_relation_lifecycle_select_distinct_lock_modes() {
+        for (suffix, mode) in [
+            ("INCREMENT BY 2", TableLockMode::ShareRowExclusive),
+            ("CACHE 1", TableLockMode::ShareRowExclusive),
+            ("RESTART", TableLockMode::ShareRowExclusive),
+            ("OWNED BY NONE", TableLockMode::ShareRowExclusive),
+            ("OWNER TO owner", TableLockMode::AccessExclusive),
+            ("RENAME TO renamed", TableLockMode::AccessExclusive),
+            ("SET SCHEMA archive", TableLockMode::AccessExclusive),
+            ("SET LOGGED", TableLockMode::AccessExclusive),
+            ("SET UNLOGGED", TableLockMode::AccessExclusive),
+        ] {
+            let sql = format!("ALTER SEQUENCE ids {suffix}");
+            let crate::Statement::AlterSequence(alter) = crate::compile(&sql).unwrap().remove(0)
+            else {
+                panic!("expected ALTER SEQUENCE: {sql}");
+            };
+            assert_eq!(sequence_alter_lock_mode(&alter), mode, "{sql}");
+        }
+    }
 
     #[test]
     fn sequence_value_generation_distinguishes_explicit_options_from_owner_and_name_changes() {

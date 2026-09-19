@@ -25,6 +25,11 @@ pub fn drop_foreign_table(
     drop_relation(context, name, DropKind::ForeignTable)
 }
 
+/// The caller supplies a definition transaction, including for an in-memory engine.
+pub fn drop_sequence(context: &RelationRemovalContext<'_>, name: &str) -> Result<bool, SQLError> {
+    drop_relation(context, name, DropKind::Sequence)
+}
+
 fn drop_relation(
     context: &RelationRemovalContext<'_>,
     name: &str,

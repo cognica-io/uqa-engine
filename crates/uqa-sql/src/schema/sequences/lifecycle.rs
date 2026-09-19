@@ -5,7 +5,6 @@
 //
 
 //! Sequence rename and schema-move declaration rules.
-use crate::catalog::roles::RoleReference;
 use crate::{
     ast::{RelationPersistence, SequenceBound, SequenceLifecycle, SequenceOwnership},
     SQLError,
@@ -15,9 +14,6 @@ use uqa_core::RelationIdentity;
 pub trait SequenceLifecycleCatalog {
     fn temporary_schema_name(&self) -> String;
     fn sequence_is_owned(&self, relation: &RelationIdentity) -> bool;
-    fn schema_exists(&self, schema: &str) -> bool;
-    fn current_role(&self) -> RoleReference;
-    fn require_schema_create(&self, schema: &str, role: &RoleReference) -> Result<(), SQLError>;
     fn relation_kind_at(&self, name: &str) -> Result<Option<&'static str>, String>;
 }
 pub fn validate_sequence_lifecycle_shape(
@@ -42,12 +38,12 @@ pub fn validate_sequence_lifecycle_shape(
     Ok(())
 }
 
+/// Bind the declared destination before acquiring its namespace lock. Collision and namespace-kind checks require the refreshed catalog after that acquisition.
 pub fn sequence_lifecycle_target(
     catalog: &dyn SequenceLifecycleCatalog,
     source: &RelationIdentity,
-    persistence: RelationPersistence,
     lifecycle: &SequenceLifecycle,
-) -> Result<Option<RelationIdentity>, SQLError> {
+) -> Result<RelationIdentity, SQLError> {
     match lifecycle {
         SequenceLifecycle::Unchanged => Err(SQLError::Internal(
             "sequence lifecycle executor received no action".into(),
@@ -60,27 +56,15 @@ pub fn sequence_lifecycle_target(
                     "ALTER SEQUENCE RENAME TO produced a qualified target".into(),
                 ));
             }
-            let target = RelationIdentity::new(&source.schema, target_name);
-            reject_sequence_lifecycle_collision(catalog, source, &target, true)?;
-            Ok(Some(target))
+            Ok(RelationIdentity::new(&source.schema, target_name))
         }
         SequenceLifecycle::SetSchema { schema } => {
-            let (qualifier, mut target_schema) = RelationIdentity::parse_reference(schema)
+            let (qualifier, target_schema) = RelationIdentity::parse_reference(schema)
                 .map_err(|error| SQLError::Internal(format!("invalid schema name: {error}")))?;
             if qualifier.is_some() {
                 return Err(SQLError::Internal(
                     "ALTER SEQUENCE SET SCHEMA produced a qualified schema".into(),
                 ));
-            }
-            let temporary_schema = catalog.temporary_schema_name();
-            if schema == "pg_temp" {
-                target_schema.clone_from(&temporary_schema);
-            }
-            if persistence == RelationPersistence::Temporary || target_schema == temporary_schema {
-                return Err(SQLError::Routine {
-                    sqlstate: "0A000".into(),
-                    message: "cannot move objects into or out of temporary schemas".into(),
-                });
             }
             if catalog.sequence_is_owned(source) {
                 return Err(SQLError::Routine {
@@ -88,22 +72,41 @@ pub fn sequence_lifecycle_target(
                     message: "cannot move an owned sequence into another schema".into(),
                 });
             }
-            if !catalog.schema_exists(&target_schema) {
-                return Err(SQLError::Routine {
-                    sqlstate: "3F000".into(),
-                    message: format!("schema \"{target_schema}\" does not exist"),
-                });
-            }
-            let current_user = catalog.current_role();
-            catalog.require_schema_create(&target_schema, &current_user)?;
-            let target = RelationIdentity::new(target_schema, &source.name);
-            if target == *source {
-                return Ok(None);
-            }
-            reject_sequence_lifecycle_collision(catalog, source, &target, false)?;
-            Ok(Some(target))
+            Ok(RelationIdentity::new(target_schema, &source.name))
         }
     }
+}
+
+/// Validate the locked destination and report whether its name needs publication. Even an unchanged schema must first retain its namespace dependency and pass namespace-kind validation.
+pub fn validate_sequence_lifecycle_target(
+    catalog: &dyn SequenceLifecycleCatalog,
+    source: &RelationIdentity,
+    target: &RelationIdentity,
+    persistence: RelationPersistence,
+    lifecycle: &SequenceLifecycle,
+) -> Result<bool, SQLError> {
+    let rename = matches!(lifecycle, SequenceLifecycle::RenameTo { .. });
+    if !rename {
+        if persistence == RelationPersistence::Temporary
+            || target.schema == catalog.temporary_schema_name()
+        {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "cannot move objects into or out of temporary schemas".into(),
+            });
+        }
+        if source.schema == "pg_toast" || target.schema == "pg_toast" {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "cannot move objects into or out of TOAST schema".into(),
+            });
+        }
+        if target == source {
+            return Ok(false);
+        }
+    }
+    reject_sequence_lifecycle_collision(catalog, source, target, rename)?;
+    Ok(true)
 }
 
 fn reject_sequence_lifecycle_collision(
@@ -165,3 +168,6 @@ pub fn alter_sequence_target_name(
         }),
     }
 }
+
+#[cfg(test)]
+mod tests;

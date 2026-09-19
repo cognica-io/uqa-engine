@@ -23,13 +23,6 @@ pub(super) fn bind_drop_targets(
     statement: &DropStmt,
     notice: &mut dyn FnMut(&str),
 ) -> Result<Vec<String>, SQLError> {
-    if statement.kind == DropKind::Sequence {
-        return uqa_sql::schema::removal::bind_relation_drop_targets(
-            context.catalog,
-            statement,
-            notice,
-        );
-    }
     let mut targets = Vec::new();
     let mut seen = BTreeSet::new();
     for name in &statement.names {
@@ -64,6 +57,16 @@ pub(super) fn bind_drop_targets(
                     .ensure_foreign_table_drop_authority(&binding.name),
                 DropKind::View | DropKind::MaterializedView => {
                     context.views.ensure_view_drop_authority(&binding.name)
+                }
+                DropKind::Sequence => {
+                    let relation = uqa_core::RelationIdentity::from_legacy_name(&binding.name)
+                        .map_err(SQLError::Internal)?;
+                    context
+                        .sequences
+                        .sequence_removal_context()
+                        .privileges
+                        .ensure_sequence_owner(&binding.name, &relation)
+                        .map(|_| ())
                 }
                 _ => unreachable!("relation DROP binding requires a table-shaped target"),
             },

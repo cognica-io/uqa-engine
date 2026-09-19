@@ -11,7 +11,6 @@ use uqa_execution::schema::sequences::{
     creation::{SequenceCreationContext, SequenceCreationNamespace, SequenceCreationPublication},
     implicit::{ImplicitSequenceContext, ImplicitSequencePublication},
 };
-use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::schema::sequences::ownership::{SequenceOwnerCatalog, SequenceOwnerColumns};
 use uqa_sql::{
     ast::{RelationPersistence, SequenceDataType},
@@ -191,19 +190,6 @@ impl uqa_sql::schema::sequences::lifecycle::SequenceLifecycleCatalog for Engine 
             .get(relation)
             .is_some_and(|state| state.owner.is_some())
     }
-    fn schema_exists(&self, schema: &str) -> bool {
-        self.durable.schemas.read().contains_key(schema)
-    }
-    fn current_role(&self) -> RoleReference {
-        Engine::current_role(self)
-    }
-    fn require_schema_create(&self, schema: &str, role: &RoleReference) -> Result<(), SQLError> {
-        self.require_schema_privilege(
-            schema,
-            role,
-            crate::schema_security::SchemaAclPrivilege::Create,
-        )
-    }
     fn relation_kind_at(&self, name: &str) -> Result<Option<&'static str>, String> {
         Engine::relation_kind_at(self, name).map_err(|error| error.to_string())
     }
@@ -318,6 +304,7 @@ impl Engine {
     ) -> uqa_execution::schema::sequences::lifecycle::SequenceLifecycleContext<'_> {
         uqa_execution::schema::sequences::lifecycle::SequenceLifecycleContext {
             analysis: self,
+            creation: self.relation_creation_context(),
             schemas: self.schema_dependency_publication_context(),
             views: self.view_sequence_rewrite_context(),
             state: self,

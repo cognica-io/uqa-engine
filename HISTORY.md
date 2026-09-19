@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Coordinate sequence definition, persistence, name and DROP operations with PostgreSQL relation lock modes and retained destination namespaces. Recheck replaced names, relation kinds, owner/CREATE authority and destination collisions after waits; retain locks for unchanged schema moves and preserve rollback/savepoint behavior.
+
 - Expose live SQL and PL/pgSQL cursor declarations in `pg_catalog.pg_cursors`, preserving original SQL, statement start time and declared options through FETCH, hold materialization and transaction cleanup. Keep metadata visible while its executor is detached, isolate sessions, and skip occupied names when allocating unnamed cursors.
 
 - Select default cursor scrollability from native backward-scan support, including outer ordering over windows, target sets and `UNION ALL`, reused window ordering, and deferred versus materialized CTEs. For example, `SELECT 1` and an inlined constant CTE default to forward-only; explicit `SCROLL` retains the existing materialization behavior. Expand streaming target sets at the correct side of sorting and apply output slicing after expansion, including `WITH TIES`.

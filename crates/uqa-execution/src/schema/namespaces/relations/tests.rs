@@ -340,3 +340,4 @@ fn temporary_creation_authorizes_before_syntax_and_allocates_only_after_validati
 }
 
 mod lifetime;
+mod relocation;
