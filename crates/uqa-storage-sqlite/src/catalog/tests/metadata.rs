@@ -7,6 +7,43 @@
 use super::*;
 
 #[test]
+fn native_schema_private_provenance_tracks_deletion_creation_and_exact_names() {
+    for native in [false, true] {
+        let connection = ManagedConnection::open_in_memory().unwrap();
+        let catalog = Catalog::open(connection.clone()).unwrap();
+        if native {
+            connection
+                .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+                .unwrap();
+        }
+        let name = "tenant:%_\0日本語";
+        let neighbor = format!("{name}:next");
+        catalog.save_schema(name).unwrap();
+        catalog.save_schema(&neighbor).unwrap();
+        assert!(!catalog.schema_has_private_changes(name).unwrap());
+        connection.begin_transaction().unwrap();
+        connection.savepoint("schemas").unwrap();
+        catalog.drop_schema(name).unwrap();
+        catalog.save_schema("created").unwrap();
+        for schema in [name, "created"] {
+            assert_eq!(catalog.schema_has_private_changes(schema).unwrap(), native);
+        }
+        for schema in ["tenant", neighbor.as_str(), "absent"] {
+            assert!(!catalog.schema_has_private_changes(schema).unwrap());
+        }
+        connection.rollback_to_savepoint("schemas").unwrap();
+        for schema in [name, "created"] {
+            assert!(!catalog.schema_has_private_changes(schema).unwrap());
+        }
+        assert!(catalog.load_schemas().unwrap().contains(&name.to_owned()));
+        catalog.drop_schema(name).unwrap();
+        connection.commit_transaction().unwrap();
+        assert!(!catalog.schema_has_private_changes(name).unwrap());
+        assert!(!catalog.load_schemas().unwrap().contains(&name.to_owned()));
+    }
+}
+
+#[test]
 fn native_metadata_private_provenance_tracks_exact_keys_and_savepoint_undo() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     let catalog = Catalog::open(connection.clone()).unwrap();

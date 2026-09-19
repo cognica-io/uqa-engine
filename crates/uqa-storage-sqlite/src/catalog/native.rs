@@ -45,10 +45,18 @@ pub(super) fn string(value: ValueRef<'_>) -> Result<String> {
 
 impl Catalog {
     pub(super) fn native_metadata_has_private_changes(&self, name: &str) -> Result<bool> {
+        self.native_named_record_has_private_changes(Family::Metadata, name)
+    }
+
+    pub(super) fn native_named_record_has_private_changes(
+        &self,
+        family: Family,
+        name: &str,
+    ) -> Result<bool> {
         Ok(self
             .read_native(|snapshot| {
                 let key = crate::mvcc::native::NativeRecordIdentity::new(
-                    Family::Metadata,
+                    family,
                     NativeRecordOwner::Database(snapshot.database),
                 )?
                 .encode_key(&[text(name)], &snapshot.control)?;

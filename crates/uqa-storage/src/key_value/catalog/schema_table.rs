@@ -172,10 +172,18 @@ impl KeyValueCatalog {
         &self,
         name: &str,
     ) -> StorageBackendResult<bool> {
+        self.named_record_has_private_changes(TAG_METADATA, name)
+    }
+
+    pub(super) fn named_record_has_private_changes(
+        &self,
+        tag: u8,
+        name: &str,
+    ) -> StorageBackendResult<bool> {
         if !self.store.transaction_model().is_versioned() {
             return Ok(false);
         }
-        let key = single_str_key(TAG_METADATA, name)?;
+        let key = single_str_key(tag, name)?;
         crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
             Ok(read.revision(&[&key])?.has_private_changes())
         })

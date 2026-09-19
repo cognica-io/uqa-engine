@@ -222,6 +222,12 @@ impl Engine {
         snapshot.sequence_object_ids = sequences.object_ids;
         snapshot.sequence_persistence = sequences.persistence;
         snapshot.sequence_security = sequences.security;
+        snapshot.schemas = uqa_execution::schema::namespaces::authority::merge_private(
+            self.storage.catalog.as_deref(),
+            &current.schemas,
+            snapshot.schemas,
+            &snapshot.roles,
+        )?;
         snapshot.domains = uqa_execution::catalog::domain::merge_private(
             self.storage.catalog.as_deref(),
             &current.domains,

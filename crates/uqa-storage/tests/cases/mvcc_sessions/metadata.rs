@@ -8,6 +8,50 @@ use super::*;
 use uqa_storage::{CatalogFacade, KeyValueCatalog};
 
 #[test]
+fn schema_private_provenance_preserves_deletions_and_exact_names_through_undo() {
+    let persistence = Persistence::new();
+    let first = Arc::new(persistence.session(1 << 24));
+    let second = Arc::new(persistence.session(1 << 24));
+    let a = KeyValueCatalog::new(first.clone());
+    let b = KeyValueCatalog::new(second.clone());
+    let name = "tenant:%_\0日本語";
+    let neighbor = format!("{name}:next");
+    a.save_schema(name).unwrap();
+    a.save_schema(&neighbor).unwrap();
+    assert!(!a.schema_has_private_changes(name).unwrap());
+    first.begin_transaction().unwrap();
+    first.savepoint("schemas").unwrap();
+    a.drop_schema(name).unwrap();
+    a.save_schema("created").unwrap();
+    for schema in [name, "created"] {
+        assert!(a.schema_has_private_changes(schema).unwrap());
+        assert!(!b.schema_has_private_changes(schema).unwrap());
+    }
+    for schema in ["tenant", neighbor.as_str(), "absent"] {
+        assert!(!a.schema_has_private_changes(schema).unwrap());
+    }
+    b.save_schema("peer").unwrap();
+    first
+        .refresh_transaction_snapshot(&uqa_core::CancellationToken::new())
+        .unwrap();
+    assert!(a.schema_has_private_changes(name).unwrap());
+    assert!(!a.schema_has_private_changes("peer").unwrap());
+    first.rollback_to_savepoint("schemas").unwrap();
+    for schema in [name, "created"] {
+        assert!(!a.schema_has_private_changes(schema).unwrap());
+    }
+    a.drop_schema(name).unwrap();
+    first.commit_transaction().unwrap();
+    assert!(!a.schema_has_private_changes(name).unwrap());
+    assert!(!b
+        .load_schemas()
+        .unwrap()
+        .iter()
+        .any(|schema| schema == name));
+    assert!(b.load_schemas().unwrap().contains(&"peer".into()));
+}
+
+#[test]
 fn metadata_private_provenance_and_literal_prefixes_follow_savepoints_and_refresh() {
     let persistence = Persistence::new();
     let first = Arc::new(persistence.session(1 << 24));

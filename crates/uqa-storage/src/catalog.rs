@@ -427,6 +427,16 @@ pub trait CatalogFacade: Send + Sync {
     fn drop_schema(&self, name: &str) -> StorageBackendResult<()>;
     fn load_schema_rows(&self) -> StorageBackendResult<Vec<SchemaRow>>;
 
+    /// Whether this exact schema has a private creation, replacement or deletion in the current session.
+    fn schema_has_private_changes(&self, _name: &str) -> StorageBackendResult<bool> {
+        if self.transaction_model().is_versioned() {
+            return Err(StorageBackendError::Other(
+                "private schema provenance is not supported by this catalog".into(),
+            ));
+        }
+        Ok(false)
+    }
+
     fn save_schema(&self, name: &str) -> StorageBackendResult<()> {
         self.save_schema_row(&SchemaRow::bootstrap(name))
     }

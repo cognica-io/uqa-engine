@@ -5,6 +5,7 @@
 //
 
 //! Schema registration and owner publication through live catalog and authorization guards.
+pub mod authority;
 pub mod privileges;
 pub mod removal;
 pub mod restoration;

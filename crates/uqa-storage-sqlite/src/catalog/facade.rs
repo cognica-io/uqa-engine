@@ -258,6 +258,13 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::load_schema_rows(self))
     }
 
+    fn schema_has_private_changes(&self, name: &str) -> StorageBackendResult<bool> {
+        into_storage_result(self.native_named_record_has_private_changes(
+            crate::mvcc::native::NativeRecordFamily::Schemas,
+            name,
+        ))
+    }
+
     fn save_table(&self, schema: &TableSchema) -> StorageBackendResult<()> {
         into_storage_result(Catalog::save_table(self, schema))
     }

@@ -266,6 +266,10 @@ impl CatalogFacade for KeyValueCatalog {
         self.save_schema_row_impl(schema)
     }
 
+    fn schema_has_private_changes(&self, name: &str) -> StorageBackendResult<bool> {
+        self.named_record_has_private_changes(TAG_SCHEMA, name)
+    }
+
     fn drop_schema(&self, name: &str) -> StorageBackendResult<()> {
         self.drop_schema_impl(name)
     }

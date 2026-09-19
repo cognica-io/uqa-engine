@@ -11,6 +11,7 @@ mod foreign_tables;
 mod relations;
 mod roles;
 mod routines;
+mod schemas;
 mod sequences;
 mod table_authorization;
 mod table_grants;
