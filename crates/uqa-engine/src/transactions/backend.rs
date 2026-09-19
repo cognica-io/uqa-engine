@@ -255,7 +255,7 @@ impl Engine {
     }
 
     pub(crate) fn open_independent_pinned_read_snapshot(&self) -> Result<Box<Engine>, SQLError> {
-        let snapshot = self.new_session().map_err(|error| {
+        let snapshot = self.new_internal_read_session().map_err(|error| {
             SQLError::Internal(format!("open fixed transaction snapshot session: {error}"))
         })?;
         let backend = snapshot.storage.backend.as_ref().ok_or_else(|| {

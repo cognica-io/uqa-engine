@@ -212,7 +212,7 @@ impl Engine {
                 params,
             );
         }
-        let session = self.new_session().map_err(|error| {
+        let session = self.new_internal_read_session().map_err(|error| {
             SQLError::Internal(format!(
                 "open independent session to recheck retrieval on `{table}`: {error}"
             ))
@@ -231,7 +231,7 @@ impl Engine {
         if self.storage.provider.is_none() {
             return self.knn_search_leaf(table, field, query_vector, top_k);
         }
-        let session = self.new_session().map_err(|error| {
+        let session = self.new_internal_read_session().map_err(|error| {
             SQLError::Internal(format!(
                 "open independent session to recheck vector retrieval on `{table}`: {error}"
             ))

@@ -119,10 +119,12 @@ fn table_rename_rechecks_source_create_after_definition_waits() {
             );
             assert!(error.to_string().contains("permission denied for schema s"));
             sql(&second, "ROLLBACK TO before_rename");
-            sql(
-                &first,
-                "BEGIN; LOCK TABLE s.items IN ACCESS EXCLUSIVE MODE NOWAIT; ROLLBACK",
+            let probe = first.sql(
+                "BEGIN; LOCK TABLE s.items IN ACCESS EXCLUSIVE MODE NOWAIT",
+                &[],
             );
+            sql(&first, "ROLLBACK");
+            probe.unwrap_or_else(|error| panic!("{provider}/{isolation}: {error}; retained locks: {:?}", sql(&first, "SELECT pid, mode, granted, relation FROM pg_locks WHERE relation='s.items'::regclass")));
             sql(&second, "ROLLBACK");
         }
     }

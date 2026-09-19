@@ -17,6 +17,7 @@ use crate::tests::native_storage;
 
 mod cache_refresh;
 mod external_refresh;
+mod internal_reads;
 
 fn sqlite_data_version(engine: &Engine) -> u64 {
     engine

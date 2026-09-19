@@ -365,7 +365,7 @@ impl Engine {
             return Ok(true);
         }
 
-        let latest = self.new_session()?;
+        let latest = self.new_internal_read_session()?;
         self.install_latest_fixed_transaction_catalogs(&latest, target_versions)?;
         Ok(true)
     }

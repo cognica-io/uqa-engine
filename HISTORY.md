@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Keep internal fixed snapshots, current-catalog readers and retrieval rechecks from registering automatic-statistics clients. Public sibling sessions retain their own maintenance client lease; internal readers no longer restart background work after application clients release it.
+
 - Preserve foreign-key catalog identities through column, table and constraint renames while keeping partition copies independent. Retain deferred modes and queued checks across local renames, and validate all converted rows before initial restoration writes. Common record format 33 excludes writers that cannot preserve those identities.
 
 - Preserve NOT NULL constraint OIDs through table, column and constraint renames, allocate a new identity after removal/recreation, and share inherited rename locking and diagnostics with CHECK constraints. Initial catalog conversion preserves predecessor OIDs and rolls back with restoration failures; common record format 32 excludes writers that cannot retain the identity.

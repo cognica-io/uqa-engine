@@ -218,6 +218,15 @@ impl Engine {
     /// must return catalog and data handles bound to one session transaction
     /// so every durable mutation commits atomically.
     pub fn new_session(&self) -> StorageBackendResult<Self> {
+        self.new_sibling_session(false)
+    }
+
+    /// Retain an internal read view without acquiring another automatic-maintenance client lease.
+    pub(crate) fn new_internal_read_session(&self) -> StorageBackendResult<Self> {
+        self.new_sibling_session(true)
+    }
+
+    fn new_sibling_session(&self, internal_read: bool) -> StorageBackendResult<Self> {
         let _statement = self.runtime.statement_gate.lock();
         let provider = self.storage.provider.as_ref().ok_or_else(|| {
             StorageBackendError::Other(
@@ -254,6 +263,10 @@ impl Engine {
                 Some(Arc::clone(provider)),
             )?,
         };
+        session
+            .session
+            .statistics_worker
+            .store(internal_read, std::sync::atomic::Ordering::Release);
         session.row_locks = Arc::clone(&self.row_locks);
         session.statistics = Arc::clone(&self.statistics);
         session.install_notification_hub(Arc::clone(&self.notification_hub))?;
