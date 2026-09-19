@@ -9,6 +9,9 @@ use super::{constraints::context::ConstraintCatalog, errors::dml_storage_error};
 use uqa_core::{DocId, Value};
 use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
+mod reservation;
+pub use reservation::reserve_document_id;
+
 pub trait MutationIdentifiers {
     fn allocate_next_id(&self, table: &str) -> Result<DocId, SQLError>;
     fn advance_next_id(&self, table: &str, doc_id: DocId) -> Result<(), String>;

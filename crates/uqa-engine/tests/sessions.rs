@@ -22,6 +22,8 @@ use uqa_storage_sqlite::{Catalog, ManagedConnection};
 mod affinity;
 #[path = "sessions/commit_resolution.rs"]
 mod commit_resolution;
+#[path = "sessions/concurrent_inserts.rs"]
+mod concurrent_inserts;
 #[path = "sessions/concurrent_writes.rs"]
 mod concurrent_writes;
 #[path = "sessions/identifiers.rs"]

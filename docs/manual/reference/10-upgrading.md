@@ -1,6 +1,6 @@
-# Upgrading to UQA Engine 0.3.6
+# Upgrading to UQA Engine 0.3.7
 
-Version 0.3.6 fixes vector-threshold intersection optimization so every predicate retains its score contribution, matching documents and validation errors. Existing 0.3.5 database formats and analyzer configurations remain compatible. See the [release history](../../../HISTORY.md#036---2026-09-15).
+Version 0.3.7 fixes generated document identity collisions between independent sessions and processes, preserving successful INSERT and RETURNING rows in new readers and after reopen. It also encrypts cross-process notification state for encrypted file-backed databases. See the [release history](../../../HISTORY.md#037---2026-09-18) and the notification upgrade requirements below.
 
 Version 0.3.5 adds native Japanese Kuromoji analysis, completion and independent normalization, with shared Nori/Kuromoji mechanisms and both dictionaries in the CLI and official bindings. It also fixes analyzer parameter inference and updates TLS dependencies. Existing 0.3.0 generic/Nori descriptors and database formats remain compatible; Rust callers using analyzer struct literals or explicit simple-lowercase profiles must apply the source changes below. See the [release history](../../../HISTORY.md#035---2026-09-15).
 
@@ -119,13 +119,19 @@ The development redb provider migrates existing Key/Value files when `RedbStorag
 
 Private changes, savepoint history, batches and retained view metadata share a default 64 MiB session allowance. Use `RedbStorage::open_with_options(path, VersionedSessionOptions { retained_bytes })` to set it explicitly. This limit is separate from SQL statement memory; exhaustion returns a typed error and no spill files are written. Provider version/receipt reclamation and full concurrent Engine SQL support remain tracked in the [implementation plan](../../plans/0008-concurrent-storage-transactions.md).
 
+## Concurrent inserts and notification encryption
+
+Generated physical document identities are reserved before INSERT rows, triggers or RETURNING results are staged. Reservations skip candidates held by other transactions and recheck the latest committed state when a statement snapshot can be stale. The fix covers tables without an integer primary key, including TEXT and composite primary keys, with VALUES and INSERT ... SELECT. Existing table data needs no format migration. Update every process sharing the database together so all writers participate in the reservation protocol; upgrading does not recover rows overwritten by an earlier release.
+
+Encrypted SQLite and compressed-encrypted databases now encrypt their `.uqa-notification-state` sidecar with the main database credential. An existing plaintext registry or a registry with a different key causes open to fail before any registry mutation; it is never silently converted or replaced. Validate the complete main-file and auxiliary-file set in isolation and update all consumers together. Custom encrypted file providers implement `auxiliary_encryption_key` on both `PersistentStorageProvider` and `PersistentStorageBackend`; the default `None` permits unencrypted auxiliary storage. See [auxiliary storage encryption](../internals/03-storage.md#encryption-and-compression) for the storage and lifecycle contract.
+
 ## Vector-threshold optimizer compatibility
 
 `uqa_planner::TreeOptimizerConfig::enable_merge_vector_thresholds` is deprecated and ignored for both `true` and `false`. Remove explicit assignments to avoid deprecation warnings; callers using `TreeOptimizerConfig::default()` need no source change. The optimizer keeps separate threshold operators for identical and nearby query vectors, preserving additive intersection scores, document support and invalid-threshold errors even inside nested operators. No data migration is required when upgrading from 0.3.5.
 
 ## Korean analysis and package features
 
-Rust applications using Korean analysis enable `nori` on `uqa` or `uqa-engine`, for example `cargo add uqa@0.3.6 --features nori`. The feature includes the immutable dictionary through `uqa-nori-data`; the official Python, Node.js, and browser WASM packages enable it. No JVM or runtime dictionary download is required. Builds without this feature retain the non-Korean analyzers and reject Korean analysis requests explicitly.
+Rust applications using Korean analysis enable `nori` on `uqa` or `uqa-engine`, for example `cargo add uqa@0.3.7 --features nori`. The feature includes the immutable dictionary through `uqa-nori-data`; the official Python, Node.js, and browser WASM packages enable it. No JVM or runtime dictionary download is required. Builds without this feature retain the non-Korean analyzers and reject Korean analysis requests explicitly.
 
 The built-in `nori` analyzer and custom Korean pipelines retain exact dictionary and user-rule identities in durable descriptors. Deploy the same feature configuration and required resources in every process opening the database. Rich analysis retains UTF-16 terms, morphology, token graph edges, and corrected source spans; existing string projections remain available but cannot represent isolated UTF-16 units. See the [analyzer reference](06-text-analyzers.md) and [binding contracts](08-bindings-and-extensions.md) for analysis, normalization, and result APIs.
 
@@ -139,20 +145,20 @@ SQLite catalogs advance to version 46 for durable cache revisions, graph access 
 
 ## Package versions
 
-Update the UQA packages used by one application together. Rust's `0.1` and `0.2` dependency requirements do not select `0.3.6`; change the requirement explicitly and regenerate the application's lockfile.
+Update the UQA packages used by one application together. Rust's `0.1` and `0.2` dependency requirements do not select `0.3.7`; change the requirement explicitly and regenerate the application's lockfile.
 
 | Environment | Versioned installation |
 | --- | --- |
-| Embedded Rust | `cargo add uqa@0.3.6` |
-| Rust HTTP client | `cargo add uqa-client@0.3.6` |
-| Python and `usql` | `python -m pip install --upgrade uqa==0.3.6` |
-| Embedded Node.js | `npm install @cognica-io/uqa@0.3.6` |
-| Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.3.6` |
-| Browser WASM | `npm install @cognica-io/uqa-wasm@0.3.6` |
+| Embedded Rust | `cargo add uqa@0.3.7` |
+| Rust HTTP client | `cargo add uqa-client@0.3.7` |
+| Python and `usql` | `python -m pip install --upgrade uqa==0.3.7` |
+| Embedded Node.js | `npm install @cognica-io/uqa@0.3.7` |
+| Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.3.7` |
+| Browser WASM | `npm install @cognica-io/uqa-wasm@0.3.7` |
 
 The Rust workspace requires Rust 1.90 or newer. Python requires Python 3.8 or newer, and the Node.js package requires Node.js 16 or newer. The Node.js root package selects an exact-version native optional package for embedded execution; deploy the root and native packages from the same release. Deploy the Browser WASM JavaScript module and `uqa.wasm` from the same package together, including when updating a browser cache.
 
-The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.3.6) contains the Python and npm archives, standalone Node.js addons, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.3.6"` consistently for every UQA dependency.
+The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.3.7) contains the Python and npm archives, standalone Node.js addons, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.3.7"` consistently for every UQA dependency.
 
 ## Automatic statistics and session caches
 
@@ -217,10 +223,10 @@ The B-tree methods on `uqa_storage::PersistentStorageBackend` now use `ValueInde
 Opening an older supported database performs the required provider and catalog migrations. The 0.2 minor release adds typed tuple metadata, richer object and column identities, ownership and ACL records, bound routine and rule dependencies, and expression-index metadata. Initial open owns migration writes; later catalog refresh validates the persisted representation. The shipped SQLite and key-value providers handle their storage migrations through the normal engine open path.
 
 1. Stop writers, close every engine using the database, and create a recoverable backup through the [storage backup procedure](04-storage-and-security.md#backups-and-copies).
-2. Open a copy with the exact 0.3.6 application and its selected provider, encryption key, and compression configuration.
+2. Open a copy with the exact 0.3.7 application and its selected provider, encryption key, and compression configuration.
 3. Execute representative reads, writes, role and privilege checks, stored routines and views, and retrieval queries. Verify indexes, transaction rollback, and close-and-reopen behavior with the application's data.
 4. Update every process sharing the database before reopening the original file. Register process-local runtime callbacks again when the application starts.
-5. If the application must return to an older binary, restore the pre-upgrade backup. Do not rely on an older binary reading a file migrated by 0.3.6.
+5. If the application must return to an older binary, restore the pre-upgrade backup. Do not rely on an older binary reading a file migrated by 0.3.7.
 
 Keep migration failures visible and resolve them before admitting writes. Retain encryption keys and any external rollback anchor according to the [storage and security contract](04-storage-and-security.md).
 

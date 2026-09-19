@@ -37,6 +37,9 @@ sha2 = { workspace = true }
 tempfile = "3.13"
 thiserror = { workspace = true }
 
+[dev-dependencies]
+proptest = { workspace = true }
+
 # Browser execution uses the sequential implementations of the parallel interfaces.
 [target.'cfg(not(target_os = "emscripten"))'.dependencies]
 rayon = { workspace = true }

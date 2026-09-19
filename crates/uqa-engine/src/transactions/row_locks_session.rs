@@ -185,6 +185,26 @@ impl Engine {
             .map_err(|error| Self::storage_tx_error("refresh scoring parameters", &error))
     }
 
+    pub(crate) fn reserve_document_id_candidate(
+        &self,
+        table: &str,
+        doc_id: uqa_core::DocId,
+    ) -> Result<crate::row_locks::LockAcquire, SQLError> {
+        let canonical = self.row_lock_table_name(table)?;
+        self.row_locks.acquire(&crate::row_locks::LockRequest {
+            session_id: self.session_id,
+            key: crate::row_locks::RowLockKey {
+                table: self.row_locks.document_identity_key(&canonical),
+                doc_id,
+            },
+            strength: uqa_sql::ast::LockStrength::ForUpdate,
+            mark: self.current_lock_mark(),
+            wait: uqa_sql::ast::LockWait::SkipLocked,
+            cancel: &self.runtime.cancellation,
+            relation: table,
+        })
+    }
+
     pub(crate) fn lock_key_reservation(
         &self,
         digest: [u8; 32],

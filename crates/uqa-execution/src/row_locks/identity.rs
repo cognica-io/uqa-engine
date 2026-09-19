@@ -17,6 +17,7 @@ pub(super) enum ManagerIdentity {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) enum LockRelationIdentity {
     Table(Arc<str>),
+    DocumentIdentityReservations(Arc<str>),
     BackendWriter,
     KeyReservation([u8; 32]),
     ScoringParameters(Arc<str>),
@@ -28,6 +29,12 @@ impl LockRelationIdentity {
     pub(super) fn stable_bytes(&self) -> Vec<u8> {
         match self {
             Self::Table(name) => name.as_bytes().to_vec(),
+            Self::DocumentIdentityReservations(name) => {
+                let mut bytes = Vec::with_capacity(1 + "document-identities".len() + name.len());
+                bytes.extend_from_slice(b"\xffdocument-identities");
+                bytes.extend_from_slice(name.as_bytes());
+                bytes
+            }
             Self::BackendWriter => b"\xffbackend-writer".to_vec(),
             Self::ScoringParameters(name) => {
                 let mut bytes = b"\xffscoring-parameters".to_vec();
