@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Remove inherited NOT NULL constraints through the same origin-aware traversal as CHECK constraints, preserve local and multiply inherited definitions, and make retained ONLY children local. Retain original child identities and per-level locks through waits, restore removals at savepoints, and reject removal beneath primary keys and identity columns with PostgreSQL diagnostics.
+
 - Validate inheritable NOT NULL constraints on descendants before marking the parent valid, match child constraints by column, and reject ONLY validation while children require validation. Retain foreign-key reference RowShare locks and inheritance descendant AccessShare locks, preserving original identities through waits and releasing acquisitions at savepoint rollback.
 
 - Retain RowExclusive sequence locks through the outer transaction for nextval, currval, lastval and setval, including cached values and savepoint rollback. Recheck definitions and authority after waits while preserving the original object identity and ordinary query snapshot. Direct calls release implicit locks, and value execution reuses an active query transaction without reentering its statement gate.

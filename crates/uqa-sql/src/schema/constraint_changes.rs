@@ -5,6 +5,8 @@
 //
 
 //! Locate durable constraints and analyze changes to their type, identity, and enforcement metadata.
+pub mod inheritance;
+pub mod not_null_removal;
 pub mod validation;
 
 use crate::schema::foreign_keys::column_foreign_key;

@@ -6,7 +6,7 @@
 
 //! Remove constraints and their referencing keys in dependency order.
 use super::{
-    checks, constraint_error, ddl_storage_error, find_constraint, publish_constraint_state,
+    constraint_error, ddl_storage_error, find_constraint, publish_constraint_state,
     table_constraint_state, ConstraintAlterContext, ConstraintLocation, SQLError,
 };
 use uqa_sql::schema::constraint_changes::foreign_key_object_id;
@@ -43,7 +43,7 @@ pub fn drop_constraint(
             ),
         ));
     }
-    if checks::drop_check(context, &table, name, recurse, cascade)? {
+    if super::inheritance::drop_inherited_constraint(context, &table, name, recurse, cascade)? {
         return Ok(());
     }
     drop_constraint_group(context, &table, name, if_exists, cascade, true)
@@ -198,16 +198,11 @@ pub fn drop_constraint_one(
     }
     match location {
         ConstraintLocation::NotNull(index) => {
-            let column = columns[index].name.clone();
-            if constraints.key_constraints.iter().any(|constraint| {
-                constraint.kind == uqa_sql::ast::TableKeyConstraintKind::PrimaryKey
-                    && constraint.columns.contains(&column)
-            }) {
-                return Err(constraint_error(
-                    "42P16",
-                    format!("column \"{column}\" is in a primary key"),
-                ));
-            }
+            uqa_sql::schema::constraint_changes::not_null_removal::validate_constraint_removal(
+                table,
+                &columns[index],
+                &constraints,
+            )?;
             columns[index].not_null = false;
             columns[index].not_null_explicit = false;
             columns[index].not_null_name = None;

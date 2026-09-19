@@ -421,6 +421,10 @@ fn run_alter_table_action<S: Clone + 'static>(
                 .iter()
                 .find(|column| column.name == name)
                 .ok_or_else(|| SQLError::UnknownColumn(format!("{}.{name}", stmt.table)))?;
+            uqa_sql::schema::constraint_changes::not_null_removal::validate_column_removal(
+                &stmt.table,
+                column,
+            )?;
             if let Some(constraint_name) = column.not_null_name.as_deref() {
                 drop_constraint(
                     &context.constraints,

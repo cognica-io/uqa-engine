@@ -47,7 +47,7 @@ impl ConstraintValidation<'_> {
         let ConstraintValidationKind::NotNull { column, .. } = self.kind else {
             return Ok(original);
         };
-        columns.iter().find(|candidate| candidate.name == column && candidate.not_null)
+        super::inheritance::not_null_constraint(columns, column)
             .and_then(|candidate| candidate.not_null_name.as_deref())
             .ok_or_else(|| constraint_error("XX000", format!("cache lookup failed for not-null constraint on column \"{column}\" of relation \"{child}\"")))
     }
