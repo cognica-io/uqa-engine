@@ -7,7 +7,8 @@
 //! Query-owned provider reads share allocation limits and cancellation with their consumers.
 
 use crate::StorageBackendResult;
-use uqa_core::{memory::MemoryBudget, CancellationToken};
+use uqa_core::memory::MemoryBudget;
+pub use uqa_core::CancellationToken;
 
 pub type ValueReadVisitor<'a> = dyn FnMut(Option<&[u8]>) -> StorageBackendResult<()> + 'a;
 pub type KeyValueReadVisitor<'a> = dyn FnMut(&[u8], &[u8]) -> StorageBackendResult<()> + 'a;

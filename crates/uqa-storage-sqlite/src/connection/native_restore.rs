@@ -67,10 +67,11 @@ impl ManagedConnection {
         .map_err(VersionError::into_storage_error)?;
         let database = records.database_id();
         Ok(Arc::new(BoundRecordSession {
-            store: Arc::new(VersionedKeyValueStore::new(
+            store: Arc::new(VersionedKeyValueStore::new_with_cancellation(
                 Arc::new(records),
                 identity,
                 options,
+                self.write_cancellation(),
             )),
             native: Some(database),
         }))

@@ -8,6 +8,8 @@
 
 #[path = "mvcc_sessions/batches.rs"]
 mod batches;
+#[path = "mvcc_sessions/cancellation.rs"]
+mod cancellation;
 #[path = "mvcc_sessions/commands.rs"]
 mod commands;
 #[path = "mvcc_sessions/compound.rs"]

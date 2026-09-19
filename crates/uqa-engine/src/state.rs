@@ -434,10 +434,17 @@ pub(super) struct QueryRuntime {
 
 impl QueryRuntime {
     pub(super) fn new(function_depth_limit: usize) -> Self {
+        Self::with_cancellation(function_depth_limit, uqa_core::CancellationToken::new())
+    }
+
+    pub(super) fn with_cancellation(
+        function_depth_limit: usize,
+        cancellation: uqa_core::CancellationToken,
+    ) -> Self {
         Self {
             statement_gate: Arc::new(StatementGate::new()),
             sql_execution_depth: AtomicUsize::new(0),
-            cancellation: uqa_core::CancellationToken::new(),
+            cancellation,
             notices: Arc::new(Mutex::new(Vec::new())),
             notifications: Arc::new(Mutex::new(VecDeque::new())),
             notification_wake: Arc::new(parking_lot::Condvar::new()),

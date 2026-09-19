@@ -249,6 +249,26 @@ pub trait KeyValueBatch {
 
 /// Ordered byte-key storage used by Key/Value catalog and index backends.
 pub trait KeyValueStore: Send + Sync {
+    /// Token shared with the execution that owns this session's writes. Cancellation must not prevent rollback cleanup or diagnostic reads. Versioned wrappers must forward this capability.
+    fn write_cancellation(&self) -> Option<uqa_core::CancellationToken> {
+        None
+    }
+
+    /// Create a transaction-isolated session with the caller's write cancellation and a fresh retention budget.
+    fn open_session_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
+        cancellation.check()?;
+        if self.transaction_model().is_versioned() {
+            return Err(StorageBackendError::Other(
+                "cancellable independent KeyValue sessions are not implemented by this store"
+                    .into(),
+            ));
+        }
+        self.open_session()
+    }
+
     /// Whether writes remain private while independent sessions read and write. Versioned stores must provide command refresh, retained reads, savepoint undo and conditional publication under one reported affinity.
     fn transaction_model(&self) -> crate::StorageTransactionModel {
         crate::StorageTransactionModel::ProviderSerialized

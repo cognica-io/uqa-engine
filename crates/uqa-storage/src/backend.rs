@@ -221,7 +221,7 @@ impl PersistentStorageSession {
         Self { catalog, backend }
     }
 
-    /// Check the transaction model, database incarnation and session affinity before restoration, migration or attachment. Versioned pairs require a matching reported affinity; serialized pairs may both omit it.
+    /// Check the transaction model, database incarnation and session affinity before restoration, migration or attachment. Versioned pairs require a matching reported affinity and backend write cancellation; serialized pairs may omit both capabilities.
     pub fn validate_transaction_affinity(&self) -> StorageBackendResult<()> {
         let affinity = self.backend.transaction_affinity();
         let model = self.backend.transaction_model();
@@ -232,6 +232,11 @@ impl PersistentStorageSession {
             return Err(StorageBackendError::backend(
                 "session",
                 StorageSessionMismatch,
+            ));
+        }
+        if model.is_versioned() && self.backend.write_cancellation().is_none() {
+            return Err(StorageBackendError::Other(
+                "versioned storage backend does not expose write cancellation".into(),
             ));
         }
         Ok(())
@@ -245,6 +250,22 @@ impl PersistentStorageSession {
 /// `SQLite`, redb, and application-defined Key/Value stores.
 pub trait PersistentStorageProvider: Send + Sync {
     fn open_session(&self) -> StorageBackendResult<PersistentStorageSession>;
+
+    /// Open an autonomous session whose writes can be cancelled by the caller. Versioned factories and wrappers must preserve their catalog/backend pair and forward this construction capability.
+    fn open_session_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        cancellation.check()?;
+        let session = self.open_session()?;
+        if session.backend.transaction_model().is_versioned() {
+            return Err(StorageBackendError::Other(
+                "cancellable independent storage sessions are not implemented by this provider"
+                    .into(),
+            ));
+        }
+        Ok(session)
+    }
 
     /// Open handles for initial Engine restoration. Providers may defer catalog schema preparation until `CatalogFacade::initialize_storage` runs inside the owning transaction; ordinary session factories must return an initialized catalog.
     fn open_initial_session(&self) -> StorageBackendResult<PersistentStorageSession> {
@@ -266,6 +287,26 @@ pub trait PersistentStorageProvider: Send + Sync {
 
 /// Factory plus transaction surface for persistent table/index storage.
 pub trait PersistentStorageBackend: Send + Sync {
+    /// Cancellation for this session's physical write admission and publication. Retained reads and rollback cleanup must remain usable after cancellation. Versioned wrappers must forward the underlying token.
+    fn write_cancellation(&self) -> Option<uqa_core::CancellationToken> {
+        None
+    }
+
+    /// Create an independent transaction context whose writes share the invoking execution's cancellation. Versioned providers must implement this without rebinding another session's token.
+    fn open_session_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        cancellation.check()?;
+        if self.transaction_model().is_versioned() {
+            return Err(StorageBackendError::Other(
+                "cancellable independent storage sessions are not implemented by this backend"
+                    .into(),
+            ));
+        }
+        self.open_session()
+    }
+
     /// Transaction ownership shared with the paired catalog. Legacy providers retain serialized Engine writer admission; versioned providers keep private writes and support command refresh without ending the transaction.
     fn transaction_model(&self) -> StorageTransactionModel {
         StorageTransactionModel::ProviderSerialized

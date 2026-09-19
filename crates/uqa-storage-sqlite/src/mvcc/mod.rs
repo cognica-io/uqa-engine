@@ -6,6 +6,7 @@
 
 //! `SQLite` persistence for shared logical records, with short physical transactions and durable receipts.
 
+mod admission;
 mod codec;
 mod identifiers;
 mod key_value;
@@ -158,6 +159,39 @@ impl SQLiteRecordStore {
             .map_err(Error::into_version)
     }
 
+    fn with_write<T>(
+        &self,
+        control: &StorageReadControl,
+        operation: impl FnOnce(&Connection) -> PhysicalResult<T>,
+    ) -> VersionResult<T> {
+        let mut operation = Some(operation);
+        loop {
+            control.cancellation().check()?;
+            let result = self
+                .connection
+                .with_record_connection(control, |connection| {
+                    let _timeout = admission::BusyTimeout::new(connection)?;
+                    control.cancellation().check()?;
+                    Ok(operation.take().expect("record write runs once")(
+                        connection,
+                    ))
+                });
+            match result {
+                Err(SQLiteError::SQLite(error))
+                    if operation.is_some() && admission::is_busy(&error) =>
+                {
+                    // Checkout/configuration failed before the operation was invoked.
+                    admission::wait(control).map_err(Error::into_version)?;
+                }
+                result => {
+                    return result
+                        .map_err(|error| Error::from(error).into_version())?
+                        .map_err(Error::into_version);
+                }
+            }
+        }
+    }
+
     fn check_transaction(&self, transaction: StorageTransactionId) -> VersionResult<()> {
         if transaction.database() != self.identity {
             return Err(VersionError::WrongDatabase);
@@ -185,7 +219,7 @@ impl VersionedPersistence for SQLiteRecordStore {
         control: &StorageReadControl,
     ) -> VersionResult<uqa_storage::mvcc::IdentifierAllocation> {
         control.cancellation().check()?;
-        self.with(|connection| {
+        self.with_write(control, |connection| {
             identifiers::allocate(
                 connection,
                 self.identity,
@@ -240,7 +274,9 @@ impl VersionedPersistence for SQLiteRecordStore {
         control: &StorageReadControl,
     ) -> VersionResult<StorageTransactionId> {
         control.cancellation().check()?;
-        self.with(|connection| write::allocate(connection, self.identity, self.native, control))
+        self.with_write(control, |connection| {
+            write::allocate(connection, self.identity, self.native, control)
+        })
     }
     fn snapshot(
         &self,
@@ -271,7 +307,7 @@ impl VersionedPersistence for SQLiteRecordStore {
         self.check_transaction(transaction)?;
         control.cancellation().check().map_err(VersionError::from)?;
         let _bindings = write::reserve_bindings(prepared, control)?;
-        self.with(|connection| {
+        self.with_write(control, |connection| {
             Ok(write::commit(
                 connection,
                 transaction,

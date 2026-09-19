@@ -200,7 +200,17 @@ impl ConnectionPool {
     }
 
     fn checkout(self: &Arc<Self>) -> Result<PooledConnection> {
+        self.checkout_with_cancellation(None)
+    }
+
+    fn checkout_with_cancellation(
+        self: &Arc<Self>,
+        cancellation: Option<&uqa_core::CancellationToken>,
+    ) -> Result<PooledConnection> {
         loop {
+            if let Some(cancellation) = cancellation {
+                cancellation.check()?;
+            }
             let mut state = self.state.lock();
             if let Some(connection) = state.idle.pop() {
                 return Ok(PooledConnection {
@@ -224,7 +234,12 @@ impl ConnectionPool {
                     }
                 };
             }
-            self.available.wait(&mut state);
+            if cancellation.is_some() {
+                self.available
+                    .wait_for(&mut state, std::time::Duration::from_millis(10));
+            } else {
+                self.available.wait(&mut state);
+            }
         }
     }
 
@@ -280,6 +295,7 @@ impl Drop for PooledConnection {
 }
 
 struct SessionState {
+    write_cancellation: uqa_core::CancellationToken,
     affinity: uqa_storage::StorageSessionAffinity,
     /// Read guards cover ordinary operations. Transaction lifecycle calls take
     /// the write guard, making BEGIN/COMMIT/ROLLBACK linearizable with respect
@@ -295,7 +311,12 @@ struct SessionState {
 
 impl SessionState {
     fn new() -> Self {
+        Self::with_cancellation(uqa_core::CancellationToken::new())
+    }
+
+    fn with_cancellation(write_cancellation: uqa_core::CancellationToken) -> Self {
         Self {
+            write_cancellation,
             affinity: uqa_storage::StorageSessionAffinity::new(),
             gate: RwLock::new(()),
             transaction: Mutex::new(None),
@@ -488,8 +509,7 @@ impl ManagedConnection {
     }
 
     fn configure_wal_connection(conn: &Connection) -> Result<()> {
-        // 5s busy timeout absorbs short contention without surfacing
-        // SQLITE_BUSY; long contention is a real bug.
+        // Legacy physical operations retain a bounded busy wait. Versioned writes supply cancellable admission under a scoped timeout.
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         // Synchronous=NORMAL is the recommended pairing with WAL: safe
         // against power loss, faster than FULL.
@@ -516,23 +536,6 @@ impl ManagedConnection {
         conn.pragma_update(None, "temp_store", "MEMORY")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         Ok(())
-    }
-
-    /// Create an independent logical session over the same database pool.
-    /// Explicit transactions started on either session are isolated and never
-    /// capture operations issued through the other session.
-    #[must_use]
-    pub fn new_session(&self) -> Self {
-        let _gate = self.session.gate.read();
-        let session = SessionState::new();
-        if let Some(logical) = self.session.logical.get() {
-            let _ = session.logical.set(Arc::new(logical.new_session()));
-        }
-        Self {
-            pool: Arc::clone(&self.pool),
-            session: Arc::new(session),
-            record_access: self.record_access,
-        }
     }
 
     /// Identity shared by handles using this session's native or logical transaction context.

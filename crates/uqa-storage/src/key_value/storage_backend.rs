@@ -31,6 +31,20 @@ impl KeyValueStorageBackend {
 }
 
 impl PersistentStorageBackend for KeyValueStorageBackend {
+    fn write_cancellation(&self) -> Option<uqa_core::CancellationToken> {
+        self.store.write_cancellation()
+    }
+
+    fn open_session_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        let store = self.store.open_session_with_cancellation(cancellation)?;
+        let catalog: Arc<dyn CatalogFacade> = Arc::new(KeyValueCatalog::new(Arc::clone(&store)));
+        let backend: Arc<dyn PersistentStorageBackend> = Arc::new(Self::new(store));
+        Ok(PersistentStorageSession::new(catalog, backend))
+    }
+
     fn transaction_model(&self) -> crate::StorageTransactionModel {
         self.store.transaction_model()
     }

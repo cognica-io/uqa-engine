@@ -51,7 +51,14 @@ impl SQLiteKeyValueStore {
     }
 
     pub fn new_session(&self) -> Self {
-        let conn = self.conn.new_session();
+        self.new_session_with_cancellation(&uqa_core::CancellationToken::new())
+    }
+
+    pub fn new_session_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> Self {
+        let conn = self.conn.new_session_with_cancellation(cancellation);
         let records = conn
             .bind_records(self.records.options())
             .expect("a fresh connection inherits the same logical session configuration");
@@ -80,6 +87,18 @@ impl uqa_storage::mvcc::IdentifierAllocator for SQLiteKeyValueStore {
 }
 
 impl KeyValueStore for SQLiteKeyValueStore {
+    fn write_cancellation(&self) -> Option<uqa_core::CancellationToken> {
+        self.records.write_cancellation()
+    }
+
+    fn open_session_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
+        cancellation.check()?;
+        Ok(Arc::new(self.new_session_with_cancellation(cancellation)))
+    }
+
     fn transaction_model(&self) -> uqa_storage::StorageTransactionModel {
         self.records.transaction_model()
     }
@@ -439,7 +458,16 @@ impl SQLiteKeyValueStorage {
 
 impl PersistentStorageProvider for SQLiteKeyValueStorage {
     fn open_session(&self) -> StorageBackendResult<PersistentStorageSession> {
-        let store: Arc<dyn KeyValueStore> = Arc::new(self.store.new_session());
+        self.open_session_with_cancellation(&uqa_core::CancellationToken::new())
+    }
+
+    fn open_session_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        cancellation.check()?;
+        let store: Arc<dyn KeyValueStore> =
+            Arc::new(self.store.new_session_with_cancellation(cancellation));
         let catalog: Arc<dyn CatalogFacade> = Arc::new(KeyValueCatalog::new(Arc::clone(&store)));
         let backend: Arc<dyn PersistentStorageBackend> =
             Arc::new(KeyValueStorageBackend::new(store));

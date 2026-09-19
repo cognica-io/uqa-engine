@@ -4,22 +4,27 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Matching affinities alone cannot validate a pair that disagrees about its transaction model or database incarnation.
+//! Versioned pairs must agree on transaction identity and expose cancellable write admission.
 
 use std::sync::Arc;
 use uqa_storage::{
-    KeyValueBatch, KeyValueCatalog, KeyValueStorageBackend, KeyValueStore, MemoryKeyValueStore,
-    PersistentStorageSession, StorageBackendResult, StorageSessionAffinity,
-    StorageTransactionModel,
+    read_control::CancellationToken, KeyValueBatch, KeyValueCatalog, KeyValueStorageBackend,
+    KeyValueStore, MemoryKeyValueStore, PersistentStorageSession, StorageBackendResult,
+    StorageSessionAffinity, StorageTransactionModel,
 };
 
 struct AdvertisedStore {
     inner: MemoryKeyValueStore,
     model: StorageTransactionModel,
     affinity: Option<StorageSessionAffinity>,
+    cancellation: Option<CancellationToken>,
 }
 
 impl KeyValueStore for AdvertisedStore {
+    fn write_cancellation(&self) -> Option<CancellationToken> {
+        self.cancellation.clone()
+    }
+
     fn transaction_model(&self) -> StorageTransactionModel {
         self.model
     }
@@ -62,7 +67,7 @@ impl KeyValueStore for AdvertisedStore {
 }
 
 #[test]
-fn versioned_pairs_require_matching_models_databases_and_reported_affinity() {
+fn versioned_pairs_require_matching_identity_and_write_cancellation() {
     let legacy = StorageTransactionModel::ProviderSerialized;
     let a = StorageTransactionModel::VersionedConcurrent {
         database: uqa_storage::mvcc::DatabaseId::from_bytes([1; 16]),
@@ -70,14 +75,15 @@ fn versioned_pairs_require_matching_models_databases_and_reported_affinity() {
     let b = StorageTransactionModel::VersionedConcurrent {
         database: uqa_storage::mvcc::DatabaseId::from_bytes([2; 16]),
     };
-    for (catalog_model, backend_model, report_affinity, accepted) in [
-        (legacy, legacy, false, true),
-        (legacy, legacy, true, true),
-        (a, a, true, true),
-        (a, a, false, false),
-        (a, b, true, false),
-        (legacy, a, true, false),
-        (a, legacy, true, false),
+    for (catalog_model, backend_model, report_affinity, report_cancellation, accepted) in [
+        (legacy, legacy, false, false, true),
+        (legacy, legacy, true, false, true),
+        (a, a, true, true, true),
+        (a, a, true, false, false),
+        (a, a, false, true, false),
+        (a, b, true, true, false),
+        (legacy, a, true, true, false),
+        (a, legacy, true, true, false),
     ] {
         let affinity = report_affinity.then(StorageSessionAffinity::new);
         let store = |model| -> Arc<dyn KeyValueStore> {
@@ -85,6 +91,7 @@ fn versioned_pairs_require_matching_models_databases_and_reported_affinity() {
                 inner: MemoryKeyValueStore::new(),
                 model,
                 affinity: affinity.clone(),
+                cancellation: report_cancellation.then(CancellationToken::new),
             })
         };
         let pair = PersistentStorageSession::new(

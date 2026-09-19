@@ -60,6 +60,7 @@ impl Engine {
     }
     pub(super) fn open_independent_catalog_session(
         &self,
+        cancellation: Option<&uqa_core::CancellationToken>,
     ) -> StorageBackendResult<Option<uqa_storage::PersistentStorageSession>> {
         if !self.versioned_backend_transactions()
             && (!self.backend_transaction_is_deferred()
@@ -67,9 +68,12 @@ impl Engine {
         {
             return Ok(None);
         }
-        self.storage
-            .provider
-            .as_ref()
-            .map_or(Ok(None), |provider| provider.open_session().map(Some))
+        self.storage.provider.as_ref().map_or(Ok(None), |provider| {
+            match cancellation {
+                Some(cancellation) => provider.open_session_with_cancellation(cancellation),
+                None => provider.open_session(),
+            }
+            .map(Some)
+        })
     }
 }

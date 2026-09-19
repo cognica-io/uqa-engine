@@ -33,6 +33,7 @@ fn vector_index_kind(engine: &Engine, table: &str, field: &str) -> String {
 
 mod api_validation;
 
+mod storage_cancellation;
 mod storage_consistency;
 
 mod search_and_vectors;

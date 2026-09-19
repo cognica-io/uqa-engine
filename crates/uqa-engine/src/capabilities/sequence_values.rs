@@ -57,7 +57,7 @@ impl SequenceValueRuntime for Engine {
     fn open_nontransactional_sequence_session(
         &self,
     ) -> StorageBackendResult<Option<PersistentStorageSession>> {
-        Engine::open_independent_catalog_session(self)
+        Engine::open_independent_catalog_session(self, Some(&self.runtime.cancellation))
     }
     fn prepare_explicit_transaction_writer(&self) -> Result<(), SQLError> {
         Engine::prepare_explicit_transaction_writer(self).map(|_| ())

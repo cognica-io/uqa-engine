@@ -13,7 +13,7 @@ use uqa_storage::mvcc::{
 };
 use uqa_storage::read_control::StorageReadControl;
 
-use super::{codec, native, schema, Error, PhysicalResult};
+use super::{admission, codec, native, schema, Error, PhysicalResult};
 
 pub(super) fn reserve_bindings(
     prepared: &PreparedRecordCommit,
@@ -44,8 +44,8 @@ pub(super) fn allocate(
     native: bool,
     control: &StorageReadControl,
 ) -> PhysicalResult<StorageTransactionId> {
-    let _permit = schema::WritePermit::acquire(connection)?;
-    let transaction = schema::begin(connection)?;
+    let _permit = admission::permit(connection, control)?;
+    let transaction = admission::begin(connection, control)?;
     native::check_mapping(&transaction, native)?;
     let current = codec::header(&transaction, identity)?;
     let id = StorageTransactionId::new(
@@ -65,7 +65,7 @@ pub(super) fn allocate(
         params![bytes.as_slice()],
     )?;
     control.cancellation().check().map_err(VersionError::from)?;
-    transaction.commit()?;
+    admission::commit(transaction, control)?;
     Ok(id)
 }
 
@@ -77,8 +77,8 @@ pub(super) fn commit(
     control: &StorageReadControl,
 ) -> CommitResult {
     let rejected = |error: Error| CommitFailure::Rejected(error.into_version());
-    let _permit = schema::WritePermit::acquire(connection).map_err(rejected)?;
-    let transaction = schema::begin(connection).map_err(rejected)?;
+    let _permit = admission::permit(connection, control).map_err(rejected)?;
+    let transaction = admission::begin(connection, control).map_err(rejected)?;
     native::check_mapping(&transaction, native).map_err(rejected)?;
     let current = codec::header(&transaction, id.database()).map_err(rejected)?;
     let status = codec::status(&transaction, id).map_err(rejected)?;
@@ -104,12 +104,13 @@ pub(super) fn commit(
             .map_err(rejected)?;
     }
     stage(&transaction, prepared, receipt, control).map_err(rejected)?;
-    transaction
-        .commit()
-        .map_err(|error| CommitFailure::Indeterminate {
+    admission::commit(transaction, control).map_err(|error| match error {
+        Error::Version(error @ VersionError::Cancelled(_)) => CommitFailure::Rejected(error),
+        error => CommitFailure::Indeterminate {
             transaction: id,
-            source: crate::SQLiteError::SQLite(error).into(),
-        })?;
+            source: error.into_version().into_storage_error(),
+        },
+    })?;
     Ok(receipt)
 }
 

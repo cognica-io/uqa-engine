@@ -57,12 +57,15 @@ impl SQLiteStorageProvider {
         Self { connection }
     }
 
-    fn native_session(&self) -> StorageBackendResult<ManagedConnection> {
+    fn native_session(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<ManagedConnection> {
         if !self.connection.is_native_record_session() {
             self.connection
                 .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())?;
         }
-        Ok(self.connection.new_session())
+        Ok(self.connection.new_session_with_cancellation(cancellation))
     }
 }
 
@@ -83,7 +86,15 @@ impl PersistentStorageProvider for SQLiteStorageProvider {
     }
 
     fn open_session(&self) -> StorageBackendResult<PersistentStorageSession> {
-        let connection = self.native_session()?;
+        self.open_session_with_cancellation(&uqa_core::CancellationToken::new())
+    }
+
+    fn open_session_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        cancellation.check()?;
+        let connection = self.native_session(cancellation)?;
         let catalog: Arc<dyn CatalogFacade> = Arc::new(Catalog::open(connection.clone())?);
         let backend: Arc<dyn PersistentStorageBackend> =
             Arc::new(SQLiteStorageBackend::new(connection));
@@ -124,6 +135,10 @@ impl uqa_storage::mvcc::IdentifierAllocator for SQLiteStorageBackend {
 }
 
 impl PersistentStorageBackend for SQLiteStorageBackend {
+    fn write_cancellation(&self) -> Option<uqa_core::CancellationToken> {
+        Some(self.conn.write_cancellation())
+    }
+
     fn transaction_model(&self) -> uqa_storage::StorageTransactionModel {
         self.conn.transaction_model()
     }
@@ -148,7 +163,15 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
     }
 
     fn open_session(&self) -> StorageBackendResult<PersistentStorageSession> {
-        let connection = self.conn.new_session();
+        self.open_session_with_cancellation(&uqa_core::CancellationToken::new())
+    }
+
+    fn open_session_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        cancellation.check()?;
+        let connection = self.conn.new_session_with_cancellation(cancellation);
         let catalog: Arc<dyn CatalogFacade> = Arc::new(Catalog::open(connection.clone())?);
         let backend: Arc<dyn PersistentStorageBackend> = Arc::new(Self::new(connection));
         Ok(PersistentStorageSession::new(catalog, backend))

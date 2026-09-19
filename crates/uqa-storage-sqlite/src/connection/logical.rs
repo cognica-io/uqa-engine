@@ -29,15 +29,51 @@ impl std::ops::Deref for BoundRecordSession {
 }
 
 impl BoundRecordSession {
-    pub(super) fn new_session(&self) -> Self {
+    pub(super) fn new_session_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> Self {
         Self {
-            store: Arc::new(self.store.new_session()),
+            store: Arc::new(self.store.new_session_with_cancellation(cancellation)),
             native: self.native,
         }
     }
 }
 
 impl ManagedConnection {
+    /// Create an independent logical session over the same database pool.
+    /// Explicit transactions started on either session are isolated and never
+    /// capture operations issued through the other session.
+    #[must_use]
+    pub fn new_session(&self) -> Self {
+        self.new_session_with_cancellation(&uqa_core::CancellationToken::new())
+    }
+
+    /// Use a fresh transaction context while sharing the invoking execution's write cancellation. Existing sessions and clones keep their original token.
+    #[must_use]
+    pub fn new_session_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> Self {
+        let _gate = self.session.gate.read();
+        let session = SessionState::with_cancellation(cancellation.clone());
+        if let Some(logical) = self.session.logical.get() {
+            let _ = session.logical.set(Arc::new(
+                logical.new_session_with_cancellation(cancellation),
+            ));
+        }
+        Self {
+            pool: Arc::clone(&self.pool),
+            session: Arc::new(session),
+            record_access: self.record_access,
+        }
+    }
+
+    /// Share the token used for autonomous allocation and record publication. Cleanup reads and rollback remain independent of this flag.
+    pub fn write_cancellation(&self) -> uqa_core::CancellationToken {
+        self.session.write_cancellation.clone()
+    }
+
     /// Transaction ownership selected for this connection and inherited by its independent sessions.
     pub fn transaction_model(&self) -> uqa_storage::StorageTransactionModel {
         let _gate = self.session.gate.read();
@@ -53,6 +89,22 @@ impl ManagedConnection {
             session: Arc::new(SessionState::new()),
             record_access: true,
         }
+    }
+
+    pub(crate) fn with_record_connection<R>(
+        &self,
+        control: &StorageReadControl,
+        operation: impl FnOnce(&Connection) -> Result<R>,
+    ) -> Result<R> {
+        self.surface_cleanup_failure()?;
+        let _gate = self.session.gate.read();
+        if !self.record_access || self.session.transaction.lock().is_some() {
+            return Err(SQLiteError::SessionMappingMismatch);
+        }
+        let connection = self
+            .pool
+            .checkout_with_cancellation(Some(control.cancellation()))?;
+        operation(connection.connection()?)
     }
 
     pub(crate) fn bind_records(
@@ -82,10 +134,11 @@ impl ManagedConnection {
             &StorageReadControl::with_limit(options.retained_bytes),
         )
         .map_err(VersionError::into_storage_error)?;
-        let logical = Arc::new(VersionedKeyValueStore::new(
+        let logical = Arc::new(VersionedKeyValueStore::new_with_cancellation(
             Arc::new(records),
             identity,
             options,
+            self.write_cancellation(),
         ));
         self.session
             .logical
@@ -179,6 +232,38 @@ mod tests {
     use super::*;
     use uqa_storage::mvcc::{CommitErrorOutcome, CommitFailure, DatabaseId, StorageTransactionId};
     use uqa_storage::StorageBackendError;
+
+    #[test]
+    fn record_checkout_cancellation_does_not_wait_for_a_retained_pool_connection() {
+        use std::{sync::mpsc, thread, time::Duration};
+
+        let connection = ManagedConnection::open_in_memory()
+            .unwrap()
+            .record_connection();
+        let held = connection.pool.checkout().unwrap();
+        let control = StorageReadControl::with_limit(1 << 20);
+        let cancellation = control.cancellation().clone();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        thread::scope(|scope| {
+            let worker = scope.spawn(|| {
+                started_tx.send(()).unwrap();
+                let result = connection.with_record_connection(&control, |_| {
+                    panic!("cancelled checkout must not enter the operation")
+                });
+                finished_tx.send(result).unwrap();
+            });
+            started_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+            cancellation.cancel();
+            let result = finished_rx.recv_timeout(Duration::from_secs(30));
+            drop(held);
+            worker.join().unwrap();
+            assert!(matches!(
+                result.unwrap(),
+                Err::<(), _>(SQLiteError::Cancelled(_))
+            ));
+        });
+    }
 
     #[test]
     fn storage_error_conversion_preserves_an_indeterminate_commit_identity() {

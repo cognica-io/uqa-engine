@@ -89,7 +89,12 @@ pub fn validate_and_rewrite_generated_rows<S: Clone + 'static>(
                 context
                     .state
                     .advance_next_id(table, new_doc_id)
-                    .map_err(|error| ddl_storage_error("generated primary key rewrite", error))?;
+                    .map_err(|error| {
+                        crate::mutation::errors::identifier_storage_error(
+                            "generated primary key rewrite",
+                            &error,
+                        )
+                    })?;
             }
         }
     }

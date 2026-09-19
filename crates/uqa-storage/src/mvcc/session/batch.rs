@@ -129,25 +129,26 @@ impl<'a> Batch<'a> {
             }
         }
         // Validate and stage every record first. Allocation uses persistence directly because the session's mutation boundary already holds its active-transaction lock.
+        let write_control = self.store.write_control();
         for operation in self.operations.iter() {
             match operation {
                 Operation::IdentifierObservation(namespace, value) => {
                     self.store.persistence.allocate_identifiers(
                         namespace,
                         crate::mvcc::IdentifierRequest::Observe(*value),
-                        control,
+                        &write_control,
                     )?;
                 }
                 Operation::IdentifierInheritance(from, to) => {
                     let source = self.store.persistence.allocate_identifiers(
                         from,
                         crate::mvcc::IdentifierRequest::Observe(0),
-                        control,
+                        &write_control,
                     )?;
                     self.store.persistence.allocate_identifiers(
                         to,
                         crate::mvcc::IdentifierRequest::Observe(source.watermark()),
-                        control,
+                        &write_control,
                     )?;
                 }
                 _ => {}

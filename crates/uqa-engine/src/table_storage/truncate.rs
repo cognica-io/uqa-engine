@@ -80,13 +80,19 @@ impl Engine {
     ) -> Result<(), SQLError> {
         let t = self.require_table(table_name)?;
         let allocator = self.table_identifier_allocator(&t).map_err(|error| {
-            SQLError::Internal(format!("bind TRUNCATE document allocator: {error}"))
+            uqa_execution::mutation::errors::identifier_storage_error(
+                "bind TRUNCATE document allocator",
+                &error,
+            )
         })?;
         if allocator.is_durable() {
             allocator
                 .synchronize(&mut t.next_id.lock())
                 .map_err(|error| {
-                    SQLError::Internal(format!("retain TRUNCATE document watermark: {error}"))
+                    uqa_execution::mutation::errors::identifier_storage_error(
+                        "retain TRUNCATE document watermark",
+                        &error,
+                    )
                 })?;
         }
         // Snapshot the doc id set before grabbing any write locks so
@@ -124,7 +130,10 @@ impl Engine {
         if restart_identity {
             *t.next_id.lock() = 1;
             self.persist_next_id(table_name).map_err(|error| {
-                SQLError::Internal(format!("persist TRUNCATE identity: {error}"))
+                uqa_execution::mutation::errors::identifier_storage_error(
+                    "persist TRUNCATE identity",
+                    &error,
+                )
             })?;
             let owned_sequences = self
                 .sequence_names_owned_by_tables(&std::collections::BTreeSet::from([t.object_id()]))
@@ -136,7 +145,10 @@ impl Engine {
             }
         } else if allocator.is_durable() {
             self.persist_next_id(table_name).map_err(|error| {
-                SQLError::Internal(format!("persist TRUNCATE document watermark: {error}"))
+                uqa_execution::mutation::errors::identifier_storage_error(
+                    "persist TRUNCATE document watermark",
+                    &error,
+                )
             })?;
         }
         self.value_indexes_truncate(table_name, &t)?;

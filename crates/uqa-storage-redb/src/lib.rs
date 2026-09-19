@@ -28,6 +28,7 @@ pub use mvcc::RedbRecordStore;
 pub use uqa_storage::mvcc::{VersionedKeyValueStore as RedbKeyValueStore, VersionedSessionOptions};
 
 use error::redb_error;
+use uqa_storage::read_control::CancellationToken;
 
 /// Shared redb database owner and engine-session factory.
 #[derive(Clone)]
@@ -70,10 +71,15 @@ impl RedbStorage {
 
     /// Create an independent logical session without acquiring a physical writer.
     pub fn store(&self) -> RedbKeyValueStore {
-        RedbKeyValueStore::new(
+        self.store_with_cancellation(&CancellationToken::new())
+    }
+
+    fn store_with_cancellation(&self, cancellation: &CancellationToken) -> RedbKeyValueStore {
+        RedbKeyValueStore::new_with_cancellation(
             self.records.clone(),
             Some(PersistentStorageIdentity::File(self.identity.clone())),
             self.options,
+            cancellation.clone(),
         )
     }
 
@@ -85,7 +91,15 @@ impl RedbStorage {
 
 impl PersistentStorageProvider for RedbStorage {
     fn open_session(&self) -> StorageBackendResult<PersistentStorageSession> {
-        let store: Arc<dyn KeyValueStore> = Arc::new(self.store());
+        self.open_session_with_cancellation(&CancellationToken::new())
+    }
+
+    fn open_session_with_cancellation(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        cancellation.check()?;
+        let store: Arc<dyn KeyValueStore> = Arc::new(self.store_with_cancellation(cancellation));
         let catalog: Arc<dyn CatalogFacade> = Arc::new(KeyValueCatalog::new(Arc::clone(&store)));
         let backend: Arc<dyn PersistentStorageBackend> =
             Arc::new(KeyValueStorageBackend::new(store));

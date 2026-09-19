@@ -33,11 +33,11 @@ impl MutationIdentifiers for Engine {
     fn allocate_next_id(&self, table: &str) -> Result<DocId, SQLError> {
         Engine::allocate_next_id(self, table)
     }
-    fn advance_next_id(&self, table: &str, doc_id: DocId) -> Result<(), String> {
-        Engine::advance_next_id(self, table, doc_id).map_err(|e| e.to_string())
+    fn advance_next_id(&self, table: &str, doc_id: DocId) -> uqa_storage::StorageBackendResult<()> {
+        Engine::advance_next_id(self, table, doc_id)
     }
-    fn persist_next_id(&self, table: &str) -> Result<(), String> {
-        Engine::persist_next_id(self, table).map_err(|e| e.to_string())
+    fn persist_next_id(&self, table: &str) -> uqa_storage::StorageBackendResult<()> {
+        Engine::persist_next_id(self, table)
     }
 }
 impl MutationStorage for Engine {

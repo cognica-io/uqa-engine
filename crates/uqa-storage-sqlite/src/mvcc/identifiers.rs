@@ -12,7 +12,7 @@ use uqa_storage::mvcc::{
 };
 use uqa_storage::read_control::StorageReadControl;
 
-use super::{codec, native, schema, PhysicalResult};
+use super::{admission, codec, native, PhysicalResult};
 
 pub(super) const TABLE: (&str, &str) = (
     "_uqa_mvcc_identifiers",
@@ -59,8 +59,8 @@ pub(super) fn allocate(
     control: &StorageReadControl,
 ) -> PhysicalResult<IdentifierAllocation> {
     let _workspace = request.reserve_workspace(namespace, control)?;
-    let _permit = schema::WritePermit::acquire(connection)?;
-    let transaction = schema::begin(connection)?;
+    let _permit = admission::permit(connection, control)?;
+    let transaction = admission::begin(connection, control)?;
     native::check_mapping(&transaction, native)?;
     codec::header(&transaction, database)?;
     let previous = watermark(&transaction, namespace)?;
@@ -75,6 +75,6 @@ pub(super) fn allocate(
         .cancellation()
         .check()
         .map_err(uqa_storage::mvcc::VersionError::from)?;
-    transaction.commit()?;
+    admission::commit(transaction, control)?;
     Ok(allocation)
 }

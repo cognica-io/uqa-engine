@@ -18,6 +18,13 @@ struct BackendSessionProvider {
 }
 
 impl PersistentStorageProvider for BackendSessionProvider {
+    fn open_session_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        self.backend.open_session_with_cancellation(cancellation)
+    }
+
     fn auxiliary_encryption_key(&self) -> Option<uqa_storage::StorageEncryptionKey> {
         self.backend.auxiliary_encryption_key()
     }
@@ -362,6 +369,7 @@ impl Engine {
         provider: Option<Arc<dyn PersistentStorageProvider>>,
     ) -> Self {
         let PersistentStorageSession { catalog, backend } = storage_session;
+        let cancellation = backend.write_cancellation().unwrap_or_default();
         let row_locks = Arc::new(crate::row_locks::RowLockManager::new());
         let notification_hub = Arc::new(crate::NotificationHub::default());
         let session_id = row_locks.allocate_session();
@@ -371,7 +379,10 @@ impl Engine {
             session: Arc::new(super::SessionContext::new(super::initial_random_state())),
             extensions: super::RuntimeExtensions::new(),
             epochs: super::EpochCoordinator::new(),
-            runtime: super::QueryRuntime::new(super::SQL_FUNCTION_DEPTH_LIMIT),
+            runtime: super::QueryRuntime::with_cancellation(
+                super::SQL_FUNCTION_DEPTH_LIMIT,
+                cancellation,
+            ),
             statistics: crate::statistics::shared_statistics(&row_locks),
             row_locks,
             notification_hub,

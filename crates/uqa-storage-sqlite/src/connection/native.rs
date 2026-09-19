@@ -82,10 +82,11 @@ impl ManagedConnection {
         self.session
             .logical
             .set(Arc::new(BoundRecordSession {
-                store: Arc::new(VersionedKeyValueStore::new(
+                store: Arc::new(VersionedKeyValueStore::new_with_cancellation(
                     Arc::new(records),
                     identity,
                     options,
+                    self.write_cancellation(),
                 )),
                 native: Some(database),
             }))

@@ -46,7 +46,7 @@ impl uqa_execution::catalog::security::roles::RoleCatalogGuards for Engine {
             persistence::RoleCatalogSnapshot, snapshot::read_role_snapshot,
         };
         let session = self
-            .open_independent_catalog_session()
+            .open_independent_catalog_session(None)
             .map_err(|error| SQLError::Internal(format!("open role inquiry snapshot: {error}")))?;
         let snapshot = read_role_snapshot(
             RoleCatalogSnapshot {

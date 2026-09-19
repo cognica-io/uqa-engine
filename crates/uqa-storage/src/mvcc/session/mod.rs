@@ -47,6 +47,7 @@ pub struct VersionedKeyValueStore {
     identity: Option<PersistentStorageIdentity>,
     options: VersionedSessionOptions,
     control: StorageReadControl,
+    write_cancellation: uqa_core::CancellationToken,
     active: Mutex<Option<Transaction>>,
 }
 
@@ -71,7 +72,7 @@ impl VersionedKeyValueStore {
                 .map_err(VersionError::into_storage_error)?;
         }
         self.persistence
-            .allocate_identifiers(namespace, request, &self.control)
+            .allocate_identifiers(namespace, request, &self.write_control())
             .map_err(VersionError::into_storage_error)
     }
 
@@ -80,12 +81,28 @@ impl VersionedKeyValueStore {
         identity: Option<PersistentStorageIdentity>,
         options: VersionedSessionOptions,
     ) -> Self {
+        Self::new_with_cancellation(
+            persistence,
+            identity,
+            options,
+            uqa_core::CancellationToken::new(),
+        )
+    }
+
+    /// Share the invoking execution's cancellation during autonomous allocation and publication. Retained reads and rollback cleanup keep their independent control, so cancelling a statement cannot prevent its undo.
+    pub fn new_with_cancellation(
+        persistence: Arc<dyn VersionedPersistence>,
+        identity: Option<PersistentStorageIdentity>,
+        options: VersionedSessionOptions,
+        write_cancellation: uqa_core::CancellationToken,
+    ) -> Self {
         Self {
             affinity: StorageSessionAffinity::new(),
             persistence,
             identity,
             options,
             control: StorageReadControl::with_limit(options.retained_bytes),
+            write_cancellation,
             active: Mutex::new(None),
         }
     }
@@ -97,6 +114,23 @@ impl VersionedKeyValueStore {
             self.identity.clone(),
             self.options,
         )
+    }
+
+    /// Keep a separate transaction context and retention budget while inheriting the invoking writer's cancellation.
+    pub fn new_session_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> Self {
+        Self::new_with_cancellation(
+            Arc::clone(&self.persistence),
+            self.identity.clone(),
+            self.options,
+            cancellation.clone(),
+        )
+    }
+
+    fn write_control(&self) -> StorageReadControl {
+        StorageReadControl::new(self.control.memory(), &self.write_cancellation)
     }
 
     pub fn options(&self) -> VersionedSessionOptions {
@@ -181,7 +215,7 @@ impl VersionedKeyValueStore {
         active
             .as_mut()
             .expect("retained attempt")
-            .commit(&*self.persistence, &self.control)
+            .commit(&*self.persistence, &self.write_control())
             .map_err(commit_error)?;
         *active = None;
         Ok(result)
@@ -215,6 +249,18 @@ impl super::IdentifierAllocator for VersionedKeyValueStore {
 }
 
 impl KeyValueStore for VersionedKeyValueStore {
+    fn write_cancellation(&self) -> Option<uqa_core::CancellationToken> {
+        Some(self.write_cancellation.clone())
+    }
+
+    fn open_session_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
+        cancellation.check()?;
+        Ok(Arc::new(self.new_session_with_cancellation(cancellation)))
+    }
+
     fn transaction_model(&self) -> crate::StorageTransactionModel {
         crate::StorageTransactionModel::VersionedConcurrent {
             database: self.persistence.database_id(),
@@ -436,7 +482,7 @@ impl KeyValueStore for VersionedKeyValueStore {
         active
             .as_mut()
             .ok_or_else(no_transaction)?
-            .commit(&*self.persistence, &self.control)
+            .commit(&*self.persistence, &self.write_control())
             .map_err(commit_error)?;
         *active = None;
         Ok(())

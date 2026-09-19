@@ -300,11 +300,17 @@ impl Engine {
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
             .ok_or_else(|| SQLError::Internal(format!("unknown table `{table}`")))?;
         let allocator = self.table_identifier_allocator(&t).map_err(|error| {
-            SQLError::Internal(format!("allocate document id for `{table}`: {error}"))
+            uqa_execution::mutation::errors::identifier_storage_error(
+                &format!("allocate document id for `{table}`"),
+                &error,
+            )
         })?;
         let next_candidate = || {
             allocator.allocate(&mut t.next_id.lock()).map_err(|error| {
-                SQLError::Internal(format!("allocate document id for `{table}`: {error}"))
+                uqa_execution::mutation::errors::identifier_storage_error(
+                    &format!("allocate document id for `{table}`"),
+                    &error,
+                )
             })
         };
         if allocator.is_durable()
