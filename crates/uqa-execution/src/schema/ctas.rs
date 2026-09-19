@@ -126,9 +126,11 @@ pub fn run_create_table_as<S: Clone>(
     if should_skip_existing_create_table_as(context.namespace, &name, execution.if_not_exists)? {
         return Ok(SQLResult::empty().with_command_tag("CREATE TABLE AS"));
     }
-    if execution.persistence != uqa_sql::ast::RelationPersistence::Temporary {
-        context.creation.ensure_create(&name)?;
-    }
+    let name = if execution.persistence == uqa_sql::ast::RelationPersistence::Temporary {
+        name
+    } else {
+        context.creation.persistent_relation_name(execution.name)?
+    };
     let result = if execution.with_no_data {
         None
     } else if let Some(result) = locking_result {

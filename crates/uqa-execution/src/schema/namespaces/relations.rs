@@ -10,7 +10,7 @@ use crate::catalog::security::roles::{
     dependencies::retain_created_owner,
     locking::{RoleBinding, RoleLockContext},
 };
-use crate::row_locks::shared_objects::SharedObjectLockSession;
+use crate::row_locks::{shared_objects::SharedObjectLockSession, RelationLockMode};
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     catalog::{
@@ -28,7 +28,7 @@ use uqa_sql::{
     },
     SQLError,
 };
-use uqa_storage::StorageBackendResult;
+use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 pub trait RelationCreationRuntime {
     fn synchronize_catalog_registries(&self) -> StorageBackendResult<()>;
@@ -86,12 +86,38 @@ impl RelationCreationContext<'_> {
         self.runtime.allocate_temporary_namespace();
         Ok(RelationIdentity::new(temporary_schema, relation).qualified_name())
     }
-    pub fn api_name(&self, name: &str) -> Result<String, String> {
-        self.runtime
-            .synchronize_catalog_registries()
-            .map_err(|err| format!("refresh schema catalog: {err}"))?;
-        creation::api_relation_name(self.state, self.schemas, name)
+    pub fn api_name(&self, name: &str) -> StorageBackendResult<String> {
+        self.lock_relation_namespace(|| {
+            self.runtime
+                .synchronize_catalog_registries()
+                .map_err(|error| SQLError::Internal(format!("refresh schema catalog: {error}")))?;
+            creation::api_relation_name(self.state, self.schemas, name).map_err(SQLError::Internal)
+        })
+        .map_err(|error| match error {
+            SQLError::Internal(message) => StorageBackendError::Other(message),
+            error => StorageBackendError::backend("CREATE TABLE namespace", error),
+        })
     }
+    pub fn persistent_relation_name(&self, name: &str) -> Result<String, SQLError> {
+        self.lock_relation_namespace(|| self.persistent_name(name))
+    }
+    fn lock_relation_namespace(
+        &self,
+        mut resolve: impl FnMut() -> Result<String, SQLError>,
+    ) -> Result<String, SQLError> {
+        super::locking::bind_namespace_lifetime(self.locks, RelationLockMode::AccessShare, || {
+            let name = resolve()?;
+            let relation =
+                RelationIdentity::from_legacy_name(&name).map_err(SQLError::Unsupported)?;
+            let security = self
+                .schema_privileges()
+                .schema_security_for_privilege(&relation.schema)
+                .ok_or_else(|| super::locking::missing(&relation.schema))?;
+            Ok(Some((super::locking::tuple(&security)?, name)))
+        })?
+        .ok_or_else(|| SQLError::Internal("creation namespace lookup returned no target".into()))
+    }
+    /// Functions and types resolve authority without retaining relation-creation namespace locks.
     pub fn persistent_name(&self, name: &str) -> Result<String, SQLError> {
         let name = self.resolve_persistent_name(name)?;
         self.ensure_create(&name)?;
@@ -171,7 +197,7 @@ impl uqa_sql::schema::view_creation::ViewCreationNamespace for RelationCreationC
         self.temporary_name(name)
     }
     fn persistent_target(&self, name: &str) -> Result<String, SQLError> {
-        self.persistent_name(name)
+        self.persistent_relation_name(name)
     }
 }
 

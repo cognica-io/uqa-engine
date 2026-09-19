@@ -258,6 +258,7 @@ fn native_catalog_schema_ownership_and_format_version_survive_failed_operations(
         object_id: [2; 16],
     };
     let schema = SchemaRow::Bound(BoundSchemaRow {
+        tuple: None,
         name: "private".into(),
         role_owner: owner,
         acl: Some(vec![BoundAclEntry {

@@ -49,15 +49,7 @@ pub(super) fn reserve_membership_oid(
 }
 
 pub(super) fn allocate_oid() -> Result<i64, SQLError> {
-    loop {
-        let mut bytes = [0; 4];
-        getrandom::fill(&mut bytes)
-            .map_err(|error| SQLError::Internal(format!("allocate role OID: {error}")))?;
-        let oid = u32::from_ne_bytes(bytes);
-        if oid >= 16_384 {
-            return Ok(i64::from(oid));
-        }
-    }
+    crate::catalog::identity::allocate_catalog_oid("role")
 }
 
 pub(super) fn reserve_definition(

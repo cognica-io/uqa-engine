@@ -67,7 +67,7 @@ pub fn create_sequence(
     let name = if persistence == RelationPersistence::Temporary {
         context.creation.temporary_name(name)?
     } else {
-        context.creation.persistent_name(name)?
+        context.creation.persistent_relation_name(name)?
     };
     let relation = RelationIdentity::from_legacy_name(&name)
         .map_err(|error| SQLError::Internal(format!("resolve sequence `{name}`: {error}")))?;

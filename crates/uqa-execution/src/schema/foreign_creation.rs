@@ -107,7 +107,7 @@ impl ForeignCreationContext<'_> {
             .map_err(|error| {
                 uqa_sql::SQLError::Internal(format!("refresh FDW catalog: {error}"))
             })?;
-        let name = self.creation.persistent_name(name)?;
+        let name = self.creation.persistent_relation_name(name)?;
         let relation = RelationIdentity::from_legacy_name(&name).map_err(|error| {
             uqa_sql::SQLError::Internal(format!("decode foreign table `{name}`: {error}"))
         })?;

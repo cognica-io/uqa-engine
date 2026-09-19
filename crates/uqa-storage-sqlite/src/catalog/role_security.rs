@@ -11,7 +11,7 @@ use rusqlite::types::{Value, ValueRef};
 use uqa_core::{
     catalog_acl::{BoundRelationSecurity, LegacyRelationSecurity},
     catalog_role::RoleIdentity,
-    catalog_schema::{BoundSchemaRow, SchemaRow as LegacySchemaRow},
+    catalog_schema::{BoundSchemaRow, SchemaRow as LegacySchemaRow, SchemaTupleIdentity},
 };
 use uqa_storage::RelationSecurityRow;
 
@@ -89,7 +89,7 @@ pub(super) fn decode_sequence(
 pub(super) fn encode_schema(row: &SchemaRow) -> Result<(Value, Option<String>)> {
     match row {
         SchemaRow::Bound(row) => Ok((
-            encode_identity(row.role_owner)?,
+            encode_schema_owner(row)?,
             row.acl.as_ref().map(serde_json::to_string).transpose()?,
         )),
         SchemaRow::Legacy(row) => Ok((
@@ -110,15 +110,69 @@ pub(super) fn decode_schema(
             role_owner: super::native::string(owner)?,
             acl: acl.map(serde_json::from_str).transpose()?,
         })),
-        ValueRef::Blob(bytes) => Ok(SchemaRow::Bound(BoundSchemaRow {
-            name,
-            role_owner: decode_identity(bytes)?,
-            acl: acl.map(serde_json::from_str).transpose()?,
-        })),
+        ValueRef::Blob(bytes) => {
+            let (role_owner, tuple) = decode_schema_owner(bytes)?;
+            Ok(SchemaRow::Bound(BoundSchemaRow {
+                name,
+                tuple,
+                role_owner,
+                acl: acl.map(serde_json::from_str).transpose()?,
+            }))
+        }
         _ => Err(SQLiteError::StorageBackend(
             "schema owner has an invalid storage class".into(),
         )),
     }
+}
+
+fn encode_schema_owner(row: &BoundSchemaRow) -> Result<Value> {
+    let Value::Blob(mut bytes) = encode_identity(row.role_owner)? else {
+        unreachable!()
+    };
+    if let Some(tuple) = row.tuple {
+        if !tuple.is_valid() {
+            return Err(SQLiteError::StorageBackend(
+                "invalid schema catalog tuple identity".into(),
+            ));
+        }
+        bytes[0] = 2;
+        bytes.extend_from_slice(
+            &u32::try_from(tuple.oid)
+                .expect("validated OID")
+                .to_be_bytes(),
+        );
+        bytes.extend_from_slice(&tuple.object_id);
+        bytes.extend_from_slice(&tuple.revision);
+    }
+    Ok(Value::Blob(bytes))
+}
+
+fn decode_schema_owner(bytes: &[u8]) -> Result<(RoleIdentity, Option<SchemaTupleIdentity>)> {
+    if bytes.len() == 21 {
+        return Ok((decode_identity(bytes)?, None));
+    }
+    if bytes.len() != 57 || bytes[0] != 2 {
+        return Err(SQLiteError::StorageBackend(
+            "invalid schema catalog identity encoding".into(),
+        ));
+    }
+    let mut owner = [0; 21];
+    owner.copy_from_slice(&bytes[..21]);
+    owner[0] = 1;
+    let owner = decode_identity(&owner)?;
+    let tuple = SchemaTupleIdentity {
+        oid: i64::from(u32::from_be_bytes(
+            bytes[21..25].try_into().expect("OID width checked"),
+        )),
+        object_id: bytes[25..41].try_into().expect("incarnation width checked"),
+        revision: bytes[41..57].try_into().expect("revision width checked"),
+    };
+    if !tuple.is_valid() {
+        return Err(SQLiteError::StorageBackend(
+            "invalid schema catalog tuple identity".into(),
+        ));
+    }
+    Ok((owner, Some(tuple)))
 }
 
 pub(super) fn encode_relation(

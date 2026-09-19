@@ -7,7 +7,8 @@
 use super::*;
 use std::{
     cell::{Cell, RefCell},
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
 };
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::catalog::{
@@ -37,6 +38,9 @@ struct Fixture {
     deferred: bool,
     publish_on_fence: bool,
     fail: Option<&'static str>,
+    locks: Arc<crate::row_locks::RowLockManager>,
+    cancellation: uqa_core::CancellationToken,
+    refreshes: RefCell<VecDeque<BTreeMap<String, BoundSchemaSecurity>>>,
 }
 impl Fixture {
     fn new() -> Self {
@@ -52,6 +56,9 @@ impl Fixture {
             deferred: true,
             publish_on_fence: false,
             fail: None,
+            locks: Arc::new(crate::row_locks::RowLockManager::new()),
+            cancellation: uqa_core::CancellationToken::new(),
+            refreshes: RefCell::new(VecDeque::new()),
         }
     }
     fn context(&self) -> RelationCreationContext<'_> {
@@ -78,13 +85,38 @@ impl Fixture {
 impl SharedObjectLockSession for Fixture {
     fn acquire_shared_catalog(
         &self,
-        _: crate::row_locks::shared_objects::SharedCatalogLock<'_>,
-        _: crate::row_locks::RelationLockMode,
+        target: crate::row_locks::shared_objects::SharedCatalogLock<'_>,
+        mode: crate::row_locks::RelationLockMode,
     ) -> Result<crate::row_locks::ScopedRelationLock<'_>, SQLError> {
-        panic!("namespace resolution does not retain role dependencies")
+        self.events.borrow_mut().push("namespace_lock");
+        if self.fail == Some("namespace_lock") {
+            return Err(SQLError::Routine {
+                sqlstate: "55P03".into(),
+                message: "namespace lock unavailable".into(),
+            });
+        }
+        assert!(matches!(
+            target,
+            crate::row_locks::shared_objects::SharedCatalogLock::Object {
+                class_id: super::super::identity::SCHEMA_CATALOG_CLASS_ID,
+                ..
+            }
+        ));
+        assert_eq!(mode, RelationLockMode::AccessShare);
+        self.locks.acquire_scoped_relation(
+            1,
+            self.locks.shared_catalog_key(target),
+            mode,
+            (0, 1),
+            &self.cancellation,
+        )
     }
     fn refresh_shared_catalog(&self) -> Result<(), SQLError> {
-        panic!("namespace resolution does not refresh through role locks")
+        self.events.borrow_mut().push("locked_refresh");
+        if let Some(schemas) = self.refreshes.borrow_mut().pop_front() {
+            *self.schemas.borrow_mut() = schemas;
+        }
+        Ok(())
     }
 }
 struct EmptyNames;
@@ -266,7 +298,7 @@ fn creation_refresh_failures_precede_namespace_reads_and_keep_call_specific_diag
     fixture.events.borrow_mut().clear();
     fixture.fail = Some("catalog");
     assert_eq!(
-        fixture.context().api_name("docs").unwrap_err(),
+        fixture.context().api_name("docs").unwrap_err().to_string(),
         "refresh schema catalog: catalog failed"
     );
     assert_eq!(&*fixture.events.borrow(), &["catalog"]);
@@ -306,3 +338,5 @@ fn temporary_creation_authorizes_before_syntax_and_allocates_only_after_validati
     assert!(fixture.allocated.get());
     assert_eq!(fixture.events.borrow().last(), Some(&"allocate"));
 }
+
+mod lifetime;

@@ -28,6 +28,7 @@ pub fn build_pg_class(
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = vec![pg_class_catalog_row(
+        catalog,
         13_313,
         13_315,
         "information_schema",
@@ -67,6 +68,7 @@ pub fn build_pg_class(
             context.table_doc_count(&name)?
         };
         let mut row = pg_class_row_with_lifecycle(
+            catalog,
             &schema,
             &table,
             relkind,
@@ -128,6 +130,7 @@ pub fn build_pg_class(
         let security = catalog.relation_security_names(&definition.security)?;
         let columns = view_columns_for(context, catalog, resolution, &definition)?;
         let mut row = pg_class_row_with_lifecycle(
+            catalog,
             &schema,
             &view,
             "v",
@@ -167,6 +170,7 @@ pub fn build_pg_class(
         let security = catalog.relation_security_names(&definition.security)?;
         let columns = view_columns_for(context, catalog, resolution, &definition)?;
         let mut row = pg_class_row_with_lifecycle(
+            catalog,
             &schema,
             &view,
             "m",
@@ -199,6 +203,7 @@ pub fn build_pg_class(
         let (schema, table) = split_schema_name(&name)?;
         let security = catalog.foreign_table_security(&name)?;
         let mut row = pg_class_row(
+            catalog,
             &schema,
             &table,
             "f",
@@ -233,8 +238,18 @@ pub fn build_pg_class(
     }
     for (sequence, persistence, object_id, security) in catalog.sequences()? {
         let (schema, name) = split_schema_name(&sequence)?;
-        let mut row =
-            pg_class_row_with_lifecycle(&schema, &name, "S", 3, 0.0, false, persistence, true, &[]);
+        let mut row = pg_class_row_with_lifecycle(
+            catalog,
+            &schema,
+            &name,
+            "S",
+            3,
+            0.0,
+            false,
+            persistence,
+            true,
+            &[],
+        );
         row.insert(
             "oid".into(),
             int_value(stable_object_oid("relation", &object_id)),
@@ -248,6 +263,7 @@ pub fn build_pg_class(
     }
     for index in catalog_indexes {
         let mut index_row = pg_class_row(
+            catalog,
             &index.relation.schema,
             &index.relation.name,
             index.relkind,

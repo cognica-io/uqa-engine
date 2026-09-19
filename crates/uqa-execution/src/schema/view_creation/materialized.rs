@@ -6,7 +6,9 @@
 
 //! Materialized-view source execution and snapshot replacement lifecycle.
 use super::{
-    context::ViewCreationTransactions, publication, registration::reject_regrole_constants,
+    context::{ViewCreationContext, ViewCreationTransactions},
+    publication,
+    registration::reject_regrole_constants,
     MaterializedViewRegistration,
 };
 use crate::catalog::view::{StoredView, StoredViewKind};
@@ -55,6 +57,39 @@ fn materialized_rows(
         .collect()
 }
 
+fn bind_materialized_view_target(
+    context: &ViewCreationContext<'_>,
+    name: &str,
+    if_not_exists: bool,
+) -> Result<Option<String>, SQLError> {
+    bind_relation(
+        context.locks,
+        RelationLockMode::AccessExclusive,
+        false,
+        || {
+            let resolved = context.namespace.resolve_persistent_name(name)?;
+            if let Some(kind) = context.names.relation_kind_at(&resolved).map_err(|error| {
+                SQLError::Internal(format!("resolve relation `{resolved}`: {error}"))
+            })? {
+                if if_not_exists {
+                    return Ok(None);
+                }
+                return Err(SQLError::Routine {
+                    sqlstate: "42P07".into(),
+                    message: format!("relation \"{resolved}\" already exists as {kind}"),
+                });
+            }
+            Ok(Some(RelationBinding {
+                name: context.namespace.persistent_relation_name(name)?,
+                object_id: None,
+                value: (),
+            }))
+        },
+        |target| context.namespace.ensure_create(&target.name),
+    )
+    .map(|binding| binding.map(|target| target.name))
+}
+
 pub fn register_materialized_view_plan(
     transactions: &dyn ViewCreationTransactions,
     registration: MaterializedViewRegistration<'_>,
@@ -87,34 +122,9 @@ pub fn register_materialized_view_plan(
             uqa_sql::schema::columns::validate_postgres_column_name(column)?;
         }
         validate_view_column_types(&query_schema, &output_columns)?;
-        let name = context.namespace.resolve_persistent_name(name)?;
-        let binding = bind_relation(
-            context.locks,
-            RelationLockMode::AccessExclusive,
-            false,
-            || {
-                if let Some(kind) = context.names.relation_kind_at(&name).map_err(|error| {
-                    SQLError::Internal(format!("resolve relation `{name}`: {error}"))
-                })? {
-                    if if_not_exists {
-                        return Ok(None);
-                    }
-                    return Err(SQLError::Routine {
-                        sqlstate: "42P07".into(),
-                        message: format!("relation \"{name}\" already exists as {kind}"),
-                    });
-                }
-                Ok(Some(RelationBinding {
-                    name: name.clone(),
-                    object_id: None,
-                    value: (),
-                }))
-            },
-            |_| context.namespace.ensure_create(&name),
-        )?;
-        if binding.is_none() {
+        let Some(name) = bind_materialized_view_target(context, name, if_not_exists)? else {
             return Ok(None);
-        }
+        };
         context.namespace.retain_owner(&owner)?;
         context.namespace.ensure_create(&name)?;
         let materialized_column_types = query_schema.column_types().to_vec();

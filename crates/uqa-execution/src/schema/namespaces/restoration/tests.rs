@@ -61,3 +61,54 @@ fn all_schema_references_are_validated_before_any_legacy_conversion_is_written()
         .contains("missing role `missing`"));
     assert_eq!(catalog.load_schema_rows().unwrap(), before);
 }
+
+#[test]
+fn bound_role_predecessors_receive_namespace_identity_once_without_rebinding_authority() {
+    let (catalog, roles) = fixture();
+    let row = SchemaRow::bootstrap("old_namespace");
+    catalog.save_schema_row(&row).unwrap();
+    assert!(restore(&catalog, &roles, false).is_err());
+    assert_eq!(catalog.load_schema_rows().unwrap(), [row]);
+    let restored = restore(&catalog, &roles, true).unwrap();
+    let security = &restored["old_namespace"];
+    assert_eq!(
+        security.namespace_oid("old_namespace"),
+        uqa_sql::catalog::oids::schema_oid("old_namespace")
+    );
+    assert!(security.tuple.unwrap().is_valid());
+    assert_eq!(security.role_owner, roles["uqa"].identity());
+    assert_eq!(restore(&catalog, &roles, false).unwrap(), restored);
+    assert_eq!(restore(&catalog, &roles, true).unwrap(), restored);
+}
+
+#[test]
+fn duplicate_namespace_oid_or_incarnation_rejects_the_whole_migration_before_writes() {
+    for same_oid in [true, false] {
+        let (catalog, roles) = fixture();
+        catalog
+            .save_schema_row(&SchemaRow::legacy("a_legacy"))
+            .unwrap();
+        let mut first = BoundSchemaSecurity::bootstrap("first");
+        let mut second = BoundSchemaSecurity::bootstrap("second");
+        first.tuple = Some(uqa_core::catalog_schema::SchemaTupleIdentity {
+            oid: 40_001,
+            object_id: [1; 16],
+            revision: [2; 16],
+        });
+        second.tuple = Some(uqa_core::catalog_schema::SchemaTupleIdentity {
+            oid: if same_oid { 40_001 } else { 40_002 },
+            object_id: if same_oid { [3; 16] } else { [1; 16] },
+            revision: [4; 16],
+        });
+        catalog.save_schema_row(&first.row("first").into()).unwrap();
+        catalog
+            .save_schema_row(&second.row("second").into())
+            .unwrap();
+        let before = catalog.load_schema_rows().unwrap();
+        assert!(restore(&catalog, &roles, true)
+            .unwrap_err()
+            .to_string()
+            .contains("duplicate schema catalog identity"));
+        assert_eq!(catalog.load_schema_rows().unwrap(), before);
+    }
+}

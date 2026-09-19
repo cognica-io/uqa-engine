@@ -20,12 +20,24 @@ use uqa_sql::{catalog::security::BoundSchemaSecurity, SQLError};
 use uqa_storage::StorageBackendResult;
 
 impl Engine {
+    fn schema_lock_context(
+        &self,
+    ) -> uqa_execution::schema::namespaces::locking::SchemaLockContext<'_> {
+        uqa_execution::schema::namespaces::locking::SchemaLockContext {
+            objects: self,
+            relations: self,
+            rows: self,
+            catalog: self,
+        }
+    }
     pub(crate) fn schema_creation_context(&self) -> SchemaCreationContext<'_> {
         SchemaCreationContext {
+            tuples: self.schema_lock_context(),
             writer: self,
             session: self,
             roles: self,
             catalog: self,
+            schemas: self,
             notices: self,
             locks: self,
             database: self,
@@ -34,6 +46,7 @@ impl Engine {
     }
     pub(crate) fn schema_owner_context(&self) -> SchemaOwnerContext<'_> {
         SchemaOwnerContext {
+            tuples: self.schema_lock_context(),
             writer: self,
             refresh: self,
             session: self,
@@ -48,6 +61,7 @@ impl Engine {
     }
     pub(crate) fn schema_privilege_context(&self) -> SchemaPrivilegeContext<'_> {
         SchemaPrivilegeContext {
+            tuples: self.schema_lock_context(),
             locks: self,
             writer: self,
             refresh: self,
@@ -106,9 +120,10 @@ impl SchemaRegistration for Engine {
         name: &str,
         if_not_exists: bool,
         role_owner: uqa_core::catalog_role::RoleIdentity,
+        tuple: uqa_core::catalog_schema::SchemaTupleIdentity,
     ) -> StorageBackendResult<bool> {
         self.mutation_coordinator()
-            .register_schema(name, if_not_exists, role_owner)
+            .register_schema(name, if_not_exists, role_owner, tuple)
     }
 }
 impl SchemaSecurityCatalog for Engine {
@@ -155,6 +170,7 @@ use uqa_sql::schema::namespaces::removal::{EmptySchemaCatalog, SchemaDropCatalog
 impl Engine {
     pub(crate) fn schema_removal_context(&self) -> SchemaRemovalContext<'_> {
         SchemaRemovalContext {
+            tuples: self.schema_lock_context(),
             refresh: self,
             catalog: self,
             names: self,
@@ -172,6 +188,7 @@ impl Engine {
     }
     pub(crate) fn empty_schema_removal_context(&self) -> EmptySchemaRemovalContext<'_> {
         EmptySchemaRemovalContext {
+            tuples: self.schema_lock_context(),
             refresh: self,
             catalog: self,
             state: self,

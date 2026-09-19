@@ -10,7 +10,7 @@ use super::builtin_routines::PG18_BUILTIN_ROUTINE_GROUPS;
 use super::expression_text::schema_expr_text;
 use super::helpers::acl::acl_identifier;
 use super::helpers::oids::{
-    current_user_oid, schema_oid, split_schema_name, stable_object_oid, stable_oid,
+    current_user_oid, namespace_oid, schema_oid, split_schema_name, stable_object_oid, stable_oid,
 };
 use super::helpers::rows::{
     bool_value, catalog_array, catalog_usize, int_value, list_int, row, str_value,
@@ -268,7 +268,10 @@ pub fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLErr
         rows.push(row([
             ("oid", int_value(user_routine_catalog_oid(&function)?)),
             ("proname", str_value(routine_name)),
-            ("pronamespace", int_value(schema_oid(&routine_schema))),
+            (
+                "pronamespace",
+                int_value(namespace_oid(catalog, &routine_schema)),
+            ),
             (
                 "proowner",
                 int_value(uqa_sql::routines::security::bound_routine_owner(def)?.oid),

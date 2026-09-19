@@ -11,6 +11,32 @@ use uqa_core::{ArrayValue, Value};
 use uqa_sql::catalog::{roles::RoleDefinition, security::BoundSchemaSecurity};
 
 #[test]
+fn namespace_oid_projection_reads_the_captured_incarnation_after_name_reuse() {
+    let mut snapshot = empty_catalog().snapshot().clone();
+    let mut first = BoundSchemaSecurity::bootstrap("s");
+    first.tuple = Some(uqa_core::catalog_schema::SchemaTupleIdentity {
+        oid: 40_001,
+        object_id: [1; 16],
+        revision: [2; 16],
+    });
+    snapshot.definitions.schemas = Arc::new(BTreeMap::from([("s".into(), first.clone())]));
+    let original = CatalogReadView::new(snapshot.clone());
+    first.tuple = Some(uqa_core::catalog_schema::SchemaTupleIdentity {
+        oid: 40_002,
+        object_id: [3; 16],
+        revision: [4; 16],
+    });
+    snapshot.definitions.schemas = Arc::new(BTreeMap::from([("s".into(), first)]));
+    let replacement = CatalogReadView::new(snapshot);
+    assert_eq!(super::super::schema_object_oid(&original, "s"), 40_001);
+    assert_eq!(super::super::schema_object_oid(&replacement, "s"), 40_002);
+    assert_eq!(
+        super::super::schema_object_oid(&replacement, "pg_catalog"),
+        11
+    );
+}
+
+#[test]
 fn namespace_snapshots_keep_owner_oids_and_project_acl_and_information_schema_names() {
     let owner = RoleDefinition::bootstrap();
     let mut roles = BTreeMap::from([(owner.name.clone(), owner)]);

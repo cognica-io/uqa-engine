@@ -10,27 +10,13 @@ use crate::{
     tests::relation_lock_support::{sessions, sql},
     Engine,
 };
-use std::sync::Arc;
 use uqa_core::Value;
 
 fn oid(engine: &Engine, name: &str) -> Value {
     sql(engine, &format!("SELECT to_regrole('{name}')::oid AS id")).rows[0]["id"].clone()
 }
 
-pub(super) fn reopen(provider: usize, path: &std::path::Path) -> Engine {
-    match provider {
-        0 => Engine::open(path).unwrap(),
-        1 => Engine::from_persistent_provider(Arc::new(
-            uqa_storage_sqlite::SQLiteKeyValueStorage::open(path).unwrap(),
-        ))
-        .unwrap(),
-        2 => Engine::from_persistent_provider(Arc::new(
-            uqa_storage_redb::RedbStorage::open(path).unwrap(),
-        ))
-        .unwrap(),
-        _ => unreachable!(),
-    }
-}
+pub(super) use crate::tests::relation_lock_support::reopen;
 
 #[test]
 fn role_oids_follow_create_undo_recreate_and_reopen_for_every_provider() {

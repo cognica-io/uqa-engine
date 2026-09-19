@@ -120,7 +120,8 @@ fn mutation_coordinator_publishes_schema_changes_without_engine_recovery() {
         .register_schema(
             "capability_test",
             false,
-            uqa_core::catalog_role::RoleIdentity::BOOTSTRAP
+            uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+            uqa_execution::schema::namespaces::identity::new_tuple(42_001).unwrap()
         )
         .unwrap());
     assert!(!snapshot.has_schema("capability_test"));

@@ -110,22 +110,34 @@ fn schema_acl_identities_preserve_private_changes_refresh_undo_and_reopen() {
 
 #[test]
 fn schema_acl_migration_rolls_back_on_later_catalog_restore_failure() {
-    for provider in 0..3 {
+    for (provider, bound_roles) in
+        (0..3).flat_map(|provider| [false, true].map(move |bound| (provider, bound)))
+    {
         let (_directory, first, second) = sessions(provider);
         sql(
             &first,
             "CREATE ROLE reader; CREATE SCHEMA secured; GRANT CREATE ON SCHEMA secured TO reader",
         );
-        let expected = first.durable.schemas.read()["secured"].clone();
-        let legacy = SchemaRow::Legacy(
+        let mut expected = first.durable.schemas.read()["secured"].clone();
+        // Name-only and bound-role-only predecessors exposed the same name-derived namespace OID.
+        expected.tuple =
+            uqa_sql::catalog::security::BoundSchemaSecurity::bootstrap("secured").tuple;
+        let named = SchemaRow::Legacy(
             expected
                 .resolve(&first.durable.roles.read())
                 .unwrap()
                 .row("secured"),
         );
+        let predecessor = if bound_roles {
+            let mut row = expected.row("secured");
+            row.tuple = None;
+            SchemaRow::Bound(row)
+        } else {
+            named
+        };
         let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
         let raw = factory.open_session().unwrap();
-        raw.catalog.save_schema_row(&legacy).unwrap();
+        raw.catalog.save_schema_row(&predecessor).unwrap();
         let Err(error) = first.new_session() else {
             panic!("secondary restoration must not bind legacy schema names");
         };
@@ -140,7 +152,7 @@ fn schema_acl_migration_rolls_back_on_later_catalog_restore_failure() {
             panic!("initial restoration accepted malformed routine metadata");
         };
         assert!(error.to_string().contains("EOF"), "{error}");
-        assert_eq!(stored(raw.catalog.as_ref()), legacy);
+        assert_eq!(stored(raw.catalog.as_ref()), predecessor);
         raw.catalog.delete_metadata("sql_functions_json").unwrap();
         let reopened = Engine::from_persistent_provider(Arc::clone(&factory)).unwrap();
         assert_eq!(reopened.durable.schemas.read()["secured"], expected);

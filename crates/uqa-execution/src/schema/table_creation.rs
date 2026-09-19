@@ -100,7 +100,7 @@ fn preflight(
     let name = if persistence == RelationPersistence::Temporary {
         context.creation.temporary_name(name)?
     } else {
-        context.creation.persistent_name(name)?
+        context.creation.persistent_relation_name(name)?
     };
     if context.namespace.relation_exists(&name)? {
         let local = uqa_core::RelationIdentity::from_legacy_name(&name)

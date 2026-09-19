@@ -198,6 +198,7 @@ impl MutationCoordinator<'_> {
         name: &str,
         if_not_exists: bool,
         role_owner: uqa_core::catalog_role::RoleIdentity,
+        tuple: uqa_core::catalog_schema::SchemaTupleIdentity,
     ) -> StorageBackendResult<bool> {
         uqa_execution::schema::namespaces::register_schema(
             &uqa_execution::schema::namespaces::SchemaRegistrationContext {
@@ -208,6 +209,7 @@ impl MutationCoordinator<'_> {
             name,
             if_not_exists,
             role_owner,
+            tuple,
         )
     }
 

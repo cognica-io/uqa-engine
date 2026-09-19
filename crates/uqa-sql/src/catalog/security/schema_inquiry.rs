@@ -66,7 +66,7 @@ impl SchemaPrivilegeInquiry<'_> {
         if let Some(security) = self.catalog.schemas().get(schema) {
             return Some(security.clone());
         }
-        match schema {
+        let mut security = match schema {
             "pg_catalog" | "information_schema" => {
                 Some(BoundSchemaSecurity::with_public_privileges(false))
             }
@@ -78,7 +78,9 @@ impl SchemaPrivilegeInquiry<'_> {
                 Some(BoundSchemaSecurity::bootstrap(name))
             }
             _ => None,
-        }
+        }?;
+        security.tuple = BoundSchemaSecurity::bootstrap(schema).tuple;
+        Some(security)
     }
 
     pub fn require_schema_privilege(
@@ -171,9 +173,10 @@ impl SchemaPrivilegeInquiry<'_> {
                     })
                 }
             }
-            Value::Int(oid) => Ok(names
-                .into_iter()
-                .find(|name| crate::catalog::oids::schema_oid(name) == *oid)),
+            Value::Int(oid) => Ok(names.into_iter().find(|name| {
+                self.schema_security_for_privilege(name)
+                    .is_some_and(|security| security.namespace_oid(name) == *oid)
+            })),
             other => Err(SQLError::TypeMismatch(format!(
                 "has_schema_privilege schema must be text or oid, got {other:?}"
             ))),

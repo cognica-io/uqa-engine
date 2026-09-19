@@ -15,30 +15,41 @@ use std::collections::BTreeMap;
 use uqa_core::{
     catalog_acl::AclGrantee,
     catalog_role::BoundAclEntry,
-    catalog_schema::{BoundSchemaRow, SchemaAclEntry, SchemaPrivileges},
+    catalog_schema::{BoundSchemaRow, SchemaAclEntry, SchemaPrivileges, SchemaTupleIdentity},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoundSchemaSecurity {
+    pub tuple: Option<SchemaTupleIdentity>,
     pub role_owner: RoleIdentity,
     pub acl: Option<Vec<BoundAclEntry<SchemaPrivileges>>>,
 }
 
 impl BoundSchemaSecurity {
+    pub fn namespace_oid(&self, name: &str) -> i64 {
+        self.tuple
+            .map_or_else(|| crate::catalog::oids::schema_oid(name), |tuple| tuple.oid)
+    }
     pub fn owner(role_owner: RoleIdentity) -> Self {
         Self {
+            tuple: None,
             role_owner,
             acl: None,
         }
     }
 
     pub fn bootstrap(name: &str) -> Self {
-        Self::from_row(BoundSchemaRow::bootstrap(name)).1
+        let mut security = Self::from_row(BoundSchemaRow::bootstrap(name)).1;
+        security.tuple = Some(SchemaTupleIdentity::initial(
+            u32::try_from(crate::catalog::oids::schema_oid(name)).expect("bootstrap schema OID"),
+        ));
+        security
     }
 
     pub fn with_public_privileges(create: bool) -> Self {
         let owner = RoleIdentity::BOOTSTRAP;
         Self {
+            tuple: None,
             role_owner: owner,
             acl: Some(vec![
                 BoundAclEntry {
@@ -66,6 +77,7 @@ impl BoundSchemaSecurity {
     ) -> Result<Self, String> {
         let bind = |name: &str| bind_role(roles, name, "schema");
         Ok(Self {
+            tuple: None,
             role_owner: bind(&security.role_owner)?,
             acl: security
                 .acl
@@ -121,6 +133,9 @@ impl BoundSchemaSecurity {
     }
 
     pub fn validate(&self, roles: &BTreeMap<String, RoleDefinition>) -> Result<(), String> {
+        if self.tuple.is_some_and(|tuple| !tuple.is_valid()) {
+            return Err("invalid schema catalog tuple identity".into());
+        }
         role_name(roles, self.role_owner, "schema")?;
         for entry in self.acl.iter().flatten() {
             if let Some(grantee) = entry.role {
@@ -144,6 +159,7 @@ impl BoundSchemaSecurity {
         (
             row.name,
             Self {
+                tuple: row.tuple,
                 role_owner: row.role_owner,
                 acl: row.acl,
             },
@@ -153,6 +169,7 @@ impl BoundSchemaSecurity {
     pub fn row(&self, name: impl Into<String>) -> BoundSchemaRow {
         BoundSchemaRow {
             name: name.into(),
+            tuple: self.tuple,
             role_owner: self.role_owner,
             acl: self.acl.clone(),
         }

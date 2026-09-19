@@ -21,7 +21,6 @@ use uqa_sql::{ResultRow, SQLError};
 
 use crate::catalog::context::CatalogContext;
 
-use super::helpers;
 use super::pg_catalog::{build_pg_type, catalog_index_relations};
 use super::pg_namespace::build_pg_namespace;
 use super::pg_proc::build_pg_proc;
@@ -650,7 +649,13 @@ fn format_regproc(
         .current_schema_names(true)
         .map_err(|error| SQLError::Internal(error.to_string()))?;
     let visible_schema = schemas.into_iter().find(|candidate_schema| {
-        let candidate_oid = helpers::oids::schema_oid(candidate_schema);
+        let Some((&candidate_oid, _)) = catalog
+            .namespaces
+            .iter()
+            .find(|(_, name)| *name == candidate_schema)
+        else {
+            return false;
+        };
         catalog
             .proc_names_by_namespace
             .get(&candidate_oid)
@@ -681,7 +686,13 @@ fn format_regprocedure(
         .map_err(|error| SQLError::Internal(error.to_string()))?
         .into_iter()
         .find(|candidate_schema| {
-            let namespace_oid = helpers::oids::schema_oid(candidate_schema);
+            let Some((&namespace_oid, _)) = catalog
+                .namespaces
+                .iter()
+                .find(|(_, name)| *name == candidate_schema)
+            else {
+                return false;
+            };
             catalog.procs.values().any(|candidate| {
                 candidate.namespace_oid == namespace_oid
                     && candidate.name == entry.name

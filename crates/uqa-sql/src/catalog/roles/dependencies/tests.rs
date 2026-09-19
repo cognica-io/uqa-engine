@@ -86,6 +86,7 @@ fn an_earlier_catalog_dependency_prevents_reading_later_registries() {
     catalog.schemas.insert(
         "owned".into(),
         BoundSchemaSecurity {
+            tuple: None,
             role_owner: catalog.roles["first"].identity(),
             acl: None,
         },

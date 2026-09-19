@@ -12,7 +12,7 @@ use uqa_sql::ResultRow;
 
 use crate::catalog::CatalogReadView;
 
-use super::super::helpers::oids::{current_user_oid, schema_oid};
+use super::super::helpers::oids::{current_user_oid, namespace_oid, schema_oid};
 use super::super::helpers::rows::{bool_value, int_value, row, str_value};
 use super::super::helpers::type_metadata::{
     pg_type_align, pg_type_array_oid, pg_type_by_value, pg_type_collation_oid, pg_type_element_oid,
@@ -384,7 +384,7 @@ pub fn build_pg_type(catalog: &CatalogReadView) -> Vec<ResultRow> {
             .unwrap_or_else(|| str_value("U"));
         let mut entry = pg_type_catalog_row(
             &ty,
-            schema_oid(&domain.identity.schema),
+            namespace_oid(catalog, &domain.identity.schema),
             "d",
             "U",
             false,
@@ -404,7 +404,7 @@ pub fn build_pg_type(catalog: &CatalogReadView) -> Vec<ResultRow> {
         types.push(entry);
         let mut array = pg_type_catalog_row(
             &ColumnType::Array(Box::new(ty)),
-            schema_oid(&domain.identity.schema),
+            namespace_oid(catalog, &domain.identity.schema),
             "b",
             "A",
             false,

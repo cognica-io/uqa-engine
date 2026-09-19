@@ -84,6 +84,7 @@ impl ViewOwnerSchemas for Catalog {
         assert!(self.memberships.try_borrow_mut().is_ok());
         self.calls.borrow_mut().push("schema");
         Some(BoundSchemaSecurity {
+            tuple: None,
             role_owner: self.roles.borrow()["schema_owner"].identity(),
             acl: None,
         })

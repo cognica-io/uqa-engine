@@ -16,7 +16,7 @@ use crate::catalog::{CatalogReadView, RelationNameResolution};
 
 use super::super::helpers::acl::acl_identifier;
 use super::super::helpers::oids::{
-    current_user_oid, relation_oid, schema_oid, split_schema_name, stable_object_oid, stable_oid,
+    current_user_oid, namespace_oid, relation_oid, split_schema_name, stable_object_oid, stable_oid,
 };
 use super::super::helpers::rows::{
     bool_value, catalog_array, catalog_name, int_value, row, str_value,
@@ -98,6 +98,7 @@ pub fn table_rowtype_oid_from(
 }
 
 pub fn pg_class_row(
+    catalog: &CatalogReadView,
     schema: &str,
     name: &str,
     relkind: &str,
@@ -106,6 +107,7 @@ pub fn pg_class_row(
     has_index: bool,
 ) -> ResultRow {
     pg_class_row_with_lifecycle(
+        catalog,
         schema,
         name,
         relkind,
@@ -120,6 +122,7 @@ pub fn pg_class_row(
 
 #[expect(clippy::too_many_arguments, reason = "keeps catalog metadata aligned")]
 pub fn pg_class_row_with_lifecycle(
+    catalog: &CatalogReadView,
     schema: &str,
     name: &str,
     relkind: &str,
@@ -137,7 +140,7 @@ pub fn pg_class_row_with_lifecycle(
         0
     };
     let mut row = pg_class_catalog_row(
-        oid, reltype, schema, name, relkind, natts, tuples, has_index,
+        catalog, oid, reltype, schema, name, relkind, natts, tuples, has_index,
     );
     row.insert(
         "relpersistence".into(),
@@ -159,6 +162,7 @@ pub fn pg_class_row_with_lifecycle(
 
 #[expect(clippy::too_many_arguments, reason = "keeps catalog metadata aligned")]
 pub fn pg_class_catalog_row(
+    catalog: &CatalogReadView,
     oid: i64,
     reltype: i64,
     schema: &str,
@@ -171,7 +175,7 @@ pub fn pg_class_catalog_row(
     row([
         ("oid", int_value(oid)),
         ("relname", str_value(name)),
-        ("relnamespace", int_value(schema_oid(schema))),
+        ("relnamespace", int_value(namespace_oid(catalog, schema))),
         ("reltype", int_value(reltype)),
         ("reloftype", int_value(0)),
         ("relowner", int_value(current_user_oid())),

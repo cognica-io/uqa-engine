@@ -79,6 +79,7 @@ fn namespace_create_is_checked_for_the_new_owner_and_bypassed_for_superusers() {
     let memberships = BTreeMap::new();
     for schema_owner in ["actor", "target"] {
         let schemas = Schemas(BoundSchemaSecurity {
+            tuple: None,
             role_owner: roles[schema_owner].identity(),
             acl: None,
         });
@@ -108,6 +109,7 @@ fn namespace_create_is_checked_for_the_new_owner_and_bypassed_for_superusers() {
     }
     .require_schema_create(
         &Schemas(BoundSchemaSecurity {
+            tuple: None,
             role_owner: roles["original"].identity(),
             acl: Some(Vec::new()),
         }),

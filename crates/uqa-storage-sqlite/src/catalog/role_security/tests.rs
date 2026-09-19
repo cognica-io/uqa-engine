@@ -7,6 +7,35 @@
 use super::*;
 
 #[test]
+fn namespace_tuple_envelope_roundtrips_and_rejects_corruption_without_legacy_fallback() {
+    let mut bound = BoundSchemaRow::bootstrap("s");
+    bound.tuple = Some(SchemaTupleIdentity {
+        oid: i64::from(u32::MAX),
+        object_id: [7; 16],
+        revision: [8; 16],
+    });
+    let row = SchemaRow::Bound(bound);
+    let (owner, acl) = encode_schema(&row).unwrap();
+    assert_eq!(
+        decode_schema("s".into(), (&owner).into(), acl.as_deref()).unwrap(),
+        row
+    );
+    let Value::Blob(original) = owner else {
+        unreachable!()
+    };
+    assert_eq!(original.len(), 57);
+    for length in [0, 20, 21, 25, 41, 56] {
+        assert!(decode_schema("s".into(), ValueRef::Blob(&original[..length]), None).is_err());
+    }
+    for field in [0..1, 1..5, 5..21, 21..25, 25..41, 41..57] {
+        let mut invalid = original.clone();
+        invalid[field].fill(0);
+        assert!(decode_schema("s".into(), ValueRef::Blob(&invalid), None).is_err());
+    }
+    assert!(decode_sequence(ValueRef::Blob(&original), None).is_err());
+}
+
+#[test]
 fn sequence_cells_keep_role_storage_classes_and_reject_mixed_acl_endpoints() {
     use uqa_core::catalog_role::BoundAclEntry;
     use uqa_core::catalog_sequence::{

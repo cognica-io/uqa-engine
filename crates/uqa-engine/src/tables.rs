@@ -183,9 +183,7 @@ impl Engine {
                 .temporary_name(raw_name)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?
         } else {
-            self.relation_creation_context()
-                .api_name(raw_name)
-                .map_err(StorageBackendError::Other)?
+            self.relation_creation_context().api_name(raw_name)?
         };
         let relation = Self::resolved_relation_identity(&name)?;
         if let Some(kind) = self.relation_kind_at(&name)? {

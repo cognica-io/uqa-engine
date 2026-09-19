@@ -46,3 +46,48 @@ fn malformed_or_unknown_schema_records_never_fall_back_to_legacy_defaults() {
     mixed["acl"][0]["role"] = serde_json::json!("uqa");
     assert!(serde_json::from_value::<SchemaRow>(mixed).is_err());
 }
+
+#[test]
+fn namespace_tuple_format_preserves_full_oid_and_rejects_missing_or_invalid_identity() {
+    let mut row = BoundSchemaRow::bootstrap("s");
+    row.tuple = Some(SchemaTupleIdentity {
+        oid: i64::from(u32::MAX),
+        object_id: [7; 16],
+        revision: [8; 16],
+    });
+    let row = SchemaRow::Bound(row);
+    let encoded = serde_json::to_value(&row).unwrap();
+    assert_eq!(encoded["schema_security_format"], 2);
+    assert_eq!(
+        serde_json::from_value::<SchemaRow>(encoded.clone()).unwrap(),
+        row
+    );
+    for field in ["oid", "object_id", "revision"] {
+        let mut invalid = encoded.clone();
+        invalid["tuple"].as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<SchemaRow>(invalid).is_err());
+    }
+    for invalid_tuple in [
+        serde_json::Value::Null,
+        serde_json::json!({"oid": 0, "object_id": vec![7; 16], "revision": vec![8; 16]}),
+        serde_json::json!({"oid": 30_001, "object_id": vec![0; 16], "revision": vec![8; 16]}),
+        serde_json::json!({"oid": 30_001, "object_id": vec![7; 16], "revision": vec![0; 16]}),
+    ] {
+        let mut invalid = encoded.clone();
+        invalid["tuple"] = invalid_tuple;
+        assert!(serde_json::from_value::<SchemaRow>(invalid).is_err());
+    }
+    let mut missing = encoded.clone();
+    missing.as_object_mut().unwrap().remove("tuple");
+    assert!(serde_json::from_value::<SchemaRow>(missing).is_err());
+    let mut wrong_version = encoded;
+    wrong_version["schema_security_format"] = serde_json::json!(1);
+    assert!(serde_json::from_value::<SchemaRow>(wrong_version).is_err());
+    let mut missing_format = serde_json::to_value(&row).unwrap();
+    missing_format
+        .as_object_mut()
+        .unwrap()
+        .remove("schema_security_format");
+    missing_format["role_owner"] = serde_json::json!("uqa");
+    assert!(serde_json::from_value::<SchemaRow>(missing_format).is_err());
+}

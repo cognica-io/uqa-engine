@@ -12,7 +12,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use uqa_execution::row_locks::RowLockKey;
+use uqa_execution::row_locks::{shared_objects::SharedCatalogLock, RowLockKey};
 
 pub(super) fn sessions(provider: usize) -> (tempfile::TempDir, Engine, Engine) {
     let directory = tempfile::tempdir().unwrap();
@@ -166,7 +166,67 @@ pub(super) fn after_tuple_wait_with_release(
         cancel.cancel();
     }
     let worker = task.join().unwrap();
-    assert!(waited, "expected catalog tuple wait: {catalog}/{doc_id}");
+    assert!(
+        waited,
+        "expected catalog tuple wait: {catalog}/{doc_id}; received {result:?}"
+    );
     released.unwrap();
     (worker, result.unwrap())
+}
+
+pub(super) fn after_shared_wait(
+    holder: &Engine,
+    worker: Engine,
+    statement: &str,
+    target: SharedCatalogLock<'_>,
+    release: &str,
+) -> (Engine, Result<SQLResult, SQLError>) {
+    let key = holder.row_locks.shared_catalog_key(target);
+    let session = worker.session_id;
+    let cancel = worker.runtime.cancellation.clone();
+    let statement = statement.to_string();
+    let (send, done) = mpsc::channel();
+    let task = thread::spawn(move || {
+        let result = worker.sql(&statement, &[]);
+        let _ = send.send(result);
+        worker
+    });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !holder.row_locks.waiting_for_relation(session, key)
+        && !task.is_finished()
+        && Instant::now() < deadline
+    {
+        thread::yield_now();
+    }
+    let waited = holder.row_locks.waiting_for_relation(session, key);
+    let released = holder.sql(release, &[]);
+    if released.is_err() {
+        cancel.cancel();
+    }
+    let result = done.recv_timeout(Duration::from_secs(30));
+    if result.is_err() {
+        cancel.cancel();
+    }
+    let worker = task.join().unwrap();
+    released.unwrap();
+    assert!(
+        waited,
+        "expected shared catalog wait on {target:?}, received {result:?}"
+    );
+    (worker, result.unwrap())
+}
+
+pub(super) fn reopen(provider: usize, path: &std::path::Path) -> Engine {
+    match provider {
+        0 => Engine::open(path).unwrap(),
+        1 => Engine::from_persistent_provider(Arc::new(
+            uqa_storage_sqlite::SQLiteKeyValueStorage::open(path).unwrap(),
+        ))
+        .unwrap(),
+        2 => Engine::from_persistent_provider(Arc::new(
+            uqa_storage_redb::RedbStorage::open(path).unwrap(),
+        ))
+        .unwrap(),
+        _ => unreachable!(),
+    }
 }

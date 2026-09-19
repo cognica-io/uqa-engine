@@ -46,6 +46,7 @@ pub trait SchemaDropNotices {
     fn schema_drop_notice(&self, message: &str);
 }
 pub struct SchemaRemovalContext<'a> {
+    pub tuples: super::locking::SchemaLockContext<'a>,
     pub refresh: &'a dyn NamespaceCatalogRefresh,
     pub catalog: &'a dyn SchemaDropCatalog,
     pub names: &'a dyn SchemaRemovalNames,
@@ -67,6 +68,7 @@ pub trait EmptySchemaRemovalPersistence {
     fn drop_schema_row(&self, name: &str) -> StorageBackendResult<()>;
 }
 pub struct EmptySchemaRemovalContext<'a> {
+    pub tuples: super::locking::SchemaLockContext<'a>,
     pub refresh: &'a dyn NamespaceCatalogRefresh,
     pub catalog: &'a dyn EmptySchemaCatalog,
     pub state: &'a dyn EmptySchemaRemovalState,
@@ -79,9 +81,18 @@ pub fn drop_empty_schema(
     name: &str,
 ) -> StorageBackendResult<bool> {
     context.refresh.refresh_catalog()?;
+    let Some(_) = context
+        .tuples
+        .bind_lifetime(name, crate::row_locks::RelationLockMode::AccessExclusive)
+        .map_err(|error| StorageBackendError::backend("DROP SCHEMA", error))?
+    else {
+        return Ok(false);
+    };
     if !validate_empty_schema_drop(context.catalog, name).map_err(StorageBackendError::Other)? {
         return Ok(false);
     }
+    lock_deletion(&context.tuples, name)
+        .map_err(|error| StorageBackendError::backend("DROP SCHEMA", error))?;
     let mut schemas = context.state.schema_registry_write();
     context.persistence.drop_schema_row(name)?;
     let removed = schemas.remove(name).is_some();
@@ -93,7 +104,7 @@ pub fn drop_empty_schema(
 }
 
 fn storage_error(error: &StorageBackendError) -> SQLError {
-    SQLError::Internal(format!("DROP SCHEMA: {error}"))
+    uqa_sql::catalog::errors::storage_error("DROP SCHEMA", error)
 }
 
 pub fn drop_schemas(
@@ -107,7 +118,14 @@ pub fn drop_schemas(
     let mut schemas = BTreeSet::new();
     let mut graphs = BTreeSet::new();
     for name in &statement.names {
-        match bind_schema_drop_target(context.catalog, name, statement.if_exists)? {
+        let mut target = bind_schema_drop_target(context.catalog, name, statement.if_exists)?;
+        if matches!(target, BoundSchemaDrop::Schema) {
+            context
+                .tuples
+                .bind_lifetime(name, crate::row_locks::RelationLockMode::AccessExclusive)?;
+            target = bind_schema_drop_target(context.catalog, name, statement.if_exists)?;
+        }
+        match target {
             BoundSchemaDrop::Schema => {
                 schemas.insert(name.clone());
             }
@@ -156,6 +174,18 @@ pub fn drop_schemas(
             .map_err(|error| storage_error(&error))?;
     }
     Ok(())
+}
+
+fn lock_deletion(
+    context: &super::locking::SchemaLockContext<'_>,
+    name: &str,
+) -> Result<(), SQLError> {
+    context.catalog_write()?;
+    let security = context
+        .catalog
+        .schema_security(name)
+        .ok_or_else(|| super::locking::missing(name))?;
+    context.replace(name, super::locking::tuple(&security)?)
 }
 
 fn drop_schema_relations(

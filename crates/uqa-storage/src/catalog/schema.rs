@@ -6,7 +6,9 @@
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use uqa_core::catalog_schema::SchemaRow as LegacySchemaRow;
-pub use uqa_core::catalog_schema::{BoundSchemaRow, SchemaAclEntry, SchemaPrivileges};
+pub use uqa_core::catalog_schema::{
+    BoundSchemaRow, SchemaAclEntry, SchemaPrivileges, SchemaTupleIdentity,
+};
 
 /// A catalog read distinguishes old names from already captured role identities.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,11 +50,18 @@ impl Serialize for SchemaRow {
         }
         match self {
             Self::Legacy(row) => row.serialize(serializer),
-            Self::Bound(row) => Bound {
-                schema_security_format: 1,
-                row,
+            Self::Bound(row) => {
+                if row.tuple.is_some_and(|tuple| !tuple.is_valid()) {
+                    return Err(serde::ser::Error::custom(
+                        "invalid schema catalog tuple identity",
+                    ));
+                }
+                Bound {
+                    schema_security_format: if row.tuple.is_some() { 2 } else { 1 },
+                    row,
+                }
+                .serialize(serializer)
             }
-            .serialize(serializer),
         }
     }
 }
@@ -62,13 +71,26 @@ impl<'de> Deserialize<'de> for SchemaRow {
         use serde::de::Error;
         let value = serde_json::Value::deserialize(deserializer)?;
         if let Some(version) = value.get("schema_security_format") {
-            if version.as_u64() != Some(1) {
+            let version = version.as_u64();
+            if !matches!(version, Some(1 | 2)) {
                 return Err(D::Error::custom("unsupported schema security format"));
             }
-            serde_json::from_value(value)
-                .map(Self::Bound)
-                .map_err(D::Error::custom)
+            if version == Some(1) && value.get("tuple").is_some() {
+                return Err(D::Error::custom(
+                    "legacy schema security contains a tuple identity",
+                ));
+            }
+            let row: BoundSchemaRow = serde_json::from_value(value).map_err(D::Error::custom)?;
+            if version == Some(2) && !row.tuple.is_some_and(SchemaTupleIdentity::is_valid) {
+                return Err(D::Error::custom("invalid schema catalog tuple identity"));
+            }
+            Ok(Self::Bound(row))
         } else {
+            if value.get("tuple").is_some() {
+                return Err(D::Error::custom(
+                    "schema tuple identity has no format marker",
+                ));
+            }
             serde_json::from_value(value)
                 .map(Self::Legacy)
                 .map_err(D::Error::custom)

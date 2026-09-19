@@ -51,6 +51,7 @@ pub trait SchemaPrivilegeNotices {
 pub struct SchemaPrivilegeContext<'a> {
     pub writer: &'a dyn SchemaStatementWriter,
     pub locks: &'a dyn SharedObjectLockSession,
+    pub tuples: super::locking::SchemaLockContext<'a>,
     pub refresh: &'a dyn NamespaceCatalogRefresh,
     pub session: &'a dyn RoleReferenceNames,
     pub roles: &'a dyn RoleCatalogGuards,
@@ -68,66 +69,127 @@ pub fn grant_schema_privileges(
         .refresh
         .refresh_catalog()
         .map_err(|error| SQLError::Internal(format!("load schemas for privileges: {error}")))?;
-    let targets =
-        resolve_schema_grant_targets(&context.registry.schemas_read(), &statement.schemas)?;
+    let mut targets = Vec::new();
+    for name in &statement.schemas {
+        resolve_schema_grant_targets(&context.registry.schemas_read(), std::slice::from_ref(name))?;
+        context
+            .tuples
+            .bind_lifetime(name, crate::row_locks::RelationLockMode::AccessShare)?
+            .ok_or_else(|| super::locking::missing(name))?;
+        if !targets.contains(name) {
+            targets.push(name.clone());
+        }
+    }
     let mut command_roles = AclCommandRoles::default();
-    let RoleDependencyCandidate {
-        roles,
-        memberships,
-        value:
-            SchemaPrivilegeCandidate {
-                mut registry,
-                updates,
-                notices,
+    {
+        let roles = context.roles.role_definitions();
+        resolve_roles(context, statement, &mut command_roles, &roles)?;
+    }
+    let privileges = requested_acl_privileges(&statement.privileges)?;
+    context.tuples.catalog_write()?;
+    for name in targets {
+        let RoleDependencyCandidate {
+            roles,
+            memberships,
+            value,
+            ..
+        } = prepare_role_dependencies(
+            &RoleLockContext {
+                roles: context.roles,
+                session: context.locks,
             },
-        ..
-    } = prepare_role_dependencies(
-        &RoleLockContext {
-            roles: context.roles,
-            session: context.locks,
-        },
-        || context.writer.prepare_writer(),
-        || prepare_privileges(context, statement, &targets, &mut command_roles),
-    )?;
-    for (name, security) in &updates {
-        context.persistence.persist_security(name, security)?;
-    }
-    let changed = !updates.is_empty();
-    for (name, security) in updates {
-        registry.insert(name, security);
-    }
-    drop(registry);
-    drop(memberships);
-    drop(roles);
-    for (level, message) in notices {
-        context.notices.schema_privilege_notice(level, &message);
-    }
-    if changed {
+            || context.writer.prepare_writer(),
+            || prepare_privileges(context, statement, &name, &privileges, &mut command_roles),
+        )?;
+        drop(memberships);
+        drop(roles);
+        context.tuples.replace(&name, value.before)?;
+        context
+            .persistence
+            .persist_security(&name, &value.security)?;
+        context
+            .registry
+            .schemas_write()
+            .insert(name, value.security);
         context.changes.catalog_registry_changed();
+        if let Some((level, message)) = value.notice {
+            context.notices.schema_privilege_notice(level, &message);
+        }
     }
     Ok(())
 }
 
-struct SchemaPrivilegeCandidate<'a> {
-    registry: SchemaRegistryWrite<'a>,
-    updates: Vec<(String, BoundSchemaSecurity)>,
-    notices: Vec<(&'static str, String)>,
+struct SchemaPrivilegeCandidate {
+    before: uqa_core::catalog_schema::SchemaTupleIdentity,
+    security: BoundSchemaSecurity,
+    notice: Option<(&'static str, String)>,
 }
 
 fn prepare_privileges<'a>(
     context: &'a SchemaPrivilegeContext<'_>,
     statement: &GrantSchemaStmt,
-    targets: &[String],
+    name: &str,
+    privileges: &[uqa_sql::catalog::security::schema::SchemaAclPrivilege],
     command_roles: &mut AclCommandRoles,
-) -> Result<RoleDependencyCandidate<'a, SchemaPrivilegeCandidate<'a>>, SQLError> {
+) -> Result<RoleDependencyCandidate<'a, SchemaPrivilegeCandidate>, SQLError> {
     let roles = context.roles.role_definitions();
     let ResolvedAclRoles {
         grantees,
         current_user,
         ..
-    } = command_roles.resolve_validated(
-        context.session,
+    } = resolve_roles(context, statement, command_roles, &roles)?;
+
+    let memberships = context.roles.role_memberships();
+    let current = context
+        .registry
+        .schemas_read()
+        .get(name)
+        .cloned()
+        .ok_or_else(|| super::locking::missing(name))?;
+    let before = super::locking::tuple(&current)?;
+    let resolved = current.resolve(&roles).map_err(SQLError::Internal)?;
+    let (next, grantable) = apply_schema_acl(
+        statement,
+        &grantees,
+        privileges,
+        &current_user,
         &roles,
+        &memberships,
+        &resolved,
+    )?;
+    let notice = (grantable != privileges.len())
+        .then(|| schema_acl_warning(statement.is_grant, grantable != 0, name));
+    let mut dependencies = BTreeSet::new();
+    added_acl_roles(
+        resolved.acl.as_deref().unwrap_or_default(),
+        &resolved.role_owner,
+        next.acl.as_deref().unwrap_or_default(),
+        &next.role_owner,
+        &mut dependencies,
+    );
+    let mut security = BoundSchemaSecurity::bind(&next, &roles).map_err(SQLError::Internal)?;
+    super::identity::replace_tuple(&current, &mut security)?;
+    Ok(RoleDependencyCandidate {
+        value: SchemaPrivilegeCandidate {
+            before,
+            security,
+            notice,
+        },
+        memberships,
+        roles,
+        dependencies,
+    })
+}
+
+fn resolve_roles(
+    context: &SchemaPrivilegeContext<'_>,
+    statement: &GrantSchemaStmt,
+    command_roles: &mut AclCommandRoles,
+    roles: &BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+) -> Result<ResolvedAclRoles, SQLError> {
+    command_roles.resolve_validated(
+        context.session,
+        roles,
         &statement.grantees,
         statement.grantor.as_ref(),
         |resolved| {
@@ -136,53 +198,8 @@ fn prepare_privileges<'a>(
                 &resolved.grantees,
                 resolved.requested_grantor.as_deref(),
                 &resolved.current_user,
-                &roles,
+                roles,
             )
         },
-    )?;
-    let privileges = requested_acl_privileges(&statement.privileges)?;
-    let memberships = context.roles.role_memberships();
-    let registry = context.registry.schemas_write();
-    let mut updates = Vec::new();
-    let mut notices = Vec::new();
-    let mut dependencies = BTreeSet::new();
-    for name in targets {
-        let current = registry.get(name).cloned().ok_or_else(|| {
-            SQLError::Internal(format!("schema `{name}` has no security metadata"))
-        })?;
-        let resolved = current.resolve(&roles).map_err(SQLError::Internal)?;
-        let (next, grantable) = apply_schema_acl(
-            statement,
-            &grantees,
-            &privileges,
-            &current_user,
-            &roles,
-            &memberships,
-            &resolved,
-        )?;
-        if grantable != privileges.len() {
-            notices.push(schema_acl_warning(statement.is_grant, grantable != 0, name));
-        }
-        added_acl_roles(
-            resolved.acl.as_deref().unwrap_or_default(),
-            &resolved.role_owner,
-            next.acl.as_deref().unwrap_or_default(),
-            &next.role_owner,
-            &mut dependencies,
-        );
-        let next = BoundSchemaSecurity::bind(&next, &roles).map_err(SQLError::Internal)?;
-        if next != current {
-            updates.push((name.clone(), next));
-        }
-    }
-    Ok(RoleDependencyCandidate {
-        value: SchemaPrivilegeCandidate {
-            registry,
-            updates,
-            notices,
-        },
-        memberships,
-        roles,
-        dependencies,
-    })
+    )
 }

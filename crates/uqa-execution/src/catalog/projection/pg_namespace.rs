@@ -10,7 +10,7 @@ use crate::catalog::{CatalogReadView, RelationNameResolution};
 use uqa_sql::{ResultRow, SQLError};
 
 use super::helpers::acl::acl_identifier;
-use super::helpers::oids::{current_user_oid, schema_oid};
+use super::helpers::oids::{current_user_oid, namespace_oid};
 use super::helpers::rows::{catalog_array, int_value, row, str_value};
 use super::helpers::views::all_schema_names;
 
@@ -24,7 +24,7 @@ pub fn build_pg_namespace(
             let security = catalog.schema_security(&schema);
             let names = catalog.schema_security_names(&schema)?;
             Ok(row([
-                ("oid", int_value(schema_oid(&schema))),
+                ("oid", int_value(namespace_oid(catalog, &schema))),
                 ("nspname", str_value(&schema)),
                 (
                     "nspowner",

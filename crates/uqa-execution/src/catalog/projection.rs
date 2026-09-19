@@ -177,8 +177,8 @@ pub fn runtime_constraints(
     Ok(constraints)
 }
 
-pub fn schema_object_oid(name: &str) -> i64 {
-    helpers::oids::schema_oid(name)
+pub fn schema_object_oid(catalog: &CatalogReadView, name: &str) -> i64 {
+    helpers::oids::namespace_oid(catalog, name)
 }
 
 pub fn resolve_age_label_relation_name(

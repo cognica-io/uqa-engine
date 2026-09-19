@@ -6,62 +6,13 @@
 
 //! Role name and object reservations follow the session's transaction boundaries.
 
-use crate::{
-    tests::relation_lock_support::{sessions, sql},
-    Engine, SQLResult,
-};
-use std::{
-    sync::mpsc,
-    thread,
-    time::{Duration, Instant},
-};
+use crate::tests::relation_lock_support::{sessions, sql};
 use uqa_execution::{
     catalog::security::roles::locking::ROLE_CATALOG_CLASS_ID,
     row_locks::shared_objects::SharedCatalogLock,
 };
-use uqa_sql::SQLError;
 
-pub(super) fn after_wait(
-    holder: &Engine,
-    worker: Engine,
-    statement: &str,
-    target: SharedCatalogLock<'_>,
-    release: &str,
-) -> (Engine, Result<SQLResult, SQLError>) {
-    let key = holder.row_locks.shared_catalog_key(target);
-    let session = worker.session_id;
-    let cancel = worker.runtime.cancellation.clone();
-    let statement = statement.to_string();
-    let (send, done) = mpsc::channel();
-    let task = thread::spawn(move || {
-        let result = worker.sql(&statement, &[]);
-        let _ = send.send(result);
-        worker
-    });
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while !holder.row_locks.waiting_for_relation(session, key)
-        && !task.is_finished()
-        && Instant::now() < deadline
-    {
-        thread::yield_now();
-    }
-    let waited = holder.row_locks.waiting_for_relation(session, key);
-    let released = holder.sql(release, &[]);
-    if released.is_err() {
-        cancel.cancel();
-    }
-    let result = done.recv_timeout(Duration::from_secs(30));
-    if result.is_err() {
-        cancel.cancel();
-    }
-    let worker = task.join().unwrap();
-    released.unwrap();
-    assert!(
-        waited,
-        "expected shared catalog wait on {target:?}, received {result:?}"
-    );
-    (worker, result.unwrap())
-}
+pub(super) use crate::tests::relation_lock_support::after_shared_wait as after_wait;
 
 #[test]
 fn concurrent_same_name_role_creators_wait_and_follow_commit_or_undo_for_every_provider() {

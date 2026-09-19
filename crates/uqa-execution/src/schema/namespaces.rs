@@ -6,6 +6,8 @@
 
 //! Schema registration and owner publication through live catalog and authorization guards.
 pub mod authority;
+pub mod identity;
+pub mod locking;
 pub mod privileges;
 pub mod removal;
 pub mod restoration;
@@ -60,8 +62,14 @@ pub fn register_schema(
     name: &str,
     if_not_exists: bool,
     role_owner: uqa_core::catalog_role::RoleIdentity,
+    tuple: uqa_core::catalog_schema::SchemaTupleIdentity,
 ) -> StorageBackendResult<bool> {
     uqa_sql::schema::namespaces::validate_schema_name(name).map_err(StorageBackendError::Other)?;
+    if !tuple.is_valid() {
+        return Err(StorageBackendError::Other(
+            "invalid schema catalog tuple identity".into(),
+        ));
+    }
     let mut schemas = context.state.schemas_write();
     if schemas.contains_key(name) || context.state.contains_graph(name) {
         if if_not_exists {
@@ -72,6 +80,7 @@ pub fn register_schema(
         )));
     }
     let security = BoundSchemaSecurity {
+        tuple: Some(tuple),
         role_owner,
         acl: None,
     };
@@ -88,9 +97,11 @@ pub trait SchemaRegistration {
         name: &str,
         if_not_exists: bool,
         role_owner: uqa_core::catalog_role::RoleIdentity,
+        tuple: uqa_core::catalog_schema::SchemaTupleIdentity,
     ) -> StorageBackendResult<bool>;
 }
 pub struct SchemaCreationContext<'a> {
+    pub tuples: locking::SchemaLockContext<'a>,
     pub writer: &'a dyn SchemaStatementWriter,
     pub session: &'a dyn RoleReferenceNames,
     pub roles: &'a dyn RoleCatalogGuards,
@@ -98,6 +109,7 @@ pub struct SchemaCreationContext<'a> {
     pub database: &'a dyn uqa_sql::catalog::security::database_inquiry::DatabasePrivilegeCatalog,
     pub registration: &'a dyn SchemaRegistration,
     pub catalog: &'a dyn SchemaSecurityCatalog,
+    pub schemas: &'a dyn uqa_sql::catalog::security::schema_inquiry::SchemaPrivilegeCatalog,
     pub notices: &'a dyn crate::catalog::notices::CatalogNotices,
 }
 
@@ -131,10 +143,13 @@ pub fn register_api_schema(
                 .then_some(()))
         },
     )?;
+    drop(memberships);
+    drop(roles);
     let created = if value.is_some() {
+        let tuple = identity::reserve_creation(context, name)?;
         context
             .registration
-            .register_schema(name, if_not_exists, owner.identity())
+            .register_schema(name, if_not_exists, owner.identity(), tuple)
             .map_err(|error| uqa_sql::catalog::errors::storage_error("CREATE SCHEMA", &error))?
     } else if if_not_exists {
         false
@@ -143,8 +158,6 @@ pub fn register_api_schema(
             "schema `{name}` already exists"
         )));
     };
-    drop(memberships);
-    drop(roles);
     Ok(created)
 }
 
@@ -193,18 +206,19 @@ pub fn create_schema(
                 .then_some(()))
         },
     )?;
+    drop(memberships);
+    drop(roles);
     let created = if value.is_none() {
         false
     } else {
+        let tuple = identity::reserve_creation(context, &target.name)?;
         context
             .registration
-            .register_schema(&target.name, true, owner.identity())
+            .register_schema(&target.name, true, owner.identity(), tuple)
             .map_err(|error| {
                 SQLError::Internal(format!("CREATE SCHEMA catalog write failed: {error}"))
             })?
     };
-    drop(memberships);
-    drop(roles);
     if !created {
         if !if_not_exists {
             return Err(SQLError::Routine {
@@ -235,6 +249,7 @@ pub struct SchemaOwnerContext<'a> {
     pub session: &'a dyn RoleReferenceNames,
     pub roles: &'a dyn RoleCatalogGuards,
     pub locks: &'a dyn SharedObjectLockSession,
+    pub tuples: locking::SchemaLockContext<'a>,
     pub database: &'a dyn uqa_sql::catalog::security::database_inquiry::DatabasePrivilegeCatalog,
     pub catalog: &'a dyn SchemaSecurityCatalog,
     pub publication: &'a dyn SchemaSecurityPublication,
@@ -257,6 +272,11 @@ pub fn alter_schema_owner(
         session: context.locks,
     };
     let owner = locks.bind(&new_owner)?;
+    context.tuples.catalog_write()?;
+    let current = context
+        .catalog
+        .schema_security(name)
+        .ok_or_else(|| locking::missing(name))?;
     let current_user = context.session.current_role();
     let RoleDependencyCandidate {
         roles,
@@ -268,18 +288,10 @@ pub fn alter_schema_owner(
         &owner,
         || context.writer.prepare_writer(),
         |roles, memberships, new_owner| {
-            let security =
-                context
-                    .catalog
-                    .schema_security(name)
-                    .ok_or_else(|| SQLError::Routine {
-                        sqlstate: "3F000".into(),
-                        message: format!("schema \"{name}\" does not exist"),
-                    })?;
-            if security.role_owner == owner.identity() {
+            if current.role_owner == owner.identity() {
                 return Ok(None);
             }
-            let mut security = security.resolve(roles).map_err(SQLError::Internal)?;
+            let mut security = current.resolve(roles).map_err(SQLError::Internal)?;
             let authority = uqa_sql::catalog::security::ownership::OwnerChangeAuthority {
                 roles,
                 memberships,
@@ -289,18 +301,20 @@ pub fn alter_schema_owner(
             authority.require_owner_change(&security.role_owner, "schema", name)?;
             authority.require_database_create(&context.database.security())?;
             rewrite_schema_acl_owner(&mut security, new_owner);
-            Ok(Some(
-                BoundSchemaSecurity::bind(&security, roles).map_err(SQLError::Internal)?,
-            ))
+            let mut security =
+                BoundSchemaSecurity::bind(&security, roles).map_err(SQLError::Internal)?;
+            identity::replace_tuple(&current, &mut security)?;
+            Ok(Some(security))
         },
     )?;
     let Some(security) = value else {
         return Ok(());
     };
-    context.persistence.persist_security(name, &security)?;
-    context.publication.publish_security(name, security);
     drop(memberships);
     drop(roles);
+    context.tuples.replace(name, locking::tuple(&current)?)?;
+    context.persistence.persist_security(name, &security)?;
+    context.publication.publish_security(name, security);
     context.changes.catalog_registry_changed();
     Ok(())
 }
