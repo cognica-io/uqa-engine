@@ -31,6 +31,7 @@ pub trait RoutineRestoreSchemas {
 }
 pub struct RoutineRestoreContext<'a> {
     pub registry: &'a dyn RoutineRegistryState,
+    pub roles: &'a dyn uqa_sql::catalog::roles::guards::RoleCatalogGuards,
     pub publication: &'a dyn RoutineRegistryPublication,
     pub schemas: &'a dyn RoutineRestoreSchemas,
     pub definition: RoutineDefinitionContext<'a>,
@@ -72,10 +73,12 @@ pub fn install_sql_function_restore_placeholders(
     catalog: &dyn CatalogFacade,
     allows_migration: bool,
 ) -> StorageBackendResult<Option<PendingSQLFunctionRestore>> {
-    let Some(json) = catalog.get_metadata(FUNCTIONS_METADATA_KEY)? else {
-        return Ok(None);
-    };
-    let (defs, format_migrated) = super::catalog::encoding::decode(&json)?;
+    let json = catalog.get_metadata(FUNCTIONS_METADATA_KEY)?;
+    let (defs, format_migrated) = super::catalog::encoding::decode(
+        json.as_deref(),
+        &context.roles.role_definitions(),
+        allows_migration,
+    )?;
     let (canonical_defs, identities_migrated) =
         canonicalize_persisted_sql_functions(context.schemas, defs)?;
     let migrated = format_migrated || identities_migrated;

@@ -72,7 +72,12 @@ pub fn prepare_routine_replacement(
     }
     ensure_routine_owner_as(
         existing,
-        role_inherits(roles, memberships, current_user, &existing.owner),
+        role_inherits(
+            roles,
+            memberships,
+            current_user,
+            &crate::routines::security::bound_routine_owner(existing)?,
+        ),
     )?;
     if existing.is_procedure != def.is_procedure {
         return Err(SQLError::Routine {
@@ -93,7 +98,7 @@ pub fn prepare_routine_replacement(
             existing.name,
         ))
     })?);
-    def.owner.clone_from(&existing.owner);
+    def.owner = existing.owner;
     def.execute_acl.clone_from(&existing.execute_acl);
     Ok(())
 }

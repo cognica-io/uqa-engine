@@ -106,12 +106,11 @@ pub fn ensure_roles_have_no_object_dependencies(
     let routines = catalog.routines();
     for name in names {
         if let Some(dependent) = routines.values().flatten().find_map(|function| {
-            let owns = function.def.owner == *name;
+            let identity = roles.get(name)?.identity();
+            let owns = function.def.owner == Some(identity);
             let has_acl = function.def.execute_acl.as_ref().is_some_and(|acl| {
-                acl.iter().any(|entry| {
-                    entry.role.role_name() == Some(name.as_str())
-                        || entry.grantor.as_deref().unwrap_or(&function.def.owner) == name
-                })
+                acl.iter()
+                    .any(|entry| entry.role == Some(identity) || entry.grantor == identity)
             });
             (owns || has_acl).then(|| format!("routine {}", function.def.name))
         }) {

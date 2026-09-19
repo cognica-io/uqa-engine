@@ -83,7 +83,7 @@ fn named_public_grantees_and_grantors_are_role_dependencies() {
 }
 
 #[test]
-fn database_schema_sequence_and_routine_acls_preserve_both_role_references() {
+fn database_schema_and_sequence_acls_preserve_both_role_references() {
     fn verify<T: AclRoleReferences>(entry: T) {
         let entries = [entry];
         let mut added = BTreeSet::new();
@@ -121,10 +121,5 @@ fn database_schema_sequence_and_routine_acls_preserve_both_role_references() {
             ..uqa_core::catalog_sequence::SequencePrivileges::default()
         },
         grant_options: uqa_core::catalog_sequence::SequencePrivileges::default(),
-    });
-    verify(crate::ast::RoutineAclEntry {
-        role: "reader".into(),
-        grantor: Some("grantor".into()),
-        grant_option: true,
     });
 }

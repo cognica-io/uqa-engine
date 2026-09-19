@@ -99,7 +99,8 @@ fn legacy_routine_owner_acl_migration_is_initial_open_only_and_rolls_back_atomic
             .unwrap()
             .unwrap();
         let mut catalog: serde_json::Value = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(catalog["routine_catalog_format"], 1);
+        assert_eq!(catalog["routine_catalog_format"], 2);
+        let original_owner = first.durable.roles.read()["acl_owner"].identity();
         let mut legacy = catalog["definitions"].take();
         for overloads in legacy.as_object_mut().unwrap().values_mut() {
             for definition in overloads.as_array_mut().unwrap() {
@@ -107,7 +108,9 @@ fn legacy_routine_owner_acl_migration_is_initial_open_only_and_rolls_back_atomic
                 definition["execute_acl"]
                     .as_array_mut()
                     .unwrap()
-                    .retain(|entry| entry["role"]["name"] != owner);
+                    .retain(|entry| entry["role"] != owner);
+                assert!(definition["execute_acl"].as_array().unwrap().is_empty());
+                definition["owner"] = "acl_owner".into();
             }
         }
         let legacy = serde_json::to_string(&legacy).unwrap();
@@ -117,7 +120,10 @@ fn legacy_routine_owner_acl_migration_is_initial_open_only_and_rolls_back_atomic
         let Err(failure) = first.new_session() else {
             panic!("secondary restore migrated legacy ACLs");
         };
-        assert!(failure.to_string().contains("initial-open"), "{failure}");
+        assert!(
+            failure.to_string().contains("initial catalog migration"),
+            "{failure}"
+        );
         let triggers = raw.catalog.get_metadata("sql_triggers_json").unwrap();
         raw.catalog.set_metadata("sql_triggers_json", "{").unwrap();
         drop(second);
@@ -146,7 +152,7 @@ fn legacy_routine_owner_acl_migration_is_initial_open_only_and_rolls_back_atomic
                 .unwrap(),
         )
         .unwrap();
-        assert_eq!(stored["routine_catalog_format"], 1);
+        assert_eq!(stored["routine_catalog_format"], 2);
         let definition = stored["definitions"]
             .as_object()
             .unwrap()
@@ -157,7 +163,7 @@ fn legacy_routine_owner_acl_migration_is_initial_open_only_and_rolls_back_atomic
         assert_eq!(definition["execute_acl"].as_array().unwrap().len(), 1);
         assert_eq!(
             definition["execute_acl"][0]["role"],
-            serde_json::json!({"kind": "role", "name": "acl_owner"})
+            serde_json::to_value(original_owner).unwrap()
         );
         sql(
             &reopened,

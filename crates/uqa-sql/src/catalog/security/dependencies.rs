@@ -38,12 +38,6 @@ impl AclRoleReferences for DatabaseAclEntry {
     }
 }
 
-impl AclRoleReferences for crate::ast::RoutineAclEntry {
-    fn role_references(&self) -> (Option<&str>, Option<&str>) {
-        (self.role.role_name(), self.grantor.as_deref())
-    }
-}
-
 fn acl_roles<'a, T: AclRoleReferences>(acl: &'a [T], owner: &'a str) -> BTreeSet<&'a str> {
     acl.iter()
         .flat_map(|entry| {

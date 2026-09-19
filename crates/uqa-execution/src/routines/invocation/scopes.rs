@@ -84,7 +84,9 @@ pub(super) fn with_routine_context<T>(
     let _volatility = RoutineVolatilityGuard::enter(definition.volatility);
     let _security_definer = SecurityDefinerGuard::enter(definition.security.security_definer);
     if definition.security.security_definer {
-        session.set_current_user(&definition.owner)?;
+        session.set_current_user(uqa_sql::routines::security::bound_routine_owner(
+            definition,
+        )?)?;
     }
     for (name, value) in &definition.config {
         session.set_configured_parameter(name, value)?;

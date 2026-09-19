@@ -41,7 +41,7 @@ pub fn compile_do_block(
         creation_search_path: Vec::new(),
         volatility: crate::ast::FunctionVolatility::Volatile,
         strict: false,
-        owner: String::new(),
+        owner: None,
         security: crate::ast::RoutineSecurityAttributes::default(),
         parallel: crate::ast::FunctionParallel::Unsafe,
         support: None,

@@ -127,7 +127,12 @@ fn resolve_routine_rename_target(
     let memberships = context.mutation.roles.role_memberships();
     ensure_routine_owner_as(
         &function.def,
-        role_inherits(&roles, &memberships, &current_user, &function.def.owner),
+        role_inherits(
+            &roles,
+            &memberships,
+            &current_user,
+            &uqa_sql::routines::security::bound_routine_owner(&function.def)?,
+        ),
     )?;
     drop(memberships);
     drop(roles);

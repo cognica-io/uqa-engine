@@ -404,7 +404,7 @@ pub(super) fn compile_create_function(
         creation_search_path: Vec::new(),
         volatility,
         strict,
-        owner: String::new(),
+        owner: None,
         security: crate::ast::RoutineSecurityAttributes {
             security_definer,
             leakproof,

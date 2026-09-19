@@ -23,7 +23,7 @@ pub trait RoutineInvocationSession {
         configured: bool,
         security_definer: bool,
     ) -> Box<dyn RoutineInvocationState + '_>;
-    fn set_current_user(&self, user: &str) -> Result<(), SQLError>;
+    fn set_current_user(&self, user: uqa_core::catalog_role::RoleIdentity) -> Result<(), SQLError>;
     fn set_configured_parameter(&self, name: &str, value: &str) -> Result<(), SQLError>;
 }
 pub struct RoutineInvocationContext<'a> {

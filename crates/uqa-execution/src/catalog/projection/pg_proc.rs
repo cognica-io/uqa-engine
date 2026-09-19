@@ -269,7 +269,10 @@ pub fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLErr
             ("oid", int_value(user_routine_catalog_oid(&function)?)),
             ("proname", str_value(routine_name)),
             ("pronamespace", int_value(schema_oid(&routine_schema))),
-            ("proowner", int_value(catalog.role_oid(&def.owner)?)),
+            (
+                "proowner",
+                int_value(uqa_sql::routines::security::bound_routine_owner(def)?.oid),
+            ),
             ("prolang", int_value(0)),
             ("procost", Value::Float(100.0)),
             (
@@ -320,7 +323,7 @@ pub fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLErr
             ("probin", Value::Null),
             ("prosqlbody", Value::Null),
             ("proconfig", routine_config_catalog_value(def)?),
-            ("proacl", routine_acl_catalog_value(def)?),
+            ("proacl", routine_acl_catalog_value(catalog, def)?),
         ]));
     }
     Ok(rows)
@@ -339,23 +342,33 @@ fn routine_config_catalog_value(def: &uqa_sql::ast::CreateFunction) -> Result<Va
     )
 }
 
-fn routine_acl_catalog_value(def: &uqa_sql::ast::CreateFunction) -> Result<Value, SQLError> {
+fn routine_acl_catalog_value(
+    catalog: &CatalogReadView,
+    def: &uqa_sql::ast::CreateFunction,
+) -> Result<Value, SQLError> {
+    use uqa_sql::catalog::roles::identity::RoleSubject;
+    let roles = &catalog.snapshot().definitions.roles;
+    let name = |identity: uqa_core::catalog_role::RoleIdentity| {
+        identity
+            .role_name(roles)
+            .map(acl_identifier)
+            .ok_or_else(|| {
+                SQLError::Internal("routine ACL references a missing role incarnation".into())
+            })
+    };
     let Some(acl) = def.execute_acl.as_ref() else {
         return Ok(Value::Null);
     };
     let entries = acl
         .iter()
         .map(|entry| {
-            let grantee = entry
-                .role
-                .role_name()
-                .map_or_else(String::new, acl_identifier);
-            let grantor = acl_identifier(entry.grantor.as_deref().unwrap_or(&def.owner));
-            str_value(format!(
+            let grantee = entry.role.map(&name).transpose()?.unwrap_or_default();
+            let grantor = name(entry.grantor)?;
+            Ok(str_value(format!(
                 "{grantee}=X{}/{grantor}",
                 if entry.grant_option { "*" } else { "" }
-            ))
+            )))
         })
-        .collect();
+        .collect::<Result<Vec<_>, SQLError>>()?;
     catalog_array(entries, "pg_proc.proacl")
 }

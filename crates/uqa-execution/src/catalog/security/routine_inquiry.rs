@@ -34,7 +34,7 @@ impl RoutinePrivilegeCatalog for RoutineCatalog<'_, '_> {
         for routine in definitions.sql_user_functions.values().flatten() {
             if user_routine_catalog_oid(routine)? == oid {
                 return Ok(Some(RoutinePrivileges {
-                    owner: &routine.def.owner,
+                    owner: uqa_sql::routines::security::bound_routine_owner(&routine.def)?,
                     execute_acl: routine.def.execute_acl.as_deref(),
                 }));
             }
@@ -48,7 +48,7 @@ impl RoutinePrivilegeCatalog for RoutineCatalog<'_, '_> {
             .find(|role| role.oid == 10)
             .ok_or_else(|| SQLError::Internal("routine catalog has no bootstrap owner".into()))?;
         Ok(Some(RoutinePrivileges {
-            owner: &owner.name,
+            owner: owner.identity(),
             execute_acl: None,
         }))
     }

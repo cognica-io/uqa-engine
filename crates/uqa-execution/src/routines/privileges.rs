@@ -20,7 +20,6 @@ use uqa_sql::{
     catalog::roles::{
         resolve_acl_role_specification, resolve_role_specification, RoleReferenceNames,
     },
-    catalog::security::dependencies::added_acl_roles,
     routines::lifecycle::RoutineRegistry,
     routines::{
         declaration::RoutineTypeCatalog, lifecycle::binding::resolve_sql_routine_alter_target,
@@ -110,6 +109,7 @@ fn prepare_privileges<'a>(
         &current_user,
         &roles,
     )?;
+    let grantees = analysis::binding::bind_routine_grantees(&grantees, &roles)?;
     let memberships = context.catalog.roles.role_memberships();
     let registry = context.catalog.registry.routines_write();
     let mut resolved = Vec::with_capacity(stmt.items.len());
@@ -127,7 +127,7 @@ fn prepare_privileges<'a>(
             &current_user,
             &roles,
             &memberships,
-        );
+        )?;
         resolved.push((name, position, grantor));
     }
     let mut next = registry.clone();
@@ -145,7 +145,7 @@ fn prepare_privileges<'a>(
         let mut def = existing.def.clone();
         let changed = if stmt.is_grant {
             for grantee in &grantees {
-                analysis::grant_routine_acl(&mut def, grantee, &grantor, stmt.grant_option);
+                analysis::grant_routine_acl(&mut def, *grantee, grantor, stmt.grant_option)?;
             }
             def.execute_acl != existing.def.execute_acl
         } else {
@@ -153,8 +153,8 @@ fn prepare_privileges<'a>(
             for grantee in &grantees {
                 changed |= analysis::revoke_routine_acl(
                     &mut def,
-                    grantee,
-                    &grantor,
+                    *grantee,
+                    grantor,
                     stmt.grant_option_only,
                     stmt.revoke_behavior == RoutineRevokeBehavior::Cascade,
                 )?;
@@ -164,13 +164,7 @@ fn prepare_privileges<'a>(
             }
             changed
         };
-        added_acl_roles(
-            existing.def.execute_acl.as_deref().unwrap_or_default(),
-            &existing.def.owner,
-            def.execute_acl.as_deref().unwrap_or_default(),
-            &def.owner,
-            &mut dependencies,
-        );
+        analysis::binding::added_routine_acl_roles(&existing.def, &def, &roles, &mut dependencies)?;
         if changed {
             next.get_mut(&name).expect("resolved routine key")[position] =
                 Arc::new(SQLUserFunction {

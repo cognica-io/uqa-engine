@@ -37,11 +37,30 @@ pub struct RoutineSecurityAttributes {
 /// One explicit `EXECUTE` ACL entry. `None` on `CreateFunction::execute_acl` retains `PostgreSQL`'s default public execution privilege.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoutineAclEntry {
-    pub role: uqa_core::catalog_acl::AclGrantee,
-    /// Grantor for this ACL path. Legacy persisted definitions omit the field and therefore use the routine owner.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grantor: Option<String>,
+    /// An explicit null means PUBLIC; a missing grantee is invalid.
+    #[serde(deserialize_with = "Deserialize::deserialize")]
+    pub role: Option<uqa_core::catalog_role::RoleIdentity>,
+    pub grantor: uqa_core::catalog_role::RoleIdentity,
     pub grant_option: bool,
+}
+
+/// Old parsed declarations used an empty owner string. This accepts only that unbound marker; stored authority is separately required to carry a valid identity.
+pub(super) fn deserialize_routine_owner<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<uqa_core::catalog_role::RoleIdentity>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Owner {
+        Bound(Option<uqa_core::catalog_role::RoleIdentity>),
+        Unbound(String),
+    }
+    match Owner::deserialize(deserializer)? {
+        Owner::Bound(identity) => Ok(identity),
+        Owner::Unbound(name) if name.is_empty() => Ok(None),
+        Owner::Unbound(_) => Err(serde::de::Error::custom(
+            "routine owner requires a role identity",
+        )),
+    }
 }
 
 /// Routine namespace selected by `ALTER FUNCTION`, `ALTER PROCEDURE`, or `ALTER ROUTINE`.

@@ -214,6 +214,12 @@ impl Engine {
             snapshot.domains,
             &snapshot.roles,
         )?;
+        snapshot.sql_user_functions = uqa_execution::routines::catalog::merge_private(
+            self.storage.catalog.as_deref(),
+            &current.sql_user_functions,
+            snapshot.sql_user_functions,
+            &snapshot.roles,
+        )?;
         snapshot.system_relation_security = Arc::new(system_relations::merge_private(
             self.storage.catalog.as_deref(),
             &current.system_relation_security,

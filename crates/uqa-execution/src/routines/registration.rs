@@ -66,17 +66,19 @@ pub fn register_sql_function(
     mut def: CreateFunction,
 ) -> Result<(), SQLError> {
     let current_user = context.catalog.names.current_role();
-    let requested_owner = if def.owner.is_empty() {
-        current_user.clone()
-    } else {
-        def.owner.clone().into()
+    let requested_owner = match def.owner {
+        Some(owner) => uqa_sql::catalog::roles::RoleReference::from_identity(
+            owner,
+            &context.catalog.roles.role_definitions(),
+        )?,
+        None => current_user.clone(),
     };
     let locks = RoleLockContext {
         roles: context.catalog.roles,
         session: context.namespace.locks,
     };
     let owner = locks.bind(&requested_owner)?;
-    def.owner.clone_from(&owner.name);
+    def.owner = Some(owner.identity());
     let requested_name = def.name.clone();
     def.name = context.namespace.persistent_name(&requested_name)?;
     resolve_routine_type_references(context.definition.compilation.analysis.types, &mut def)?;
@@ -132,7 +134,8 @@ pub fn register_sql_function(
                     compiled: compiled.clone(),
                 });
             } else {
-                dependencies.insert(owner.name.clone());
+                dependencies =
+                    uqa_sql::routines::security::binding::routine_role_dependencies(&def, &roles)?;
                 def.object_id = Some(allocate_routine_object_id(&registry, &name)?);
                 overloads.push(Arc::new(SQLUserFunction {
                     def,
@@ -197,7 +200,12 @@ pub fn alter_sql_routine(
         })?;
     ensure_routine_owner_as(
         &existing.def,
-        role_inherits(&roles, &memberships, &current_user, &existing.def.owner),
+        role_inherits(
+            &roles,
+            &memberships,
+            &current_user,
+            &uqa_sql::routines::security::bound_routine_owner(&existing.def)?,
+        ),
     )?;
     let mut def = analysis::alter_routine_attributes(
         &existing.def,

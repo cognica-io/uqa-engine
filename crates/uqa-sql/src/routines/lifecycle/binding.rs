@@ -234,7 +234,12 @@ pub fn ensure_routine_drop_owners(
             })?;
         ensure_routine_owner_as(
             definition,
-            role_inherits(roles, memberships, current_user, &definition.owner),
+            role_inherits(
+                roles,
+                memberships,
+                current_user,
+                &crate::routines::security::bound_routine_owner(definition)?,
+            ),
         )?;
     }
     Ok(())

@@ -87,7 +87,10 @@ impl Catalog {
 }
 fn routine() -> Arc<SQLUserFunction> {
     let Statement::CreateFunction(mut def) = crate::compile("CREATE FUNCTION public.handler() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$").unwrap().remove(0) else {panic!("expected routine")};
-    def.owner = "owner".into();
+    def.owner = Some(crate::catalog::roles::RoleIdentity {
+        oid: 42,
+        object_id: [42; 16],
+    });
     let compiled = crate::routines::CompiledFunctionBody::PLpgSQL(
         crate::plpgsql::parse_function(&def).unwrap(),
     );
@@ -231,10 +234,6 @@ impl RoutineExecutionAuthority for Catalog {
             }
         );
         self.record("inherits:owner");
-        self.allow_owner
-    }
-    fn current_user_has_role_privileges(&self, role: &str) -> bool {
-        self.record(format!("inherits:{role}"));
         self.allow_owner
     }
 }

@@ -39,13 +39,13 @@ impl RoutineInvocationSession for Engine {
     ) -> Box<dyn RoutineInvocationState + '_> {
         Box::new(self.routine_invocation_state_guard(configured, security_definer))
     }
-    fn set_current_user(&self, user: &str) -> Result<(), SQLError> {
-        let role = RoleReference::from(user).bind(&self.durable.roles.read())?;
-        self.session
-            .state
-            .write()
-            .authorization
-            .set_effective(role.into());
+    fn set_current_user(&self, user: uqa_core::catalog_role::RoleIdentity) -> Result<(), SQLError> {
+        let RoleReference::Bound(role) =
+            RoleReference::from_identity(user, &self.durable.roles.read())?
+        else {
+            unreachable!("identity lookup returns a bound role")
+        };
+        self.session.state.write().authorization.set_effective(role);
         Ok(())
     }
     fn set_configured_parameter(&self, name: &str, value: &str) -> Result<(), SQLError> {

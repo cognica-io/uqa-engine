@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use uqa_core::Value;
 
 pub struct RoutinePrivileges<'a> {
-    pub owner: &'a str,
+    pub owner: crate::catalog::roles::RoleIdentity,
     pub execute_acl: Option<&'a [RoutineAclEntry]>,
 }
 
@@ -93,7 +93,7 @@ impl RoutinePrivilegeInquiry<'_> {
         };
         Ok(Value::Bool(checks.into_iter().any(|grant_option| {
             routine_privilege_allowed(
-                security.owner,
+                &security.owner,
                 security.execute_acl,
                 grant_option,
                 false,

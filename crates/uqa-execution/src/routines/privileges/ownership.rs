@@ -70,12 +70,13 @@ pub fn alter_sql_routine_owner(
                     sqlstate: "42883".into(),
                     message: format!("routine {} does not exist", stmt.name),
                 })?;
-            if existing.def.owner == owner.name {
+            let previous_owner = analysis::bound_routine_owner(&existing.def)?;
+            if previous_owner == owner.identity() {
                 return Ok(None);
             }
             ensure_routine_owner_as(
                 &existing.def,
-                role_inherits(roles, memberships, &current_user, &existing.def.owner),
+                role_inherits(roles, memberships, &current_user, &previous_owner),
             )?;
             require_set_role(roles, memberships, &current_user, &owner.name)?;
             let relation = RelationIdentity::from_legacy_name(name).map_err(|error| {
@@ -89,8 +90,8 @@ pub fn alter_sql_routine_owner(
             }
             .require_schema_create(context.schemas, &relation.schema)?;
             let mut def = existing.def.clone();
-            analysis::rewrite_routine_acl_owner(&mut def, &existing.def.owner, &owner.name);
-            def.owner.clone_from(&owner.name);
+            analysis::rewrite_routine_acl_owner(&mut def, previous_owner, owner.identity());
+            def.owner = Some(owner.identity());
             let mut next = registry.clone();
             next.get_mut(name).expect("resolved routine key")[position] =
                 Arc::new(SQLUserFunction {

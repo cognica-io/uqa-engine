@@ -25,7 +25,7 @@ impl RoutinePrivilegeCatalog for Catalog {
     }
     fn routine_privileges(&self, oid: i64) -> Result<Option<RoutinePrivileges<'_>>, SQLError> {
         Ok((oid == 1).then_some(RoutinePrivileges {
-            owner: "owner",
+            owner: roles()["owner"].identity(),
             execute_acl: self.acl.as_deref(),
         }))
     }
@@ -175,35 +175,31 @@ fn revoking_owner_execute_preserves_grant_authority_and_delegated_privileges() {
     else {
         panic!("routine definition");
     };
-    definition.owner = "owner".into();
-    grant_routine_acl(&mut definition, &"reader".into(), "owner", true);
-    revoke_routine_acl(
-        &mut definition,
-        &uqa_core::catalog_acl::AclGrantee::Public,
-        "owner",
-        false,
-        false,
-    )
-    .unwrap();
-    revoke_routine_acl(&mut definition, &"owner".into(), "owner", false, false).unwrap();
-    let has = |subject: &str, option| {
+    let roles = roles();
+    let owner = roles["owner"].identity();
+    let reader = roles["reader"].identity();
+    definition.owner = Some(owner);
+    grant_routine_acl(&mut definition, Some(reader), owner, true).unwrap();
+    revoke_routine_acl(&mut definition, None, owner, false, false).unwrap();
+    revoke_routine_acl(&mut definition, Some(owner), owner, false, false).unwrap();
+    let has = |subject, option| {
         routine_privilege_allowed(
-            &definition.owner,
+            &owner,
             definition.execute_acl.as_deref(),
             option,
             false,
-            |role| role == subject,
+            |role| *role == subject,
         )
     };
-    assert!(!has("owner", false));
-    assert!(has("owner", true));
-    assert!(has("reader", true));
-    grant_routine_acl(&mut definition, &"owner".into(), "owner", false);
+    assert!(!has(owner, false));
+    assert!(has(owner, true));
+    assert!(has(reader, true));
+    grant_routine_acl(&mut definition, Some(owner), owner, false).unwrap();
     assert!(routine_privilege_allowed(
-        &definition.owner,
+        &owner,
         definition.execute_acl.as_deref(),
         false,
         false,
-        |role| role == "owner"
+        |role| *role == owner
     ));
 }

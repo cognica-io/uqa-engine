@@ -21,9 +21,6 @@ impl RoutineExecutionAuthority for Engine {
     ) -> bool {
         Engine::current_user_has_role_privileges(self, &role)
     }
-    fn current_user_has_role_privileges(&self, role: &str) -> bool {
-        Engine::current_user_has_role_privileges(self, role)
-    }
 }
 impl RoutinePrivilegeNotices for Engine {
     fn routine_privilege_notice(&self, level: &str, message: &str) {
