@@ -121,6 +121,10 @@ fn stage(
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
     let sequence = receipt.sequence.as_u64().to_be_bytes();
+    let has_runs: bool =
+        connection.query_row("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_runs)", [], |row| {
+            row.get(0)
+        })?;
     {
         let mut versions = connection
             .prepare("INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES (?1, ?2, ?3)")?;
@@ -128,6 +132,9 @@ fn stage(
         let mut heads = connection.prepare("INSERT INTO _uqa_mvcc_heads (key, sequence, compacted) VALUES (?1, ?2, 0) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence, compacted = 0")?;
         for write in prepared.records() {
             control.cancellation().check().map_err(VersionError::from)?;
+            if has_runs {
+                super::runs::extract(connection, write.key(), control)?;
+            }
             previous.execute([write.key()])?;
             previous.clear_bindings();
             versions.execute(params![write.key(), sequence.as_slice(), write.value()])?;
@@ -156,6 +163,7 @@ pub(super) fn stage_record(
     let _bindings =
         crate::read_control::reserve_bindings(control, &[key, value.unwrap_or_default()])?;
     let sequence = sequence.as_u64().to_be_bytes();
+    super::runs::extract(connection, key, control)?;
     connection.execute("INSERT INTO _uqa_mvcc_versions (key, sequence, value) SELECT key, sequence, NULL FROM _uqa_mvcc_heads WHERE key = ?1 AND compacted = 1", [key])?;
     connection.execute(
         "INSERT INTO _uqa_mvcc_versions(key, sequence, value) VALUES (?1, ?2, ?3)",

@@ -29,7 +29,7 @@ pub(super) fn reclaim(
             "SELECT max(sequence) FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence <= ?2",
         )?;
         let mut delete = transaction.prepare("DELETE FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence IN (SELECT sequence FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence < ?2 ORDER BY sequence LIMIT 128)")?;
-        read::keys(&transaction, b"", None, usize::MAX, control, &mut |key| {
+        read::point_keys(&transaction, b"", None, usize::MAX, control, &mut |key| {
             let (head, compacted) = codec::head_state(&transaction, key)?.ok_or(
                 VersionError::InvalidEncoding("reclamation head disappeared"),
             )?;
@@ -73,6 +73,7 @@ pub(super) fn reclaim(
             Ok(Some(true))
         })?;
     }
+    super::runs::compact(&transaction, horizon.sequence(), control)?;
     admission::commit(transaction, control)?;
     Ok(removed)
 }

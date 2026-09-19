@@ -87,9 +87,11 @@ fn report(records: &dyn VersionedPersistence, committed: u64, pending: u64) -> s
     })
 }
 
-fn rejected<T, E: std::fmt::Display>(result: Result<T, E>) {
+fn rejected<T, E: std::fmt::Display>(result: Result<T, E>, native_reopen: bool) {
     let error = result.err().expect("previous writer accepted the new record format").to_string();
-    assert!(error.contains("record format") || error.contains("record table definition"), "unrelated failure: {error}");
+    // Native predecessors validate their closed set of physical families before inspecting the common record version. A newly guarded record table must also fence those binaries at that earlier check.
+    let unmapped_native = native_reopen && error == "invalid versioned record encoding: unmapped native table requires an explicit record family";
+    assert!(error.contains("record format") || error.contains("record table definition") || unmapped_native, "unrelated failure: {error}");
 }
 
 fn main() {
@@ -99,7 +101,7 @@ fn main() {
     let state = Path::new(&args[5]);
     let opened = open(kind, mode, path, action == "create");
     if action == "reject" {
-        rejected(opened);
+        rejected(opened, kind == "native");
         return;
     }
     let records = opened.unwrap();
@@ -128,11 +130,11 @@ fn main() {
         let mut line = String::new();
         std::io::stdin().lock().read_line(&mut line).unwrap();
         assert_eq!(line.trim(), "upgraded");
-        rejected(records.snapshot(&control));
-        rejected(snapshot.get(b"fixture\0\xff", &control));
-        rejected(records.allocate_transaction(&control));
-        rejected(records.commit(pending_id, &empty, &control));
-        rejected(records.abort(pending_id, &control));
+        rejected(records.snapshot(&control), false);
+        rejected(snapshot.get(b"fixture\0\xff", &control), false);
+        rejected(records.allocate_transaction(&control), false);
+        rejected(records.commit(pending_id, &empty, &control), false);
+        rejected(records.abort(pending_id, &control), false);
         return;
     }
     assert_eq!(action, "verify");

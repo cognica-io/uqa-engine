@@ -19,6 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Compact eligible current SQLite MVCC records into bounded lossless runs while preserving exact keys, values, revisions, snapshots and conditional-write conflicts. Split and restore individual predecessors atomically on later writes. Development record format 29 adds guarded run storage; redb retains its existing physical layout.
 - Reclaim obsolete MVCC history while retaining live snapshots across SQLite sessions and native processes, and across redb adapters. Preserve deletion conflicts and every commit receipt; compact SQLite head tombstones without duplicating their keys in history, and restore deleted revisions before later replacements. Share native file coordination primitives below execution. Development record format 28 rejects readers and writers that do not register snapshot leases.
 
 - Preserve PostgreSQL target order during multi-role deletion: wait and remove memberships before resolving later targets, check initial CREATEROLE once, and perform dependency checks and tuple deletion in target order. Retain statement/savepoint atomicity and original identities. Reuse transitive ADMIN authority for role alteration, rename and deletion independently of INHERIT/SET options.

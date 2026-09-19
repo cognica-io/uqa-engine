@@ -76,7 +76,7 @@ fn role_rename_format_upgrade_preserves_records_allocations_and_receipts() {
     let transaction = database.begin_read().unwrap();
     assert_eq!(
         read_u64(&transaction.open_table(METADATA).unwrap(), "format").unwrap(),
-        28
+        29
     );
 }
 

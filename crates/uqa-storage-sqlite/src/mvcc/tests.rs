@@ -12,6 +12,7 @@ use super::*;
 mod admission;
 mod identifiers;
 mod reclamation;
+mod runs;
 
 fn control() -> StorageReadControl {
     StorageReadControl::with_limit(1 << 24)
@@ -48,6 +49,7 @@ fn records_require_a_connection_local_permit_that_closes_after_every_operation()
         .unwrap();
     for sql in [
         "DELETE FROM _uqa_mvcc_versions",
+        "INSERT INTO _uqa_mvcc_runs VALUES (8, x'0000000000000000', x'0000000000000001', x'0000000000000001', 0, NULL)",
         "UPDATE _uqa_mvcc_heads SET sequence = x'0000000000000009'",
         "DELETE FROM _uqa_mvcc_metadata",
         "DELETE FROM _uqa_mvcc_transactions",
@@ -95,6 +97,8 @@ fn records_require_a_connection_local_permit_that_closes_after_every_operation()
 fn incomplete_or_altered_formats_are_rejected_without_recreation() {
     for sql in [
         "DROP TABLE _uqa_mvcc_versions",
+        "DROP TABLE _uqa_mvcc_runs",
+        "DROP TRIGGER _uqa_mvcc_runs_UPDATE_guard",
         "DROP TABLE _uqa_mvcc_identifiers",
         "DROP TRIGGER _uqa_mvcc_identifiers_UPDATE_guard",
         "DROP TRIGGER _uqa_mvcc_heads_INSERT_guard",
@@ -141,14 +145,18 @@ fn downgrade_record_format(store: &SQLiteRecordStore, format: i64) {
     store.with(|connection| {
         let _permit = schema::WritePermit::acquire(connection)?;
         let definition: String = connection.query_row("SELECT sql FROM sqlite_schema WHERE name = '_uqa_mvcc_metadata'", [], |row| row.get(0))?;
-        assert!(definition.contains("CHECK(format = 28)"));
-        connection.execute_batch("INSERT INTO _uqa_mvcc_versions (key, sequence, value) SELECT key, sequence, NULL FROM _uqa_mvcc_heads WHERE compacted = 1; ALTER TABLE _uqa_mvcc_heads DROP COLUMN compacted")?;
+        assert!(definition.contains("CHECK(format = 29)"));
+        assert_eq!(connection.query_row("SELECT count(*) FROM _uqa_mvcc_runs", [], |row| row.get::<_, i64>(0))?, 0);
+        connection.execute_batch("DROP TABLE _uqa_mvcc_runs")?;
+        if format < 28 {
+            connection.execute_batch("INSERT INTO _uqa_mvcc_versions (key, sequence, value) SELECT key, sequence, NULL FROM _uqa_mvcc_heads WHERE compacted = 1; ALTER TABLE _uqa_mvcc_heads DROP COLUMN compacted")?;
+        }
         if format < 5 {
             assert_eq!(connection.query_row("SELECT count(*) FROM _uqa_mvcc_identifiers", [], |row| row.get::<_, i64>(0))?, 0);
             connection.execute_batch("DROP TABLE _uqa_mvcc_identifiers")?;
         }
         connection.execute_batch("ALTER TABLE _uqa_mvcc_metadata RENAME TO saved_metadata")?;
-        connection.execute_batch(&definition.replace("CHECK(format = 28)", &format!("CHECK(format = {format})")))?;
+        connection.execute_batch(&definition.replace("CHECK(format = 29)", &format!("CHECK(format = {format})")))?;
         connection.execute_batch(&format!("INSERT INTO _uqa_mvcc_metadata SELECT singleton, {format}, database_id, allocated, sequence, mapping FROM saved_metadata; DROP TABLE saved_metadata;"))?;
         for action in ["INSERT", "UPDATE", "DELETE"] { connection.execute_batch(&schema::trigger("_uqa_mvcc_metadata", action).1)?; }
         Ok(())
@@ -211,7 +219,7 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
     for (mode, format) in (0..3).flat_map(|mode| {
         [
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-            25, 26,
+            25, 26, 27, 28,
         ]
         .map(|format| (mode, format))
     }) {
@@ -298,7 +306,7 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
                 assert_eq!(
                     connection.query_row("SELECT format FROM _uqa_mvcc_metadata", [], |row| row
                         .get::<_, i64>(0))?,
-                    28
+                    29
                 );
                 Ok(())
             })
@@ -311,7 +319,7 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
 fn failed_record_format_upgrade_restores_the_old_schema_and_allows_repair() {
     for format in [
         1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-        26, 27,
+        26, 27, 28,
     ] {
         let connection = ManagedConnection::open_in_memory().unwrap();
         let store = SQLiteRecordStore::new(&connection).unwrap();
@@ -352,7 +360,7 @@ fn closed_record_format_files_upgrade_in_every_sqlite_mode() {
     for (mode, format) in (0..4).flat_map(|mode| {
         [
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-            25, 26,
+            25, 26, 27, 28,
         ]
         .map(|format| (mode, format))
     }) {

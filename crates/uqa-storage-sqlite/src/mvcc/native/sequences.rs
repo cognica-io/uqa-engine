@@ -7,11 +7,14 @@
 //! A sequence incarnation has one live definition generation, including across independent committers.
 
 use rusqlite::{params, Connection};
-use uqa_storage::{mvcc::PreparedRecordCommit, read_control::StorageReadControl};
+use uqa_storage::{
+    mvcc::{CommitSequence, PreparedRecordCommit},
+    read_control::StorageReadControl,
+};
 
 use super::{invalid, NativeRecordFamily as Family, NativeRecordIdentity, NativeRecordOwner};
 use crate::{
-    mvcc::PhysicalResult,
+    mvcc::{read, PhysicalResult},
     read_control::{prefix_upper_bound, reserve_bindings},
 };
 
@@ -43,24 +46,23 @@ pub(super) fn validate_prepared(
         let upper = prefix_upper_bound(&prefix, control)?.expect("native prefix has a successor");
         let _bindings = reserve_bindings(control, &[&prefix, &upper, record.key()])?;
         // The final prepared definitions must be unique, and every other currently live generation must be retired by this exact batch. Probe ordered record keys without loading sequence ACLs or other payloads.
-        let collision: bool = connection.query_row(
-            "SELECT
-                (SELECT count(*) > 1 FROM _uqa_mvcc_native_expected
-                 WHERE new_key >= ?1 AND new_key < ?2)
-                OR EXISTS (
-                    SELECT 1 FROM _uqa_mvcc_heads AS head
-                    JOIN _uqa_mvcc_versions AS version
-                      ON version.key = head.key AND version.sequence = head.sequence
-                    WHERE head.key >= ?1 AND head.key < ?2 AND head.key != ?3
-                      AND version.value IS NOT NULL
-                      AND NOT EXISTS (
-                          SELECT 1 FROM _uqa_mvcc_native_expected AS retired
-                          WHERE retired.old_key = head.key AND retired.new_key IS NOT head.key
-                      )
-                )",
-            params![&prefix[..], &upper[..], record.key()],
+        let mut collision: bool = connection.query_row(
+            "SELECT count(*) > 1 FROM _uqa_mvcc_native_expected WHERE new_key >= ?1 AND new_key < ?2",
+            params![&prefix[..], &upper[..]],
             |row| row.get(0),
         )?;
+        if !collision {
+            read::keys(connection, &prefix, None, usize::MAX, control, &mut |key| {
+                if key == record.key()
+                    || read::info(connection, key, CommitSequence::from_u64(u64::MAX))?
+                        .is_none_or(|info| info.length.is_none())
+                {
+                    return Ok(Some(true));
+                }
+                collision = !connection.query_row("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_native_expected WHERE old_key = ?1 AND new_key IS NOT ?1)", [key], |row| row.get::<_, bool>(0))?;
+                Ok(Some(!collision))
+            })?;
+        }
         if collision {
             return Err(invalid("native sequence incarnation has competing definitions").into());
         }

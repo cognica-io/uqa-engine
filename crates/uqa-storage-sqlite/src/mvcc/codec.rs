@@ -36,7 +36,7 @@ pub(super) fn header(connection: &Connection, expected: DatabaseId) -> PhysicalR
     let row = rows
         .next()?
         .ok_or(VersionError::InvalidEncoding("missing record metadata"))?;
-    if row.get::<_, i64>(0)? != 28 {
+    if row.get::<_, i64>(0)? != 29 {
         return Err(VersionError::InvalidEncoding("unknown record format").into());
     }
     let database = identity(bytes(row, 1)?)?;
@@ -95,7 +95,10 @@ pub(super) fn status(
 }
 
 pub(super) fn head(connection: &Connection, key: &[u8]) -> PhysicalResult<Option<CommitSequence>> {
-    Ok(head_state(connection, key)?.map(|(sequence, _)| sequence))
+    if let Some((sequence, _)) = head_state(connection, key)? {
+        return Ok(Some(sequence));
+    }
+    Ok(super::runs::info(connection, key)?.map(|(sequence, _)| sequence))
 }
 
 pub(super) fn head_state(

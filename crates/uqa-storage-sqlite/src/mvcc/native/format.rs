@@ -128,7 +128,7 @@ pub(in crate::mvcc) fn initialize_in(
     prepare_catalog_sources(transaction, control)?;
     let identity = schema::initialize_in(transaction)?.identity;
     let header = codec::header(transaction, identity)?;
-    let populated: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_heads) OR EXISTS(SELECT 1 FROM _uqa_mvcc_versions) OR EXISTS(SELECT 1 FROM _uqa_mvcc_transactions)", [], |row| row.get(0))?;
+    let populated: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_heads) OR EXISTS(SELECT 1 FROM _uqa_mvcc_versions) OR EXISTS(SELECT 1 FROM _uqa_mvcc_transactions) OR EXISTS(SELECT 1 FROM _uqa_mvcc_runs)", [], |row| row.get(0))?;
     if header.key_value_mapping
         || header.allocated != 0
         || header.sequence.as_u64() != 0
@@ -142,6 +142,7 @@ pub(in crate::mvcc) fn initialize_in(
     for table in [
         "_uqa_mvcc_metadata",
         "_uqa_mvcc_heads",
+        "_uqa_mvcc_runs",
         "_uqa_mvcc_versions",
         "_uqa_mvcc_transactions",
         "_uqa_mvcc_identifiers",
@@ -241,6 +242,13 @@ fn reopen(connection: &Connection, control: &StorageReadControl) -> PhysicalResu
         return Err(invalid("mixed native and KeyValue mappings").into());
     }
     check_mapping_version(connection, version)?;
+    if version < 8
+        && connection.query_row("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_runs)", [], |row| {
+            row.get::<_, bool>(0)
+        })?
+    {
+        return Err(invalid("predecessor native mapping contains current record runs").into());
+    }
     super::sequences::validate_source(connection)?;
     if version < 3 {
         graph_lookup_upgrade::upgrade(connection, identity, version, control)?;
@@ -485,6 +493,7 @@ fn validate_layouts(connection: &Connection, version: u32) -> PhysicalResult<()>
                 name,
                 "_uqa_mvcc_metadata"
                     | "_uqa_mvcc_heads"
+                    | "_uqa_mvcc_runs"
                     | "_uqa_mvcc_versions"
                     | "_uqa_mvcc_transactions"
                     | "_uqa_mvcc_identifiers"

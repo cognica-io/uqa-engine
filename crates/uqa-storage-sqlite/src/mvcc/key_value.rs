@@ -55,7 +55,7 @@ pub(super) fn initialize(
         return Err(VersionError::InvalidEncoding("unexpected legacy KeyValue object").into());
     }
     let unrelated: bool = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name IN ('_metadata', '_meta') OR (type = 'table' AND name NOT IN ('_key_value', '_uqa_mvcc_metadata', '_uqa_mvcc_heads', '_uqa_mvcc_versions', '_uqa_mvcc_transactions', '_uqa_mvcc_identifiers') AND name NOT GLOB 'sqlite_*'))",
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name IN ('_metadata', '_meta') OR (type = 'table' AND name NOT IN ('_key_value', '_uqa_mvcc_metadata', '_uqa_mvcc_heads', '_uqa_mvcc_versions', '_uqa_mvcc_transactions', '_uqa_mvcc_identifiers', '_uqa_mvcc_runs') AND name NOT GLOB 'sqlite_*'))",
         [],
         |row| row.get(0),
     )?;

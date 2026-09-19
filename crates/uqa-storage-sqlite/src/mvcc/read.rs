@@ -17,7 +17,7 @@ use uqa_storage::read_control::StorageReadControl;
 
 use crate::read_control::{copy_bytes, payload_length, prefix_upper_bound, reserve_bindings};
 
-use super::{codec, PhysicalResult, SQLiteRecordStore};
+use super::{codec, runs, PhysicalResult, SQLiteRecordStore};
 
 pub(super) struct Snapshot {
     pub(super) store: SQLiteRecordStore,
@@ -103,11 +103,10 @@ impl CommittedRecordSnapshot for Snapshot {
         control.cancellation().check()?;
         self.read(|connection| {
             let _bindings = reserve_bindings(control, &[key])?;
-            let record =
-                info(connection, key, self.sequence)?.map(|(revision, length)| RecordMetadata {
-                    revision: Some(CommitSequence::from_u64(revision)),
-                    live: length.is_some(),
-                });
+            let record = info(connection, key, self.sequence)?.map(|info| RecordMetadata {
+                revision: Some(CommitSequence::from_u64(info.revision)),
+                live: info.length.is_some(),
+            });
             control.cancellation().check().map_err(VersionError::from)?;
             Ok(record)
         })
@@ -155,12 +154,12 @@ impl CommittedRecordSnapshot for Snapshot {
             keys(connection, prefix, after, limit, control, &mut |key| {
                 let _bindings = reserve_bindings(control, &[key])?;
                 info(connection, key, self.sequence)?
-                    .map(|(revision, length)| {
+                    .map(|info| {
                         Ok(visit(
                             key,
                             RecordMetadata {
-                                revision: Some(CommitSequence::from_u64(revision)),
-                                live: length.is_some(),
+                                revision: Some(CommitSequence::from_u64(info.revision)),
+                                live: info.length.is_some(),
                             },
                         )?)
                     })
@@ -179,17 +178,69 @@ pub(super) fn keys(
     visit: &mut impl FnMut(&[u8]) -> PhysicalResult<Option<bool>>,
 ) -> PhysicalResult<()> {
     let upper = prefix_upper_bound(prefix, control)?;
+    let has_runs: bool =
+        connection.query_row("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_runs)", [], |row| {
+            row.get(0)
+        })?;
+    walk_keys(
+        after,
+        limit,
+        control,
+        &mut |after| {
+            let point = next_key(connection, prefix, after, upper.as_deref(), control)?;
+            if !has_runs {
+                return Ok(point);
+            }
+            let after = after.filter(|after| *after >= prefix);
+            let run = runs::next_key(
+                connection,
+                after.unwrap_or(prefix),
+                after.is_some(),
+                point.as_deref().or(upper.as_deref()),
+                control,
+            )?;
+            Ok(match (point, run) {
+                (Some(point), Some(run)) if point[..] <= run[..] => Some(point),
+                (_, Some(run)) => Some(run),
+                (point, None) => point,
+            })
+        },
+        visit,
+    )
+}
+
+pub(super) fn point_keys(
+    connection: &Connection,
+    prefix: &[u8],
+    after: Option<&[u8]>,
+    limit: usize,
+    control: &StorageReadControl,
+    visit: &mut impl FnMut(&[u8]) -> PhysicalResult<Option<bool>>,
+) -> PhysicalResult<()> {
+    let upper = prefix_upper_bound(prefix, control)?;
+    walk_keys(
+        after,
+        limit,
+        control,
+        &mut |after| next_key(connection, prefix, after, upper.as_deref(), control),
+        visit,
+    )
+}
+
+fn walk_keys(
+    after: Option<&[u8]>,
+    limit: usize,
+    control: &StorageReadControl,
+    next: &mut impl FnMut(Option<&[u8]>) -> PhysicalResult<Option<BudgetedVec<u8>>>,
+    visit: &mut impl FnMut(&[u8]) -> PhysicalResult<Option<bool>>,
+) -> PhysicalResult<()> {
+    if limit == 0 {
+        return Ok(());
+    }
     let mut cursor: Option<BudgetedVec<u8>> = None;
     let mut count = 0;
     loop {
-        let Some(key) = next_key(
-            connection,
-            prefix,
-            cursor.as_deref().or(after),
-            upper.as_deref(),
-            control,
-        )?
-        else {
+        let Some(key) = next(cursor.as_deref().or(after))? else {
             break;
         };
         if let Some(more) = visit(&key)? {
@@ -205,20 +256,36 @@ pub(super) fn keys(
     Ok(())
 }
 
-fn info(
+pub(super) struct Info {
+    pub(super) revision: u64,
+    pub(super) length: Option<usize>,
+    run: bool,
+}
+
+pub(super) fn info(
     connection: &Connection,
     key: &[u8],
     boundary: CommitSequence,
-) -> PhysicalResult<Option<(u64, Option<usize>)>> {
+) -> PhysicalResult<Option<Info>> {
     let mut statement = connection.prepare("SELECT h.sequence, h.compacted, v.sequence, CASE WHEN v.value IS NULL THEN NULL WHEN typeof(v.value) = 'blob' THEN length(v.value) ELSE -1 END FROM _uqa_mvcc_heads h LEFT JOIN _uqa_mvcc_versions v ON v.key = h.key AND v.sequence = (SELECT sequence FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence <= ?2 ORDER BY sequence DESC LIMIT 1) WHERE h.key = ?1")?;
     let mut rows = statement.query(params![key, boundary.as_u64().to_be_bytes().as_slice()])?;
     let Some(row) = rows.next()? else {
-        return Ok(None);
+        return Ok(runs::info(connection, key)?
+            .filter(|(sequence, _)| *sequence <= boundary)
+            .map(|(sequence, length)| Info {
+                revision: sequence.as_u64(),
+                length,
+                run: true,
+            }));
     };
     let (head, compacted) = codec::decode_head(row)?;
     let head_visible = head <= boundary;
     if head_visible && compacted {
-        return Ok(Some((head.as_u64(), None)));
+        return Ok(Some(Info {
+            revision: head.as_u64(),
+            length: None,
+            run: false,
+        }));
     }
     if matches!(row.get_ref(2)?, ValueRef::Null) {
         if head_visible {
@@ -233,12 +300,14 @@ fn info(
     if revision == 0 {
         return Err(VersionError::InvalidEncoding("zero record revision").into());
     }
-    Ok(Some((
+    Ok(Some(Info {
         revision,
-        row.get::<_, Option<i64>>(3)?
+        length: row
+            .get::<_, Option<i64>>(3)?
             .map(payload_length)
             .transpose()?,
-    )))
+        run: false,
+    }))
 }
 
 pub(super) fn value(
@@ -250,12 +319,18 @@ pub(super) fn value(
 ) -> PhysicalResult<()> {
     let _bindings = reserve_bindings(control, &[key])?;
     let info = info(connection, key, boundary)?;
-    let Some((revision, length)) = info else {
+    let Some(info) = info else {
         control.cancellation().check().map_err(VersionError::from)?;
         visit(None)?;
         control.cancellation().check().map_err(VersionError::from)?;
         return Ok(());
     };
+    if info.run {
+        return runs::value(connection, key, boundary, control, visit);
+    }
+    let Info {
+        revision, length, ..
+    } = info;
     control.cancellation().check().map_err(VersionError::from)?;
     if length.is_none() {
         visit(Some(BorrowedRecord {
