@@ -145,9 +145,11 @@ fn downgrade_record_format(store: &SQLiteRecordStore, format: i64) {
     store.with(|connection| {
         let _permit = schema::WritePermit::acquire(connection)?;
         let definition: String = connection.query_row("SELECT sql FROM sqlite_schema WHERE name = '_uqa_mvcc_metadata'", [], |row| row.get(0))?;
-        assert!(definition.contains("CHECK(format = 29)"));
-        assert_eq!(connection.query_row("SELECT count(*) FROM _uqa_mvcc_runs", [], |row| row.get::<_, i64>(0))?, 0);
-        connection.execute_batch("DROP TABLE _uqa_mvcc_runs")?;
+        assert!(definition.contains("CHECK(format = 30)"));
+        if format < 29 {
+            assert_eq!(connection.query_row("SELECT count(*) FROM _uqa_mvcc_runs", [], |row| row.get::<_, i64>(0))?, 0);
+            connection.execute_batch("DROP TABLE _uqa_mvcc_runs")?;
+        }
         if format < 28 {
             connection.execute_batch("INSERT INTO _uqa_mvcc_versions (key, sequence, value) SELECT key, sequence, NULL FROM _uqa_mvcc_heads WHERE compacted = 1; ALTER TABLE _uqa_mvcc_heads DROP COLUMN compacted")?;
         }
@@ -156,7 +158,7 @@ fn downgrade_record_format(store: &SQLiteRecordStore, format: i64) {
             connection.execute_batch("DROP TABLE _uqa_mvcc_identifiers")?;
         }
         connection.execute_batch("ALTER TABLE _uqa_mvcc_metadata RENAME TO saved_metadata")?;
-        connection.execute_batch(&definition.replace("CHECK(format = 29)", &format!("CHECK(format = {format})")))?;
+        connection.execute_batch(&definition.replace("CHECK(format = 30)", &format!("CHECK(format = {format})")))?;
         connection.execute_batch(&format!("INSERT INTO _uqa_mvcc_metadata SELECT singleton, {format}, database_id, allocated, sequence, mapping FROM saved_metadata; DROP TABLE saved_metadata;"))?;
         for action in ["INSERT", "UPDATE", "DELETE"] { connection.execute_batch(&schema::trigger("_uqa_mvcc_metadata", action).1)?; }
         Ok(())
@@ -219,7 +221,7 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
     for (mode, format) in (0..3).flat_map(|mode| {
         [
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-            25, 26, 27, 28,
+            25, 26, 27, 28, 29,
         ]
         .map(|format| (mode, format))
     }) {
@@ -306,7 +308,7 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
                 assert_eq!(
                     connection.query_row("SELECT format FROM _uqa_mvcc_metadata", [], |row| row
                         .get::<_, i64>(0))?,
-                    29
+                    30
                 );
                 Ok(())
             })
@@ -319,7 +321,7 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
 fn failed_record_format_upgrade_restores_the_old_schema_and_allows_repair() {
     for format in [
         1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-        26, 27, 28,
+        26, 27, 28, 29,
     ] {
         let connection = ManagedConnection::open_in_memory().unwrap();
         let store = SQLiteRecordStore::new(&connection).unwrap();
@@ -360,7 +362,7 @@ fn closed_record_format_files_upgrade_in_every_sqlite_mode() {
     for (mode, format) in (0..4).flat_map(|mode| {
         [
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-            25, 26, 27, 28,
+            25, 26, 27, 28, 29,
         ]
         .map(|format| (mode, format))
     }) {

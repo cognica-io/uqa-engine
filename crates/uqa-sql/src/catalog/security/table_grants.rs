@@ -24,7 +24,7 @@ use crate::{
     ast::{GrantTableStmt, SequencePrivilege, TablePrivilege, TableRevokeBehavior},
     SQLError,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::catalog_acl::AclGrantee;
 use uqa_core::RelationIdentity;
 pub type ViewPrivilegeUpdate = (RelationIdentity, StoredView);
@@ -40,6 +40,17 @@ pub struct ResolvedTableGrantTarget {
     pub name: String,
     pub relation: RelationIdentity,
     pub kind: &'static str,
+    /// Attribute tuples selected in column order before authorization or writer waits. `None` denotes an uncoordinated analysis input.
+    pub acl_columns: Option<BTreeSet<String>>,
+}
+impl ResolvedTableGrantTarget {
+    pub fn includes_acl_tuple(&self, column: Option<&str>) -> bool {
+        column.is_none_or(|column| {
+            self.acl_columns
+                .as_ref()
+                .is_none_or(|columns| columns.contains(column))
+        })
+    }
 }
 
 fn apply_table_acl(
@@ -96,6 +107,7 @@ fn apply_column_acl(
     privileges: &[(TableAclPrivilege, String)],
     authorization: &TableSecurity,
     current: &TableSecurity,
+    selected: Option<&BTreeSet<String>>,
 ) -> Result<(TableSecurity, usize), SQLError> {
     let TableGrantApplication {
         statement,
@@ -134,6 +146,9 @@ fn apply_column_acl(
         .count();
     let mut next = current.clone();
     for (privilege, column, grantor) in grantors {
+        if selected.is_some_and(|columns| !columns.contains(&column)) {
+            continue;
+        }
         let Some(grantor) = grantor else {
             continue;
         };
@@ -172,7 +187,82 @@ pub struct TableGrantApplication<'a> {
 }
 
 impl TableGrantApplication<'_> {
+    /// `PostgreSQL` replaces relation ACL tuples for table-level commands, and nonempty requested attribute ACLs even when their bits are unchanged.
+    pub fn replaced_tuples(
+        &self,
+        before: &TableSecurity,
+        after: &TableSecurity,
+    ) -> Vec<Option<String>> {
+        let mut tuples = Vec::new();
+        let implicit_columns = !self.statement.is_grant
+            && self.requested.table.iter().any(|privilege| {
+                matches!(
+                    privilege,
+                    TableAclPrivilege::Select
+                        | TableAclPrivilege::Insert
+                        | TableAclPrivilege::Update
+                        | TableAclPrivilege::References
+                )
+            });
+        if !self.requested.table.is_empty() {
+            tuples.push(None);
+        }
+        let columns = before
+            .column_acls
+            .keys()
+            .chain(after.column_acls.keys())
+            .chain(self.requested.columns.iter().map(|(_, column)| column))
+            .collect::<std::collections::BTreeSet<_>>();
+        for column in columns {
+            if before.column_acls.get(column) != after.column_acls.get(column)
+                || ((implicit_columns
+                    || self
+                        .requested
+                        .columns
+                        .iter()
+                        .any(|(_, name)| name == column))
+                    && after
+                        .column_acls
+                        .get(column)
+                        .is_some_and(|acl| !acl.is_empty()))
+            {
+                tuples.push(Some(column.clone()));
+            }
+        }
+        tuples
+    }
+
     pub fn apply(&self, current: &TableSecurity) -> Result<(TableSecurity, usize), SQLError> {
+        self.apply_columns(current, None)
+    }
+
+    pub fn apply_to(
+        &self,
+        target: &ResolvedTableGrantTarget,
+        current: &TableSecurity,
+    ) -> Result<(TableSecurity, usize), SQLError> {
+        self.apply_columns(current, target.acl_columns.as_ref())
+    }
+
+    /// Inspect one attribute in catalog order without revisiting earlier attribute ACLs.
+    pub fn replaces_attribute(
+        &self,
+        current: &TableSecurity,
+        column: &str,
+    ) -> Result<bool, SQLError> {
+        let selected = BTreeSet::from([column.to_owned()]);
+        let (next, _) = self.apply_columns(current, Some(&selected))?;
+        Ok(self
+            .replaced_tuples(current, &next)
+            .iter()
+            .any(|tuple| tuple.as_deref() == Some(column)))
+    }
+
+    fn apply_columns(
+        &self,
+        current: &TableSecurity,
+        selected: Option<&BTreeSet<String>>,
+    ) -> Result<(TableSecurity, usize), SQLError> {
         let (next, table_grantable) = apply_table_acl(
             self.statement,
             self.grantees,
@@ -203,9 +293,13 @@ impl TableGrantApplication<'_> {
                 }
             }
         }
-        let (mut next, column_grantable) = apply_column_acl(self, &columns, current, &next)?;
+        let (mut next, column_grantable) =
+            apply_column_acl(self, &columns, current, &next, selected)?;
         // Relation grant-option loss also invalidates column grants made through that relation authority.
         for (privilege, column) in implied {
+            if selected.is_some_and(|columns| !columns.contains(&column)) {
+                continue;
+            }
             let before = super::columns::column_grant_option_roles(current, &column, privilege);
             super::columns::revoke_dependent_column_acl(
                 &mut next,
@@ -389,7 +483,7 @@ pub fn view_privilege_updates(
             .security
             .resolve(application.roles)
             .map_err(SQLError::Internal)?;
-        let (next, grantable) = application.apply(&current)?;
+        let (next, grantable) = application.apply_to(target, &current)?;
         crate::catalog::security::dependencies::added_table_acl_roles(
             &current,
             &next,
@@ -410,7 +504,11 @@ pub fn view_privilege_updates(
             },
         )?;
         application.record_warning(grantable, &target.relation, notices);
-        if next != current {
+        if application
+            .replaced_tuples(&current, &next)
+            .iter()
+            .any(|column| target.includes_acl_tuple(column.as_deref()))
+        {
             view.set_security(
                 BoundTableSecurity::bind(&next, application.roles).map_err(SQLError::Internal)?,
             );
@@ -430,7 +528,7 @@ pub fn foreign_table_privilege_updates(
         let current = current
             .resolve(application.roles)
             .map_err(SQLError::Internal)?;
-        let (next, grantable) = application.apply(&current)?;
+        let (next, grantable) = application.apply_to(target, &current)?;
         crate::catalog::security::dependencies::added_table_acl_roles(
             &current,
             &next,
@@ -445,7 +543,11 @@ pub fn foreign_table_privilege_updates(
             },
         )?;
         application.record_warning(grantable, &target.relation, notices);
-        if next != current {
+        if application
+            .replaced_tuples(&current, &next)
+            .iter()
+            .any(|column| target.includes_acl_tuple(column.as_deref()))
+        {
             updates.push((
                 target.relation.clone(),
                 BoundTableSecurity::bind(&next, application.roles).map_err(SQLError::Internal)?,

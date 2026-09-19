@@ -13,6 +13,52 @@ use super::*;
 
 type Records = BTreeMap<Vec<u8>, Option<Vec<u8>>>;
 
+#[test]
+fn acl_format_upgrade_retains_populated_runs_and_rejects_missing_predecessor_guards() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let records = (0..130)
+        .map(|index| (key(b"acl-format", index), Some(vec![b'x'; 64])))
+        .collect::<Records>();
+    let receipt = publish(&store, &records, None);
+    store.reclaim_versions(&control()).unwrap();
+    assert!(count(&store, "_uqa_mvcc_runs") > 0);
+    let count_before = count(&store, "_uqa_mvcc_runs");
+    super::downgrade_record_format(&store, 29);
+    let upgraded = SQLiteRecordStore::new(&connection).unwrap();
+    assert_eq!(count(&upgraded, "_uqa_mvcc_runs"), count_before);
+    verify(
+        upgraded.snapshot(&control()).unwrap().as_ref(),
+        &records,
+        receipt.sequence,
+    );
+    for sql in [
+        "DROP TABLE _uqa_mvcc_runs",
+        "DROP TRIGGER _uqa_mvcc_runs_UPDATE_guard",
+    ] {
+        let connection = ManagedConnection::open_in_memory().unwrap();
+        let store = SQLiteRecordStore::new(&connection).unwrap();
+        super::downgrade_record_format(&store, 29);
+        store
+            .with(|connection| {
+                connection.execute_batch(sql)?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(SQLiteRecordStore::new(&connection).is_err());
+        store
+            .with(|connection| {
+                assert_eq!(
+                    connection.query_row("SELECT format FROM _uqa_mvcc_metadata", [], |row| row
+                        .get::<_, i64>(0))?,
+                    29
+                );
+                Ok(())
+            })
+            .unwrap();
+    }
+}
+
 fn key(prefix: &[u8], number: u64) -> Vec<u8> {
     [prefix, &number.to_be_bytes()].concat()
 }

@@ -154,6 +154,7 @@ pub(super) fn decode_relation(
         })),
         ValueRef::Blob(bytes) => Ok(RelationSecurityRow::Bound(BoundRelationSecurity {
             role_owner: decode_identity(bytes)?,
+            acl_revisions: uqa_core::catalog_acl::RelationAclRevisions::default(),
             acl: acl.map(serde_json::from_str).transpose()?,
             column_acls: serde_json::from_str(columns.ok_or_else(|| {
                 SQLiteError::StorageBackend("bound relation security has no column ACL map".into())

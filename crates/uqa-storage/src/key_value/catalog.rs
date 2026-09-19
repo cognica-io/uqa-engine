@@ -50,6 +50,7 @@ mod occurrence_lifecycle;
 mod path_index_data;
 mod physical_indexes;
 mod records;
+mod relation_acl;
 mod relations;
 mod schema_table;
 mod sequences;

@@ -35,6 +35,7 @@ pub fn bind_named_table_grants(
         let relation = RelationIdentity::from_legacy_name(&name)
             .map_err(|error| SQLError::Internal(format!("resolve table `{name}`: {error}")))?;
         resolved.push(ResolvedTableGrantTarget {
+            acl_columns: None,
             requested: requested.clone(),
             name,
             relation,

@@ -108,6 +108,7 @@ fn column_allowed(
 }
 fn target(kind: &'static str) -> ResolvedTableGrantTarget {
     ResolvedTableGrantTarget {
+        acl_columns: None,
         requested: "items".into(),
         name: "public.items".into(),
         relation: RelationIdentity::new("public", "items"),
@@ -576,4 +577,35 @@ fn table_grant_option_revoke_tracks_column_grants_authorized_by_the_table_acl() 
         &roles,
         &BTreeMap::new()
     ));
+}
+
+#[test]
+fn selected_attribute_candidates_preserve_new_grants_on_previously_skipped_columns() {
+    let roles = roles();
+    let (current, _, _) = apply(
+        "GRANT UPDATE(a, b) ON items TO reader",
+        "uqa",
+        &roles,
+        &TableSecurity::owner("uqa"),
+    )
+    .unwrap();
+    let statement = statement("REVOKE UPDATE ON items FROM reader");
+    let requested = requested_acl_privileges(&statement.privileges).unwrap();
+    let application = TableGrantApplication {
+        statement: &statement,
+        grantees: &["reader".into()],
+        requested: &requested,
+        current_user: &"uqa",
+        roles: &roles,
+        memberships: &BTreeMap::new(),
+    };
+    let mut target = target("table");
+    target.acl_columns = Some(BTreeSet::from(["b".into()]));
+    let (next, count) = application.apply_to(&target, &current).unwrap();
+    assert_eq!(count, 1);
+    assert!(column_allowed(&next, "a", "reader", &roles));
+    assert!(!column_allowed(&next, "b", "reader", &roles));
+    assert!(!target.includes_acl_tuple(Some("a")));
+    assert!(target.includes_acl_tuple(Some("b")));
+    assert!(target.includes_acl_tuple(None));
 }

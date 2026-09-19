@@ -15,6 +15,8 @@ use crate::key_value::MemoryKeyValueStore;
 use crate::{RelationSecurityRow, TableAclEntry};
 use std::collections::BTreeMap;
 
+mod relation_acls;
+
 fn legacy_security(
     role_owner: &str,
     acl: Option<Vec<TableAclEntry>>,

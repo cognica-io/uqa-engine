@@ -20,7 +20,7 @@ use super::{codec, PhysicalResult};
 const PREVIOUS_HEADS: &str = "CREATE TABLE _uqa_mvcc_heads (key BLOB PRIMARY KEY CHECK(typeof(key) = 'blob'), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8 AND sequence > x'0000000000000000')) WITHOUT ROWID";
 
 const TABLES: [(&str, &str); 6] = [
-    ("_uqa_mvcc_metadata", "CREATE TABLE _uqa_mvcc_metadata (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 29), database_id BLOB NOT NULL CHECK(typeof(database_id) = 'blob' AND length(database_id) = 16), allocated BLOB NOT NULL CHECK(typeof(allocated) = 'blob' AND length(allocated) = 8), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8), mapping INTEGER NOT NULL DEFAULT 0 CHECK(mapping IN (0, 1)))"),
+    ("_uqa_mvcc_metadata", "CREATE TABLE _uqa_mvcc_metadata (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 30), database_id BLOB NOT NULL CHECK(typeof(database_id) = 'blob' AND length(database_id) = 16), allocated BLOB NOT NULL CHECK(typeof(allocated) = 'blob' AND length(allocated) = 8), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8), mapping INTEGER NOT NULL DEFAULT 0 CHECK(mapping IN (0, 1)))"),
     ("_uqa_mvcc_heads", "CREATE TABLE _uqa_mvcc_heads (key BLOB PRIMARY KEY CHECK(typeof(key) = 'blob'), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8 AND sequence > x'0000000000000000'), compacted INTEGER NOT NULL DEFAULT 0 CHECK(compacted IN (0, 1))) WITHOUT ROWID"),
     ("_uqa_mvcc_versions", "CREATE TABLE _uqa_mvcc_versions (key BLOB NOT NULL CHECK(typeof(key) = 'blob'), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8 AND sequence > x'0000000000000000'), value BLOB CHECK(value IS NULL OR typeof(value) = 'blob'), PRIMARY KEY(key, sequence)) WITHOUT ROWID"),
     ("_uqa_mvcc_transactions", "CREATE TABLE _uqa_mvcc_transactions (allocation BLOB PRIMARY KEY CHECK(typeof(allocation) = 'blob' AND length(allocation) = 8 AND allocation > x'0000000000000000'), status INTEGER NOT NULL CHECK(status IN (0, 1, 2)), sequence BLOB, fingerprint BLOB, CHECK((status IN (0, 1) AND sequence IS NULL AND fingerprint IS NULL) OR (status = 2 AND typeof(sequence) = 'blob' AND length(sequence) = 8 AND typeof(fingerprint) = 'blob' AND length(fingerprint) = 32))) WITHOUT ROWID"),
@@ -123,7 +123,7 @@ pub(super) fn initialize_in(transaction: &Connection) -> PhysicalResult<Initiali
             )
         })?;
         transaction.execute(
-            "INSERT INTO _uqa_mvcc_metadata (singleton, format, database_id, allocated, sequence) VALUES (1, 29, ?1, ?2, ?2)",
+            "INSERT INTO _uqa_mvcc_metadata (singleton, format, database_id, allocated, sequence) VALUES (1, 30, ?1, ?2, ?2)",
             params![identity.as_slice(), 0_u64.to_be_bytes().as_slice()],
         )?;
         return Ok(Initialization {
@@ -134,7 +134,7 @@ pub(super) fn initialize_in(transaction: &Connection) -> PhysicalResult<Initiali
     }
     for (name, _) in TABLES {
         if (predecessor.is_some_and(|format| format < 5) && name == super::identifiers::TABLE.0)
-            || (predecessor.is_some() && name == super::runs::TABLE.0)
+            || (predecessor.is_some_and(|format| format < 29) && name == super::runs::TABLE.0)
         {
             continue;
         }
@@ -176,12 +176,12 @@ fn validate_tables(transaction: &Connection) -> PhysicalResult<(usize, Option<i6
         if let Some(matches) = definition_matches(transaction, name, expected)? {
             if !matches {
                 if name == TABLES[0].0 {
-                    for format in 1..=28 {
+                    for format in 1..=29 {
                         if definition_matches(
                             transaction,
                             name,
                             &expected.replace(
-                                "CHECK(format = 29)",
+                                "CHECK(format = 30)",
                                 &format!("CHECK(format = {format})"),
                             ),
                         )? == Some(true)
@@ -222,7 +222,7 @@ fn validate_tables(transaction: &Connection) -> PhysicalResult<(usize, Option<i6
         )
         .into());
     }
-    if predecessor.is_some()
+    if predecessor.is_some_and(|format| format < 29)
         && definition_matches(transaction, super::runs::TABLE.0, super::runs::TABLE.1)?.is_some()
     {
         return Err(
@@ -231,7 +231,7 @@ fn validate_tables(transaction: &Connection) -> PhysicalResult<(usize, Option<i6
     }
     let expected = TABLES.len()
         - usize::from(predecessor.is_some_and(|format| format < 5))
-        - usize::from(predecessor.is_some());
+        - usize::from(predecessor.is_some_and(|format| format < 29));
     if present != 0 && present != expected {
         return Err(VersionError::InvalidEncoding("incomplete record table set").into());
     }
@@ -250,9 +250,11 @@ fn upgrade_metadata(transaction: &Connection, format: i64) -> PhysicalResult<()>
     if format < 28 {
         transaction.execute_batch("ALTER TABLE _uqa_mvcc_heads ADD COLUMN compacted INTEGER NOT NULL DEFAULT 0 CHECK(compacted IN (0, 1))")?;
     }
-    transaction.execute_batch(super::runs::TABLE.1)?;
-    for action in ["INSERT", "UPDATE", "DELETE"] {
-        transaction.execute_batch(&trigger(super::runs::TABLE.0, action).1)?;
+    if format < 29 {
+        transaction.execute_batch(super::runs::TABLE.1)?;
+        for action in ["INSERT", "UPDATE", "DELETE"] {
+            transaction.execute_batch(&trigger(super::runs::TABLE.0, action).1)?;
+        }
     }
     // Existing key/revision identities, histories, receipts and identifier reservations keep their commit boundaries.
     if format < 5 {
@@ -265,7 +267,7 @@ fn upgrade_metadata(transaction: &Connection, format: i64) -> PhysicalResult<()>
     transaction
         .execute_batch("ALTER TABLE _uqa_mvcc_metadata RENAME TO _uqa_mvcc_previous_metadata")?;
     transaction.execute_batch(TABLES[0].1)?;
-    transaction.execute_batch("INSERT INTO _uqa_mvcc_metadata SELECT singleton, 29, database_id, allocated, sequence, mapping FROM _uqa_mvcc_previous_metadata; DROP TABLE _uqa_mvcc_previous_metadata;")?;
+    transaction.execute_batch("INSERT INTO _uqa_mvcc_metadata SELECT singleton, 30, database_id, allocated, sequence, mapping FROM _uqa_mvcc_previous_metadata; DROP TABLE _uqa_mvcc_previous_metadata;")?;
     for action in ["INSERT", "UPDATE", "DELETE"] {
         transaction.execute_batch(&trigger(TABLES[0].0, action).1)?;
     }

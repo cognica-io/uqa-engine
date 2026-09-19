@@ -51,6 +51,10 @@ impl Catalog {
                     Ok(())
                 },
             )?;
+            let acls = snapshot.load_relation_acls()?;
+            for view in &mut views {
+                acls.apply(&view.relation, &mut view.security)?;
+            }
             Ok(views)
         })
     }

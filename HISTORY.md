@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Persist ordinary relation and column ACL tuples independently across native SQLite, SQLite Key/Value and redb. GRANT/REVOKE now coordinate catalog tuple updates, preserve independent column commits and combine private ACL changes with fresh authority under fixed data snapshots. Record format 30 rejects writers that cannot read these tuples; definition lifecycle operations compact, move and remove the records atomically.
 - Routed bound native SQLite occurrence indexes through common logical sessions, including retained cursors, source rebuilds and scorer-versioned block maxima. Mapping format 4 normalizes legacy skip/block-max tables; source and column changes invalidate derived accelerators and reject late competing builds. Concurrent Engine SQL remains in progress.
 - Routed bound native SQLite exact, IVF and HNSW vector APIs through common logical sessions. Canonical tensors and index metadata publish atomically, retained snapshots survive rollback and lifecycle changes, and HNSW caches distinguish committed and private graph generations. Existing IVF assignments and HNSW topology reopen without rebuilding. Complete concurrent Engine SQL remains in progress.
 - Routed native SQLite catalog cache generations through retained committed/private snapshots, including savepoint restoration, independent writers and bounded changed-key projections. Complete concurrent Engine SQL integration remains in progress.

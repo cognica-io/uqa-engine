@@ -5,9 +5,11 @@
 //
 
 //! Apply table-shaped privilege commands while preserving authorization guards and persistence/publication order.
+mod authority;
 pub mod context;
 mod locking;
 mod targets;
+mod tuples;
 mod updates;
 pub use context::{TableGrantContext, TableGrantInputs};
 mod prepared;
@@ -15,7 +17,6 @@ use super::roles::{
     dependencies::{prepare_role_dependencies, RoleDependencyCandidate},
     locking::RoleLockContext,
 };
-use updates::persist_table_privilege_updates;
 use uqa_sql::catalog::security::acl_command::AclCommandRoles;
 use uqa_sql::{
     ast::{
@@ -35,12 +36,12 @@ pub fn grant_table_privileges(
 }
 impl TableGrantContext<'_> {
     pub fn grant_table_privileges(&self, statement: &GrantTableStmt) -> Result<(), SQLError> {
-        let targets = locking::lock_targets(self, statement)?;
+        let mut command_roles = AclCommandRoles::default();
+        let targets = locking::lock_targets(self, statement, &mut command_roles)?;
         let role_locks = RoleLockContext {
             roles: self.roles,
             session: self.shared_locks,
         };
-        let mut command_roles = AclCommandRoles::default();
         let RoleDependencyCandidate {
             roles,
             memberships,
@@ -50,6 +51,7 @@ impl TableGrantContext<'_> {
                     view_updates,
                     foreign_updates,
                     system_updates,
+                    acl_updates,
                     notices,
                 },
             ..
@@ -58,7 +60,11 @@ impl TableGrantContext<'_> {
             || self.writer.prepare_writer(),
             || prepared::prepare(self, statement, &targets, &mut command_roles),
         )?;
-        persist_table_privilege_updates(self, &updates, &view_updates, &foreign_updates)?;
+        for update in &acl_updates {
+            update.persist(self.acls).map_err(|error| {
+                SQLError::Internal(format!("persist relation ACL tuple: {error}"))
+            })?;
+        }
         for update in &system_updates {
             update.persist(self.catalog).map_err(|error| {
                 SQLError::Internal(format!("persist system relation privileges: {error}"))

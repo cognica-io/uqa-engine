@@ -10,12 +10,9 @@ use std::{collections::BTreeMap, ops::DerefMut};
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::{
     roles::RoleDefinition,
-    security::{
-        system_relations::{
-            metadata_key, validate_security, SystemAcl, SystemRelationSecurities,
-            SystemRelationSecurityCatalog, METADATA_PREFIX,
-        },
-        TableSecurity,
+    security::system_relations::{
+        metadata_key, validate_security, SystemAcl, SystemRelationSecurities,
+        SystemRelationSecurityCatalog, METADATA_PREFIX,
     },
     SystemRelation,
 };
@@ -173,19 +170,6 @@ pub fn tuple_revision(
         ))
         .and_then(|security| security.entry(column))
         .map(|entry| entry.revision)
-}
-
-pub fn changed_columns<'a>(
-    before: &'a TableSecurity,
-    after: &'a TableSecurity,
-) -> impl Iterator<Item = &'a String> {
-    before
-        .column_acls
-        .keys()
-        .chain(after.column_acls.keys())
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .filter(|name| before.column_acls.get(*name) != after.column_acls.get(*name))
 }
 
 #[cfg(test)]

@@ -11,6 +11,24 @@ use crate::catalog_role::{BoundAclEntry, RoleIdentity};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Replacement identities of independently writable relation and attribute ACL tuples.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelationAclRevisions {
+    pub relation: Option<[u8; 16]>,
+    pub columns: BTreeMap<String, [u8; 16]>,
+}
+
+impl RelationAclRevisions {
+    pub fn is_empty(&self) -> bool {
+        self.relation.is_none() && self.columns.is_empty()
+    }
+
+    pub fn get(&self, column: Option<&str>) -> Option<[u8; 16]> {
+        column.map_or(self.relation, |column| self.columns.get(column).copied())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BoundRelationSecurity {
@@ -19,6 +37,9 @@ pub struct BoundRelationSecurity {
     #[serde(deserialize_with = "Deserialize::deserialize")]
     pub acl: Option<Vec<BoundAclEntry<TablePrivileges>>>,
     pub column_acls: BTreeMap<String, Vec<BoundAclEntry<TablePrivileges>>>,
+    /// Loaded from independent ACL records, never embedded in a relation definition.
+    #[serde(skip)]
+    pub acl_revisions: RelationAclRevisions,
 }
 
 impl BoundRelationSecurity {
@@ -27,6 +48,7 @@ impl BoundRelationSecurity {
             role_owner,
             acl: None,
             column_acls: BTreeMap::new(),
+            acl_revisions: RelationAclRevisions::default(),
         }
     }
 }

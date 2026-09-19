@@ -19,14 +19,30 @@ pub struct BoundTableSecurity {
     pub role_owner: RoleIdentity,
     pub acl: Option<Vec<BoundTableAclEntry>>,
     pub column_acls: BTreeMap<String, Vec<BoundTableAclEntry>>,
+    pub acl_revisions: uqa_core::catalog_acl::RelationAclRevisions,
 }
 
 impl BoundTableSecurity {
+    pub fn remove_column_acl(&mut self, column: &str) {
+        self.column_acls.remove(column);
+        self.acl_revisions.columns.remove(column);
+    }
+
+    pub fn rename_column_acl(&mut self, from: &str, to: &str) {
+        if let Some(acl) = self.column_acls.remove(from) {
+            self.column_acls.insert(to.to_owned(), acl);
+        }
+        if let Some(revision) = self.acl_revisions.columns.remove(from) {
+            self.acl_revisions.columns.insert(to.to_owned(), revision);
+        }
+    }
+
     pub fn from_row(row: uqa_core::catalog_acl::BoundRelationSecurity) -> Self {
         Self {
             role_owner: row.role_owner,
             acl: row.acl,
             column_acls: row.column_acls,
+            acl_revisions: row.acl_revisions,
         }
     }
 
@@ -35,6 +51,7 @@ impl BoundTableSecurity {
             role_owner: self.role_owner,
             acl: self.acl.clone(),
             column_acls: self.column_acls.clone(),
+            acl_revisions: self.acl_revisions.clone(),
         }
     }
 
@@ -43,6 +60,7 @@ impl BoundTableSecurity {
             role_owner,
             acl: None,
             column_acls: BTreeMap::new(),
+            acl_revisions: uqa_core::catalog_acl::RelationAclRevisions::default(),
         }
     }
 
@@ -77,6 +95,7 @@ impl BoundTableSecurity {
         };
         Ok(Self {
             role_owner: bind(&security.role_owner)?,
+            acl_revisions: uqa_core::catalog_acl::RelationAclRevisions::default(),
             acl: security.acl.as_deref().map(entries).transpose()?,
             column_acls: security
                 .column_acls
@@ -125,6 +144,13 @@ impl BoundTableSecurity {
         columns: Option<&[String]>,
         roles: &BTreeMap<String, RoleDefinition>,
     ) -> Result<(), String> {
+        if self.acl_revisions.relation == Some([0; 16])
+            || self.acl_revisions.columns.iter().any(|(column, revision)| {
+                *revision == [0; 16] || columns.is_some_and(|columns| !columns.contains(column))
+            })
+        {
+            return Err("invalid relation or attribute ACL tuple identity".into());
+        }
         super::table::validate_table_security_invariants(&self.resolve(roles)?, columns, roles)
     }
 

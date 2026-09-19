@@ -26,9 +26,13 @@ enum MetadataTriggerFormat {
     BinaryNames,
     AllocationGuards,
     GraphLifetimes,
+    RelationAclTuples,
 }
 
 pub(super) fn metadata_scope(name: &str) -> Option<(&'static str, &str)> {
+    if name.starts_with(uqa_storage::catalog::relation_acl::METADATA_PREFIX) {
+        return Some(("catalog", ""));
+    }
     if matches!(
         name,
         "graph_identifier_generation" | "graph_identifier_data_revision"
@@ -75,7 +79,7 @@ impl Catalog {
             table,
             has_table_name,
             event,
-            MetadataTriggerFormat::GraphLifetimes,
+            MetadataTriggerFormat::RelationAclTuples,
         )
     }
 
@@ -109,9 +113,17 @@ impl Catalog {
                 MetadataTriggerFormat::AllocationGuards,
             )
             .1;
+            let graph_lifetimes = cache_trigger(
+                "_metadata",
+                false,
+                event,
+                MetadataTriggerFormat::GraphLifetimes,
+            )
+            .1;
             if current.as_deref() != Some(previous.as_str())
                 && current.as_deref() != Some(binary.as_str())
                 && current.as_deref() != Some(allocations.as_str())
+                && current.as_deref() != Some(graph_lifetimes.as_str())
             {
                 return Err(SQLiteError::StorageBackend(
                     "missing or changed metadata cache trigger".into(),
@@ -217,18 +229,27 @@ fn cache_trigger(
                 has_table_name,
                 image,
                 !matches!(encoding, MetadataTriggerFormat::TextNames),
+                matches!(encoding, MetadataTriggerFormat::RelationAclTuples),
             );
             let mut values = if table == "_metadata"
                 && matches!(
                     encoding,
-                    MetadataTriggerFormat::AllocationGuards | MetadataTriggerFormat::GraphLifetimes
+                    MetadataTriggerFormat::AllocationGuards
+                        | MetadataTriggerFormat::GraphLifetimes
+                        | MetadataTriggerFormat::RelationAclTuples
                 ) {
                 let prefix = "graph_definition_data_revision::";
                 format!("SELECT {kind}, {name}, 1 WHERE {image}.key NOT IN ('graph_identifier_generation', 'graph_identifier_data_revision') AND substr(CAST({image}.key AS BLOB), 1, {}) != CAST('{prefix}' AS BLOB)", prefix.len())
             } else {
                 format!("VALUES ({kind}, {name}, 1)")
             };
-            if table == "_metadata" && matches!(encoding, MetadataTriggerFormat::GraphLifetimes) {
+            if table == "_metadata"
+                && matches!(
+                    encoding,
+                    MetadataTriggerFormat::GraphLifetimes
+                        | MetadataTriggerFormat::RelationAclTuples
+                )
+            {
                 write!(values, " AND substr(CAST({image}.key AS BLOB), 1, {}) != CAST('{GRAPH_GUARD_PREFIX}' AS BLOB)", GRAPH_GUARD_PREFIX.len()).expect("write graph guard exclusion");
             }
             write!(
@@ -252,6 +273,7 @@ fn revision_scope(
     has_table_name: bool,
     image: &str,
     binary_names: bool,
+    relation_acls: bool,
 ) -> (String, String) {
     match table {
         "_tables" => ("'catalog'".into(), "''".into()),
@@ -260,6 +282,15 @@ fn revision_scope(
         "_graph_membership" => ("'graph'".into(), format!("{image}.graph_name")),
         "_metadata" => {
             let key = format!("{image}.key");
+            let acl_scope = if relation_acls {
+                let prefix = uqa_storage::catalog::relation_acl::METADATA_PREFIX;
+                format!(
+                    "WHEN substr({key}, 1, {}) = '{prefix}' THEN 'catalog' ",
+                    prefix.len()
+                )
+            } else {
+                String::new()
+            };
             let [(maintenance, _), (next_id, _), (graph_labels, _)] = METADATA_SCOPES;
             let suffix = |length: usize| {
                 if binary_names {
@@ -269,7 +300,7 @@ fn revision_scope(
                 }
             };
             (
-                format!("CASE WHEN substr({key}, 1, {}) = '{maintenance}' THEN 'maintenance' WHEN substr({key}, 1, {}) = '{next_id}' THEN 'data' WHEN substr({key}, 1, {}) = '{graph_labels}' THEN 'graph' ELSE 'registry' END", maintenance.len(), next_id.len(), graph_labels.len()),
+                format!("CASE {acl_scope}WHEN substr({key}, 1, {}) = '{maintenance}' THEN 'maintenance' WHEN substr({key}, 1, {}) = '{next_id}' THEN 'data' WHEN substr({key}, 1, {}) = '{graph_labels}' THEN 'graph' ELSE 'registry' END", maintenance.len(), next_id.len(), graph_labels.len()),
                 format!("CASE WHEN substr({key}, 1, {}) = '{maintenance}' THEN {} WHEN substr({key}, 1, {}) = '{next_id}' THEN {} WHEN substr({key}, 1, {}) = '{graph_labels}' THEN {} ELSE '' END", maintenance.len(), suffix(maintenance.len()), next_id.len(), suffix(next_id.len()), graph_labels.len(), suffix(graph_labels.len())),
             )
         }

@@ -100,6 +100,7 @@ impl Catalog {
     ) -> Result<Option<()>> {
         self.conn.with_native_write(|snapshot, batch| {
             snapshot.claim_relation(batch, relation, record.kind())?;
+            snapshot.clear_relation_acls(batch, relation)?;
             snapshot.put_row(
                 batch,
                 record.family(),
@@ -129,6 +130,7 @@ impl Catalog {
                 )));
             }
             snapshot.claim_relation(batch, to, record.kind())?;
+            snapshot.rename_relation_acls(batch, from, to)?;
             snapshot.read_row(record.family(), owner, &key, |row| {
                 // Only the two name columns change; every payload and nullable ACL stays intact.
                 let mut renamed = uqa_core::memory::BudgetedVec::new(snapshot.control.memory());
@@ -160,6 +162,7 @@ impl Catalog {
             let key = [text(&relation.schema), text(&relation.name)];
             let exists = snapshot.contains_row(record.family(), owner, &key)?;
             if exists {
+                snapshot.clear_relation_acls(batch, relation)?;
                 snapshot.delete_prefix(batch, record.family(), owner, &key)?;
                 snapshot.release_relation(batch, relation, record.kind())?;
             }

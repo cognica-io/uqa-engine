@@ -10,7 +10,7 @@ use super::*;
 use uqa_storage::mvcc::{IdentifierRequest, RecordWrite};
 
 #[test]
-fn role_rename_format_upgrade_preserves_records_allocations_and_receipts() {
+fn acl_tuple_format_upgrade_preserves_records_allocations_and_receipts() {
     let database = Arc::new(
         Database::builder()
             .create_with_backend(InMemoryBackend::new())
@@ -41,7 +41,7 @@ fn role_rename_format_upgrade_preserves_records_allocations_and_receipts() {
         transaction
             .open_table(METADATA)
             .unwrap()
-            .insert("format", 26_u64.to_be_bytes().as_slice())
+            .insert("format", 29_u64.to_be_bytes().as_slice())
             .unwrap();
         transaction.commit().unwrap();
     }
@@ -76,7 +76,7 @@ fn role_rename_format_upgrade_preserves_records_allocations_and_receipts() {
     let transaction = database.begin_read().unwrap();
     assert_eq!(
         read_u64(&transaction.open_table(METADATA).unwrap(), "format").unwrap(),
-        29
+        30
     );
 }
 

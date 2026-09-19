@@ -12,6 +12,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use uqa_execution::row_locks::RowLockKey;
 
 pub(super) fn sessions(provider: usize) -> (tempfile::TempDir, Engine, Engine) {
     let directory = tempfile::tempdir().unwrap();
@@ -111,5 +112,61 @@ pub(super) fn after_operation_wait<T: Send + 'static>(
     let worker = task.join().unwrap();
     released.unwrap();
     assert!(waited, "expected a logical wait on {relation}");
+    (worker, result.unwrap())
+}
+
+pub(super) fn after_tuple_wait(
+    holder: &Engine,
+    worker: Engine,
+    statement: &str,
+    catalog: &str,
+    doc_id: u64,
+    release: &str,
+) -> (Engine, Result<SQLResult, SQLError>) {
+    after_tuple_wait_with_release(holder, worker, statement, catalog, doc_id, || {
+        holder.sql(release, &[])
+    })
+}
+
+pub(super) fn after_tuple_wait_with_release(
+    holder: &Engine,
+    worker: Engine,
+    statement: &str,
+    catalog: &str,
+    doc_id: u64,
+    release: impl FnOnce() -> Result<SQLResult, SQLError>,
+) -> (Engine, Result<SQLResult, SQLError>) {
+    let session = worker.session_id;
+    let key = RowLockKey {
+        table: holder.row_locks.table_key(catalog),
+        doc_id,
+    };
+    let cancel = worker.runtime.cancellation.clone();
+    let statement = statement.to_string();
+    let (send, done) = mpsc::channel();
+    let task = thread::spawn(move || {
+        let result = worker.sql(&statement, &[]);
+        let _ = send.send(result);
+        worker
+    });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !holder.row_locks.waiting_for_row(session, key)
+        && !task.is_finished()
+        && Instant::now() < deadline
+    {
+        thread::yield_now();
+    }
+    let waited = holder.row_locks.waiting_for_row(session, key);
+    let released = release();
+    if released.is_err() {
+        cancel.cancel();
+    }
+    let result = done.recv_timeout(Duration::from_secs(30));
+    if result.is_err() {
+        cancel.cancel();
+    }
+    let worker = task.join().unwrap();
+    assert!(waited, "expected catalog tuple wait: {catalog}/{doc_id}");
+    released.unwrap();
     (worker, result.unwrap())
 }

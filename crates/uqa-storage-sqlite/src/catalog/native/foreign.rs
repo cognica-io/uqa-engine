@@ -62,6 +62,7 @@ impl Catalog {
         security: &uqa_storage::RelationSecurityRow,
     ) -> Result<Option<bool>> {
         self.conn.with_native_write(|snapshot, batch| {
+            snapshot.clear_relation_acls(batch, relation)?;
             let (security_owner, acl, columns) =
                 super::super::role_security::encode_relation(security)?;
             let owner = NativeRecordOwner::Database(snapshot.database);
@@ -115,6 +116,10 @@ impl Catalog {
                     Ok(())
                 },
             )?;
+            let acls = snapshot.load_relation_acls()?;
+            for table in &mut tables {
+                acls.apply(&table.relation, &mut table.security)?;
+            }
             Ok(tables)
         })
     }

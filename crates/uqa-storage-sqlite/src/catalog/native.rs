@@ -12,6 +12,7 @@ mod columns;
 mod foreign;
 pub(super) mod graph;
 mod indexes;
+mod relation_acl;
 mod relations;
 mod sequences;
 mod stats;

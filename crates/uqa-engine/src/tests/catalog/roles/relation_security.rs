@@ -237,7 +237,13 @@ fn relation_acl_conversion_rolls_back_when_later_catalog_restoration_fails() {
         );
         let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
         let raw = factory.open_session().unwrap();
-        let expected = RELATIONS.map(|name| stored(raw.catalog.as_ref(), name));
+        let mut expected = RELATIONS.map(|name| stored(raw.catalog.as_ref(), name));
+        // Rewriting a definition baseline retires the independent tuple revisions.
+        for row in &mut expected {
+            if let RelationSecurityRow::Bound(row) = row {
+                row.acl_revisions = uqa_core::catalog_acl::RelationAclRevisions::default();
+            }
+        }
         let legacy = expected.clone().map(|row| {
             let RelationSecurityRow::Bound(bound) = row else {
                 unreachable!()
@@ -298,6 +304,7 @@ fn relation_acl_corruption_rejects_owner_grantee_and_grantor_incarnations() {
                 let RelationSecurityRow::Bound(mut bound) = original.clone() else {
                     unreachable!()
                 };
+                bound.acl_revisions = uqa_core::catalog_acl::RelationAclRevisions::default();
                 let reference = match endpoint {
                     "owner" => &mut bound.role_owner,
                     "grantee" => bound.column_acls.get_mut("id").unwrap()[0]
@@ -329,6 +336,44 @@ fn relation_acl_corruption_rejects_owner_grantee_and_grantor_incarnations() {
                 replace(raw.catalog.as_ref(), name, original);
                 let restored = Engine::from_persistent_provider(factory).unwrap();
                 assert!(can_select(&restored, "reader", name));
+            }
+        }
+    }
+}
+
+#[test]
+fn independent_acl_records_reject_replaced_role_incarnations_without_rebinding() {
+    for provider in 0..3 {
+        for name in RELATIONS {
+            for endpoint in ["role", "grantor"] {
+                let (_directory, first, _second) = sessions(provider);
+                setup(&first);
+                sql(&first, &format!("GRANT SELECT(id) ON {name} TO reader"));
+                let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
+                let raw = factory.open_session().unwrap();
+                let key = uqa_storage::catalog::relation_acl::key(
+                    &RelationIdentity::new("public", name),
+                    Some("id"),
+                );
+                let original = raw.catalog.get_metadata(&key).unwrap().unwrap();
+                let mut value: serde_json::Value = serde_json::from_str(&original).unwrap();
+                value["acl"][0][endpoint]["object_id"] = serde_json::json!(vec![42; 16]);
+                let corrupt = value.to_string();
+                raw.catalog.set_metadata(&key, &corrupt).unwrap();
+                let error = first
+                    .new_session()
+                    .err()
+                    .expect("corrupt ACL tuple accepted");
+                assert!(
+                    error.to_string().contains("missing role incarnation"),
+                    "{error}"
+                );
+                assert_eq!(
+                    raw.catalog.get_metadata(&key).unwrap().as_deref(),
+                    Some(corrupt.as_str())
+                );
+                raw.catalog.set_metadata(&key, &original).unwrap();
+                assert!(can_select(&first.new_session().unwrap(), "reader", name));
             }
         }
     }

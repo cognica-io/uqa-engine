@@ -36,7 +36,7 @@ impl Engine {
         };
         let security = table.security();
         serde_json::to_vec(&(
-            security.row(),
+            security.role_owner,
             table.analyzer.read().clone(),
             table.fts_fields.read().clone(),
             vector_dimensions,
@@ -129,6 +129,20 @@ impl Engine {
             let generation = table.storage_generation();
             merged.retain(|_, candidate| candidate.storage_generation() != generation);
             merged.insert(relation, table);
+        }
+        for (relation, table) in &merged {
+            if let Some(previous) = current
+                .get(relation)
+                .filter(|previous| previous.object_id == table.object_id)
+            {
+                let security = uqa_execution::catalog::security::relation_authority::merge_private(
+                    self.storage.catalog.as_deref(),
+                    relation,
+                    &previous.security(),
+                    table.security(),
+                )?;
+                *table.security.write() = security;
+            }
         }
         Ok((merged, latest_baseline))
     }
@@ -225,6 +239,19 @@ impl Engine {
             &current.system_relation_security,
             (*snapshot.system_relation_security).clone(),
         )?);
+        snapshot.views = uqa_execution::catalog::security::relation_authority::merge_private_views(
+            self.storage.catalog.as_deref(),
+            &current.views,
+            snapshot.views,
+        )?;
+        snapshot.foreign_table_security =
+            uqa_execution::catalog::security::relation_authority::merge_private_foreign(
+                self.storage.catalog.as_deref(),
+                &current.foreign_tables,
+                &current.foreign_table_security,
+                &snapshot.foreign_tables,
+                snapshot.foreign_table_security,
+            )?;
         Ok(snapshot)
     }
 

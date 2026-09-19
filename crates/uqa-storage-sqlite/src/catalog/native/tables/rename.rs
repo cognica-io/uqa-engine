@@ -41,6 +41,7 @@ impl Catalog {
                 snapshot.check_table_data_merge(source, target)?;
             }
             snapshot.claim_relation(batch, to, RelationKind::Table)?;
+            snapshot.rename_relation_acls(batch, from, to)?;
             snapshot.read_row(Family::Tables, owner, &[], |row| {
                 let mut renamed = BudgetedVec::new(snapshot.control.memory());
                 renamed.extend_from_slice(row).map_err(VersionError::from)?;

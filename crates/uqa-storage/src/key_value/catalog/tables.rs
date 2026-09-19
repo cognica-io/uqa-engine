@@ -43,6 +43,7 @@ impl KeyValueCatalog {
             } else {
                 schema.clone()
             };
+            super::relation_acl::clear(read, batch, &schema.relation)?;
             batch.put(
                 &relation_key(TAG_TABLE, &schema.relation)?,
                 &encode_value(&schema)?,
@@ -78,6 +79,10 @@ impl KeyValueCatalog {
                     }
                 }
             }
+            let acls = super::relation_acl::load(read)?;
+            for schema in &mut rows {
+                acls.apply(&schema.relation, &mut schema.security)?;
+            }
             Ok(())
         })?;
         rows.sort_by(|a, b| a.relation.cmp(&b.relation));
@@ -89,6 +94,7 @@ impl KeyValueCatalog {
             RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?;
         let durable = self.store.identifier_allocator().is_some();
         self.store.with_mutation(&mut |read, batch| {
+            super::relation_acl::clear(read, batch, &relation)?;
             indexes::drop_table_indexes(read, batch, &relation.qualified_name())?;
             for name in relation.canonical_and_legacy_public_names() {
                 if durable {
@@ -170,6 +176,7 @@ impl KeyValueCatalog {
                 schema.relation = to_relation.clone();
             }
             table_data::rename(read, batch, from, to)?;
+            super::relation_acl::rename(read, batch, &from_relation, &to_relation)?;
             batch.put(
                 &relation_key(TAG_TABLE, &to_relation)?,
                 &encode_value(&schema)?,

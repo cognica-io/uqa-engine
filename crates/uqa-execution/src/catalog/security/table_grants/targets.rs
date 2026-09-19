@@ -139,6 +139,7 @@ impl TableGrantContext<'_> {
             .keys()
             .filter(|relation| resolved_schemas.contains(&relation.schema))
             .map(|relation| ResolvedTableGrantTarget {
+                acl_columns: None,
                 requested: relation.qualified_name(),
                 name: relation.qualified_name(),
                 relation: relation.clone(),
@@ -152,6 +153,7 @@ impl TableGrantContext<'_> {
                 .iter()
                 .filter(|(relation, _)| resolved_schemas.contains(&relation.schema))
                 .map(|(relation, view)| ResolvedTableGrantTarget {
+                    acl_columns: None,
                     requested: relation.qualified_name(),
                     name: relation.qualified_name(),
                     relation: relation.clone(),
@@ -167,6 +169,7 @@ impl TableGrantContext<'_> {
                 .keys()
                 .filter(|relation| resolved_schemas.contains(&relation.schema))
                 .map(|relation| ResolvedTableGrantTarget {
+                    acl_columns: None,
                     requested: relation.qualified_name(),
                     name: relation.qualified_name(),
                     relation: relation.clone(),
@@ -181,6 +184,7 @@ impl TableGrantContext<'_> {
                         .any(|schema| schema == relation.namespace())
                 })
                 .map(|relation| ResolvedTableGrantTarget {
+                    acl_columns: None,
                     requested: relation.qualified_name(),
                     name: relation.qualified_name(),
                     relation: uqa_core::RelationIdentity::new(

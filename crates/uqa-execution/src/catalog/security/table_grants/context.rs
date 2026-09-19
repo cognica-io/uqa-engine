@@ -28,15 +28,11 @@ use uqa_sql::catalog::{
         grants::GrantNamespace, table_grants::targets::TableGrantResolution, BoundTableSecurity,
     },
 };
-use uqa_storage::{CatalogFacade, StorageBackendResult};
+use uqa_storage::CatalogFacade;
 pub type TableSecurityWrite<'a> = Box<dyn DerefMut<Target = BoundTableSecurity> + 'a>;
 pub trait TableGrantState: TablePrivilegeState {
     fn security_write(&self) -> TableSecurityWrite<'_>;
-    fn persist_security(
-        &self,
-        name: &str,
-        security: &BoundTableSecurity,
-    ) -> StorageBackendResult<()>;
+    fn persistence(&self) -> uqa_sql::ast::RelationPersistence;
 }
 pub trait TableGrantRead<'a> {
     fn keys(&self) -> Box<dyn Iterator<Item = &RelationIdentity> + '_>;
@@ -44,6 +40,15 @@ pub trait TableGrantRead<'a> {
 }
 pub trait TableGrantRegistry {
     fn tables(&self) -> Box<dyn TableGrantRead<'_> + '_>;
+}
+/// Persist one bound ACL tuple through the session's catalog before publishing live security.
+pub trait TableGrantPersistence {
+    fn persist_relation_acl(
+        &self,
+        relation: &RelationIdentity,
+        column: Option<&str>,
+        entry: &uqa_storage::catalog::relation_acl::RelationAclTuple,
+    ) -> uqa_storage::StorageBackendResult<()>;
 }
 pub use crate::catalog::notices::CatalogNotices as TableGrantNotices;
 pub struct TableGrantContext<'a> {
@@ -61,6 +66,7 @@ pub struct TableGrantContext<'a> {
     pub tables: &'a dyn TableGrantRegistry,
     pub views: &'a dyn ViewRegistryState,
     pub foreign: &'a dyn ForeignTableAlterPublication,
+    pub acls: &'a dyn TableGrantPersistence,
     pub catalog: Option<&'a dyn CatalogFacade>,
     pub changes: &'a dyn CatalogPublicationChanges,
     pub notices: &'a dyn TableGrantNotices,

@@ -15,6 +15,7 @@ impl Catalog {
         data: bool,
     ) -> Result<Option<()>> {
         self.conn.with_native_write(|snapshot, batch| {
+            snapshot.clear_relation_acls(batch, relation)?;
             snapshot.release_relation(batch, relation, RelationKind::Table)?;
             snapshot.drop_table_catalog_indexes(batch, relation)?;
             let name = relation.qualified_name();

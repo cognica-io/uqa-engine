@@ -22,6 +22,7 @@ pub mod graph_identifiers;
 pub(crate) mod graph_snapshot;
 mod identity;
 mod relation;
+pub mod relation_acl;
 mod relation_security;
 mod schema;
 mod sequence_security;
@@ -381,6 +382,18 @@ pub trait CatalogFacade: Send + Sync {
     fn get_metadata(&self, key: &str) -> StorageBackendResult<Option<String>>;
     /// Read matching metadata keys from one catalog snapshot; the prefix is literal, including NUL and wildcard characters.
     fn metadata_with_prefix(&self, prefix: &str) -> StorageBackendResult<Vec<(String, String)>>;
+    /// Replace one already bound relation or attribute ACL without rewriting its definition. The caller holds the relation lifetime and catalog tuple locks until transaction end.
+    fn save_relation_acl(
+        &self,
+        relation: &RelationIdentity,
+        column: Option<&str>,
+        entry: &relation_acl::RelationAclTuple,
+    ) -> StorageBackendResult<()> {
+        if !self.transaction_model().is_versioned() {
+            return relation_acl::save_serialized(self, relation, column, entry);
+        }
+        self.set_metadata(&relation_acl::key(relation, column), &entry.encode(column)?)
+    }
     /// Whether this metadata key has a transaction-private replacement in the current session.
     fn metadata_has_private_changes(&self, _key: &str) -> StorageBackendResult<bool> {
         if self.transaction_model().is_versioned() {

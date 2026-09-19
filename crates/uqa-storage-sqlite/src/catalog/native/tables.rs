@@ -67,6 +67,7 @@ impl Catalog {
             let vectors = serde_json::to_string(&schema.vector_fields)?;
             let (security_owner, acl, columns) =
                 super::super::role_security::encode_relation(&schema.security)?;
+            snapshot.clear_relation_acls(batch, &schema.relation)?;
             snapshot.put_row(
                 batch,
                 Family::Tables,
@@ -123,6 +124,10 @@ impl Catalog {
                 Ok(())
             })?;
             tables.sort_unstable_by(|left, right| left.relation.cmp(&right.relation));
+            let acls = snapshot.load_relation_acls()?;
+            for table in &mut tables {
+                acls.apply(&table.relation, &mut table.security)?;
+            }
             Ok(tables)
         })
     }

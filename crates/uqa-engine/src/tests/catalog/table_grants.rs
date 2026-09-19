@@ -12,17 +12,12 @@ use std::{
 };
 use uqa_core::RelationIdentity;
 use uqa_execution::{
-    catalog::security::table_grants::context::{TableGrantInputs, TableGrantNotices},
+    catalog::security::table_grants::context::{
+        TableGrantInputs, TableGrantNotices, TableGrantPersistence,
+    },
     row_locks::{
         shared_objects::{SharedCatalogLock, SharedObjectLockSession},
         RelationLockMode, ScopedRelationLock,
-    },
-    schema::{
-        foreign_table_alteration::{
-            ForeignMemoryRegistryWrite, ForeignSecurityRegistryWrite, ForeignTableAlterPublication,
-            ForeignTableRegistryWrite,
-        },
-        sequences::role_ownership::OwnedSequenceSecurityWrite,
     },
 };
 use uqa_sql::{
@@ -138,31 +133,19 @@ struct FailedForeignWrite<'a> {
     before: (BoundTableSecurity, BoundTableSecurity, BoundTableSecurity),
     reached: Cell<bool>,
 }
-impl ForeignTableAlterPublication for FailedForeignWrite<'_> {
-    fn persist_rename(
+impl TableGrantPersistence for FailedForeignWrite<'_> {
+    fn persist_relation_acl(
         &self,
-        from: &RelationIdentity,
-        to: &RelationIdentity,
-    ) -> StorageBackendResult<Option<bool>> {
-        ForeignTableAlterPublication::persist_rename(self.authorization.engine, from, to)
-    }
-    fn tables_write(&self) -> ForeignTableRegistryWrite<'_> {
-        ForeignTableAlterPublication::tables_write(self.authorization.engine)
-    }
-    fn security_write(&self) -> ForeignSecurityRegistryWrite<'_> {
-        ForeignTableAlterPublication::security_write(self.authorization.engine)
-    }
-    fn memory_tables_write(&self) -> ForeignMemoryRegistryWrite<'_> {
-        ForeignTableAlterPublication::memory_tables_write(self.authorization.engine)
-    }
-    fn sequence_security_write(&self) -> OwnedSequenceSecurityWrite<'_> {
-        ForeignTableAlterPublication::sequence_security_write(self.authorization.engine)
-    }
-    fn persist_security(
-        &self,
-        _relation: &RelationIdentity,
-        _security: &BoundTableSecurity,
-    ) -> Result<(), SQLError> {
+        relation: &RelationIdentity,
+        column: Option<&str>,
+        entry: &uqa_storage::catalog::relation_acl::RelationAclTuple,
+    ) -> StorageBackendResult<()> {
+        if relation.name != "remote" {
+            return self
+                .authorization
+                .engine
+                .persist_relation_acl(relation, column, entry);
+        }
         assert!(self.authorization.roles_held.get() && self.authorization.memberships_held.get());
         assert_eq!(security(self.authorization.engine), self.before);
         let catalog = self.authorization.engine.storage.catalog.as_ref().unwrap();
@@ -173,7 +156,7 @@ impl ForeignTableAlterPublication for FailedForeignWrite<'_> {
             matches!(&catalog.load_views().unwrap()[0].security, uqa_storage::RelationSecurityRow::Bound(security) if security.acl.is_some())
         );
         self.reached.set(true);
-        Err(SQLError::Internal(
+        Err(uqa_storage::StorageBackendError::Other(
             "injected foreign ACL persistence failure".into(),
         ))
     }
@@ -211,7 +194,7 @@ fn final_foreign_persistence_failure_rolls_back_prior_writes_without_publishing_
                 let mut context = engine.table_grant_context();
                 context.roles = &authorization;
                 context.shared_locks = &authorization;
-                context.foreign = &publication;
+                context.acls = &publication;
                 context.grant_table_privileges(&statement)
             })
             .unwrap_err();
@@ -305,3 +288,6 @@ fn mixed_table_sequence_grant_releases_authorization_guards_before_sequence_warn
             .is_some()
     );
 }
+
+#[path = "table_grants/concurrency.rs"]
+mod concurrency;

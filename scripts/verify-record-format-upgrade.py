@@ -89,9 +89,11 @@ fn report(records: &dyn VersionedPersistence, committed: u64, pending: u64) -> s
 
 fn rejected<T, E: std::fmt::Display>(result: Result<T, E>, native_reopen: bool) {
     let error = result.err().expect("previous writer accepted the new record format").to_string();
-    // Native predecessors validate their closed set of physical families before inspecting the common record version. A newly guarded record table must also fence those binaries at that earlier check.
-    let unmapped_native = native_reopen && error == "invalid versioned record encoding: unmapped native table requires an explicit record family";
-    assert!(error.contains("record format") || error.contains("record table definition") || unmapped_native, "unrelated failure: {error}");
+    // Native reopen validates physical families and exact cache triggers before the common record version. Retained handles must still reject through their record-format guard.
+    let native_schema_fence = native_reopen && matches!(error.as_str(),
+        "invalid versioned record encoding: unmapped native table requires an explicit record family"
+        | "SQLite storage failed: storage backend error: missing or changed metadata cache trigger");
+    assert!(error.contains("record format") || error.contains("record table definition") || native_schema_fence, "unrelated failure: {error}");
 }
 
 fn main() {
