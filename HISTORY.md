@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Apply actual-owner, system-catalog and source-schema CREATE checks before view, materialized-view and foreign-table ALTER kind errors. Recheck authority after relation waits, preserve temporary-view TEMP requirements, and defer foreign-table write admission until definition binding succeeds.
+
 - Check the actual relation owner before ALTER SEQUENCE reports the requested kind, and require source-schema CREATE for sequence renames before and after lock waits. Temporary sequence renames honor current database TEMP authority; pinned system catalogs retain their protection.
 
 - Coordinate sequence definition, persistence, name and DROP operations with PostgreSQL relation lock modes and retained destination namespaces. Recheck replaced names, relation kinds, owner/CREATE authority and destination collisions after waits; retain locks for unchanged schema moves and preserve rollback/savepoint behavior.

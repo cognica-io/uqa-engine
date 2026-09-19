@@ -8,7 +8,8 @@
 use super::{
     publication::dependencies::CatalogPublicationChanges,
     relation_alteration::{
-        rewrite_relation_rename_dependents, RelationRenameDependencies, RoleTransferContext,
+        rewrite_relation_rename_dependents, validate_relation_alter_authority,
+        RelationRenameDependencies, RoleTransferContext,
     },
     sequences::role_ownership::{
         table_owned_sequence_owner_updates, OwnedSequenceSecurityCatalog,
@@ -69,7 +70,8 @@ pub trait ForeignTableAlterPublication {
 pub struct ForeignTableAlterContext<'a> {
     pub names: &'a dyn RelationAlterNames,
     pub catalog: &'a dyn ForeignTableAlterCatalog,
-    pub access: &'a dyn ForeignTableAlterAccess,
+    pub authority: crate::catalog::security::table_inquiry::TablePrivilegeContext<'a>,
+    pub creation: super::namespaces::relations::RelationCreationContext<'a>,
     pub locks: &'a dyn RelationDefinitionSession,
     pub writer: &'a dyn ForeignTableOwnerWriter,
     pub roles: RoleTransferContext<'a>,
@@ -115,7 +117,7 @@ pub fn alter_foreign_table(
             RelationLockMode::AccessExclusive,
             false,
             || {
-                let Some(canonical) = relation_alteration::foreign_table_alter_target(
+                let Some(target) = relation_alteration::foreign_table_alter_target(
                     context.names.resolve_relation_kind(&statement.name)?,
                     statement,
                     &mut |message| {
@@ -128,17 +130,26 @@ pub fn alter_foreign_table(
                 else {
                     return Ok(None);
                 };
-                let (relation, _) = bound_foreign_table_security(context.catalog, &canonical)?;
-                let table = context.catalog.table(&relation).ok_or_else(|| {
-                    SQLError::Internal(format!("foreign table `{canonical}` disappeared"))
-                })?;
                 Ok(Some(RelationBinding {
-                    name: canonical,
-                    object_id: Some(table.object_id),
-                    value: (),
+                    name: target.canonical.clone(),
+                    object_id: context
+                        .catalog
+                        .table(&target.relation)
+                        .map(|table| table.object_id),
+                    value: target,
                 }))
             },
-            |binding| context.access.ensure_owner(&binding.name).map(|_| ()),
+            |binding| {
+                let target = &binding.value;
+                validate_relation_alter_authority(
+                    &context.authority,
+                    &context.creation,
+                    &target.relation,
+                    target.kind,
+                    matches!(statement.action, AlterForeignTableAction::RenameTo(_)),
+                )?;
+                target.require_kind("foreign table")
+            },
         )?
         else {
             return Ok(());
@@ -149,13 +160,8 @@ pub fn alter_foreign_table(
                 alter_foreign_table_role_owner(context, &canonical, owner)
             }
             AlterForeignTableAction::RenameTo(new_name) => {
-                context.access.ensure_owner(&canonical)?;
-                let relation = RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
-                    SQLError::Internal(format!(
-                        "resolve foreign table rename target `{canonical}`: {error}"
-                    ))
-                })?;
-                rename_foreign_table(context, &relation, new_name)
+                context.locks.prepare_definition_write()?;
+                rename_foreign_table(context, &binding.value.relation, new_name)
             }
         }
     }))

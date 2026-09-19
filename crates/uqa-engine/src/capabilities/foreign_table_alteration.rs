@@ -27,7 +27,8 @@ impl Engine {
         ForeignTableAlterContext {
             names: self,
             catalog: self,
-            access: self,
+            authority: self.table_privilege_context(),
+            creation: self.relation_creation_context(),
             locks: self,
             writer: self,
             roles: self.role_transfer_context(),
@@ -42,7 +43,9 @@ impl Engine {
 }
 impl ForeignTableAlterTransactions for Engine {
     fn with_foreign_table_write(&self, write: ForeignTableAlterWrite<'_>) -> Result<(), SQLError> {
-        self.with_implicit_transaction(|engine| write(&engine.foreign_table_alter_context()))
+        self.with_implicit_definition_transaction(|engine| {
+            write(&engine.foreign_table_alter_context())
+        })
     }
 }
 impl ForeignTableAlterCatalog for Engine {

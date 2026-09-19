@@ -9,6 +9,7 @@ use crate::catalog::security::roles::{
     locking::{RoleBinding, RoleLockContext},
     RoleCatalogGuards,
 };
+use crate::catalog::security::table_inquiry::TablePrivilegeContext;
 use crate::row_locks::shared_objects::SharedObjectLockSession;
 use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
@@ -19,6 +20,21 @@ use uqa_sql::{
     SQLError,
 };
 use uqa_storage::{StorageBackendError, StorageBackendResult};
+
+pub fn validate_relation_alter_authority(
+    owners: &TablePrivilegeContext<'_>,
+    namespaces: &super::namespaces::relations::RelationCreationContext<'_>,
+    relation: &RelationIdentity,
+    kind: &str,
+    rename: bool,
+) -> Result<(), SQLError> {
+    owners.ensure_relation_owner(relation, kind)?;
+    uqa_sql::catalog::security::ownership::reject_system_relation_alter(relation)?;
+    if rename {
+        namespaces.ensure_namespace_create(&relation.schema)?;
+    }
+    Ok(())
+}
 
 pub trait RelationAlterLocks {
     fn lock_exclusive(&self, name: &str) -> Result<(), SQLError>;

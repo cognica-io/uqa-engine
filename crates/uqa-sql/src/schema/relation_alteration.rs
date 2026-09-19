@@ -20,10 +20,37 @@ pub trait RelationAlterNames {
     fn relation_kind_at(&self, name: &str) -> Result<Option<&'static str>, String>;
 }
 
-pub struct ViewAlterTarget {
+pub struct RelationAlterTarget {
     pub canonical: String,
     pub relation: RelationIdentity,
     pub kind: &'static str,
+}
+
+impl RelationAlterTarget {
+    fn from_name(canonical: String, kind: &'static str) -> Result<Self, SQLError> {
+        let relation = RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
+            SQLError::Internal(format!(
+                "invalid relation ALTER target `{canonical}`: {error}"
+            ))
+        })?;
+        Ok(Self {
+            canonical,
+            relation,
+            kind,
+        })
+    }
+
+    /// Execution checks actual ownership and namespace authority before applying the requested kind.
+    pub fn require_kind(&self, expected: &str) -> Result<(), SQLError> {
+        if self.kind == expected {
+            Ok(())
+        } else {
+            Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!("\"{}\" is not a {expected}", self.relation.name),
+            })
+        }
+    }
 }
 
 pub fn view_alter_lock_mode(statement: &AlterViewStmt) -> TableLockMode {
@@ -42,11 +69,7 @@ pub fn view_alter_target(
     resolution: RelationResolution,
     statement: &AlterViewStmt,
     notice: &mut dyn FnMut(&str),
-) -> Result<Option<ViewAlterTarget>, SQLError> {
-    let kind = match statement.kind {
-        AlterViewKind::View => "view",
-        AlterViewKind::MaterializedView => "materialized view",
-    };
+) -> Result<Option<RelationAlterTarget>, SQLError> {
     let resolution = if matches!(statement.action, AlterViewAction::RenameTo(_)) {
         resolve_relation_rename_source(resolution, &statement.name, statement.if_exists, notice)?
     } else {
@@ -61,27 +84,14 @@ pub fn view_alter_target(
             message: format!("relation \"{}\" does not exist", statement.name),
         });
     };
-    if actual_kind != kind {
-        return Err(SQLError::Routine {
-            sqlstate: "42809".into(),
-            message: format!("\"{}\" is not a {kind}", statement.name),
-        });
-    }
-    let relation = RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
-        SQLError::Internal(format!("invalid ALTER VIEW target `{canonical}`: {error}"))
-    })?;
-    Ok(Some(ViewAlterTarget {
-        canonical,
-        relation,
-        kind,
-    }))
+    RelationAlterTarget::from_name(canonical, actual_kind).map(Some)
 }
 
 pub fn foreign_table_alter_target(
     resolution: RelationResolution,
     statement: &AlterForeignTableStmt,
     notice: &mut dyn FnMut(&str),
-) -> Result<Option<String>, SQLError> {
+) -> Result<Option<RelationAlterTarget>, SQLError> {
     let resolution = if matches!(statement.action, AlterForeignTableAction::RenameTo(_)) {
         let Some((canonical, kind)) = resolve_relation_rename_source(
             resolution,
@@ -97,11 +107,9 @@ pub fn foreign_table_alter_target(
         resolution
     };
     match resolution {
-        RelationResolution::Found(canonical, "foreign table") => Ok(Some(canonical)),
-        RelationResolution::Found(_, _) => Err(SQLError::Routine {
-            sqlstate: "42809".into(),
-            message: format!("\"{}\" is not a foreign table", statement.name),
-        }),
+        RelationResolution::Found(canonical, kind) => {
+            RelationAlterTarget::from_name(canonical, kind).map(Some)
+        }
         RelationResolution::MissingSchema(schema) if statement.if_exists => {
             notice(&format!("schema \"{schema}\" does not exist, skipping"));
             Ok(None)

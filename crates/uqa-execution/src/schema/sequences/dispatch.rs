@@ -102,19 +102,16 @@ fn bind_alter_sequence(
         },
         |binding| {
             let target = &binding.value;
-            context
-                .authority
-                .ensure_relation_owner(&target.relation, target.kind)?;
-            uqa_sql::catalog::security::ownership::reject_system_relation_alter(&target.relation)?;
-            if matches!(
-                alter.lifecycle,
-                uqa_sql::ast::SequenceLifecycle::RenameTo { .. }
-            ) {
-                context
-                    .lifecycle
-                    .creation
-                    .ensure_namespace_create(&target.relation.schema)?;
-            }
+            crate::schema::relation_alteration::validate_relation_alter_authority(
+                &context.authority,
+                &context.lifecycle.creation,
+                &target.relation,
+                target.kind,
+                matches!(
+                    alter.lifecycle,
+                    uqa_sql::ast::SequenceLifecycle::RenameTo { .. }
+                ),
+            )?;
             uqa_sql::schema::sequences::lifecycle::validate_sequence_alter_kind(
                 alter,
                 target.kind,

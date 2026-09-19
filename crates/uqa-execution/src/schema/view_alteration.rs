@@ -8,7 +8,8 @@
 use super::{
     publication::dependencies::CatalogPublicationChanges,
     relation_alteration::{
-        rewrite_relation_rename_dependents, RelationRenameDependencies, RoleTransferContext,
+        rewrite_relation_rename_dependents, validate_relation_alter_authority,
+        RelationRenameDependencies, RoleTransferContext,
     },
 };
 use crate::catalog::security::roles::dependencies::{prepare_role_owner, RoleDependencyCandidate};
@@ -46,7 +47,8 @@ pub trait ViewAlterPublication: ViewPublication {
 pub struct ViewAlterContext<'a> {
     pub names: &'a dyn RelationAlterNames,
     pub catalog: &'a dyn ViewAlterCatalog,
-    pub access: &'a dyn ViewAlterAccess,
+    pub authority: crate::catalog::security::table_inquiry::TablePrivilegeContext<'a>,
+    pub creation: super::namespaces::relations::RelationCreationContext<'a>,
     pub locks: &'a dyn RelationDefinitionSession,
     pub roles: RoleTransferContext<'a>,
     pub dependencies: &'a dyn RelationRenameDependencies,
@@ -89,29 +91,38 @@ fn execute_alter_view(
             else {
                 return Ok(None);
             };
-            let view = context.catalog.view(&target.relation).ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "{} `{}` disappeared",
-                    target.kind, target.canonical
-                ))
-            })?;
+            let view = context.catalog.view(&target.relation);
             Ok(Some(RelationBinding {
                 name: target.canonical.clone(),
-                object_id: Some(view.object_id),
+                object_id: view.as_ref().map(|view| view.object_id),
                 value: (target, view),
             }))
         },
         |binding| {
-            context
-                .access
-                .ensure_owner(&binding.name, &binding.value.1)
-                .map(|_| ())
+            let target = &binding.value.0;
+            validate_relation_alter_authority(
+                &context.authority,
+                &context.creation,
+                &target.relation,
+                target.kind,
+                matches!(statement.action, AlterViewAction::RenameTo(_)),
+            )?;
+            target.require_kind(match statement.kind {
+                AlterViewKind::View => "view",
+                AlterViewKind::MaterializedView => "materialized view",
+            })
         },
     )?
     else {
         return Ok(());
     };
-    let (target, mut view) = binding.value;
+    let (target, view) = binding.value;
+    let mut view = view.ok_or_else(|| {
+        SQLError::Internal(format!(
+            "{} `{}` disappeared",
+            target.kind, target.canonical
+        ))
+    })?;
     let relation = &target.relation;
     let canonical = &target.canonical;
     let expected_kind = target.kind;

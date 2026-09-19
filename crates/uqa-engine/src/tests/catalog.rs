@@ -6,6 +6,7 @@
 
 //! Catalog publication, guards, and durable Engine state.
 
+mod alteration_authority;
 mod events;
 mod foreign_tables;
 mod relations;
