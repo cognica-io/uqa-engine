@@ -355,7 +355,10 @@ impl Engine {
             None => uqa_storage::DocumentMetadata::with_tuple_xmin(self.tuple_version_xid()?),
         };
         self.advance_next_id(&table_name, doc_id).map_err(|error| {
-            SQLError::Internal(format!("observe inserted document identity: {error}"))
+            uqa_execution::mutation::errors::identifier_storage_error(
+                "observe inserted document identity",
+                &error,
+            )
         })?;
         let mut store = t.document_store.write();
         store

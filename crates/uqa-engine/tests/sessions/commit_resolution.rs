@@ -66,6 +66,7 @@ fn rejected_commit_error(fault: u8) -> Option<uqa_storage::mvcc::VersionError> {
 struct FaultPersistence {
     inner: Arc<dyn VersionedPersistence>,
     fault: AtomicU8,
+    identifier_fault: AtomicU8,
     foreground: std::thread::ThreadId,
     attempt: Mutex<Option<StorageTransactionId>>,
     aborts: AtomicUsize,
@@ -112,6 +113,15 @@ impl VersionedPersistence for FaultPersistence {
         request: uqa_storage::mvcc::IdentifierRequest,
         control: &StorageReadControl,
     ) -> VersionResult<uqa_storage::mvcc::IdentifierAllocation> {
+        if std::thread::current().id() == self.foreground
+            && matches!(request, uqa_storage::mvcc::IdentifierRequest::Observe(_))
+        {
+            if let Some(error) =
+                rejected_commit_error(self.identifier_fault.swap(HEALTHY, Ordering::AcqRel))
+            {
+                return Err(error);
+            }
+        }
         self.inner.allocate_identifiers(namespace, request, control)
     }
     fn allocate_transaction(
@@ -230,6 +240,7 @@ fn fixtures() -> (tempfile::TempDir, Vec<Arc<FaultPersistence>>) {
                 Arc::new(FaultPersistence {
                     inner,
                     fault: AtomicU8::new(HEALTHY),
+                    identifier_fault: AtomicU8::new(HEALTHY),
                     foreground: std::thread::current().id(),
                     attempt: Mutex::new(None),
                     aborts: AtomicUsize::new(0),

@@ -119,6 +119,66 @@ fn rejected_commit_preserves_typed_diagnostics_and_cleans_up_without_replay() {
 }
 
 #[test]
+fn direct_document_observation_preserves_storage_diagnostics_and_rolls_back_the_write() {
+    let (_directory, fixtures) = fixtures();
+    for persistence in fixtures {
+        let root = engine(persistence.clone());
+        root.sql(
+            "CREATE TABLE items(body text); CREATE INDEX body_idx ON items USING gin(body)",
+            &[],
+        )
+        .unwrap();
+        let observer = root.new_session().unwrap();
+        for (fault, state) in [
+            (REJECT_MEMORY, "53200"),
+            (REJECT_CANCELLED, "57014"),
+            (REJECT_DEPENDENCY, "40001"),
+        ] {
+            persistence.identifier_fault.store(fault, Ordering::Release);
+            let error = root
+                .add_document(
+                    "items",
+                    17,
+                    [("body".into(), Value::Str("rejected".into()))].into(),
+                )
+                .unwrap_err();
+            assert_eq!(error.sqlstate(), Some(state), "{error}");
+            if fault == REJECT_CANCELLED {
+                assert!(matches!(error, SQLError::Cancelled(_)));
+            }
+            assert_eq!(
+                persistence.identifier_fault.load(Ordering::Acquire),
+                HEALTHY
+            );
+            assert_eq!(root.transaction_depth(), 0);
+            assert!(root.pending_commit().is_none());
+            assert_eq!(count(&observer, "items"), Value::Int(0));
+            for session in [&root, &observer] {
+                let stats = session.fts_index_stats(Some("items")).unwrap();
+                assert_eq!(stats.len(), 1);
+                assert_eq!(stats[0].posting_count, 0);
+                assert_eq!(stats[0].indexed_doc_count, 0);
+                assert_eq!(stats[0].total_field_length, 0);
+            }
+            root.add_document(
+                "items",
+                17,
+                [("body".into(), Value::Str("accepted".into()))].into(),
+            )
+            .unwrap();
+            assert_eq!(count(&observer, "items"), Value::Int(1));
+            let stats = observer.fts_index_stats(Some("items")).unwrap();
+            assert_eq!(stats[0].posting_count, 1);
+            assert_eq!(stats[0].indexed_doc_count, 1);
+            assert_eq!(stats[0].total_field_length, 1);
+            root.sql("DELETE FROM items", &[]).unwrap();
+        }
+        drop((root, observer));
+        assert_eq!(count(&engine(persistence), "items"), Value::Int(0));
+    }
+}
+
+#[test]
 fn uncertain_commit_keeps_its_outcome_even_when_the_source_is_a_conflict() {
     let (_directory, fixtures) = fixtures();
     for persistence in fixtures {
