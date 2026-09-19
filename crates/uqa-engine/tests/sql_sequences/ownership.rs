@@ -445,7 +445,7 @@ fn reopening_a_legacy_catalog_rebuilds_serial_sequence_ownership() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("legacy-owned-reopen.sqlite");
     {
-        let engine = Engine::open(&database).unwrap();
+        let engine = crate::native_storage::legacy_engine(&database);
         engine
             .sql("CREATE TABLE legacy_owner(id serial)", &[])
             .unwrap();

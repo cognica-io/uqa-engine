@@ -6,12 +6,21 @@
 
 //! Materialized-view source execution and snapshot replacement lifecycle.
 use super::{
-    context::ViewCreationTransactions, publication, registration::reject_regrole_constants,
+    context::{ViewCreationContext, ViewCreationTransactions},
+    publication,
+    registration::reject_regrole_constants,
     MaterializedViewRegistration,
 };
 use crate::catalog::view::{StoredView, StoredViewKind};
+use crate::row_locks::{
+    binding::{bind_relation, RelationBinding},
+    RelationLockMode,
+};
 use uqa_core::RelationIdentity;
-use uqa_sql::{catalog::view::create_view_output_columns, SQLError};
+use uqa_sql::{
+    catalog::view::{create_view_output_columns, validate_view_column_types},
+    SQLError,
+};
 
 fn materialized_rows(
     result: &uqa_sql::SQLResult,
@@ -48,6 +57,39 @@ fn materialized_rows(
         .collect()
 }
 
+fn bind_materialized_view_target(
+    context: &ViewCreationContext<'_>,
+    name: &str,
+    if_not_exists: bool,
+) -> Result<Option<String>, SQLError> {
+    bind_relation(
+        context.locks,
+        RelationLockMode::AccessExclusive,
+        false,
+        || {
+            let resolved = context.namespace.resolve_persistent_name(name)?;
+            if let Some(kind) = context.names.relation_kind_at(&resolved).map_err(|error| {
+                SQLError::Internal(format!("resolve relation `{resolved}`: {error}"))
+            })? {
+                if if_not_exists {
+                    return Ok(None);
+                }
+                return Err(SQLError::Routine {
+                    sqlstate: "42P07".into(),
+                    message: format!("relation \"{resolved}\" already exists as {kind}"),
+                });
+            }
+            Ok(Some(RelationBinding {
+                name: context.namespace.persistent_relation_name(name)?,
+                object_id: None,
+                value: (),
+            }))
+        },
+        |target| context.namespace.ensure_create(&target.name),
+    )
+    .map(|binding| binding.map(|target| target.name))
+}
+
 pub fn register_materialized_view_plan(
     transactions: &dyn ViewCreationTransactions,
     registration: MaterializedViewRegistration<'_>,
@@ -65,6 +107,8 @@ pub fn register_materialized_view_plan(
         context.catalog.synchronize().map_err(|error| {
             SQLError::Internal(format!("refresh materialized-view catalog: {error}"))
         })?;
+        let owner = context.namespace.bind_owner()?;
+        context.bindings.lock_relations(&plan)?;
         if context.bindings.bind_relations(&mut plan)? {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
@@ -77,25 +121,11 @@ pub fn register_materialized_view_plan(
         for column in &output_columns {
             uqa_sql::schema::columns::validate_postgres_column_name(column)?;
         }
-        for (position, column) in output_columns.iter().enumerate() {
-            if let Some(ty) = query_schema.column_type(position) {
-                uqa_sql::schema::columns::validate_postgres_relation_column_type(column, ty)?;
-            }
-        }
-        let name = context.namespace.resolve_persistent_name(name)?;
-        if let Some(kind) = context
-            .names
-            .relation_kind_at(&name)
-            .map_err(|error| SQLError::Internal(format!("resolve relation `{name}`: {error}")))?
-        {
-            if if_not_exists {
-                return Ok(None);
-            }
-            return Err(SQLError::Routine {
-                sqlstate: "42P07".into(),
-                message: format!("relation \"{name}\" already exists as {kind}"),
-            });
-        }
+        validate_view_column_types(&query_schema, &output_columns)?;
+        let Some(name) = bind_materialized_view_target(context, name, if_not_exists)? else {
+            return Ok(None);
+        };
+        context.namespace.retain_owner(&owner)?;
         context.namespace.ensure_create(&name)?;
         let materialized_column_types = query_schema.column_types().to_vec();
         let materialized_rows = if with_no_data {
@@ -110,23 +140,25 @@ pub fn register_materialized_view_plan(
         let relation = RelationIdentity::from_legacy_name(&name).map_err(|error| {
             SQLError::Internal(format!("invalid materialized-view name: {error}"))
         })?;
+        context.locks.prepare_definition_write()?;
+        context.namespace.ensure_create(&name)?;
         let view = StoredView {
-            object_id: context.catalog.allocate_identity().map_err(|error| {
-                SQLError::Internal(format!(
-                    "allocate materialized view `{name}` identity: {error}"
-                ))
-            })?,
-            role_owner: context.access.current_user_name(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::new(),
-            query: plan,
-            output_columns: Some(output_columns),
-            persistence: uqa_sql::ast::RelationPersistence::Permanent,
-            options: options.to_vec(),
-            kind: StoredViewKind::Materialized,
-            materialized_rows,
-            materialized_column_types,
-            populated: !with_no_data,
+            security: uqa_sql::catalog::security::BoundTableSecurity::owner(owner.identity()),
+            definition: uqa_sql::catalog::stored_view::StoredViewDefinition {
+                object_id: context.catalog.allocate_identity().map_err(|error| {
+                    SQLError::Internal(format!(
+                        "allocate materialized view `{name}` identity: {error}"
+                    ))
+                })?,
+                query: plan,
+                output_columns: Some(output_columns),
+                persistence: uqa_sql::ast::RelationPersistence::Permanent,
+                options: options.to_vec(),
+                kind: StoredViewKind::Materialized,
+                materialized_rows,
+                materialized_column_types,
+                populated: !with_no_data,
+            },
         };
         publication::publish_materialized_view(
             context.publication,
@@ -152,32 +184,54 @@ pub fn refresh_materialized_view(
             });
     }
     transactions.with_view_creation(Box::new(move |context| {
-        let (canonical, kind) = context
-            .names
-            .resolve_relation_kind(name)?
-            .into_found()
-            .ok_or_else(|| SQLError::Routine {
-                sqlstate: "42P01".into(),
-                message: format!("relation \"{name}\" does not exist"),
-            })?;
-        if kind != "materialized view" {
-            return Err(SQLError::Routine {
-                sqlstate: "0A000".into(),
-                message: format!("\"{name}\" is not a materialized view"),
-            });
-        }
-        let relation = RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
-            SQLError::Internal(format!("invalid materialized-view name: {error}"))
-        })?;
-        let mut view = context.views.view(&relation).ok_or_else(|| {
-            SQLError::Internal(format!("materialized view `{canonical}` disappeared"))
-        })?;
-        context.access.ensure_maintenance(&canonical, &view)?;
+        let binding = bind_relation(
+            context.locks,
+            RelationLockMode::AccessExclusive,
+            false,
+            || {
+                let (canonical, kind) = context
+                    .names
+                    .resolve_relation_kind(name)?
+                    .into_found()
+                    .ok_or_else(|| SQLError::Routine {
+                        sqlstate: "42P01".into(),
+                        message: format!("relation \"{name}\" does not exist"),
+                    })?;
+                if kind != "materialized view" {
+                    return Err(SQLError::Routine {
+                        sqlstate: "0A000".into(),
+                        message: format!("\"{name}\" is not a materialized view"),
+                    });
+                }
+                let relation =
+                    RelationIdentity::from_legacy_name(&canonical).map_err(SQLError::Internal)?;
+                let view = context.views.view(&relation).ok_or_else(|| {
+                    SQLError::Internal(format!("materialized view `{canonical}` disappeared"))
+                })?;
+                Ok(Some(RelationBinding {
+                    name: canonical,
+                    object_id: Some(view.object_id),
+                    value: (relation, view),
+                }))
+            },
+            |binding| {
+                context
+                    .access
+                    .ensure_maintenance(&binding.name, &binding.value.1)
+            },
+        )?
+        .ok_or_else(|| SQLError::Internal("materialized view binding disappeared".into()))?;
+        let canonical = binding.name;
+        let (relation, mut view) = binding.value;
         view.materialized_rows = if with_no_data {
             Vec::new()
         } else {
+            context.bindings.lock_relations(&view.query)?;
+            let owner = view
+                .security
+                .owner_reference(&context.namespace.roles.role_definitions())?;
             let result = context.query_owners.with_owner(
-                &view.role_owner,
+                &owner,
                 Box::new(|queries| queries.execute(&view.query, &[])),
             )?;
             let output_columns = view.output_columns.as_deref().ok_or_else(|| {
@@ -190,6 +244,7 @@ pub fn refresh_materialized_view(
             rows
         };
         view.populated = !with_no_data;
+        context.locks.prepare_definition_write()?;
         publication::publish_materialized_view(
             context.publication,
             context.changes,

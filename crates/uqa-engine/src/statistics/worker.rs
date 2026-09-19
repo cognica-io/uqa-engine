@@ -131,7 +131,11 @@ fn refresh_due_tables(engine: &Engine) -> StorageBackendResult<()> {
             };
             let state = MaintenanceState::load_for(catalog, &name, table.object_id())?;
             let missing = state.missing(table.column_stats.read().is_empty());
-            if !state.due(missing, now_ms()) {
+            if !state.due(
+                missing,
+                now_ms(),
+                crate::statistics::value_size::FORMAT_VERSION,
+            ) {
                 return Ok(false);
             }
             engine.run_automatic_analyze(&name)

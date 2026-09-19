@@ -11,41 +11,58 @@ use uqa_execution::schema::namespaces::{
     privileges::{
         SchemaPrivilegeContext, SchemaPrivilegeNotices, SchemaPrivilegeRegistry, SchemaRegistryRead,
     },
-    NamespaceCatalogChanges, NamespaceCatalogRefresh, SchemaAuthority, SchemaCreationContext,
-    SchemaOwnerContext, SchemaRegistration, SchemaRegistrationPersistence, SchemaRegistrationState,
+    NamespaceCatalogChanges, NamespaceCatalogRefresh, SchemaCreationContext, SchemaOwnerContext,
+    SchemaRegistration, SchemaRegistrationPersistence, SchemaRegistrationState,
     SchemaRegistryWrite, SchemaSecurityCatalog, SchemaSecurityPersistence,
     SchemaSecurityPublication, SchemaStatementWriter,
 };
-use uqa_sql::{catalog::security::SchemaSecurity, SQLError};
+use uqa_sql::{catalog::security::BoundSchemaSecurity, SQLError};
 use uqa_storage::StorageBackendResult;
 
 impl Engine {
+    fn schema_lock_context(
+        &self,
+    ) -> uqa_execution::schema::namespaces::locking::SchemaLockContext<'_> {
+        uqa_execution::schema::namespaces::locking::SchemaLockContext {
+            objects: self,
+            relations: self,
+            rows: self,
+            catalog: self,
+        }
+    }
     pub(crate) fn schema_creation_context(&self) -> SchemaCreationContext<'_> {
         SchemaCreationContext {
+            tuples: self.schema_lock_context(),
             writer: self,
             session: self,
             roles: self,
             catalog: self,
+            schemas: self,
             notices: self,
-            authority: self,
+            locks: self,
+            database: self,
             registration: self,
         }
     }
     pub(crate) fn schema_owner_context(&self) -> SchemaOwnerContext<'_> {
         SchemaOwnerContext {
+            tuples: self.schema_lock_context(),
             writer: self,
             refresh: self,
             session: self,
             roles: self,
-            authority: self,
+            locks: self,
+            database: self,
             catalog: self,
-            persistence: self,
             publication: self,
+            persistence: self,
             changes: self,
         }
     }
     pub(crate) fn schema_privilege_context(&self) -> SchemaPrivilegeContext<'_> {
         SchemaPrivilegeContext {
+            tuples: self.schema_lock_context(),
+            locks: self,
             writer: self,
             refresh: self,
             session: self,
@@ -67,20 +84,6 @@ impl NamespaceCatalogRefresh for Engine {
         self.synchronize_catalog_registries()
     }
 }
-impl SchemaAuthority for Engine {
-    fn current_user_has_role_privileges(&self, role: &str) -> bool {
-        Engine::current_user_has_role_privileges(self, role)
-    }
-    fn current_user_is_superuser(&self) -> bool {
-        Engine::current_user_is_superuser(self)
-    }
-    fn ensure_database_create(&self, role: &str) -> Result<(), SQLError> {
-        self.ensure_database_privilege(
-            role,
-            uqa_sql::catalog::security::database::DatabaseAclPrivilege::Create,
-        )
-    }
-}
 impl SchemaRegistrationState for MutationCoordinator<'_> {
     fn schemas_write(&self) -> SchemaRegistryWrite<'_> {
         Box::new(self.durable.schemas.write())
@@ -90,9 +93,13 @@ impl SchemaRegistrationState for MutationCoordinator<'_> {
     }
 }
 impl SchemaRegistrationPersistence for MutationCoordinator<'_> {
-    fn persist_schema(&self, name: &str, security: &SchemaSecurity) -> StorageBackendResult<()> {
+    fn persist_schema(
+        &self,
+        name: &str,
+        security: &BoundSchemaSecurity,
+    ) -> StorageBackendResult<()> {
         if let Some(catalog) = self.storage.catalog.as_ref() {
-            catalog.save_schema_row(&security.row(name))?;
+            catalog.save_schema_row(&security.row(name).into())?;
         }
         Ok(())
     }
@@ -112,24 +119,25 @@ impl SchemaRegistration for Engine {
         &self,
         name: &str,
         if_not_exists: bool,
-        role_owner: &str,
+        role_owner: uqa_core::catalog_role::RoleIdentity,
+        tuple: uqa_core::catalog_schema::SchemaTupleIdentity,
     ) -> StorageBackendResult<bool> {
         self.mutation_coordinator()
-            .register_schema(name, if_not_exists, role_owner)
+            .register_schema(name, if_not_exists, role_owner, tuple)
     }
 }
 impl SchemaSecurityCatalog for Engine {
-    fn schema_security(&self, name: &str) -> Option<SchemaSecurity> {
+    fn schema_security(&self, name: &str) -> Option<BoundSchemaSecurity> {
         self.schema_security_for_privilege(name)
     }
 }
 impl SchemaSecurityPersistence for Engine {
-    fn persist_security(&self, name: &str, security: &SchemaSecurity) -> Result<(), SQLError> {
+    fn persist_security(&self, name: &str, security: &BoundSchemaSecurity) -> Result<(), SQLError> {
         self.persist_schema_security(name, security)
     }
 }
 impl SchemaSecurityPublication for Engine {
-    fn publish_security(&self, name: &str, security: SchemaSecurity) {
+    fn publish_security(&self, name: &str, security: BoundSchemaSecurity) {
         self.durable
             .schemas
             .write()
@@ -162,6 +170,7 @@ use uqa_sql::schema::namespaces::removal::{EmptySchemaCatalog, SchemaDropCatalog
 impl Engine {
     pub(crate) fn schema_removal_context(&self) -> SchemaRemovalContext<'_> {
         SchemaRemovalContext {
+            tuples: self.schema_lock_context(),
             refresh: self,
             catalog: self,
             names: self,
@@ -179,6 +188,7 @@ impl Engine {
     }
     pub(crate) fn empty_schema_removal_context(&self) -> EmptySchemaRemovalContext<'_> {
         EmptySchemaRemovalContext {
+            tuples: self.schema_lock_context(),
             refresh: self,
             catalog: self,
             state: self,
@@ -196,10 +206,13 @@ impl EmptySchemaCatalog for Engine {
     }
 }
 impl SchemaDropCatalog for Engine {
-    fn schema_security(&self, name: &str) -> Option<SchemaSecurity> {
+    fn schema_security(&self, name: &str) -> Option<BoundSchemaSecurity> {
         self.schema_security_for_privilege(name)
     }
-    fn current_user_has_role_privileges(&self, role: &str) -> bool {
+    fn current_user_has_role_privileges(
+        &self,
+        role: &uqa_core::catalog_role::RoleIdentity,
+    ) -> bool {
         Engine::current_user_has_role_privileges(self, role)
     }
     fn schema_is_graph(&self, name: &str) -> Result<bool, String> {

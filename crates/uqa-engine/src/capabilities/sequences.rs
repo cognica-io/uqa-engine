@@ -5,7 +5,7 @@
 //
 
 //! Bind sequence catalog consumers to session namespaces and durable registry state.
-use crate::{state::SequenceSecurity, Engine, SequenceState};
+use crate::{state::BoundSequenceSecurity, Engine, SequenceState};
 use uqa_core::RelationIdentity;
 use uqa_execution::schema::sequences::{
     creation::{SequenceCreationContext, SequenceCreationNamespace, SequenceCreationPublication},
@@ -91,12 +91,9 @@ impl SequenceCreationPublication for Engine {
         relation: &RelationIdentity,
         mut state: SequenceState,
         persistence: RelationPersistence,
+        role_owner: uqa_core::catalog_role::RoleIdentity,
     ) -> Result<bool, SQLError> {
-        let role_owner = self.current_user_name();
-        let security = SequenceSecurity {
-            role_owner,
-            acl: None,
-        };
+        let security = BoundSequenceSecurity::owner(role_owner);
         let object_id = crate::new_sequence_object_id().map_err(|error| {
             SQLError::Internal(format!("allocate sequence `{name}` identity: {error}"))
         })?;
@@ -193,19 +190,6 @@ impl uqa_sql::schema::sequences::lifecycle::SequenceLifecycleCatalog for Engine 
             .get(relation)
             .is_some_and(|state| state.owner.is_some())
     }
-    fn schema_exists(&self, schema: &str) -> bool {
-        self.durable.schemas.read().contains_key(schema)
-    }
-    fn current_user_name(&self) -> String {
-        Engine::current_user_name(self)
-    }
-    fn require_schema_create(&self, schema: &str, role: &str) -> Result<(), SQLError> {
-        self.require_schema_privilege(
-            schema,
-            role,
-            crate::schema_security::SchemaAclPrivilege::Create,
-        )
-    }
     fn relation_kind_at(&self, name: &str) -> Result<Option<&'static str>, String> {
         Engine::relation_kind_at(self, name).map_err(|error| error.to_string())
     }
@@ -273,9 +257,10 @@ impl Engine {
         &self,
     ) -> uqa_execution::schema::sequences::role_ownership::SequenceRoleOwnershipContext<'_> {
         uqa_execution::schema::sequences::role_ownership::SequenceRoleOwnershipContext {
+            locks: self,
+            writer: self,
             roles: self,
             session: self,
-            access: self,
             schemas: self,
             metadata: self,
             security: self,
@@ -283,31 +268,19 @@ impl Engine {
         }
     }
 }
-impl uqa_execution::schema::sequences::role_ownership::SequenceRoleAccess for Engine {
-    fn ensure_sequence_owner(
-        &self,
-        name: &str,
-        relation: &RelationIdentity,
-    ) -> Result<String, SQLError> {
-        Engine::ensure_sequence_owner(self, name, relation)
-    }
-    fn current_user_is_superuser(&self) -> bool {
-        Engine::current_user_is_superuser(self)
-    }
-}
 impl uqa_execution::schema::sequences::role_ownership::SequenceSecurityPublication for Engine {
-    fn security(&self, relation: &RelationIdentity) -> Option<SequenceSecurity> {
+    fn security(&self, relation: &RelationIdentity) -> Option<BoundSequenceSecurity> {
         self.durable.sequence_security.read().get(relation).cloned()
     }
     fn persist_security(
         &self,
         name: &str,
         relation: &RelationIdentity,
-        security: &SequenceSecurity,
+        security: &BoundSequenceSecurity,
     ) -> Result<(), SQLError> {
         self.persist_sequence_security(name, relation, security)
     }
-    fn publish_security(&self, relation: &RelationIdentity, security: SequenceSecurity) {
+    fn publish_security(&self, relation: &RelationIdentity, security: BoundSequenceSecurity) {
         self.durable
             .sequence_security
             .write()
@@ -321,6 +294,7 @@ impl Engine {
     ) -> uqa_execution::schema::sequences::lifecycle::SequenceLifecycleContext<'_> {
         uqa_execution::schema::sequences::lifecycle::SequenceLifecycleContext {
             analysis: self,
+            creation: self.relation_creation_context(),
             schemas: self.schema_dependency_publication_context(),
             views: self.view_sequence_rewrite_context(),
             state: self,
@@ -335,6 +309,7 @@ impl Engine {
     ) -> uqa_execution::schema::sequences::dispatch::SequenceAlterContext<'_> {
         uqa_execution::schema::sequences::dispatch::SequenceAlterContext {
             catalog: self,
+            authority: self.table_privilege_context(),
             definition: self.sequence_definition_context(),
             roles: self.sequence_role_ownership_context(),
             lifecycle: self.sequence_lifecycle_context(),

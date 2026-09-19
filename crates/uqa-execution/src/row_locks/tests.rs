@@ -25,6 +25,49 @@ fn wait_until_registered(manager: &RowLockManager, session_id: u64) {
 }
 
 #[test]
+fn scoring_parameter_names_have_stable_independent_transaction_lock_identities() {
+    let manager = RowLockManager::new();
+    let peer = RowLockManager::new();
+    let sql_table = manager.table_key("docs.body");
+    let signal = manager.scoring_parameters_key("docs.body");
+    let other = manager.scoring_parameters_key("docs.title");
+    // A different local registration order must not change cross-process ownership.
+    let peer_signal = peer.scoring_parameters_key("docs.body");
+    peer.table_key("docs.body");
+    assert_eq!(
+        manager.relation_bytes(signal),
+        peer.relation_bytes(peer_signal)
+    );
+    assert_ne!(
+        manager.relation_bytes(signal),
+        manager.relation_bytes(sql_table)
+    );
+    let first = manager.allocate_session();
+    let second = manager.allocate_session();
+    let cancel = uqa_core::CancellationToken::new();
+    let acquire = |session_id, table| {
+        manager.acquire(&LockRequest {
+            session_id,
+            key: RowLockKey { table, doc_id: 0 },
+            strength: LockStrength::ForUpdate,
+            mark: 1,
+            wait: uqa_sql::ast::LockWait::NoWait,
+            cancel: &cancel,
+            relation: "docs.body",
+        })
+    };
+    assert_granted(acquire(first, signal));
+    assert_eq!(
+        acquire(second, signal).unwrap_err().sqlstate(),
+        Some("55P03")
+    );
+    assert_granted(acquire(second, other));
+    assert_granted(acquire(second, sql_table));
+    manager.release_mark_above(first, 0);
+    assert_granted(acquire(second, signal));
+}
+
+#[test]
 fn postgresql_tuple_lock_conflicts_match_strength_matrix() {
     use LockStrength::{ForKeyShare, ForNoKeyUpdate, ForShare, ForUpdate};
     assert!(!lock_strengths_conflict(ForKeyShare, ForKeyShare));

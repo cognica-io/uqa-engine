@@ -18,6 +18,7 @@ use uqa_sql::{
     ast::{
         AlterTableAction, AutoIncrement, ColumnDef, ForeignKey, PartitionBound,
         RelationPersistence, TableCheck, TableConstraintSet, TableHierarchy, TableKeyConstraint,
+        TableLockMode,
     },
     SQLError,
 };
@@ -40,7 +41,7 @@ pub trait HierarchyCatalog {
 }
 pub trait HierarchyNamespace {
     fn resolve_visible_relation_kind(&self, name: &str) -> Result<RelationResolution, SQLError>;
-    fn lock_exclusive(&self, table: &str) -> Result<(), SQLError>;
+    fn lock_relation(&self, table: &str, mode: TableLockMode) -> Result<(), SQLError>;
 }
 pub struct HierarchyContext<'a> {
     pub catalog: &'a dyn HierarchyCatalog,
@@ -81,7 +82,7 @@ fn add_inheritance(
     requested_parent: &str,
 ) -> Result<(), SQLError> {
     let parent = resolve_table(context, requested_parent)?;
-    lock_secondary_relation(context, child, &parent)?;
+    lock_secondary_relation(context, child, &parent, TableLockMode::ShareUpdateExclusive)?;
     validate_matching_persistence(context, child, &parent, "inherit from")?;
     let mut hierarchy = read_hierarchy(context, child)?;
     let parent_hierarchy = read_hierarchy(context, &parent)?;
@@ -136,7 +137,7 @@ fn drop_inheritance(
     requested_parent: &str,
 ) -> Result<(), SQLError> {
     let parent = resolve_table(context, requested_parent)?;
-    lock_secondary_relation(context, child, &parent)?;
+    lock_secondary_relation(context, child, &parent, TableLockMode::AccessShare)?;
     let mut hierarchy = read_hierarchy(context, child)?;
     if hierarchy.is_partition() {
         return Err(wrong_object("cannot change inheritance of a partition"));
@@ -172,7 +173,7 @@ fn attach_partition(
     bound: PartitionBound,
 ) -> Result<(), SQLError> {
     let partition = resolve_table(context, requested_partition)?;
-    lock_secondary_relation(context, parent, &partition)?;
+    lock_secondary_relation(context, parent, &partition, TableLockMode::AccessExclusive)?;
     validate_matching_persistence(context, &partition, parent, "attach to")?;
     let parent_hierarchy = read_hierarchy(context, parent)?;
     let Some(parent_spec) = parent_hierarchy.partition_spec.as_ref() else {
@@ -297,7 +298,7 @@ fn detach_partition(
     finalize: bool,
 ) -> Result<(), SQLError> {
     let partition = resolve_table(context, requested_partition)?;
-    lock_secondary_relation(context, parent, &partition)?;
+    lock_secondary_relation(context, parent, &partition, TableLockMode::AccessExclusive)?;
     let parent_hierarchy = read_hierarchy(context, parent)?;
     let Some(parent_spec) = parent_hierarchy.partition_spec.as_ref() else {
         return Err(wrong_object(format!(
@@ -643,9 +644,10 @@ fn lock_secondary_relation(
     context: &HierarchyContext<'_>,
     primary: &str,
     secondary: &str,
+    mode: TableLockMode,
 ) -> Result<(), SQLError> {
     if primary != secondary {
-        context.namespace.lock_exclusive(secondary)?;
+        context.namespace.lock_relation(secondary, mode)?;
     }
     Ok(())
 }

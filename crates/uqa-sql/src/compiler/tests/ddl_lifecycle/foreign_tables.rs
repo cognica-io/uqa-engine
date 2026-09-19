@@ -16,7 +16,7 @@ fn foreign_table_ownership_and_drop_preserve_relation_lifecycle_semantics() {
             name,
             if_exists: false,
             action: crate::ast::AlterForeignTableAction::OwnerTo(owner),
-        }) if name == "app.items" && owner == "CURRENT_USER"
+        }) if name == "app.items" && owner == crate::ast::RoleSpecification::CurrentUser
     ));
     assert!(matches!(
         first("ALTER FOREIGN TABLE IF EXISTS app.items OWNER TO next_owner"),
@@ -24,7 +24,7 @@ fn foreign_table_ownership_and_drop_preserve_relation_lifecycle_semantics() {
             name,
             if_exists: true,
             action: crate::ast::AlterForeignTableAction::OwnerTo(owner),
-        }) if name == "app.items" && owner == "next_owner"
+        }) if name == "app.items" && owner == crate::ast::RoleSpecification::from("next_owner")
     ));
     assert!(matches!(
         first("ALTER FOREIGN TABLE app.items RENAME TO archived_items"),

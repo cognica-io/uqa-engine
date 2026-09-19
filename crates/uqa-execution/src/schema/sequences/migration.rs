@@ -44,7 +44,7 @@ fn persisted_relation_names(
 pub fn materialize_persisted_foreign_implicit_sequences(
     catalog: &dyn CatalogFacade,
     relation: &RelationIdentity,
-    role_owner: &str,
+    role_owner: uqa_core::catalog_role::RoleIdentity,
     table_object_id: [u8; 16],
     columns: &mut [uqa_sql::ast::ColumnDef],
 ) -> StorageBackendResult<bool> {
@@ -97,10 +97,7 @@ pub fn materialize_persisted_foreign_implicit_sequences(
         let object_id =
             crate::catalog::identity::new_nonzero_catalog_identity("sequence", "object identity")?;
         state.definition_generation = object_id;
-        let security = crate::catalog::security::SequenceSecurity {
-            role_owner: role_owner.to_string(),
-            acl: None,
-        };
+        let security = crate::catalog::security::BoundSequenceSecurity::owner(role_owner);
         if !catalog.create_sequence_row(&crate::catalog::sequence::sequence_row(
             &sequence,
             object_id,

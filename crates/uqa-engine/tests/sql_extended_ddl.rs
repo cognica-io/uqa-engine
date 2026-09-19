@@ -281,7 +281,7 @@ fn legacy_unqualified_foreign_keys_ignore_search_path_and_fail_on_ambiguity() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("legacy-unqualified-fk.db");
     {
-        let engine = Engine::open(&database).unwrap();
+        let engine = crate::native_storage::legacy_engine(&database);
         engine.sql("CREATE SCHEMA app", &[]).unwrap();
         engine
             .sql("CREATE TABLE app.parent (id INTEGER PRIMARY KEY)", &[])
@@ -347,21 +347,17 @@ fn legacy_unqualified_foreign_keys_ignore_search_path_and_fail_on_ambiguity() {
     );
     drop(reopened);
 
-    connection
-        .with(|connection| {
-            connection.execute(
-                "UPDATE _tables \
-                 SET constraints = replace(\
-                     constraints, \
-                     '\"ref_table\":\"parent\"', \
-                     '\"ref_table\":\"missing\"'\
-                 ) \
-                 WHERE schema_name = 'app' AND relation_name = 'child'",
-                [],
-            )?;
-            Ok(())
-        })
+    let catalog = crate::native_storage::catalog(connection).unwrap();
+    let mut schema = catalog
+        .load_tables()
+        .unwrap()
+        .into_iter()
+        .find(|schema| schema.relation.qualified_name() == "app.child")
         .unwrap();
+    schema.constraints_json = schema
+        .constraints_json
+        .replace("\"ref_table\":\"parent\"", "\"ref_table\":\"missing\"");
+    catalog.save_table(&schema).unwrap();
     let dangling = Engine::open(&database).unwrap();
     let dangling_error = dangling.foreign_keys("app.child").unwrap_err();
     assert!(

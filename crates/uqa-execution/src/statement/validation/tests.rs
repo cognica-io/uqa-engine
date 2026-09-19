@@ -11,6 +11,7 @@ use crate::{
 };
 use parking_lot::Mutex;
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::{FunctionBinding, RelationPersistence, RuleEvent},
     catalog::{
@@ -49,7 +50,7 @@ impl Inputs {
 }
 
 impl CatalogSession for Inputs {
-    fn current_user(&self) -> String {
+    fn current_role(&self) -> RoleReference {
         panic!("validation must not read unrelated session values")
     }
     fn temporary_schema_name(&self) -> String {
@@ -70,6 +71,9 @@ impl CatalogSession for Inputs {
     }
     fn runtime_parameter_source(&self, _: &str) -> &'static str {
         panic!("validation must not enumerate settings")
+    }
+    fn cursors(&self) -> Vec<uqa_sql::catalog::session::CursorMetadata> {
+        panic!("unexpected cursor catalog read")
     }
     fn prepared_statements(&self) -> Vec<PreparedStatementMetadata> {
         panic!("validation must not enumerate prepared statements")
@@ -201,12 +205,12 @@ fn cte_syntax_and_rule_errors_precede_read_only_observation_and_snapshot_marking
     assert!(
         matches!(error, SQLError::Unsupported(message) if message == "WITH clause containing a data-modifying statement must be at the top level")
     );
-    assert_eq!(*inputs.events.lock(), ["resolution"]);
+    assert!(inputs.events.lock().is_empty());
     inputs.events.lock().clear();
     let query = plan("WITH moved AS (DELETE FROM items RETURNING id) SELECT id FROM moved");
     let error = validate_plan(&inputs.context(), &cancellation, &query).unwrap_err();
     assert!(matches!(error, SQLError::Internal(message) if message == "rule catalog unavailable"));
-    assert_eq!(*inputs.events.lock(), ["resolution", "target", "rules"]);
+    assert_eq!(*inputs.events.lock(), ["target", "rules"]);
 }
 
 #[test]
@@ -217,14 +221,7 @@ fn effects_are_captured_after_cte_rules_and_snapshot_marking_requires_success() 
     validate_plan(&inputs.context(), &cancellation, &query).unwrap();
     assert_eq!(
         *inputs.events.lock(),
-        [
-            "resolution",
-            "target",
-            "rules",
-            "effects",
-            "read-only",
-            "snapshot"
-        ]
+        ["target", "rules", "effects", "read-only", "snapshot"]
     );
     let reader = Inputs {
         read_only: true,
@@ -237,8 +234,5 @@ fn effects_are_captured_after_cte_rules_and_snapshot_marking_requires_success() 
     )
     .unwrap_err();
     assert!(matches!(error, SQLError::Routine { sqlstate, .. } if sqlstate == "25006"));
-    assert_eq!(
-        *reader.events.lock(),
-        ["resolution", "effects", "read-only"]
-    );
+    assert_eq!(*reader.events.lock(), ["effects", "read-only"]);
 }

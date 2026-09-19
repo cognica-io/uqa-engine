@@ -32,7 +32,6 @@ impl Engine {
         }
         let session_snapshot = self.snapshot_session_state();
         let data_snapshot = self.snapshot_transaction_data()?;
-        let relation_states_at_begin = self.transaction_relation_states();
         let deferred = Self::backend_savepoints_deferred(stack);
         let storage_savepoint = StorageSavepointId::allocate();
         let frame = stack.last_mut().ok_or_else(|| {
@@ -55,11 +54,9 @@ impl Engine {
         frame.savepoints.push(TransactionSavepoint {
             name,
             storage_savepoint,
-            intent: frame.intent,
             characteristics: frame.characteristics,
             session_snapshot,
             data_snapshot,
-            relation_states_at_begin,
             dirty: self.transaction_dirty_state(),
             lock_mark: keep_mark,
             row_changes,
@@ -93,14 +90,12 @@ impl Engine {
                 message: format!("savepoint \"{name}\" does not exist"),
             })?;
         let storage_savepoint = frame.savepoints[position].storage_savepoint;
-        let intent = frame.savepoints[position].intent;
         let characteristics = frame.savepoints[position].characteristics;
         if let Some(backend) = self.storage.backend.as_ref().filter(|_| !deferred) {
             backend
                 .release_savepoint(storage_savepoint)
                 .map_err(|err| Self::storage_tx_error("RELEASE SAVEPOINT", &err))?;
         }
-        frame.intent = intent;
         frame.characteristics = characteristics;
         frame.savepoints.truncate(position);
         frame.xid_levels.truncate(position + 1);
@@ -125,13 +120,6 @@ impl Engine {
                 sqlstate: "3B001".into(),
                 message: format!("savepoint \"{name}\" does not exist"),
             })?;
-        let rollback_relation_states = stack
-            .last()
-            .and_then(|frame| frame.savepoints.get(position))
-            .map(|savepoint| savepoint.relation_states_at_begin.clone())
-            .unwrap_or_default();
-        let nontransactional_column_stats =
-            self.retain_nontransactional_stats_for_rollback(stack, &rollback_relation_states);
         let deferred = Self::backend_savepoints_deferred(stack);
         let frame = stack.last_mut().ok_or_else(|| SQLError::Routine {
             sqlstate: "25P01".into(),
@@ -152,12 +140,6 @@ impl Engine {
             }
         }
         self.restore_transaction_dirty_state(savepoint.dirty);
-        if let Err(error) = self.persist_nontransactional_column_stats_after_rollback(
-            &nontransactional_column_stats,
-            false,
-        ) {
-            cleanup_errors.push(format!("ANALYZE statistics restore: {error}"));
-        }
         if let Err(error) = self.reload_persistent_value_indexes() {
             cleanup_errors.push(format!("btree restore: {error}"));
         }
@@ -168,10 +150,6 @@ impl Engine {
             if let Err(error) = self.reload_catalog_registries_after_rollback() {
                 cleanup_errors.push(format!("registry restore: {error}"));
             }
-        }
-        if let Err(error) = self.apply_nontransactional_column_stats(&nontransactional_column_stats)
-        {
-            cleanup_errors.push(format!("ANALYZE statistics cache restore: {error}"));
         }
         self.restore_session_state_preserving_sequences(
             &savepoint.session_snapshot,
@@ -216,7 +194,6 @@ impl TransactionFrame {
             .clone_from(&savepoint.deferred_constraint_trigger_events);
         self.constraint_modes
             .clone_from(&savepoint.constraint_modes);
-        self.intent = savepoint.intent;
         self.characteristics = savepoint.characteristics;
     }
 }

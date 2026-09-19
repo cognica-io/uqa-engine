@@ -7,7 +7,10 @@
 //! Versioned IVF metadata encoding, restoration, and atomic snapshot writes.
 
 use serde::{Deserialize, Serialize};
-use uqa_core::DocId;
+use uqa_core::{
+    memory::{Budgeted, BudgetedVec},
+    DocId,
+};
 
 use super::codec::{
     blob_to_vector, decode_u64_value, decode_value, encode_value, other_error, read_u64,
@@ -17,37 +20,37 @@ use super::index_keys::{
     ivf_assignment_doc_prefix, ivf_assignment_key, ivf_assignment_prefix, ivf_centroid_key,
     ivf_centroid_prefix, ivf_metadata_key,
 };
-use super::{KeyValueBatch, KeyValueStore, KeyValueVectorIndex};
+use super::{KeyValueBatch, KeyValueRead, KeyValueVectorIndex};
 use crate::ivf_index::{IVFIndex, IVFMetadataSnapshot, IVFState};
 use crate::vector_index::IVFIndexParams;
 use crate::StorageBackendResult;
 
-const IVF_FORMAT_VERSION: u32 = 1;
+pub(super) const IVF_FORMAT_VERSION: u32 = 1;
 
 #[derive(Debug, Serialize, Deserialize)]
-struct PersistedIVFMetadata {
-    format_version: u32,
-    dimensions: u32,
-    nlist: u64,
-    nprobe: u64,
-    train_threshold: u64,
-    state: PersistedIVFState,
-    trained_size: u64,
-    deletes_since_train: u64,
-    vector_count: u64,
-    revision: u64,
+pub(super) struct PersistedIVFMetadata {
+    pub(super) format_version: u32,
+    pub(super) dimensions: u32,
+    pub(super) nlist: u64,
+    pub(super) nprobe: u64,
+    pub(super) train_threshold: u64,
+    pub(super) state: PersistedIVFState,
+    pub(super) trained_size: u64,
+    pub(super) deletes_since_train: u64,
+    pub(super) vector_count: u64,
+    pub(super) revision: u64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum PersistedIVFState {
+pub(super) enum PersistedIVFState {
     Untrained,
     Trained,
     Stale,
 }
 
 pub(super) fn restore_state(
-    store: &dyn KeyValueStore,
+    store: &dyn KeyValueRead,
     raw: &KeyValueVectorIndex,
     table: &str,
     field: &str,
@@ -60,30 +63,38 @@ pub(super) fn restore_state(
         ))
     })?;
     validate_metadata(&metadata, table, field, dimensions, params)?;
+    let trained_size = checked_usize(metadata.trained_size, "IVF trained_size")?;
+    let deletes_since_train =
+        checked_usize(metadata.deletes_since_train, "IVF deletes_since_train")?;
+    let vector_count = checked_usize(metadata.vector_count, "IVF vector_count")?;
+    let centroids = load_centroids(store, table, field)?;
+    let assignments = load_assignments(store, table, field)?;
+    let vectors = raw.load_all_from(store)?;
+    let (centroids, centroid_memory) = centroids.into_parts();
+    let (assignments, assignment_memory) = assignments.into_parts();
+    let (vectors, vector_memory) = vectors.into_parts();
+    let _decoded_memory = (centroid_memory, assignment_memory, vector_memory);
     let snapshot = IVFMetadataSnapshot {
         state: metadata.state.into(),
-        centroids: load_centroids(store, table, field)?,
-        assignments: load_assignments(store, table, field)?,
-        trained_size: checked_usize(metadata.trained_size, "IVF trained_size")?,
-        deletes_since_train: checked_usize(
-            metadata.deletes_since_train,
-            "IVF deletes_since_train",
-        )?,
-        vector_count: checked_usize(metadata.vector_count, "IVF vector_count")?,
+        centroids,
+        assignments,
+        trained_size,
+        deletes_since_train,
+        vector_count,
     };
     let index = IVFIndex::from_persistence(
         dimensions,
         params.nlist,
         params.nprobe,
         params.train_threshold,
-        raw.load_all_with_ordinals()?,
+        vectors,
         snapshot,
     )?;
     Ok((index, metadata.revision))
 }
 
 pub(super) fn load_revision(
-    store: &dyn KeyValueStore,
+    store: &dyn KeyValueRead,
     table: &str,
     field: &str,
 ) -> StorageBackendResult<Option<u64>> {
@@ -104,33 +115,45 @@ pub(super) fn stage_snapshot(
     revision: u64,
     full_rewrite: bool,
     changed_doc: Option<DocId>,
+    preview: bool,
 ) -> StorageBackendResult<()> {
-    batch.put(
+    if !preview {
+        batch.fence_ivf_prefix(&ivf_metadata_key(table, field)?)?;
+    }
+    put_record(
+        batch,
+        preview,
         &ivf_metadata_key(table, field)?,
         &encode_value(&metadata_from_snapshot(
             dimensions, params, snapshot, revision,
         )?)?,
     )?;
     if full_rewrite {
-        batch.delete_prefix(&ivf_centroid_prefix(table, field)?)?;
-        batch.delete_prefix(&ivf_assignment_prefix(table, field)?)?;
+        delete_prefix(batch, preview, &ivf_centroid_prefix(table, field)?)?;
+        delete_prefix(batch, preview, &ivf_assignment_prefix(table, field)?)?;
         for (centroid, vector) in snapshot.centroids.iter().enumerate() {
-            batch.put(
+            put_record(
+                batch,
+                preview,
                 &ivf_centroid_key(table, field, centroid)?,
                 &vector_to_blob(vector)?,
             )?;
         }
         for (doc_id, ordinal, centroid) in &snapshot.assignments {
-            put_assignment(batch, table, field, *doc_id, *ordinal, *centroid)?;
+            put_assignment(batch, table, field, *doc_id, *ordinal, *centroid, preview)?;
         }
     } else if let Some(doc_id) = changed_doc {
-        batch.delete_prefix(&ivf_assignment_doc_prefix(table, field, doc_id)?)?;
+        delete_prefix(
+            batch,
+            preview,
+            &ivf_assignment_doc_prefix(table, field, doc_id)?,
+        )?;
         for (_, ordinal, centroid) in snapshot
             .assignments
             .iter()
             .filter(|(candidate, _, _)| *candidate == doc_id)
         {
-            put_assignment(batch, table, field, doc_id, *ordinal, *centroid)?;
+            put_assignment(batch, table, field, doc_id, *ordinal, *centroid, preview)?;
         }
     }
     Ok(())
@@ -143,15 +166,18 @@ fn put_assignment(
     doc_id: DocId,
     ordinal: u32,
     centroid: usize,
+    preview: bool,
 ) -> StorageBackendResult<()> {
-    batch.put(
+    put_record(
+        batch,
+        preview,
         &ivf_assignment_key(table, field, doc_id, ordinal)?,
         &usize_to_u64(centroid, "IVF centroid assignment")?.to_be_bytes(),
     )
 }
 
 fn load_metadata(
-    store: &dyn KeyValueStore,
+    store: &dyn KeyValueRead,
     table: &str,
     field: &str,
 ) -> StorageBackendResult<Option<PersistedIVFMetadata>> {
@@ -162,47 +188,58 @@ fn load_metadata(
 }
 
 fn load_centroids(
-    store: &dyn KeyValueStore,
+    store: &dyn KeyValueRead,
     table: &str,
     field: &str,
-) -> StorageBackendResult<Vec<Vec<f32>>> {
+) -> StorageBackendResult<Budgeted<Vec<Vec<f32>>>> {
     let prefix = ivf_centroid_prefix(table, field)?;
-    let mut centroids = Vec::new();
-    for (expected, (key, value)) in store.scan_prefix(&prefix)?.into_iter().enumerate() {
+    let mut output = (
+        BudgetedVec::new(store.control().memory()),
+        store.control().memory().reserve(0)?,
+    );
+    let (centroids, payload) = (&mut output.0, &mut output.1);
+    store.visit_prefix(&prefix, &mut |key, value| {
         let mut offset = prefix.len();
-        let found = read_u64(&key, &mut offset)?;
-        if offset != key.len() || found != usize_to_u64(expected, "IVF centroid id")? {
+        let found = read_u64(key, &mut offset)?;
+        if offset != key.len() || found != usize_to_u64(centroids.len(), "IVF centroid id")? {
             return Err(other_error("corrupt IVF centroid key sequence"));
         }
-        centroids.push(blob_to_vector(&value)?);
-    }
-    Ok(centroids)
+        payload.grow(value.len())?;
+        centroids.reserve(1)?;
+        centroids.push(blob_to_vector(value)?)?;
+        Ok(())
+    })?;
+    let (centroids, mut memory) = output.0.into_parts();
+    memory.absorb(output.1);
+    Ok(Budgeted::new(centroids, memory))
 }
 
 fn load_assignments(
-    store: &dyn KeyValueStore,
+    store: &dyn KeyValueRead,
     table: &str,
     field: &str,
-) -> StorageBackendResult<Vec<(DocId, u32, usize)>> {
+) -> StorageBackendResult<Budgeted<Vec<(DocId, u32, usize)>>> {
     let prefix = ivf_assignment_prefix(table, field)?;
-    let mut assignments = Vec::new();
-    for (key, value) in store.scan_prefix(&prefix)? {
+    let mut assignments = BudgetedVec::new(store.control().memory());
+    store.visit_prefix(&prefix, &mut |key, value| {
         let mut offset = prefix.len();
-        let doc_id = read_u64(&key, &mut offset)?;
-        let ordinal = u32::try_from(read_u64(&key, &mut offset)?)
+        let doc_id = read_u64(key, &mut offset)?;
+        let ordinal = u32::try_from(read_u64(key, &mut offset)?)
             .map_err(|_| other_error("persisted IVF ordinal exceeds u32"))?;
         if offset != key.len() {
             return Err(other_error(
                 "persisted IVF assignment key has trailing bytes",
             ));
         }
-        let centroid = checked_usize(decode_u64_value(&value)?, "IVF centroid assignment")?;
-        assignments.push((doc_id, ordinal, centroid));
-    }
-    Ok(assignments)
+        let centroid = checked_usize(decode_u64_value(value)?, "IVF centroid assignment")?;
+        assignments.push((doc_id, ordinal, centroid))?;
+        Ok(())
+    })?;
+    let (assignments, memory) = assignments.into_parts();
+    Ok(Budgeted::new(assignments, memory))
 }
 
-fn metadata_from_snapshot(
+pub(super) fn metadata_from_snapshot(
     dimensions: u32,
     params: IVFIndexParams,
     snapshot: &IVFMetadataSnapshot,
@@ -266,5 +303,29 @@ impl From<PersistedIVFState> for IVFState {
             PersistedIVFState::Trained => Self::Trained,
             PersistedIVFState::Stale => Self::Stale,
         }
+    }
+}
+
+fn put_record(
+    batch: &mut dyn KeyValueBatch,
+    preview: bool,
+    key: &[u8],
+    value: &[u8],
+) -> StorageBackendResult<()> {
+    if preview {
+        batch.preview_ivf_record(key, Some(value))
+    } else {
+        batch.put(key, value)
+    }
+}
+fn delete_prefix(
+    batch: &mut dyn KeyValueBatch,
+    preview: bool,
+    prefix: &[u8],
+) -> StorageBackendResult<()> {
+    if preview {
+        batch.preview_ivf_prefix(prefix)
+    } else {
+        batch.delete_prefix(prefix)
     }
 }

@@ -514,9 +514,6 @@ impl Engine {
             if let Some(doc_id) =
                 Self::doc_id_for_primary_key_conflict(&t, &conflict_columns[0], &values[0])
             {
-                if u128::from(doc_id) >= *t.next_id.lock() {
-                    return Ok(None);
-                }
                 let exists = t
                     .document_store
                     .read()

@@ -7,19 +7,21 @@
 //! Consumer-owned services required to project catalog rows.
 use super::RelationNameResolution;
 use uqa_core::Value;
-use uqa_sql::catalog::session::PreparedStatementMetadata;
+use uqa_sql::catalog::roles::RoleReference;
+use uqa_sql::catalog::session::{CursorMetadata, PreparedStatementMetadata};
 use uqa_sql::{
     ast::{Expr, TriggerEvent},
     SQLError,
 };
 
 pub trait CatalogSession: Sync {
-    fn current_user(&self) -> String;
+    fn current_role(&self) -> RoleReference;
     fn temporary_schema_name(&self) -> String;
     fn relation_name_resolution(&self) -> RelationNameResolution;
     fn show_variable(&self, name: &str) -> Result<String, SQLError>;
     fn runtime_parameter_source(&self, name: &str) -> &'static str;
     fn prepared_statements(&self) -> Vec<PreparedStatementMetadata>;
+    fn cursors(&self) -> Vec<CursorMetadata>;
 }
 pub trait CatalogExpressionEvaluation: Sync {
     fn evaluate(&self, expression: &Expr) -> Result<Value, SQLError>;

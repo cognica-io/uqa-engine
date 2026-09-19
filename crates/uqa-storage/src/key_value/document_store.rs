@@ -4,183 +4,246 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Document-store adapter over an ordered key/value store.
+//! Document access and mutations use one provider-owned view of the exact storage name.
 
-use super::codec::{
-    decode_document_value, decode_stored_document_value,
-    decode_stored_document_value_for_migration, decode_value, document_key, document_key_prefix,
-    document_value_is_current, encode_stored_document_value, key_with_tag, other_error, read_str,
-    read_u64, single_str_key, string_value,
-};
-use super::{
-    Arc, DocId, Document, DocumentMetadata, DocumentStore, KeyValueStore, StorageBackendResult,
-    StoredDocument, Value, TAG_DOCUMENT, TAG_METADATA, TAG_TABLE,
-};
-use crate::TableSchema;
+mod migration;
+mod read;
 
-const DOCUMENT_FORMAT_METADATA_KEY: &str = "document_storage_format";
-const DOCUMENT_FORMAT_NAME: &str = "record-v2";
-const MIGRATION_PAGE_SIZE: usize = 512;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use super::codec::{document_key, document_key_prefix, encode_stored_document_value, other_error};
+use super::{table_owners, KeyValueBatch, KeyValueRead, KeyValueStore};
+use crate::document_store::Document;
+use crate::{DocumentStore, StorageBackendResult, StoredDocument};
+use read::Documents;
+use uqa_core::{DocId, Value};
+
+#[derive(Clone)]
+enum Source {
+    Live(Arc<dyn KeyValueStore>),
+    Retained(Arc<dyn KeyValueRead + Send + Sync>),
+}
 
 /// Document store implemented over [`KeyValueStore`].
 #[derive(Clone)]
 pub struct KeyValueDocumentStore {
-    store: Arc<dyn KeyValueStore>,
+    source: Source,
     table: String,
 }
 
 impl KeyValueDocumentStore {
     pub fn new(store: Arc<dyn KeyValueStore>, table: impl Into<String>) -> Self {
         Self {
-            store,
+            source: Source::Live(store),
             table: table.into(),
         }
     }
 
-    pub(crate) fn migrate_legacy_storage(store: &dyn KeyValueStore) -> StorageBackendResult<()> {
-        let marker = single_str_key(TAG_METADATA, DOCUMENT_FORMAT_METADATA_KEY)?;
-        if let Some(format) = store.get(&marker)? {
-            if format == DOCUMENT_FORMAT_NAME.as_bytes() {
-                return Ok(());
-            }
-            return Err(other_error(format!(
-                "unsupported KeyValue document format `{}`",
-                String::from_utf8_lossy(&format)
-            )));
+    fn read<T>(
+        &self,
+        query: impl FnOnce(Documents<'_>) -> StorageBackendResult<T>,
+    ) -> StorageBackendResult<T> {
+        let mut query = Some(query);
+        let mut result = None;
+        let mut visit = |read: &dyn KeyValueRead| {
+            let query = query
+                .take()
+                .ok_or_else(|| other_error("document read was evaluated twice"))?;
+            result = Some(query(Documents {
+                read,
+                table: &self.table,
+            })?);
+            Ok(())
+        };
+        match &self.source {
+            Source::Live(store) => store.with_read_view(&mut visit)?,
+            Source::Retained(read) => visit(&**read)?,
         }
-        if store.in_transaction() {
-            return Err(other_error(
-                "cannot migrate KeyValue documents inside an active transaction",
-            ));
-        }
-        store.begin_transaction()?;
-        let migration = Self::migrate_legacy_storage_in_transaction(store, &marker);
-        match migration {
-            Ok(()) => store.commit_transaction(),
-            Err(error) => match store.rollback_transaction() {
-                Ok(()) => Err(error),
-                Err(rollback) => Err(other_error(format!(
-                    "{error}; KeyValue document migration rollback also failed: {rollback}"
-                ))),
-            },
-        }
+        result.ok_or_else(|| other_error("document read was not evaluated"))
     }
 
-    fn migrate_legacy_storage_in_transaction(
-        store: &dyn KeyValueStore,
-        marker: &[u8],
-    ) -> StorageBackendResult<()> {
-        let (known_tables, declared_xmin_tables) = catalog_xmin_tables(store)?;
-        let prefix = key_with_tag(TAG_DOCUMENT);
-        let mut after = None::<Vec<u8>>;
-        loop {
-            let page = store.scan_prefix_after(&prefix, after.as_deref(), MIGRATION_PAGE_SIZE)?;
-            if page.is_empty() {
-                break;
-            }
-            for (key, value) in page {
-                after = Some(key.clone());
-                if document_value_is_current(&value) {
-                    continue;
-                }
-                let mut offset = 1;
-                let table = read_str(&key, &mut offset)?;
-                let preserve_public_xmin =
-                    !known_tables.contains(&table) || declared_xmin_tables.contains(&table);
-                let document =
-                    decode_stored_document_value_for_migration(&value, preserve_public_xmin)?;
-                store.put(&key, &encode_stored_document_value(&document)?)?;
-            }
-        }
-        store.put(marker, &string_value(DOCUMENT_FORMAT_NAME))
+    fn mutate<T>(
+        &self,
+        change: impl FnOnce(
+            Documents<'_>,
+            &mut dyn KeyValueBatch,
+            Option<table_owners::Owner>,
+        ) -> StorageBackendResult<T>,
+    ) -> StorageBackendResult<T> {
+        let Source::Live(store) = &self.source else {
+            return Err(other_error("document snapshot is read-only"));
+        };
+        let durable = store.identifier_allocator().is_some();
+        let mut change = Some(change);
+        let mut result = None;
+        store.with_mutation(&mut |read, batch| {
+            let change = change
+                .take()
+                .ok_or_else(|| other_error("document mutation was evaluated twice"))?;
+            let owner = if durable {
+                Some(table_owners::document_owner(read, batch, &self.table)?)
+            } else {
+                None
+            };
+            result = Some(change(
+                Documents {
+                    read,
+                    table: &self.table,
+                },
+                batch,
+                owner,
+            )?);
+            Ok(())
+        })?;
+        result.ok_or_else(|| other_error("document mutation was not evaluated"))
     }
 }
 
-fn catalog_xmin_tables(
-    store: &dyn KeyValueStore,
-) -> StorageBackendResult<(
-    std::collections::BTreeSet<String>,
-    std::collections::BTreeSet<String>,
-)> {
-    let mut known = std::collections::BTreeSet::new();
-    let mut declared_xmin = std::collections::BTreeSet::new();
-    for (_, value) in store.scan_prefix(&key_with_tag(TAG_TABLE))? {
-        let schema = decode_value::<TableSchema>(&value)?;
-        let definitions = serde_json::from_str::<Vec<serde_json::Value>>(&schema.columns_json)?;
-        let has_declared_xmin = definitions.iter().any(|definition| {
-            definition
-                .as_object()
-                .and_then(|definition| definition.get("name"))
-                .and_then(serde_json::Value::as_str)
-                == Some("xmin")
-        });
-        let aliases = schema.relation.canonical_and_legacy_public_names();
-        known.extend(aliases.iter().cloned());
-        if has_declared_xmin {
-            declared_xmin.extend(aliases);
-        }
+fn put_document(
+    batch: &mut dyn KeyValueBatch,
+    table: &str,
+    owner: Option<table_owners::Owner>,
+    id: DocId,
+    document: StoredDocument,
+) -> StorageBackendResult<()> {
+    let (mut fields, metadata) = document.into_parts();
+    fields.retain(|_, value| !matches!(value, Value::Null));
+    let bytes = encode_stored_document_value(&StoredDocument::with_metadata(fields, metadata))?;
+    if let Some(owner) = owner {
+        owner.observe(batch, id)?;
     }
-    Ok((known, declared_xmin))
+    batch.put(&document_key(table, id)?, &bytes)
 }
 
 impl DocumentStore for KeyValueDocumentStore {
-    fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
-        let metadata = self.get_metadata(doc_id)?.unwrap_or_default();
-        self.put_stored(doc_id, StoredDocument::with_metadata(document, metadata))
+    fn put(&mut self, id: DocId, document: Document) -> StorageBackendResult<()> {
+        self.mutate(|view, batch, owner| {
+            let metadata = view
+                .get(id)?
+                .map(|document| document.metadata())
+                .unwrap_or_default();
+            put_document(
+                batch,
+                view.table,
+                owner,
+                id,
+                StoredDocument::with_metadata(document, metadata),
+            )
+        })
     }
 
-    fn get(&self, doc_id: DocId) -> StorageBackendResult<Option<Document>> {
-        self.store
-            .get(&document_key(&self.table, doc_id)?)?
-            .map(|bytes| decode_document_value(&bytes))
-            .transpose()
+    fn put_stored(&mut self, id: DocId, document: StoredDocument) -> StorageBackendResult<()> {
+        self.mutate(|view, batch, owner| put_document(batch, view.table, owner, id, document))
     }
 
-    fn put_stored(&mut self, doc_id: DocId, document: StoredDocument) -> StorageBackendResult<()> {
-        let (fields, metadata) = document.into_parts();
-        let fields = fields
+    fn get_stored(&self, id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
+        self.read(|view| view.get(id))
+    }
+
+    fn get_stored_many(
+        &self,
+        ids: &[DocId],
+    ) -> StorageBackendResult<BTreeMap<DocId, StoredDocument>> {
+        self.read(|view| view.many(ids))
+    }
+
+    fn get_many(&self, ids: &[DocId]) -> StorageBackendResult<BTreeMap<DocId, Document>> {
+        Ok(self
+            .get_stored_many(ids)?
             .into_iter()
-            .filter(|(_, value)| !matches!(value, Value::Null))
-            .collect();
-        let document = StoredDocument::with_metadata(fields, metadata);
-        let value = encode_stored_document_value(&document)?;
-        self.store.put(&document_key(&self.table, doc_id)?, &value)
+            .map(|(id, document)| (id, document.into_fields()))
+            .collect())
     }
 
-    fn get_stored(&self, doc_id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
-        self.store
-            .get(&document_key(&self.table, doc_id)?)?
-            .map(|bytes| decode_stored_document_value(&bytes))
-            .transpose()
+    fn get_fields_multi(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+    ) -> StorageBackendResult<BTreeMap<DocId, Vec<Value>>> {
+        self.read(|view| view.project(ids, fields))
     }
 
-    fn get_metadata(&self, doc_id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
-        self.get_stored(doc_id)
-            .map(|document| document.map(|document| document.metadata()))
+    fn for_each_fields_multi_ref_with_presence(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
+    ) -> StorageBackendResult<()> {
+        // Finish persistence access before invoking the caller, including empty projections.
+        let projected = self.get_fields_multi(ids, fields)?;
+        let null = Value::Null;
+        let missing = vec![&null; fields.len()];
+        for id in ids {
+            let present = projected.get(id);
+            let row = present.map(|row| row.iter().collect::<Vec<_>>());
+            if !visitor(*id, present.is_some(), row.as_deref().unwrap_or(&missing)) {
+                break;
+            }
+        }
+        Ok(())
     }
 
-    fn contains_doc_id(&self, doc_id: DocId) -> StorageBackendResult<bool> {
-        self.store.contains_key(&document_key(&self.table, doc_id)?)
+    fn get_fields_bulk(
+        &self,
+        ids: &[DocId],
+        field: &str,
+    ) -> StorageBackendResult<BTreeMap<DocId, Value>> {
+        let projected = self.get_fields_multi(ids, &[field])?;
+        Ok(ids
+            .iter()
+            .map(|id| {
+                (
+                    *id,
+                    projected
+                        .get(id)
+                        .and_then(|row| row.first().cloned())
+                        .unwrap_or(Value::Null),
+                )
+            })
+            .collect())
     }
 
-    fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
-        self.store.delete(&document_key(&self.table, doc_id)?)
+    fn contains_doc_id(&self, id: DocId) -> StorageBackendResult<bool> {
+        self.read(|view| view.contains(id))
+    }
+
+    fn patch_fields(
+        &mut self,
+        id: DocId,
+        updates: &BTreeMap<String, Value>,
+    ) -> StorageBackendResult<bool> {
+        self.mutate(|view, batch, owner| {
+            let Some(mut document) = view.get(id)? else {
+                return Ok(false);
+            };
+            for (field, value) in updates {
+                if matches!(value, Value::Null) {
+                    document.fields_mut().remove(field);
+                } else {
+                    document.fields_mut().insert(field.clone(), value.clone());
+                }
+            }
+            put_document(batch, view.table, owner, id, document)?;
+            Ok(true)
+        })
+    }
+
+    fn delete(&mut self, id: DocId) -> StorageBackendResult<()> {
+        self.mutate(|view, batch, _| batch.delete(&document_key(view.table, id)?))
     }
 
     fn clear(&mut self) -> StorageBackendResult<()> {
-        self.store
-            .delete_prefix(&document_key_prefix(&self.table)?)
-            .map(|_| ())
+        self.mutate(|view, batch, owner| {
+            if let Some(owner) = owner {
+                owner.fence(batch)?;
+            }
+            batch.delete_prefix(&document_key_prefix(view.table)?)
+        })
     }
 
     fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {
-        let mut out = Vec::new();
-        for (key, _) in self.store.scan_prefix(&document_key_prefix(&self.table)?)? {
-            let mut offset = 1;
-            let _table = read_str(&key, &mut offset)?;
-            out.push(read_u64(&key, &mut offset)?);
-        }
-        Ok(out)
+        self.next_doc_ids(None, usize::MAX)
     }
 
     fn next_doc_id(&self, after: Option<DocId>) -> StorageBackendResult<Option<DocId>> {
@@ -188,34 +251,60 @@ impl DocumentStore for KeyValueDocumentStore {
     }
 
     fn next_doc_ids(&self, after: Option<DocId>, limit: usize) -> StorageBackendResult<Vec<DocId>> {
-        if limit == 0 {
-            return Ok(Vec::new());
-        }
-        let prefix = document_key_prefix(&self.table)?;
-        let after_key = after
-            .map(|doc_id| document_key(&self.table, doc_id))
-            .transpose()?;
-        let mut out = Vec::with_capacity(limit);
-        for key in self
-            .store
-            .scan_prefix_keys_after(&prefix, after_key.as_deref(), limit)?
-        {
-            let mut offset = 1;
-            let _table = read_str(&key, &mut offset)?;
-            let doc_id = read_u64(&key, &mut offset)?;
-            out.push(doc_id);
-        }
-        Ok(out)
+        self.read(|view| view.ids(after, limit))
     }
 
     fn len(&self) -> StorageBackendResult<usize> {
-        Ok(self
-            .store
-            .scan_prefix(&document_key_prefix(&self.table)?)?
-            .len())
+        self.read(|view| view.count())
+    }
+
+    fn find_doc_id_by_field(
+        &self,
+        field: &str,
+        value: &Value,
+    ) -> StorageBackendResult<Option<DocId>> {
+        self.read(|view| view.find(|document| document.get(field) == Some(value)))
+    }
+
+    fn has_value(&self, field: &str, value: &Value) -> StorageBackendResult<bool> {
+        Ok(self.find_doc_id_by_field(field, value)?.is_some())
+    }
+
+    fn find_doc_id_by_fields(
+        &self,
+        fields: &[String],
+        values: &[Value],
+    ) -> StorageBackendResult<Option<DocId>> {
+        if fields.is_empty() || fields.len() != values.len() {
+            return Ok(None);
+        }
+        self.read(|view| {
+            view.find(|document| {
+                fields
+                    .iter()
+                    .zip(values)
+                    .all(|(field, value)| document.get(field).unwrap_or(&Value::Null) == value)
+            })
+        })
+    }
+
+    fn iter_all(&self) -> StorageBackendResult<Box<dyn Iterator<Item = (DocId, Document)> + '_>> {
+        let rows = self.read(|view| view.all())?;
+        Ok(Box::new(rows.into_iter()))
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>> {
-        Ok(Arc::new(self.clone()))
+        let source = match &self.source {
+            Source::Live(_) => self.read(|view| {
+                Ok(Source::Retained(
+                    view.read.retain(&[&document_key_prefix(view.table)?])?,
+                ))
+            })?,
+            Source::Retained(_) => self.source.clone(),
+        };
+        Ok(Arc::new(Self {
+            source,
+            table: self.table.clone(),
+        }))
     }
 }

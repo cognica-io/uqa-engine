@@ -6,7 +6,7 @@
 
 //! Read guards shared by foreign catalog inquiries and definition execution.
 use super::StoredForeignTable;
-use crate::catalog::security::TableSecurity;
+use crate::catalog::security::BoundTableSecurity;
 use std::{collections::BTreeMap, ops::Deref};
 use uqa_core::RelationIdentity;
 pub type ForeignServersRead<'a> =
@@ -14,7 +14,7 @@ pub type ForeignServersRead<'a> =
 pub type ForeignTablesRead<'a> =
     Box<dyn Deref<Target = BTreeMap<RelationIdentity, StoredForeignTable>> + 'a>;
 pub type ForeignSecurityRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RelationIdentity, TableSecurity>> + 'a>;
+    Box<dyn Deref<Target = BTreeMap<RelationIdentity, BoundTableSecurity>> + 'a>;
 pub trait ForeignRegistryReads {
     fn servers(&self) -> ForeignServersRead<'_>;
     fn tables(&self) -> ForeignTablesRead<'_>;

@@ -12,8 +12,9 @@ use super::{
     PostingCursor, SQLiteError, SQLiteResult, TokenTermKey,
 };
 use uqa_storage::clustered_postings::{
-    decode_occurrence_cluster, encode_occurrence_cluster, score_count,
+    decode_occurrence_cluster, encode_occurrence_cluster_controlled, score_count,
 };
+use uqa_storage::read_control::StorageReadControl;
 use uqa_storage::StorageBackendResult;
 
 pub(super) fn clustered_result<T>(result: StorageBackendResult<T>) -> SQLiteResult<T> {
@@ -63,7 +64,9 @@ pub(super) fn write_cluster(
     term: &TokenTermKey,
     cluster_id: u64,
     entries: &[OccurrencePosting],
+    control: &StorageReadControl,
 ) -> SQLiteResult<()> {
+    control.cancellation().check()?;
     let stored_cluster = encode_index_u64("posting cluster", cluster_id)?;
     if entries.is_empty() {
         conn.execute(
@@ -74,7 +77,8 @@ pub(super) fn write_cluster(
         )?;
         return Ok(());
     }
-    let (score_blob, positions_blob) = clustered_result(encode_occurrence_cluster(entries))?;
+    let (score_blob, positions_blob) =
+        encode_occurrence_cluster_controlled(entries.iter(), control).map_err(SQLiteError::from)?;
     let posting_count = encode_index_counter("posting count", entries.len() as u64)?;
     conn.execute(
         "INSERT INTO _occurrence_clusters
@@ -91,8 +95,8 @@ pub(super) fn write_cluster(
             term.as_bytes(),
             stored_cluster,
             posting_count,
-            score_blob,
-            positions_blob
+            score_blob.as_ref(),
+            positions_blob.as_ref()
         ],
     )?;
     Ok(())

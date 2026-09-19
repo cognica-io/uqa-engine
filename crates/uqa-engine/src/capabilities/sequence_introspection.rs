@@ -9,7 +9,6 @@
 use crate::Engine;
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::{
-    security::SequenceSecurity,
     sequence::SequenceState,
     sequence_introspection::{
         SequenceIntrospectionCatalog, SequenceIntrospectionContext, SequenceObjectIdsRead,
@@ -23,9 +22,8 @@ impl Engine {
     pub(crate) fn sequence_introspection_context(&self) -> SequenceIntrospectionContext<'_> {
         SequenceIntrospectionContext {
             catalog: self.catalog_execution(),
-            sequences: self,
+            snapshots: self,
             owners: self,
-            roles: self,
         }
     }
 }
@@ -41,9 +39,6 @@ impl SequenceIntrospectionCatalog for Engine {
     }
     fn sequence_state(&self, relation: &RelationIdentity) -> Option<SequenceState> {
         self.durable.sequences.read().get(relation).copied()
-    }
-    fn sequence_security(&self, relation: &RelationIdentity) -> Option<SequenceSecurity> {
-        self.durable.sequence_security.read().get(relation).cloned()
     }
     fn sequence_persistence(&self, relation: &RelationIdentity) -> Option<RelationPersistence> {
         self.durable

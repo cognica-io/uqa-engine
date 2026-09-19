@@ -65,7 +65,10 @@ impl EventAnalysisContext<'_> {
         error_kind: Option<&str>,
     ) -> Result<(), SQLError> {
         let (owner, relation_kind) = self.catalog.event_relation_owner(relation)?;
-        if self.authority.current_user_has_role_privileges(&owner) {
+        if self
+            .authority
+            .current_user_has_role_identity_privileges(owner)
+        {
             return Ok(());
         }
         Err(SQLError::Routine {

@@ -9,6 +9,13 @@
 use uqa_core::RelationIdentity;
 use uqa_sql::SQLError;
 
+/// Resolve namespace references from the same catalog snapshot as their owning rows.
+pub fn namespace_oid(catalog: &crate::catalog::CatalogReadView, name: &str) -> i64 {
+    catalog
+        .schema_security(name)
+        .map_or_else(|| schema_oid(name), |security| security.namespace_oid(name))
+}
+
 pub fn split_schema_name(name: &str) -> Result<(String, String), SQLError> {
     let relation = RelationIdentity::from_legacy_name(name).map_err(|error| {
         SQLError::Internal(format!("invalid catalog relation `{name}`: {error}"))

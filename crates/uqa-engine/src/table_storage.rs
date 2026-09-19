@@ -26,7 +26,6 @@ fn table_not_found(table: &str) -> StorageBackendError {
     StorageBackendError::Other(format!("table `{table}` does not exist"))
 }
 
-pub(crate) use uqa_sql::schema::dependencies::rewrites::upgrade_legacy_schema_function_dispatches;
 use uqa_sql::schema::dependencies::rewrites::{
     schema_expr_references_relation, stored_relation_reference_matches,
 };
@@ -62,10 +61,7 @@ fn rename_schema_expr_qualified_column(
 
 mod columns;
 mod constraints;
-pub(crate) use constraints::{
-    foreign_keys_match_without_object_id, materialize_constraint_metadata,
-    table_next_id_metadata_key,
-};
+pub(crate) use constraints::table_next_id_metadata_key;
 mod dependencies;
 mod documents;
 mod fts;

@@ -21,6 +21,7 @@ use uqa_sql::{
 };
 pub mod context;
 pub mod recursive;
+pub(crate) mod strategy;
 pub use context::CteExecutionContext;
 use recursive::materialize_recursive_cte;
 

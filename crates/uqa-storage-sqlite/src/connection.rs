@@ -14,13 +14,20 @@
 //! readers to make real concurrent progress.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use parking_lot::{Condvar, Mutex, RwLock};
 use rusqlite::{Connection, OpenFlags};
-use uqa_storage::StorageEncryptionKey;
+use uqa_storage::{mvcc::VersionedKeyValueStore, KeyValueStore, StorageEncryptionKey};
 
 use crate::compressed_vfs::{self, SQLiteCompressedContainerAnchor, SQLiteCompressionOptions};
+
+mod logical;
+mod native;
+mod native_restore;
+mod snapshot;
+use snapshot::PhysicalConnection;
+pub(crate) use snapshot::SnapshotIdentity;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SQLiteError {
@@ -65,6 +72,8 @@ pub enum SQLiteError {
     Serde(#[from] serde_json::Error),
     #[error("storage backend error: {0}")]
     StorageBackend(String),
+    #[error(transparent)]
+    StorageSource(Box<uqa_storage::StorageBackendError>),
     #[error("transaction already active for this sqlite session")]
     TransactionAlreadyActive,
     #[error("no active transaction for this sqlite session")]
@@ -75,6 +84,12 @@ pub enum SQLiteError {
     SessionCleanupFailed(String),
     #[error("sqlite connection-pool checkout lost its connection")]
     MissingCheckedOutConnection,
+    #[error("versioned storage requires its logical session; use with_physical only for explicit physical maintenance")]
+    LogicalSessionRequired,
+    #[error("the SQLite session already has a different retention limit")]
+    SessionOptionsMismatch,
+    #[error("the SQLite session is bound to a different record mapping")]
+    SessionMappingMismatch,
 }
 
 pub type Result<T> = std::result::Result<T, SQLiteError>;
@@ -154,11 +169,17 @@ impl ConnectionSpec {
 }
 
 struct PoolState {
-    idle: Vec<Connection>,
+    idle: Vec<PhysicalConnection>,
     open: usize,
 }
 
 struct ConnectionPool {
+    snapshot_registry: Mutex<
+        Option<(
+            uqa_storage::mvcc::DatabaseId,
+            std::sync::Weak<uqa_storage::mvcc::SnapshotRegistry>,
+        )>,
+    >,
     spec: ConnectionSpec,
     max_connections: usize,
     state: Mutex<PoolState>,
@@ -173,10 +194,11 @@ struct ConnectionPool {
 impl ConnectionPool {
     fn new(spec: ConnectionSpec, initial: Connection, max_connections: usize) -> Arc<Self> {
         Arc::new(Self {
+            snapshot_registry: Mutex::new(None),
             spec,
             max_connections: max_connections.max(1),
             state: Mutex::new(PoolState {
-                idle: vec![initial],
+                idle: vec![PhysicalConnection::new(initial)],
                 open: 1,
             }),
             available: Condvar::new(),
@@ -185,7 +207,17 @@ impl ConnectionPool {
     }
 
     fn checkout(self: &Arc<Self>) -> Result<PooledConnection> {
+        self.checkout_with_cancellation(None)
+    }
+
+    fn checkout_with_cancellation(
+        self: &Arc<Self>,
+        cancellation: Option<&uqa_core::CancellationToken>,
+    ) -> Result<PooledConnection> {
         loop {
+            if let Some(cancellation) = cancellation {
+                cancellation.check()?;
+            }
             let mut state = self.state.lock();
             if let Some(connection) = state.idle.pop() {
                 return Ok(PooledConnection {
@@ -199,7 +231,7 @@ impl ConnectionPool {
                 return match self.spec.open(false) {
                     Ok(connection) => Ok(PooledConnection {
                         pool: Arc::clone(self),
-                        connection: Some(connection),
+                        connection: Some(PhysicalConnection::new(connection)),
                     }),
                     Err(error) => {
                         let mut state = self.state.lock();
@@ -209,11 +241,16 @@ impl ConnectionPool {
                     }
                 };
             }
-            self.available.wait(&mut state);
+            if cancellation.is_some() {
+                self.available
+                    .wait_for(&mut state, std::time::Duration::from_millis(10));
+            } else {
+                self.available.wait(&mut state);
+            }
         }
     }
 
-    fn checkin(&self, connection: Connection) {
+    fn checkin(&self, connection: PhysicalConnection) {
         self.state.lock().idle.push(connection);
         self.available.notify_one();
     }
@@ -227,20 +264,25 @@ impl ConnectionPool {
 
 pub(crate) struct PooledConnection {
     pool: Arc<ConnectionPool>,
-    connection: Option<Connection>,
+    connection: Option<PhysicalConnection>,
 }
 
 impl PooledConnection {
     pub(crate) fn connection(&self) -> Result<&Connection> {
         self.connection
             .as_ref()
+            .map(|physical| &physical.connection)
+            .ok_or(SQLiteError::MissingCheckedOutConnection)
+    }
+
+    fn physical_mut(&mut self) -> Result<&mut PhysicalConnection> {
+        self.connection
+            .as_mut()
             .ok_or(SQLiteError::MissingCheckedOutConnection)
     }
 
     pub(crate) fn connection_mut(&mut self) -> Result<&mut Connection> {
-        self.connection
-            .as_mut()
-            .ok_or(SQLiteError::MissingCheckedOutConnection)
+        self.physical_mut().map(|physical| &mut physical.connection)
     }
 }
 
@@ -249,7 +291,8 @@ impl Drop for PooledConnection {
         let Some(connection) = self.connection.take() else {
             return;
         };
-        let reusable = connection.is_autocommit() || connection.execute_batch("ROLLBACK").is_ok();
+        let reusable = connection.connection.is_autocommit()
+            || connection.connection.execute_batch("ROLLBACK").is_ok();
         if reusable {
             self.pool.checkin(connection);
         } else {
@@ -259,6 +302,8 @@ impl Drop for PooledConnection {
 }
 
 struct SessionState {
+    write_cancellation: uqa_core::CancellationToken,
+    affinity: uqa_storage::StorageSessionAffinity,
     /// Read guards cover ordinary operations. Transaction lifecycle calls take
     /// the write guard, making BEGIN/COMMIT/ROLLBACK linearizable with respect
     /// to every operation issued through the same logical session.
@@ -266,15 +311,27 @@ struct SessionState {
     transaction: Mutex<Option<PooledConnection>>,
     transaction_failure: Mutex<Option<String>>,
     cleanup_failure: Mutex<Option<String>>,
+    logical: OnceLock<Arc<logical::BoundRecordSession>>,
+    native_restore: Mutex<Option<native_restore::NativeRestore>>,
+    snapshot_branch: Mutex<Arc<()>>,
 }
 
 impl SessionState {
     fn new() -> Self {
+        Self::with_cancellation(uqa_core::CancellationToken::new())
+    }
+
+    fn with_cancellation(write_cancellation: uqa_core::CancellationToken) -> Self {
         Self {
+            write_cancellation,
+            affinity: uqa_storage::StorageSessionAffinity::new(),
             gate: RwLock::new(()),
             transaction: Mutex::new(None),
             transaction_failure: Mutex::new(None),
             cleanup_failure: Mutex::new(None),
+            logical: OnceLock::new(),
+            native_restore: Mutex::new(None),
+            snapshot_branch: Mutex::new(Arc::new(())),
         }
     }
 }
@@ -284,6 +341,7 @@ impl Drop for SessionState {
         // `PooledConnection::drop` performs the rollback and discards the
         // physical connection when rollback itself fails. Taking the pinned
         // handle here therefore cannot return a broken connection to the pool.
+        self.native_restore.get_mut().take();
         self.transaction.get_mut().take();
     }
 }
@@ -295,6 +353,7 @@ impl Drop for SessionState {
 pub struct ManagedConnection {
     pool: Arc<ConnectionPool>,
     session: Arc<SessionState>,
+    record_access: bool,
 }
 
 impl ManagedConnection {
@@ -439,6 +498,7 @@ impl ManagedConnection {
         Ok(Self {
             pool: ConnectionPool::new(spec, initial, max_connections),
             session: Arc::new(SessionState::new()),
+            record_access: false,
         })
     }
 
@@ -456,8 +516,7 @@ impl ManagedConnection {
     }
 
     fn configure_wal_connection(conn: &Connection) -> Result<()> {
-        // 5s busy timeout absorbs short contention without surfacing
-        // SQLITE_BUSY; long contention is a real bug.
+        // Legacy physical operations retain a bounded busy wait. Versioned writes supply cancellable admission under a scoped timeout.
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         // Synchronous=NORMAL is the recommended pairing with WAL: safe
         // against power loss, faster than FULL.
@@ -486,30 +545,31 @@ impl ManagedConnection {
         Ok(())
     }
 
-    /// Create an independent logical session over the same database pool.
-    /// Explicit transactions started on either session are isolated and never
-    /// capture operations issued through the other session.
-    #[must_use]
-    pub fn new_session(&self) -> Self {
-        Self {
-            pool: Arc::clone(&self.pool),
-            session: Arc::new(SessionState::new()),
-        }
+    /// Identity shared by handles using this session's native or logical transaction context.
+    pub fn transaction_affinity(&self) -> uqa_storage::StorageSessionAffinity {
+        let _gate = self.session.gate.read();
+        self.session.logical.get().map_or_else(
+            || self.session.affinity.clone(),
+            |logical| logical.session_affinity(),
+        )
     }
 
-    /// Whether this logical session currently owns a pinned transaction
-    /// connection.
+    /// Whether this session has an active native or logical record transaction.
     #[must_use]
     pub fn in_transaction(&self) -> bool {
         let _gate = self.session.gate.read();
+        if let Some(logical) = self.session.logical.get() {
+            return logical.in_transaction();
+        }
         self.session.transaction.lock().is_some()
     }
 
-    /// Whether the currently pinned transaction has upgraded to a write
-    /// transaction. Callers use this to enforce read-only execution
-    /// boundaries before COMMIT rather than inferring writes from SQL shape.
+    /// Whether this session has staged writes, including private logical records. Callers use this to enforce read-only execution boundaries before COMMIT.
     pub fn transaction_has_written(&self) -> Result<bool> {
         let _gate = self.session.gate.read();
+        if let Some(logical) = self.session.logical.get() {
+            return logical.transaction_has_written().map_err(Into::into);
+        }
         let transaction = self.session.transaction.lock();
         let transaction = transaction
             .as_ref()
@@ -525,20 +585,28 @@ impl ManagedConnection {
     ///
     /// A rollback-journal writer's pending lock blocks new readers while waiting for existing readers to finish. A rollback-journal read transaction must therefore also avoid the independent monitor: its own shared lock may be preventing that waiting writer from proceeding. Callers refresh through the pinned connection instead. WAL sessions and sessions without a pinned transaction permit the independent monitor.
     pub fn data_version_monitor_is_nonblocking(&self) -> Result<bool> {
-        if self.supports_concurrent_pinned_read_and_write() {
+        let _gate = self.session.gate.read();
+        if self.session.logical.get().is_some() {
             return Ok(true);
         }
-        let _gate = self.session.gate.read();
+        if !matches!(
+            &self.pool.spec,
+            ConnectionSpec::Compressed { .. } | ConnectionSpec::Auxiliary { .. }
+        ) {
+            return Ok(true);
+        }
         Ok(self.session.transaction.lock().is_none())
     }
 
     /// Whether one pooled connection may retain a read snapshot while another writes. Ordinary plain and encrypted `SQLite` databases use WAL; compressed containers and auxiliary files use rollback journaling and therefore require a detached engine snapshot before writer promotion.
     #[must_use]
     pub fn supports_concurrent_pinned_read_and_write(&self) -> bool {
-        !matches!(
-            &self.pool.spec,
-            ConnectionSpec::Compressed { .. } | ConnectionSpec::Auxiliary { .. }
-        )
+        let _gate = self.session.gate.read();
+        self.session.logical.get().is_some()
+            || !matches!(
+                &self.pool.spec,
+                ConnectionSpec::Compressed { .. } | ConnectionSpec::Auxiliary { .. }
+            )
     }
 
     /// Database change counter observed on one stable connection shared by
@@ -546,6 +614,10 @@ impl ManagedConnection {
     /// `SQLite` connection commits. In-memory databases have no independent
     /// connections and therefore return `None`.
     pub fn data_version(&self) -> Result<Option<u64>> {
+        let _gate = self.session.gate.read();
+        if let Some(logical) = self.session.logical.get() {
+            return logical.change_version().map_err(Into::into);
+        }
         if matches!(&self.pool.spec, ConnectionSpec::Memory) {
             return Ok(None);
         }
@@ -574,7 +646,16 @@ impl ManagedConnection {
     /// read. Reading `sqlite_schema` is database-wide and keeps the operation
     /// independent of any application table.
     pub fn pin_transaction_snapshot(&self) -> Result<()> {
-        self.with(|connection| {
+        self.surface_cleanup_failure()?;
+        let _gate = self.session.gate.read();
+        if let Some(logical) = self.session.logical.get() {
+            return if logical.in_transaction() {
+                Ok(())
+            } else {
+                Err(SQLiteError::NoActiveTransaction)
+            };
+        }
+        self.with_native(|connection| {
             if connection.is_autocommit() {
                 return Err(SQLiteError::NoActiveTransaction);
             }
@@ -590,11 +671,20 @@ impl ManagedConnection {
     pub fn with<R>(&self, f: impl FnOnce(&Connection) -> Result<R>) -> Result<R> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.read();
+        if self.session.logical.get().is_some() {
+            return Err(SQLiteError::LogicalSessionRequired);
+        }
+        self.with_native(f)
+    }
+
+    /// The caller holds the session gate and has ruled out logical record access.
+    fn with_native<R>(&self, f: impl FnOnce(&Connection) -> Result<R>) -> Result<R> {
         let transaction = self.session.transaction.lock();
         if let Some(connection) = transaction.as_ref() {
             if let Some(error) = self.session.transaction_failure.lock().as_ref() {
                 return Err(SQLiteError::TransactionAborted(error.clone()));
             }
+            self.check_native_access(connection.connection()?)?;
             let result = f(connection.connection()?);
             if let Err(error) = &result {
                 let mut failure = self.session.transaction_failure.lock();
@@ -606,18 +696,30 @@ impl ManagedConnection {
         }
         drop(transaction);
         let connection = self.pool.checkout()?;
+        self.check_native_access(connection.connection()?)?;
         f(connection.connection()?)
     }
 
     pub fn with_mut<R>(&self, f: impl FnOnce(&mut Connection) -> Result<R>) -> Result<R> {
+        self.with_physical_mut(|physical| f(&mut physical.connection))
+    }
+
+    fn with_physical_mut<R>(
+        &self,
+        f: impl FnOnce(&mut PhysicalConnection) -> Result<R>,
+    ) -> Result<R> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.read();
+        if self.session.logical.get().is_some() {
+            return Err(SQLiteError::LogicalSessionRequired);
+        }
         let mut transaction = self.session.transaction.lock();
         if let Some(connection) = transaction.as_mut() {
             if let Some(error) = self.session.transaction_failure.lock().as_ref() {
                 return Err(SQLiteError::TransactionAborted(error.clone()));
             }
-            let result = f(connection.connection_mut()?);
+            self.check_native_access(connection.connection()?)?;
+            let result = f(connection.physical_mut()?);
             if let Err(error) = &result {
                 let mut failure = self.session.transaction_failure.lock();
                 if failure.is_none() {
@@ -628,15 +730,25 @@ impl ManagedConnection {
         }
         drop(transaction);
         let mut connection = self.pool.checkout()?;
-        f(connection.connection_mut()?)
+        self.check_native_access(connection.connection()?)?;
+        f(connection.physical_mut()?)
     }
 
     /// Rewrite the `SQLite` database into its minimum-sized file. `SQLite` requires `VACUUM` to run in autocommit mode, so the session write gate makes the transaction check and maintenance command one atomic session operation.
     pub fn vacuum(&self) -> Result<()> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.write();
-        if self.session.transaction.lock().is_some() {
+        if self.session.transaction.lock().is_some()
+            || self
+                .session
+                .logical
+                .get()
+                .is_some_and(|logical| logical.in_transaction())
+        {
             return Err(SQLiteError::TransactionAlreadyActive);
+        }
+        if let Some(logical) = self.session.logical.get() {
+            logical.reclaim_versions()?;
         }
         let connection = self.pool.checkout()?;
         connection.connection()?.execute_batch("VACUUM")?;
@@ -664,11 +776,18 @@ impl ManagedConnection {
     fn begin_transaction_with(&self, statement: &str) -> Result<()> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.write();
+        if let Some(logical) = self.session.logical.get() {
+            if logical.in_transaction() {
+                return Err(SQLiteError::TransactionAlreadyActive);
+            }
+            return logical.begin_transaction().map_err(Into::into);
+        }
         let mut transaction = self.session.transaction.lock();
         if transaction.is_some() {
             return Err(SQLiteError::TransactionAlreadyActive);
         }
         let connection = self.pool.checkout()?;
+        self.check_native_access(connection.connection()?)?;
         connection.connection()?.execute_batch(statement)?;
         self.session.transaction_failure.lock().take();
         *transaction = Some(connection);
@@ -699,10 +818,22 @@ impl ManagedConnection {
 
     fn finish_transaction(&self, statement: &str) -> Result<()> {
         let _gate = self.session.gate.write();
+        if let Some(logical) = self.session.logical.get() {
+            if !logical.in_transaction() {
+                return Err(SQLiteError::NoActiveTransaction);
+            }
+            return if statement == "COMMIT" {
+                logical.commit_transaction()
+            } else {
+                logical.rollback_transaction()
+            }
+            .map_err(Into::into);
+        }
         let mut transaction = self.session.transaction.lock();
         let connection = transaction
             .as_ref()
             .ok_or(SQLiteError::NoActiveTransaction)?;
+        *self.session.snapshot_branch.lock() = Arc::new(());
         if statement == "COMMIT" {
             // Materialize the failure before entering the branch. Holding the
             // mutex guard created by an `if let` scrutinee until the end of
@@ -710,61 +841,97 @@ impl ManagedConnection {
             let transaction_failure = self.session.transaction_failure.lock().clone();
             if let Some(error) = transaction_failure {
                 if let Err(rollback_error) = connection.connection()?.execute_batch("ROLLBACK") {
+                    self.session.native_restore.lock().take();
                     transaction.take();
                     self.session.transaction_failure.lock().take();
                     return Err(SQLiteError::SQLite(rollback_error));
                 }
+                self.session.native_restore.lock().take();
                 transaction.take();
                 self.session.transaction_failure.lock().take();
                 return Err(SQLiteError::TransactionAborted(error));
             }
         }
+        let native = if statement == "COMMIT" && self.session.native_restore.lock().is_some() {
+            match self.prepare_initial_native_binding(connection.connection()?) {
+                Ok(native) => Some(native),
+                Err(error) => {
+                    *self.session.transaction_failure.lock() = Some(error.to_string());
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
         if let Err(error) = connection.connection()?.execute_batch(statement) {
+            self.session.native_restore.lock().take();
             transaction.take();
             self.session.transaction_failure.lock().take();
             return Err(SQLiteError::SQLite(error));
         }
+        self.session.native_restore.lock().take();
         transaction.take();
         self.session.transaction_failure.lock().take();
+        if let Some(native) = native {
+            self.install_initial_native_binding(native);
+        }
         Ok(())
     }
 
-    fn with_transaction<R>(&self, f: impl FnOnce(&Connection) -> Result<R>) -> Result<R> {
+    fn with_transaction<R>(
+        &self,
+        logical: impl FnOnce(&VersionedKeyValueStore) -> uqa_storage::StorageBackendResult<R>,
+        native: impl FnOnce(&Connection) -> Result<R>,
+    ) -> Result<R> {
+        self.surface_cleanup_failure()?;
         let _gate = self.session.gate.read();
+        if let Some(store) = self.session.logical.get() {
+            if !store.in_transaction() {
+                return Err(SQLiteError::NoActiveTransaction);
+            }
+            return logical(store).map_err(Into::into);
+        }
         let transaction = self.session.transaction.lock();
         let connection = transaction
             .as_ref()
             .ok_or(SQLiteError::NoActiveTransaction)?;
-        f(connection.connection()?)
+        self.check_native_access(connection.connection()?)?;
+        native(connection.connection()?)
     }
 
     pub fn savepoint(&self, name: &str) -> Result<()> {
-        self.surface_cleanup_failure()?;
-        let stmt = format!("SAVEPOINT \"{}\"", name.replace('"', "\"\""));
-        self.with_transaction(|c| {
-            c.execute_batch(&stmt)?;
-            Ok(())
-        })
+        self.with_transaction(
+            |logical| logical.savepoint(name),
+            |connection| {
+                let stmt = format!("SAVEPOINT \"{}\"", name.replace('"', "\"\""));
+                connection.execute_batch(&stmt)?;
+                Ok(())
+            },
+        )
     }
 
     pub fn release_savepoint(&self, name: &str) -> Result<()> {
-        self.surface_cleanup_failure()?;
-        let stmt = format!("RELEASE SAVEPOINT \"{}\"", name.replace('"', "\"\""));
-        self.with_transaction(|c| {
-            c.execute_batch(&stmt)?;
-            Ok(())
-        })
+        self.with_transaction(
+            |logical| logical.release_savepoint(name),
+            |connection| {
+                let stmt = format!("RELEASE SAVEPOINT \"{}\"", name.replace('"', "\"\""));
+                connection.execute_batch(&stmt)?;
+                Ok(())
+            },
+        )
     }
 
     pub fn rollback_to_savepoint(&self, name: &str) -> Result<()> {
-        self.surface_cleanup_failure()?;
-        let stmt = format!("ROLLBACK TO SAVEPOINT \"{}\"", name.replace('"', "\"\""));
-        self.with_transaction(|c| {
-            c.execute_batch(&stmt)?;
-            Ok(())
-        })?;
-        self.session.transaction_failure.lock().take();
-        Ok(())
+        self.with_transaction(
+            |logical| logical.rollback_to_savepoint(name),
+            |connection| {
+                let stmt = format!("ROLLBACK TO SAVEPOINT \"{}\"", name.replace('"', "\"\""));
+                connection.execute_batch(&stmt)?;
+                self.session.transaction_failure.lock().take();
+                *self.session.snapshot_branch.lock() = Arc::new(());
+                Ok(())
+            },
+        )
     }
 }
 
@@ -777,11 +944,18 @@ fn default_pool_connections() -> usize {
 #[cfg(test)]
 mod tests;
 
+impl From<uqa_storage::mvcc::VersionError> for SQLiteError {
+    fn from(error: uqa_storage::mvcc::VersionError) -> Self {
+        Self::from(error.into_storage_error())
+    }
+}
+
 impl From<SQLiteError> for uqa_storage::StorageBackendError {
     fn from(source: SQLiteError) -> Self {
         match source {
             SQLiteError::Memory(error) => Self::Memory(error),
             SQLiteError::Cancelled(error) => Self::Cancelled(error),
+            SQLiteError::StorageSource(error) => *error,
             source => Self::backend("SQLite", source),
         }
     }
@@ -803,7 +977,9 @@ impl From<uqa_storage::StorageBackendError> for SQLiteError {
             StorageBackendError::Serde(error) => Self::Serde(error),
             StorageBackendError::Backend { backend, source } => match source.downcast::<Self>() {
                 Ok(error) => *error,
-                Err(source) => Self::StorageBackend(format!("{backend} storage failed: {source}")),
+                Err(source) => {
+                    Self::StorageSource(Box::new(StorageBackendError::Backend { backend, source }))
+                }
             },
             StorageBackendError::Other(message) => Self::StorageBackend(message),
         }

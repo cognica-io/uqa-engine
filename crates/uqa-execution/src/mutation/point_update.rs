@@ -12,6 +12,7 @@ use super::{
 use crate::query::locking::context::update_lock_strength;
 use std::collections::BTreeMap;
 use uqa_core::Value;
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     assignment::columns::coerce_to_column_type,
     ast::{BinaryOp, ColumnType},
@@ -46,7 +47,7 @@ pub fn try_run_point_update<S: Clone + 'static>(
         stmt.predicate.as_ref(),
         context,
         params,
-        stmt.statement_privilege_subject.as_deref(),
+        stmt.statement_privilege_subject.as_ref(),
         stmt.relations_bound,
     )?
     else {
@@ -119,7 +120,7 @@ pub fn point_lookup_filter<S: Clone + 'static>(
     filter: Option<&ScalarExpr>,
     context: PointMutationContext<'_, S>,
     params: &[SQLParam],
-    privilege_subject: Option<&str>,
+    privilege_subject: Option<&RoleReference>,
     relations_bound: bool,
 ) -> Result<Option<(String, Value)>, SQLError> {
     let Some(ScalarExpr::Binary {
@@ -163,7 +164,7 @@ pub fn row_independent_update_values<S: Clone + 'static>(
     let mut updates = BTreeMap::new();
     let mut vectors = BTreeMap::new();
     let ctes = context.scopes.command_scope(
-        stmt.statement_privilege_subject.as_deref(),
+        stmt.statement_privilege_subject.as_ref(),
         stmt.relations_bound,
     )?;
     for assignment in &stmt.assignments {

@@ -8,10 +8,12 @@
 //!
 //! The handle does not load a graph on open or retain entity/adjacency maps.
 //! Existing per-table schemas and legacy property encodings remain readable.
-//! Mutations use physical transactions/savepoints; multi-read queries pin one
-//! storage snapshot. Owned query results belong to the caller, not the store.
+//! Mutations follow the connection's physical or logical transactions/savepoints;
+//! multi-read queries pin one storage snapshot. Owned query results belong to the caller, not the store.
 
 mod access;
+mod native;
+mod routing;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -54,6 +56,7 @@ impl SQLiteGraphStore {
                 "invalid graph table suffix {suffix:?}"
             )));
         }
+        let scope = suffix.to_ascii_lowercase();
         let suffix = if suffix.is_empty() {
             String::new()
         } else {
@@ -61,14 +64,21 @@ impl SQLiteGraphStore {
         };
         let backend: Arc<dyn PersistentStorageBackend> =
             Arc::new(SQLiteStorageBackend::new(conn.clone()));
-        let storage = Arc::new(access::SQLiteGraphStorage {
-            conn,
-            backend: Arc::clone(&backend),
-            vtx_table: format!("_graph_vertices{suffix}"),
-            edge_table: format!("_graph_edges{suffix}"),
-            member_table: format!("_graph_membership{suffix}"),
-            catalog_table: format!("_graph_catalog{suffix}"),
-            metadata_table: format!("_graph_metadata{suffix}"),
+        let storage = Arc::new(routing::RoutedGraphStorage {
+            native: native::NativeGraphStorage {
+                connection: conn.clone(),
+                backend: Arc::clone(&backend),
+                scope,
+            },
+            legacy: access::SQLiteGraphStorage {
+                conn,
+                backend: Arc::clone(&backend),
+                vtx_table: format!("_graph_vertices{suffix}"),
+                edge_table: format!("_graph_edges{suffix}"),
+                member_table: format!("_graph_membership{suffix}"),
+                catalog_table: format!("_graph_catalog{suffix}"),
+                metadata_table: format!("_graph_metadata{suffix}"),
+            },
         });
         let mut inner = PersistentGraphStore::from_storage(storage.clone());
         let mut checkpoint =
@@ -112,7 +122,7 @@ impl SQLiteGraphStore {
         })
     }
 
-    /// Execute several graph reads against one pinned physical snapshot.
+    /// Execute several graph reads against one pinned storage snapshot.
     /// Callers must serialize transaction ownership on this storage session.
     pub fn read_snapshot<T>(
         &self,
@@ -601,7 +611,7 @@ fn decode_legacy_value(raw: serde_json::Value) -> Result<Value, SQLiteError> {
     }
 }
 
-fn encode_graph_id(kind: &str, id: u64) -> Result<i64, SQLiteError> {
+pub(crate) fn encode_graph_id(kind: &str, id: u64) -> Result<i64, SQLiteError> {
     i64::try_from(id).map_err(|_| {
         SQLiteError::StorageBackend(format!("{kind} id {id} exceeds SQLite INTEGER range"))
     })

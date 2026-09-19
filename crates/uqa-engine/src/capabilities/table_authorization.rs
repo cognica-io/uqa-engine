@@ -10,6 +10,7 @@ use uqa_execution::catalog::security::{
     foreign_authorization::ForeignAuthorizationContext,
     table_authorization::TableAuthorizationContext, table_maintenance::TableMaintenanceContext,
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     catalog::security::{table::TableAclPrivilege, view_authorization::ViewAuthorizationContext},
     SQLError,
@@ -42,7 +43,7 @@ impl Engine {
     pub(crate) fn ensure_table_privilege_for(
         &self,
         name: &str,
-        subject: &str,
+        subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         self.table_authorization_context()
@@ -65,7 +66,7 @@ impl Engine {
         &self,
         name: &str,
         column: &str,
-        subject: &str,
+        subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         self.table_authorization_context()
@@ -82,7 +83,7 @@ impl Engine {
     pub(crate) fn ensure_any_column_privilege_for(
         &self,
         name: &str,
-        subject: &str,
+        subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         self.table_authorization_context()
@@ -99,7 +100,7 @@ impl Engine {
         &self,
         name: &str,
         view: &crate::StoredView,
-        subject: &str,
+        subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         ViewAuthorizationContext { roles: self }
@@ -110,7 +111,7 @@ impl Engine {
         name: &str,
         view: &crate::StoredView,
         column: &str,
-        subject: &str,
+        subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         ViewAuthorizationContext { roles: self }
@@ -120,7 +121,7 @@ impl Engine {
         &self,
         name: &str,
         view: &crate::StoredView,
-        subject: &str,
+        subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         ViewAuthorizationContext { roles: self }
@@ -152,7 +153,7 @@ impl Engine {
     pub(crate) fn persist_foreign_table_security(
         &self,
         relation: &uqa_core::RelationIdentity,
-        security: &uqa_sql::catalog::security::TableSecurity,
+        security: &uqa_sql::catalog::security::BoundTableSecurity,
     ) -> Result<(), SQLError> {
         uqa_execution::catalog::security::foreign_authorization::persist_foreign_table_security(
             self.storage.catalog.as_deref(),

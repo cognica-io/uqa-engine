@@ -29,8 +29,14 @@ pub mod index_types;
 pub mod inverted_index;
 pub mod ivf_index;
 pub mod key_value;
+pub mod mvcc;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+#[allow(unsafe_code)]
+// Narrow OS file calls; callers retain descriptor ownership and local arbitration.
+pub mod native_file;
 pub mod read_control;
 pub mod spatial_index;
+pub mod statistics_maintenance;
 pub mod term_key;
 pub mod transaction;
 pub mod vector_index;
@@ -38,17 +44,18 @@ pub mod vector_index;
 pub use backend::{
     PersistentStorageBackend, PersistentStorageIdentity, PersistentStorageProvider,
     PersistentStorageSession, StorageBackendError, StorageBackendResult, StorageSavepointId,
+    StorageSessionAffinity, StorageSessionMismatch, StorageTransactionModel,
 };
 pub use block_max_index::{BlockMaxIndex, BlockMaxScorer, DEFAULT_BLOCK_SIZE};
 pub use btree_index::BTreeIndex;
 pub use catalog::{
     sequence_value_reservation, CatalogCacheRevisions, CatalogFacade, CatalogIndexRow,
     ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow, GraphEntityFilter, GraphEntityKind,
-    GraphSnapshot, GraphVertexRow, RelationIdentity, RelationKind, SchemaAclEntry,
-    SchemaPrivileges, SchemaRow, SequenceAclEntry, SequenceOptions, SequenceOwner,
+    GraphSnapshot, GraphVertexRow, RelationIdentity, RelationKind, RelationSecurityRow,
+    SchemaAclEntry, SchemaPrivileges, SchemaRow, SequenceAclEntry, SequenceOptions, SequenceOwner,
     SequenceOwnerDependency, SequencePrivileges, SequenceReservationResult, SequenceRow,
-    SequenceValuePosition, SequenceValueReservation, TableAclEntry, TablePrivileges, TableSchema,
-    VectorFieldSchema, ViewRow, MAX_GRAPH_ID_PAGE,
+    SequenceSecurityRow, SequenceSetValueResult, SequenceValuePosition, SequenceValueReservation,
+    TableAclEntry, TablePrivileges, TableSchema, VectorFieldSchema, ViewRow, MAX_GRAPH_ID_PAGE,
 };
 pub use clustered_postings::{
     MaterializedPostingCursor, PostingCursor, PostingScore, POSTING_CLUSTER_DOCS,

@@ -9,9 +9,11 @@
 use rusqlite::{params_from_iter, types::Value as SQLValue};
 use std::fmt::Write as _;
 
+use super::native::graph;
 use super::{
     decode_catalog_id, encode_catalog_id, Catalog, EdgeRow, OptionalExtension, Result, SQLiteError,
 };
+use uqa_storage::catalog::GraphEntitySelector;
 use uqa_storage::{GraphEntityFilter, GraphEntityKind, GraphVertexRow};
 
 fn entity_table(kind: GraphEntityKind) -> (&'static str, &'static str) {
@@ -29,16 +31,16 @@ struct Selection {
 }
 
 fn selection(filter: GraphEntityFilter<'_>) -> Result<Selection> {
-    filter
-        .validate()
+    let selector = filter
+        .selector()
         .map_err(|error| SQLiteError::StorageBackend(error.to_string()))?;
     let (table, key) = entity_table(filter.kind);
     let mut values = Vec::new();
-    let index = match (filter.kind, filter.source, filter.target, filter.label) {
-        (GraphEntityKind::Edge, Some(_), _, _) => Some("_graph_edges_out"),
-        (GraphEntityKind::Edge, _, Some(_), _) => Some("_graph_edges_in"),
-        (GraphEntityKind::Edge, _, _, Some(_)) => Some("_graph_edges_label"),
-        (GraphEntityKind::Vertex, _, _, Some(_)) => Some("_graph_vertices_label"),
+    let index = match (filter.kind, selector) {
+        (_, GraphEntitySelector::Source(_)) => Some("_graph_edges_out"),
+        (_, GraphEntitySelector::Target(_)) => Some("_graph_edges_in"),
+        (GraphEntityKind::Edge, GraphEntitySelector::Label(_)) => Some("_graph_edges_label"),
+        (GraphEntityKind::Vertex, GraphEntitySelector::Label(_)) => Some("_graph_vertices_label"),
         _ => None,
     };
     let (mut from, id) = if let Some(index) = index {
@@ -84,6 +86,11 @@ fn selection(filter: GraphEntityFilter<'_>) -> Result<Selection> {
 
 impl Catalog {
     pub fn named_graph_exists(&self, name: &str) -> Result<bool> {
+        if let Some(found) =
+            self.read_native(|snapshot| graph::named_graph_exists(snapshot, name))?
+        {
+            return Ok(found);
+        }
         self.conn.with(|conn| {
             Ok(conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM _named_graphs WHERE name = ?1)",
@@ -95,6 +102,9 @@ impl Catalog {
 
     pub fn graph_vertex(&self, id: u64) -> Result<Option<GraphVertexRow>> {
         let encoded = encode_catalog_id("vertex", id)?;
+        if let Some(row) = self.read_native(|snapshot| graph::vertex(snapshot, id))? {
+            return Ok(row);
+        }
         self.conn.with(|conn| {
             Ok(conn
                 .query_row(
@@ -114,6 +124,9 @@ impl Catalog {
 
     pub fn graph_edge(&self, id: u64) -> Result<Option<EdgeRow>> {
         let encoded = encode_catalog_id("edge", id)?;
+        if let Some(row) = self.read_native(|snapshot| graph::edge(snapshot, id))? {
+            return Ok(row);
+        }
         self.conn.with(|conn| {
             let row = conn.query_row(
                 "SELECT source_id, target_id, label, properties_json FROM _graph_edges WHERE edge_id = ?1",
@@ -135,6 +148,11 @@ impl Catalog {
         after: Option<u64>,
         limit: usize,
     ) -> Result<Vec<u64>> {
+        if let Some(ids) =
+            self.read_native(|snapshot| graph::ids(snapshot, filter, after, limit))?
+        {
+            return Ok(ids);
+        }
         uqa_storage::catalog::validate_graph_page(limit)
             .map_err(|error| SQLiteError::StorageBackend(error.to_string()))?;
         let mut query = selection(filter)?;
@@ -172,6 +190,9 @@ impl Catalog {
     }
 
     pub fn graph_entity_count(&self, filter: GraphEntityFilter<'_>) -> Result<u64> {
+        if let Some(count) = self.read_native(|snapshot| graph::count(snapshot, filter))? {
+            return Ok(count);
+        }
         let query = selection(filter)?;
         let sql = format!("SELECT count(*), count({}) {}", query.stored_id, query.from);
         self.conn.with(|conn| {
@@ -191,6 +212,9 @@ impl Catalog {
     }
 
     pub fn graph_entity_max_id(&self, kind: GraphEntityKind) -> Result<Option<u64>> {
+        if let Some(maximum) = self.read_native(|snapshot| graph::max_id(snapshot, kind))? {
+            return Ok(maximum);
+        }
         let (table, key) = entity_table(kind);
         self.conn.with(|conn| {
             let id: Option<i64> =
@@ -204,6 +228,9 @@ impl Catalog {
 
     pub fn graph_entity_memberships(&self, kind: GraphEntityKind, id: u64) -> Result<Vec<String>> {
         let encoded = encode_catalog_id("graph entity", id)?;
+        if let Some(names) = self.read_native(|snapshot| graph::memberships(snapshot, kind, id))? {
+            return Ok(names);
+        }
         self.conn.with(|conn| {
             let mut statement = conn.prepare_cached("SELECT graph_name FROM _graph_membership WHERE entity_type = ?1 AND entity_id = ?2 ORDER BY graph_name")?;
             let rows = statement.query_map(rusqlite::params![kind.as_str(), encoded], |row| row.get(0))?;
@@ -218,6 +245,11 @@ impl Catalog {
         graph: &str,
     ) -> Result<bool> {
         let encoded = encode_catalog_id("graph entity", id)?;
+        if let Some(found) =
+            self.read_native(|snapshot| graph::has_membership(snapshot, kind, id, graph))?
+        {
+            return Ok(found);
+        }
         self.conn.with(|conn| Ok(conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM _graph_membership WHERE entity_type = ?1 AND entity_id = ?2 AND graph_name = ?3)",
             rusqlite::params![kind.as_str(), encoded, graph], |row| row.get(0),

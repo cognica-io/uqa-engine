@@ -35,6 +35,7 @@ impl RowLockManager {
             next_table: AtomicU64::new(1),
             next_acquisition: AtomicU64::new(1),
             change_gate: RwLock::new(()),
+            temporary_roles: Mutex::new(HashMap::new()),
             state: Mutex::new(LockTable {
                 rows: HashMap::new(),
                 waiting: HashMap::new(),
@@ -113,6 +114,22 @@ impl RowLockManager {
         self.relation_key(LockRelationIdentity::Table(Arc::from(table)))
     }
 
+    pub fn shared_catalog_key(&self, target: super::shared_objects::SharedCatalogLock<'_>) -> u64 {
+        use super::shared_objects::SharedCatalogLock;
+        self.relation_key(match target {
+            SharedCatalogLock::Object { class_id, oid } => {
+                LockRelationIdentity::SharedObject { class_id, oid }
+            }
+            SharedCatalogLock::Name { class_id, name } => LockRelationIdentity::SharedObjectName {
+                class_id,
+                name: Arc::from(name),
+            },
+            SharedCatalogLock::Tuple { class_id, oid } => {
+                LockRelationIdentity::SharedObjectTuple { class_id, oid }
+            }
+        })
+    }
+
     /// Reserve generated identities independently of tuple locks and SQL constraint keys. One namespace per table keeps registry metadata independent of the number of allocated rows.
     pub fn document_identity_key(&self, table: &str) -> u64 {
         self.relation_key(LockRelationIdentity::DocumentIdentityReservations(
@@ -126,7 +143,11 @@ impl RowLockManager {
 
     #[doc(hidden)]
     pub fn waiting_for_backend_writer(&self, session_id: u64) -> bool {
-        let key = self.backend_writer_key();
+        self.waiting_for_relation(session_id, self.backend_writer_key())
+    }
+
+    #[doc(hidden)]
+    pub fn waiting_for_relation(&self, session_id: u64, key: u64) -> bool {
         self.state
             .lock()
             .waiting_relations
@@ -134,8 +155,22 @@ impl RowLockManager {
             .is_some_and(|relations| relations.contains_key(&key))
     }
 
+    #[doc(hidden)]
+    pub fn waiting_for_row(&self, session_id: u64, key: super::RowLockKey) -> bool {
+        self.state
+            .lock()
+            .waiting
+            .get(&session_id)
+            .is_some_and(|rows| rows.contains_key(&key))
+    }
+
     pub fn key_reservation_key(&self, digest: [u8; 32]) -> u64 {
         self.relation_key(LockRelationIdentity::KeyReservation(digest))
+    }
+
+    /// Coordinate one named scoring-parameter value without locking unrelated signals or SQL tables.
+    pub fn scoring_parameters_key(&self, name: &str) -> u64 {
+        self.relation_key(LockRelationIdentity::ScoringParameters(Arc::from(name)))
     }
 
     fn relation_key(&self, identity: LockRelationIdentity) -> u64 {

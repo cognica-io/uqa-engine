@@ -15,64 +15,12 @@ fn sqlstate(engine: &Engine, sql: &str) -> String {
         .to_string()
 }
 
-fn remove_routine_identity_fields(value: &mut serde_json::Value) -> usize {
-    match value {
-        serde_json::Value::Object(fields) => {
-            let mut removed = usize::from(fields.remove("object_id").is_some());
-            removed += usize::from(fields.remove("function_object_id").is_some());
-            for value in fields.values_mut() {
-                removed += remove_routine_identity_fields(value);
-            }
-            removed
-        }
-        serde_json::Value::Array(values) => {
-            values.iter_mut().map(remove_routine_identity_fields).sum()
-        }
-        _ => 0,
-    }
-}
-
-fn remove_function_binding_identities(value: &mut serde_json::Value) -> usize {
-    match value {
-        serde_json::Value::Object(fields) => {
-            let is_binding = fields.contains_key("name")
-                && fields.contains_key("argument_types")
-                && fields.contains_key("builtin");
-            let mut removed = usize::from(is_binding && fields.remove("object_id").is_some());
-            for value in fields.values_mut() {
-                removed += remove_function_binding_identities(value);
-            }
-            removed
-        }
-        serde_json::Value::Array(values) => values
-            .iter_mut()
-            .map(remove_function_binding_identities)
-            .sum(),
-        _ => 0,
-    }
-}
-
-fn remove_expression_function_bindings(value: &mut serde_json::Value) -> usize {
-    match value {
-        serde_json::Value::Object(fields) => {
-            let mut removed = fields
-                .get_mut("Func")
-                .and_then(serde_json::Value::as_object_mut)
-                .map_or(0, |function| {
-                    usize::from(function.remove("binding").is_some())
-                });
-            for value in fields.values_mut() {
-                removed += remove_expression_function_bindings(value);
-            }
-            removed
-        }
-        serde_json::Value::Array(values) => values
-            .iter_mut()
-            .map(remove_expression_function_bindings)
-            .sum(),
-        _ => 0,
-    }
-}
+#[path = "routine_rename/migration.rs"]
+mod migration;
+use migration::{
+    remove_expression_function_bindings, remove_function_binding_identities,
+    remove_routine_identity_fields,
+};
 
 #[test]
 fn routine_rename_preserves_oid_and_replace_identity() {
@@ -575,9 +523,10 @@ fn remove_legacy_rule_and_trigger_identities(catalog: &uqa_storage_sqlite::Catal
 }
 
 fn make_catalog_legacy(database: &std::path::Path) {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
-    let catalog = Catalog::open(ManagedConnection::open(database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(database).unwrap()).unwrap();
     remove_legacy_function_identities(&catalog);
     remove_legacy_view_identities(&catalog);
     remove_legacy_generated_column_identities(&catalog);
@@ -687,9 +636,10 @@ fn rename_migrated_routines(engine: &Engine) -> Value {
 }
 
 fn assert_migrated_identity_metadata(database: &std::path::Path) {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
-    let catalog = Catalog::open(ManagedConnection::open(database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(database).unwrap()).unwrap();
     let functions = catalog.get_metadata("sql_functions_json").unwrap().unwrap();
     let definitions: serde_json::Value = serde_json::from_str(&functions).unwrap();
     assert!(functions.contains("object_id"), "{definitions}");
@@ -756,7 +706,7 @@ fn legacy_routine_catalog_gains_persistent_object_identities() {
 
 #[test]
 fn secondary_session_rejects_legacy_routine_metadata_without_repair() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = TempDir::new().unwrap();
     let database = directory.path().join("routine-load-only.sqlite");
@@ -767,7 +717,8 @@ fn secondary_session_rejects_legacy_routine_metadata_without_repair() {
             &[],
         )
         .unwrap();
-    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     let encoded = catalog.get_metadata("sql_functions_json").unwrap().unwrap();
     let mut definitions: serde_json::Value = serde_json::from_str(&encoded).unwrap();
     assert!(remove_routine_identity_fields(&mut definitions) >= 1);
@@ -777,9 +728,7 @@ fn secondary_session_rejects_legacy_routine_metadata_without_repair() {
     let Err(error) = engine.new_session() else {
         panic!("secondary session must not repair legacy routine metadata");
     };
-    assert!(error
-        .to_string()
-        .contains("initial-open object-identity migration"));
+    assert!(error.to_string().contains("initial catalog migration"));
     assert_eq!(
         catalog.get_metadata("sql_functions_json").unwrap(),
         Some(legacy)
@@ -788,7 +737,7 @@ fn secondary_session_rejects_legacy_routine_metadata_without_repair() {
 
 #[test]
 fn secondary_session_does_not_repair_routine_owned_dependency_bindings() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = TempDir::new().unwrap();
     let database = directory.path().join("routine-dependency-load-only.sqlite");
@@ -803,7 +752,8 @@ fn secondary_session_does_not_repair_routine_owned_dependency_bindings() {
             .sql(ddl, &[])
             .unwrap_or_else(|error| panic!("{ddl}: {error}"));
     }
-    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     let encoded = catalog.get_metadata("sql_functions_json").unwrap().unwrap();
     let mut definitions: serde_json::Value = serde_json::from_str(&encoded).unwrap();
     assert!(remove_function_binding_identities(&mut definitions) >= 2);
@@ -839,7 +789,7 @@ fn secondary_session_does_not_repair_routine_owned_dependency_bindings() {
 
 #[test]
 fn secondary_session_does_not_repair_schema_expression_bindings() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = TempDir::new().unwrap();
     let database = directory.path().join("schema-dependency-load-only.sqlite");
@@ -852,7 +802,8 @@ fn secondary_session_does_not_repair_schema_expression_bindings() {
             .sql(ddl, &[])
             .unwrap_or_else(|error| panic!("{ddl}: {error}"));
     }
-    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     let mut tables = catalog.load_tables().unwrap();
     let table = tables
         .iter_mut()
@@ -899,7 +850,7 @@ fn secondary_session_does_not_repair_schema_expression_bindings() {
 
 #[test]
 fn failed_initial_routine_migration_rolls_back_catalog_writes() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = TempDir::new().unwrap();
     let database = directory.path().join("routine-migration-atomicity.sqlite");
@@ -936,7 +887,8 @@ fn failed_initial_routine_migration_rolls_back_catalog_writes() {
     let legacy_functions;
     let legacy_columns;
     {
-        let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+        let catalog =
+            crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
         let encoded = catalog.get_metadata("sql_functions_json").unwrap().unwrap();
         let mut definitions: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         assert!(remove_routine_identity_fields(&mut definitions) >= 1);
@@ -973,7 +925,8 @@ fn failed_initial_routine_migration_rolls_back_catalog_writes() {
         panic!("invalid trigger must abort initial catalog migration");
     };
     assert!(error.to_string().contains("missing_trigger"));
-    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     assert_eq!(
         catalog.get_metadata("sql_functions_json").unwrap(),
         Some(legacy_functions)

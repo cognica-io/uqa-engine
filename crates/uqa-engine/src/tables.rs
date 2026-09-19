@@ -11,7 +11,7 @@ use super::{
     StorageBackendResult, TableSchema, TableState, VectorFieldSchema, VectorIndex,
     VectorIndexOpenMode, VectorIndexSpec,
 };
-use crate::state::TableSecurity;
+use crate::state::BoundTableSecurity;
 
 impl Engine {
     pub(crate) fn is_persistent(&self) -> bool {
@@ -68,7 +68,7 @@ impl Engine {
         table: &TableState,
         columns: &[uqa_sql::ast::ColumnDef],
         constraints: &uqa_sql::ast::TableConstraintSet,
-        security: &crate::state::TableSecurity,
+        security: &crate::state::BoundTableSecurity,
     ) -> StorageBackendResult<()> {
         if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {
             return Ok(());
@@ -93,9 +93,7 @@ impl Engine {
         catalog.save_table(&TableSchema {
             relation: RelationIdentity::from_legacy_name(name)
                 .map_err(StorageBackendError::Other)?,
-            role_owner: security.role_owner.clone(),
-            acl: security.acl.clone(),
-            column_acls: security.column_acls.clone(),
+            security: security.row().into(),
             object_id: table.object_id(),
             storage_generation: table.storage_generation(),
             analyzer_json,
@@ -131,12 +129,17 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         let raw_name = name.into();
         self.with_implicit_storage_transaction(move |engine| {
+            let owner = engine
+                .relation_creation_context()
+                .bind_owner()
+                .map_err(|error| StorageBackendError::backend("CREATE TABLE owner", error))?;
             engine.create_table_inner(
                 &raw_name,
                 analyzer,
                 fts_fields,
                 uqa_sql::ast::RelationPersistence::Permanent,
                 uqa_sql::ast::OnCommitAction::PreserveRows,
+                &owner,
             )
         })
     }
@@ -148,13 +151,21 @@ impl Engine {
         fts_fields: Vec<FieldName>,
         persistence: uqa_sql::ast::RelationPersistence,
         on_commit: uqa_sql::ast::OnCommitAction,
+        owner: &uqa_execution::catalog::security::roles::locking::RoleBinding,
     ) -> StorageBackendResult<()> {
         if persistence == uqa_sql::ast::RelationPersistence::Temporary {
-            return self.create_table_inner(name, analyzer, fts_fields, persistence, on_commit);
+            return self.create_table_inner(
+                name,
+                analyzer,
+                fts_fields,
+                persistence,
+                on_commit,
+                owner,
+            );
         }
         let name = name.to_string();
         self.with_implicit_storage_transaction(move |engine| {
-            engine.create_table_inner(&name, analyzer, fts_fields, persistence, on_commit)
+            engine.create_table_inner(&name, analyzer, fts_fields, persistence, on_commit, owner)
         })
     }
 
@@ -165,15 +176,14 @@ impl Engine {
         fts_fields: Vec<FieldName>,
         persistence: uqa_sql::ast::RelationPersistence,
         on_commit: uqa_sql::ast::OnCommitAction,
+        owner: &uqa_execution::catalog::security::roles::locking::RoleBinding,
     ) -> StorageBackendResult<()> {
         let name = if persistence == uqa_sql::ast::RelationPersistence::Temporary {
             self.relation_creation_context()
                 .temporary_name(raw_name)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?
         } else {
-            self.relation_creation_context()
-                .api_name(raw_name)
-                .map_err(StorageBackendError::Other)?
+            self.relation_creation_context().api_name(raw_name)?
         };
         let relation = Self::resolved_relation_identity(&name)?;
         if let Some(kind) = self.relation_kind_at(&name)? {
@@ -207,14 +217,13 @@ impl Engine {
                     Box::new(MemoryInvertedIndex::new(analyzer.clone())),
                 )
             };
+        self.relation_creation_context()
+            .retain_owner(owner)
+            .map_err(|error| StorageBackendError::backend("CREATE TABLE owner", error))?;
         let table = TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: crate::new_table_object_id()?,
-            security: crate::state::CatalogCell::new(TableSecurity {
-                role_owner: self.current_user_name(),
-                acl: None,
-                column_acls: BTreeMap::new(),
-            }),
+            security: crate::state::CatalogCell::new(BoundTableSecurity::owner(owner.identity())),
             storage_generation: RwLock::new(crate::new_table_storage_generation()?),
             document_store: RwLock::new(docs),
             inverted_index: RwLock::new(inv),

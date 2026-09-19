@@ -6,107 +6,78 @@
 
 use super::{
     read_sequence, sequence_relation_oid, BTreeMap, RelationIdentity, RelationPersistence,
-    SequenceDataType, SequenceIntrospectionCatalog, SequenceObjectIdsRead, SequenceSecurity,
-    SequenceState, SequenceStatesRead, StorageBackendResult,
+    RoleCatalogSnapshot, SequenceDataType, SequenceSecurity, SequenceSnapshotSource, SequenceState,
+    StorageBackendResult,
 };
+use crate::catalog::sequence::snapshot::SequenceReadSnapshot;
 use std::{
     cell::{Cell, RefCell},
-    ops::Deref,
+    sync::Arc,
 };
+use uqa_sql::catalog::roles::RoleDefinition;
 
 struct TestCatalog {
-    ids: BTreeMap<RelationIdentity, [u8; 16]>,
-    states: BTreeMap<RelationIdentity, SequenceState>,
-    held: Cell<bool>,
-    events: RefCell<Vec<&'static str>>,
+    snapshot: RefCell<SequenceReadSnapshot>,
+    reads: Cell<usize>,
 }
 
-struct ObjectIdsGuard<'a>(&'a TestCatalog);
-
-impl Deref for ObjectIdsGuard<'_> {
-    type Target = BTreeMap<RelationIdentity, [u8; 16]>;
-    fn deref(&self) -> &Self::Target {
-        &self.0.ids
-    }
-}
-impl Drop for ObjectIdsGuard<'_> {
-    fn drop(&mut self) {
-        assert!(self.0.held.replace(false));
-        self.0.events.borrow_mut().push("release");
-    }
-}
-impl SequenceIntrospectionCatalog for TestCatalog {
-    fn refresh_sequences(&self) -> StorageBackendResult<()> {
-        assert!(!self.held.get());
-        self.events.borrow_mut().push("refresh");
-        Ok(())
-    }
-    fn object_ids(&self) -> SequenceObjectIdsRead<'_> {
-        assert!(!self.held.replace(true));
-        self.events.borrow_mut().push("object_ids");
-        Box::new(ObjectIdsGuard(self))
-    }
-    fn states(&self) -> SequenceStatesRead<'_> {
-        Box::new(&self.states)
-    }
-    fn sequence_state(&self, relation: &RelationIdentity) -> Option<SequenceState> {
-        assert!(self.held.get());
-        self.events.borrow_mut().push("state");
-        self.states.get(relation).copied()
-    }
-    fn sequence_security(&self, _: &RelationIdentity) -> Option<SequenceSecurity> {
-        assert!(self.held.get());
-        self.events.borrow_mut().push("security");
-        Some(SequenceSecurity {
-            role_owner: "uqa".into(),
-            acl: None,
-        })
-    }
-    fn sequence_persistence(&self, _: &RelationIdentity) -> Option<RelationPersistence> {
-        assert!(self.held.get());
-        self.events.borrow_mut().push("persistence");
-        None
+impl SequenceSnapshotSource for TestCatalog {
+    fn sequence_read_snapshot(&self) -> StorageBackendResult<SequenceReadSnapshot> {
+        self.reads.set(self.reads.get() + 1);
+        Ok(self.snapshot.borrow().clone())
     }
 }
 
 #[test]
-fn sequence_catalog_guard_covers_metadata_reads_and_releases_on_error() {
+fn sequence_introspection_retains_metadata_and_roles_together_and_rejects_missing_state() {
     let relation = RelationIdentity::from_legacy_name("public.counter").unwrap();
     let object_id = [7; 16];
     let state = SequenceState::initial(1, 1, SequenceDataType::BigInt);
-    let mut catalog = TestCatalog {
-        ids: BTreeMap::from([(relation.clone(), object_id)]),
-        states: BTreeMap::from([(relation.clone(), state)]),
-        held: Cell::new(false),
-        events: RefCell::new(Vec::new()),
+    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let security = SequenceSecurity {
+        role_owner: "uqa".into(),
+        acl: None,
+    };
+    let catalog = TestCatalog {
+        snapshot: RefCell::new(SequenceReadSnapshot {
+            sequences: Arc::new(BTreeMap::from([(relation.clone(), state)])),
+            object_ids: Arc::new(BTreeMap::from([(relation.clone(), object_id)])),
+            persistence: Arc::new(BTreeMap::from([(
+                relation.clone(),
+                RelationPersistence::Unlogged,
+            )])),
+            security: Arc::new(BTreeMap::from([(
+                relation.clone(),
+                uqa_sql::catalog::security::BoundSequenceSecurity::bind(&security, &roles).unwrap(),
+            )])),
+            roles: RoleCatalogSnapshot {
+                roles: Arc::new(roles),
+                memberships: Arc::new(BTreeMap::new()),
+            },
+        }),
+        reads: Cell::new(0),
     };
     let sequence = read_sequence(&catalog, sequence_relation_oid(object_id))
         .unwrap()
         .unwrap();
+    assert_eq!(catalog.reads.get(), 1);
+    {
+        let mut current = catalog.snapshot.borrow_mut();
+        Arc::make_mut(&mut current.sequences).clear();
+        Arc::make_mut(&mut current.security).clear();
+        Arc::make_mut(&mut current.roles.roles).clear();
+    }
     assert_eq!(sequence.relation, relation);
     assert_eq!(sequence.state, state);
-    assert!(!catalog.held.get());
-    assert_eq!(
-        *catalog.events.borrow(),
-        [
-            "refresh",
-            "object_ids",
-            "state",
-            "security",
-            "persistence",
-            "release"
-        ]
-    );
-
-    catalog.states.clear();
-    catalog.events.borrow_mut().clear();
+    assert_eq!(sequence.security, security);
+    assert_eq!(sequence.persistence, RelationPersistence::Unlogged);
+    assert!(sequence.authority.roles.contains_key("uqa"));
     let error = read_sequence(&catalog, sequence_relation_oid(object_id))
         .err()
         .unwrap();
     assert!(error.to_string().contains("disappeared"), "{error}");
-    assert!(!catalog.held.get());
-    assert_eq!(
-        *catalog.events.borrow(),
-        ["refresh", "object_ids", "state", "release"]
-    );
+    assert_eq!(catalog.reads.get(), 2);
+    assert!(read_sequence(&catalog, sequence_relation_oid([8; 16]))
+        .unwrap()
+        .is_none());
 }

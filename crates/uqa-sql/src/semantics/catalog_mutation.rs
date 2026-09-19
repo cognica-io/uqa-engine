@@ -6,20 +6,61 @@
 
 //! Mutation rules for SQL virtual catalog relations.
 
-use crate::catalog::resolution::RelationNameResolution;
+use crate::catalog::{
+    analysis::AnalysisCatalog,
+    resolution::{RelationLookupMode, RelationNameResolution},
+    VirtualRelation,
+};
 use crate::plan::{CommandPlan, MergeWhenPlan};
 use crate::SQLError;
 
+/// Check spelling before requesting a catalog snapshot; an earlier user relation can still take precedence.
+pub fn virtual_relation_mutation_candidate(command: &CommandPlan) -> bool {
+    command
+        .mutation_target()
+        .is_some_and(|target| session_metadata_relation(target).is_some())
+}
+
+fn session_metadata_relation(target: &str) -> Option<VirtualRelation> {
+    crate::catalog::resolve_virtual_relation(&[], target).filter(|relation| {
+        matches!(
+            relation,
+            VirtualRelation::PgPreparedStatements | VirtualRelation::PgCursors
+        )
+    })
+}
+
 pub fn virtual_relation_mutation_error(
+    catalog: &dyn AnalysisCatalog,
     resolution: &RelationNameResolution,
     command: &CommandPlan,
-) -> Option<SQLError> {
-    let target = command.mutation_target()?;
-    if crate::catalog::resolve_virtual_relation(resolution.search_path(), target)
-        != Some(crate::catalog::VirtualRelation::PgPreparedStatements)
-    {
-        return None;
+) -> Result<Option<SQLError>, SQLError> {
+    let Some(target) = command.mutation_target() else {
+        return Ok(None);
+    };
+    let Some(relation) = session_metadata_relation(target) else {
+        return Ok(None);
+    };
+    let bound = match command {
+        CommandPlan::Insert(plan) => plan.target_relation_bound,
+        CommandPlan::Update(plan) => plan.target_relation_bound,
+        CommandPlan::Delete(plan) => plan.target_relation_bound,
+        _ => false,
+    };
+    let mut resolution = resolution.clone();
+    if bound {
+        resolution.set_lookup_mode(RelationLookupMode::Bound);
     }
+    if catalog
+        .virtual_relation_schema(&resolution, target)?
+        .is_none()
+    {
+        return Ok(None);
+    }
+    Ok(mutation_error(command, relation))
+}
+
+fn mutation_error(command: &CommandPlan, relation: VirtualRelation) -> Option<SQLError> {
     let action = match command {
         CommandPlan::Insert(_) => "insert into",
         CommandPlan::Update(_) => "update",
@@ -36,6 +77,46 @@ pub fn virtual_relation_mutation_error(
     };
     Some(SQLError::Routine {
         sqlstate: "55000".into(),
-        message: format!("cannot {action} view \"pg_prepared_statements\""),
+        message: format!("cannot {action} view \"{}\"", relation.name()),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_catalog_mutations_retain_each_views_name_and_operation() {
+        for relation in [
+            VirtualRelation::PgCursors,
+            VirtualRelation::PgPreparedStatements,
+        ] {
+            for (sql, action) in [
+                (
+                    format!("INSERT INTO {} (name) VALUES ('x')", relation.name()),
+                    "insert into",
+                ),
+                (
+                    format!("UPDATE {} SET name = 'x'", relation.name()),
+                    "update",
+                ),
+                (format!("DELETE FROM {}", relation.name()), "delete from"),
+            ] {
+                let crate::plan::UnifiedPlan::Command(command) =
+                    crate::plan::UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0))
+                else {
+                    panic!("mutation fixture produced a query");
+                };
+                assert!(virtual_relation_mutation_candidate(&command));
+                let error = mutation_error(&command, relation).unwrap();
+                assert_eq!(error.sqlstate(), Some("55000"));
+                assert_eq!(
+                    error.to_string(),
+                    format!("cannot {action} view \"{}\"", relation.name())
+                );
+            }
+        }
+        assert_eq!(session_metadata_relation("public.pg_cursors"), None);
+        assert_eq!(session_metadata_relation("pg_catalog.\"PG_CURSORS\""), None);
+    }
 }

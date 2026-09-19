@@ -34,7 +34,7 @@ pub(super) struct StorageContext {
 }
 
 pub(crate) use uqa_execution::catalog::security::{
-    DatabaseSecurity, SchemaSecurity, SequenceSecurity, TableSecurity,
+    BoundDatabaseSecurity, BoundSchemaSecurity, BoundSequenceSecurity, BoundTableSecurity,
 };
 
 impl StorageContext {
@@ -83,20 +83,22 @@ pub(super) struct DurableCatalogState {
     pub(super) views: CatalogCell<BTreeMap<RelationIdentity, StoredView>>,
     pub(super) catalog_indexes:
         CatalogCell<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
-    pub(super) database_security: CatalogCell<DatabaseSecurity>,
-    pub(super) schemas: CatalogCell<BTreeMap<String, SchemaSecurity>>,
+    pub(super) database_security: CatalogCell<BoundDatabaseSecurity>,
+    pub(super) schemas: CatalogCell<BTreeMap<String, BoundSchemaSecurity>>,
     pub(super) path_indexes: CatalogCell<BTreeMap<String, uqa_graph::PathIndex>>,
     pub(super) sequences: CatalogCell<BTreeMap<RelationIdentity, SequenceState>>,
     pub(super) sequence_object_ids: CatalogCell<BTreeMap<RelationIdentity, [u8; 16]>>,
     pub(super) sequence_persistence:
         CatalogCell<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
-    pub(super) sequence_security: CatalogCell<BTreeMap<RelationIdentity, SequenceSecurity>>,
+    pub(super) sequence_security: CatalogCell<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
     pub(super) named_analyzers: CatalogCell<BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>>>,
     pub(super) table_field_analyzers: CatalogCell<TableFieldAnalyzerRegistry>,
     pub(super) foreign_servers: CatalogCell<BTreeMap<String, uqa_fdw::ForeignServer>>,
     pub(super) foreign_tables:
         CatalogCell<BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>>,
-    pub(super) foreign_table_security: CatalogCell<BTreeMap<RelationIdentity, TableSecurity>>,
+    pub(super) foreign_table_security: CatalogCell<BTreeMap<RelationIdentity, BoundTableSecurity>>,
+    pub(super) system_relation_security:
+        CatalogCell<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
     pub(super) sql_user_functions:
         CatalogCell<BTreeMap<String, Vec<Arc<super::user_functions::SQLUserFunction>>>>,
     pub(super) roles: CatalogCell<BTreeMap<String, super::roles::RoleDefinition>>,
@@ -116,19 +118,21 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) scoring_params: Arc<BTreeMap<String, String>>,
     pub(super) views: Arc<BTreeMap<RelationIdentity, StoredView>>,
     pub(super) catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
-    pub(super) database_security: Arc<DatabaseSecurity>,
-    pub(super) schemas: Arc<BTreeMap<String, SchemaSecurity>>,
+    pub(super) database_security: Arc<BoundDatabaseSecurity>,
+    pub(super) schemas: Arc<BTreeMap<String, BoundSchemaSecurity>>,
     pub(super) path_indexes: Arc<BTreeMap<String, uqa_graph::PathIndex>>,
     pub(super) sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
     pub(super) sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
     pub(super) sequence_persistence:
         Arc<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
-    pub(super) sequence_security: Arc<BTreeMap<RelationIdentity, SequenceSecurity>>,
+    pub(super) sequence_security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
     pub(super) named_analyzers: Arc<BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>>>,
     pub(super) table_field_analyzers: Arc<TableFieldAnalyzerRegistry>,
     pub(super) foreign_servers: Arc<BTreeMap<String, uqa_fdw::ForeignServer>>,
     pub(super) foreign_tables: Arc<BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>>,
-    pub(super) foreign_table_security: Arc<BTreeMap<RelationIdentity, TableSecurity>>,
+    pub(super) foreign_table_security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
+    pub(super) system_relation_security:
+        Arc<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
     pub(super) sql_user_functions:
         Arc<BTreeMap<String, Vec<Arc<super::user_functions::SQLUserFunction>>>>,
     pub(super) roles: Arc<BTreeMap<String, super::roles::RoleDefinition>>,
@@ -148,10 +152,10 @@ impl DurableCatalogState {
             scoring_params: CatalogCell::new(BTreeMap::new()),
             views: CatalogCell::new(BTreeMap::new()),
             catalog_indexes: CatalogCell::new(BTreeMap::new()),
-            database_security: CatalogCell::new(DatabaseSecurity::bootstrap()),
+            database_security: CatalogCell::new(BoundDatabaseSecurity::bootstrap()),
             schemas: CatalogCell::new(BTreeMap::from([(
                 "public".to_string(),
-                SchemaSecurity::legacy("public"),
+                BoundSchemaSecurity::bootstrap("public"),
             )])),
             path_indexes: CatalogCell::new(BTreeMap::new()),
             sequences: CatalogCell::new(BTreeMap::new()),
@@ -163,6 +167,7 @@ impl DurableCatalogState {
             foreign_servers: CatalogCell::new(BTreeMap::new()),
             foreign_tables: CatalogCell::new(BTreeMap::new()),
             foreign_table_security: CatalogCell::new(BTreeMap::new()),
+            system_relation_security: CatalogCell::new(BTreeMap::new()),
             sql_user_functions: CatalogCell::new(BTreeMap::new()),
             roles: CatalogCell::new(BTreeMap::from([(
                 "uqa".to_string(),
@@ -195,6 +200,7 @@ impl DurableCatalogState {
             foreign_servers: self.foreign_servers.snapshot(),
             foreign_tables: self.foreign_tables.snapshot(),
             foreign_table_security: self.foreign_table_security.snapshot(),
+            system_relation_security: self.system_relation_security.snapshot(),
             sql_user_functions: self.sql_user_functions.snapshot(),
             roles: self.roles.snapshot(),
             role_memberships: self.role_memberships.snapshot(),
@@ -226,6 +232,8 @@ impl DurableCatalogState {
         self.foreign_tables.restore(&snapshot.foreign_tables);
         self.foreign_table_security
             .restore(&snapshot.foreign_table_security);
+        self.system_relation_security
+            .restore(&snapshot.system_relation_security);
         self.sql_user_functions
             .restore(&snapshot.sql_user_functions);
         self.domains.restore(&snapshot.domains);
@@ -262,7 +270,7 @@ pub(super) struct SessionContext {
     >,
     pub(super) command_mutation_overlays: Mutex<Vec<CommandMutationOverlay>>,
     pub(super) portals: Mutex<BTreeMap<String, super::SessionPortalState>>,
-    pub(super) next_portal_id: Mutex<usize>,
+    pub(super) portal_registry: uqa_execution::statement::portal::PortalRegistry,
     pub(super) next_portal_transaction_origin: Mutex<u64>,
     pub(crate) statistics_worker: AtomicBool,
     pub(crate) statistics_client: AtomicBool,
@@ -275,7 +283,8 @@ pub(super) enum RuntimeParameterValue {
         setting: Option<String>,
         path: Vec<String>,
     },
-    Role(String),
+    Role(Option<Arc<uqa_sql::catalog::roles::identity::RoleBinding>>),
+    SessionAuthorization(Arc<uqa_sql::catalog::roles::identity::RoleBinding>),
 }
 
 impl SessionContext {
@@ -285,15 +294,14 @@ impl SessionContext {
             search_path: vec!["public".to_string()],
             temporary_namespace_allocated: false,
             session_vars: BTreeMap::new(),
-            local_parameter_restore: BTreeMap::new(),
+            parameter_scopes: uqa_sql::semantics::parameters::ParameterScopes::default(),
             sequence_currvals: BTreeMap::new(),
             last_sequence: None,
             sequence_discard_generation: 0,
             sql_statement_cache: SQLStatementCache::default(),
             portal_names: BTreeSet::new(),
             listened_channels: Vec::new(),
-            current_user: "uqa".to_string(),
-            session_user: "uqa".to_string(),
+            authorization: uqa_sql::catalog::roles::session::SessionAuthorization::default(),
         };
         Self {
             statement_started_at_micros: AtomicI64::new(0),
@@ -307,7 +315,7 @@ impl SessionContext {
             row_lock_statements: Mutex::new(Vec::new()),
             command_mutation_overlays: Mutex::new(Vec::new()),
             portals: Mutex::new(BTreeMap::new()),
-            next_portal_id: Mutex::new(1),
+            portal_registry: uqa_execution::statement::portal::PortalRegistry::default(),
             next_portal_transaction_origin: Mutex::new(1),
             statistics_worker: AtomicBool::new(false),
             statistics_client: AtomicBool::new(false),
@@ -426,10 +434,17 @@ pub(super) struct QueryRuntime {
 
 impl QueryRuntime {
     pub(super) fn new(function_depth_limit: usize) -> Self {
+        Self::with_cancellation(function_depth_limit, uqa_core::CancellationToken::new())
+    }
+
+    pub(super) fn with_cancellation(
+        function_depth_limit: usize,
+        cancellation: uqa_core::CancellationToken,
+    ) -> Self {
         Self {
             statement_gate: Arc::new(StatementGate::new()),
             sql_execution_depth: AtomicUsize::new(0),
-            cancellation: uqa_core::CancellationToken::new(),
+            cancellation,
             notices: Arc::new(Mutex::new(Vec::new())),
             notifications: Arc::new(Mutex::new(VecDeque::new())),
             notification_wake: Arc::new(parking_lot::Condvar::new()),

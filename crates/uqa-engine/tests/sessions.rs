@@ -18,8 +18,18 @@ use uqa_sql::SQLError;
 use uqa_storage::{RelationIdentity, SequenceOptions, SequenceRow};
 use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
+#[path = "sessions/affinity.rs"]
+mod affinity;
+#[path = "sessions/commit_resolution.rs"]
+mod commit_resolution;
 #[path = "sessions/concurrent_inserts.rs"]
 mod concurrent_inserts;
+#[path = "sessions/concurrent_writes.rs"]
+mod concurrent_writes;
+#[path = "sessions/identifiers.rs"]
+mod identifiers;
+#[path = "sessions/native_records.rs"]
+mod native_records;
 
 fn scalar_int(engine: &Engine, sql: &str, column: &str) -> i64 {
     match engine.sql(sql, &[]).unwrap().rows[0].get(column) {
@@ -749,8 +759,7 @@ fn opening_an_engine_assigns_legacy_sequence_object_identities() {
     catalog.save_schema("public").unwrap();
     assert!(catalog
         .create_sequence_row(&SequenceRow {
-            role_owner: "uqa".into(),
-            acl: None,
+            security: uqa_storage::SequenceSecurityRow::bootstrap(),
             relation: RelationIdentity::new("public", "legacy_ids"),
             object_id: [0; 16],
             definition_generation: [0; 16],
@@ -770,7 +779,11 @@ fn opening_an_engine_assigns_legacy_sequence_object_identities() {
     assert_eq!(engine.nextval("legacy_ids").unwrap(), 5);
     drop(engine);
 
-    let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+    let connection = ManagedConnection::open(&path).unwrap();
+    connection
+        .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+        .unwrap();
+    let catalog = Catalog::open(connection).unwrap();
     let sequence = catalog.load_sequence_rows().unwrap().remove(0);
     assert_ne!(sequence.object_id, [0; 16]);
 }

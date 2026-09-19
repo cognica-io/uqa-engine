@@ -11,3 +11,5 @@ pub mod declaration;
 pub mod worker;
 
 pub use context::{SessionPortalCommandDeclaration, SessionPortalDeclaration};
+mod registry;
+pub use registry::{PortalRegistration, PortalRegistry};

@@ -1,6 +1,6 @@
 {
   "sqlite": {
-    "schema_version": 2,
+    "schema_version": 3,
     "corpus_sha256": "18a50905d26e3615d9db2a8b9565cbcdefcbcfdd1036a88292624154fc228e6b",
     "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
     "allocation_ceilings": {
@@ -166,79 +166,80 @@
           "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/artifacts/10314024274"
         }
       ]
-    }
+    },
+    "transaction_model": "provider_serialized"
   },
   "redb": {
-    "schema_version": 2,
+    "schema_version": 3,
     "corpus_sha256": "18a50905d26e3615d9db2a8b9565cbcdefcbcfdd1036a88292624154fc228e6b",
     "analyzer_fingerprint": "7f8e498f7729129651636ff477f512d0e4d30ff9570ff878d78caa42e2f1b84e",
     "allocation_ceilings": {
       "macos/aarch64/64": {
         "commit_batch_256/0": {
-          "bytes_net": 1847524,
-          "bytes_peak": 13159918,
-          "bytes_total": 473580931,
-          "count_net": 319,
-          "count_peak": 12476,
-          "count_total": 1948666
+          "bytes_net": 1919112,
+          "bytes_peak": 8292246,
+          "bytes_total": 469391264,
+          "count_net": 352,
+          "count_peak": 11463,
+          "count_total": 1949385
         },
         "commit_batch_16/256": {
-          "bytes_net": 2800708,
-          "bytes_peak": 5659869,
-          "bytes_total": 51574012,
-          "count_net": 333,
-          "count_peak": 3870,
-          "count_total": 144927
+          "bytes_net": 3306492,
+          "bytes_peak": 4714401,
+          "bytes_total": 51376312,
+          "count_net": 430,
+          "count_peak": 3864,
+          "count_total": 156233
         },
         "commit_batch_16/2048": {
-          "bytes_net": 20703496,
-          "bytes_peak": 39746417,
-          "bytes_total": 179452985,
-          "count_net": 445,
-          "count_peak": 3941,
-          "count_total": 172899
+          "bytes_net": 22273700,
+          "bytes_peak": 32454609,
+          "bytes_total": 172690252,
+          "count_net": 534,
+          "count_peak": 3935,
+          "count_total": 181855
         },
         "rollback_batch_16/2048": {
-          "bytes_net": 8219824,
-          "bytes_peak": 39746417,
-          "bytes_total": 179349696,
-          "count_net": 247,
-          "count_peak": 3941,
-          "count_total": 172703
+          "bytes_net": 12405364,
+          "bytes_peak": 25458952,
+          "bytes_total": 148111393,
+          "count_net": 278,
+          "count_peak": 3935,
+          "count_total": 174178
         }
       },
       "linux/x86_64/64": {
         "commit_batch_256/0": {
-          "bytes_net": 1848212,
-          "bytes_peak": 13159758,
-          "bytes_total": 473580963,
-          "count_net": 319,
-          "count_peak": 12474,
-          "count_total": 1948655
+          "bytes_net": 1919864,
+          "bytes_peak": 8292246,
+          "bytes_total": 469390665,
+          "count_net": 352,
+          "count_peak": 11463,
+          "count_total": 1949363
         },
         "commit_batch_16/256": {
-          "bytes_net": 2801452,
-          "bytes_peak": 5660165,
-          "bytes_total": 51574092,
-          "count_net": 333,
-          "count_peak": 3868,
-          "count_total": 144916
+          "bytes_net": 3307284,
+          "bytes_peak": 4714593,
+          "bytes_total": 51375888,
+          "count_net": 430,
+          "count_peak": 3864,
+          "count_total": 156211
         },
         "commit_batch_16/2048": {
-          "bytes_net": 20704368,
-          "bytes_peak": 39746897,
-          "bytes_total": 179453281,
-          "count_net": 445,
-          "count_peak": 3939,
-          "count_total": 172888
+          "bytes_net": 22274596,
+          "bytes_peak": 32454929,
+          "bytes_total": 172690020,
+          "count_net": 534,
+          "count_peak": 3935,
+          "count_total": 181833
         },
         "rollback_batch_16/2048": {
-          "bytes_net": 8220520,
-          "bytes_peak": 39746897,
-          "bytes_total": 179350144,
-          "count_net": 247,
-          "count_peak": 3939,
-          "count_total": 172698
+          "bytes_net": 12405948,
+          "bytes_peak": 25459408,
+          "bytes_total": 148111993,
+          "count_net": 278,
+          "count_peak": 3935,
+          "count_total": 174178
         }
       }
     },
@@ -266,52 +267,61 @@
     },
     "timing_max_ratio": 1.21,
     "calibration": {
-      "maximum_bidirectional_repeat_ratio": 1.0985584434948636,
-      "timing_policy_margin": 1.1,
-      "allocation_policy": "maximum observed value for each metric, target OS, target architecture and pointer width; no padding; unknown targets require calibration; every commit workload must observe both table-update orders, differing by exactly three cumulative bytes with all other counters unchanged",
+      "allocation_policy": "One allocation-only observation per workload and target after ownership corrections. Exact observed limits for all metrics except commit bytes_total, which adds the independently derived nine-byte redb 4.1.0 table-update-order bound. No timing or percentage margin; unknown targets require review.",
+      "transaction_model": "versioned_concurrent",
+      "private_retained_bytes_after_completion": 0,
+      "dependency_versions": {
+        "redb": "4.1.0",
+        "allocation-counter": "0.8.1"
+      },
+      "table_update_order": {
+        "type_name_bytes": {
+          "uqa_mvcc_metadata": 9,
+          "uqa_mvcc_heads": 8,
+          "uqa_mvcc_versions": 16,
+          "uqa_mvcc_transactions": 8
+        },
+        "allocation_commit_byte_range": 1,
+        "publication_commit_byte_range": 8,
+        "bytes_total_allowance": {
+          "commit_batch_256/0": 9,
+          "commit_batch_16/256": 9,
+          "commit_batch_16/2048": 9,
+          "rollback_batch_16/2048": 0
+        },
+        "explanation": "On the single-leaf table directory, the first root replacement copies its committed page; later replacements copy the old definition value. Its type-name length makes the order-dependent difference. Transaction allocation changes metadata/receipts; publication changes metadata/heads/versions/receipts. Logical rollback does neither."
+      },
       "reports": [
         {
-          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-native-baseline.json",
-          "sha256": "50d6b1acda2cbdfd9ea59e7480165003e943ae745881ffc5160660471a8e0fa0"
+          "target": "macos/aarch64/64",
+          "source": "target/benchmark-runs/nori-redb-mvcc-budget-macos-20260918.json",
+          "sha256": "a133dbf58e8184fe081972f79621f204a61d700f62ffd4a25797662119b6a867",
+          "bytes": 5591,
+          "revision": "a91b112ab4267584336564bc0f9b9086a9dc7f0d",
+          "runtime_sources_sha256": "035be8bbd97576079756c77c78d9aca6275e2e83848fefe799157535d404329b",
+          "benchmark_sha256": "890a79d629d4459359289e9cdd503960a86bd7c298ada9e50566b2233d5fd745",
+          "gate_passed_at_collection": false
         },
         {
-          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-native-repeat.json",
-          "sha256": "582230564b590f726c70179182081cd3753b1367708ac590644ab4233172f980"
-        },
-        {
-          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-native-check.json",
-          "sha256": "0bc354b034d7a8201d4c316503bc507ca41ad8c5940ae96e68a8b90ed6e16978"
-        },
-        {
-          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-linux-baseline.json",
-          "sha256": "b970e09fd25e6b842ae9ce3b1cd0e6744c29d85a1ced83d9803763fd2df4f4dd",
+          "target": "linux/x86_64/64",
+          "source": "https://github.com/cognica-io/uqa-engine/actions/runs/35342064795/artifacts/10545219467",
+          "artifact_file": "nori-redb-native.json",
+          "sha256": "6a8a9de332fefcc350adcdb432cf01279c3897341776dfd82f5a76a7db98caa8",
+          "bytes": 5006,
+          "revision": "a91b112ab4267584336564bc0f9b9086a9dc7f0d",
+          "runtime_sources_sha256": "035be8bbd97576079756c77c78d9aca6275e2e83848fefe799157535d404329b",
+          "benchmark_sha256": "890a79d629d4459359289e9cdd503960a86bd7c298ada9e50566b2233d5fd745",
           "gate_passed_at_collection": false,
-          "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/attempts/1",
-          "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/artifacts/10314081635"
-        },
-        {
-          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-linux-repeat.json",
-          "sha256": "37a4d04b2032e812c9231c100a6d3eabce4efb023617c017a0afc9eb83a5bfe3",
-          "gate_passed_at_collection": false,
-          "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/attempts/2",
-          "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34745342004/artifacts/10314024274"
-        },
-        {
-          "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-linux-commit-order.json",
-          "sha256": "a20600183644479ef05f848d8c1f2c12a3ee9a603b12e9880b1f60a93be89c33",
-          "gate_passed_at_collection": false,
-          "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/34749722780/attempts/1",
-          "source_artifact": "https://github.com/cognica-io/uqa-engine/actions/runs/34749722780/artifacts/10314984155"
+          "source_run": "https://github.com/cognica-io/uqa-engine/actions/runs/35342064795"
         }
       ],
-      "allocation_reference": {
-        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-allocation-reference.json",
-        "sha256": "6792e89d46fdb8dfd4240c131d06a79df31dc0299d13806152bbfb98f358ca76"
+      "supersedes": {
+        "source": "https://github.com/cognica-io/uqa-engine/blob/a91b112ab4267584336564bc0f9b9086a9dc7f0d/benchmarks/nori/persistent-limits.json",
+        "sha256": "a654232161cfb920bb73f11aa7172771c73bf3d69f7ba0e706f254d2bce68a1d",
+        "transaction_model": "provider_serialized"
       },
-      "commit_allocation_probe": {
-        "source": "https://github.com/cognica-io/uqa-engine/blob/dd371992c4ec1da27725960faa573c4837ab3a53/benchmarks/nori/persistent-evidence/redb-commit-allocation-probe.json",
-        "sha256": "8bd5e9979b725a8cad99490dcd270e1d3bc5fa3173b7dfeac7a78f85b090de27"
-      }
-    }
+      "timing_acceptance": "Not established by allocation-only observations; requires a controlled host and an independent noise bound."
+    },
+    "transaction_model": "versioned_concurrent"
   }
 }

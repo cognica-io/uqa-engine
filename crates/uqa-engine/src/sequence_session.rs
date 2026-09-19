@@ -58,17 +58,22 @@ impl Engine {
             history.defines_lastval = defines_lastval || preserves_lastval;
         }
     }
-    pub(super) fn open_nontransactional_sequence_session(
+    pub(super) fn open_independent_catalog_session(
         &self,
+        cancellation: Option<&uqa_core::CancellationToken>,
     ) -> StorageBackendResult<Option<uqa_storage::PersistentStorageSession>> {
-        if !self.backend_transaction_is_deferred()
-            || self.session.row_lock_statements.lock().is_empty()
+        if !self.versioned_backend_transactions()
+            && (!self.backend_transaction_is_deferred()
+                || self.session.row_lock_statements.lock().is_empty())
         {
             return Ok(None);
         }
-        self.storage
-            .provider
-            .as_ref()
-            .map_or(Ok(None), |provider| provider.open_session().map(Some))
+        self.storage.provider.as_ref().map_or(Ok(None), |provider| {
+            match cancellation {
+                Some(cancellation) => provider.open_session_with_cancellation(cancellation),
+                None => provider.open_session(),
+            }
+            .map(Some)
+        })
     }
 }

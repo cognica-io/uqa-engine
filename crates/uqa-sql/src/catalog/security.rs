@@ -5,10 +5,17 @@
 //
 
 use std::collections::BTreeMap;
+pub mod acl_command;
 pub mod columns;
+pub mod dependencies;
+mod role_bindings;
 pub mod schema;
+pub mod schema_binding;
+pub use schema_binding::BoundSchemaSecurity;
 pub mod table;
-pub use uqa_core::catalog_acl::{TableAclEntry, TablePrivileges};
+pub mod table_binding;
+pub use table_binding::BoundTableSecurity;
+pub use uqa_core::catalog_acl::{AclGrantee, TableAclEntry, TablePrivileges};
 
 /// Complete table-shaped relation security state. Ownership and ACL changes are published through one value so readers cannot observe a torn authorization state.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,6 +26,14 @@ pub struct TableSecurity {
 }
 
 impl TableSecurity {
+    pub fn from_legacy(row: uqa_core::catalog_acl::LegacyRelationSecurity) -> Self {
+        Self {
+            role_owner: row.role_owner,
+            acl: row.acl,
+            column_acls: row.column_acls,
+        }
+    }
+
     pub fn owner(role_owner: impl Into<String>) -> Self {
         Self {
             role_owner: role_owner.into(),
@@ -65,6 +80,8 @@ pub mod database;
 pub mod database_inquiry;
 
 pub mod sequence;
+pub mod sequence_binding;
+pub use sequence_binding::BoundSequenceSecurity;
 pub mod sequence_grants;
 pub mod sequence_inquiry;
 
@@ -79,8 +96,12 @@ pub mod table_inquiry;
 pub mod view_ownership;
 
 pub mod grants;
+pub mod system_relations;
 pub mod table_grants;
 
 pub mod view_authorization;
 
 pub mod ownership;
+
+#[cfg(test)]
+mod owner_privileges;

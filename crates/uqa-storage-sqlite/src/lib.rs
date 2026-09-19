@@ -39,6 +39,7 @@ pub mod backend;
 pub mod block_max_index;
 pub mod graph;
 pub mod key_value;
+pub mod mvcc;
 mod read_control;
 pub mod transaction;
 mod value_index_key;
@@ -49,4 +50,5 @@ pub use graph::SQLiteGraphStore;
 pub use key_value::{
     SQLiteKeyValueCatalog, SQLiteKeyValueStorage, SQLiteKeyValueStorageBackend, SQLiteKeyValueStore,
 };
+pub use mvcc::SQLiteRecordStore;
 pub use transaction::SQLiteTransaction;

@@ -27,9 +27,13 @@ impl Engine {
         }
     }
     pub fn drop_sequence(&self, name: &str) -> Result<bool, String> {
-        self.with_implicit_string_transaction(|engine| {
-            engine.sequence_removal_context().drop_sequence(name)
+        self.with_implicit_definition_transaction(|engine| {
+            uqa_execution::schema::removal::direct::drop_sequence(
+                &engine.relation_removal_context(),
+                name,
+            )
         })
+        .map_err(|error| error.to_string())
     }
 }
 impl SequenceRemovalPublication for Engine {

@@ -145,7 +145,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
     let execute_read =
         |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
             let mut ctes = read_context.mutation.scopes.command_scope(
-                stmt.statement_privilege_subject.as_deref(),
+                stmt.statement_privilege_subject.as_ref(),
                 stmt.relations_bound,
             )?;
             if let Some(parent) = inherited_ctes {

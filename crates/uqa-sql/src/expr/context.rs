@@ -199,12 +199,19 @@ pub trait EngineHook {
         Ok(None)
     }
 
-    fn current_user(&self) -> std::result::Result<Option<String>, String> {
+    fn current_user(&self) -> std::result::Result<Option<String>, crate::SQLError> {
         Ok(None)
     }
 
-    fn session_user(&self) -> std::result::Result<Option<String>, String> {
+    fn session_user(&self) -> std::result::Result<Option<String>, crate::SQLError> {
         Ok(None)
+    }
+
+    /// Read a session setting. `None` means the parameter is unknown; errors must remain visible even for `current_setting(..., true)`.
+    fn runtime_parameter(&self, _name: &str) -> Result<Option<String>> {
+        Err(SQLError::Unsupported(
+            "engine hook does not provide session settings".into(),
+        ))
     }
 
     /// Resolve the existing schemas visible to the logical session.

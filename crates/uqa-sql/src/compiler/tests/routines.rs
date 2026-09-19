@@ -10,6 +10,31 @@ use crate::ast::{
     RoutineConfigAction, RoutineRevokeBehavior,
 };
 
+#[test]
+fn role_rename_preserves_literal_names_and_unifies_role_user_and_group_aliases() {
+    for alias in ["ROLE", "USER", "GROUP"] {
+        let statement = first(&format!(
+            "ALTER {alias} \"CURRENT_USER\" RENAME TO \"PUBLIC\""
+        ));
+        let Statement::RenameRole(rename) = &statement else {
+            panic!("expected role rename: {statement:?}")
+        };
+        assert_eq!(rename.name, "CURRENT_USER");
+        assert_eq!(rename.new_name, "PUBLIC");
+        let encoded = serde_json::to_string(&statement).unwrap();
+        let Statement::RenameRole(restored) = serde_json::from_str::<Statement>(&encoded).unwrap()
+        else {
+            panic!("expected role rename after decoding")
+        };
+        assert_eq!(&restored, rename);
+    }
+    let Statement::RenameRole(rename) = first("ALTER ROLE Source RENAME TO Destination") else {
+        panic!("expected role rename")
+    };
+    assert_eq!(rename.name, "source");
+    assert_eq!(rename.new_name, "destination");
+}
+
 fn variadic_value(expression: &Expr) -> &Expr {
     crate::expr::variadic_argument_value(expression)
         .unwrap_or_else(|| panic!("expected VARIADIC marker, got {expression:?}"))
@@ -219,7 +244,10 @@ fn routine_security_ownership_acl_role_and_refcursor_statements_compile() {
     };
     assert_eq!(owner.name, "app.open_cursor");
     assert_eq!(owner.arg_types.as_deref().unwrap(), ["refcursor"]);
-    assert_eq!(owner.new_owner, "routine_owner");
+    assert_eq!(
+        owner.new_owner,
+        crate::ast::RoleSpecification::from("routine_owner")
+    );
 
     let Statement::GrantRoutine(grant) = first(
         "GRANT ALL PRIVILEGES ON FUNCTION app.open_cursor(refcursor) TO routine_caller, PUBLIC WITH GRANT OPTION",
@@ -228,7 +256,13 @@ fn routine_security_ownership_acl_role_and_refcursor_statements_compile() {
     };
     assert!(grant.is_grant);
     assert!(grant.grant_option);
-    assert_eq!(grant.grantees, ["routine_caller", "PUBLIC"]);
+    assert_eq!(
+        grant.grantees,
+        [
+            "routine_caller".into(),
+            crate::ast::AclRoleSpecification::Public
+        ]
+    );
     assert_eq!(grant.items[0].arg_types.as_deref().unwrap(), ["refcursor"]);
     assert_eq!(grant.grantor, None);
     assert_eq!(grant.revoke_behavior, RoutineRevokeBehavior::Restrict);
@@ -240,7 +274,10 @@ fn routine_security_ownership_acl_role_and_refcursor_statements_compile() {
     };
     assert!(!revoke.is_grant);
     assert!(revoke.grant_option_only);
-    assert_eq!(revoke.grantor.as_deref(), Some("CURRENT_USER"));
+    assert_eq!(
+        revoke.grantor,
+        Some(crate::ast::RoleSpecification::CurrentUser)
+    );
     assert_eq!(revoke.revoke_behavior, RoutineRevokeBehavior::Cascade);
 
     assert!(matches!(
@@ -310,11 +347,20 @@ fn pg18_role_membership_statements_preserve_options_and_legacy_entry_points() {
     };
     assert!(grant.is_grant);
     assert_eq!(grant.granted_roles, ["parent_role", "audit_role"]);
-    assert_eq!(grant.grantee_roles, ["member_role", "CURRENT_USER"]);
+    assert_eq!(
+        grant.grantee_roles,
+        [
+            crate::ast::RoleSpecification::Named("member_role".into()),
+            crate::ast::RoleSpecification::CurrentUser
+        ]
+    );
     assert_eq!(grant.options.admin, Some(true));
     assert_eq!(grant.options.inherit, Some(false));
     assert_eq!(grant.options.set, Some(true));
-    assert_eq!(grant.grantor.as_deref(), Some("grantor_role"));
+    assert_eq!(
+        grant.grantor,
+        Some(crate::ast::RoleSpecification::Named("grantor_role".into()))
+    );
     assert!(!grant.cascade);
 
     let Statement::GrantRole(revoke) = first(
@@ -333,9 +379,18 @@ fn pg18_role_membership_statements_preserve_options_and_legacy_entry_points() {
     else {
         panic!("expected CREATE ROLE");
     };
-    assert_eq!(create.in_roles, ["parent_role"]);
-    assert_eq!(create.role_members, ["member_role"]);
-    assert_eq!(create.admin_members, ["admin_member"]);
+    assert_eq!(
+        create.in_roles,
+        [crate::ast::RoleSpecification::Named("parent_role".into())]
+    );
+    assert_eq!(
+        create.role_members,
+        [crate::ast::RoleSpecification::Named("member_role".into())]
+    );
+    assert_eq!(
+        create.admin_members,
+        [crate::ast::RoleSpecification::Named("admin_member".into())]
+    );
 
     let Statement::AlterRole(alter) =
         first("ALTER GROUP parent_role ADD USER first_member, second_member")
@@ -346,5 +401,45 @@ fn pg18_role_membership_statements_preserve_options_and_legacy_entry_points() {
         alter.membership_action,
         Some(crate::ast::RoleMembershipAction::Add)
     );
-    assert_eq!(alter.members, ["first_member", "second_member"]);
+    assert_eq!(
+        alter.members,
+        [
+            crate::ast::RoleSpecification::Named("first_member".into()),
+            crate::ast::RoleSpecification::Named("second_member".into())
+        ]
+    );
+}
+
+#[test]
+fn role_commands_keep_quoted_keyword_names_distinct_from_session_references() {
+    use crate::ast::RoleSpecification::{CurrentUser, Named, SessionUser};
+    let Statement::GrantRole(grant) =
+        first("GRANT \"CURRENT_USER\" TO \"SESSION_USER\", CURRENT_USER GRANTED BY SESSION_USER")
+    else {
+        panic!("GRANT")
+    };
+    assert_eq!(grant.granted_roles, ["CURRENT_USER"]);
+    assert_eq!(
+        grant.grantee_roles,
+        [Named("SESSION_USER".into()), CurrentUser]
+    );
+    assert_eq!(grant.grantor, Some(SessionUser));
+    let Statement::CreateRole(create) = first(
+        "CREATE ROLE created IN ROLE \"CURRENT_USER\" ROLE SESSION_USER ADMIN \"SESSION_USER\"",
+    ) else {
+        panic!("CREATE")
+    };
+    assert_eq!(create.in_roles, [Named("CURRENT_USER".into())]);
+    assert_eq!(create.role_members, [SessionUser]);
+    assert_eq!(create.admin_members, [Named("SESSION_USER".into())]);
+    let Statement::AlterRole(alter) = first("ALTER GROUP \"CURRENT_USER\" ADD USER SESSION_USER")
+    else {
+        panic!("ALTER")
+    };
+    assert_eq!(alter.name, Named("CURRENT_USER".into()));
+    assert_eq!(alter.members, [SessionUser]);
+    let Statement::DropRole(drop) = first("DROP ROLE \"CURRENT_USER\", CURRENT_USER") else {
+        panic!("DROP")
+    };
+    assert_eq!(drop.names, [Named("CURRENT_USER".into()), CurrentUser]);
 }

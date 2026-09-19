@@ -55,18 +55,23 @@ fn view(object_id: u8, persistence: RelationPersistence) -> StoredView {
         panic!("query fixture");
     };
     StoredView {
-        object_id: [object_id; 16],
-        role_owner: "owner".into(),
-        acl: None,
-        column_acls: BTreeMap::new(),
-        query: *query,
-        output_columns: Some(vec!["value".into()]),
-        persistence,
-        options: Vec::new(),
-        kind: StoredViewKind::View,
-        materialized_rows: Vec::new(),
-        materialized_column_types: Vec::new(),
-        populated: true,
+        security: uqa_sql::catalog::security::BoundTableSecurity::owner(
+            uqa_sql::catalog::roles::RoleIdentity {
+                oid: 42,
+                object_id: [42; 16],
+            },
+        ),
+        definition: uqa_sql::catalog::stored_view::StoredViewDefinition {
+            object_id: [object_id; 16],
+            query: *query,
+            output_columns: Some(vec!["value".into()]),
+            persistence,
+            options: Vec::new(),
+            kind: StoredViewKind::View,
+            materialized_rows: Vec::new(),
+            materialized_column_types: Vec::new(),
+            populated: true,
+        },
     }
 }
 impl Fixture {
@@ -75,9 +80,7 @@ impl Fixture {
             .into_iter()
             .map(|name| ViewRow {
                 relation: RelationIdentity::new("public", name),
-                role_owner: "owner".into(),
-                acl: None,
-                column_acls: BTreeMap::new(),
+                security: uqa_storage::RelationSecurityRow::legacy("owner"),
                 definition_json: serde_json::to_string(
                     &view(0, RelationPersistence::Permanent).query,
                 )
@@ -106,6 +109,8 @@ impl Fixture {
                 "owner".into(),
                 RoleDefinition {
                     oid: 42,
+                    object_id: [42; 16],
+                    revision: 1,
                     name: "owner".into(),
                     attributes: BTreeSet::new(),
                     connection_limit: -1,
@@ -131,7 +136,7 @@ impl Fixture {
     ) -> Vec<(
         RelationIdentity,
         serde_json::Value,
-        uqa_sql::catalog::security::TableSecurity,
+        uqa_sql::catalog::security::BoundTableSecurity,
     )> {
         self.registry
             .borrow()
@@ -213,6 +218,9 @@ impl RoleCatalogGuards for Fixture {
     }
 }
 impl ViewPlanBinding for Fixture {
+    fn lock_relations(&self, _: &QueryPlan) -> Result<(), SQLError> {
+        panic!("restoration uses its explicit persisted namespace");
+    }
     fn bind_relations(&self, _: &mut QueryPlan) -> Result<bool, SQLError> {
         panic!("restoration uses its explicit persisted namespace");
     }
@@ -282,7 +290,10 @@ fn view_migration_publishes_the_complete_namespace_before_binding_and_keeps_temp
         let restored = &views[&RelationIdentity::new("public", name)];
         assert_ne!(restored.object_id, [0; 16]);
         assert_eq!(restored.output_columns, Some(vec!["value".into()]));
-        assert_eq!(restored.role_owner, "owner");
+        assert_eq!(
+            restored.security.role_owner,
+            fixture.roles["owner"].identity()
+        );
     }
 }
 
@@ -300,13 +311,36 @@ fn view_migration_failures_restore_the_previous_registry_including_security_and_
 
 #[test]
 fn load_only_view_restore_rejects_migration_before_registry_or_storage_publication() {
-    let fixture = Fixture::new(Failure::None);
+    let mut fixture = Fixture::new(Failure::None);
+    for row in &mut fixture.rows {
+        row.security = view(0, RelationPersistence::Permanent)
+            .security
+            .row()
+            .into();
+    }
     let before = fixture.snapshot();
     let error = restore_views_from_catalog(&fixture.context(), &fixture, false).unwrap_err();
     assert!(error
         .to_string()
         .contains("requires an initial-open metadata migration"));
     assert_eq!(fixture.identities.get(), 2);
+    assert_eq!(fixture.writes.get(), 0);
+    assert_eq!(fixture.bindings.get(), 0);
+    assert!(fixture.saved.borrow().is_empty());
+    assert_eq!(fixture.snapshot(), before);
+}
+
+#[test]
+fn load_only_view_restore_rejects_legacy_security_before_allocating_or_publishing() {
+    let mut fixture = Fixture::new(Failure::None);
+    for (identity, row) in (1..).zip(&mut fixture.rows) {
+        row.definition_json =
+            serde_json::to_string(&view(identity, RelationPersistence::Permanent)).unwrap();
+    }
+    let before = fixture.snapshot();
+    let error = restore_views_from_catalog(&fixture.context(), &fixture, false).unwrap_err();
+    assert!(error.to_string().contains("initial catalog migration"));
+    assert_eq!(fixture.identities.get(), 0);
     assert_eq!(fixture.writes.get(), 0);
     assert_eq!(fixture.bindings.get(), 0);
     assert!(fixture.saved.borrow().is_empty());

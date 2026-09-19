@@ -61,6 +61,7 @@ mod scalar_math;
 mod scalar_postgres;
 mod scalar_range;
 mod scalar_temporal;
+mod session_settings;
 
 use binary::{compare, eval_comparison_op, values_equal};
 pub(crate) use binary::{division_by_zero, out_of_range};

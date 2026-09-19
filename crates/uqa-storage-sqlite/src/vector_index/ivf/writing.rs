@@ -127,6 +127,10 @@ pub(super) fn drop_metadata(
     table: &str,
     field: &str,
 ) -> SQLiteResult<()> {
+    let index = SQLiteVectorIndex::new(connection.clone(), table, field, 0);
+    if index.write_native(super::native::drop_metadata)?.is_some() {
+        return Ok(());
+    }
     connection.with_mut(|connection| {
         let transaction = connection.savepoint()?;
         for metadata_table in ["_ivf_assignments", "_ivf_centroids", "_ivf_indexes"] {

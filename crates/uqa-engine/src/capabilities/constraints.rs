@@ -16,6 +16,7 @@ use uqa_execution::{
     },
     row_locks::LockAcquire,
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::{ColumnDef, ColumnType, ForeignKey, TableCheck},
     catalog::index::EnforcedKey,
@@ -105,13 +106,13 @@ impl ConstraintTransactions for Engine {
     }
 }
 impl MutationNamespace for Engine {
-    fn current_user_name(&self) -> String {
-        Engine::current_user_name(self)
+    fn current_role(&self) -> RoleReference {
+        Engine::current_role(self)
     }
     fn require_schema_privilege(
         &self,
         schema: &str,
-        role: &str,
+        role: &RoleReference,
         privilege: SchemaAclPrivilege,
     ) -> Result<(), SQLError> {
         Engine::require_schema_privilege(self, schema, role, privilege)

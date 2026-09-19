@@ -34,7 +34,7 @@ pub trait EventRelationCatalog {
     fn event_relation_owner(
         &self,
         relation: &RelationIdentity,
-    ) -> Result<(String, &'static str), SQLError>;
+    ) -> Result<(crate::catalog::roles::RoleIdentity, &'static str), SQLError>;
     fn view_kind(&self, relation: &RelationIdentity) -> Option<StoredViewKind>;
     fn view(&self, relation: &RelationIdentity) -> Option<StoredView>;
     fn foreign_columns(&self, relation: &RelationIdentity) -> Option<Vec<ColumnDef>>;

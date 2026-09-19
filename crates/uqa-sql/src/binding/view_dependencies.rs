@@ -14,52 +14,8 @@ use crate::{
 use uqa_core::{RelationIdentity, Value};
 
 pub fn canonical_virtual_relation_reference(reference: &str) -> Option<String> {
-    let (schema, relation) = RelationIdentity::parse_reference(reference).ok()?;
-    let relation = relation.to_ascii_lowercase();
-    let schema = schema.map(|schema| schema.to_ascii_lowercase());
-    let information_schema = matches!(
-        relation.as_str(),
-        "schemata"
-            | "tables"
-            | "columns"
-            | "column_privileges"
-            | "role_column_grants"
-            | "views"
-            | "routines"
-            | "sequences"
-            | "table_constraints"
-            | "key_column_usage"
-    );
-    let pg_catalog = matches!(
-        relation.as_str(),
-        "pg_namespace"
-            | "pg_class"
-            | "pg_inherits"
-            | "pg_partitioned_table"
-            | "pg_attribute"
-            | "pg_attrdef"
-            | "pg_constraint"
-            | "pg_index"
-            | "pg_tables"
-            | "pg_views"
-            | "pg_indexes"
-            | "pg_type"
-            | "pg_proc"
-            | "pg_database"
-            | "pg_roles"
-            | "pg_user"
-            | "pg_settings"
-            | "pg_description"
-            | "pg_matviews"
-            | "pg_sequences"
-    );
-    match schema.as_deref() {
-        Some("information_schema") if information_schema => {
-            Some(format!("information_schema.{relation}"))
-        }
-        Some("pg_catalog") | None if pg_catalog => Some(format!("pg_catalog.{relation}")),
-        _ => None,
-    }
+    crate::catalog::resolve_virtual_relation(&[], reference)
+        .map(crate::catalog::VirtualRelation::qualified_name)
 }
 
 pub fn sequence_function_reference_mut(expression: &mut ScalarExpr) -> Option<&mut String> {
@@ -114,6 +70,15 @@ pub fn bind_query_plan_relations<E>(
     inherited_ctes: &std::collections::BTreeSet<String>,
     resolve: &mut impl FnMut(&str) -> Result<String, E>,
 ) -> Result<(), E> {
+    bind_query_plan_relation_targets(plan, inherited_ctes, &mut |name, _| resolve(name))
+}
+
+/// Bind concrete relation references with their inheritance scope, excluding CTE aliases at every query boundary.
+pub fn bind_query_plan_relation_targets<E>(
+    plan: &mut QueryPlan,
+    inherited_ctes: &std::collections::BTreeSet<String>,
+    resolve: &mut impl FnMut(&str, bool) -> Result<String, E>,
+) -> Result<(), E> {
     // Non-recursive CTEs see outer and preceding CTEs. WITH RECURSIVE makes every sibling visible while each body is bound, after which execution orders dependencies before their consumers.
     let mut visible_ctes = inherited_ctes.clone();
     let recursive_ctes = plan.ctes.iter().any(|cte| cte.recursive).then(|| {
@@ -127,10 +92,10 @@ pub fn bind_query_plan_relations<E>(
             || visible_ctes.clone(),
             |ctes| inherited_ctes.union(ctes).cloned().collect(),
         );
-        bind_cte_plan_relations(&mut cte.body, &body_ctes, resolve)?;
+        bind_cte_relation_targets(&mut cte.body, &body_ctes, resolve)?;
         visible_ctes.insert(cte.name.clone());
     }
-    bind_relational_plan_relations(&mut plan.root, &visible_ctes, resolve)?;
+    bind_relational_targets(&mut plan.root, &visible_ctes, resolve)?;
     plan.relations_bound = true;
     Ok(())
 }
@@ -140,13 +105,21 @@ pub fn bind_relational_plan_relations<E>(
     visible_ctes: &std::collections::BTreeSet<String>,
     resolve: &mut impl FnMut(&str) -> Result<String, E>,
 ) -> Result<(), E> {
+    bind_relational_targets(plan, visible_ctes, &mut |name, _| resolve(name))
+}
+
+fn bind_relational_targets<E>(
+    plan: &mut RelationalPlan,
+    visible_ctes: &std::collections::BTreeSet<String>,
+    resolve: &mut impl FnMut(&str, bool) -> Result<String, E>,
+) -> Result<(), E> {
     match plan {
         RelationalPlan::QueryBlock(block) => {
             if let Some(source) = &mut block.from {
-                bind_source_plan_relations(source, visible_ctes, resolve)?;
+                bind_source_targets(source, visible_ctes, resolve)?;
             }
             for subquery in &mut block.subqueries {
-                bind_query_plan_relations(subquery, visible_ctes, resolve)?;
+                bind_query_plan_relation_targets(subquery, visible_ctes, resolve)?;
             }
         }
         RelationalPlan::SetOp {
@@ -155,15 +128,15 @@ pub fn bind_relational_plan_relations<E>(
             subqueries,
             ..
         } => {
-            bind_query_plan_relations(left, visible_ctes, resolve)?;
-            bind_query_plan_relations(right, visible_ctes, resolve)?;
+            bind_query_plan_relation_targets(left, visible_ctes, resolve)?;
+            bind_query_plan_relation_targets(right, visible_ctes, resolve)?;
             for subquery in subqueries {
-                bind_query_plan_relations(subquery, visible_ctes, resolve)?;
+                bind_query_plan_relation_targets(subquery, visible_ctes, resolve)?;
             }
         }
         RelationalPlan::Values { subqueries, .. } => {
             for subquery in subqueries {
-                bind_query_plan_relations(subquery, visible_ctes, resolve)?;
+                bind_query_plan_relation_targets(subquery, visible_ctes, resolve)?;
             }
         }
     }
@@ -175,9 +148,20 @@ pub fn bind_source_plan_relations<E>(
     visible_ctes: &std::collections::BTreeSet<String>,
     resolve: &mut impl FnMut(&str) -> Result<String, E>,
 ) -> Result<(), E> {
+    bind_source_targets(source, visible_ctes, &mut |name, _| resolve(name))
+}
+
+fn bind_source_targets<E>(
+    source: &mut SourcePlan,
+    visible_ctes: &std::collections::BTreeSet<String>,
+    resolve: &mut impl FnMut(&str, bool) -> Result<String, E>,
+) -> Result<(), E> {
     match source {
         SourcePlan::Table {
-            name, qualifier, ..
+            name,
+            qualifier,
+            include_descendants,
+            ..
         } => {
             if qualifier.is_empty() {
                 *qualifier = RelationIdentity::parse_reference(name)
@@ -190,15 +174,15 @@ pub fn bind_source_plan_relations<E>(
                         schema.is_none() && visible_ctes.contains(&relation)
                     });
             if !is_cte {
-                *name = resolve(name)?;
+                *name = resolve(name, *include_descendants)?;
             }
         }
         SourcePlan::Join { left, right, .. } => {
-            bind_source_plan_relations(left, visible_ctes, resolve)?;
-            bind_source_plan_relations(right, visible_ctes, resolve)?;
+            bind_source_targets(left, visible_ctes, resolve)?;
+            bind_source_targets(right, visible_ctes, resolve)?;
         }
         SourcePlan::Subquery { body, .. } => {
-            bind_query_plan_relations(body, visible_ctes, resolve)?;
+            bind_query_plan_relation_targets(body, visible_ctes, resolve)?;
         }
         SourcePlan::Function {
             name,
@@ -211,8 +195,8 @@ pub fn bind_source_plan_relations<E>(
                     .map_or_else(|_| name.clone(), |(_, function)| function);
             }
             if let Some(relations) = relations {
-                relations.left = resolve(&relations.left)?;
-                relations.right = resolve(&relations.right)?;
+                relations.left = resolve(&relations.left, false)?;
+                relations.right = resolve(&relations.right, false)?;
             }
         }
         SourcePlan::FunctionGroup { functions, .. } => {
@@ -222,8 +206,8 @@ pub fn bind_source_plan_relations<E>(
                         .map_or_else(|_| function.name.clone(), |(_, name)| name);
                 }
                 if let Some(relations) = &mut function.relations {
-                    relations.left = resolve(&relations.left)?;
-                    relations.right = resolve(&relations.right)?;
+                    relations.left = resolve(&relations.left, false)?;
+                    relations.right = resolve(&relations.right, false)?;
                 }
             }
         }
@@ -613,14 +597,27 @@ pub fn bind_cte_plan_relations<E>(
     inherited: &std::collections::BTreeSet<String>,
     resolve: &mut impl FnMut(&str) -> Result<String, E>,
 ) -> Result<(), E> {
+    bind_cte_relation_targets(body, inherited, &mut |name, _| resolve(name))
+}
+
+fn bind_cte_relation_targets<E>(
+    body: &mut crate::plan::CtePlanBody,
+    inherited: &std::collections::BTreeSet<String>,
+    resolve: &mut impl FnMut(&str, bool) -> Result<String, E>,
+) -> Result<(), E> {
     let crate::plan::CtePlanBody::Command(command) = body else {
         let crate::plan::CtePlanBody::Query(query) = body else {
             unreachable!()
         };
-        return bind_query_plan_relations(query, inherited, resolve);
+        return bind_query_plan_relation_targets(query, inherited, resolve);
+    };
+    let include_descendants = match command.as_ref() {
+        crate::plan::CommandPlan::Update(plan) => plan.include_descendants,
+        crate::plan::CommandPlan::Delete(plan) => plan.include_descendants,
+        _ => false,
     };
     if let Some(target) = command.mutation_target_mut() {
-        *target = resolve(target)?;
+        *target = resolve(target, include_descendants)?;
     }
     match command.as_mut() {
         crate::plan::CommandPlan::Insert(plan) => {
@@ -649,15 +646,15 @@ pub fn bind_cte_plan_relations<E>(
                 || visible.clone(),
                 |names| inherited.union(names).cloned().collect(),
             );
-            bind_cte_plan_relations(&mut cte.body, &scope, resolve)?;
+            bind_cte_relation_targets(&mut cte.body, &scope, resolve)?;
             visible.insert(cte.name.clone());
         }
     }
     if let Some(source) = command.source_input_mut() {
-        bind_source_plan_relations(source, &visible, resolve)?;
+        bind_source_targets(source, &visible, resolve)?;
     }
     for query in command.query_inputs_mut() {
-        bind_query_plan_relations(query, &visible, resolve)?;
+        bind_query_plan_relation_targets(query, &visible, resolve)?;
     }
     Ok(())
 }

@@ -18,16 +18,20 @@ pub fn validate_table_security_invariants(
         let mut paths = BTreeSet::new();
         for entry in acl {
             let grantor = super::acl_grantor(entry, &security.role_owner);
-            if entry.role != "PUBLIC" && !roles.contains_key(&entry.role) {
+            if entry
+                .role
+                .role_name()
+                .is_some_and(|name| !roles.contains_key(name))
+            {
                 return Err(format!(
                     "ACL references missing grantee role `{}`",
                     entry.role
                 ));
             }
-            if grantor == "PUBLIC" || !roles.contains_key(grantor) {
+            if !roles.contains_key(grantor) {
                 return Err(format!("ACL references missing grantor role `{grantor}`"));
             }
-            if !paths.insert((entry.role.as_str(), grantor)) {
+            if !paths.insert((&entry.role, grantor)) {
                 return Err(format!(
                     "ACL contains duplicate grant path `{grantor}` -> `{}`",
                     entry.role
@@ -36,7 +40,7 @@ pub fn validate_table_security_invariants(
             if entry.privileges.is_empty() && entry.grant_options.is_empty() {
                 return Err("ACL contains an empty grant path".into());
             }
-            if entry.role == "PUBLIC" && !entry.grant_options.is_empty() {
+            if entry.role.is_public() && !entry.grant_options.is_empty() {
                 return Err("PUBLIC cannot hold grant options".into());
             }
             for privilege in TableAclPrivilege::ALL {

@@ -9,8 +9,8 @@
 use super::{
     Catalog, CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow,
     ForeignTableRow, GraphSnapshot, OptionalExtension, RelationIdentity, Result, SQLiteError,
-    SequenceReservationResult, SequenceRow, StorageBackendError, StorageBackendResult,
-    TableAclEntry, TableSchema, ViewRow,
+    SequenceReservationResult, SequenceRow, SequenceSetValueResult, StorageBackendError,
+    StorageBackendResult, TableSchema, ViewRow,
 };
 
 fn into_storage_result<T>(result: Result<T>) -> StorageBackendResult<T> {
@@ -18,6 +18,23 @@ fn into_storage_result<T>(result: Result<T>) -> StorageBackendResult<T> {
 }
 
 impl CatalogFacade for Catalog {
+    fn transaction_model(&self) -> uqa_storage::StorageTransactionModel {
+        self.conn.transaction_model()
+    }
+
+    fn guard_graph_definition(&self, graph: Option<&str>) -> StorageBackendResult<()> {
+        into_storage_result(
+            self.conn
+                .with_native_write(|snapshot, batch| {
+                    snapshot.guard_graph_definition(batch, None, graph)
+                })
+                .map(|_| ()),
+        )
+    }
+    fn transaction_affinity(&self) -> Option<uqa_storage::StorageSessionAffinity> {
+        Some(self.conn.transaction_affinity())
+    }
+
     fn clear_path_index_data(&self, index: &str) -> StorageBackendResult<()> {
         into_storage_result(Catalog::clear_path_index_data(self, index))
     }
@@ -122,11 +139,58 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::set_metadata(self, key, value))
     }
 
+    fn delete_metadata(&self, key: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::delete_metadata(self, key))
+    }
+
     fn get_metadata(&self, key: &str) -> StorageBackendResult<Option<String>> {
         into_storage_result(Catalog::get_metadata(self, key))
     }
 
+    fn metadata_has_private_changes(&self, key: &str) -> StorageBackendResult<bool> {
+        into_storage_result(self.native_metadata_has_private_changes(key))
+    }
+    fn metadata_with_prefix(&self, prefix: &str) -> StorageBackendResult<Vec<(String, String)>> {
+        into_storage_result(Catalog::metadata_with_prefix(self, prefix))
+    }
+
+    fn save_statistics_maintenance(
+        &self,
+        table: &str,
+        state: &uqa_storage::statistics_maintenance::StatisticsMaintenance,
+    ) -> StorageBackendResult<()> {
+        use crate::mvcc::native::{NativeRecord, NativeRecordFamily, NativeRecordOwner};
+        use rusqlite::types::ValueRef;
+        use uqa_storage::mvcc::VersionError;
+        let key = uqa_storage::statistics_maintenance::StatisticsMaintenance::key(table);
+        let native = self.conn.with_native_write(|snapshot, batch| {
+            let json = state
+                .encode(&snapshot.control)
+                .map_err(VersionError::into_storage_error)?;
+            let record = NativeRecord::encode(
+                NativeRecordFamily::Metadata,
+                NativeRecordOwner::Database(snapshot.database),
+                &[ValueRef::Text(key.as_bytes()), ValueRef::Text(&json)],
+                &snapshot.control,
+            )
+            .map_err(VersionError::into_storage_error)?;
+            batch
+                .replace_statistics_maintenance(record.key(), record.row())
+                .map_err(Into::into)
+        });
+        if into_storage_result(native)?.is_some() {
+            return Ok(());
+        }
+        into_storage_result(self.set_metadata(&key, &serde_json::to_string(state)?))
+    }
+
     fn migrate_relation_namespace(&self) -> StorageBackendResult<()> {
+        if self
+            .read_native(crate::mvcc::native::NativeSnapshot::validate_catalog_namespace)?
+            .is_some()
+        {
+            return Ok(());
+        }
         into_storage_result(self.conn.with(|connection| {
             let foreign_key_violation = connection
                 .query_row("PRAGMA foreign_key_check", [], |row| {
@@ -192,6 +256,13 @@ impl CatalogFacade for Catalog {
 
     fn load_schema_rows(&self) -> StorageBackendResult<Vec<uqa_storage::catalog::SchemaRow>> {
         into_storage_result(Catalog::load_schema_rows(self))
+    }
+
+    fn schema_has_private_changes(&self, name: &str) -> StorageBackendResult<bool> {
+        into_storage_result(self.native_named_record_has_private_changes(
+            crate::mvcc::native::NativeRecordFamily::Schemas,
+            name,
+        ))
     }
 
     fn save_table(&self, schema: &TableSchema) -> StorageBackendResult<()> {
@@ -283,6 +354,14 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::load_sequence_rows(self))
     }
 
+    fn sequence_has_private_changes(
+        &self,
+        _relation: &RelationIdentity,
+        object_id: [u8; 16],
+    ) -> StorageBackendResult<bool> {
+        into_storage_result(self.native_sequence_has_private_changes(object_id))
+    }
+
     fn reserve_sequence_values(
         &self,
         name: &str,
@@ -301,12 +380,19 @@ impl CatalogFacade for Catalog {
         &self,
         name: &str,
         object_id: [u8; 16],
+        definition_generation: [u8; 16],
         value: i64,
         called: bool,
         log_count: i64,
-    ) -> StorageBackendResult<Option<i64>> {
+    ) -> StorageBackendResult<SequenceSetValueResult> {
         into_storage_result(Catalog::set_sequence_value(
-            self, name, object_id, value, called, log_count,
+            self,
+            name,
+            object_id,
+            definition_generation,
+            value,
+            called,
+            log_count,
         ))
     }
 
@@ -592,16 +678,10 @@ impl CatalogFacade for Catalog {
     fn update_foreign_table_security(
         &self,
         relation: &RelationIdentity,
-        role_owner: &str,
-        acl: Option<&[TableAclEntry]>,
-        column_acls: &std::collections::BTreeMap<String, Vec<TableAclEntry>>,
+        security: &uqa_storage::RelationSecurityRow,
     ) -> StorageBackendResult<bool> {
         into_storage_result(Catalog::update_foreign_table_security(
-            self,
-            relation,
-            role_owner,
-            acl,
-            column_acls,
+            self, relation, security,
         ))
     }
 

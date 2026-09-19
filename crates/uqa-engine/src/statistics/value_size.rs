@@ -16,7 +16,7 @@ pub(crate) const TEXT_BYTES: usize = 1_024;
 pub(crate) const ENCODED_VALUE_BYTES: usize = 8_192;
 pub(crate) const HISTOGRAM_VALUES: usize = 101;
 pub(crate) const MCV_VALUES: usize = 10;
-pub(super) const FORMAT_VERSION: u32 = 1;
+pub(crate) const FORMAT_VERSION: u32 = 1;
 
 struct LimitedWriter(usize);
 

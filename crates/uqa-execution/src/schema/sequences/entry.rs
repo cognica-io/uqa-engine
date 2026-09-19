@@ -61,7 +61,7 @@ pub fn run_alter_sequence(
     if !transactions.with_sequence_write(Box::new(|context| alter_sequence(context, statement)))? {
         notices.lock().push((
             "NOTICE".into(),
-            format!("relation \"{}\" does not exist, skipping", statement.name),
+            uqa_sql::catalog::resolution::missing_relation_notice(&statement.name)?,
         ));
     }
     Ok(SQLResult::empty())

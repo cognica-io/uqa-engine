@@ -14,7 +14,7 @@ use crate::catalog::{CatalogReadView, RelationNameResolution};
 use super::super::helpers::constraints::{
     constraint_catalog_rows, ConstraintCatalogKind, ConstraintCatalogRow,
 };
-use super::super::helpers::oids::{schema_oid, stable_object_oid, stable_oid};
+use super::super::helpers::oids::{namespace_oid, stable_object_oid, stable_oid};
 use super::super::helpers::rows::{
     bool_value, catalog_array, catalog_usize, int_value, row, str_value,
 };
@@ -85,7 +85,7 @@ pub fn build_pg_constraint(
             Ok(row([
                 (
                     "oid",
-                    int_value(
+                    int_value(constraint.catalog_oid.unwrap_or_else(|| {
                         constraint
                             .object_id
                             .filter(|_| constraint.kind == ConstraintCatalogKind::Check)
@@ -100,11 +100,14 @@ pub fn build_pg_constraint(
                                     )
                                 },
                                 |object_id| stable_object_oid("constraint", &object_id),
-                            ),
-                    ),
+                            )
+                    })),
                 ),
                 ("conname", str_value(constraint.name)),
-                ("connamespace", int_value(schema_oid(&constraint.schema))),
+                (
+                    "connamespace",
+                    int_value(namespace_oid(catalog, &constraint.schema)),
+                ),
                 ("contype", str_value(constraint.kind.pg_type())),
                 ("condeferrable", bool_value(constraint.state.deferrable())),
                 (

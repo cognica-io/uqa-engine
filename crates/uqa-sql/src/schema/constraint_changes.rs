@@ -5,6 +5,12 @@
 //
 
 //! Locate durable constraints and analyze changes to their type, identity, and enforcement metadata.
+pub mod foreign_key_target;
+pub mod inheritance;
+pub mod not_null_removal;
+pub mod renaming;
+pub mod validation;
+
 use crate::schema::foreign_keys::column_foreign_key;
 use crate::{
     ast::{ColumnType, ForeignKey, TableCheck},

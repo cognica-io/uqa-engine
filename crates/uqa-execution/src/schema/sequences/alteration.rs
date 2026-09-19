@@ -88,12 +88,15 @@ pub fn alter_sequence_definition(
         }
         state.owner = owner;
     }
-    let definition_generation = (context.new_generation)().map_err(|error| {
-        SQLError::Internal(format!(
-            "allocate sequence `{name}` definition generation: {error}"
-        ))
-    })?;
-    state.definition_generation = definition_generation;
+    if target_persistence != persistence
+        || uqa_sql::schema::sequences::actions::sequence_alter_changes_value_parameters(alter)
+    {
+        state.definition_generation = (context.new_generation)().map_err(|error| {
+            SQLError::Internal(format!(
+                "allocate sequence `{name}` definition generation: {error}"
+            ))
+        })?;
+    }
     context.publication.replace_sequence(
         name,
         relation,

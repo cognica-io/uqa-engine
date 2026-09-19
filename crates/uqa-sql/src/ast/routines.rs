@@ -158,9 +158,12 @@ pub struct CreateFunction {
     /// `STRICT` / `RETURNS NULL ON NULL INPUT` - the function is not
     /// invoked when any input argument is NULL; the result is NULL.
     pub strict: bool,
-    /// Catalog owner. The compiler leaves this empty and registration captures the effective current user; persisted definitions always carry a role name.
-    #[serde(default)]
-    pub owner: String,
+    /// Catalog owner incarnation. Parsed declarations and anonymous blocks are unbound; registration binds the effective current role before publication.
+    #[serde(
+        default,
+        deserialize_with = "super::routine_security::deserialize_routine_owner"
+    )]
+    pub owner: Option<uqa_core::catalog_role::RoleIdentity>,
     /// Execution identity and leakproofness, flattened to retain the catalog-definition wire shape.
     #[serde(default, flatten)]
     pub security: RoutineSecurityAttributes,
@@ -176,8 +179,8 @@ pub struct CreateFunction {
     /// Creation-time configuration actions awaiting engine/session resolution. Registration consumes this list before persistence.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub config_actions: Vec<RoutineConfigAction>,
-    /// Explicit execution privileges. `None` means the `PostgreSQL` default (`PUBLIC=EXECUTE`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Explicit execution privileges, including the owner's revocable EXECUTE. `None` means the `PostgreSQL` default (PUBLIC and owner EXECUTE); ownership always retains implicit grant options.
+    #[serde(default)]
     pub execute_acl: Option<Vec<RoutineAclEntry>>,
 }
 

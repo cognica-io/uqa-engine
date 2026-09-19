@@ -174,8 +174,6 @@ use statement_cache::{PreparedStatementPlan, SQLStatementCache};
 
 #[cfg(test)]
 use uqa_execution::catalog::sequence::restoration::SEQUENCES_METADATA_KEY;
-const ROLES_METADATA_KEY: &str = "sql_roles_json";
-const ROLE_MEMBERSHIPS_METADATA_KEY: &str = "sql_role_memberships_json";
 /// Default nesting cap for user-defined function calls. Exceeding it
 /// raises `stack depth limit exceeded`, mirroring the `PostgreSQL`
 /// `max_stack_depth` guard.
@@ -208,9 +206,7 @@ type SessionPortalCatalogSnapshot = Arc<DurableCatalogSnapshot>;
 type SessionPortalTransactionOverlay =
     Arc<BTreeMap<String, BTreeMap<DocId, Option<StoredDocument>>>>;
 type ColumnStatsMap = BTreeMap<String, uqa_planner::ColumnStats>;
-type TransactionRelationStates = BTreeMap<RelationIdentity, u64>;
 type FixedTransactionCatalogBaseline = BTreeMap<[u8; 16], (RelationIdentity, Vec<u8>)>;
-type NontransactionalColumnStats = Vec<NontransactionalColumnStatsEntry>;
 type NontransactionalSequenceValues = BTreeMap<[u8; 16], NontransactionalSequenceHistory>;
 
 #[derive(Clone, Default)]
@@ -219,15 +215,6 @@ struct NontransactionalSequenceHistory {
     object_id: [u8; 16],
     session_currval: Option<SessionSequenceValue>,
     defines_lastval: bool,
-}
-
-#[derive(Clone)]
-struct NontransactionalColumnStatsEntry {
-    table_name: String,
-    table_lifecycle_id: u64,
-    stats: ColumnStatsMap,
-    persistent: bool,
-    autonomous: bool,
 }
 
 /// Unified query engine composed from explicit storage, durable-catalog,
@@ -261,6 +248,7 @@ struct TransactionDirtyState {
     catalog_registry: bool,
 }
 
+/// Physical write admission for the lifetime of a transaction. Savepoint undo restores SQL access characteristics but cannot turn an already promoted physical writer back into an unwritten reader.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TransactionIntent {
     ReadOnly,
@@ -271,6 +259,7 @@ enum TransactionIntent {
 enum BackendTransactionMode {
     Deferred,
     Writer,
+    Versioned,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -278,6 +267,7 @@ enum TransactionStatus {
     Active,
     Failed,
     FailedBackendAborted,
+    CommitPending(uqa_storage::mvcc::StorageTransactionId),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -332,7 +322,6 @@ struct TransactionFrame {
     savepoints: Vec<TransactionSavepoint>,
     session_snapshot: SessionStateSnapshot,
     data_snapshot: Option<EngineDataSnapshot>,
-    relation_states_at_begin: TransactionRelationStates,
     dirty_at_begin: TransactionDirtyState,
     /// Lock mark this frame started with. Rolling the whole frame back releases every acquisition at or above it, independent of the savepoint marks the frame allocated later.
     begin_lock_mark: u32,
@@ -347,8 +336,6 @@ struct TransactionFrame {
     pending_listen_actions: Vec<PendingListenAction>,
     pending_notifications: Vec<PendingNotification>,
     constraint_modes: ConstraintModeState,
-    /// Statistics written by ANALYZE are nontransactional in `PostgreSQL`. Keep the latest values outside savepoint snapshots so any rollback can restore them after transactional storage state is rolled back.
-    nontransactional_column_stats: NontransactionalColumnStats,
     /// Values allocated by `nextval` or installed by `setval` are not rolled back in `PostgreSQL`, except that allocations made against a transactionally changed sequence definition roll back with that definition. Every active frame records values by definition generation so transaction, savepoint, and PL/pgSQL exception rollback can reapply exactly the generation owned by the rollback target while preserving the latest session `currval` and `lastval` effects.
     nontransactional_sequence_values: NontransactionalSequenceValues,
 }
@@ -398,11 +385,9 @@ impl FixedTransactionSnapshot {
 struct TransactionSavepoint {
     name: String,
     storage_savepoint: StorageSavepointId,
-    intent: TransactionIntent,
     characteristics: TransactionCharacteristicsState,
     session_snapshot: SessionStateSnapshot,
     data_snapshot: Option<EngineDataSnapshot>,
-    relation_states_at_begin: TransactionRelationStates,
     dirty: TransactionDirtyState,
     lock_mark: u32,
     row_changes: Vec<TransactionRowChange>,
@@ -423,7 +408,7 @@ struct SessionStateSnapshot {
     search_path: Vec<String>,
     temporary_namespace_allocated: bool,
     session_vars: BTreeMap<String, String>,
-    local_parameter_restore: BTreeMap<String, state::RuntimeParameterValue>,
+    parameter_scopes: uqa_sql::semantics::parameters::ParameterScopes<state::RuntimeParameterValue>,
     sequence_currvals: BTreeMap<RelationIdentity, SessionSequenceValue>,
     last_sequence: Option<SessionLastSequenceReference>,
     sequence_discard_generation: u64,
@@ -431,8 +416,7 @@ struct SessionStateSnapshot {
     /// Names of portals that existed at this transaction or savepoint boundary. Rollback removes portals created later without rewinding cursor positions or resurrecting closed portals.
     portal_names: BTreeSet<String>,
     listened_channels: Vec<String>,
-    current_user: String,
-    session_user: String,
+    authorization: uqa_sql::catalog::roles::session::SessionAuthorization,
 }
 
 #[derive(Clone)]
@@ -459,8 +443,8 @@ struct SessionPortalState {
     pinned_transaction_control: PinnedPortalTransactionControl,
     /// A PL/pgSQL row loop pins its portal while user statements run so the loop body cannot close the executor that owns its current tuple batch.
     pin_count: usize,
-    /// The engine carries typed values rather than wire encodings; retaining the declaration format lets a `PostgreSQL` wire adapter request binary result encoding without changing portal execution.
-    _binary: bool,
+    /// Retain live catalog visibility while the executor is temporarily outside the session map.
+    _registration: uqa_execution::statement::portal::PortalRegistration,
 }
 
 use uqa_execution::statement::portal::{SessionPortalCommandDeclaration, SessionPortalDeclaration};
@@ -546,7 +530,7 @@ struct EngineDataSnapshot {
 #[expect(clippy::struct_excessive_bools, reason = "independent snapshot flags")]
 struct TableDataSnapshot {
     state: Arc<TableState>,
-    security: state::TableSecurity,
+    security: state::BoundTableSecurity,
     storage_generation: [u8; 16],
     document_store: Arc<dyn DocumentStore>,
     inverted_index: Arc<dyn InvertedIndex>,
@@ -577,7 +561,7 @@ pub(crate) struct TableState {
     /// Durable logical relation identity used by `PostgreSQL` catalogs. Renames, schema changes, `TRUNCATE`, and reopen preserve it.
     object_id: [u8; 16],
     /// Durable SQL role ownership and ACL. Mutations publish this value atomically and preserve the relation's logical and physical identities.
-    security: state::CatalogCell<state::TableSecurity>,
+    security: state::CatalogCell<state::BoundTableSecurity>,
     /// Durable physical-storage generation shared by every session. Schema-only changes preserve it; CREATE and TRUNCATE replace it so a fixed transaction snapshot never aliases a different physical relation lifetime.
     storage_generation: RwLock<[u8; 16]>,
     pub(crate) document_store: RwLock<Box<dyn DocumentStore>>,
@@ -587,7 +571,7 @@ pub(crate) struct TableState {
     /// Column schema captured at CREATE TABLE / ALTER TABLE time, driving auto-id allocation and ALTER COLUMN bookkeeping.
     columns: state::CatalogCell<Vec<uqa_sql::ast::ColumnDef>>,
     columns_declared: state::CatalogCell<bool>,
-    /// Monotonic id watermark for SERIAL/BIGSERIAL columns. The first allocated value is `1`; the watermark grows past `max(existing_doc_id, allocated)` so reopened catalogs do not collide with existing rows.
+    /// Retained document-ID floor. Capable persistent backends reserve from the storage-owned durable namespace; temporary, memory and serialized backends use this local state. `u128` preserves the exhausted `u64::MAX + 1` value.
     next_id: parking_lot::Mutex<u128>,
     analyzer: state::CatalogCell<Analyzer>,
     /// Per-column statistics refreshed by `ANALYZE table_name` or lazily
@@ -636,11 +620,11 @@ impl TableState {
         self.object_id
     }
 
-    fn role_owner(&self) -> String {
-        self.security.read().role_owner.clone()
+    fn role_owner(&self) -> uqa_sql::catalog::roles::RoleIdentity {
+        self.security.read().role_owner
     }
 
-    fn security(&self) -> state::TableSecurity {
+    fn security(&self) -> state::BoundTableSecurity {
         self.security.read().clone()
     }
 
@@ -734,6 +718,7 @@ impl Drop for Engine {
                     let _ = backend.rollback_transaction();
                 }
             }
+            self.row_locks.close_temporary_roles(self.session_id);
             self.row_locks.release_session(self.session_id);
             self.notification_hub.unregister(self.session_id);
             self.release_automatic_statistics_client();

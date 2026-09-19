@@ -33,7 +33,6 @@ impl Engine {
             publication: self,
             catalog: self.storage.catalog.as_deref(),
             changes: self,
-            session: self,
             sequences: self.implicit_sequence_context(),
             ownership: self.implicit_ownership_context(),
             notices: self.query_runtime_view().notices,

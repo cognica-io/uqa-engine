@@ -9,6 +9,10 @@ use uqa_core::DocId;
 use super::{HNSWIndex, MAX_HNSW_LEVEL};
 use crate::vector_index::{HNSWIndexParams, MemoryVectorIndex, VectorIndex};
 
+mod preparation;
+#[path = "tests/restoration.rs"]
+mod restoration;
+
 fn vector(seed: u64, dimensions: usize) -> Vec<f32> {
     let mut state = seed;
     (0..dimensions)

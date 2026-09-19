@@ -37,26 +37,31 @@ pub struct PortalExecutionContext<'a, S: Clone + 'static> {
     pub types: &'a dyn RoutineTypeCatalog,
     pub session: &'a dyn CatalogSession,
     pub explain: ExplainRenderer,
+    pub source_sql: Option<&'a str>,
+    pub created_at_micros: i64,
+}
+
+impl<'a, S: Clone + 'static> PortalExecutionContext<'a, S> {
+    pub fn with_source_sql(mut self, source_sql: Option<&'a str>) -> Self {
+        self.source_sql = source_sql;
+        self
+    }
 }
 
 pub struct SessionPortalDeclaration {
-    pub name: String,
+    pub metadata: uqa_sql::catalog::session::CursorMetadata,
     pub query: uqa_sql::plan::QueryPlan,
     pub params: Vec<SQLParam>,
     pub columns: Vec<String>,
     pub column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
-    pub scrollable: bool,
-    pub holdable: bool,
-    pub binary: bool,
 }
 
 pub struct SessionPortalCommandDeclaration {
-    pub name: String,
+    pub metadata: uqa_sql::catalog::session::CursorMetadata,
     pub command: Box<uqa_sql::plan::CommandPlan>,
     pub params: Vec<SQLParam>,
     pub columns: Vec<String>,
     pub column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
-    pub scrollable: bool,
     /// `PostgreSQL` 18 materializes one `NULL`-filled tuple for each row produced by a modifying command opened with explicit `SCROLL`.
     pub null_returning_values: bool,
 }

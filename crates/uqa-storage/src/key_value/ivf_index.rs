@@ -4,28 +4,23 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Transactional IVF physical state over the logical Key/Value backend.
+//! IVF state and canonical values share one logical Key/Value visibility boundary.
 
 use std::sync::Arc;
 
-use parking_lot::Mutex;
 use uqa_core::{DocId, PostingList};
 
-use super::codec::other_error;
+use super::codec::{other_error, vector_field_prefix};
 use super::index_keys::{
     hnsw_metadata_key, hnsw_node_prefix, ivf_assignment_prefix, ivf_centroid_prefix,
     ivf_metadata_key,
 };
+use super::index_view::{read_only, read_view, IndexState, IndexView};
 use super::ivf_persistence;
-use super::{KeyValueStore, KeyValueVectorIndex};
-use crate::ivf_index::{IVFIndex, IVFMetadataSnapshot, IVFState};
+use super::{KeyValueBatch, KeyValueRead, KeyValueStore, KeyValueVectorIndex};
+use crate::ivf_index::{IVFIndex, IVFMetadataSnapshot, IVFMutation, IVFState};
 use crate::vector_index::{IVFIndexParams, VectorIndex};
 use crate::{StorageBackendError, StorageBackendResult};
-
-struct CachedIVF {
-    index: IVFIndex,
-    revision: Option<u64>,
-}
 
 pub struct KeyValueIVFIndex {
     store: Arc<dyn KeyValueStore>,
@@ -34,7 +29,8 @@ pub struct KeyValueIVFIndex {
     field: String,
     dimensions: u32,
     params: IVFIndexParams,
-    cached: Mutex<CachedIVF>,
+    require_persisted: bool,
+    view: IndexView<IVFIndex>,
 }
 
 impl KeyValueIVFIndex {
@@ -45,23 +41,9 @@ impl KeyValueIVFIndex {
         dimensions: u32,
         params: IVFIndexParams,
     ) -> StorageBackendResult<Self> {
-        let params = params.validate()?;
-        let table = table.into();
-        let field = field.into();
-        let raw = KeyValueVectorIndex::new(Arc::clone(&store), &table, &field, dimensions);
-        let index = build_from_canonical(&raw, dimensions, params)?;
-        Ok(Self {
-            store,
-            raw,
-            table,
-            field,
-            dimensions,
-            params,
-            cached: Mutex::new(CachedIVF {
-                index,
-                revision: None,
-            }),
-        })
+        let index = Self::new(store, table.into(), field.into(), dimensions, params, false)?;
+        index.read_index()?;
+        Ok(index)
     }
 
     pub fn restore(
@@ -71,29 +53,28 @@ impl KeyValueIVFIndex {
         dimensions: u32,
         params: IVFIndexParams,
     ) -> StorageBackendResult<Self> {
-        let params = params.validate()?;
-        let table = table.into();
-        let field = field.into();
-        let raw = KeyValueVectorIndex::new(Arc::clone(&store), &table, &field, dimensions);
-        let (index, revision) = ivf_persistence::restore_state(
-            store.as_ref(),
-            &raw,
-            &table,
-            &field,
-            dimensions,
-            params,
-        )?;
+        let index = Self::new(store, table.into(), field.into(), dimensions, params, true)?;
+        index.read_index()?;
+        Ok(index)
+    }
+
+    fn new(
+        store: Arc<dyn KeyValueStore>,
+        table: String,
+        field: String,
+        dimensions: u32,
+        params: IVFIndexParams,
+        require_persisted: bool,
+    ) -> StorageBackendResult<Self> {
         Ok(Self {
+            raw: KeyValueVectorIndex::new(store.clone(), &table, &field, dimensions),
             store,
-            raw,
             table,
             field,
             dimensions,
-            params,
-            cached: Mutex::new(CachedIVF {
-                index,
-                revision: Some(revision),
-            }),
+            params: params.validate()?,
+            require_persisted,
+            view: IndexView::new(!require_persisted),
         })
     }
 
@@ -103,6 +84,8 @@ impl KeyValueIVFIndex {
         field: &str,
     ) -> StorageBackendResult<()> {
         let mut batch = store.batch();
+        batch.fence_ivf_prefix(&ivf_metadata_key(table, field)?)?;
+        batch.fence_hnsw_prefix(&hnsw_metadata_key(table, field)?)?;
         batch.delete(&ivf_metadata_key(table, field)?)?;
         batch.delete_prefix(&ivf_centroid_prefix(table, field)?)?;
         batch.delete_prefix(&ivf_assignment_prefix(table, field)?)?;
@@ -111,99 +94,125 @@ impl KeyValueIVFIndex {
         batch.commit()
     }
 
-    fn replace_document(&self, doc_id: DocId, vectors: &[Vec<f32>]) -> StorageBackendResult<()> {
-        let mut cached = self.cached.lock();
-        self.verify_revision(cached.revision)?;
-        let before = cached.index.metadata_snapshot();
-        let mut staged = cached.index.detached_clone();
-        staged.add_many(doc_id, vectors.to_vec())?;
-        train_if_stale(&staged)?;
-        let after = staged.metadata_snapshot();
-        let full_rewrite = cached.revision.is_none() || before.centroids != after.centroids;
-        let revision = next_revision(cached.revision)?;
-        let mut batch = self.store.batch();
-        self.raw.stage_replace(batch.as_mut(), doc_id, vectors)?;
-        self.stage_snapshot(batch.as_mut(), &after, revision, full_rewrite, Some(doc_id))?;
-        batch.commit()?;
-        *cached = CachedIVF {
-            index: staged,
-            revision: Some(revision),
-        };
-        Ok(())
+    fn index_at(&self, read: &dyn KeyValueRead) -> StorageBackendResult<IndexState<IVFIndex>> {
+        self.view.load(
+            read,
+            &[
+                &ivf_metadata_key(&self.table, &self.field)?,
+                &ivf_centroid_prefix(&self.table, &self.field)?,
+                &ivf_assignment_prefix(&self.table, &self.field)?,
+                &vector_field_prefix(&self.table, &self.field)?,
+            ],
+            |creating| {
+                let revision = ivf_persistence::load_revision(read, &self.table, &self.field)?;
+                let index = if creating || (revision.is_none() && !self.require_persisted) {
+                    self.build_from_canonical(read)?
+                } else {
+                    ivf_persistence::restore_state(
+                        read,
+                        &self.raw,
+                        &self.table,
+                        &self.field,
+                        self.dimensions,
+                        self.params,
+                    )?
+                    .0
+                };
+                Ok((index, revision))
+            },
+        )
     }
 
-    fn delete_document(&self, doc_id: DocId) -> StorageBackendResult<()> {
-        let mut cached = self.cached.lock();
-        self.verify_revision(cached.revision)?;
-        let before = cached.index.metadata_snapshot();
-        let mut staged = cached.index.detached_clone();
-        staged.delete(doc_id)?;
-        train_if_stale(&staged)?;
-        let after = staged.metadata_snapshot();
-        let full_rewrite = cached.revision.is_none() || before.centroids != after.centroids;
-        let revision = next_revision(cached.revision)?;
-        let mut batch = self.store.batch();
-        self.raw.stage_replace(batch.as_mut(), doc_id, &[])?;
-        self.stage_snapshot(batch.as_mut(), &after, revision, full_rewrite, Some(doc_id))?;
-        batch.commit()?;
-        *cached = CachedIVF {
-            index: staged,
-            revision: Some(revision),
-        };
-        Ok(())
+    fn read_index(&self) -> StorageBackendResult<IndexState<IVFIndex>> {
+        read_view(self.store.as_ref(), |read| self.index_at(read))
     }
 
-    fn replace_all(&self, clear_vectors: bool, train: bool) -> StorageBackendResult<()> {
-        let mut cached = self.cached.lock();
-        self.verify_revision(cached.revision)?;
-        let mut staged = cached.index.detached_clone();
-        if clear_vectors {
-            staged.clear()?;
-        } else if train {
-            staged.initialize()?;
+    fn mutate(
+        &self,
+        mutation: IVFMutation<'_>,
+        canonical: impl FnOnce(&mut dyn KeyValueBatch) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()> {
+        self.view.evaluate(self.store.as_ref(), |read, batch| {
+            let cached = self.index_at(read)?;
+            let after = cached.value.prepare_metadata(mutation, read.control())?;
+            let changed_doc = match mutation {
+                IVFMutation::Replace { document, .. } | IVFMutation::Delete(document) => {
+                    Some(document)
+                }
+                IVFMutation::Clear | IVFMutation::Train => None,
+            };
+            let full_rewrite = changed_doc.is_none()
+                || cached.definition_candidate
+                || cached.revision.is_none()
+                || !cached.value.centroids_match(&after);
+            canonical(batch)?;
+            let preview =
+                !cached.definition_candidate && cached.revision.is_some() && changed_doc.is_some();
+            if preview {
+                batch.ivf_mutation(&ivf_metadata_key(&self.table, &self.field)?, mutation)?;
+            }
+            self.stage_snapshot(
+                batch,
+                &after,
+                next_revision(cached.revision)?,
+                full_rewrite,
+                changed_doc,
+                preview,
+            )
+        })
+    }
+
+    fn build_from_canonical(&self, read: &dyn KeyValueRead) -> StorageBackendResult<IVFIndex> {
+        let entries = self.raw.load_all_from(read)?;
+        let mut index = IVFIndex::with_params(
+            self.dimensions,
+            self.params.nlist,
+            self.params.nprobe,
+            self.params.train_threshold,
+        );
+        for vectors in entries.chunk_by(|a, b| a.0 == b.0) {
+            read.control().check()?;
+            index.add_many(
+                vectors[0].0,
+                vectors
+                    .iter()
+                    .map(|(_, _, vector)| vector.clone())
+                    .collect(),
+            )?;
         }
-        let snapshot = staged.metadata_snapshot();
-        let revision = next_revision(cached.revision)?;
-        let mut batch = self.store.batch();
-        if clear_vectors {
-            self.raw.stage_clear(batch.as_mut())?;
-        }
-        self.stage_snapshot(batch.as_mut(), &snapshot, revision, true, None)?;
-        batch.commit()?;
-        *cached = CachedIVF {
-            index: staged,
-            revision: Some(revision),
-        };
-        Ok(())
+        Ok(index)
     }
 
-    fn verify_revision(&self, expected: Option<u64>) -> StorageBackendResult<()> {
-        let Some(expected) = expected else {
-            return Ok(());
-        };
-        let actual = ivf_persistence::load_revision(self.store.as_ref(), &self.table, &self.field)?
-            .ok_or_else(|| {
-                other_error(format!(
+    fn rebuild(&self) -> StorageBackendResult<()> {
+        self.view.evaluate(self.store.as_ref(), |read, batch| {
+            let revision = ivf_persistence::load_revision(read, &self.table, &self.field)?;
+            if revision.is_none() && self.require_persisted {
+                return Err(other_error(format!(
                     "missing persisted IVF metadata for {}.{}",
                     self.table, self.field
-                ))
-            })?;
-        if actual != expected {
-            return Err(other_error(format!(
-                "concurrent IVF metadata change for {}.{}: expected revision {expected}, found {actual}",
-                self.table, self.field
-            )));
-        }
-        Ok(())
+                )));
+            }
+            let mut candidate = self.build_from_canonical(read)?;
+            candidate.initialize()?;
+            self.stage_snapshot(
+                batch,
+                &candidate.metadata_snapshot(),
+                next_revision(revision)?,
+                true,
+                None,
+                false,
+            )
+        })
     }
 
     fn stage_snapshot(
         &self,
-        batch: &mut dyn super::KeyValueBatch,
+        batch: &mut dyn KeyValueBatch,
         snapshot: &IVFMetadataSnapshot,
         revision: u64,
         full_rewrite: bool,
         changed_doc: Option<DocId>,
+        preview: bool,
     ) -> StorageBackendResult<()> {
         ivf_persistence::stage_snapshot(
             batch,
@@ -215,6 +224,7 @@ impl KeyValueIVFIndex {
             revision,
             full_rewrite,
             changed_doc,
+            preview,
         )
     }
 }
@@ -223,72 +233,56 @@ impl VectorIndex for KeyValueIVFIndex {
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
-
     fn index_kind(&self) -> &'static str {
         "ivf"
     }
-
     fn add(&mut self, doc_id: DocId, vector: Vec<f32>) -> StorageBackendResult<()> {
-        self.replace_document(doc_id, &[vector])
+        self.add_many(doc_id, vec![vector])
     }
-
     fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>) -> StorageBackendResult<()> {
-        self.replace_document(doc_id, &vectors)
+        self.mutate(
+            IVFMutation::Replace {
+                document: doc_id,
+                vectors: &vectors,
+            },
+            |batch| self.raw.stage_replace(batch, doc_id, &vectors),
+        )
     }
-
     fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
-        self.delete_document(doc_id)
+        self.mutate(IVFMutation::Delete(doc_id), |batch| {
+            self.raw.stage_replace(batch, doc_id, &[])
+        })
     }
-
     fn clear(&mut self) -> StorageBackendResult<()> {
-        self.replace_all(true, false)
+        self.mutate(IVFMutation::Clear, |batch| self.raw.stage_clear(batch))
     }
-
     fn search_knn(&self, query: &[f32], k: usize) -> StorageBackendResult<PostingList> {
-        let cached = self.cached.lock();
-        if cached.index.state() != IVFState::Stale {
-            return cached.index.search_knn(query, k);
+        let cached = self.read_index()?;
+        if cached.value.state() != IVFState::Stale {
+            return cached.value.search_knn(query, k);
         }
-        let staged = cached.index.detached_clone();
-        drop(cached);
-        staged.train()?;
-        staged.search_knn(query, k)
+        let candidate = cached.value.detached_clone();
+        candidate.train()?;
+        candidate.search_knn(query, k)
     }
-
     fn search_threshold(&self, query: &[f32], threshold: f32) -> StorageBackendResult<PostingList> {
-        self.cached.lock().index.search_threshold(query, threshold)
+        self.read_index()?.value.search_threshold(query, threshold)
     }
-
     fn count(&self) -> StorageBackendResult<usize> {
-        self.cached.lock().index.count()
+        self.read_index()?.value.count()
     }
-
     fn initialize(&mut self) -> StorageBackendResult<()> {
-        self.replace_all(false, true)
+        self.rebuild()
     }
-
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
-        let staged = self.cached.lock().index.detached_clone();
-        train_if_stale(&staged)?;
-        Ok(Arc::new(staged))
+        let cached = self.read_index()?;
+        if cached.value.state() != IVFState::Stale {
+            return Ok(cached.snapshot);
+        }
+        let candidate = cached.value.detached_clone();
+        candidate.train()?;
+        Ok(read_only(Arc::new(candidate)))
     }
-}
-
-fn build_from_canonical(
-    raw: &KeyValueVectorIndex,
-    dimensions: u32,
-    params: IVFIndexParams,
-) -> StorageBackendResult<IVFIndex> {
-    let mut index = IVFIndex::with_params(
-        dimensions,
-        params.nlist,
-        params.nprobe,
-        params.train_threshold,
-    );
-    for (doc_id, vectors) in raw.load_by_document()? {
-        index.add_many(doc_id, vectors)?;
-    }
-    Ok(index)
 }
 
 fn next_revision(revision: Option<u64>) -> StorageBackendResult<u64> {
@@ -296,11 +290,4 @@ fn next_revision(revision: Option<u64>) -> StorageBackendResult<u64> {
         .unwrap_or(0)
         .checked_add(1)
         .ok_or_else(|| StorageBackendError::Other("IVF metadata revision space exhausted".into()))
-}
-
-fn train_if_stale(index: &IVFIndex) -> StorageBackendResult<()> {
-    if index.state() == IVFState::Stale {
-        index.train()?;
-    }
-    Ok(())
 }

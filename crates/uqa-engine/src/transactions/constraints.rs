@@ -9,6 +9,7 @@
 use super::{BTreeSet, ConstraintModeState, Engine, SQLError};
 use crate::{ConstraintIdentity, RelationIdentity};
 use uqa_sql::ast::{ForeignKey, SetConstraintName};
+use uqa_sql::catalog::roles::identity::RoleSubject;
 
 pub(crate) use uqa_sql::catalog::constraints::constraint_identities_match;
 
@@ -87,7 +88,10 @@ impl Engine {
             let schema = match configured_schema.as_str() {
                 "pg_temp" if has_temporary => temporary.clone(),
                 "pg_temp" => continue,
-                "$user" => self.current_user_name(),
+                "$user" => match self.current_role().role_name(&self.durable.roles.read()) {
+                    Some(name) => name.to_owned(),
+                    None => continue,
+                },
                 _ => configured_schema,
             };
             if self.constraint_namespace_exists(&schema)? && !effective.contains(&schema) {

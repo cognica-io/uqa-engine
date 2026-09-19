@@ -9,8 +9,10 @@
 use std::collections::BTreeSet;
 
 use super::metric::distance;
+use super::prepare::{check, Control};
 use super::search::Candidate;
 use super::types::{HNSWIndex, NodeId};
+use crate::StorageBackendResult;
 
 impl HNSWIndex {
     pub(super) fn ensure_layer_zero_backbone(&self, node_id: NodeId, neighbors: &mut Vec<NodeId>) {
@@ -23,12 +25,18 @@ impl HNSWIndex {
         }
     }
 
-    pub(super) fn prune_node(&mut self, node_id: NodeId, layer: usize) {
+    pub(super) fn prune_node(
+        &mut self,
+        node_id: NodeId,
+        layer: usize,
+        control: Control<'_>,
+    ) -> StorageBackendResult<()> {
+        check(control)?;
         let Some(node) = self.nodes.get(&node_id) else {
-            return;
+            return Ok(());
         };
         let Some(current) = node.neighbors.get(layer).cloned() else {
-            return;
+            return Ok(());
         };
         let protected = current
             .iter()
@@ -46,7 +54,8 @@ impl HNSWIndex {
                     .filter(|neighbor_id| !protected.contains(neighbor_id)),
                 limit.saturating_sub(selected.len()),
                 Some(node_id),
-            ),
+                control,
+            )?,
         );
         selected.sort_unstable();
         let selected_set = selected.iter().copied().collect::<BTreeSet<_>>();
@@ -59,6 +68,7 @@ impl HNSWIndex {
             self.dirty_nodes.insert(node_id);
         }
         for removed_id in removed {
+            check(control)?;
             if let Some(neighbor) = self.nodes.get_mut(&removed_id) {
                 if let Some(reverse) = neighbor.neighbors.get_mut(layer) {
                     reverse.retain(|candidate| *candidate != node_id);
@@ -66,6 +76,7 @@ impl HNSWIndex {
                 }
             }
         }
+        Ok(())
     }
 
     pub(super) fn select_neighbors(
@@ -74,33 +85,45 @@ impl HNSWIndex {
         candidates: impl IntoIterator<Item = NodeId>,
         limit: usize,
         exclude: Option<NodeId>,
-    ) -> Vec<NodeId> {
-        let mut candidates = candidates
-            .into_iter()
-            .filter(|node_id| Some(*node_id) != exclude)
-            .filter_map(|node_id| {
-                self.nodes.get(&node_id).map(|node| Candidate {
-                    distance: distance(query, &node.normalized_vector),
-                    node_id,
-                })
-            })
-            .collect::<Vec<_>>();
+        control: Control<'_>,
+    ) -> StorageBackendResult<Vec<NodeId>> {
+        check(control)?;
+        let mut scored = Vec::new();
+        for node_id in candidates {
+            check(control)?;
+            if Some(node_id) != exclude {
+                if let Some(node) = self.nodes.get(&node_id) {
+                    scored.push(Candidate {
+                        distance: distance(query, &node.normalized_vector),
+                        node_id,
+                    });
+                }
+            }
+        }
+        let mut candidates = scored;
         candidates.sort();
         candidates.dedup_by_key(|candidate| candidate.node_id);
         let mut selected = Vec::with_capacity(limit.min(candidates.len()));
         let mut rejected = Vec::new();
         for candidate in candidates {
+            check(control)?;
             let Some(candidate_node) = self.nodes.get(&candidate.node_id) else {
                 continue;
             };
-            let diverse = selected.iter().all(|selected_id| {
-                self.nodes.get(selected_id).is_none_or(|selected_node| {
-                    distance(
+            let mut diverse = true;
+            for selected_id in &selected {
+                check(control)?;
+                if let Some(selected_node) = self.nodes.get(selected_id) {
+                    let separated = distance(
                         &candidate_node.normalized_vector,
                         &selected_node.normalized_vector,
-                    ) > candidate.distance
-                })
-            });
+                    ) > candidate.distance;
+                    if !separated {
+                        diverse = false;
+                        break;
+                    }
+                }
+            }
             if diverse && selected.len() < limit {
                 selected.push(candidate.node_id);
             } else {
@@ -108,12 +131,14 @@ impl HNSWIndex {
             }
         }
         for candidate in rejected {
+            check(control)?;
             if selected.len() >= limit {
                 break;
             }
             selected.push(candidate);
         }
         selected.sort_unstable();
-        selected
+        check(control)?;
+        Ok(selected)
     }
 }

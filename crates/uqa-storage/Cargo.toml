@@ -21,10 +21,17 @@ serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
 parking_lot = { workspace = true }
 thiserror = { workspace = true }
+sha2 = { workspace = true }
+getrandom = { workspace = true }
+
+[target.'cfg(all(unix, not(target_os = "emscripten")))'.dependencies]
+libc = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO"] }
 
 [dev-dependencies]
 allocation-counter = "=0.8.1"
-sha2 = { workspace = true }
 tempfile = "3.13"
 criterion = { workspace = true }
 proptest = { workspace = true }

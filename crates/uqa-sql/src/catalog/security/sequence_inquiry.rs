@@ -8,12 +8,13 @@
 
 use super::{
     sequence::{self as acl, role_has_privilege, AclPrivilege, PrivilegeCheck},
-    SequenceSecurity,
+    BoundSequenceSecurity,
 };
+use crate::catalog::roles::identity::RoleSubject;
 use crate::{
     catalog::{
         resolution::RelationResolution,
-        roles::{guards::RoleCatalogGuards, RoleDefinition, RoleReferenceNames},
+        roles::{guards::RoleCatalogGuards, RoleReferenceNames},
     },
     SQLError,
 };
@@ -21,7 +22,7 @@ use std::{collections::BTreeMap, ops::Deref};
 use uqa_core::{RelationIdentity, Value};
 
 pub type SequenceSecurityRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RelationIdentity, SequenceSecurity>> + 'a>;
+    Box<dyn Deref<Target = BTreeMap<RelationIdentity, BoundSequenceSecurity>> + 'a>;
 pub trait SequenceSecurityCatalog {
     fn security_read(&self) -> SequenceSecurityRead<'_>;
 }
@@ -32,6 +33,15 @@ pub trait SequencePrivilegeResolution {
         oid: i64,
     ) -> Result<Option<(String, RelationIdentity)>, SQLError>;
 }
+pub trait SequenceTablePrivilegeInquiry {
+    fn sequence_table_privileges(
+        &self,
+        relation: &RelationIdentity,
+        subject: &dyn RoleSubject,
+        checks: &[super::table::TablePrivilegeCheck],
+    ) -> Result<bool, SQLError>;
+}
+
 pub struct SequencePrivilegeInquiry<'a> {
     pub names: &'a dyn RoleReferenceNames,
     pub roles: &'a dyn RoleCatalogGuards,
@@ -86,8 +96,9 @@ impl SequencePrivilegeInquiry<'_> {
             .ok_or_else(|| {
                 SQLError::Internal(format!("sequence `{name}` has no security metadata"))
             })?;
-        let current_user = self.names.current_user_name();
+        let current_user = self.names.current_role();
         let roles = self.roles.role_definitions();
+        let security = security.resolve(&roles).map_err(SQLError::Internal)?;
         let memberships = self.roles.role_memberships();
         if privileges.iter().any(|privilege| {
             role_has_privilege(
@@ -110,81 +121,61 @@ impl SequencePrivilegeInquiry<'_> {
     }
 
     pub fn has_sequence_privilege_value(&self, arguments: &[Value]) -> Result<Value, SQLError> {
-        if arguments.iter().any(|argument| argument == &Value::Null) {
-            return Ok(Value::Null);
-        }
-        let (subject_value, sequence_value, privilege_value) = match arguments {
-            [sequence, privilege] => (None, sequence, privilege),
-            [subject, sequence, privilege] => (Some(subject), sequence, privilege),
-            _ => {
-                return Err(SQLError::BadArity {
-                    name: "has_sequence_privilege".into(),
-                    expected: "2 or 3".into(),
-                    actual: arguments.len(),
-                })
-            }
-        };
-        let current_user = subject_value
-            .is_none()
-            .then(|| self.names.current_user_name());
-        let subject = {
-            let roles = self.roles.role_definitions();
-            subject_value.map_or_else(
-                || Ok(current_user),
-                |value| resolve_sequence_privilege_role(value, &roles),
-            )?
-        };
-        let Some((_name, relation)) = self.resolve_sequence_privilege_target(sequence_value)?
-        else {
+        let Some(arguments) = SequencePrivilegeArguments::parse(arguments)? else {
             return Ok(Value::Null);
         };
-        let privilege = match privilege_value {
-            Value::Str(privilege) | Value::FixedChar(privilege) => privilege,
-            other => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "has_sequence_privilege privilege must be text, got {other:?}"
-                )))
-            }
+        let request = arguments.bind(self.names, self.roles)?;
+        let Some((_, relation)) = request.target.resolve(self.resolution)? else {
+            return Ok(Value::Null);
         };
-        let checks = acl::parse_privilege_checks(privilege)?;
-        let Some(subject) = subject else {
-            return Ok(Value::Bool(false));
-        };
-        let security = self
-            .security
-            .security_read()
-            .get(&relation)
-            .cloned()
-            .ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "sequence `{}` has no security metadata",
-                    relation.qualified_name()
-                ))
-            })?;
-        let roles = self.roles.role_definitions();
-        let memberships = self.roles.role_memberships();
-        Ok(Value::Bool(checks.into_iter().any(|check| {
-            role_has_privilege(&security, &subject, check, &roles, &memberships)
-        })))
+        request.evaluate(&relation, self.roles, self.security)
     }
 
     pub fn role_has_sequence_table_privilege(
         &self,
         relation: &RelationIdentity,
-        subject: &str,
+        subject: &(impl RoleSubject + ?Sized),
         privilege: super::table::TableAclPrivilege,
         grant_option: bool,
     ) -> Result<bool, SQLError> {
-        let privilege = match privilege {
-            super::table::TableAclPrivilege::Select => AclPrivilege::Select,
-            super::table::TableAclPrivilege::Update => AclPrivilege::Update,
-            super::table::TableAclPrivilege::Insert
-            | super::table::TableAclPrivilege::Delete
-            | super::table::TableAclPrivilege::Truncate
-            | super::table::TableAclPrivilege::References
-            | super::table::TableAclPrivilege::Trigger
-            | super::table::TableAclPrivilege::Maintain => return Ok(false),
-        };
+        self.role_has_sequence_table_privileges(
+            relation,
+            subject,
+            &[super::table::TablePrivilegeCheck {
+                privilege,
+                grant_option,
+            }],
+        )
+    }
+
+    pub fn role_has_sequence_table_privileges(
+        &self,
+        relation: &RelationIdentity,
+        subject: &(impl RoleSubject + ?Sized),
+        checks: &[super::table::TablePrivilegeCheck],
+    ) -> Result<bool, SQLError> {
+        let mut checks = checks
+            .iter()
+            .filter_map(|check| {
+                let privilege = match check.privilege {
+                    super::table::TableAclPrivilege::Select => AclPrivilege::Select,
+                    super::table::TableAclPrivilege::Update => AclPrivilege::Update,
+                    super::table::TableAclPrivilege::Insert
+                    | super::table::TableAclPrivilege::Delete
+                    | super::table::TableAclPrivilege::Truncate
+                    | super::table::TableAclPrivilege::References
+                    | super::table::TableAclPrivilege::Trigger
+                    | super::table::TableAclPrivilege::Maintain => return None,
+                };
+                Some(PrivilegeCheck {
+                    privilege,
+                    grant_option: check.grant_option,
+                })
+            })
+            .peekable();
+        if checks.peek().is_none() {
+            return Ok(false);
+        }
         let security = self
             .security
             .security_read()
@@ -197,56 +188,9 @@ impl SequencePrivilegeInquiry<'_> {
                 ))
             })?;
         let roles = self.roles.role_definitions();
+        let security = security.resolve(&roles).map_err(SQLError::Internal)?;
         let memberships = self.roles.role_memberships();
-        Ok(role_has_privilege(
-            &security,
-            subject,
-            PrivilegeCheck {
-                privilege,
-                grant_option,
-            },
-            &roles,
-            &memberships,
-        ))
-    }
-
-    fn resolve_sequence_privilege_target(
-        &self,
-        value: &Value,
-    ) -> Result<Option<(String, RelationIdentity)>, SQLError> {
-        match value {
-            Value::Str(reference) | Value::FixedChar(reference) => {
-                let (name, kind) = match self.resolution.visible_relation_kind(reference)? {
-                    RelationResolution::Found(name, kind) => (name, kind),
-                    RelationResolution::MissingSchema(schema) => {
-                        return Err(SQLError::Routine {
-                            sqlstate: "3F000".into(),
-                            message: format!("schema \"{schema}\" does not exist"),
-                        });
-                    }
-                    RelationResolution::MissingRelation => {
-                        return Err(SQLError::Routine {
-                            sqlstate: "42P01".into(),
-                            message: format!("relation \"{reference}\" does not exist"),
-                        });
-                    }
-                };
-                if kind != "sequence" {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42809".into(),
-                        message: format!("\"{reference}\" is not a sequence"),
-                    });
-                }
-                let relation = RelationIdentity::from_legacy_name(&name).map_err(|error| {
-                    SQLError::Internal(format!("resolve sequence `{name}`: {error}"))
-                })?;
-                Ok(Some((name, relation)))
-            }
-            Value::Int(oid) => self.resolution.sequence_privilege_oid(*oid),
-            other => Err(SQLError::TypeMismatch(format!(
-                "has_sequence_privilege sequence must be text or oid, got {other:?}"
-            ))),
-        }
+        Ok(checks.any(|check| role_has_privilege(&security, subject, check, &roles, &memberships)))
     }
 
     pub fn ensure_sequence_owner(
@@ -254,45 +198,41 @@ impl SequencePrivilegeInquiry<'_> {
         name: &str,
         relation: &RelationIdentity,
     ) -> Result<String, SQLError> {
-        let owner = self
+        let security = self
             .security
             .security_read()
             .get(relation)
-            .map(|security| security.role_owner.clone())
+            .cloned()
             .ok_or_else(|| {
                 SQLError::Internal(format!("sequence `{name}` has no security metadata"))
             })?;
+        let roles = self.roles.role_definitions();
+        let owner = security.owner_reference(&roles)?;
         crate::schema::sequences::ownership::require_sequence_ownership(&relation.name, {
-            let current = self.names.current_user_name();
-            let roles = self.roles.role_definitions();
+            let current = self.names.current_role();
             let memberships = self.roles.role_memberships();
             crate::catalog::roles::role_inherits(&roles, &memberships, &current, &owner)
         })?;
+        let owner = owner.catalog_name(&roles)?;
         Ok(owner)
     }
 }
 
-fn resolve_sequence_privilege_role(
-    value: &Value,
-    roles: &BTreeMap<String, RoleDefinition>,
-) -> Result<Option<String>, SQLError> {
-    match value {
-        Value::Str(name) | Value::FixedChar(name) => {
-            if roles.contains_key(name) {
-                Ok(Some(name.clone()))
-            } else {
-                Err(SQLError::Routine {
-                    sqlstate: "42704".into(),
-                    message: format!("role \"{name}\" does not exist"),
-                })
-            }
-        }
-        Value::Int(oid) => Ok(roles
-            .values()
-            .find(|role| role.oid == *oid)
-            .map(|role| role.name.clone())),
-        other => Err(SQLError::TypeMismatch(format!(
-            "has_sequence_privilege role must be name or oid, got {other:?}"
-        ))),
+impl SequenceTablePrivilegeInquiry for SequencePrivilegeInquiry<'_> {
+    fn sequence_table_privileges(
+        &self,
+        relation: &RelationIdentity,
+        subject: &dyn RoleSubject,
+        checks: &[super::table::TablePrivilegeCheck],
+    ) -> Result<bool, SQLError> {
+        self.role_has_sequence_table_privileges(relation, subject, checks)
     }
 }
+
+mod value;
+pub use value::{
+    missing_sequence, SequencePrivilegeArguments, SequencePrivilegeRequest, SequencePrivilegeTarget,
+};
+
+#[cfg(test)]
+mod tests;

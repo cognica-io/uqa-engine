@@ -90,8 +90,20 @@ fn capability_views_expose_only_their_owned_state() {
     let runtime = engine.query_runtime_view();
     assert!(catalog.has_schema("public"));
     assert_eq!(session.search_path(), vec!["public"]);
-    assert_eq!(session.current_user(), "uqa");
-    assert_eq!(session.session_user(), "uqa");
+    assert_eq!(
+        session
+            .current_role()
+            .require_name(&engine.durable.roles.read())
+            .unwrap(),
+        "uqa"
+    );
+    assert_eq!(
+        session
+            .session_role()
+            .require_name(&engine.durable.roles.read())
+            .unwrap(),
+        "uqa"
+    );
     assert_eq!(session.transaction_depth(), 0);
     assert_eq!(session.transaction_snapshot_identity(), None);
     assert_eq!(runtime.work_mem_bytes().unwrap(), 64 * 1024 * 1024);
@@ -105,7 +117,12 @@ fn mutation_coordinator_publishes_schema_changes_without_engine_recovery() {
     let before = engine.catalog_epochs();
     assert!(engine
         .mutation_coordinator()
-        .register_schema("capability_test", false, "uqa")
+        .register_schema(
+            "capability_test",
+            false,
+            uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+            uqa_execution::schema::namespaces::identity::new_tuple(42_001).unwrap()
+        )
         .unwrap());
     assert!(!snapshot.has_schema("capability_test"));
     assert!(engine.catalog_read_view().has_schema("capability_test"));
@@ -161,7 +178,7 @@ fn catalog_read_view_keeps_all_live_projection_families_on_one_snapshot() {
     engine.sql("CREATE ROLE snapshot_role", &[]).unwrap();
     engine.create_graph("snapshot_graph").unwrap();
 
-    assert!(snapshot.sequences().is_empty());
+    assert!(snapshot.sequences().unwrap().is_empty());
     assert!(snapshot.views_of_kind(StoredViewKind::View).is_empty());
     assert!(!snapshot.roles().any(|role| role.name == "snapshot_role"));
     assert!(snapshot.graph_names().is_empty());
@@ -169,6 +186,7 @@ fn catalog_read_view_keeps_all_live_projection_families_on_one_snapshot() {
     let current = engine.catalog_read_view();
     assert!(current
         .sequences()
+        .unwrap()
         .iter()
         .any(|(name, _, _, _)| name == "public.snapshot_sequence"));
     assert!(current

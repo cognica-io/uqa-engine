@@ -24,6 +24,15 @@ impl SQLiteIVFIndex {
     ) -> StorageBackendResult<()> {
         let (encoded_doc_id, encoded_vectors) =
             self.persistent.stage_doc_vectors(doc_id, &vectors)?;
+        if self
+            .persistent
+            .write_native(|read, batch| {
+                self.replace_native(read, batch, encoded_doc_id, &encoded_vectors, &vectors)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         let mut prospective = self.persistent.load_all_with_ordinals()?;
         prospective.retain(|(stored_doc_id, _, _)| *stored_doc_id != doc_id);
         for (ordinal, vector) in vectors.into_iter().enumerate() {
@@ -45,6 +54,13 @@ impl SQLiteIVFIndex {
 
     pub(super) fn delete_document(&self, doc_id: DocId) -> StorageBackendResult<()> {
         let encoded_doc_id = encode_doc_id(doc_id)?;
+        if self
+            .persistent
+            .write_native(|read, batch| self.delete_native(read, batch, encoded_doc_id))?
+            .is_some()
+        {
+            return Ok(());
+        }
         let mut prospective = self.persistent.load_all_with_ordinals()?;
         let previous_len = prospective.len();
         prospective.retain(|(stored_doc_id, _, _)| *stored_doc_id != doc_id);
@@ -57,6 +73,16 @@ impl SQLiteIVFIndex {
     }
 
     pub(super) fn clear_index(&self) -> StorageBackendResult<()> {
+        if self
+            .persistent
+            .write_native(|read, batch| {
+                read.clear_family(batch, crate::mvcc::native::NativeRecordFamily::Vectors)?;
+                super::native::drop_metadata(read, batch)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.persistent.conn.with_mut(|conn| {
             let tx = conn.savepoint()?;
             for table in [

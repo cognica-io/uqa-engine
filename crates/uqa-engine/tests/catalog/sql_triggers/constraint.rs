@@ -394,7 +394,7 @@ fn dropping_a_referenced_relation_cancels_pending_constraint_trigger_events() {
 
 #[test]
 fn legacy_trigger_catalogs_gain_a_stable_object_identity() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = TempDir::new().unwrap();
     let database = directory.path().join("legacy-trigger-object-id.db");
@@ -415,7 +415,8 @@ fn legacy_trigger_catalogs_gain_a_stable_object_identity() {
     }
 
     {
-        let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+        let catalog =
+            crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
         let encoded = catalog.get_metadata("sql_triggers_json").unwrap().unwrap();
         let mut metadata: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         let triggers = metadata

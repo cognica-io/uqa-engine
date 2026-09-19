@@ -111,6 +111,9 @@ impl Engine {
         if self.storage.provider.is_none() {
             return Ok(false);
         }
+        if backend.transaction_model().is_versioned() {
+            return Ok(true);
+        }
         let stack = self.session.transactions.lock();
         let deferred_reader = stack.first().is_some_and(|frame| {
             frame.intent == TransactionIntent::ReadOnly
@@ -148,6 +151,38 @@ impl Engine {
             cancel: &self.runtime.cancellation,
             relation: display_name,
         })
+    }
+
+    /// Refresh a named parameter after obtaining its transaction-retained logical lock. Execution workers already belong to the parent command, so this adapter must not reenter its thread-owned statement gate.
+    pub(crate) fn lock_scoring_parameter_write(&self, name: &str) -> Result<(), SQLError> {
+        let Some(backend) = self
+            .storage
+            .backend
+            .as_ref()
+            .filter(|backend| backend.transaction_model().is_versioned())
+        else {
+            return Ok(());
+        };
+        if self.transaction_depth() == 0 {
+            return Err(SQLError::Internal(
+                "scoring parameter writes require an active transaction".into(),
+            ));
+        }
+        self.row_locks.acquire(&crate::row_locks::LockRequest {
+            session_id: self.session_id,
+            key: crate::row_locks::RowLockKey {
+                table: self.row_locks.scoring_parameters_key(name),
+                doc_id: 0,
+            },
+            strength: uqa_sql::ast::LockStrength::ForUpdate,
+            mark: self.current_lock_mark(),
+            wait: uqa_sql::ast::LockWait::Block,
+            cancel: &self.runtime.cancellation,
+            relation: name,
+        })?;
+        backend
+            .refresh_transaction_snapshot(&self.runtime.cancellation)
+            .map_err(|error| Self::storage_tx_error("refresh scoring parameters", &error))
     }
 
     pub(crate) fn reserve_document_id_candidate(
@@ -201,6 +236,22 @@ impl Engine {
             self.row_locks.table_key(&canonical),
             mode,
             self.current_lock_mark(),
+            &self.runtime.cancellation,
+        )
+    }
+
+    pub(crate) fn temporary_relation_lock(
+        &self,
+        table: &str,
+        mode: crate::row_locks::RelationLockMode,
+    ) -> Result<crate::row_locks::ScopedRelationLock<'_>, SQLError> {
+        let canonical = self.row_lock_table_name(table)?;
+        self.prepare_transaction_lock_wait()?;
+        self.row_locks.acquire_scoped_relation(
+            self.session_id,
+            self.row_locks.table_key(&canonical),
+            mode,
+            self.temporary_relation_lock_marks()?,
             &self.runtime.cancellation,
         )
     }

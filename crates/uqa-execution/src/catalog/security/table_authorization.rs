@@ -8,6 +8,7 @@
 use super::table_inquiry::{TablePrivilegeRegistry, TablePrivilegeState};
 use std::sync::Arc;
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::roles::identity::RoleSubject;
 use uqa_sql::{
     catalog::{
         roles::{guards::RoleCatalogGuards, role_inherits, RoleReferenceNames},
@@ -31,19 +32,20 @@ impl TableAuthorizationContext<'_> {
         name: &str,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
-        let current_user = self.names.current_user_name();
+        let current_user = self.names.current_role();
         self.ensure_table_privilege_for(name, &current_user, privilege)
     }
     pub fn ensure_table_privilege_for(
         &self,
         name: &str,
-        subject: &str,
+        subject: &(impl RoleSubject + ?Sized),
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         let (relation, table) = self.bound_table_for_security(name)?;
-        let security = table.security();
+        let bound = table.security();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
+        let security = bound.resolve(&roles).map_err(SQLError::Internal)?;
         if role_has_privilege(
             &security,
             subject,
@@ -76,20 +78,21 @@ impl TableAuthorizationContext<'_> {
         column: &str,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
-        let current_user = self.names.current_user_name();
+        let current_user = self.names.current_role();
         self.ensure_column_privilege_for(name, column, &current_user, privilege)
     }
     pub fn ensure_column_privilege_for(
         &self,
         name: &str,
         column: &str,
-        subject: &str,
+        subject: &(impl RoleSubject + ?Sized),
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         let (relation, table) = self.bound_table_for_security(name)?;
-        let security = table.security();
+        let bound = table.security();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
+        let security = bound.resolve(&roles).map_err(SQLError::Internal)?;
         if column_privilege_check(
             &security,
             column,
@@ -113,19 +116,20 @@ impl TableAuthorizationContext<'_> {
         name: &str,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
-        let current_user = self.names.current_user_name();
+        let current_user = self.names.current_role();
         self.ensure_any_column_privilege_for(name, &current_user, privilege)
     }
     pub fn ensure_any_column_privilege_for(
         &self,
         name: &str,
-        subject: &str,
+        subject: &(impl RoleSubject + ?Sized),
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         let (relation, table) = self.bound_table_for_security(name)?;
-        let security = table.security();
+        let bound = table.security();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
+        let security = bound.resolve(&roles).map_err(SQLError::Internal)?;
         let table_check = TablePrivilegeCheck {
             privilege,
             grant_option: false,
@@ -153,7 +157,11 @@ impl TableAuthorizationContext<'_> {
         let (relation, table) = self.bound_table_for_security(name)?;
         let owner = table.role_owner();
         if self.current_user_has_role_privileges(&owner) {
-            return Ok(owner);
+            return table
+                .security()
+                .resolve(&self.roles.role_definitions())
+                .map(|security| security.role_owner)
+                .map_err(SQLError::Internal);
         }
         Err(SQLError::Routine {
             sqlstate: "42501".into(),
@@ -191,8 +199,8 @@ impl TableAuthorizationContext<'_> {
             .ok_or_else(|| SQLError::Internal(format!("table `{name}` disappeared")))?;
         Ok((relation, table))
     }
-    fn current_user_has_role_privileges(&self, target: &str) -> bool {
-        let current = self.names.current_user_name();
+    fn current_user_has_role_privileges(&self, target: &(impl RoleSubject + ?Sized)) -> bool {
+        let current = self.names.current_role();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
         role_inherits(&roles, &memberships, &current, target)

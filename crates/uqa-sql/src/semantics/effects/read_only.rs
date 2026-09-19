@@ -78,6 +78,7 @@ pub fn forbidden_command(
         CommandPlan::CreateSchema { .. } => Ok(Some("CREATE SCHEMA")),
         CommandPlan::AlterSchemaOwner { .. } => Ok(Some("ALTER SCHEMA")),
         CommandPlan::Analyze { .. } => Ok(None),
+        CommandPlan::LockTable(_) => Ok(None),
         // VACUUM's transaction-block prohibition has precedence over read-only validation and is enforced by its executor.
         CommandPlan::Vacuum(_) => Ok(None),
         CommandPlan::Truncate { .. } => Ok(Some("TRUNCATE")),
@@ -121,7 +122,7 @@ pub fn forbidden_command(
         CommandPlan::GrantSchema(_) => Ok(Some("GRANT ON SCHEMA")),
         CommandPlan::GrantRole(_) => Ok(Some("GRANT ROLE")),
         CommandPlan::CreateRole(_) => Ok(Some("CREATE ROLE")),
-        CommandPlan::AlterRole(_) => Ok(Some("ALTER ROLE")),
+        CommandPlan::AlterRole(_) | CommandPlan::RenameRole(_) => Ok(Some("ALTER ROLE")),
         CommandPlan::DropRole(_) => Ok(Some("DROP ROLE")),
         CommandPlan::CreateTrigger(_) => Ok(Some("CREATE TRIGGER")),
         CommandPlan::DropTrigger(_) => Ok(Some("DROP TRIGGER")),
@@ -163,6 +164,7 @@ pub fn plan_sets_transaction_snapshot(plan: &UnifiedPlan) -> bool {
                     | CommandPlan::SetConstraints { .. }
                     | CommandPlan::ShowVariable { .. }
                     | CommandPlan::Transaction(_)
+                    | CommandPlan::LockTable(_)
                     | CommandPlan::FetchCursor(_)
                     | CommandPlan::CloseCursor { .. }
                     | CommandPlan::Deallocate { .. }

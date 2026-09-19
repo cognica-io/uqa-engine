@@ -12,24 +12,27 @@ pub mod sequence;
 pub mod table;
 
 pub use uqa_sql::catalog::security::database::{
-    DatabaseAclEntry, DatabasePrivileges, DatabaseSecurity,
+    BoundDatabaseSecurity, DatabaseAclEntry, DatabasePrivileges, DatabaseSecurity,
 };
 
-pub use uqa_sql::catalog::security::SequenceSecurity;
+pub use uqa_sql::catalog::security::{BoundSequenceSecurity, SequenceSecurity};
 
-pub use uqa_sql::catalog::security::TableSecurity;
+pub use uqa_sql::catalog::security::{BoundTableSecurity, TableSecurity};
 
-pub use uqa_sql::catalog::security::SchemaSecurity;
+pub use uqa_sql::catalog::security::{BoundSchemaSecurity, SchemaSecurity};
 
 pub mod role_lifecycle;
 pub mod roles;
 
 pub mod database_lifecycle;
 
+pub mod routine_inquiry;
+pub mod sequence_inquiry;
 pub mod sequence_lifecycle;
 
 pub mod table_inquiry;
 
+pub mod system_relations;
 pub mod table_grants;
 
 pub mod foreign_authorization;
@@ -37,3 +40,7 @@ pub mod table_authorization;
 pub mod table_maintenance;
 
 pub mod table_ownership;
+
+pub mod relation_authority;
+pub mod relation_ownership;
+pub mod relation_restoration;

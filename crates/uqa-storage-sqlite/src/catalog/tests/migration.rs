@@ -307,7 +307,10 @@ fn relation_namespace_migration_is_atomic_and_moves_public_table_data() {
         catalog.load_views().unwrap()[0].relation,
         RelationIdentity::new("public", "report")
     );
-    assert_eq!(catalog.load_views().unwrap()[0].role_owner, "uqa");
+    assert_eq!(
+        legacy_security(&catalog.load_views().unwrap()[0].security).role_owner,
+        "uqa"
+    );
     assert!(catalog.load_schemas().unwrap().contains(&"app".to_string()));
     connection
         .with(|conn| {
@@ -399,9 +402,7 @@ fn table_and_column_rename_move_btree_children_without_fk_cascade() {
     catalog
         .save_table(&TableSchema {
             relation: RelationIdentity::new("public", "docs"),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::default(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             object_id: [1; 16],
             storage_generation: [1; 16],
             analyzer_json: "{}".into(),

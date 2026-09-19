@@ -23,6 +23,8 @@ impl Engine {
             relations: self,
             access: self,
             locks: self,
+            lock_catalog: self,
+            lock_session: self,
             modes: self,
             names: self,
             rows: self.constraint_execution_context(),

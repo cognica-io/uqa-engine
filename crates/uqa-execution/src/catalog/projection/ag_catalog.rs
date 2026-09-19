@@ -197,6 +197,7 @@ pub fn age_pg_class_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQ
     let mut out = Vec::new();
     for entry in graph_catalog_entries(catalog)? {
         out.push(pg_class_row(
+            catalog,
             &entry.name,
             LABEL_ID_SEQUENCE,
             "S",
@@ -208,6 +209,7 @@ pub fn age_pg_class_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQ
             let natts = i64::try_from(label_columns(label.kind).len())
                 .map_err(|_| SQLError::Internal("label column count".into()))?;
             out.push(pg_class_row(
+                catalog,
                 &entry.name,
                 &label.name,
                 "r",
@@ -216,6 +218,7 @@ pub fn age_pg_class_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQ
                 false,
             ));
             out.push(pg_class_row(
+                catalog,
                 &entry.name,
                 &label_sequence_name(&label.name),
                 "S",

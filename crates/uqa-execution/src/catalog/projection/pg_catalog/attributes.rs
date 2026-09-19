@@ -68,6 +68,7 @@ pub fn build_pg_attribute(
         let table = catalog
             .table(resolution, &table_name)?
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
+        let security = catalog.relation_security_names(&table.security)?;
         let hierarchy = &table.hierarchy;
         let mut inherited_columns = Vec::new();
         for parent in &hierarchy.parents {
@@ -89,8 +90,8 @@ pub fn build_pg_attribute(
             attribute.insert(
                 "attacl".into(),
                 super::super::relation_catalog::table_acl_catalog_value(
-                    &table.security.role_owner,
-                    table.security.column_acls.get(&col.name),
+                    &security.role_owner,
+                    security.column_acls.get(&col.name),
                 )?,
             );
             attribute.insert(
@@ -113,6 +114,7 @@ pub fn build_pg_attribute(
         }
     }
     for (_, stored) in catalog.views_of_kind(crate::catalog::view::StoredViewKind::View) {
+        let security = catalog.relation_security_names(&stored.security)?;
         let relid = crate::catalog::projection::view_relation_oid(&stored);
         let columns = view_columns_for(context, catalog, resolution, &stored)?;
         for (idx, col) in columns.iter().enumerate() {
@@ -124,14 +126,15 @@ pub fn build_pg_attribute(
             attribute.insert(
                 "attacl".into(),
                 super::super::relation_catalog::table_acl_catalog_value(
-                    &stored.role_owner,
-                    stored.column_acls.get(&col.name),
+                    &security.role_owner,
+                    security.column_acls.get(&col.name),
                 )?,
             );
             out.push(attribute);
         }
     }
     for (_, stored) in catalog.views_of_kind(crate::catalog::view::StoredViewKind::Materialized) {
+        let security = catalog.relation_security_names(&stored.security)?;
         let relid = crate::catalog::projection::view_relation_oid(&stored);
         let columns = view_columns_for(context, catalog, resolution, &stored)?;
         for (idx, col) in columns.iter().enumerate() {
@@ -143,8 +146,8 @@ pub fn build_pg_attribute(
             attribute.insert(
                 "attacl".into(),
                 super::super::relation_catalog::table_acl_catalog_value(
-                    &stored.role_owner,
-                    stored.column_acls.get(&col.name),
+                    &security.role_owner,
+                    security.column_acls.get(&col.name),
                 )?,
             );
             out.push(attribute);
@@ -169,7 +172,7 @@ pub fn build_pg_attribute(
             out.push(attribute);
         }
     }
-    for (_, _, object_id, _) in catalog.sequences() {
+    for (_, _, object_id, _) in catalog.sequences()? {
         let relid = crate::catalog::projection::sequence_relation_oid(object_id);
         for (idx, column) in sequence_attribute_columns().iter().enumerate() {
             out.push(pg_attribute_row(
@@ -202,6 +205,7 @@ fn sequence_attribute_column(name: &str, ty: ColumnType) -> SQLColumnDef {
         not_null: true,
         not_null_explicit: true,
         not_null_name: None,
+        not_null_identity: None,
         not_null_validated: true,
         not_null_no_inherit: false,
         not_null_is_local: true,

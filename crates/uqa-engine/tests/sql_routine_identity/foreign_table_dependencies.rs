@@ -425,7 +425,7 @@ fn foreign_table_sequence_dependencies_follow_rename_drop_and_reopen() {
 
 #[test]
 fn foreign_table_legacy_schema_migration_is_initial_open_only_and_atomic() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = TempDir::new().unwrap();
     let database = directory
@@ -444,7 +444,8 @@ fn foreign_table_legacy_schema_migration_is_initial_open_only_and_atomic() {
             .sql(ddl, &[])
             .unwrap_or_else(|error| panic!("{ddl}: {error}"));
     }
-    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     let mut foreign_tables = catalog.load_foreign_tables().unwrap();
     let table = foreign_tables
         .iter_mut()
@@ -478,7 +479,8 @@ fn foreign_table_legacy_schema_migration_is_initial_open_only_and_atomic() {
     drop(engine);
 
     assert!(Engine::open(&database).is_err());
-    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     assert_eq!(
         catalog
             .load_foreign_tables()
@@ -501,7 +503,8 @@ fn foreign_table_legacy_schema_migration_is_initial_open_only_and_atomic() {
         "2BP01"
     );
     drop(reopened);
-    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     let migrated = catalog
         .load_foreign_tables()
         .unwrap()
@@ -837,7 +840,7 @@ fn foreign_table_owner_transfer_moves_owned_sequences_atomically() {
 
 #[test]
 fn legacy_foreign_generated_sequences_are_migrated_once() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = TempDir::new().unwrap();
     let database = directory
@@ -852,7 +855,8 @@ fn legacy_foreign_generated_sequences_are_migrated_once() {
             )
             .unwrap();
     }
-    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     let mut table = catalog
         .load_foreign_tables()
         .unwrap()
@@ -890,7 +894,8 @@ fn legacy_foreign_generated_sequences_are_migrated_once() {
     drop(catalog);
 
     assert!(Engine::open(&database).is_err());
-    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     let table = catalog
         .load_foreign_tables()
         .unwrap()

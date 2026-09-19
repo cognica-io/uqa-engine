@@ -6,13 +6,16 @@
 
 //! Immutable catalog inputs and runtime catalog projections.
 
+pub mod domain;
 pub mod foreign;
 pub mod identity;
 pub mod security;
 pub mod sequence;
 pub mod view;
 
-use security::{DatabaseSecurity, SchemaSecurity, SequenceSecurity, TableSecurity};
+use security::{
+    BoundDatabaseSecurity, BoundSchemaSecurity, BoundSequenceSecurity, BoundTableSecurity,
+};
 use sequence::SequenceState;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -23,6 +26,7 @@ mod analysis;
 pub mod graph;
 mod read;
 pub mod schema;
+mod snapshot_read;
 
 /// Read-only access to catalog-owned state. This view cannot mutate transactions, acquire locks, publish caches, or recover the enclosing engine.
 #[derive(Clone)]
@@ -41,7 +45,7 @@ pub struct CatalogReadSnapshot {
 #[derive(Clone)]
 pub struct CatalogTableSnapshot {
     pub object_id: [u8; 16],
-    pub security: Arc<crate::catalog::security::TableSecurity>,
+    pub security: Arc<crate::catalog::security::BoundTableSecurity>,
     pub columns: Arc<Vec<uqa_sql::ast::ColumnDef>>,
     pub columns_declared: bool,
     pub checks: Arc<Vec<uqa_sql::ast::TableCheck>>,
@@ -58,6 +62,13 @@ pub struct CatalogSequenceSnapshot {
     pub state: crate::catalog::sequence::SequenceState,
     pub security: crate::catalog::security::SequenceSecurity,
 }
+
+pub type CatalogSequenceMetadata = (
+    String,
+    uqa_sql::ast::RelationPersistence,
+    [u8; 16],
+    security::SequenceSecurity,
+);
 
 pub use uqa_sql::catalog::resolution::RelationResolution;
 
@@ -78,12 +89,14 @@ pub struct CatalogDefinitionSnapshot {
     pub graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub views: Arc<BTreeMap<RelationIdentity, StoredView>>,
     pub catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
-    pub database_security: Arc<DatabaseSecurity>,
-    pub schemas: Arc<BTreeMap<String, SchemaSecurity>>,
+    pub database_security: Arc<BoundDatabaseSecurity>,
+    pub schemas: Arc<BTreeMap<String, BoundSchemaSecurity>>,
     pub sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
     pub sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
-    pub sequence_security: Arc<BTreeMap<RelationIdentity, SequenceSecurity>>,
-    pub foreign_table_security: Arc<BTreeMap<RelationIdentity, TableSecurity>>,
+    pub sequence_security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
+    pub foreign_table_security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
+    pub system_relation_security:
+        Arc<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
     pub roles: Arc<BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>>,
     pub triggers: Arc<
         BTreeMap<

@@ -11,6 +11,7 @@ pub mod compiled;
 pub mod cursor;
 pub mod portal;
 pub mod prepared;
+pub mod table_locks;
 pub mod transactions;
 
 pub mod context;

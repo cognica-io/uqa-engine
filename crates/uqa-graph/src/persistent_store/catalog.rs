@@ -30,6 +30,36 @@ fn json_error(error: &serde_json::Error) -> GraphStoreError {
 }
 
 impl GraphStorage for CatalogGraphStorage {
+    fn guard_definition(&self, graph: Option<&str>) -> GraphStoreResult<()> {
+        if self.backend.identifier_allocator().is_some() {
+            self.catalog.guard_graph_definition(graph)?;
+        }
+        Ok(())
+    }
+    fn identifiers(&self) -> GraphStoreResult<Option<super::storage::GraphIdentifierScope<'_>>> {
+        let Some(allocator) = self.backend.identifier_allocator() else {
+            return Ok(None);
+        };
+        let generation = super::storage::decode_identifier_generation(
+            self.catalog
+                .get_metadata("graph_identifier_generation")?
+                .as_deref(),
+        )?;
+        Ok(Some(super::storage::GraphIdentifierScope::catalog(
+            allocator, generation,
+        )))
+    }
+    fn reset_identifiers(&self) -> GraphStoreResult<()> {
+        if self.backend.identifier_allocator().is_some() {
+            let generation =
+                uqa_storage::catalog::new_nonzero_catalog_identity("graph", "generation")?;
+            self.catalog.set_metadata(
+                "graph_identifier_generation",
+                &serde_json::to_string(&generation).map_err(|error| json_error(&error))?,
+            )?;
+        }
+        Ok(())
+    }
     fn begin_write(&self) -> GraphStoreResult<Box<dyn GraphWriteTransaction>> {
         super::storage::begin_graph_write(Arc::clone(&self.backend))
     }

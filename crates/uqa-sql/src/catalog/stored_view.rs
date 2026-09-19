@@ -4,24 +4,25 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::security::TableSecurity;
-use std::collections::BTreeMap;
+use super::security::BoundTableSecurity;
+use std::ops::{Deref, DerefMut};
 
 /// One bound view query together with the fixed public column names captured when the view was created. `None` exists only while the catalog-opening migration reads formats written before column metadata was persisted.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct StoredView {
+    /// Security is loaded independently from the durable catalog row.
+    #[serde(skip)]
+    pub security: BoundTableSecurity,
+    #[serde(flatten)]
+    pub definition: StoredViewDefinition,
+}
+
+/// Query-definition JSON carries no authorization state. Restoration supplies validated security before publishing a view.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StoredViewDefinition {
     /// Stable logical relation identity. Renames and replacement preserve it; a zero value marks a legacy catalog row upgraded during initial open.
     #[serde(default)]
     pub object_id: [u8; 16],
-    /// Durable SQL-role owner loaded from the typed view catalog row. The query-definition JSON deliberately excludes ownership so catalog definition and authorization state cannot disagree.
-    #[serde(skip)]
-    pub role_owner: String,
-    /// Durable relation-wide ACL loaded from the typed view catalog row.
-    #[serde(skip)]
-    pub acl: Option<Vec<super::security::TableAclEntry>>,
-    /// Durable per-column ACLs loaded from the typed view catalog row.
-    #[serde(skip)]
-    pub column_acls: BTreeMap<String, Vec<super::security::TableAclEntry>>,
     pub query: crate::plan::QueryPlan,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_columns: Option<Vec<String>>,
@@ -45,19 +46,26 @@ const fn default_view_populated() -> bool {
     true
 }
 
+impl Deref for StoredView {
+    type Target = StoredViewDefinition;
+    fn deref(&self) -> &Self::Target {
+        &self.definition
+    }
+}
+
+impl DerefMut for StoredView {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.definition
+    }
+}
+
 impl StoredView {
-    pub fn security(&self) -> TableSecurity {
-        TableSecurity {
-            role_owner: self.role_owner.clone(),
-            acl: self.acl.clone(),
-            column_acls: self.column_acls.clone(),
-        }
+    pub fn security(&self) -> BoundTableSecurity {
+        self.security.clone()
     }
 
-    pub fn set_security(&mut self, security: TableSecurity) {
-        self.role_owner = security.role_owner;
-        self.acl = security.acl;
-        self.column_acls = security.column_acls;
+    pub fn set_security(&mut self, security: BoundTableSecurity) {
+        self.security = security;
     }
 
     pub fn security_invoker(&self) -> bool {

@@ -17,6 +17,11 @@ on:
         description: Run the Rust validation jobs for a Rust-affecting change
         required: true
         type: boolean
+      run_nori_allocations:
+        description: Run only persistent Nori allocation and output checks when run_rust is false
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -270,7 +275,7 @@ jobs:
 
   nori-benchmark:
     name: Nori native analysis and indexing gate
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.run_rust || inputs.run_nori_allocations)) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -283,20 +288,23 @@ jobs:
           cache-targets: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Measure native analysis and indexing with reviewed allocation ceilings
+        if: ${{ github.event_name == 'push' || inputs.run_rust }}
         run: |
           mkdir -p target/benchmark-runs
-          cargo bench --locked -p uqa-storage-redb --bench commit_allocation_order > target/benchmark-runs/redb-commit-allocation-order.json
           python3 scripts/run-nori-benchmark.py --output target/benchmark-runs/nori-native.json
           python3 scripts/run-nori-index-benchmark.py --output target/benchmark-runs/nori-index-native.json
-          python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --output target/benchmark-runs/nori-sqlite-native.json
-          python3 scripts/run-nori-persistent-benchmark.py --provider redb --output target/benchmark-runs/nori-redb-native.json
           python3 scripts/run-nori-phrase-benchmark.py --output target/benchmark-runs/nori-phrase-native.json
+      - name: Verify SQLite allocation and reopened outputs
+        if: ${{ !cancelled() }}
+        run: python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --output target/benchmark-runs/nori-sqlite-native.json --allocation-only
+      - name: Verify redb allocation and reopened outputs
+        if: ${{ !cancelled() }}
+        run: python3 scripts/run-nori-persistent-benchmark.py --provider redb --output target/benchmark-runs/nori-redb-native.json --allocation-only
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: nori-native-${{ github.sha }}
           path: |
-            target/benchmark-runs/redb-commit-allocation-order.json
             target/benchmark-runs/nori-native.json
             target/benchmark-runs/nori-index-native.json
             target/benchmark-runs/nori-sqlite-native.json

@@ -43,7 +43,7 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
     let privilege_subject = stmt
         .target_privilege_subject
         .clone()
-        .unwrap_or_else(|| context.mutation.privileges.current_user_name());
+        .unwrap_or_else(|| context.mutation.privileges.current_role());
     context.mutation.privileges.ensure_table_privilege_for(
         &stmt.table,
         &privilege_subject,
@@ -57,7 +57,7 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
     context.mutation.privileges.ensure_target_select(
         uqa_sql::semantics::privileges::TargetSelectPrivilegeRequest {
             table: &stmt.table,
-            privilege_subject: stmt.target_privilege_subject.as_deref(),
+            privilege_subject: stmt.target_privilege_subject.as_ref(),
             target_qualifier: &stmt.target_qualifier,
             returning_aliases: &stmt.returning_aliases,
             expressions: &privilege_expressions,
@@ -154,7 +154,7 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                 Vec::new();
             let mut returning_rows = Vec::new();
             let mut ctes = read_context.mutation.scopes.command_scope(
-                stmt.statement_privilege_subject.as_deref(),
+                stmt.statement_privilege_subject.as_ref(),
                 stmt.relations_bound,
             )?;
             if let Some(parent) = inherited_ctes {

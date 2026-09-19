@@ -175,6 +175,7 @@ pub(super) fn optimize_command(
         | CommandPlan::Discard { .. }
         | CommandPlan::Load { .. }
         | CommandPlan::Analyze { .. }
+        | CommandPlan::LockTable(_)
         | CommandPlan::Vacuum(_)
         | CommandPlan::Truncate { .. }
         | CommandPlan::Transaction(_)
@@ -200,6 +201,7 @@ pub(super) fn optimize_command(
         | CommandPlan::GrantRole(_)
         | CommandPlan::CreateRole(_)
         | CommandPlan::AlterRole(_)
+        | CommandPlan::RenameRole(_)
         | CommandPlan::DropRole(_)
         | CommandPlan::CreateTrigger(_)
         | CommandPlan::DropTrigger(_)

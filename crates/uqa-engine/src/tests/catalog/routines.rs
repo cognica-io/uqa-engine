@@ -14,6 +14,7 @@ use uqa_sql::{
 };
 
 use crate::Engine;
+mod acl_persistence;
 use uqa_sql::{routines::routine_signature_types, type_resolution::canonical_routine_type_name};
 
 fn create_function(sql: &str) -> CreateFunction {

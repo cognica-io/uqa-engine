@@ -22,7 +22,8 @@ impl Engine {
         ViewAlterContext {
             names: self,
             catalog: self,
-            access: self,
+            authority: self.table_privilege_context(),
+            creation: self.relation_creation_context(),
             locks: self,
             roles: self.role_transfer_context(),
             dependencies: self,
@@ -35,7 +36,7 @@ impl Engine {
 }
 impl ViewAlterTransactions for Engine {
     fn with_view_write(&self, write: ViewAlterWrite<'_>) -> Result<(), SQLError> {
-        self.with_implicit_transaction(|engine| write(&engine.view_alter_context()))
+        self.with_implicit_definition_transaction(|engine| write(&engine.view_alter_context()))
     }
 }
 impl ViewAlterCatalog for Engine {

@@ -13,6 +13,7 @@ use uqa_execution::schema::{
         ColumnRemovalViews,
     },
     table_alteration::{
+        binding::TableAlterBindingContext,
         entry::{
             RelationEventAlterContext, RelationEventAlterTransactions, RelationEventAlterWrite,
             TableAlterEntryContext, TableAlterSession, TableAlterTransactions, TableAlterWrite,
@@ -28,13 +29,23 @@ use uqa_sql::{
 };
 use uqa_storage::StorageBackendResult;
 impl Engine {
+    pub(crate) fn table_alter_binding_context(&self) -> TableAlterBindingContext<'_> {
+        TableAlterBindingContext {
+            names: self,
+            catalog: self,
+            authority: self.table_privilege_context(),
+            creation: self.relation_creation_context(),
+            locks: self,
+            notices: self.query_runtime_view().notices,
+        }
+    }
+
     pub(crate) fn table_alter_entry_context(
         &self,
     ) -> TableAlterEntryContext<'_, StatementReadSnapshot> {
         TableAlterEntryContext {
             session: self,
-            names: self,
-            locks: self,
+            binding: self.table_alter_binding_context(),
             tables: self,
             events: self,
             views: self,
@@ -45,6 +56,7 @@ impl Engine {
     }
     pub(crate) fn table_alter_context(&self) -> TableAlterContext<'_, StatementReadSnapshot> {
         TableAlterContext {
+            binding: self.table_alter_binding_context(),
             ownership: self.table_ownership_context(),
             hierarchy: self.hierarchy_execution_context(),
             constraints: self.constraint_alter_context(),
@@ -77,7 +89,7 @@ impl TableAlterTransactions<StatementReadSnapshot> for Engine {
         &self,
         write: TableAlterWrite<'_, StatementReadSnapshot>,
     ) -> Result<SQLResult, SQLError> {
-        self.with_implicit_transaction(|engine| write(&engine.table_alter_context()))
+        self.with_implicit_definition_transaction(|engine| write(&engine.table_alter_context()))
     }
 }
 impl RelationEventAlterTransactions for Engine {

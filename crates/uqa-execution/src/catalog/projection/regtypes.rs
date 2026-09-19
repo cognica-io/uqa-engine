@@ -21,13 +21,15 @@ use uqa_sql::{ResultRow, SQLError};
 
 use crate::catalog::context::CatalogContext;
 
-use super::helpers;
 use super::pg_catalog::{build_pg_type, catalog_index_relations};
 use super::pg_namespace::build_pg_namespace;
 use super::pg_proc::build_pg_proc;
 use super::relation_catalog::build_pg_class;
 
+mod procedures;
 mod type_names;
+use procedures::lookup_regprocedure_oid;
+pub use procedures::resolve_regprocedure_input_oid;
 
 pub use type_names::{resolve_catalog_column_type, resolve_catalog_domain_type_by_oid};
 
@@ -107,15 +109,6 @@ pub fn resolve_regclass_kind_by_oid(
     Ok(None)
 }
 
-fn parse_regprocedure_name(
-    name: &str,
-) -> Result<Option<uqa_sql::ParsedRegprocedureName>, SQLError> {
-    match uqa_sql::parse_regprocedure_name(name) {
-        Ok(parsed) => Ok(parsed),
-        Err(_) => Ok(None),
-    }
-}
-
 fn object_name(names: &[String]) -> Result<(Option<&str>, &str), SQLError> {
     match names {
         [local] => Ok((None, local)),
@@ -178,7 +171,7 @@ fn parsed_regtype_oid(
         }
         context.require_schema_privilege(
             schema,
-            &context.current_user_name(),
+            &context.current_role(),
             crate::catalog::security::schema::SchemaAclPrivilege::Usage,
         )?;
         return Ok(type_oid_in_schema(
@@ -193,56 +186,6 @@ fn parsed_regtype_oid(
         .map_err(|error| SQLError::Internal(error.to_string()))?
     {
         if let Some(oid) = type_oid_in_schema(catalog, &schema, local, parsed.array_dimensions) {
-            return Ok(Some(oid));
-        }
-    }
-    Ok(None)
-}
-
-fn lookup_regprocedure_oid(
-    context: &CatalogContext<'_>,
-    name: &str,
-) -> Result<Option<i64>, SQLError> {
-    match numeric_regobject_oid(name) {
-        NumericRegobjectOid::Valid(oid) => return Ok(Some(oid)),
-        NumericRegobjectOid::InvalidSyntax | NumericRegobjectOid::OutOfRange => return Ok(None),
-        NumericRegobjectOid::NotNumeric => {}
-    }
-    let Some(parsed) = parse_regprocedure_name(name)? else {
-        return Ok(None);
-    };
-    let Some(argument_types) = parsed.argument_types.as_ref() else {
-        return Ok(None);
-    };
-    let (schema, local) = object_name(&parsed.names)?;
-    let catalog = regtype_output_catalog(context)?;
-    let argument_oids = argument_types
-        .iter()
-        .map(|type_name| parsed_regtype_oid(context, &catalog, type_name))
-        .collect::<Result<Option<Vec<_>>, _>>()?;
-    let Some(argument_oids) = argument_oids else {
-        return Ok(None);
-    };
-    let find_in_schema = |schema: &str| {
-        let namespace_oid = catalog
-            .namespaces
-            .iter()
-            .find_map(|(oid, name)| (name == schema).then_some(*oid))?;
-        catalog.procs.iter().find_map(|(oid, entry)| {
-            (entry.namespace_oid == namespace_oid
-                && entry.name == *local
-                && entry.argument_types == argument_oids)
-                .then_some(*oid)
-        })
-    };
-    if let Some(schema) = schema {
-        return Ok(find_in_schema(schema));
-    }
-    for schema in context
-        .current_schema_names(true)
-        .map_err(|error| SQLError::Internal(error.to_string()))?
-    {
-        if let Some(oid) = find_in_schema(&schema) {
             return Ok(Some(oid));
         }
     }
@@ -469,71 +412,6 @@ pub fn resolve_regobject_oid(
     }
 }
 
-const VIRTUAL_REGCLASSES: &[(&str, &str, i64)] = &[
-    ("pg_catalog", "pg_namespace", 2615),
-    ("pg_catalog", "pg_class", 1259),
-    ("pg_catalog", "pg_inherits", 2611),
-    ("pg_catalog", "pg_partitioned_table", 3350),
-    ("pg_catalog", "pg_attribute", 1249),
-    ("pg_catalog", "pg_attrdef", 2604),
-    ("pg_catalog", "pg_constraint", 2606),
-    ("pg_catalog", "pg_index", 2610),
-    ("pg_catalog", "pg_trigger", 2620),
-    ("pg_catalog", "pg_rewrite", 2618),
-    ("pg_catalog", "pg_rules", 12023),
-    ("pg_catalog", "pg_tables", 12033),
-    ("pg_catalog", "pg_views", 12028),
-    ("pg_catalog", "pg_indexes", 12043),
-    ("pg_catalog", "pg_type", 1247),
-    ("pg_catalog", "pg_range", 3541),
-    ("pg_catalog", "pg_proc", 1255),
-    ("pg_catalog", "pg_database", 1262),
-    ("pg_catalog", "pg_roles", 12000),
-    ("pg_catalog", "pg_user", 12014),
-    ("pg_catalog", "pg_settings", 12104),
-    ("pg_catalog", "pg_prepared_statements", 12095),
-    ("pg_catalog", "pg_description", 2609),
-    ("pg_catalog", "pg_matviews", 12038),
-    ("pg_catalog", "pg_sequences", 12048),
-    (
-        "information_schema",
-        "information_schema_catalog_name",
-        13313,
-    ),
-    ("information_schema", "column_privileges", 13371),
-    ("information_schema", "columns", 13381),
-    ("information_schema", "key_column_usage", 13414),
-    ("information_schema", "routines", 13462),
-    ("information_schema", "role_column_grants", 13429),
-    ("information_schema", "schemata", 13467),
-    ("information_schema", "sequences", 13471),
-    ("information_schema", "table_constraints", 13496),
-    ("information_schema", "tables", 13510),
-    ("information_schema", "views", 13568),
-];
-
-fn resolve_virtual_regclass(
-    context: &CatalogContext<'_>,
-    schema: Option<&str>,
-    local: &str,
-) -> Result<Option<(i64, &'static str, &'static str)>, SQLError> {
-    if let Some(schema) = schema {
-        return Ok(VIRTUAL_REGCLASSES
-            .iter()
-            .find(|(candidate_schema, candidate_local, _)| {
-                *candidate_schema == schema && *candidate_local == local
-            })
-            .map(|(schema, local, oid)| (*oid, *schema, *local)));
-    }
-    let Some(visible_schema) = visible_relation_schema(context, local)? else {
-        return Ok(None);
-    };
-    Ok(VIRTUAL_REGCLASSES
-        .iter()
-        .find(|(schema, candidate_local, _)| *schema == visible_schema && *candidate_local == local)
-        .map(|(schema, local, oid)| (*oid, *schema, *local)))
-}
-
 fn catalog_int(row: &ResultRow, column: &str) -> Option<i64> {
     match row.get(column) {
         Some(Value::Int(value)) => Some(*value),
@@ -687,6 +565,10 @@ fn regtype_output_catalog(
         .get_or_try_init(|| RegtypeOutputCatalog::build(context))
 }
 
+pub fn routine_oid_exists(context: &CatalogContext<'_>, oid: i64) -> Result<bool, SQLError> {
+    Ok(regtype_output_catalog(context)?.procs.contains_key(&oid))
+}
+
 fn namespace_name(catalog: &RegtypeOutputCatalog, oid: i64) -> Option<&str> {
     catalog.namespaces.get(&oid).map(String::as_str)
 }
@@ -703,39 +585,14 @@ fn visible_relation_schema(
     context: &CatalogContext<'_>,
     local: &str,
 ) -> Result<Option<String>, SQLError> {
-    let physical = context.try_resolve_visible_relation_kind(local)?;
-    if let Some((canonical, _)) = physical.as_ref() {
-        if let Some((schema, _)) = canonical.rsplit_once('.') {
-            if schema.starts_with("pg_temp_") {
-                return Ok(Some(schema.to_string()));
-            }
-        }
-    }
-    for schema in context
-        .current_schema_names(true)
-        .map_err(|error| SQLError::Internal(error.to_string()))?
-    {
-        if VIRTUAL_REGCLASSES
-            .iter()
-            .any(|(candidate_schema, candidate_local, _)| {
-                *candidate_schema == schema && *candidate_local == local
-            })
-        {
-            return Ok(Some(schema));
-        }
-        if context
-            .relation_kind_at(&format!("{schema}.{local}"))
-            .map_err(|error| SQLError::Internal(error.to_string()))?
-            .is_some()
-        {
-            return Ok(Some(schema));
-        }
-    }
-    Ok(physical.and_then(|(canonical, _)| {
-        canonical
-            .rsplit_once('.')
-            .map(|(schema, _)| schema.to_string())
-    }))
+    context
+        .try_resolve_visible_relation_kind(&uqa_sql::expr::quote_ident(local))?
+        .map(|(canonical, _)| {
+            uqa_core::RelationIdentity::from_legacy_name(&canonical)
+                .map(|identity| identity.schema)
+                .map_err(SQLError::Internal)
+        })
+        .transpose()
 }
 
 fn relation_name_is_visible(
@@ -751,10 +608,11 @@ fn format_regclass(
     catalog: &RegtypeOutputCatalog,
     oid: i64,
 ) -> Result<Option<String>, SQLError> {
-    if let Some((schema, local, _)) = VIRTUAL_REGCLASSES
-        .iter()
-        .find(|(_, _, candidate_oid)| *candidate_oid == oid)
+    if let Some(relation) =
+        uqa_sql::catalog::SystemRelation::all().find(|relation| relation.oid() == oid)
     {
+        let schema = relation.namespace();
+        let local = relation.name();
         return Ok(Some(if relation_name_is_visible(context, schema, local)? {
             uqa_sql::expr::quote_ident(local)
         } else {
@@ -791,7 +649,13 @@ fn format_regproc(
         .current_schema_names(true)
         .map_err(|error| SQLError::Internal(error.to_string()))?;
     let visible_schema = schemas.into_iter().find(|candidate_schema| {
-        let candidate_oid = helpers::oids::schema_oid(candidate_schema);
+        let Some((&candidate_oid, _)) = catalog
+            .namespaces
+            .iter()
+            .find(|(_, name)| *name == candidate_schema)
+        else {
+            return false;
+        };
         catalog
             .proc_names_by_namespace
             .get(&candidate_oid)
@@ -822,7 +686,13 @@ fn format_regprocedure(
         .map_err(|error| SQLError::Internal(error.to_string()))?
         .into_iter()
         .find(|candidate_schema| {
-            let namespace_oid = helpers::oids::schema_oid(candidate_schema);
+            let Some((&namespace_oid, _)) = catalog
+                .namespaces
+                .iter()
+                .find(|(_, name)| *name == candidate_schema)
+            else {
+                return false;
+            };
             catalog.procs.values().any(|candidate| {
                 candidate.namespace_oid == namespace_oid
                     && candidate.name == entry.name

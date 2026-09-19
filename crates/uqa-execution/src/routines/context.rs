@@ -51,6 +51,7 @@ pub trait RoutinePortals {
         name: &str,
         scroll: Option<bool>,
         plan: &UnifiedPlan,
+        source_sql: &str,
     ) -> Result<(), SQLError>;
     fn fetch(&self, request: &FetchCursorStmt) -> Result<SQLResult, SQLError>;
     fn close(&self, name: &str) -> Result<(), SQLError>;

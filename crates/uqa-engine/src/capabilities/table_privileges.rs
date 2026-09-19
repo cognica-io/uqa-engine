@@ -14,12 +14,14 @@ use uqa_execution::catalog::security::table_inquiry::{
     PrivilegeForeignSecurityRead, PrivilegeForeignTablesRead, PrivilegeViewsRead,
     TablePrivilegeContext, TablePrivilegeRead, TablePrivilegeRegistry, TablePrivilegeState,
 };
-use uqa_sql::catalog::security::TableSecurity;
+use uqa_sql::catalog::security::BoundTableSecurity;
 use uqa_storage::StorageBackendResult;
 
 struct TablePrivilegeGuard<'a>(RwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>);
 impl TablePrivilegeRead for TablePrivilegeGuard<'_> {
-    fn security_entries(&self) -> Box<dyn Iterator<Item = (RelationIdentity, TableSecurity)> + '_> {
+    fn security_entries(
+        &self,
+    ) -> Box<dyn Iterator<Item = (RelationIdentity, BoundTableSecurity)> + '_> {
         Box::new(
             self.0
                 .iter()
@@ -42,13 +44,13 @@ impl TablePrivilegeRead for TablePrivilegeGuard<'_> {
     }
 }
 impl TablePrivilegeState for TableState {
-    fn role_owner(&self) -> String {
+    fn role_owner(&self) -> uqa_sql::catalog::roles::RoleIdentity {
         self.role_owner()
     }
     fn columns(&self) -> uqa_execution::catalog::security::table_inquiry::TableColumnsRead<'_> {
         Box::new(self.columns.read())
     }
-    fn security(&self) -> TableSecurity {
+    fn security(&self) -> BoundTableSecurity {
         self.security()
     }
     fn column_names(&self) -> Vec<String> {
@@ -87,6 +89,26 @@ impl Engine {
             sequences: self.sequence_privilege_inquiry(),
             catalog: self.catalog_execution(),
             registry: self,
+            snapshots: self,
         }
+    }
+}
+
+impl uqa_sql::catalog::security::system_relations::SystemRelationSecurityCatalog for Engine {
+    fn system_relation_securities(
+        &self,
+    ) -> uqa_sql::catalog::security::system_relations::SystemRelationSecurityRead<'_> {
+        Box::new(self.durable.system_relation_security.read())
+    }
+}
+impl uqa_execution::catalog::security::system_relations::SystemRelationSecurityState for Engine {
+    fn system_relation_securities_write(
+        &self,
+    ) -> Box<
+        dyn std::ops::DerefMut<
+                Target = uqa_sql::catalog::security::system_relations::SystemRelationSecurities,
+            > + '_,
+    > {
+        Box::new(self.durable.system_relation_security.write())
     }
 }

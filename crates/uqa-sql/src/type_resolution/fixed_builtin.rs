@@ -315,6 +315,7 @@ fn builtin_binding_is_non_immutable(binding: &FunctionBinding) -> bool {
                 | "pg_get_expr"
                 | "pg_get_partkeydef"
                 | "pg_backend_pid"
+                | "current_setting"
                 | "version"
                 | "pg_listening_channels"
                 | "pg_notify"
@@ -334,6 +335,7 @@ fn builtin_binding_is_non_immutable(binding: &FunctionBinding) -> bool {
                 | "has_database_privilege"
                 | "has_schema_privilege"
                 | "has_sequence_privilege"
+                | "has_function_privilege"
                 | "to_regproc"
                 | "to_regprocedure"
                 | "to_regclass"
@@ -595,6 +597,14 @@ fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
         ],
         "pg_get_partkeydef" => vec![overload(&local, &[ColumnType::Oid], ColumnType::Text)],
         "pg_backend_pid" => vec![overload(&local, &[], ColumnType::Integer)],
+        "current_setting" => vec![
+            overload(&local, &[ColumnType::Text], ColumnType::Text),
+            overload(
+                &local,
+                &[ColumnType::Text, ColumnType::Boolean],
+                ColumnType::Text,
+            ),
+        ],
         "version" | "pg_listening_channels" => vec![overload(&local, &[], ColumnType::Text)],
         "pg_notify" => vec![overload(
             &local,
@@ -797,7 +807,8 @@ fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
         "has_table_privilege"
         | "has_database_privilege"
         | "has_schema_privilege"
-        | "has_sequence_privilege" => vec![
+        | "has_sequence_privilege"
+        | "has_function_privilege" => vec![
             overload(
                 &local,
                 &[ColumnType::Name, ColumnType::Text, ColumnType::Text],
@@ -881,6 +892,7 @@ fn local_name(name: &str) -> Option<String> {
             | "pg_get_expr"
             | "pg_get_partkeydef"
             | "pg_backend_pid"
+            | "current_setting"
             | "version"
             | "pg_listening_channels"
             | "pg_notify"
@@ -900,6 +912,7 @@ fn local_name(name: &str) -> Option<String> {
             | "has_database_privilege"
             | "has_schema_privilege"
             | "has_sequence_privilege"
+            | "has_function_privilege"
     )
     .then(|| local.to_string())
 }

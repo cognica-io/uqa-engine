@@ -309,7 +309,12 @@ impl Engine {
             .catalog_registry
             .published
             .load(std::sync::atomic::Ordering::Acquire);
-        if storage_snapshot_unchanged
+        // A committed sequence alone does not identify a private command view: writes and savepoint undo may change it without a durable commit.
+        let private_view = self.storage.backend.as_ref().is_some_and(|backend| {
+            backend.transaction_model().is_versioned() && backend.in_transaction()
+        });
+        if !private_view
+            && storage_snapshot_unchanged
             && self
                 .epochs
                 .table_catalog

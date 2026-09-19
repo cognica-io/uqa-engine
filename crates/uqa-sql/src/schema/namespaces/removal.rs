@@ -7,7 +7,7 @@
 //! Schema DROP target authority, namespace protection, and empty-schema validation.
 
 use crate::{
-    catalog::{is_virtual_system_schema, security::SchemaSecurity},
+    catalog::{is_virtual_system_schema, security::BoundSchemaSecurity},
     SQLError,
 };
 use std::collections::BTreeSet;
@@ -17,8 +17,9 @@ pub trait EmptySchemaCatalog {
     fn schema_is_empty(&self, name: &str) -> bool;
 }
 pub trait SchemaDropCatalog: EmptySchemaCatalog {
-    fn schema_security(&self, name: &str) -> Option<SchemaSecurity>;
-    fn current_user_has_role_privileges(&self, role: &str) -> bool;
+    fn schema_security(&self, name: &str) -> Option<BoundSchemaSecurity>;
+    fn current_user_has_role_privileges(&self, role: &uqa_core::catalog_role::RoleIdentity)
+        -> bool;
     fn schema_is_graph(&self, name: &str) -> Result<bool, String>;
 }
 pub enum BoundSchemaDrop {

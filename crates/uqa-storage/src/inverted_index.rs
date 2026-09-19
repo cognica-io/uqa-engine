@@ -26,6 +26,7 @@ mod analysis;
 mod batch;
 mod bindings;
 mod contract;
+pub mod defaults;
 mod memory;
 mod metadata;
 mod read_cursor;

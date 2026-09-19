@@ -7,6 +7,7 @@
 //! Engine-backed scalar and function callback adapters.
 
 use std::sync::Arc;
+use uqa_sql::catalog::roles::RoleReference;
 
 use uqa_execution::SharedExpressionEvaluator;
 use uqa_sql::expr::RowLookup;
@@ -235,12 +236,26 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
             .map_err(|error| error.to_string())
     }
 
-    fn current_user(&self) -> std::result::Result<Option<String>, String> {
-        Ok(Some(self.engine.current_user_name()))
+    fn current_user(&self) -> std::result::Result<Option<String>, SQLError> {
+        Ok(Some(
+            self.engine
+                .current_role()
+                .require_name(&self.engine.durable.roles.read())?
+                .to_owned(),
+        ))
     }
 
-    fn session_user(&self) -> std::result::Result<Option<String>, String> {
-        Ok(Some(self.engine.session_user_name()))
+    fn session_user(&self) -> std::result::Result<Option<String>, SQLError> {
+        Ok(Some(
+            self.engine
+                .session_role()
+                .require_name(&self.engine.durable.roles.read())?
+                .to_owned(),
+        ))
+    }
+
+    fn runtime_parameter(&self, name: &str) -> std::result::Result<Option<String>, SQLError> {
+        Ok(self.engine.session_execution_view().runtime_parameter(name))
     }
 
     fn current_schemas(
@@ -354,7 +369,7 @@ pub(crate) fn eval_stored_expression_plan_with_row(
     schema: &RowSchema,
     row: &PhysicalRow,
     params: &[SQLParam],
-    privilege_subject: Option<&str>,
+    privilege_subject: Option<&RoleReference>,
 ) -> Result<Value, SQLError> {
     let scope = crate::capabilities::query_scope::new_for_statement(engine, privilege_subject);
     uqa_execution::query::catalog_expression::eval_stored_expression_plan_with_row(

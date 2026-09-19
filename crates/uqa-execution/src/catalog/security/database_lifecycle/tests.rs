@@ -9,6 +9,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::{DatabasePrivilege, DatabaseRevokeBehavior},
     catalog::roles::{
@@ -18,7 +19,7 @@ use uqa_sql::{
 };
 
 struct DatabaseCatalog {
-    security: RefCell<DatabaseSecurity>,
+    security: RefCell<BoundDatabaseSecurity>,
     roles: RefCell<BTreeMap<String, RoleDefinition>>,
     memberships: RefCell<BTreeMap<RoleMembershipKey, RoleMembership>>,
     fail_persistence: Cell<bool>,
@@ -30,6 +31,7 @@ impl DatabaseCatalog {
     fn context(&self) -> DatabasePrivilegeContext<'_> {
         DatabasePrivilegeContext {
             names: self,
+            locks: self,
             roles: self,
             registry: self,
             publication: self,
@@ -49,11 +51,14 @@ impl DatabaseCatalog {
 }
 
 impl RoleReferenceNames for DatabaseCatalog {
-    fn current_user_name(&self) -> String {
+    fn outer_role(&self) -> uqa_sql::catalog::roles::RoleReference {
+        self.current_role()
+    }
+    fn current_role(&self) -> RoleReference {
         "uqa".into()
     }
 
-    fn session_user_name(&self) -> String {
+    fn session_role(&self) -> RoleReference {
         "uqa".into()
     }
 }
@@ -82,6 +87,7 @@ impl DatabaseSecurityRegistry for DatabaseCatalog {
 
 impl DatabasePrivilegePublication for DatabaseCatalog {
     fn prepare_writer(&self) -> Result<(), SQLError> {
+        self.assert_guards_are_released();
         Ok(())
     }
 
@@ -89,10 +95,14 @@ impl DatabasePrivilegePublication for DatabaseCatalog {
         Ok(())
     }
 
-    fn persist_security(&self, security: &DatabaseSecurity) -> Result<(), SQLError> {
+    fn persist_security(&self, json: &str) -> Result<(), SQLError> {
         self.assert_authorization_is_retained();
         assert!(self.security.try_borrow_mut().is_ok());
-        assert_ne!(*self.security.borrow(), *security);
+        let stored: serde_json::Value = serde_json::from_str(json).unwrap();
+        assert_eq!(stored["database_security_format"], 1);
+        let bound: uqa_sql::catalog::security::database::binding::BoundDatabaseSecurity =
+            serde_json::from_value(stored["security"].clone()).unwrap();
+        assert_ne!(bound, *self.security.borrow());
         self.publications.borrow_mut().push("persist");
         if self.fail_persistence.get() {
             return Err(SQLError::Internal("simulated persistence failure".into()));
@@ -113,10 +123,24 @@ impl DatabasePrivilegePublication for DatabaseCatalog {
     }
 }
 
+impl SharedObjectLockSession for DatabaseCatalog {
+    fn acquire_shared_catalog(
+        &self,
+        _: crate::row_locks::shared_objects::SharedCatalogLock<'_>,
+        _: crate::row_locks::RelationLockMode,
+    ) -> Result<crate::row_locks::ScopedRelationLock<'_>, SQLError> {
+        panic!("PUBLIC must not acquire a role dependency lock")
+    }
+
+    fn refresh_shared_catalog(&self) -> Result<(), SQLError> {
+        panic!("PUBLIC has no shared role dependency")
+    }
+}
+
 #[test]
 fn database_acl_persistence_failure_leaves_security_and_epoch_unchanged() {
     let catalog = DatabaseCatalog {
-        security: RefCell::new(DatabaseSecurity::bootstrap()),
+        security: RefCell::new(BoundDatabaseSecurity::bootstrap()),
         roles: RefCell::new(BTreeMap::from([(
             "uqa".into(),
             RoleDefinition::bootstrap(),
@@ -132,7 +156,7 @@ fn database_acl_persistence_failure_leaves_security_and_epoch_unchanged() {
         grant_option_only: false,
         privileges: vec![DatabasePrivilege::Create],
         databases: vec!["uqa".into()],
-        grantees: vec!["PUBLIC".into()],
+        grantees: vec![uqa_sql::ast::AclRoleSpecification::Public],
         grantor: None,
         revoke_behavior: DatabaseRevokeBehavior::Restrict,
     };

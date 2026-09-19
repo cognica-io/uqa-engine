@@ -102,6 +102,7 @@ fn command_completion(
         CommandPlan::Load { .. } => "LOAD",
         CommandPlan::Explain { .. } => "EXPLAIN",
         CommandPlan::Analyze { .. } => "ANALYZE",
+        CommandPlan::LockTable(_) => "LOCK TABLE",
         CommandPlan::Vacuum(_) => "VACUUM",
         CommandPlan::Truncate { .. } => "TRUNCATE TABLE",
         CommandPlan::Transaction(statement) => {
@@ -163,7 +164,7 @@ fn command_completion(
             }
         }
         CommandPlan::CreateRole(_) => "CREATE ROLE",
-        CommandPlan::AlterRole(_) => "ALTER ROLE",
+        CommandPlan::AlterRole(_) | CommandPlan::RenameRole(_) => "ALTER ROLE",
         CommandPlan::DropRole(_) => "DROP ROLE",
         CommandPlan::CreateTrigger(_) => "CREATE TRIGGER",
         CommandPlan::DropTrigger(_) => "DROP TRIGGER",

@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleReference;
 use crate::{
     ast::{ColumnDef, FunctionBinding, TableHierarchy},
     binding::{
@@ -86,7 +87,10 @@ impl Catalog {
 }
 fn routine() -> Arc<SQLUserFunction> {
     let Statement::CreateFunction(mut def) = crate::compile("CREATE FUNCTION public.handler() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$").unwrap().remove(0) else {panic!("expected routine")};
-    def.owner = "owner".into();
+    def.owner = Some(crate::catalog::roles::RoleIdentity {
+        oid: 42,
+        object_id: [42; 16],
+    });
     let compiled = crate::routines::CompiledFunctionBody::PLpgSQL(
         crate::plpgsql::parse_function(&def).unwrap(),
     );
@@ -99,9 +103,15 @@ impl EventRelationCatalog for Catalog {
     fn event_relation_owner(
         &self,
         relation: &RelationIdentity,
-    ) -> Result<(String, &'static str), SQLError> {
+    ) -> Result<(crate::catalog::roles::RoleIdentity, &'static str), SQLError> {
         self.record(format!("owner:{}", relation.qualified_name()));
-        Ok(("owner".into(), self.kind))
+        Ok((
+            crate::catalog::roles::RoleIdentity {
+                oid: 42,
+                object_id: [42; 16],
+            },
+            self.kind,
+        ))
     }
     fn view_kind(&self, _: &RelationIdentity) -> Option<StoredViewKind> {
         self.record("view-kind");
@@ -208,27 +218,50 @@ impl RoutineSupportAuthority for Catalog {
     }
 }
 impl RoutineExecutionAuthority for Catalog {
-    fn current_user_name(&self) -> String {
+    fn current_role(&self) -> RoleReference {
         self.record("current-user");
         "reader".into()
     }
-    fn current_user_has_role_privileges(&self, role: &str) -> bool {
-        self.record(format!("inherits:{role}"));
+    fn current_user_has_role_identity_privileges(
+        &self,
+        role: crate::catalog::roles::RoleIdentity,
+    ) -> bool {
+        assert_eq!(
+            role,
+            crate::catalog::roles::RoleIdentity {
+                oid: 42,
+                object_id: [42; 16]
+            }
+        );
+        self.record("inherits:owner");
         self.allow_owner
     }
 }
 impl ViewPrivilegeCatalog for Catalog {
+    fn bound_role(
+        &self,
+        identity: crate::catalog::roles::RoleIdentity,
+    ) -> Result<RoleReference, SQLError> {
+        assert_eq!(identity.oid, 42);
+        Ok(RoleReference::Bound(Arc::new(
+            crate::catalog::roles::identity::RoleBinding {
+                name: "owner".into(),
+                oid: 42,
+                object_id: identity.object_id,
+            },
+        )))
+    }
     fn view_definition(&self, _: &str) -> Result<Option<StoredView>, SQLError> {
         panic!("unexpected visible view")
     }
-    fn current_user_name(&self) -> String {
-        RoutineExecutionAuthority::current_user_name(self)
+    fn current_role(&self) -> RoleReference {
+        RoutineExecutionAuthority::current_role(self)
     }
     fn ensure_view_privilege_for(
         &self,
         _: &str,
         _: &StoredView,
-        _: &str,
+        _: &RoleReference,
         _: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         panic!("unexpected view privilege")
@@ -238,7 +271,7 @@ impl ViewPrivilegeCatalog for Catalog {
         _: &str,
         _: &StoredView,
         _: &str,
-        _: &str,
+        _: &RoleReference,
         _: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         panic!("unexpected view column privilege")
@@ -247,7 +280,7 @@ impl ViewPrivilegeCatalog for Catalog {
         &self,
         _: &str,
         _: &StoredView,
-        _: &str,
+        _: &RoleReference,
         _: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         panic!("unexpected view column privilege")
@@ -266,10 +299,11 @@ impl MutationPrivilegeCatalog for Catalog {
     fn ensure_table_privilege_for(
         &self,
         table: &str,
-        subject: &str,
+        subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         assert!(matches!(privilege, TableAclPrivilege::Trigger));
+        let subject = subject.catalog_name(&std::collections::BTreeMap::new())?;
         self.record(format!("trigger-privilege:{table}:{subject}"));
         if self.allow_trigger {
             Ok(())
@@ -284,7 +318,7 @@ impl MutationPrivilegeCatalog for Catalog {
         &self,
         _: &str,
         _: &str,
-        _: &str,
+        _: &RoleReference,
         _: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         panic!("unexpected column privilege")
@@ -292,7 +326,7 @@ impl MutationPrivilegeCatalog for Catalog {
     fn ensure_any_column_privilege_for(
         &self,
         _: &str,
-        _: &str,
+        _: &RoleReference,
         _: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         panic!("unexpected column privilege")

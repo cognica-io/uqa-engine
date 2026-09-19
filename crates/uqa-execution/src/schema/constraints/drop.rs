@@ -6,10 +6,14 @@
 
 //! Remove constraints and their referencing keys in dependency order.
 use super::{
-    checks, constraint_error, ddl_storage_error, find_constraint, publish_constraint_state,
+    constraint_error, ddl_storage_error, find_constraint, publish_constraint_state,
     table_constraint_state, ConstraintAlterContext, ConstraintLocation, SQLError,
 };
-use uqa_sql::schema::constraint_changes::foreign_key_object_id;
+use uqa_sql::schema::constraint_changes::foreign_key_target::ForeignKeyTarget;
+mod foreign_keys;
+pub use foreign_keys::{
+    capture_foreign_key_dependencies, drop_foreign_key_dependencies, ForeignKeyRemovalTarget,
+};
 
 pub fn drop_constraint(
     context: &ConstraintAlterContext<'_>,
@@ -43,7 +47,7 @@ pub fn drop_constraint(
             ),
         ));
     }
-    if checks::drop_check(context, &table, name, recurse, cascade)? {
+    if super::inheritance::drop_inherited_constraint(context, &table, name, recurse, cascade)? {
         return Ok(());
     }
     drop_constraint_group(context, &table, name, if_exists, cascade, true)
@@ -65,103 +69,16 @@ fn drop_constraint_group(
     cascade: bool,
     direct: bool,
 ) -> Result<(), SQLError> {
-    let targets = constraint_drop_targets(context, table, name, if_exists, direct)?;
-    if direct {
-        for target in targets.iter().filter(|target| target.as_str() != table) {
-            context
-                .access
-                .ensure_no_pending_events(target, "ALTER TABLE")?;
-        }
-    }
-    for target in targets {
-        drop_constraint_one(context, &target, name, true, cascade)?;
-    }
-    Ok(())
-}
-
-fn constraint_drop_targets(
-    context: &ConstraintAlterContext<'_>,
-    table: &str,
-    name: &str,
-    if_exists: bool,
-    direct: bool,
-) -> Result<Vec<String>, SQLError> {
     let (columns, constraints) = table_constraint_state(context, table)?;
-    let Some(location) = find_constraint(&columns, &constraints, name) else {
-        if if_exists {
-            return Ok(Vec::new());
+    if let Some(target) = ForeignKeyTarget::by_name(&columns, &constraints, name)? {
+        if direct {
+            foreign_keys::ensure_direct_removal(context, table, name, target.object_id)?;
         }
-        return Err(constraint_error(
-            "42704",
-            format!("constraint \"{name}\" of relation \"{table}\" does not exist"),
-        ));
-    };
-    let object_id = foreign_key_object_id(&columns, &constraints, location);
-    let mut inherited = object_id.is_some_and(|object_id| {
-        constraints
-            .hierarchy
-            .partition_inherited_foreign_keys
-            .iter()
-            .any(|foreign_key| foreign_key.object_id == Some(object_id))
-    });
-    if let Some(object_id) = object_id {
-        for parent in &constraints.hierarchy.parents {
-            let (parent_columns, parent_constraints) = table_constraint_state(context, parent)?;
-            let Some(parent_location) = find_constraint(&parent_columns, &parent_constraints, name)
-            else {
-                continue;
-            };
-            if foreign_key_object_id(&parent_columns, &parent_constraints, parent_location)
-                == Some(object_id)
-            {
-                inherited = true;
-                break;
-            }
-        }
+        let targets =
+            capture_foreign_key_dependencies(context, [(table.to_string(), name.to_string())])?;
+        return foreign_keys::drop_targets(context, targets, direct);
     }
-    if direct && inherited {
-        let relation = uqa_core::RelationIdentity::from_legacy_name(table).map_err(|error| {
-            SQLError::Internal(format!(
-                "decode inherited constraint relation '{table}': {error}"
-            ))
-        })?;
-        return Err(constraint_error(
-            "42P16",
-            format!(
-                "cannot drop inherited constraint \"{name}\" of relation \"{}\"",
-                relation.name
-            ),
-        ));
-    }
-    let Some(object_id) = object_id else {
-        return Ok(vec![table.to_string()]);
-    };
-    let mut targets = vec![table.to_string()];
-    for candidate in context
-        .relations
-        .table_names()
-        .map_err(|error| ddl_storage_error("DROP CONSTRAINT partition lookup", error))?
-    {
-        if candidate == table {
-            continue;
-        }
-        let (candidate_columns, candidate_constraints) =
-            table_constraint_state(context, &candidate)?;
-        let Some(candidate_location) =
-            find_constraint(&candidate_columns, &candidate_constraints, name)
-        else {
-            continue;
-        };
-        let candidate_object_id = foreign_key_object_id(
-            &candidate_columns,
-            &candidate_constraints,
-            candidate_location,
-        );
-        if candidate_object_id == Some(object_id) {
-            targets.push(candidate);
-        }
-    }
-    Ok(targets)
+    drop_constraint_one(context, table, name, if_exists, cascade)
 }
 
 pub fn drop_constraint_one(
@@ -181,36 +98,33 @@ pub fn drop_constraint_one(
             format!("constraint \"{name}\" of relation \"{table}\" does not exist"),
         ));
     };
-    let referenced_table = match location {
-        ConstraintLocation::ColumnForeignKey(index) => columns[index]
-            .references
-            .as_ref()
-            .map(|reference| reference.table.clone()),
-        ConstraintLocation::TableForeignKey(index) => {
-            Some(constraints.foreign_keys[index].ref_table.clone())
-        }
-        _ => None,
-    };
-    if let Some(referenced_table) = referenced_table {
-        context
-            .access
-            .ensure_no_pending_events(&referenced_table, "ALTER TABLE")?;
+    if let Some(target) = ForeignKeyTarget::by_name(&columns, &constraints, name)? {
+        return foreign_keys::drop_one(context, table, target.object_id);
     }
+    if let ConstraintLocation::Key(index) = location {
+        drop_key_constraint_dependencies(
+            context,
+            table,
+            &constraints.key_constraints[index],
+            cascade,
+        )?;
+        // Dependent waits may refresh unrelated metadata, including renamed FK references.
+        (columns, constraints) = table_constraint_state(context, table)?;
+    }
+    let location = find_constraint(&columns, &constraints, name).ok_or_else(|| {
+        SQLError::Internal("locked constraint disappeared during dependent removal".into())
+    })?;
     match location {
         ConstraintLocation::NotNull(index) => {
-            let column = columns[index].name.clone();
-            if constraints.key_constraints.iter().any(|constraint| {
-                constraint.kind == uqa_sql::ast::TableKeyConstraintKind::PrimaryKey
-                    && constraint.columns.contains(&column)
-            }) {
-                return Err(constraint_error(
-                    "42P16",
-                    format!("column \"{column}\" is in a primary key"),
-                ));
-            }
+            uqa_sql::schema::constraint_changes::not_null_removal::validate_constraint_removal(
+                table,
+                &columns[index],
+                &constraints,
+            )?;
             columns[index].not_null = false;
             columns[index].not_null_explicit = false;
             columns[index].not_null_name = None;
+            columns[index].not_null_identity = None;
             columns[index].not_null_validated = true;
             columns[index].not_null_no_inherit = false;
             columns[index].not_null_is_local = true;
@@ -233,23 +147,6 @@ pub fn drop_constraint_one(
         }
         ConstraintLocation::Key(index) => {
             let key = constraints.key_constraints[index].clone();
-            let local_dependents = drop_key_constraint_dependencies(context, table, &key, cascade)?;
-            for column in &mut columns {
-                if column.references.as_ref().is_some_and(|reference| {
-                    reference
-                        .name
-                        .as_ref()
-                        .is_some_and(|name| local_dependents.contains(name))
-                }) {
-                    column.references = None;
-                }
-            }
-            constraints.foreign_keys.retain(|foreign_key| {
-                foreign_key
-                    .name
-                    .as_ref()
-                    .is_none_or(|name| !local_dependents.contains(name))
-            });
             constraints.key_constraints.remove(index);
             if key.columns.len() == 1 {
                 if let Some(column) = columns
@@ -276,7 +173,7 @@ fn drop_key_constraint_dependencies(
     table: &str,
     key: &uqa_sql::ast::TableKeyConstraint,
     cascade: bool,
-) -> Result<std::collections::BTreeSet<String>, SQLError> {
+) -> Result<(), SQLError> {
     let canonical = context
         .publication
         .catalog
@@ -324,13 +221,6 @@ fn drop_key_constraint_dependencies(
             ),
         ));
     }
-    let mut local_dependents = std::collections::BTreeSet::new();
-    for (referrer, name) in dependents {
-        if referrer == canonical {
-            local_dependents.insert(name);
-        } else {
-            drop_constraint_dependency(context, &referrer, &name)?;
-        }
-    }
-    Ok(local_dependents)
+    let targets = capture_foreign_key_dependencies(context, dependents)?;
+    drop_foreign_key_dependencies(context, targets)
 }

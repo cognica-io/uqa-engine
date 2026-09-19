@@ -101,13 +101,11 @@ impl StoredForeignTable {
     pub fn catalog_row(
         &self,
         relation: &RelationIdentity,
-        security: &super::security::TableSecurity,
+        security: &super::security::BoundTableSecurity,
     ) -> StorageBackendResult<uqa_storage::ForeignTableRow> {
         Ok(uqa_storage::ForeignTableRow {
             relation: relation.clone(),
-            role_owner: security.role_owner.clone(),
-            acl: security.acl.clone(),
-            column_acls: security.column_acls.clone(),
+            security: security.row().into(),
             server_name: self.server_name.clone(),
             columns_json: self.schema_json()?,
             options_json: serde_json::to_string(&self.options)?,
@@ -208,3 +206,5 @@ fn sql_range_subtype_to_fdw(subtype: uqa_sql::ast::RangeSubtype) -> uqa_fdw::Ran
 
 pub mod lookup;
 pub mod reads;
+
+pub mod restoration;

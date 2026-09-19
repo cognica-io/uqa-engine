@@ -12,13 +12,13 @@ use uqa_storage::vector_index::HNSWIndexParams;
 
 pub(super) const HNSW_FORMAT_VERSION: i64 = 1;
 
-pub(super) type RawMeta = (
+pub(super) type RawMeta<S = String> = (
     i64,
     i64,
     i64,
     i64,
     i64,
-    String,
+    S,
     Option<i64>,
     i64,
     i64,
@@ -29,7 +29,7 @@ pub(super) type RawMeta = (
 );
 
 pub(super) fn decode_meta(
-    raw: RawMeta,
+    raw: RawMeta<impl AsRef<str>>,
 ) -> SQLiteResult<(u32, HNSWIndexParams, HNSWGraphMeta, u64)> {
     let (
         dimensions,
@@ -52,6 +52,7 @@ pub(super) fn decode_meta(
             &format_version.to_string(),
         ));
     }
+    let seed = seed.as_ref();
     let params = HNSWIndexParams {
         m: checked_positive_usize("m", m)?,
         ef_construction: checked_positive_usize("ef_construction", ef_construction)?,
@@ -59,7 +60,7 @@ pub(super) fn decode_meta(
         rebuild_threshold: checked_positive_usize("rebuild_threshold", rebuild_threshold)?,
         seed: seed
             .parse::<u64>()
-            .map_err(|_| invalid_metadata("seed", &seed))?,
+            .map_err(|_| invalid_metadata("seed", seed))?,
     };
     params
         .validate()

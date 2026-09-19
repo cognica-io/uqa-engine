@@ -7,6 +7,7 @@
 //! Capture authorization analysis inputs from the statement scope.
 use super::CteScope;
 use std::collections::BTreeSet;
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::semantics::privileges::{
     self as logical,
     context::{PrivilegeCteCatalog, PrivilegeScope},
@@ -26,7 +27,7 @@ impl<S: Clone> PrivilegeCteCatalog for CteScope<S> {
     fn deferred_reference(&self, name: &str) -> Option<&CtePlan> {
         self.deferred_reference(name)
     }
-    fn privilege_subject(&self) -> Result<&str, SQLError> {
+    fn privilege_subject(&self) -> Result<&RoleReference, SQLError> {
         self.privilege_subject()
     }
 }
@@ -108,7 +109,7 @@ pub fn ensure_target_table_select_for_expressions<S: Clone>(
     ]);
     ctes.scalar_subqueries = subqueries.to_vec();
     if let Some(subject) = privilege_subject {
-        let scope = ctes.enter_privilege_subject(subject.to_string());
+        let scope = ctes.enter_privilege_subject(subject.clone());
         ensure_select_privileges_for_table_expressions(
             table,
             &target_qualifiers,

@@ -30,6 +30,8 @@ impl Engine {
             types: self,
             session: self,
             explain: uqa_planner::explain::run_explain,
+            source_sql: None,
+            created_at_micros: self.statement_timestamp_micros(),
         }
     }
 }

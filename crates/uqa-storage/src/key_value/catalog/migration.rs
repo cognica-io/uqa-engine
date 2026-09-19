@@ -75,7 +75,13 @@ pub(super) fn decode_migrated_table(
     source: &str,
     value: &[u8],
 ) -> StorageBackendResult<TableSchema> {
-    if let Ok(current) = serde_json::from_slice::<TableSchema>(value) {
+    let mut encoded: serde_json::Value = serde_json::from_slice(value)?;
+    if encoded.get("relation").is_some() || encoded.get("relation_security_format").is_some() {
+        if encoded.get("relation_security_format").is_none() && encoded.get("role_owner").is_none()
+        {
+            encoded["role_owner"] = serde_json::json!("uqa");
+        }
+        let current: TableSchema = serde_json::from_value(encoded)?;
         if current.relation != *key_relation {
             return Err(StorageBackendError::Other(format!(
                 "table catalog key `{source}` disagrees with stored relation `{}`",
@@ -95,9 +101,7 @@ pub(super) fn decode_migrated_table(
     }
     Ok(TableSchema {
         relation,
-        role_owner: "uqa".into(),
-        acl: None,
-        column_acls: std::collections::BTreeMap::new(),
+        security: crate::RelationSecurityRow::legacy("uqa"),
         object_id: [0; 16],
         storage_generation: [0; 16],
         analyzer_json: legacy.analyzer_json,
@@ -143,8 +147,7 @@ pub(super) fn collect_sequence_migrations(
             old_key: Some(key),
             row: SequenceRow {
                 relation,
-                role_owner: stored.role_owner,
-                acl: stored.acl,
+                security: stored.security,
                 object_id: stored.object_id,
                 definition_generation: stored.definition_generation,
                 start: stored.start,
@@ -174,8 +177,7 @@ pub(super) fn collect_sequence_migrations(
                 old_key: None,
                 row: SequenceRow {
                     relation,
-                    role_owner: "uqa".into(),
-                    acl: None,
+                    security: crate::catalog::SequenceSecurityRow::bootstrap(),
                     object_id: [0; 16],
                     definition_generation: [0; 16],
                     start: state.start,
@@ -200,6 +202,9 @@ pub(super) fn collect_foreign_migrations(
     let mut rows = Vec::new();
     for (key, value) in store.scan_prefix(&key_with_tag(TAG_FOREIGN_TABLE))? {
         let (relation, _, source) = decode_catalog_relation_key(&key)?;
+        let encoded: serde_json::Value = serde_json::from_slice(&value)?;
+        let current_format = encoded.get("security_version").is_some()
+            || encoded.get("relation_security_format").is_some();
         let stored = match decode_value::<StoredForeignTable>(&value) {
             Ok(stored) if stored.security_version == STORED_FOREIGN_TABLE_SECURITY_VERSION => {
                 stored
@@ -210,12 +215,11 @@ pub(super) fn collect_foreign_migrations(
                     stored.security_version
                 )))
             }
+            Err(current_error) if current_format => return Err(current_error),
             Err(current_error) => match decode_value::<OwnedStoredForeignTable>(&value) {
                 Ok(legacy) => StoredForeignTable {
                     security_version: STORED_FOREIGN_TABLE_SECURITY_VERSION,
-                    role_owner: legacy.role_owner,
-                    acl: None,
-                    column_acls: std::collections::BTreeMap::new(),
+                    security: crate::RelationSecurityRow::legacy(legacy.role_owner),
                     server_name: legacy.server_name,
                     columns_json: legacy.columns_json,
                     options_json: legacy.options_json,
@@ -223,9 +227,7 @@ pub(super) fn collect_foreign_migrations(
                 Err(owned_error) => decode_value::<LegacyStoredForeignTable>(&value)
                     .map(|legacy| StoredForeignTable {
                         security_version: STORED_FOREIGN_TABLE_SECURITY_VERSION,
-                        role_owner: "uqa".into(),
-                        acl: None,
-                        column_acls: std::collections::BTreeMap::new(),
+                        security: crate::RelationSecurityRow::legacy("uqa"),
                         server_name: legacy.server_name,
                         columns_json: legacy.columns_json,
                         options_json: legacy.options_json,
@@ -257,9 +259,7 @@ pub(super) fn collect_view_migrations(
         let stored = decode_value::<StoredView>(&value).or_else(|current_error| {
             decode_value::<LegacyStoredView>(&value)
                 .map(|legacy| StoredView {
-                    role_owner: "uqa".into(),
-                    acl: None,
-                    column_acls: std::collections::BTreeMap::new(),
+                    security: crate::RelationSecurityRow::legacy("uqa"),
                     definition_json: legacy.definition_json,
                 })
                 .map_err(|legacy_error| {
@@ -273,9 +273,7 @@ pub(super) fn collect_view_migrations(
             old_key: Some(key),
             row: ViewRow {
                 relation,
-                role_owner: stored.role_owner,
-                acl: stored.acl,
-                column_acls: stored.column_acls,
+                security: stored.security,
                 definition_json: stored.definition_json,
             },
         });
@@ -295,9 +293,7 @@ pub(super) fn collect_view_migrations(
                 old_key: None,
                 row: ViewRow {
                     relation,
-                    role_owner: "uqa".into(),
-                    acl: None,
-                    column_acls: std::collections::BTreeMap::new(),
+                    security: crate::RelationSecurityRow::legacy("uqa"),
                     definition_json: serde_json::to_string(&definition)?,
                 },
             });
@@ -482,6 +478,8 @@ pub(super) fn apply_table_migration(
     if table.old_physical_name == canonical {
         return Ok(None);
     }
+    batch.reset_occurrences(&table.old_physical_name)?;
+    batch.reset_occurrences(&canonical)?;
     for (old_prefix, new_prefix) in table_data_prefixes(&table.old_physical_name)?
         .into_iter()
         .zip(table_data_prefixes(&canonical)?)
@@ -501,8 +499,7 @@ pub(super) fn put_sequence_migrations(
         batch.put(
             &key,
             &encode_value(&StoredSequence {
-                role_owner: sequence.row.role_owner,
-                acl: sequence.row.acl,
+                security: sequence.row.security,
                 object_id: sequence.row.object_id,
                 definition_generation: sequence.row.definition_generation,
                 start: sequence.row.start,
@@ -547,9 +544,7 @@ pub(super) fn put_view_migrations(
         batch.put(
             &key,
             &encode_value(&StoredView {
-                role_owner: view.row.role_owner,
-                acl: view.row.acl,
-                column_acls: view.row.column_acls,
+                security: view.row.security,
                 definition_json: view.row.definition_json,
             })?,
         )?;

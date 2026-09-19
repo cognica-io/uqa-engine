@@ -138,7 +138,7 @@ fn sql_language_standard_body() {
 
 #[test]
 fn v016_sql_standard_body_dispatch_markers_migrate_before_catalog_binding() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("legacy-function-dispatch.db");
@@ -156,7 +156,8 @@ fn v016_sql_standard_body_dispatch_markers_migrate_before_catalog_binding() {
     }
 
     {
-        let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+        let catalog =
+            crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
         let encoded = catalog.get_metadata("sql_functions_json").unwrap().unwrap();
         let mut definitions: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         assert_eq!(

@@ -8,7 +8,7 @@
 
 use std::collections::VecDeque;
 
-use super::{replacement, MemoryBudget, MemoryError, MemoryReservation};
+use super::{reconcile_buffer_capacity, replacement, MemoryBudget, MemoryError, MemoryReservation};
 
 #[derive(Debug)]
 pub struct BudgetedDeque<T> {
@@ -44,9 +44,11 @@ impl<T> BudgetedDeque<T> {
         if required <= self.values.capacity() {
             return Ok(());
         }
-        let (capacity, memory) = replacement::<T>(self.memory.budget(), self.capacity(), required)?;
+        let (capacity, mut memory) =
+            replacement::<T>(self.memory.budget(), self.capacity(), required)?;
         let mut values = VecDeque::new();
         values.try_reserve_exact(capacity)?;
+        reconcile_buffer_capacity::<T>(&mut memory, values.capacity())?;
         while let Some(value) = self.values.pop_front() {
             values.push_back(value);
         }

@@ -304,68 +304,19 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
                         None,
                     )?;
                 } else if statement.locking.is_empty() {
-                    let effective_order_statement = order_statement.as_ref().unwrap_or(statement);
-                    let (sort_statement, before_sort, after_sort) =
-                        split_locking_order_projections(
-                            effective_order_statement,
-                            &order_output,
-                            physical,
-                        )?;
-                    if !before_sort.is_empty() {
-                        operator = Box::new(Project::appending_target_evaluator(
-                            operator,
-                            before_sort,
-                            Arc::clone(&evaluator),
-                        ));
-                    }
-                    if projections_may_return_set(
-                        context.catalog,
-                        type_resolver.as_ref(),
-                        &after_sort,
-                        operator.row_schema(),
-                        params,
-                    )? {
-                        operator = build_set_projection(
-                            operator,
-                            context,
-                            params,
-                            ctes,
-                            Arc::clone(&evaluator),
-                            crate::query::set_projection::SetProjectionOutput {
-                                projections: after_sort,
-                                pass_through: true,
-                                batch_size: projection_set_batch_size(statement, ctes),
-                            },
-                        )?;
-                        operator = attach_order_limit(
-                            operator,
-                            &sort_statement,
-                            &order_output,
+                    operator = super::ordering::attach_streaming_order_projection(
+                        operator,
+                        order_statement.as_ref().unwrap_or(statement),
+                        &order_output,
+                        physical,
+                        FinalProjectionExecution {
                             context,
                             params,
                             ctes,
                             runtime,
-                            Arc::clone(&evaluator),
-                            None,
-                        )?;
-                    } else {
-                        operator = attach_order_limit(
-                            operator,
-                            &sort_statement,
-                            &order_output,
-                            context,
-                            params,
-                            ctes,
-                            runtime,
-                            Arc::clone(&evaluator),
-                            None,
-                        )?;
-                        operator = append_row_at_time_projection(
-                            operator,
-                            after_sort,
-                            Arc::clone(&evaluator),
-                        );
-                    }
+                            evaluator: Arc::clone(&evaluator),
+                        },
+                    )?;
                 } else {
                     let effective_order_statement = order_statement.as_ref().unwrap_or(statement);
                     let recheck_projections = physical.clone();

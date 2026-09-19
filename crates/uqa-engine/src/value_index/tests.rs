@@ -249,7 +249,7 @@ fn query_builds_missing_durable_index_in_memory_only() {
 fn open_repair_discards_raw_alias_and_rebuilds_canonical_index() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("repair-btree.db");
-    let engine = crate::Engine::open(&database).unwrap();
+    let engine = crate::tests::native_storage::legacy_engine(&database);
     engine
         .sql("CREATE TABLE items (id INTEGER PRIMARY KEY)", &[])
         .unwrap();

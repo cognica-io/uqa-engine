@@ -13,6 +13,7 @@ use super::{
     SQLiteError, SQLiteInvertedIndex, SQLiteResult, StagedField, TokenTermKey,
 };
 use uqa_storage::clustered_postings::{cluster_id, encode_term_keys};
+use uqa_storage::read_control::StorageReadControl;
 
 type Documents = BTreeMap<DocId, BTreeMap<FieldName, StagedField>>;
 type Changes = BTreeMap<(FieldName, TokenTermKey, u64), BTreeMap<DocId, Option<OccurrencePosting>>>;
@@ -184,33 +185,33 @@ impl SQLiteInvertedIndex {
                 tx.commit()?;
                 return Ok(());
             }
-            for (doc_id, fields) in &staged {
-                add_statistics(&mut totals, fields)?;
+            for (doc_id, fields) in staged {
+                add_statistics(&mut totals, &fields)?;
+                self.write_document_on(&tx, doc_id, &fields)?;
+                // The document metadata is now staged in this savepoint. Transfer its evaluated occurrences into cluster changes instead of retaining a second complete copy until publication.
                 for (field, snapshot) in fields {
-                    for (term, occurrences) in &snapshot.postings {
+                    for (term, occurrences) in snapshot.postings {
                         changes
-                            .entry((field.clone(), term.clone(), cluster_id(*doc_id)))
+                            .entry((field.clone(), term, cluster_id(doc_id)))
                             .or_default()
                             .insert(
-                                *doc_id,
+                                doc_id,
                                 Some(OccurrencePosting {
-                                    doc_id: *doc_id,
+                                    doc_id,
                                     doc_length: snapshot.metadata.length,
-                                    occurrences: occurrences.clone(),
+                                    occurrences,
                                 }),
                             );
                     }
                 }
             }
+            let encoding = StorageReadControl::with_limit(usize::MAX);
             for ((field, term, cluster), updates) in changes {
                 let merged = merge_cluster_changes(
                     load_cluster(&tx, &self.table, &field, &term, cluster)?,
                     updates,
                 );
-                write_cluster(&tx, &self.table, &field, &term, cluster, &merged)?;
-            }
-            for (doc_id, fields) in &staged {
-                self.write_document_on(&tx, *doc_id, fields)?;
+                write_cluster(&tx, &self.table, &field, &term, cluster, &merged, &encoding)?;
             }
             self.write_statistics_on(&tx, &totals)?;
             for field in totals.keys() {
@@ -282,11 +283,28 @@ impl SQLiteInvertedIndex {
                 cancellation.check()?;
             }
             self.clear_index_on(&tx)?;
+            let encoding = cancellation.map_or_else(
+                || StorageReadControl::with_limit(usize::MAX),
+                |cancellation| {
+                    StorageReadControl::new(
+                        &uqa_core::memory::MemoryBudget::new(usize::MAX),
+                        cancellation,
+                    )
+                },
+            );
             for ((field, term, cluster), entries) in clusters {
                 if let Some(cancellation) = cancellation {
                     cancellation.check()?;
                 }
-                write_cluster(&tx, &self.table, &field, &term, cluster, &entries)?;
+                write_cluster(
+                    &tx,
+                    &self.table,
+                    &field,
+                    &term,
+                    cluster,
+                    &entries,
+                    &encoding,
+                )?;
             }
             for (doc_id, fields) in &staged {
                 if let Some(cancellation) = cancellation {

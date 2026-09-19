@@ -10,10 +10,10 @@
 
 use super::{
     failed_transaction_error, BackendTransactionMode, ConstraintModeState, Engine,
-    EngineDataSnapshot, NontransactionalColumnStats, NontransactionalSequenceValues, SQLError,
-    SessionStateSnapshot, StorageBackendError, StorageSavepointId, TransactionCharacteristicsState,
+    EngineDataSnapshot, NontransactionalSequenceValues, SQLError, SessionStateSnapshot,
+    StorageBackendError, StorageSavepointId, TransactionCharacteristicsState,
     TransactionDirtyState, TransactionFrame, TransactionFrameKind, TransactionIntent,
-    TransactionRelationStates, TransactionStatus,
+    TransactionStatus,
 };
 
 impl Engine {
@@ -37,15 +37,6 @@ impl Engine {
         }
     }
 
-    pub(super) fn transaction_relation_states(&self) -> TransactionRelationStates {
-        self.storage
-            .tables
-            .read()
-            .iter()
-            .map(|(relation, table)| (relation.clone(), table.lifecycle_id()))
-            .collect()
-    }
-
     pub(super) fn restore_transaction_dirty_state(&self, state: TransactionDirtyState) {
         self.epochs
             .table_data
@@ -64,11 +55,11 @@ impl Engine {
     pub fn begin(&self) -> Result<(), SQLError> {
         let _statement = self.runtime.statement_gate.lock();
         let mut stack = self.session.transactions.lock();
-        if stack
+        if let Some(error) = stack
             .last()
-            .is_some_and(|frame| frame.status != TransactionStatus::Active)
+            .and_then(|frame| Self::transaction_status_error(frame.status))
         {
-            return Err(failed_transaction_error());
+            return Err(error);
         }
         let characteristics = self.transaction_characteristics_for_begin(
             &stack,
@@ -127,7 +118,23 @@ impl Engine {
             .transactions
             .lock()
             .last()
-            .is_some_and(|frame| frame.status != TransactionStatus::Active)
+            .is_some_and(|frame| {
+                matches!(
+                    frame.status,
+                    TransactionStatus::Failed | TransactionStatus::FailedBackendAborted
+                )
+            })
+    }
+
+    /// Durable identity of an unresolved commit. Only commit resolution or whole-transaction rollback may proceed; callers must not replay the transaction body.
+    pub fn pending_commit(&self) -> Option<uqa_storage::mvcc::StorageTransactionId> {
+        self.session.transactions.lock().last().and_then(|frame| {
+            if let TransactionStatus::CommitPending(transaction) = frame.status {
+                Some(transaction)
+            } else {
+                None
+            }
+        })
     }
 
     pub(crate) fn in_transaction_block(&self) -> bool {
@@ -170,14 +177,14 @@ impl Engine {
     }
 
     pub(crate) fn ensure_transaction_usable(&self) -> Result<(), SQLError> {
-        if self
+        if let Some(error) = self
             .session
             .transactions
             .lock()
             .last()
-            .is_some_and(|frame| frame.status != TransactionStatus::Active)
+            .and_then(|frame| Self::transaction_status_error(frame.status))
         {
-            return Err(failed_transaction_error());
+            return Err(error);
         }
         Ok(())
     }
@@ -289,13 +296,13 @@ impl Engine {
             frame.next_lock_mark = frame.next_lock_mark.saturating_add(1);
             (lock_mark, frame.next_lock_mark)
         });
-        let backend_mode = if stack.is_empty() && defer_write_lock && self.storage.backend.is_some()
-        {
+        let backend_mode = if self.versioned_backend_transactions() {
+            BackendTransactionMode::Versioned
+        } else if stack.is_empty() && defer_write_lock && self.storage.backend.is_some() {
             BackendTransactionMode::Deferred
         } else {
             BackendTransactionMode::Writer
         };
-        let relation_states_at_begin = self.transaction_relation_states();
         let (implicit_statement, explicit_transaction_block) = match kind {
             TransactionFrameKind::ExplicitBlock => (false, true),
             TransactionFrameKind::ImplicitStatement => (true, false),
@@ -321,7 +328,6 @@ impl Engine {
             savepoints: Vec::new(),
             session_snapshot,
             data_snapshot,
-            relation_states_at_begin,
             dirty_at_begin: self.transaction_dirty_state(),
             begin_lock_mark: lock_mark,
             lock_mark,
@@ -334,7 +340,6 @@ impl Engine {
             pending_listen_actions: Vec::new(),
             pending_notifications: Vec::new(),
             constraint_modes,
-            nontransactional_column_stats: NontransactionalColumnStats::new(),
             nontransactional_sequence_values: NontransactionalSequenceValues::new(),
         });
         self.update_statement_row_lock_baseline(snapshot_change_baseline);
@@ -409,7 +414,15 @@ impl Engine {
                 .map_err(|err| Self::storage_tx_error("BEGIN registry refresh", &err))?;
             return Ok((self.snapshot_transaction_data()?, snapshot_gate.baseline()?));
         };
-        let snapshot_gate = if read_only || defer_write_lock {
+        let snapshot_gate = if backend.transaction_model().is_versioned() {
+            let gate = self
+                .row_locks
+                .begin_change_snapshot(&self.runtime.cancellation)?;
+            backend
+                .begin_upgradeable_transaction()
+                .map_err(|err| Self::storage_tx_error("BEGIN logical transaction", &err))?;
+            gate
+        } else if read_only || defer_write_lock {
             let gate = self
                 .row_locks
                 .begin_change_snapshot(&self.runtime.cancellation)?;
@@ -500,6 +513,74 @@ impl Engine {
         }
     }
     pub(super) fn storage_tx_error(action: &str, err: &StorageBackendError) -> SQLError {
-        SQLError::Internal(format!("{action} failed in storage backend: {err}"))
+        use uqa_storage::mvcc::{CommitErrorOutcome, VersionError};
+        match err.commit_outcome() {
+            Some(CommitErrorOutcome::Aborted(transaction)) => {
+                return SQLError::Routine {
+                    sqlstate: "25000".into(),
+                    message: format!(
+                        "{action} cannot commit transaction {transaction:?}: it was already aborted"
+                    ),
+                };
+            }
+            Some(CommitErrorOutcome::Indeterminate(transaction)) => {
+                return Self::pending_commit_error(transaction, err);
+            }
+            Some(CommitErrorOutcome::Committed(_)) => {
+                return SQLError::Internal(format!(
+                    "{action} failed after storage committed: {err}"
+                ));
+            }
+            None => {}
+        }
+        let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(err);
+        while let Some(error) = cause {
+            match error.downcast_ref::<StorageBackendError>() {
+                Some(StorageBackendError::Cancelled(_)) => {
+                    return SQLError::Cancelled(uqa_core::QueryCancelled);
+                }
+                Some(StorageBackendError::Memory(_)) => {
+                    return SQLError::Routine {
+                        sqlstate: "53200".into(),
+                        message: format!("{action}: {err}"),
+                    };
+                }
+                _ => {}
+            }
+            if matches!(
+                error.downcast_ref::<VersionError>(),
+                Some(VersionError::WriteConflict { .. } | VersionError::ReadConflict { .. })
+            ) {
+                return SQLError::Routine {
+                    sqlstate: "40001".into(),
+                    message: format!("{action} could not serialize storage changes: {err}"),
+                };
+            }
+            cause = error.source();
+        }
+        uqa_sql::catalog::errors::storage_error(action, err)
+    }
+
+    pub(super) fn transaction_status_error(status: TransactionStatus) -> Option<SQLError> {
+        match status {
+            TransactionStatus::Active => None,
+            TransactionStatus::CommitPending(transaction) => Some(Self::pending_commit_error(
+                transaction,
+                "resolve the retained commit before executing another statement",
+            )),
+            TransactionStatus::Failed | TransactionStatus::FailedBackendAborted => {
+                Some(failed_transaction_error())
+            }
+        }
+    }
+
+    pub(super) fn pending_commit_error(
+        transaction: uqa_storage::mvcc::StorageTransactionId,
+        detail: impl std::fmt::Display,
+    ) -> SQLError {
+        SQLError::Routine {
+            sqlstate: "08007".into(),
+            message: format!("transaction {transaction:?} requires commit resolution: {detail}"),
+        }
     }
 }

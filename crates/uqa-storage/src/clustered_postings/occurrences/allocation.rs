@@ -22,6 +22,24 @@ struct Records {
     children: MemoryReservation,
 }
 
+/// Validate every score and occurrence while borrowing encoded bytes; no decoded postings are retained.
+pub(crate) fn validate_occurrence_cluster(
+    cluster_id: u64,
+    score_blob: &[u8],
+    positions_blob: &[u8],
+    mut poll: impl FnMut() -> StorageBackendResult<()>,
+) -> StorageBackendResult<()> {
+    let (scores, positions) = directories(score_blob, positions_blob, &mut poll)?;
+    visit_cluster(
+        cluster_id,
+        &scores,
+        &positions,
+        score_blob,
+        &mut poll,
+        |score, bytes, poll| visit_entry(bytes, score.term_freq, poll, |_| Ok(())),
+    )
+}
+
 /// Decode complete graph records while retaining their vector and every occurrence buffer.
 ///
 /// Encoded payloads stay borrowed. Directory validation and decoding poll the callback; no temporary score or offset vectors are allocated. Failure drops all partial output reservations.

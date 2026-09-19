@@ -35,6 +35,9 @@ pub struct ColumnDef {
     /// `PostgreSQL`'s generated name before the constraint becomes visible.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub not_null_name: Option<String>,
+    /// Independent NOT NULL lifetime and public catalog OID, retained through column, relation, and constraint renames.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub not_null_identity: Option<ConstraintCatalogIdentity>,
     /// Whether the named `NOT NULL` constraint has been validated against
     /// every pre-existing row. `NOT VALID` still enforces future writes.
     #[serde(default = "default_true")]
@@ -88,6 +91,20 @@ pub struct ColumnDef {
     /// Column-level `REFERENCES parent[(col)]` foreign key. An omitted column is resolved to the referenced primary key before publication.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub references: Option<ForeignKeyRef>,
+}
+
+/// A constraint incarnation and its public OID. Migrated constraints retain their preceding name-derived OID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConstraintCatalogIdentity {
+    pub object_id: [u8; 16],
+    pub oid: i64,
+}
+
+impl ConstraintCatalogIdentity {
+    pub fn is_valid(self) -> bool {
+        self.object_id != [0; 16] && u32::try_from(self.oid).is_ok_and(|oid| oid != 0)
+    }
 }
 
 /// `REFERENCES table[(column)]` reference target.

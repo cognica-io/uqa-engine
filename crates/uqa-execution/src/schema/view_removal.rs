@@ -6,8 +6,13 @@
 
 //! View deletion preflight and dependency scheduling.
 pub mod context;
+pub mod locking;
 mod publication;
 use super::view_dependencies;
+use crate::row_locks::{
+    binding::{bind_relation, RelationBinding},
+    RelationLockMode,
+};
 use context::{ViewRemovalContext, ViewRemovalTransactions};
 
 use uqa_core::RelationIdentity;
@@ -19,9 +24,34 @@ pub fn drop_view(
     name: &str,
 ) -> Result<bool, SQLError> {
     transactions.with_view_removal(|transactions, context| {
-        let target = analysis::direct_view_drop_target(context.names.relation_kind(name)?)?;
+        let target = bind_relation(
+            context.locks,
+            RelationLockMode::AccessExclusive,
+            false,
+            || {
+                let Some(canonical) =
+                    analysis::direct_view_drop_target(context.names.relation_kind(name)?)?
+                else {
+                    return Ok(None);
+                };
+                let identity =
+                    RelationIdentity::from_legacy_name(&canonical).map_err(SQLError::Internal)?;
+                let views = context.registry.views_read();
+                let view = views.get(&identity).ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "view `{canonical}` disappeared before DROP binding"
+                    ))
+                })?;
+                Ok(Some(RelationBinding {
+                    name: canonical,
+                    object_id: Some(view.object_id),
+                    value: (),
+                }))
+            },
+            |binding| ensure_view_drop_authorities(context, std::slice::from_ref(&binding.name)),
+        )?;
         if let Some(canonical) = target {
-            drop_views(transactions, &[canonical], false, "view")?;
+            drop_views(transactions, &[canonical.name], false, "view")?;
             Ok(true)
         } else {
             Ok(false)
@@ -36,14 +66,17 @@ pub fn drop_views(
 ) -> Result<(), SQLError> {
     transactions.with_view_removal(|_, context| {
         ensure_view_drop_authorities(context, names)?;
+        let dependents = locking::lock_dependent_views(context.registry, context.locks, names)?;
+        context.locks.prepare_definition_write()?;
         context
             .routines
             .drop_relation_routine_dependents(names, cascade, kind)?;
         if !cascade {
             return drop_views_inner(context, names, false);
         }
-        let remaining = remaining_view_drop_targets(context, names)?;
-        let closure = view_dependencies::cascade_view_closure(&context.dependencies, remaining)?;
+        let mut closure = names.to_vec();
+        closure.extend(dependents);
+        let closure = remaining_view_drop_targets(context, &closure)?;
         context
             .events
             .drop_rules_depending_on_relations_inner(&closure)
@@ -53,7 +86,7 @@ pub fn drop_views(
         drop_views_inner(context, &closure, false)
     })
 }
-fn ensure_view_drop_authorities(
+pub fn ensure_view_drop_authorities(
     context: &ViewRemovalContext<'_>,
     names: &[String],
 ) -> Result<(), SQLError> {

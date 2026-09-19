@@ -12,6 +12,7 @@ use uqa_execution::mutation::{
     command_scope::MutationCommandState,
     point_update::{context::PointMutationStorage, RowUpdateVectors},
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::SQLError;
 impl MutationCommandState for Engine {
     fn prepare_writer(&self) -> Result<(), SQLError> {
@@ -76,7 +77,7 @@ impl uqa_sql::semantics::mutation_privileges::MutationPrivilegeCatalog for Engin
     fn ensure_table_privilege_for(
         &self,
         table: &str,
-        subject: &str,
+        subject: &RoleReference,
         privilege: uqa_sql::catalog::security::table::TableAclPrivilege,
     ) -> Result<(), SQLError> {
         Engine::ensure_table_privilege_for(self, table, subject, privilege)
@@ -85,7 +86,7 @@ impl uqa_sql::semantics::mutation_privileges::MutationPrivilegeCatalog for Engin
         &self,
         table: &str,
         column: &str,
-        subject: &str,
+        subject: &RoleReference,
         privilege: uqa_sql::catalog::security::table::TableAclPrivilege,
     ) -> Result<(), SQLError> {
         Engine::ensure_column_privilege_for(self, table, column, subject, privilege)
@@ -93,7 +94,7 @@ impl uqa_sql::semantics::mutation_privileges::MutationPrivilegeCatalog for Engin
     fn ensure_any_column_privilege_for(
         &self,
         table: &str,
-        subject: &str,
+        subject: &RoleReference,
         privilege: uqa_sql::catalog::security::table::TableAclPrivilege,
     ) -> Result<(), SQLError> {
         Engine::ensure_any_column_privilege_for(self, table, subject, privilege)

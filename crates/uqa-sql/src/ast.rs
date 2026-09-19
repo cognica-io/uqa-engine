@@ -11,6 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
+mod acl_role_specification;
 mod constraints;
 mod cte;
 mod domains;
@@ -25,11 +26,13 @@ mod namespaces;
 mod ranges;
 mod relation_hierarchy;
 mod relation_lifecycle;
+mod role_specification;
 mod routine_security;
 mod routines;
 mod sequence;
 mod types;
 
+pub use acl_role_specification::AclRoleSpecification;
 pub use constraints::*;
 pub use cte::*;
 pub use domains::*;
@@ -44,6 +47,7 @@ pub use namespaces::*;
 pub use ranges::*;
 pub use relation_hierarchy::*;
 pub use relation_lifecycle::*;
+pub use role_specification::RoleSpecification;
 pub use routine_security::*;
 pub use routines::*;
 pub use sequence::*;
@@ -216,7 +220,7 @@ pub enum AlterTableAction {
         persistence: RelationPersistence,
     },
     ChangeOwner {
-        owner: String,
+        owner: RoleSpecification,
     },
     SetSchema {
         schema: String,
@@ -566,7 +570,7 @@ pub enum Statement {
     },
     AlterSchemaOwner {
         name: String,
-        new_owner: String,
+        new_owner: RoleSpecification,
     },
     /// `NOTIFY channel [, 'payload']` queues one asynchronous notification for delivery when the outer transaction commits.
     Notify {
@@ -635,6 +639,8 @@ pub enum Statement {
     },
     /// `VACUUM [options] [relations]`. Execution enforces `PostgreSQL`'s transaction-block restriction before validating options and dispatching storage maintenance.
     Vacuum(VacuumStmt),
+    /// `LOCK [TABLE] [ONLY] name [IN mode MODE] [NOWAIT]`.
+    LockTable(LockTableStmt),
     /// `TRUNCATE TABLE t1, t2 ...`. Wipes the listed table hierarchies unless
     /// a target uses `ONLY`.
     Truncate {
@@ -719,6 +725,7 @@ pub enum Statement {
     GrantRole(GrantRoleStmt),
     CreateRole(CreateRoleStmt),
     AlterRole(AlterRoleStmt),
+    RenameRole(RenameRoleStmt),
     DropRole(DropRoleStmt),
     /// `CREATE [OR REPLACE] TRIGGER ... ON relation`.
     CreateTrigger(CreateTrigger),

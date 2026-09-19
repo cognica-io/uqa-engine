@@ -6,6 +6,8 @@
 
 //! Routine registry snapshots, retained write guards, and durable publication.
 
+pub(crate) mod encoding;
+
 use std::ops::DerefMut;
 use uqa_sql::{routines::lifecycle::RoutineRegistry, SQLError};
 
@@ -33,10 +35,34 @@ use uqa_sql::{ast::CreateFunction, routines::SQLUserFunction};
 
 pub(crate) const FUNCTIONS_METADATA_KEY: &str = "sql_functions_json";
 
+/// Select one complete metadata record so committed refresh cannot discard private routine definitions or ACL changes.
+pub fn merge_private(
+    catalog: Option<&dyn uqa_storage::CatalogFacade>,
+    current: &Arc<RoutineRegistry>,
+    committed: Arc<RoutineRegistry>,
+    roles: &BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+) -> uqa_storage::StorageBackendResult<Arc<RoutineRegistry>> {
+    let registry = if catalog.map_or(Ok(false), |catalog| {
+        catalog.metadata_has_private_changes(FUNCTIONS_METADATA_KEY)
+    })? {
+        Arc::clone(current)
+    } else {
+        committed
+    };
+    for function in registry.values().flatten() {
+        uqa_sql::routines::security::binding::validate_routine_authority(&function.def, roles)
+            .map_err(|error| uqa_storage::StorageBackendError::Other(error.to_string()))?;
+    }
+    Ok(registry)
+}
+
 pub fn persist_sql_functions_snapshot(
     catalog: Option<&dyn uqa_storage::CatalogFacade>,
     registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
 ) -> Result<(), SQLError> {
+    for function in registry.values().flatten() {
+        uqa_sql::routines::security::binding::validate_routine_authority_identities(&function.def)?;
+    }
     let Some(catalog) = catalog else {
         return Ok(());
     };
@@ -52,7 +78,7 @@ pub fn persist_sql_functions_snapshot(
             )
         })
         .collect();
-    let json = serde_json::to_string(&defs)
+    let json = encoding::encode(defs)
         .map_err(|err| SQLError::Internal(format!("serialize function catalog: {err}")))?;
     catalog
         .set_metadata(FUNCTIONS_METADATA_KEY, &json)

@@ -8,16 +8,16 @@
 
 use super::cache::RegtypeOutputCache;
 use super::security::{
-    schema::{
-        role_has_schema_privilege, schema_security_with_public_privileges, SchemaAclPrivilege,
-    },
-    SchemaSecurity,
+    schema::{role_has_schema_privilege, SchemaAclPrivilege},
+    BoundSchemaSecurity,
 };
 use super::services::{
     CatalogExpressionEvaluation, CatalogNamespace, CatalogSession, CatalogSnapshotSource,
     RelationCounts, ViewCatalogCapabilities,
 };
 use super::{CatalogReadView, RelationLookupMode, RelationNameResolution, RelationResolution};
+use uqa_sql::catalog::roles::identity::RoleSubject;
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::routines::RoutineResolution;
 use uqa_sql::{ColumnType, SQLError};
 
@@ -43,8 +43,8 @@ impl CatalogContext<'_> {
     pub fn current_schema_names(&self, implicit: bool) -> Result<Vec<String>, SQLError> {
         self.namespaces.current_schema_names(implicit)
     }
-    pub fn current_user_name(&self) -> String {
-        self.session.current_user()
+    pub fn current_role(&self) -> RoleReference {
+        self.session.current_role()
     }
     pub fn search_path_contains(&self, schema: &str) -> bool {
         self.session
@@ -119,26 +119,27 @@ impl CatalogContext<'_> {
         }
         None
     }
-    pub fn schema_security_for_privilege(&self, schema: &str) -> Option<SchemaSecurity> {
-        if let Some(security) = self.catalog_read_view().schema_security(schema) {
+    pub fn schema_security_for_privilege(&self, schema: &str) -> Option<BoundSchemaSecurity> {
+        self.schema_security_in(&self.catalog_read_view(), schema)
+    }
+    fn schema_security_in(
+        &self,
+        catalog: &CatalogReadView,
+        schema: &str,
+    ) -> Option<BoundSchemaSecurity> {
+        if let Some(security) = catalog.schema_security(schema) {
             return Some(security.clone());
         }
         match schema {
             "pg_catalog" | "information_schema" => {
-                Some(schema_security_with_public_privileges(false))
+                Some(BoundSchemaSecurity::with_public_privileges(false))
             }
-            "ag_catalog" => Some(SchemaSecurity::legacy("ag_catalog")),
+            "ag_catalog" => Some(BoundSchemaSecurity::bootstrap("ag_catalog")),
             name if name == self.session.temporary_schema_name() => {
-                Some(schema_security_with_public_privileges(true))
+                Some(BoundSchemaSecurity::with_public_privileges(true))
             }
-            name if self
-                .catalog_read_view()
-                .snapshot()
-                .definitions
-                .graphs
-                .contains_key(name) =>
-            {
-                Some(SchemaSecurity::legacy(name))
+            name if catalog.snapshot().definitions.graphs.contains_key(name) => {
+                Some(BoundSchemaSecurity::bootstrap(name))
             }
             _ => None,
         }
@@ -146,13 +147,19 @@ impl CatalogContext<'_> {
     pub fn require_schema_privilege(
         &self,
         schema: &str,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
         privilege: SchemaAclPrivilege,
     ) -> Result<(), SQLError> {
         let catalog = self.catalog_read_view();
         let definitions = &catalog.snapshot().definitions;
         if self
-            .schema_security_for_privilege(schema)
+            .schema_security_in(&catalog, schema)
+            .map(|security| {
+                security
+                    .resolve(&definitions.roles)
+                    .map_err(SQLError::Internal)
+            })
+            .transpose()?
             .is_some_and(|security| {
                 role_has_schema_privilege(
                     &security,

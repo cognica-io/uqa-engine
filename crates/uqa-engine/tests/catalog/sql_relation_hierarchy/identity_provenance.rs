@@ -214,6 +214,7 @@ fn legacy_boolean_auto_increment_metadata_remains_readable() {
         not_null: true,
         not_null_explicit: false,
         not_null_name: None,
+        not_null_identity: None,
         not_null_validated: true,
         not_null_no_inherit: false,
         not_null_is_local: true,
@@ -247,7 +248,7 @@ fn legacy_boolean_auto_increment_catalog_fields_are_internally_consistent() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("legacy-auto-increment-catalog.db");
     {
-        let engine = Engine::open(&database).unwrap();
+        let engine = crate::native_storage::legacy_engine(&database);
         exec(&engine, "CREATE TABLE legacy_catalog (id SERIAL)");
     }
     {

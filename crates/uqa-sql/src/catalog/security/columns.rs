@@ -6,7 +6,9 @@
 
 //! Table-shaped relation column ACL grant paths and privilege checks.
 
+use crate::catalog::roles::identity::RoleSubject;
 use std::collections::{BTreeMap, BTreeSet};
+use uqa_core::catalog_acl::AclGrantee;
 
 use super::{TableAclEntry, TablePrivileges};
 use crate::ast::RoleAttribute;
@@ -28,11 +30,13 @@ pub fn column_grant_option_roles(
     loop {
         let mut changed = false;
         for entry in acl {
-            if entry.role != "PUBLIC"
-                && entry.grant_options.intersects(privilege.mask())
+            let Some(role) = entry.role.role_name() else {
+                continue;
+            };
+            if entry.grant_options.intersects(privilege.mask())
                 && reachable.contains(acl_grantor(entry, &security.role_owner))
             {
-                changed |= reachable.insert(entry.role.clone());
+                changed |= reachable.insert(role.to_owned());
             }
         }
         if !changed {
@@ -45,10 +49,11 @@ pub fn select_column_acl_grantor(
     security: &TableSecurity,
     column: &str,
     privilege: TableAclPrivilege,
-    current_user: &str,
+    current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> Option<String> {
+    let current_user = current_user.role_name(roles)?;
     if role_inherits(roles, memberships, current_user, &security.role_owner) {
         return Some(security.role_owner.clone());
     }
@@ -58,22 +63,21 @@ pub fn select_column_acl_grantor(
     }
     grant_options
         .into_iter()
-        .filter(|role| role != "PUBLIC" && role != &security.role_owner)
+        .filter(|role| role != &security.role_owner)
         .find(|role| role_inherits(roles, memberships, current_user, role))
 }
 
 pub fn role_has_column_privilege(
     security: &TableSecurity,
     column: &str,
-    subject: &str,
+    subject: &(impl RoleSubject + ?Sized),
     check: TablePrivilegeCheck,
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> bool {
-    if roles
-        .get(subject)
+    if subject
+        .role_definition(roles)
         .is_some_and(|role| role.has(RoleAttribute::Superuser))
-        || role_inherits(roles, memberships, subject, &security.role_owner)
     {
         return true;
     }
@@ -88,7 +92,7 @@ pub fn role_has_column_privilege(
     security.column_acls.get(column).is_some_and(|acl| {
         acl.iter().any(|entry| {
             entry.privileges.intersects(check.privilege.mask())
-                && (entry.role == "PUBLIC"
+                && (entry.role.is_public()
                     || role_inherits(roles, memberships, subject, &entry.role))
         })
     })
@@ -98,7 +102,7 @@ pub fn grant_column_acl(
     security: &mut TableSecurity,
     column: &str,
     privilege: TableAclPrivilege,
-    grantees: &[String],
+    grantees: &[AclGrantee],
     grantor: &str,
     grant_option: bool,
 ) {
@@ -119,7 +123,7 @@ pub fn grant_column_acl(
             });
         let entry = &mut acl[position];
         entry.privileges.insert(privilege.mask());
-        if grant_option && grantee != "PUBLIC" && grantee != &owner {
+        if grant_option && grantee.role_name().is_some_and(|name| name != owner) {
             entry.grant_options.insert(privilege.mask());
         }
     }
@@ -129,7 +133,7 @@ pub fn revoke_column_acl(
     security: &mut TableSecurity,
     column: &str,
     privilege: TableAclPrivilege,
-    grantees: &[String],
+    grantees: &[AclGrantee],
     grantor: &str,
     grant_option_only: bool,
     cascade: bool,
@@ -152,7 +156,7 @@ pub fn revoke_column_acl(
     revoke_dependent_column_acl(security, column, privilege, &before, cascade)
 }
 
-fn revoke_dependent_column_acl(
+pub(super) fn revoke_dependent_column_acl(
     security: &mut TableSecurity,
     column: &str,
     privilege: TableAclPrivilege,

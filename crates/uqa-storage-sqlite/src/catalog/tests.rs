@@ -7,6 +7,7 @@
 use super::*;
 
 mod cache_revisions;
+mod metadata;
 mod migration;
 mod version_migrations;
 
@@ -18,9 +19,7 @@ fn fresh() -> Catalog {
 fn empty_table(schema: &str, name: &str) -> TableSchema {
     TableSchema {
         relation: RelationIdentity::new(schema, name),
-        role_owner: "uqa".into(),
-        acl: None,
-        column_acls: std::collections::BTreeMap::default(),
+        security: uqa_storage::RelationSecurityRow::legacy("uqa"),
         object_id: [1; 16],
         storage_generation: [1; 16],
         analyzer_json: "{}".into(),
@@ -45,6 +44,15 @@ fn sample_sequence_acl() -> Vec<uqa_storage::catalog::SequenceAclEntry> {
             ..uqa_storage::catalog::SequencePrivileges::default()
         },
     }]
+}
+
+fn legacy_security(
+    row: &uqa_storage::RelationSecurityRow,
+) -> &uqa_core::catalog_acl::LegacyRelationSecurity {
+    let uqa_storage::RelationSecurityRow::Legacy(security) = row else {
+        panic!("legacy fixture unexpectedly acquired role identities");
+    };
+    security
 }
 
 fn sample_table_acl() -> Vec<uqa_storage::catalog::TableAclEntry> {
@@ -72,9 +80,13 @@ fn view_rows_round_trip_role_ownership() {
     catalog
         .save_view(&ViewRow {
             relation: RelationIdentity::new("application", "owned_view"),
-            role_owner: "view_owner".into(),
-            acl: Some(acl.clone()),
-            column_acls: column_acls.clone(),
+            security: uqa_storage::RelationSecurityRow::Legacy(
+                uqa_core::catalog_acl::LegacyRelationSecurity {
+                    role_owner: "view_owner".into(),
+                    acl: Some(acl.clone()),
+                    column_acls: column_acls.clone(),
+                },
+            ),
             definition_json: r#"{"query":"definition"}"#.into(),
         })
         .unwrap();
@@ -84,9 +96,9 @@ fn view_rows_round_trip_role_ownership() {
         view.relation,
         RelationIdentity::new("application", "owned_view")
     );
-    assert_eq!(view.role_owner, "view_owner");
-    assert_eq!(view.acl, Some(acl));
-    assert_eq!(view.column_acls, column_acls);
+    assert_eq!(legacy_security(&view.security).role_owner, "view_owner");
+    assert_eq!(legacy_security(&view.security).acl, Some(acl));
+    assert_eq!(legacy_security(&view.security).column_acls, column_acls);
     assert_eq!(view.definition_json, r#"{"query":"definition"}"#);
 }
 
@@ -101,18 +113,14 @@ fn view_and_foreign_table_renames_move_rows_and_relation_claims_atomically() {
     catalog
         .save_view(&ViewRow {
             relation: view.clone(),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::new(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             definition_json: "view-definition".into(),
         })
         .unwrap();
     catalog
         .save_foreign_table(&ForeignTableRow {
             relation: foreign.clone(),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::new(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             server_name: "memory".into(),
             columns_json: "[]".into(),
             options_json: "{}".into(),
@@ -138,18 +146,14 @@ fn view_and_foreign_table_renames_move_rows_and_relation_claims_atomically() {
     catalog
         .save_view(&ViewRow {
             relation: view,
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::new(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             definition_json: "replacement-view-definition".into(),
         })
         .unwrap();
     catalog
         .save_foreign_table(&ForeignTableRow {
             relation: foreign,
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::new(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             server_name: "memory".into(),
             columns_json: "[]".into(),
             options_json: "{}".into(),
@@ -182,9 +186,13 @@ fn save_load_round_trip() {
     let column_acls = std::collections::BTreeMap::from([("title".to_string(), sample_table_acl())]);
     let schema = TableSchema {
         relation: RelationIdentity::new("public", "articles"),
-        role_owner: "article_owner".into(),
-        acl: Some(acl.clone()),
-        column_acls: column_acls.clone(),
+        security: uqa_storage::RelationSecurityRow::Legacy(
+            uqa_core::catalog_acl::LegacyRelationSecurity {
+                role_owner: "article_owner".into(),
+                acl: Some(acl.clone()),
+                column_acls: column_acls.clone(),
+            },
+        ),
         object_id: [1; 16],
         storage_generation: [1; 16],
         analyzer_json:
@@ -202,9 +210,15 @@ fn save_load_round_trip() {
     let loaded = cat.load_tables().unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].relation.qualified_name(), "public.articles");
-    assert_eq!(loaded[0].role_owner, "article_owner");
-    assert_eq!(loaded[0].acl, Some(acl));
-    assert_eq!(loaded[0].column_acls, column_acls);
+    assert_eq!(
+        legacy_security(&loaded[0].security).role_owner,
+        "article_owner"
+    );
+    assert_eq!(legacy_security(&loaded[0].security).acl, Some(acl));
+    assert_eq!(
+        legacy_security(&loaded[0].security).column_acls,
+        column_acls
+    );
     assert_eq!(loaded[0].object_id, [1; 16]);
     assert_eq!(loaded[0].storage_generation, [1; 16]);
     assert_eq!(loaded[0].fts_fields, vec!["title", "body"]);
@@ -221,9 +235,7 @@ fn catalog_facade_trait_object_round_trips_table() {
     let facade: &dyn CatalogFacade = &cat;
     let schema = TableSchema {
         relation: RelationIdentity::new("public", "facade_articles"),
-        role_owner: "facade_owner".into(),
-        acl: None,
-        column_acls: std::collections::BTreeMap::default(),
+        security: uqa_storage::RelationSecurityRow::legacy("facade_owner"),
         object_id: [2; 16],
         storage_generation: [2; 16],
         analyzer_json:
@@ -244,7 +256,10 @@ fn catalog_facade_trait_object_round_trips_table() {
         loaded[0].relation.qualified_name(),
         "public.facade_articles"
     );
-    assert_eq!(loaded[0].role_owner, "facade_owner");
+    assert_eq!(
+        legacy_security(&loaded[0].security).role_owner,
+        "facade_owner"
+    );
 }
 
 #[test]
@@ -261,8 +276,12 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
     catalog
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "controlled"),
-            role_owner: "sequence_owner".into(),
-            acl: Some(acl.clone()),
+            security: uqa_storage::SequenceSecurityRow::Legacy(
+                uqa_core::catalog_sequence::LegacySequenceSecurity {
+                    role_owner: "sequence_owner".into(),
+                    acl: Some(acl.clone()),
+                },
+            ),
             object_id,
             definition_generation: object_id,
             start: 1,
@@ -284,16 +303,34 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
     );
     assert_eq!(
         catalog
-            .set_sequence_value("public.controlled", object_id, 7, false, 0)
+            .set_sequence_value("public.controlled", object_id, object_id, 7, false, 0)
             .unwrap(),
-        Some(7)
+        uqa_storage::SequenceSetValueResult::Set(7)
     );
+    let unchanged = catalog.load_sequence_rows().unwrap();
+    assert_eq!(
+        catalog
+            .set_sequence_value("public.controlled", object_id, [8; 16], 75, true, 0)
+            .unwrap(),
+        uqa_storage::SequenceSetValueResult::DefinitionChanged
+    );
+    assert!(catalog
+        .set_sequence_value("public.controlled", object_id, object_id, 75, true, -1)
+        .is_err());
+    assert_eq!(catalog.load_sequence_rows().unwrap(), unchanged);
     let uncalled = catalog.load_sequence_rows().unwrap().remove(0);
     assert_eq!(uncalled.current, 7);
     assert!(!uncalled.called);
     assert_eq!(uncalled.owner, Some(owner));
-    assert_eq!(uncalled.role_owner, "sequence_owner");
-    assert_eq!(uncalled.acl, Some(acl));
+    assert_eq!(
+        uncalled.security,
+        uqa_storage::SequenceSecurityRow::Legacy(
+            uqa_core::catalog_sequence::LegacySequenceSecurity {
+                role_owner: "sequence_owner".into(),
+                acl: Some(acl)
+            }
+        )
+    );
     assert_eq!(
         catalog
             .next_sequence_value("public.controlled", object_id)
@@ -308,9 +345,9 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
     );
     assert_eq!(
         catalog
-            .set_sequence_value("public.controlled", object_id, 20, true, 0)
+            .set_sequence_value("public.controlled", object_id, object_id, 20, true, 0)
             .unwrap(),
-        Some(20)
+        uqa_storage::SequenceSetValueResult::Set(20)
     );
     assert_eq!(
         catalog
@@ -318,13 +355,16 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
             .unwrap(),
         Some(22)
     );
+}
 
+#[test]
+fn sequence_reservations_cycle_at_the_configured_bounds() {
+    let catalog = fresh();
     let cycling_id = [9; 16];
     catalog
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "cycling"),
-            role_owner: "uqa".into(),
-            acl: None,
+            security: uqa_storage::SequenceSecurityRow::bootstrap(),
             object_id: cycling_id,
             definition_generation: cycling_id,
             start: 5,
@@ -361,8 +401,7 @@ fn sqlite_sequence_rename_moves_catalog_identity_and_value_atomically() {
     catalog
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "ids"),
-            role_owner: "uqa".into(),
-            acl: None,
+            security: uqa_storage::SequenceSecurityRow::bootstrap(),
             object_id,
             definition_generation: [18; 16],
             start: 1,
@@ -406,8 +445,7 @@ fn sqlite_sequence_rename_moves_catalog_identity_and_value_atomically() {
     catalog
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "occupied"),
-            role_owner: "uqa".into(),
-            acl: None,
+            security: uqa_storage::SequenceSecurityRow::bootstrap(),
             object_id: [19; 16],
             definition_generation: [19; 16],
             start: 1,
@@ -437,8 +475,7 @@ fn sqlite_sequence_reservations_are_atomic_and_stop_at_the_configured_bound() {
     catalog
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "cached"),
-            role_owner: "uqa".into(),
-            acl: None,
+            security: uqa_storage::SequenceSecurityRow::bootstrap(),
             object_id,
             definition_generation: generation,
             start: 1,

@@ -28,6 +28,7 @@ pub fn build_pg_class(
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = vec![pg_class_catalog_row(
+        catalog,
         13_313,
         13_315,
         "information_schema",
@@ -44,6 +45,7 @@ pub fn build_pg_class(
             .table(resolution, &name)?
             .ok_or_else(|| SQLError::UnknownTable(name.clone()))?;
         let columns = &table_snapshot.columns;
+        let security = catalog.relation_security_names(&table_snapshot.security)?;
         let hierarchy = &table_snapshot.hierarchy;
         let relkind = if hierarchy.partition_spec.is_some() {
             "p"
@@ -66,6 +68,7 @@ pub fn build_pg_class(
             context.table_doc_count(&name)?
         };
         let mut row = pg_class_row_with_lifecycle(
+            catalog,
             &schema,
             &table,
             relkind,
@@ -86,16 +89,11 @@ pub fn build_pg_class(
         );
         row.insert(
             "relowner".into(),
-            int_value(uqa_sql::catalog::roles::role_oid(
-                &table_snapshot.security.role_owner,
-            )),
+            int_value(table_snapshot.security.role_owner.oid),
         );
         row.insert(
             "relacl".into(),
-            table_acl_catalog_value(
-                &table_snapshot.security.role_owner,
-                table_snapshot.security.acl.as_ref(),
-            )?,
+            table_acl_catalog_value(&security.role_owner, security.acl.as_ref())?,
         );
         row.insert(
             "relispartition".into(),
@@ -129,8 +127,10 @@ pub fn build_pg_class(
     }
     for (name, definition) in catalog.views_of_kind(crate::catalog::view::StoredViewKind::View) {
         let (schema, view) = split_schema_name(&name)?;
+        let security = catalog.relation_security_names(&definition.security)?;
         let columns = view_columns_for(context, catalog, resolution, &definition)?;
         let mut row = pg_class_row_with_lifecycle(
+            catalog,
             &schema,
             &view,
             "v",
@@ -155,11 +155,11 @@ pub fn build_pg_class(
         );
         row.insert(
             "relowner".into(),
-            int_value(uqa_sql::catalog::roles::role_oid(&definition.role_owner)),
+            int_value(definition.security.role_owner.oid),
         );
         row.insert(
             "relacl".into(),
-            table_acl_catalog_value(&definition.role_owner, definition.acl.as_ref())?,
+            table_acl_catalog_value(&security.role_owner, security.acl.as_ref())?,
         );
         out.push(row);
     }
@@ -167,8 +167,10 @@ pub fn build_pg_class(
         catalog.views_of_kind(crate::catalog::view::StoredViewKind::Materialized)
     {
         let (schema, view) = split_schema_name(&name)?;
+        let security = catalog.relation_security_names(&definition.security)?;
         let columns = view_columns_for(context, catalog, resolution, &definition)?;
         let mut row = pg_class_row_with_lifecycle(
+            catalog,
             &schema,
             &view,
             "m",
@@ -189,11 +191,11 @@ pub fn build_pg_class(
         );
         row.insert(
             "relowner".into(),
-            int_value(uqa_sql::catalog::roles::role_oid(&definition.role_owner)),
+            int_value(definition.security.role_owner.oid),
         );
         row.insert(
             "relacl".into(),
-            table_acl_catalog_value(&definition.role_owner, definition.acl.as_ref())?,
+            table_acl_catalog_value(&security.role_owner, security.acl.as_ref())?,
         );
         out.push(row);
     }
@@ -201,6 +203,7 @@ pub fn build_pg_class(
         let (schema, table) = split_schema_name(&name)?;
         let security = catalog.foreign_table_security(&name)?;
         let mut row = pg_class_row(
+            catalog,
             &schema,
             &table,
             "f",
@@ -221,7 +224,7 @@ pub fn build_pg_class(
         );
         row.insert(
             "relowner".into(),
-            int_value(uqa_sql::catalog::roles::role_oid(&security.role_owner)),
+            int_value(catalog.role_oid(&security.role_owner)?),
         );
         row.insert(
             "relacl".into(),
@@ -233,23 +236,34 @@ pub fn build_pg_class(
         );
         out.push(row);
     }
-    for (sequence, persistence, object_id, security) in catalog.sequences() {
+    for (sequence, persistence, object_id, security) in catalog.sequences()? {
         let (schema, name) = split_schema_name(&sequence)?;
-        let mut row =
-            pg_class_row_with_lifecycle(&schema, &name, "S", 3, 0.0, false, persistence, true, &[]);
+        let mut row = pg_class_row_with_lifecycle(
+            catalog,
+            &schema,
+            &name,
+            "S",
+            3,
+            0.0,
+            false,
+            persistence,
+            true,
+            &[],
+        );
         row.insert(
             "oid".into(),
             int_value(stable_object_oid("relation", &object_id)),
         );
         row.insert(
             "relowner".into(),
-            int_value(uqa_sql::catalog::roles::role_oid(&security.role_owner)),
+            int_value(catalog.role_oid(&security.role_owner)?),
         );
         row.insert("relacl".into(), sequence_acl_catalog_value(&security)?);
         out.push(row);
     }
     for index in catalog_indexes {
         let mut index_row = pg_class_row(
+            catalog,
             &index.relation.schema,
             &index.relation.name,
             index.relkind,
@@ -267,12 +281,7 @@ pub fn build_pg_class(
         let table = catalog
             .table(resolution, &index.table_name)?
             .ok_or_else(|| SQLError::UnknownTable(index.table_name.clone()))?;
-        index_row.insert(
-            "relowner".into(),
-            int_value(uqa_sql::catalog::roles::role_oid(
-                &table.security.role_owner,
-            )),
-        );
+        index_row.insert("relowner".into(), int_value(table.security.role_owner.oid));
         index_row.insert("relispartition".into(), bool_value(index.is_partition));
         index_row.insert("relhassubclass".into(), bool_value(index.has_children));
         out.push(index_row);
@@ -291,11 +300,10 @@ pub fn table_acl_catalog_value(
     catalog_array(
         acl.iter()
             .map(|entry| {
-                let grantee = if entry.role == "PUBLIC" {
-                    String::new()
-                } else {
-                    acl_identifier(&entry.role)
-                };
+                let grantee = entry
+                    .role
+                    .role_name()
+                    .map_or_else(String::new, acl_identifier);
                 let grantor = acl_identifier(entry.grantor.as_deref().unwrap_or(owner));
                 let mut privileges = String::new();
                 for (enabled, grant_option, code) in [
@@ -335,11 +343,10 @@ fn sequence_acl_catalog_value(
     catalog_array(
         acl.iter()
             .map(|entry| {
-                let grantee = if entry.role == "PUBLIC" {
-                    String::new()
-                } else {
-                    acl_identifier(&entry.role)
-                };
+                let grantee = entry
+                    .role
+                    .role_name()
+                    .map_or_else(String::new, acl_identifier);
                 let grantor =
                     acl_identifier(entry.grantor.as_deref().unwrap_or(&security.role_owner));
                 let mut privileges = String::new();

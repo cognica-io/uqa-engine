@@ -11,15 +11,19 @@ use uqa_execution::catalog::sequence::restoration::{
     RestoredSequenceRegistry, SequencePersistenceRead, SequenceRestoreRegistry,
 };
 use uqa_execution::catalog::sequence::{restoration::restore_sequence_rows, SequenceState};
-use uqa_sql::{ast::RelationPersistence, catalog::security::SequenceSecurity};
+use uqa_sql::{ast::RelationPersistence, catalog::security::BoundSequenceSecurity};
 use uqa_storage::SequenceRow;
+
+mod inspection;
+mod owner_enumeration;
+mod refresh;
 
 #[derive(Debug, PartialEq)]
 struct Snapshot {
     sequences: BTreeMap<RelationIdentity, SequenceState>,
     object_ids: BTreeMap<RelationIdentity, [u8; 16]>,
     persistence: BTreeMap<RelationIdentity, RelationPersistence>,
-    security: BTreeMap<RelationIdentity, SequenceSecurity>,
+    security: BTreeMap<RelationIdentity, BoundSequenceSecurity>,
 }
 fn snapshot(engine: &Engine) -> Snapshot {
     Snapshot {
@@ -46,10 +50,7 @@ fn incoming(engine: &Engine, name: &str, id: [u8; 16]) -> SequenceRow {
         id,
         state,
         RelationPersistence::Permanent,
-        &SequenceSecurity {
-            role_owner: "uqa".into(),
-            acl: None,
-        },
+        &BoundSequenceSecurity::owner(uqa_core::catalog_role::RoleIdentity::BOOTSTRAP),
     )
     .unwrap()
 }
@@ -67,7 +68,14 @@ fn corrupt_later_sequence_rows_leave_all_actual_registries_and_temporary_state_u
     ] {
         let mut bad = incoming(&engine, "public.broken", [9; 16]);
         match kind {
-            "owner" => bad.role_owner.clear(),
+            "owner" => {
+                bad.security = BoundSequenceSecurity::owner(uqa_core::catalog_role::RoleIdentity {
+                    oid: 0,
+                    ..uqa_core::catalog_role::RoleIdentity::BOOTSTRAP
+                })
+                .row()
+                .into();
+            }
             "zero identity" => bad.object_id = [0; 16],
             "duplicate identity" => bad.object_id = valid.object_id,
             "persistence" => bad.persistence = "t".into(),

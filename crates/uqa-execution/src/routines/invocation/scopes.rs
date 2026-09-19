@@ -77,18 +77,23 @@ pub(super) fn with_routine_context<T>(
     definition: &CreateFunction,
     execute: impl FnOnce() -> Result<T, SQLError>,
 ) -> Result<T, SQLError> {
-    let mut guard = session.state_guard();
+    let mut guard = session.state_guard(
+        !definition.config.is_empty(),
+        definition.security.security_definer,
+    );
     let _volatility = RoutineVolatilityGuard::enter(definition.volatility);
     let _security_definer = SecurityDefinerGuard::enter(definition.security.security_definer);
     if definition.security.security_definer {
-        session.set_current_user(&definition.owner);
+        session.set_current_user(uqa_sql::routines::security::bound_routine_owner(
+            definition,
+        )?)?;
     }
     for (name, value) in &definition.config {
-        session.set_variable(name, value)?;
+        session.set_configured_parameter(name, value)?;
     }
     let result = execute();
-    if result.is_ok() && !definition.security.security_definer {
-        guard.preserve_current_user();
+    if result.is_ok() {
+        guard.finish();
     }
     result
 }

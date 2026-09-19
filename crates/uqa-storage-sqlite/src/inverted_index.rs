@@ -48,6 +48,8 @@ mod data;
 mod format;
 mod maintenance;
 mod mutation;
+mod native;
+pub(crate) use native::NativeOccurrenceRecords;
 mod queries;
 mod trait_impl;
 

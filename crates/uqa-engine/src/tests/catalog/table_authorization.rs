@@ -16,7 +16,7 @@ use uqa_execution::catalog::security::table_inquiry::{
     PrivilegeForeignSecurityRead, PrivilegeForeignTablesRead, PrivilegeViewsRead, TableColumnsRead,
     TablePrivilegeRead, TablePrivilegeRegistry, TablePrivilegeState,
 };
-use uqa_sql::catalog::security::{table::TableAclPrivilege, TableSecurity};
+use uqa_sql::catalog::security::{table::TableAclPrivilege, BoundTableSecurity};
 use uqa_storage::StorageBackendResult;
 
 struct ObservedTable {
@@ -24,10 +24,10 @@ struct ObservedTable {
     columns_reads: Arc<AtomicUsize>,
 }
 impl TablePrivilegeState for ObservedTable {
-    fn role_owner(&self) -> String {
+    fn role_owner(&self) -> uqa_sql::catalog::roles::RoleIdentity {
         self.state.role_owner()
     }
-    fn security(&self) -> TableSecurity {
+    fn security(&self) -> BoundTableSecurity {
         self.state.security()
     }
     fn column_names(&self) -> Vec<String> {
@@ -46,7 +46,9 @@ impl TablePrivilegeRead for ObservedRead<'_> {
     fn keys(&self) -> Box<dyn Iterator<Item = &RelationIdentity> + '_> {
         Box::new(self.actual.keys())
     }
-    fn security_entries(&self) -> Box<dyn Iterator<Item = (RelationIdentity, TableSecurity)> + '_> {
+    fn security_entries(
+        &self,
+    ) -> Box<dyn Iterator<Item = (RelationIdentity, BoundTableSecurity)> + '_> {
         Box::new(
             self.actual
                 .iter()
@@ -70,6 +72,15 @@ impl TablePrivilegeRead for ObservedRead<'_> {
 struct ObservedRegistry<'a> {
     engine: &'a Engine,
     columns_reads: Arc<AtomicUsize>,
+}
+impl uqa_sql::catalog::security::system_relations::SystemRelationSecurityCatalog
+    for ObservedRegistry<'_>
+{
+    fn system_relation_securities(
+        &self,
+    ) -> uqa_sql::catalog::security::system_relations::SystemRelationSecurityRead<'_> {
+        self.engine.system_relation_securities()
+    }
 }
 impl TablePrivilegeRegistry for ObservedRegistry<'_> {
     fn refresh_tables(&self) -> StorageBackendResult<()> {

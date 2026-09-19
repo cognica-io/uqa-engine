@@ -76,7 +76,7 @@ pub fn sql_creation_schema(
     state: &dyn RelationCandidateState,
     privileges: &SchemaPrivilegeInquiry<'_>,
     schema: Option<&str>,
-    current_user: &str,
+    current_user: &(impl crate::catalog::roles::identity::RoleSubject + ?Sized),
 ) -> Option<String> {
     if let Some(schema) = schema {
         privileges
@@ -113,7 +113,7 @@ pub fn ensure_creation_privilege(
 ) -> Result<(), SQLError> {
     let relation =
         RelationIdentity::from_legacy_name(canonical_name).map_err(SQLError::Unsupported)?;
-    let current_user = names.current_user_name();
+    let current_user = names.current_role();
     privileges.require_schema_privilege(&relation.schema, &current_user, SchemaAclPrivilege::Create)
 }
 
@@ -134,7 +134,7 @@ pub fn resolve_index_table_name(
                     message: format!("schema \"{schema}\" does not exist"),
                 });
             }
-            let current_user = names.current_user_name();
+            let current_user = names.current_role();
             privileges.require_schema_privilege(
                 schema,
                 &current_user,
@@ -142,7 +142,7 @@ pub fn resolve_index_table_name(
             )?;
         }
     }
-    let current_user = names.current_user_name();
+    let current_user = names.current_role();
     for relation in relation_lookup_candidates(state, name)
         .map_err(|error| SQLError::Internal(format!("resolve index table `{name}`: {error}")))?
     {

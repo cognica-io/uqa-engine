@@ -4,24 +4,21 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Transactional HNSW graph persistence over the logical Key/Value backend.
+//! HNSW readers and evaluated mutations use one logical Key/Value visibility boundary.
 
 use std::sync::Arc;
-
-use parking_lot::Mutex;
 use uqa_core::{DocId, PostingList};
 
-use super::codec::other_error;
-use super::hnsw_persistence;
-use super::{KeyValueStore, KeyValueVectorIndex};
-use crate::hnsw_index::{HNSWIndex, HNSWPersistenceDelta};
+use super::codec::encode_value;
+use super::codec::{other_error, vector_field_prefix};
+use super::hnsw_persistence::{self, metadata_from_graph, PersistedHNSWNode};
+use super::index_keys::{hnsw_metadata_key, hnsw_node_key, hnsw_node_prefix};
+use super::{KeyValueBatch, KeyValueRead, KeyValueStore, KeyValueVectorIndex};
+use crate::hnsw_index::{HNSWIndex, HNSWMutation, HNSWPersistenceDelta};
 use crate::vector_index::{HNSWIndexParams, VectorIndex};
 use crate::{StorageBackendError, StorageBackendResult};
 
-struct CachedHNSW {
-    graph: HNSWIndex,
-    revision: Option<u64>,
-}
+use super::index_view::{read_view, IndexState, IndexView};
 
 pub struct KeyValueHNSWIndex {
     store: Arc<dyn KeyValueStore>,
@@ -30,7 +27,8 @@ pub struct KeyValueHNSWIndex {
     field: String,
     dimensions: u32,
     params: HNSWIndexParams,
-    cached: Mutex<CachedHNSW>,
+    require_persisted: bool,
+    view: IndexView<HNSWIndex>,
 }
 
 impl KeyValueHNSWIndex {
@@ -41,23 +39,9 @@ impl KeyValueHNSWIndex {
         dimensions: u32,
         params: HNSWIndexParams,
     ) -> StorageBackendResult<Self> {
-        let params = params.validate()?;
-        let table = table.into();
-        let field = field.into();
-        let raw = KeyValueVectorIndex::new(Arc::clone(&store), &table, &field, dimensions);
-        let graph = build_from_canonical(&raw, dimensions, params)?;
-        Ok(Self {
-            store,
-            raw,
-            table,
-            field,
-            dimensions,
-            params,
-            cached: Mutex::new(CachedHNSW {
-                graph,
-                revision: None,
-            }),
-        })
+        let index = Self::new(store, table.into(), field.into(), dimensions, params, false)?;
+        index.read_graph()?;
+        Ok(index)
     }
 
     pub fn restore(
@@ -67,138 +51,157 @@ impl KeyValueHNSWIndex {
         dimensions: u32,
         params: HNSWIndexParams,
     ) -> StorageBackendResult<Self> {
-        let params = params.validate()?;
-        let table = table.into();
-        let field = field.into();
-        let raw = KeyValueVectorIndex::new(Arc::clone(&store), &table, &field, dimensions);
-        let (graph, revision) = hnsw_persistence::restore_graph(
-            store.as_ref(),
-            &raw,
-            &table,
-            &field,
-            dimensions,
-            params,
-        )?;
+        let index = Self::new(store, table.into(), field.into(), dimensions, params, true)?;
+        index.read_graph()?;
+        Ok(index)
+    }
+
+    fn new(
+        store: Arc<dyn KeyValueStore>,
+        table: String,
+        field: String,
+        dimensions: u32,
+        params: HNSWIndexParams,
+        require_persisted: bool,
+    ) -> StorageBackendResult<Self> {
         Ok(Self {
+            raw: KeyValueVectorIndex::new(Arc::clone(&store), &table, &field, dimensions),
             store,
-            raw,
             table,
             field,
             dimensions,
-            params,
-            cached: Mutex::new(CachedHNSW {
-                graph,
-                revision: Some(revision),
-            }),
+            params: params.validate()?,
+            require_persisted,
+            view: IndexView::new(!require_persisted),
         })
     }
 
-    fn replace_document(&self, doc_id: DocId, vectors: &[Vec<f32>]) -> StorageBackendResult<()> {
-        let mut cached = self.cached.lock();
-        self.verify_revision(cached.revision)?;
-        let mut graph = cached.graph.clone();
-        graph.add_many(doc_id, vectors.to_vec())?;
-        let delta = graph.take_persistence_delta();
-        let revision = next_revision(cached.revision)?;
-        let mut batch = self.store.batch();
-        self.raw.stage_replace(batch.as_mut(), doc_id, vectors)?;
-        self.stage_delta(batch.as_mut(), &delta, revision)?;
-        batch.commit()?;
-        *cached = CachedHNSW {
-            graph,
-            revision: Some(revision),
-        };
-        Ok(())
+    fn graph_at(&self, read: &dyn KeyValueRead) -> StorageBackendResult<IndexState<HNSWIndex>> {
+        self.view.load(
+            read,
+            &[
+                &hnsw_metadata_key(&self.table, &self.field)?,
+                &hnsw_node_prefix(&self.table, &self.field)?,
+                &vector_field_prefix(&self.table, &self.field)?,
+            ],
+            |creating| {
+                let revision = hnsw_persistence::load_revision(read, &self.table, &self.field)?;
+                let graph = if creating || (revision.is_none() && !self.require_persisted) {
+                    self.build_from_canonical(read)?
+                } else {
+                    hnsw_persistence::restore_graph(
+                        read,
+                        &self.raw,
+                        &self.table,
+                        &self.field,
+                        self.dimensions,
+                        self.params,
+                    )?
+                    .0
+                };
+                Ok((graph, revision))
+            },
+        )
     }
 
-    fn delete_document(&self, doc_id: DocId) -> StorageBackendResult<()> {
-        let mut cached = self.cached.lock();
-        self.verify_revision(cached.revision)?;
-        let mut graph = cached.graph.clone();
-        graph.delete(doc_id)?;
-        let delta = graph.take_persistence_delta();
-        let revision = next_revision(cached.revision)?;
-        let mut batch = self.store.batch();
-        self.raw.stage_replace(batch.as_mut(), doc_id, &[])?;
-        self.stage_delta(batch.as_mut(), &delta, revision)?;
-        batch.commit()?;
-        *cached = CachedHNSW {
-            graph,
-            revision: Some(revision),
-        };
-        Ok(())
+    fn read_graph(&self) -> StorageBackendResult<IndexState<HNSWIndex>> {
+        read_view(self.store.as_ref(), |read| self.graph_at(read))
     }
 
-    fn clear_graph(&self) -> StorageBackendResult<()> {
-        let mut cached = self.cached.lock();
-        self.verify_revision(cached.revision)?;
-        let mut graph = cached.graph.clone();
-        graph.clear()?;
-        let delta = graph.take_persistence_delta();
-        let revision = next_revision(cached.revision)?;
-        let mut batch = self.store.batch();
-        self.raw.stage_clear(batch.as_mut())?;
-        self.stage_delta(batch.as_mut(), &delta, revision)?;
-        batch.commit()?;
-        *cached = CachedHNSW {
-            graph,
-            revision: Some(revision),
-        };
-        Ok(())
+    fn mutate_graph(
+        &self,
+        mutation: HNSWMutation<'_>,
+        canonical: impl FnOnce(&mut dyn KeyValueBatch) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()> {
+        self.view.evaluate(self.store.as_ref(), |read, batch| {
+            let cached = self.graph_at(read)?;
+            let delta = cached.value.prepare_delta(mutation, read.control())?;
+            canonical(batch)?;
+            let preview = !cached.definition_candidate
+                && cached.revision.is_some()
+                && !matches!(mutation, HNSWMutation::Clear);
+            if preview {
+                batch.hnsw_mutation(&hnsw_metadata_key(&self.table, &self.field)?, mutation)?;
+            }
+            // Only a later reader publishes the graph with its actual committed/private identity.
+            self.stage_delta(batch, &delta, next_revision(cached.revision)?, preview)
+        })
     }
 
     fn rebuild_graph(&self) -> StorageBackendResult<()> {
-        let mut cached = self.cached.lock();
-        self.verify_revision(cached.revision)?;
-        let mut graph = build_from_canonical(&self.raw, self.dimensions, self.params)?;
-        let delta = graph.take_persistence_delta();
-        let revision = next_revision(cached.revision)?;
-        let mut batch = self.store.batch();
-        self.stage_delta(batch.as_mut(), &delta, revision)?;
-        batch.commit()?;
-        *cached = CachedHNSW {
-            graph,
-            revision: Some(revision),
-        };
-        Ok(())
+        self.view.evaluate(self.store.as_ref(), |read, batch| {
+            let revision = hnsw_persistence::load_revision(read, &self.table, &self.field)?;
+            if revision.is_none() && self.require_persisted {
+                return Err(other_error(format!(
+                    "missing persisted HNSW metadata for {}.{}",
+                    self.table, self.field
+                )));
+            }
+            let vectors = self.raw.load_all_from(read)?;
+            let delta = HNSWIndex::prepare_canonical(
+                self.dimensions,
+                self.params,
+                &vectors,
+                read.control(),
+            )?;
+            self.stage_delta(batch, &delta, next_revision(revision)?, false)
+        })
     }
 
-    fn verify_revision(&self, expected: Option<u64>) -> StorageBackendResult<()> {
-        let Some(expected) = expected else {
-            return Ok(());
-        };
-        let actual =
-            hnsw_persistence::load_revision(self.store.as_ref(), &self.table, &self.field)?
-                .ok_or_else(|| {
-                    other_error(format!(
-                        "missing persisted HNSW metadata for {}.{}",
-                        self.table, self.field
-                    ))
-                })?;
-        if actual != expected {
-            return Err(other_error(format!(
-                "concurrent HNSW metadata change for {}.{}: expected revision {expected}, found {actual}",
-                self.table, self.field
-            )));
+    fn build_from_canonical(&self, read: &dyn KeyValueRead) -> StorageBackendResult<HNSWIndex> {
+        let entries = self.raw.load_all_from(read)?;
+        let mut graph = HNSWIndex::with_params(self.dimensions, self.params)?;
+        for vectors in entries.chunk_by(|a, b| a.0 == b.0) {
+            read.control().check()?;
+            graph.add_many(
+                vectors[0].0,
+                vectors
+                    .iter()
+                    .map(|(_, _, vector)| vector.clone())
+                    .collect(),
+            )?;
         }
-        Ok(())
+        Ok(graph)
     }
 
     fn stage_delta(
         &self,
-        batch: &mut dyn super::KeyValueBatch,
+        batch: &mut dyn KeyValueBatch,
         delta: &HNSWPersistenceDelta,
         revision: u64,
+        preview: bool,
     ) -> StorageBackendResult<()> {
-        hnsw_persistence::stage_delta(
-            batch,
-            &self.table,
-            &self.field,
+        let metadata = hnsw_metadata_key(&self.table, &self.field)?;
+        let value = encode_value(&metadata_from_graph(
             self.dimensions,
             self.params,
-            delta,
+            delta.meta,
             revision,
-        )
+        )?)?;
+        if preview {
+            batch.preview_hnsw_record(&metadata, Some(&value))?;
+        } else {
+            batch.fence_hnsw_prefix(&metadata)?;
+            batch.put(&metadata, &value)?;
+        }
+        if delta.full_rewrite {
+            let prefix = hnsw_node_prefix(&self.table, &self.field)?;
+            if preview {
+                batch.preview_hnsw_prefix(&prefix)?;
+            } else {
+                batch.delete_prefix(&prefix)?;
+            }
+        }
+        for node in &delta.nodes {
+            let key = hnsw_node_key(&self.table, &self.field, node.node_id)?;
+            let value = encode_value(&PersistedHNSWNode::try_from(node)?)?;
+            if preview {
+                batch.preview_hnsw_record(&key, Some(&value))?;
+            } else {
+                batch.put(&key, &value)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -206,58 +209,44 @@ impl VectorIndex for KeyValueHNSWIndex {
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
-
     fn index_kind(&self) -> &'static str {
         "hnsw"
     }
-
     fn add(&mut self, doc_id: DocId, vector: Vec<f32>) -> StorageBackendResult<()> {
-        self.replace_document(doc_id, &[vector])
+        self.add_many(doc_id, vec![vector])
     }
-
     fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>) -> StorageBackendResult<()> {
-        self.replace_document(doc_id, &vectors)
+        self.mutate_graph(
+            HNSWMutation::Replace {
+                document: doc_id,
+                vectors: &vectors,
+            },
+            |batch| self.raw.stage_replace(batch, doc_id, &vectors),
+        )
     }
-
     fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
-        self.delete_document(doc_id)
+        self.mutate_graph(HNSWMutation::Delete(doc_id), |batch| {
+            self.raw.stage_replace(batch, doc_id, &[])
+        })
     }
-
     fn clear(&mut self) -> StorageBackendResult<()> {
-        self.clear_graph()
+        self.mutate_graph(HNSWMutation::Clear, |batch| self.raw.stage_clear(batch))
     }
-
     fn search_knn(&self, query: &[f32], k: usize) -> StorageBackendResult<PostingList> {
-        self.cached.lock().graph.search_knn(query, k)
+        self.read_graph()?.value.search_knn(query, k)
     }
-
     fn search_threshold(&self, query: &[f32], threshold: f32) -> StorageBackendResult<PostingList> {
-        self.cached.lock().graph.search_threshold(query, threshold)
+        self.read_graph()?.value.search_threshold(query, threshold)
     }
-
     fn count(&self) -> StorageBackendResult<usize> {
-        self.cached.lock().graph.count()
+        self.read_graph()?.value.count()
     }
-
     fn initialize(&mut self) -> StorageBackendResult<()> {
         self.rebuild_graph()
     }
-
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
-        Ok(Arc::new(self.cached.lock().graph.clone()))
+        Ok(self.read_graph()?.snapshot)
     }
-}
-
-fn build_from_canonical(
-    raw: &KeyValueVectorIndex,
-    dimensions: u32,
-    params: HNSWIndexParams,
-) -> StorageBackendResult<HNSWIndex> {
-    let mut graph = HNSWIndex::with_params(dimensions, params)?;
-    for (doc_id, vectors) in raw.load_by_document()? {
-        graph.add_many(doc_id, vectors)?;
-    }
-    Ok(graph)
 }
 
 fn next_revision(revision: Option<u64>) -> StorageBackendResult<u64> {

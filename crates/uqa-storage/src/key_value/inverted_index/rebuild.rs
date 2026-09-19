@@ -7,20 +7,14 @@
 //! Publish a complete graph index from original sources in one storage batch.
 
 use super::{
-    cluster_id, BTreeMap, ClusterKey, DocId, FieldName, KeyValueInvertedIndex, OccurrencePosting,
-    StorageBackendResult,
+    cluster_id, BTreeMap, ClusterKey, DocId, FieldName, KeyValueBatch, OccurrencePosting,
+    OccurrenceRead, StorageBackendResult,
 };
 
-impl KeyValueInvertedIndex {
-    pub(super) fn rebuild_documents(
-        &mut self,
-        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
-    ) -> StorageBackendResult<()> {
-        self.rebuild_documents_inner(documents, None)
-    }
-
+impl OccurrenceRead<'_> {
     pub(super) fn rebuild_documents_inner(
-        &mut self,
+        &self,
+        batch: &mut dyn KeyValueBatch,
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
         cancellation: Option<&uqa_core::CancellationToken>,
     ) -> StorageBackendResult<()> {
@@ -48,27 +42,26 @@ impl KeyValueInvertedIndex {
                 }
             }
         }
-        let mut batch = self.store.batch();
         if let Some(cancellation) = cancellation {
             cancellation.check()?;
         }
-        self.clear_index_batch(batch.as_mut())?;
+        self.clear_index_batch(batch)?;
         for ((field, term, cluster), entries) in clusters {
             if let Some(cancellation) = cancellation {
                 cancellation.check()?;
             }
-            self.put_cluster(batch.as_mut(), &field, &term, cluster, &entries)?;
+            self.put_cluster(batch, &field, &term, cluster, &entries)?;
         }
         for (doc_id, fields) in &staged {
             if let Some(cancellation) = cancellation {
                 cancellation.check()?;
             }
-            self.put_document(batch.as_mut(), *doc_id, fields)?;
+            self.put_document(batch, *doc_id, fields)?;
         }
-        self.put_field_statistics(batch.as_mut(), totals)?;
+        self.put_field_statistics(batch, totals)?;
         if let Some(cancellation) = cancellation {
             cancellation.check()?;
         }
-        batch.commit()
+        Ok(())
     }
 }

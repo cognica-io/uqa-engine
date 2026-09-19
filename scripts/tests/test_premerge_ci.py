@@ -51,7 +51,8 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             "(github.event_name == 'workflow_dispatch' && inputs.run_rust) }}"
         )
 
-        self.assertEqual(self.workflow.count(condition), 10)
+        self.assertEqual(self.workflow.count(condition), 9)
+        self.assertIn("(github.event_name == 'workflow_dispatch' && (inputs.run_rust || inputs.run_nori_allocations))", self.workflow)
         self.assertNotIn("if: ${{ inputs.run_rust }}", self.workflow)
 
     def test_upstream_reference_is_required_by_the_merge_gate(self) -> None:

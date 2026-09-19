@@ -98,6 +98,14 @@ impl Engine {
             false
         };
         if apply_on_commit {
+            if self.versioned_backend_transactions() {
+                if let Err(error) = self.refresh_explicit_statement_snapshot() {
+                    return Err(self.rollback_transaction_completion_failure(
+                        error,
+                        "commit snapshot refresh",
+                    ));
+                }
+            }
             // PostgreSQL alternates deferred-trigger processing with WITH HOLD portal conversion until neither phase can enqueue more work. A cursor query may invoke a mutating routine while it is being materialized, so validating only before portal conversion can otherwise commit a newly queued deferred FK violation.
             loop {
                 self.validate_deferred_constraints_before_outer_commit()?;
@@ -139,6 +147,24 @@ impl Engine {
         failed: bool,
         apply_on_commit: bool,
     ) -> Result<(), SQLError> {
+        if let Some(TransactionStatus::CommitPending(transaction)) =
+            guard.last().map(|frame| frame.status)
+        {
+            return match tx {
+                TransactionStmt::Commit => self.commit_transaction_frame(guard, false),
+                TransactionStmt::CommitAndChain => {
+                    self.finish_transaction_and_chain(guard, "COMMIT", true, false)
+                }
+                TransactionStmt::Rollback => self.rollback_transaction_frame(guard),
+                TransactionStmt::RollbackAndChain => {
+                    self.finish_transaction_and_chain(guard, "ROLLBACK", false, false)
+                }
+                _ => Err(Self::pending_commit_error(
+                    transaction,
+                    "only COMMIT or ROLLBACK can resolve this transaction",
+                )),
+            };
+        }
         match tx {
             TransactionStmt::Rollback => self.rollback_transaction_frame(guard),
             TransactionStmt::Commit if failed => self.rollback_transaction_frame(guard),

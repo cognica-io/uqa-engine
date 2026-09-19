@@ -63,3 +63,6 @@ crates/uqa-node/node_modules/
 /benchmarks/nori/evidence/
 /benchmarks/nori/*-evidence/
 /benchmarks/nori/*followup-evidence.json
+
+# Native logical snapshot coordination
+*.uqa-snapshots

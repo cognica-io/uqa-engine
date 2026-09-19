@@ -6,7 +6,7 @@
 
 //! UTF-8 buffers reserve old and replacement allocations before growing.
 
-use super::{replacement, MemoryBudget, MemoryError, MemoryReservation};
+use super::{reconcile_buffer_capacity, replacement, MemoryBudget, MemoryError, MemoryReservation};
 
 #[derive(Debug)]
 pub struct BudgetedString {
@@ -35,10 +35,11 @@ impl BudgetedString {
         if required <= self.capacity() {
             return Ok(());
         }
-        let (capacity, memory) =
+        let (capacity, mut memory) =
             replacement::<u8>(self.memory.budget(), self.capacity(), required)?;
         let mut value = String::new();
         value.try_reserve_exact(capacity)?;
+        reconcile_buffer_capacity::<u8>(&mut memory, value.capacity())?;
         value.push_str(&self.value);
         self.value = value;
         self.memory = memory;

@@ -6,7 +6,8 @@
 
 //! Schema/catalog enumeration and schema lifecycle.
 
-use super::{CatalogIndexRow, Engine, RelationIdentity, StorageBackendResult};
+use super::{CatalogIndexRow, Engine, StorageBackendResult};
+use uqa_execution::catalog::sequence::snapshot::SequenceSnapshotSource;
 
 pub(crate) use uqa_sql::catalog::is_virtual_system_schema;
 
@@ -37,11 +38,12 @@ impl Engine {
     /// schema was created and `false` only for `IF NOT EXISTS`.
     pub fn register_schema(&self, name: &str, if_not_exists: bool) -> StorageBackendResult<bool> {
         self.with_implicit_storage_transaction(|engine| {
-            engine.synchronize_catalog_registries()?;
-            let role_owner = engine.current_user_name();
-            engine
-                .mutation_coordinator()
-                .register_schema(name, if_not_exists, &role_owner)
+            uqa_execution::schema::namespaces::register_api_schema(
+                &engine.schema_creation_context(),
+                name,
+                if_not_exists,
+            )
+            .map_err(|error| uqa_storage::StorageBackendError::backend("CREATE SCHEMA", error))
         })
     }
 
@@ -70,8 +72,8 @@ impl Engine {
             || self.durable.graphs.read().contains_key(name))
     }
 
-    pub(crate) fn validate_schema_name(name: &str) -> StorageBackendResult<()> {
-        crate::capabilities::validate_schema_name(name)
+    pub(crate) fn validate_stored_schema_name(name: &str) -> StorageBackendResult<()> {
+        crate::capabilities::validate_stored_schema_name(name)
     }
 
     pub(crate) fn schema_is_empty(&self, schema: &str) -> bool {
@@ -140,24 +142,10 @@ impl Engine {
     }
 
     pub fn list_sequences(&self) -> StorageBackendResult<Vec<String>> {
+        let _statement = self.runtime.statement_gate.lock();
         if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
-            let mut out = snapshot
-                .sequences
-                .keys()
-                .map(RelationIdentity::qualified_name)
-                .collect::<Vec<_>>();
-            out.sort_unstable();
-            return Ok(out);
+            return Ok(snapshot.sequence_read_snapshot().names());
         }
-        self.refresh_sequences_from_catalog()?;
-        let mut out: Vec<String> = self
-            .durable
-            .sequences
-            .read()
-            .keys()
-            .map(RelationIdentity::qualified_name)
-            .collect();
-        out.sort_unstable();
-        Ok(out)
+        Ok(self.sequence_read_snapshot()?.names())
     }
 }

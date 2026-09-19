@@ -12,35 +12,41 @@ use super::{
 };
 
 impl Engine {
-    /// Run `f` inside one engine transaction. On success the transaction is
-    /// committed; on error or panic it is rolled back before the error/panic is
-    /// returned to the caller.
+    /// Run `f` inside one engine transaction. An error or panic from `f` rolls back the transaction. A successful callback commits; an indeterminate commit retains its sealed attempt in the session for resolution through `commit` or `rollback`, without replaying `f`.
     pub fn transaction<R>(
         &self,
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
+        self.transaction_with_error(f, std::convert::identity)
+    }
+
+    pub(crate) fn transaction_with_error<R, E: std::fmt::Display>(
+        &self,
+        f: impl FnOnce(&Self) -> Result<R, E>,
+        map_transaction_error: impl Fn(SQLError) -> E,
+    ) -> Result<R, E> {
         let _statement = self.runtime.statement_gate.lock();
-        let mut scope = TransactionScope::begin(self)?;
+        let mut scope = TransactionScope::begin(self).map_err(&map_transaction_error)?;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)));
         match result {
             Ok(Ok(value)) => {
-                scope.commit()?;
+                scope.commit().map_err(&map_transaction_error)?;
                 Ok(value)
             }
             Ok(Err(err)) => {
                 if let Err(rollback_err) = scope.rollback() {
-                    return Err(SQLError::Internal(format!(
+                    return Err(map_transaction_error(SQLError::Internal(format!(
                         "transaction rollback after error failed: {rollback_err}; original error: {err}"
-                    )));
+                    ))));
                 }
                 Err(err)
             }
             Err(payload) => match scope.rollback() {
                 Ok(()) => std::panic::resume_unwind(payload),
-                Err(rollback_err) => Err(SQLError::Internal(format!(
+                Err(rollback_err) => Err(map_transaction_error(SQLError::Internal(format!(
                     "transaction rollback after panic failed: {rollback_err}; original panic: {}",
                     panic_description(payload.as_ref())
-                ))),
+                )))),
             },
         }
     }
@@ -69,6 +75,26 @@ impl Engine {
             engine.prepare_explicit_transaction_writer()?;
             f(engine)
         })
+    }
+
+    /// Definition changes need transaction-owned relation locks even for direct memory APIs. Defer physical writer admission until execution has acquired and revalidated those locks.
+    pub(crate) fn with_implicit_definition_transaction<R>(
+        &self,
+        f: impl FnOnce(&Self) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
+        let _statement = self.runtime.statement_gate.lock();
+        if self.current_transaction_is_read_only() {
+            return Err(SQLError::Routine {
+                sqlstate: "25006".into(),
+                message: "cannot execute direct mutation in a read-only transaction".into(),
+            });
+        }
+        if self.transaction_depth() != 0 {
+            self.ensure_transaction_usable()?;
+            f(self)
+        } else {
+            self.transaction(f)
+        }
     }
 
     /// Error-type-preserving counterpart for direct APIs whose public error
@@ -155,7 +181,7 @@ impl Engine {
                 "cannot execute storage mutation in a read-only transaction".into(),
             ));
         }
-        self.with_implicit_storage_transaction_inner(false, f)
+        self.with_implicit_storage_transaction_inner(false, true, f)
     }
 
     /// Run storage maintenance that `PostgreSQL` permits in a read-only transaction. The transaction remains logically read-only, while its physical backend is allowed to persist maintenance metadata such as ANALYZE statistics.
@@ -163,29 +189,50 @@ impl Engine {
         &self,
         f: impl FnOnce(&Self) -> StorageBackendResult<R>,
     ) -> StorageBackendResult<R> {
-        if self.transaction_depth() != 0 && self.current_transaction_is_read_only() {
-            self.ensure_transaction_usable()
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            return f(self);
+        self.with_storage_maintenance_scope(|engine| {
+            engine.prepare_storage_maintenance_writer()?;
+            f(engine)
+        })
+    }
+
+    /// Establish the maintenance transaction before execution acquires logical locks or samples rows. Physical write admission is deferred until the caller has finished every required logical wait.
+    pub(crate) fn with_storage_maintenance_scope<R>(
+        &self,
+        f: impl FnOnce(&Self) -> StorageBackendResult<R>,
+    ) -> StorageBackendResult<R> {
+        self.with_implicit_storage_transaction_inner(true, false, f)
+    }
+
+    pub(crate) fn prepare_storage_maintenance_writer(&self) -> StorageBackendResult<()> {
+        self.prepare_explicit_transaction_writer()
+            .map_err(|error| StorageBackendError::backend("maintenance transaction", error))?;
+        if self.current_transaction_is_read_only() {
+            // SQL access remains read-only. Physical maintenance admission is retained until the transaction ends, including after savepoint undo.
+            for frame in self.session.transactions.lock().iter_mut() {
+                frame.intent = TransactionIntent::ReadWrite;
+            }
         }
-        self.with_implicit_storage_transaction_inner(true, f)
+        Ok(())
     }
 
     fn with_implicit_storage_transaction_inner<R>(
         &self,
         maintenance_can_override_default_read_only: bool,
+        promote_writer: bool,
         f: impl FnOnce(&Self) -> StorageBackendResult<R>,
     ) -> StorageBackendResult<R> {
         let _statement = self.runtime.statement_gate.lock();
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            self.prepare_explicit_transaction_writer()
-                .map_err(|error| {
-                    StorageBackendError::Other(format!(
-                        "promote explicit engine transaction failed: {error}"
-                    ))
-                })?;
+            if promote_writer {
+                self.prepare_explicit_transaction_writer()
+                    .map_err(|error| {
+                        StorageBackendError::Other(format!(
+                            "promote explicit engine transaction failed: {error}"
+                        ))
+                    })?;
+            }
             return f(self);
         }
         let mut scope = TransactionScope::begin(self).map_err(|error| {
@@ -197,7 +244,10 @@ impl Engine {
                 frame.characteristics.read_only = false;
             }
         }
-        if let Err(error) = self.prepare_explicit_transaction_writer() {
+        if let Err(error) = promote_writer
+            .then(|| self.prepare_explicit_transaction_writer())
+            .transpose()
+        {
             let error = StorageBackendError::Other(format!(
                 "promote implicit engine transaction failed: {error}"
             ));

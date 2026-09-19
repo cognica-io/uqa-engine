@@ -7,12 +7,14 @@
 //! Column-statistics collection, persistence, and lazy refresh.
 
 mod automatic;
+#[cfg(test)]
+mod tests;
 
 use super::analyze_helpers::ColumnAnalyzeValues;
 use super::{
     build_histogram, build_mcv, collect_analyze_values, distinct_count, Arc, BTreeMap,
-    CatalogFacade, ColumnStatsInput, DocId, Engine, Ordering, RelationIdentity,
-    StorageBackendError, StorageBackendResult, TableState, Value,
+    CatalogFacade, ColumnStatsInput, DocId, Engine, Ordering, StorageBackendError,
+    StorageBackendResult, TableState, Value,
 };
 
 struct HierarchyAnalyzeInputs {
@@ -83,9 +85,7 @@ impl Engine {
     /// frequency), and stores the result on the per-table state so the
     /// cardinality estimator can read it on subsequent queries.
     pub fn run_analyze(&self, table: Option<&str>) -> StorageBackendResult<()> {
-        self.with_read_only_compatible_storage_transaction(|engine| {
-            engine.run_analyze_inner(table, None, true)
-        })
+        self.analyze_targets(table, None, true, false)
     }
 
     pub(crate) fn run_analyze_target(
@@ -94,52 +94,48 @@ impl Engine {
         columns: &[String],
         include_descendants: bool,
     ) -> StorageBackendResult<()> {
-        let columns = (!columns.is_empty()).then_some(columns);
-        self.with_read_only_compatible_storage_transaction(|engine| {
-            engine.run_analyze_inner(Some(table), columns, include_descendants)
-        })
+        self.analyze_targets(
+            Some(table),
+            (!columns.is_empty()).then_some(columns),
+            include_descendants,
+            true,
+        )
     }
 
-    fn run_analyze_inner(
+    fn analyze_targets(
         &self,
         table: Option<&str>,
         columns: Option<&[String]>,
         include_descendants: bool,
+        check_privileges: bool,
     ) -> StorageBackendResult<()> {
-        if let Some(name) = table {
-            let Some(canonical_name) = self.try_resolve_table_name(name)? else {
-                return Err(StorageBackendError::Other(format!(
-                    "ANALYZE target table `{name}` does not exist"
-                )));
-            };
-            let Some(table) = self.try_table(&canonical_name)? else {
-                return Err(StorageBackendError::Other(format!(
-                    "ANALYZE target table `{name}` does not exist"
-                )));
-            };
-            self.analyze_table(&canonical_name, &table, true, columns, include_descendants)?;
-        } else {
-            // The catalog can change between collecting the names and opening
-            // each table in another session. Missing entries are only benign
-            // for the catalog-wide form; an explicitly named table above is
-            // always an error.
-            let names: Vec<String> = self
-                .storage
-                .tables
-                .read()
-                .keys()
-                .map(RelationIdentity::qualified_name)
-                .collect();
-            for name in names {
-                let Some(table) = self.table(&name)? else {
-                    continue;
-                };
-                self.analyze_table(&name, &table, true, None, true)?;
+        self.with_storage_maintenance_scope(|engine| {
+            let targets = uqa_execution::maintenance::analyze::prepare_targets(
+                &engine.analyze_execution_context(check_privileges),
+                table,
+                include_descendants,
+            )
+            .map_err(|error| StorageBackendError::backend("ANALYZE locking", error))?;
+            if targets.is_empty() {
+                return Ok(());
             }
-        }
-        // Persisted statistics participate in DPccp join ordering and every
-        // cached optimized statement. Publish the same commit-delayed data
-        // generation even when ANALYZE did not change document contents.
+            engine.prepare_storage_maintenance_writer()?;
+            uqa_execution::maintenance::analyze::run_locked_targets(&targets, |name| {
+                engine.analyze_locked_table(name, columns, include_descendants)
+            })
+        })
+    }
+
+    fn analyze_locked_table(
+        &self,
+        name: &str,
+        columns: Option<&[String]>,
+        include_descendants: bool,
+    ) -> StorageBackendResult<()> {
+        let table = self.try_table(name)?.ok_or_else(|| {
+            StorageBackendError::Other(format!("locked ANALYZE target `{name}` does not exist"))
+        })?;
+        self.analyze_table(name, &table, true, columns, include_descendants)?;
         self.note_table_data_changed();
         Ok(())
     }
@@ -162,7 +158,6 @@ impl Engine {
             .hierarchy_ancestor_tables(canonical_table_name)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         for name in ancestors {
-            self.statistics.invalidate_column_stats(&name);
             let state = if name == canonical_table_name {
                 Arc::clone(table)
             } else {
@@ -211,14 +206,13 @@ impl Engine {
                 "column `{column}` of relation `{canonical_table_name}` does not exist"
             )));
         }
-        let stats_out = build_analyze_stats(
+        let inputs = self.collect_hierarchy_analyze_inputs(
+            canonical_table_name,
             &columns,
-            self.collect_hierarchy_analyze_inputs(
-                canonical_table_name,
-                &columns,
-                include_descendants,
-            )?,
+            include_descendants,
         )?;
+        let row_count = inputs.row_count;
+        let stats_out = build_analyze_stats(&columns, inputs)?;
 
         let stats_out = if requested_columns.is_some() {
             let mut combined = t.column_stats.read().clone();
@@ -227,59 +221,21 @@ impl Engine {
         } else {
             stats_out
         };
-        let mut persisted_autonomously = false;
         if persist && t.persistence != uqa_sql::ast::RelationPersistence::Temporary {
-            let backend_has_written = self
-                .storage
-                .backend
-                .as_ref()
-                .map(|backend| backend.transaction_has_written())
-                .transpose()?
-                .unwrap_or(false);
-            if self.transaction_depth() != 0
-                && self.current_transaction_is_read_only()
-                && !backend_has_written
-                && self.storage.backend.is_some()
-            {
-                if self
-                    .storage
-                    .backend
-                    .as_ref()
-                    .is_some_and(|backend| !backend.supports_concurrent_pinned_read_and_write())
-                {
-                    self.release_backend_reader_for_independent_maintenance()
-                        .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-                }
-                self.persist_column_stats_independently(canonical_table_name, &stats_out)?;
-                persisted_autonomously = true;
-            } else if let Some(catalog) = self.storage.catalog.as_ref() {
-                Self::persist_column_stats(catalog.as_ref(), canonical_table_name, &stats_out)?;
+            if let Some(catalog) = self.storage.catalog.as_ref() {
+                Self::persist_column_stats(
+                    catalog.as_ref(),
+                    canonical_table_name,
+                    &stats_out,
+                    t.object_id(),
+                    row_count,
+                )?;
             }
         }
-        *t.column_stats.write() = stats_out.clone();
+        *t.column_stats.write() = stats_out;
         t.column_stats_loaded.store(true, Ordering::Release);
         t.column_stats_dirty.store(false, Ordering::Release);
-        self.clear_pending_statistics_changes(canonical_table_name);
-        if persist {
-            if t.persistence != uqa_sql::ast::RelationPersistence::Temporary {
-                self.statistics
-                    .publish_column_stats(canonical_table_name.to_string(), stats_out.clone());
-            }
-            if let Some(frame) = self.session.transactions.lock().first_mut() {
-                frame
-                    .nontransactional_column_stats
-                    .retain(|entry| entry.table_lifecycle_id != t.lifecycle_id());
-                frame
-                    .nontransactional_column_stats
-                    .push(crate::NontransactionalColumnStatsEntry {
-                        table_name: canonical_table_name.to_string(),
-                        table_lifecycle_id: t.lifecycle_id(),
-                        stats: stats_out,
-                        persistent: t.persistence != uqa_sql::ast::RelationPersistence::Temporary,
-                        autonomous: persisted_autonomously,
-                    });
-            }
-        }
+        self.clear_pending_statistics_changes(canonical_table_name, t.object_id());
         Ok(())
     }
 
@@ -350,34 +306,12 @@ impl Engine {
         })
     }
 
-    pub(crate) fn persist_column_stats_independently(
-        &self,
-        table_name: &str,
-        stats: &BTreeMap<String, uqa_planner::ColumnStats>,
-    ) -> StorageBackendResult<()> {
-        let provider = self.storage.provider.as_ref().ok_or_else(|| {
-            StorageBackendError::Other(
-                "read-only ANALYZE requires an independent persistent session".into(),
-            )
-        })?;
-        let session = provider.open_session()?;
-        session.backend.begin_transaction()?;
-        let result = Self::persist_column_stats(session.catalog.as_ref(), table_name, stats);
-        match result {
-            Ok(()) => session.backend.commit_transaction(),
-            Err(error) => match session.backend.rollback_transaction() {
-                Ok(()) => Err(error),
-                Err(rollback_error) => Err(StorageBackendError::Other(format!(
-                    "persist ANALYZE statistics failed: {error}; rollback also failed: {rollback_error}"
-                ))),
-            },
-        }
-    }
-
     pub(crate) fn persist_column_stats(
         catalog: &dyn CatalogFacade,
         table_name: &str,
         stats: &BTreeMap<String, uqa_planner::ColumnStats>,
+        object_id: [u8; 16],
+        row_count: u64,
     ) -> StorageBackendResult<()> {
         struct EncodedColumnStats {
             column_name: String,
@@ -434,10 +368,12 @@ impl Engine {
             })
             .collect::<Vec<_>>();
         catalog.replace_column_stats(table_name, &rows)?;
-        crate::statistics::MaintenanceState::analyzed(
+        crate::statistics::MaintenanceState::analyzed_for(
             catalog,
             table_name,
-            stats.values().next().map_or(0, |stats| stats.row_count),
+            object_id,
+            row_count,
+            crate::statistics::value_size::FORMAT_VERSION,
         )
     }
 
@@ -478,12 +414,6 @@ impl Engine {
         let t = self
             .try_table(&canonical_name)?
             .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` does not exist")))?;
-        if let Some(stats) = self.statistics.published_column_stats(&canonical_name) {
-            *t.column_stats.write() = stats.clone();
-            t.column_stats_loaded.store(true, Ordering::Release);
-            t.column_stats_dirty.store(false, Ordering::Release);
-            return Ok(stats);
-        }
         if t.column_stats_dirty.load(Ordering::Acquire) {
             if self.storage.catalog.is_none() {
                 // Memory-only lazy collection has no durable publication and

@@ -10,30 +10,42 @@ use crate::ast::{CreateRoleStmt, RoleAttribute};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
+pub mod identity;
+pub mod rename;
+pub mod session;
+pub mod tuple;
+use identity::RoleBinding;
+pub use identity::{RoleIdentity, RoleReference};
 pub mod memberships;
 pub use memberships::{role_can_set, role_inherits};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoleDefinition {
     pub oid: i64,
+    /// Durable incarnation independent of the recyclable SQL-visible OID. Zero identifies legacy metadata that requires initial-open migration.
+    #[serde(default)]
+    pub object_id: [u8; 16],
+    /// Version of this definition tuple; even an attribute assignment of the same value creates a new tuple version. Zero requires initial-open conversion.
+    #[serde(default)]
+    pub revision: u64,
     pub name: String,
     pub attributes: BTreeSet<RoleAttribute>,
     pub connection_limit: i32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct RoleMembershipKey {
-    pub role: String,
-    pub member: String,
-    pub grantor: String,
+    pub role: RoleIdentity,
+    pub member: RoleIdentity,
+    pub grantor: RoleIdentity,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoleMembership {
     pub oid: i64,
-    pub role: String,
-    pub member: String,
-    pub grantor: String,
+    pub role: RoleBinding,
+    pub member: RoleBinding,
+    pub grantor: RoleBinding,
     pub admin_option: bool,
     pub inherit_option: bool,
     pub set_option: bool,
@@ -42,17 +54,26 @@ pub struct RoleMembership {
 impl RoleMembership {
     pub fn key(&self) -> RoleMembershipKey {
         RoleMembershipKey {
-            role: self.role.clone(),
-            member: self.member.clone(),
-            grantor: self.grantor.clone(),
+            role: self.role.identity(),
+            member: self.member.identity(),
+            grantor: self.grantor.identity(),
         }
     }
 }
 
 impl RoleDefinition {
+    pub fn identity(&self) -> RoleIdentity {
+        RoleIdentity {
+            oid: self.oid,
+            object_id: self.object_id,
+        }
+    }
+
     pub fn bootstrap() -> Self {
         Self {
             oid: 10,
+            object_id: RoleIdentity::BOOTSTRAP.object_id,
+            revision: 1,
             name: "uqa".into(),
             attributes: BTreeSet::from([
                 RoleAttribute::Superuser,
@@ -66,9 +87,11 @@ impl RoleDefinition {
         }
     }
 
-    pub fn from_create(statement: &CreateRoleStmt) -> Self {
+    pub fn from_create(statement: &CreateRoleStmt, oid: i64, object_id: [u8; 16]) -> Self {
         Self {
-            oid: role_oid(&statement.name),
+            oid,
+            object_id,
+            revision: 1,
             name: statement.name.clone(),
             attributes: statement.attributes.clone(),
             connection_limit: statement.connection_limit,
@@ -78,32 +101,55 @@ impl RoleDefinition {
     pub fn has(&self, attribute: RoleAttribute) -> bool {
         self.attributes.contains(&attribute)
     }
+
+    pub fn advance_revision(&mut self) -> Result<(), crate::SQLError> {
+        self.revision = self
+            .revision
+            .checked_add(1)
+            .filter(|_| self.revision != 0)
+            .ok_or_else(|| {
+                crate::SQLError::Internal("invalid or exhausted role tuple revision".into())
+            })?;
+        Ok(())
+    }
 }
 
-pub fn role_oid(name: &str) -> i64 {
-    if name == "uqa" {
-        return 10;
-    }
-    let mut hash = 14_695_981_039_346_656_037_u64;
-    for byte in name.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(1_099_511_628_211);
-    }
-    20_000 + i64::try_from(hash % 2_000_000_000).unwrap_or(0)
-}
-
-/// Session names used by `CURRENT_USER` and `SESSION_USER` role references.
+/// Selected identities used by SQL current-user, session-user and authenticated-role references.
 pub trait RoleReferenceNames {
-    fn current_user_name(&self) -> String;
-    fn session_user_name(&self) -> String;
-}
-pub fn resolve_role_reference(names: &dyn RoleReferenceNames, name: &str) -> String {
-    match name {
-        "CURRENT_USER" => names.current_user_name(),
-        "SESSION_USER" => names.session_user_name(),
-        other => other.to_string(),
+    fn current_role(&self) -> RoleReference;
+    fn session_role(&self) -> RoleReference;
+    /// Session-selected role before any SECURITY DEFINER substitution.
+    fn outer_role(&self) -> RoleReference;
+    fn authenticated_role(&self) -> RoleReference {
+        self.session_role()
     }
 }
+pub fn resolve_role_specification(
+    names: &dyn RoleReferenceNames,
+    specification: &crate::ast::RoleSpecification,
+) -> RoleReference {
+    match specification {
+        crate::ast::RoleSpecification::Named(name) => name.clone().into(),
+        crate::ast::RoleSpecification::CurrentUser => names.current_role(),
+        crate::ast::RoleSpecification::SessionUser => names.session_role(),
+    }
+}
+
+pub fn resolve_acl_role_specification(
+    names: &dyn RoleReferenceNames,
+    specification: &crate::ast::AclRoleSpecification,
+    roles: &std::collections::BTreeMap<String, RoleDefinition>,
+) -> Result<uqa_core::catalog_acl::AclGrantee, crate::SQLError> {
+    use crate::ast::AclRoleSpecification;
+    use uqa_core::catalog_acl::AclGrantee;
+    match specification {
+        AclRoleSpecification::Public => Ok(AclGrantee::Public),
+        AclRoleSpecification::Role(role) => resolve_role_specification(names, role)
+            .catalog_name(roles)
+            .map(AclGrantee::Role),
+    }
+}
+
 pub fn require_role_exists(
     roles: &std::collections::BTreeMap<String, RoleDefinition>,
     name: &str,
@@ -119,7 +165,7 @@ pub fn require_role_exists(
 pub fn require_set_role(
     roles: &std::collections::BTreeMap<String, RoleDefinition>,
     memberships: &std::collections::BTreeMap<RoleMembershipKey, RoleMembership>,
-    current: &str,
+    current: &(impl identity::RoleSubject + ?Sized),
     target: &str,
 ) -> Result<(), crate::SQLError> {
     if role_can_set(roles, memberships, current, target) {

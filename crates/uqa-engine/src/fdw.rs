@@ -103,9 +103,13 @@ impl Engine {
     }
 
     pub fn drop_foreign_table(&self, name: &str) -> Result<bool, String> {
-        self.with_implicit_string_transaction(|engine| {
-            engine.foreign_removal_context().drop_foreign_table(name)
+        self.with_implicit_definition_transaction(|engine| {
+            uqa_execution::schema::removal::direct::drop_foreign_table(
+                &engine.relation_removal_context(),
+                name,
+            )
         })
+        .map_err(|error| error.to_string())
     }
 
     pub fn foreign_server(&self, name: &str) -> Result<Option<uqa_fdw::ForeignServer>, String> {

@@ -6,7 +6,6 @@
 
 //! Catalog facade implementation for key/value-backed persistence.
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -15,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::catalog::{
     CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
     GraphSnapshot, RelationIdentity, RelationKind, SchemaRow, SequenceOptions,
-    SequenceReservationResult, SequenceRow, TableAclEntry, TableSchema, ViewRow,
+    SequenceReservationResult, SequenceRow, SequenceSetValueResult, TableSchema, ViewRow,
 };
 use crate::{StorageBackendError, StorageBackendResult};
 
@@ -40,18 +39,23 @@ use super::{
 mod analyzers;
 mod foreign;
 mod graph_access;
+mod graph_guards;
+mod graph_view;
 mod graphs;
 mod indexes;
-mod keys;
+pub(super) mod keys;
 mod migration;
 mod models;
 mod occurrence_lifecycle;
 mod path_index_data;
 mod physical_indexes;
 mod records;
+mod relation_acl;
 mod relations;
 mod schema_table;
 mod sequences;
+mod table_data;
+mod tables;
 mod views;
 
 use keys::{
@@ -59,9 +63,9 @@ use keys::{
     catalog_index_references_column, catalog_index_rename_column, column_stats_key,
     column_stats_prefix, decode_catalog_relation_key, decode_relation_key, edge_key,
     ensure_prefix_absent, graph_membership_graph_prefix, graph_membership_key,
-    graph_membership_prefix, load_single_keys, load_single_string_rows,
-    register_migration_relation, relation_key, table_field_analyzer_field_prefix,
-    table_field_analyzer_key, table_field_analyzer_prefix, vertex_key,
+    graph_membership_prefix, load_single_string_rows, register_migration_relation, relation_key,
+    table_field_analyzer_field_prefix, table_field_analyzer_key, table_field_analyzer_prefix,
+    vertex_key,
 };
 use migration::{
     apply_relation_migrations, collect_relation_migrations, validate_relation_parents,
@@ -75,7 +79,6 @@ use records::{
 #[derive(Clone)]
 pub struct KeyValueCatalog {
     store: Arc<dyn KeyValueStore>,
-    sequence_lock: Arc<Mutex<()>>,
     graph_indexes_lock: Arc<Mutex<()>>,
 }
 
@@ -83,7 +86,6 @@ impl KeyValueCatalog {
     pub fn new(store: Arc<dyn KeyValueStore>) -> Self {
         Self {
             store,
-            sequence_lock: Arc::new(Mutex::new(())),
             graph_indexes_lock: Arc::new(Mutex::new(())),
         }
     }
@@ -94,6 +96,14 @@ impl KeyValueCatalog {
 }
 
 impl CatalogFacade for KeyValueCatalog {
+    fn transaction_model(&self) -> crate::StorageTransactionModel {
+        self.store.transaction_model()
+    }
+
+    fn transaction_affinity(&self) -> Option<crate::StorageSessionAffinity> {
+        self.store.transaction_affinity()
+    }
+
     fn clear_path_index_data(&self, index: &str) -> StorageBackendResult<()> {
         self.clear_path_index_data_impl(index)
     }
@@ -155,36 +165,42 @@ impl CatalogFacade for KeyValueCatalog {
         &self,
         filter: crate::GraphEntityFilter<'_>,
     ) -> StorageBackendResult<u64> {
-        let mut after = None;
-        let mut count = 0_u64;
-        loop {
-            let ids = self.graph_entity_ids_impl(filter, after, 256)?;
-            if ids.is_empty() {
-                return Ok(count);
+        self.with_graph_read(|read| {
+            let mut after = None;
+            let mut count = 0_u64;
+            loop {
+                let ids = read.ids(filter, after, 256)?;
+                if ids.is_empty() {
+                    return Ok(count);
+                }
+                after = ids.last().copied();
+                count = count
+                    .checked_add(
+                        u64::try_from(ids.len())
+                            .map_err(|error| StorageBackendError::Other(error.to_string()))?,
+                    )
+                    .ok_or_else(|| {
+                        StorageBackendError::Other("graph entity count overflow".into())
+                    })?;
             }
-            after = ids.last().copied();
-            count = count
-                .checked_add(
-                    u64::try_from(ids.len())
-                        .map_err(|error| StorageBackendError::Other(error.to_string()))?,
-                )
-                .ok_or_else(|| StorageBackendError::Other("graph entity count overflow".into()))?;
-        }
+        })
     }
 
     fn graph_entity_max_id(
         &self,
         kind: crate::GraphEntityKind,
     ) -> StorageBackendResult<Option<u64>> {
-        let filter = crate::GraphEntityFilter::new(kind, None);
-        let mut after = None;
-        loop {
-            let ids = self.graph_entity_ids_impl(filter, after, 256)?;
-            if ids.is_empty() {
-                return Ok(after);
+        self.with_graph_read(|read| {
+            let filter = crate::GraphEntityFilter::new(kind, None);
+            let mut after = None;
+            loop {
+                let ids = read.ids(filter, after, 256)?;
+                if ids.is_empty() {
+                    return Ok(after);
+                }
+                after = ids.last().copied();
             }
-            after = ids.last().copied();
-        }
+        })
     }
 
     fn graph_entity_memberships(
@@ -209,8 +225,36 @@ impl CatalogFacade for KeyValueCatalog {
         self.set_metadata_impl(key, value)
     }
 
+    fn delete_metadata(&self, key: &str) -> StorageBackendResult<()> {
+        self.delete_metadata_impl(key)
+    }
+
     fn get_metadata(&self, key: &str) -> StorageBackendResult<Option<String>> {
         self.get_metadata_impl(key)
+    }
+
+    fn metadata_has_private_changes(&self, key: &str) -> StorageBackendResult<bool> {
+        self.metadata_has_private_changes_impl(key)
+    }
+    fn metadata_with_prefix(&self, prefix: &str) -> StorageBackendResult<Vec<(String, String)>> {
+        self.metadata_with_prefix_impl(prefix)
+    }
+
+    fn save_statistics_maintenance(
+        &self,
+        table: &str,
+        state: &crate::statistics_maintenance::StatisticsMaintenance,
+    ) -> StorageBackendResult<()> {
+        let key = single_str_key(
+            TAG_METADATA,
+            &crate::statistics_maintenance::StatisticsMaintenance::key(table),
+        )?;
+        self.store.with_mutation(&mut |read, batch| {
+            let value = state
+                .encode(read.control())
+                .map_err(crate::mvcc::VersionError::into_storage_error)?;
+            batch.replace_statistics_maintenance(&key, &value)
+        })
     }
 
     fn migrate_relation_namespace(&self) -> StorageBackendResult<()> {
@@ -220,6 +264,10 @@ impl CatalogFacade for KeyValueCatalog {
 
     fn save_schema_row(&self, schema: &SchemaRow) -> StorageBackendResult<()> {
         self.save_schema_row_impl(schema)
+    }
+
+    fn schema_has_private_changes(&self, name: &str) -> StorageBackendResult<bool> {
+        self.named_record_has_private_changes(TAG_SCHEMA, name)
     }
 
     fn drop_schema(&self, name: &str) -> StorageBackendResult<()> {
@@ -319,6 +367,14 @@ impl CatalogFacade for KeyValueCatalog {
         self.load_sequence_rows_impl()
     }
 
+    fn sequence_has_private_changes(
+        &self,
+        relation: &RelationIdentity,
+        _object_id: [u8; 16],
+    ) -> StorageBackendResult<bool> {
+        self.sequence_has_private_changes_impl(relation)
+    }
+
     fn reserve_sequence_values(
         &self,
         name: &str,
@@ -332,11 +388,19 @@ impl CatalogFacade for KeyValueCatalog {
         &self,
         name: &str,
         object_id: [u8; 16],
+        definition_generation: [u8; 16],
         value: i64,
         called: bool,
         log_count: i64,
-    ) -> StorageBackendResult<Option<i64>> {
-        self.set_sequence_value_impl(name, object_id, value, called, log_count)
+    ) -> StorageBackendResult<SequenceSetValueResult> {
+        self.set_sequence_value_impl(
+            name,
+            object_id,
+            definition_generation,
+            value,
+            called,
+            log_count,
+        )
     }
 
     fn save_view(&self, view: &ViewRow) -> StorageBackendResult<()> {
@@ -361,6 +425,24 @@ impl CatalogFacade for KeyValueCatalog {
 
     fn save_named_graph(&self, name: &str) -> StorageBackendResult<()> {
         self.save_named_graph_impl(name)
+    }
+    fn guard_graph_definition(&self, graph: Option<&str>) -> StorageBackendResult<()> {
+        self.guard_graph_definition_impl(graph)
+    }
+    fn load_named_graph_snapshot(&self, name: &str) -> StorageBackendResult<Option<GraphSnapshot>> {
+        let (mut result, namespace) =
+            self.with_graph_read(|read| Ok((read.snapshot(name)?, read.identifier_namespace()?)))?;
+        if let (Some(snapshot), Some(allocator)) =
+            (result.as_mut(), self.store.identifier_allocator())
+        {
+            snapshot.label_registry_json = crate::catalog::graph_identifiers::export_registry(
+                &snapshot.label_registry_json,
+                name,
+                namespace,
+                |key| allocator.identifier_watermark(key),
+            )?;
+        }
+        Ok(result)
     }
 
     fn drop_named_graph(&self, name: &str) -> StorageBackendResult<()> {
@@ -565,11 +647,9 @@ impl CatalogFacade for KeyValueCatalog {
     fn update_foreign_table_security(
         &self,
         relation: &RelationIdentity,
-        role_owner: &str,
-        acl: Option<&[TableAclEntry]>,
-        column_acls: &BTreeMap<String, Vec<TableAclEntry>>,
+        security: &crate::RelationSecurityRow,
     ) -> StorageBackendResult<bool> {
-        self.update_foreign_table_security_impl(relation, role_owner, acl, column_acls)
+        self.update_foreign_table_security_impl(relation, security)
     }
 
     fn drop_foreign_table(&self, relation: &RelationIdentity) -> StorageBackendResult<()> {

@@ -78,6 +78,7 @@ pub fn builtin_function_dispatch_name(name: &str) -> String {
                         | "setval"
                         | "current_schema"
                         | "current_schemas"
+                        | "current_setting"
                         | "pg_backend_pid"
                         | "pg_listening_channels"
                         | "pg_notify"
@@ -96,6 +97,7 @@ pub fn builtin_function_dispatch_name(name: &str) -> String {
                         | "has_database_privilege"
                         | "has_schema_privilege"
                         | "has_sequence_privilege"
+                        | "has_function_privilege"
                 )
         }
         _ => false,

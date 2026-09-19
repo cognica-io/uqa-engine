@@ -12,7 +12,7 @@ use uqa_execution::{
         lookup::{ForeignLookupContext, ForeignLookupState},
         StoredForeignTable,
     },
-    schema::foreign_removal::{ForeignSequenceDependents, ForeignTableRemovalContext},
+    schema::foreign_removal::ForeignTableRemovalContext,
 };
 use uqa_storage::StorageBackendResult;
 impl Engine {
@@ -30,8 +30,6 @@ impl Engine {
             changes: self,
             events: self.event_lifecycle_context(),
             owners: self,
-            dependencies: self,
-            sequences: self,
         }
     }
 }
@@ -54,14 +52,5 @@ impl ForeignLookupState for Engine {
         name: &str,
     ) -> StorageBackendResult<Vec<RelationIdentity>> {
         Engine::relation_lookup_candidates(self, name)
-    }
-}
-impl ForeignSequenceDependents for Engine {
-    fn sequence_external_dependents_for_owner_drop(
-        &self,
-        sequence: &str,
-        targets: &std::collections::BTreeSet<String>,
-    ) -> StorageBackendResult<Vec<String>> {
-        Engine::sequence_external_dependents_for_owner_drop(self, sequence, targets)
     }
 }

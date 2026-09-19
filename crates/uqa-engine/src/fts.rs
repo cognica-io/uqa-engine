@@ -354,6 +354,9 @@ impl Engine {
             Some(metadata) => metadata,
             None => uqa_storage::DocumentMetadata::with_tuple_xmin(self.tuple_version_xid()?),
         };
+        self.advance_next_id(&table_name, doc_id).map_err(|error| {
+            SQLError::Internal(format!("observe inserted document identity: {error}"))
+        })?;
         let mut store = t.document_store.write();
         store
             .put_stored(
@@ -370,13 +373,6 @@ impl Engine {
         drop(store);
         self.mark_column_stats_dirty(&table_name, &t)
             .map_err(|err| SQLError::Internal(format!("invalidate column stats: {err}")))?;
-        // Keep the auto-id watermark monotonic over manual inserts as well.
-        let mut nx = t.next_id.lock();
-        let next = u128::from(doc_id) + 1;
-        if next > *nx {
-            *nx = next;
-        }
-        drop(nx);
         if existed {
             self.note_row_changed(&table_name, doc_id)?;
         } else {

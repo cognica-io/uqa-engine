@@ -87,7 +87,7 @@ fn catalog_relation_identity_is_retained_before_planning_nested_queries() {
         &inputs.context(),
         statement("WITH source AS (SELECT $1 AS id FROM public.items) SELECT id FROM source"),
         &[SQLParam::scalar(Value::Int(7))],
-        "rule_owner",
+        &"rule_owner".into(),
     ));
     let plans = inputs.planned.borrow();
     let [UnifiedPlan::Query(query)] = &plans[..] else {
@@ -104,7 +104,7 @@ fn invalid_catalog_commands_fail_before_planner_or_execution_inputs() {
         &inputs.context(),
         statement("CREATE TABLE rejected (id BIGINT)"),
         &[SQLParam::scalar(Value::Int(7))],
-        "rule_owner",
+        &"rule_owner".into(),
     );
     assert!(
         matches!(result, Err(SQLError::Internal(message)) if message == "catalog-owned statement lowered to an unsupported command")

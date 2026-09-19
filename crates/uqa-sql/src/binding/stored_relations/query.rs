@@ -8,10 +8,7 @@
 
 use super::StoredRelationCatalog;
 use crate::{
-    binding::view_dependencies::{
-        bind_query_plan_relations, bind_query_plan_sequence_references,
-        canonical_virtual_relation_reference,
-    },
+    binding::view_dependencies::{bind_query_plan_relations, bind_query_plan_sequence_references},
     plan::QueryPlan,
     SQLError,
 };
@@ -55,10 +52,6 @@ pub fn bind_stored_query_relations(
 ) -> Result<bool, SQLError> {
     let mut uses_temporary_relation = false;
     bind_query_plan_relations(plan, &std::collections::BTreeSet::new(), &mut |reference| {
-        // Catalog relations win for their supported spellings just as they do in FROM execution (notably unqualified `pg_class`). Explicit user schemas remain ordinary catalog identities.
-        if let Some(canonical) = canonical_virtual_relation_reference(reference) {
-            return Ok(canonical);
-        }
         if let Some(canonical) = catalog
             .relations
             .resolve_age_label_relation_name(reference)?

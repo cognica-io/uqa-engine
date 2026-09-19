@@ -48,7 +48,7 @@ fn physical_relation_name(table: &str) -> String {
 }
 
 fn create_notes_gin_fixture(db: &Path) {
-    let eng = Engine::open(db).unwrap();
+    let eng = crate::native_storage::legacy_engine(db);
     eng.sql(
         "CREATE TABLE notes (
             id TEXT PRIMARY KEY,
@@ -202,44 +202,46 @@ fn assert_legacy_gin_reopens_with_restored_index(db: &Path) {
 }
 
 fn overwrite_document_body(db: &Path, table: &str, doc_id: i64, document: &Document) {
-    let body = serde_json::to_string(&document).unwrap();
-    let table = physical_relation_name(table);
-    let conn = ManagedConnection::open(db).unwrap();
-    conn.with(|c| {
-        c.execute(
-            "UPDATE _documents SET body = ?1 WHERE table_name = ?2 AND doc_id = ?3",
-            params![body, table, doc_id],
-        )?;
-        Ok(())
-    })
-    .unwrap();
+    use uqa_storage::DocumentStore;
+    let connection = ManagedConnection::open(db).unwrap();
+    let mapped = connection
+        .with_physical(|sqlite| {
+            Ok(sqlite.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = '_uqa_mvcc_native_format')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )?)
+        })
+        .unwrap();
+    if mapped {
+        connection
+            .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+            .unwrap();
+    }
+    let mut documents =
+        uqa_storage_sqlite::SQLiteDocumentStore::new(connection, physical_relation_name(table));
+    documents
+        .put(u64::try_from(doc_id).unwrap(), document.clone())
+        .unwrap();
 }
 
 fn delete_ivf_metadata(db: &Path, table: &str, field: &str) {
-    let table = physical_relation_name(table);
-    let conn = ManagedConnection::open(db).unwrap();
-    conn.with(|c| {
-        c.execute(
-            "DELETE FROM _ivf_indexes WHERE table_name = ?1 AND field = ?2",
-            params![table, field],
-        )?;
-        c.execute(
-            "DELETE FROM _ivf_centroids WHERE table_name = ?1 AND field = ?2",
-            params![table, field],
-        )?;
-        c.execute(
-            "DELETE FROM _ivf_assignments WHERE table_name = ?1 AND field = ?2",
-            params![table, field],
-        )?;
-        Ok(())
-    })
+    let connection = ManagedConnection::open(db).unwrap();
+    connection
+        .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+        .unwrap();
+    uqa_storage_sqlite::SQLiteIVFIndex::drop_metadata(
+        &connection,
+        &physical_relation_name(table),
+        field,
+    )
     .unwrap();
 }
 
 fn ivf_metadata_count(db: &Path, table: &str, field: &str) -> i64 {
     let table = physical_relation_name(table);
     let conn = ManagedConnection::open(db).unwrap();
-    conn.with(|c| {
+    conn.with_physical(|c| {
         let n = c.query_row(
             "SELECT COUNT(*) FROM _ivf_indexes WHERE table_name = ?1 AND field = ?2",
             params![table, field],
@@ -254,7 +256,7 @@ fn hnsw_metadata_counts(db: &Path, table: &str, field: &str) -> (i64, i64, i64) 
     let table = physical_relation_name(table);
     let connection = ManagedConnection::open(db).unwrap();
     connection
-        .with(|conn| {
+        .with_physical(|conn| {
             let count = |metadata_table: &str| {
                 conn.query_row(
                     &format!(
@@ -605,7 +607,7 @@ fn reopen_rebuilds_legacy_positional_postings_from_original_documents() {
     let dir = TempDir::new().unwrap();
     let db = dir.path().join("uqa-v21.db");
     {
-        let eng = Engine::open(&db).unwrap();
+        let eng = crate::native_storage::legacy_engine(&db);
         eng.sql(
             "CREATE TABLE messages (id INTEGER PRIMARY KEY, content TEXT)",
             &[],
@@ -652,10 +654,7 @@ fn reopen_rebuilds_legacy_positional_postings_from_original_documents() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(
-        version,
-        uqa_storage_sqlite::CURRENT_SCHEMA_VERSION.to_string()
-    );
+    assert_eq!(version, "49");
     let migrated_rows: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM _occurrence_clusters

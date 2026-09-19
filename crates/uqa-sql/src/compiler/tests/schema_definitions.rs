@@ -120,7 +120,7 @@ fn sequence_role_owner_preserves_direct_and_historical_syntax() {
         panic!("not ALTER SEQUENCE");
     };
     assert_eq!(direct.name, "app.ids");
-    assert_eq!(direct.role_owner.as_deref(), Some("next_owner"));
+    assert_eq!(direct.role_owner, Some("next_owner".into()));
 
     let Statement::AlterTable(historical) = first("ALTER TABLE app.ids OWNER TO CURRENT_USER")
     else {
@@ -128,13 +128,13 @@ fn sequence_role_owner_preserves_direct_and_historical_syntax() {
     };
     assert!(matches!(
         historical.actions.as_slice(),
-        [crate::ast::AlterTableAction::ChangeOwner { owner }] if owner == "CURRENT_USER"
+        [crate::ast::AlterTableAction::ChangeOwner { owner }] if *owner == crate::ast::RoleSpecification::CurrentUser
     ));
 
     let Statement::AlterSequence(public) = first("ALTER SEQUENCE ids OWNER TO PUBLIC") else {
         panic!("not ALTER SEQUENCE");
     };
-    assert_eq!(public.role_owner.as_deref(), Some("public"));
+    assert_eq!(public.role_owner, Some("public".into()));
 }
 
 #[test]
@@ -156,8 +156,14 @@ fn sequence_grants_preserve_privileges_targets_and_grant_paths() {
         grant.target,
         GrantSequenceTarget::Sequences { ref names } if names == &["app.ids", "ids2"]
     ));
-    assert_eq!(grant.grantees, ["caller", "PUBLIC"]);
-    assert_eq!(grant.grantor.as_deref(), Some("CURRENT_USER"));
+    assert_eq!(
+        grant.grantees,
+        ["caller".into(), crate::ast::AclRoleSpecification::Public]
+    );
+    assert_eq!(
+        grant.grantor,
+        Some(crate::ast::RoleSpecification::CurrentUser)
+    );
 
     let Statement::GrantSequence(revoke) = first(
         "REVOKE GRANT OPTION FOR ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA app, public FROM caller CASCADE",
@@ -235,8 +241,14 @@ fn database_grants_preserve_privileges_targets_and_grant_paths() {
         ]
     );
     assert_eq!(grant.databases, ["uqa", "archive"]);
-    assert_eq!(grant.grantees, ["caller"]);
-    assert_eq!(grant.grantor.as_deref(), Some("CURRENT_USER"));
+    assert_eq!(
+        grant.grantees,
+        [crate::ast::AclRoleSpecification::from("caller")]
+    );
+    assert_eq!(
+        grant.grantor,
+        Some(crate::ast::RoleSpecification::CurrentUser)
+    );
 
     let Statement::GrantDatabase(revoke) =
         first("REVOKE GRANT OPTION FOR ALL PRIVILEGES ON DATABASE uqa FROM caller CASCADE")
@@ -285,8 +297,14 @@ fn schema_grants_preserve_privileges_targets_and_grant_paths() {
         vec![SchemaPrivilege::Usage, SchemaPrivilege::Create]
     );
     assert_eq!(grant.schemas, ["app", "archive"]);
-    assert_eq!(grant.grantees, ["caller"]);
-    assert_eq!(grant.grantor.as_deref(), Some("CURRENT_USER"));
+    assert_eq!(
+        grant.grantees,
+        [crate::ast::AclRoleSpecification::from("caller")]
+    );
+    assert_eq!(
+        grant.grantor,
+        Some(crate::ast::RoleSpecification::CurrentUser)
+    );
 
     let Statement::GrantSchema(revoke) =
         first("REVOKE GRANT OPTION FOR ALL PRIVILEGES ON SCHEMA app FROM caller CASCADE")

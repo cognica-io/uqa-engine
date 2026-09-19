@@ -12,6 +12,9 @@ use std::{
 };
 use uqa_core::DocId;
 use uqa_execution::{
+    maintenance::analyze::{
+        AnalyzeCatalog, AnalyzeContext, AnalyzeLocks, AnalyzeNotices, AnalyzeTarget,
+    },
     maintenance::{
         VacuumContext, VacuumDocuments, VacuumLocks, VacuumRelations, VacuumRows, VacuumStatistics,
         VacuumStatisticsRefresh, VacuumStorage, VacuumTable, VacuumTransactions,
@@ -27,6 +30,15 @@ use uqa_sql::{
 };
 use uqa_storage::{document_store::Document, StorageBackendResult, StoredDocument};
 impl Engine {
+    pub(crate) fn analyze_execution_context(&self, check_privileges: bool) -> AnalyzeContext<'_> {
+        AnalyzeContext {
+            catalog: self,
+            locks: self,
+            notices: self,
+            privileges: check_privileges.then_some(self),
+        }
+    }
+
     pub(crate) fn vacuum_execution_context(&self) -> VacuumContext<'_> {
         VacuumContext {
             catalog: self,
@@ -38,6 +50,75 @@ impl Engine {
             statistics: self,
             transactions: self,
         }
+    }
+}
+
+impl AnalyzeCatalog for Engine {
+    fn resolve(&self, name: &str) -> Result<Option<AnalyzeTarget>, SQLError> {
+        let Some(name) = self.try_resolve_table_name(name).map_err(|error| {
+            uqa_sql::catalog::errors::storage_error("resolve ANALYZE target", &error)
+        })?
+        else {
+            return Ok(None);
+        };
+        self.try_table(&name)
+            .map(|table| {
+                table.map(|table| AnalyzeTarget {
+                    name,
+                    object_id: table.object_id(),
+                })
+            })
+            .map_err(|error| uqa_sql::catalog::errors::storage_error("read ANALYZE target", &error))
+    }
+
+    fn all_tables(&self) -> Vec<AnalyzeTarget> {
+        self.storage
+            .tables
+            .read()
+            .iter()
+            .map(|(name, table)| AnalyzeTarget {
+                name: name.qualified_name(),
+                object_id: table.object_id(),
+            })
+            .collect()
+    }
+
+    fn current_target(&self, object_id: [u8; 16]) -> Option<AnalyzeTarget> {
+        self.storage.tables.read().iter().find_map(|(name, table)| {
+            (table.object_id() == object_id).then(|| AnalyzeTarget {
+                name: name.qualified_name(),
+                object_id,
+            })
+        })
+    }
+
+    fn descendants(&self, name: &str) -> Result<Vec<String>, SQLError> {
+        self.hierarchy_scan_tables(name, true)
+    }
+}
+
+impl AnalyzeLocks for Engine {
+    fn bind_name(&self, name: &str) -> Result<crate::row_locks::ScopedRelationLock<'_>, SQLError> {
+        self.temporary_relation_lock(name, crate::row_locks::RelationLockMode::AccessShare)
+    }
+
+    fn acquire(
+        &self,
+        name: &str,
+        mode: crate::row_locks::RelationLockMode,
+    ) -> Result<(), SQLError> {
+        self.prepare_transaction_lock_wait()?;
+        self.lock_relation(name, mode)
+    }
+
+    fn refresh_after_wait(&self) -> Result<(), SQLError> {
+        self.refresh_explicit_statement_snapshot()
+    }
+}
+
+impl AnalyzeNotices for Engine {
+    fn warning(&self, message: &str) {
+        self.push_sql_notice("WARNING", message);
     }
 }
 struct VacuumMetadata(Arc<TableState>);
@@ -97,7 +178,16 @@ impl VacuumStatistics for SavedVacuumStatistics<'_> {
     }
     fn persist(&self, table: &str) -> StorageBackendResult<()> {
         if let Some(catalog) = self.engine.storage.catalog.as_ref() {
-            Engine::persist_column_stats(catalog.as_ref(), table, &self.statistics)?;
+            Engine::persist_column_stats(
+                catalog.as_ref(),
+                table,
+                &self.statistics,
+                self.table.object_id(),
+                self.statistics
+                    .values()
+                    .next()
+                    .map_or(0, |stats| stats.row_count),
+            )?;
         }
         Ok(())
     }

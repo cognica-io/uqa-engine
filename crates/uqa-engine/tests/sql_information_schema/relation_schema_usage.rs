@@ -369,7 +369,7 @@ fn pg18_stored_rule_actions_keep_their_authorized_relation_identity() {
 
 #[test]
 fn legacy_stored_rule_actions_restore_as_bound_relation_identities() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     fn remove_target_binding_marker(value: &mut serde_json::Value) -> usize {
         match value {
@@ -416,7 +416,8 @@ fn legacy_stored_rule_actions_restore_as_bound_relation_identities() {
         }
     }
     {
-        let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+        let catalog =
+            crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
         let encoded = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
         let mut metadata: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         assert_eq!(remove_target_binding_marker(&mut metadata), 3);

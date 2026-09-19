@@ -16,9 +16,13 @@ impl Engine {
     }
 
     pub(crate) fn try_drop_table(&self, name: &str) -> StorageBackendResult<bool> {
-        self.with_implicit_storage_transaction(|engine| {
-            engine.table_removal_context().drop_table(name)
+        self.with_implicit_definition_transaction(|engine| {
+            uqa_execution::schema::removal::direct::drop_table(
+                &engine.relation_removal_context(),
+                name,
+            )
         })
+        .map_err(|error| uqa_storage::StorageBackendError::backend("DROP TABLE", error))
     }
 
     pub(crate) fn drop_temporary_table_on_commit_inner(

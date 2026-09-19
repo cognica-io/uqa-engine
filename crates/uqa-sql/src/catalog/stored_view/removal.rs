@@ -64,10 +64,17 @@ pub fn ensure_no_rule_dependents(
 
 pub fn ensure_no_view_dependents(name: &str, dependents: &[String]) -> Result<(), SQLError> {
     if !dependents.is_empty() {
-        return Err(SQLError::Unsupported(format!(
-            "DROP VIEW `{name}` rejected: dependent view(s) `{}` still reference it",
-            dependents.join("`, `")
-        )));
+        return Err(SQLError::Routine {
+            sqlstate: "2BP01".into(),
+            message: format!(
+                "cannot drop view {name} because other objects depend on it: {}",
+                dependents
+                    .iter()
+                    .map(|dependent| format!("view {dependent}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+        });
     }
     Ok(())
 }

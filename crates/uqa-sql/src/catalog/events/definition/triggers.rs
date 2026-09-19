@@ -234,7 +234,7 @@ impl EventAnalysisContext<'_> {
         let canonical = relation.qualified_name();
         match relation_kind {
             "table" => {
-                let current_user = self.authority.current_user_name();
+                let current_user = self.authority.current_role();
                 self.privileges.ensure_table_privilege_for(
                     &canonical,
                     &current_user,
@@ -253,7 +253,7 @@ impl EventAnalysisContext<'_> {
                 self.privileges.ensure_view_privilege_for(
                     &canonical,
                     &view,
-                    &self.authority.current_user_name(),
+                    &self.authority.current_role(),
                     TableAclPrivilege::Trigger,
                 )
             }
@@ -536,6 +536,7 @@ fn trigger_column(name: String, ty: ColumnType) -> ColumnDef {
         not_null: false,
         not_null_explicit: false,
         not_null_name: None,
+        not_null_identity: None,
         not_null_validated: true,
         not_null_no_inherit: false,
         not_null_is_local: true,

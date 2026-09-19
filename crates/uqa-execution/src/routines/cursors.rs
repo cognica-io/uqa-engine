@@ -13,6 +13,7 @@ use super::{
     SQLParam, Statement, Value,
 };
 use uqa_sql::plan::UnifiedPlan;
+use uqa_sql::plpgsql::PLpgSQLCursor;
 
 impl Interpreter<'_> {
     pub(super) fn exec_open_cursor(
@@ -23,17 +24,26 @@ impl Interpreter<'_> {
         let cursor_name = self.cursor_variable_name(cursor_index, "OPEN")?.to_string();
         let portal_name = self.portal_name_for_open(cursor_index, &cursor_name)?;
         self.services.portals.ensure_available(&portal_name)?;
-        let (query, params, scroll) = match open {
+        let (query, params, scroll, source_sql) = match open {
             PLpgSQLCursorOpen::Bound { arguments } => {
-                let (query, fields, scroll) = self.bound_cursor_query(cursor_index)?;
-                let query =
-                    self.bind_bound_cursor_query(&cursor_name, query, &fields, arguments)?;
-                (query, Vec::new(), scroll)
+                let (definition, fields) = self.bound_cursor_query(cursor_index)?;
+                let query = self.bind_bound_cursor_query(
+                    &cursor_name,
+                    definition.query,
+                    &fields,
+                    arguments,
+                )?;
+                (query, Vec::new(), definition.scroll, definition.source_sql)
             }
-            PLpgSQLCursorOpen::Static { query, scroll } => (
+            PLpgSQLCursorOpen::Static {
+                query,
+                scroll,
+                source_sql,
+            } => (
                 bind_statement(query, &mut self.resolver())?,
                 Vec::new(),
                 *scroll,
+                std::sync::Arc::clone(source_sql),
             ),
             PLpgSQLCursorOpen::Dynamic {
                 query,
@@ -41,13 +51,18 @@ impl Interpreter<'_> {
                 scroll,
             } => {
                 let (text, params) = self.eval_dynamic_sql(query, params)?;
-                (compile_cursor_statement(&text)?, params, *scroll)
+                (
+                    compile_cursor_statement(&text)?,
+                    params,
+                    *scroll,
+                    text.into(),
+                )
             }
         };
         let plan = self.lower_cursor_plan(query)?;
         self.services
             .portals
-            .open(&params, &portal_name, scroll, &plan)?;
+            .open(&params, &portal_name, scroll, &plan, &source_sql)?;
         self.values[cursor_index] = Value::Str(portal_name);
         Ok(())
     }
@@ -117,11 +132,12 @@ impl Interpreter<'_> {
         label: Option<&str>,
         target: &IntoTarget,
         query: &Statement,
+        source_sql: &str,
         body: &[PLpgSQLStmt],
     ) -> Result<Flow, SQLError> {
         let query = bind_statement(query, &mut self.resolver())?;
         let plan = self.lower_cursor_plan(query)?;
-        let portal_name = self.open_internal_for_portal(&[], &plan)?;
+        let portal_name = self.open_internal_for_portal(&[], &plan, source_sql)?;
         self.exec_pinned_for_portal(&portal_name, label, target, body, true)
     }
 
@@ -136,7 +152,7 @@ impl Interpreter<'_> {
         let (text, params) = self.eval_dynamic_sql(query, params)?;
         let query = compile_cursor_statement(&text)?;
         let plan = self.lower_cursor_plan(query)?;
-        let portal_name = self.open_internal_for_portal(&params, &plan)?;
+        let portal_name = self.open_internal_for_portal(&params, &plan, &text)?;
         self.exec_pinned_for_portal(&portal_name, label, target, body, true)
     }
 
@@ -175,11 +191,12 @@ impl Interpreter<'_> {
         &self,
         params: &[SQLParam],
         plan: &UnifiedPlan,
+        source_sql: &str,
     ) -> Result<String, SQLError> {
         let portal_name = self.services.portals.allocate_name();
         self.services
             .portals
-            .open(params, &portal_name, Some(false), plan)?;
+            .open(params, &portal_name, Some(false), plan, source_sql)?;
         Ok(portal_name)
     }
 
@@ -292,7 +309,7 @@ impl Interpreter<'_> {
     fn bound_cursor_query(
         &self,
         cursor_index: usize,
-    ) -> Result<(Statement, Vec<PLpgSQLRowField>, Option<bool>), SQLError> {
+    ) -> Result<(PLpgSQLCursor, Vec<PLpgSQLRowField>), SQLError> {
         let Some(PLpgSQLDatum::Var(variable)) = self.datums.get(cursor_index) else {
             return Err(SQLError::Internal(format!(
                 "PL/pgSQL OPEN references invalid cursor datum {cursor_index}"
@@ -315,7 +332,7 @@ impl Interpreter<'_> {
             },
             None => Vec::new(),
         };
-        Ok((definition.query.clone(), fields, definition.scroll))
+        Ok((definition.clone(), fields))
     }
 
     fn bind_bound_cursor_query(

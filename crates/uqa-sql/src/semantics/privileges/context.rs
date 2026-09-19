@@ -6,6 +6,7 @@
 
 //! Immutable relation authorization and CTE name inputs for column lineage analysis.
 
+use crate::catalog::roles::RoleReference;
 use crate::{
     catalog::resolution::RelationNameResolution,
     plan::{CtePlan, QueryPlan},
@@ -15,6 +16,7 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Copy)]
 pub enum PrivilegeRelationKind {
+    System(crate::catalog::SystemRelation),
     Table,
     View,
     MaterializedView,
@@ -22,10 +24,14 @@ pub enum PrivilegeRelationKind {
 }
 impl PrivilegeRelationKind {
     pub const fn has_system_columns(self) -> bool {
-        matches!(self, Self::Table | Self::ForeignTable)
+        match self {
+            Self::System(relation) => matches!(relation.kind().as_bytes(), b"table"),
+            _ => matches!(self, Self::Table | Self::ForeignTable),
+        }
     }
     pub const fn description(self) -> &'static str {
         match self {
+            Self::System(relation) => relation.kind(),
             Self::Table => "table",
             Self::View => "view",
             Self::MaterializedView => "materialized view",
@@ -49,14 +55,14 @@ pub trait PrivilegeCatalog {
         resolution: &RelationNameResolution,
         relation: &PrivilegeRelation,
         column: Option<&str>,
-        subject: &str,
+        subject: &RoleReference,
     ) -> Result<bool, SQLError>;
 }
 pub trait PrivilegeCteCatalog {
     fn is_visible_cte(&self, name: &str) -> bool;
     fn materialized_columns(&self, name: &str) -> Option<Vec<String>>;
     fn deferred_reference(&self, name: &str) -> Option<&CtePlan>;
-    fn privilege_subject(&self) -> Result<&str, SQLError>;
+    fn privilege_subject(&self) -> Result<&RoleReference, SQLError>;
 }
 #[derive(Clone)]
 pub struct PrivilegeScope<'a> {
@@ -103,7 +109,7 @@ impl<'a> PrivilegeScope<'a> {
             .or_else(|| self.inherited.deferred_reference(name))
     }
 
-    pub fn privilege_subject(&self) -> Result<&str, SQLError> {
+    pub fn privilege_subject(&self) -> Result<&RoleReference, SQLError> {
         self.inherited.privilege_subject()
     }
 }

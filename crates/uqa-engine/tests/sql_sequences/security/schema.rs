@@ -279,11 +279,11 @@ fn sequence_schema_name_error_precedence_matches_postgresql() {
         [
             (
                 "NOTICE".into(),
-                "relation \"missing_sequence_schema.ids\" does not exist, skipping".into(),
+                "relation \"ids\" does not exist, skipping".into(),
             ),
             (
                 "NOTICE".into(),
-                "sequence \"missing_sequence_schema.ids\" does not exist, skipping".into(),
+                "schema \"missing_sequence_schema\" does not exist, skipping".into(),
             ),
         ]
     );

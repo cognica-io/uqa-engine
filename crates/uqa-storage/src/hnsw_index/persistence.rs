@@ -38,7 +38,7 @@ impl HNSWIndex {
         }
     }
 
-    fn graph_meta(&self) -> HNSWGraphMeta {
+    pub(super) fn graph_meta(&self) -> HNSWGraphMeta {
         HNSWGraphMeta {
             entry_point: self.entry_point,
             max_level: self.max_level,

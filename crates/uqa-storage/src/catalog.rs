@@ -17,17 +17,28 @@ use crate::backend::{StorageBackendError, StorageBackendResult};
 
 mod cache_revisions;
 mod graph_access;
-mod graph_snapshot;
+pub mod graph_guards;
+pub mod graph_identifiers;
+pub(crate) mod graph_snapshot;
+mod identity;
 mod relation;
+pub mod relation_acl;
+mod relation_security;
 mod schema;
+mod sequence_security;
 
 pub use cache_revisions::CatalogCacheRevisions;
 pub use graph_access::validate_graph_page;
-pub use graph_access::{GraphEntityFilter, GraphEntityKind, MAX_GRAPH_ID_PAGE};
+pub use graph_access::{
+    GraphEntityFilter, GraphEntityKind, GraphEntitySelector, MAX_GRAPH_ID_PAGE,
+};
+pub use identity::new_nonzero_catalog_identity;
 pub use relation::RelationIdentity;
+pub use relation_security::{BoundRelationSecurity, LegacyRelationSecurity, RelationSecurityRow};
+pub use sequence_security::{BoundSequenceSecurity, LegacySequenceSecurity, SequenceSecurityRow};
 mod table;
 
-pub use schema::{SchemaAclEntry, SchemaPrivileges, SchemaRow};
+pub use schema::{BoundSchemaRow, SchemaAclEntry, SchemaPrivileges, SchemaRow};
 pub use table::{TableAclEntry, TablePrivileges};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,15 +66,8 @@ impl RelationKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableSchema {
     pub relation: RelationIdentity,
-    /// SQL role that owns the relation. Catalogs created before table role ownership was persisted belong to the bootstrap role.
-    #[serde(default = "legacy_table_role_owner")]
-    pub role_owner: String,
-    /// Explicit table ACL paths. `None` represents `PostgreSQL`'s null default ACL, in which the owner has every ordinary table privilege.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub acl: Option<Vec<TableAclEntry>>,
-    /// Explicit per-column ACL paths keyed by the current column name. A missing key represents `PostgreSQL`'s null default `attacl`; an empty entry represents an explicitly empty ACL.
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub column_acls: std::collections::BTreeMap<String, Vec<TableAclEntry>>,
+    #[serde(flatten)]
+    pub security: RelationSecurityRow,
     /// Stable logical relation identity. `CREATE TABLE` allocates a new value, while renames, schema changes, `TRUNCATE`, and reopen preserve it. A zero value marks a legacy catalog row that the engine upgrades during open.
     #[serde(default)]
     pub object_id: [u8; 16],
@@ -83,10 +87,6 @@ pub struct TableSchema {
     /// created before durable table constraints were introduced.
     #[serde(default)]
     pub constraints_json: String,
-}
-
-fn legacy_table_role_owner() -> String {
-    "uqa".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,12 +127,7 @@ pub struct GraphSnapshot {
 #[derive(Debug, Clone)]
 pub struct ForeignTableRow {
     pub relation: RelationIdentity,
-    /// SQL role that owns the foreign table. Catalogs created before foreign-table role ownership was persisted belong to the bootstrap role.
-    pub role_owner: String,
-    /// Explicit relation-wide ACL. `None` preserves `PostgreSQL`'s implicit owner-only default ACL.
-    pub acl: Option<Vec<TableAclEntry>>,
-    /// Explicit per-column ACL paths keyed by the foreign table's public column name.
-    pub column_acls: std::collections::BTreeMap<String, Vec<TableAclEntry>>,
+    pub security: RelationSecurityRow,
     pub server_name: String,
     pub columns_json: String,
     pub options_json: String,
@@ -143,12 +138,7 @@ pub struct ForeignTableRow {
 #[derive(Debug, Clone)]
 pub struct ViewRow {
     pub relation: RelationIdentity,
-    /// SQL role that owns the view. Catalogs created before view role ownership was persisted belong to the bootstrap role.
-    pub role_owner: String,
-    /// Explicit relation-wide ACL. `None` preserves `PostgreSQL`'s implicit owner-only default ACL.
-    pub acl: Option<Vec<TableAclEntry>>,
-    /// Explicit per-column ACL paths keyed by the view's public column name.
-    pub column_acls: std::collections::BTreeMap<String, Vec<TableAclEntry>>,
+    pub security: RelationSecurityRow,
     pub definition_json: String,
 }
 
@@ -246,16 +236,13 @@ pub use uqa_core::catalog_sequence::{
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SequenceRow {
     pub relation: RelationIdentity,
-    /// SQL role that owns the sequence. Legacy catalogs predate roles and therefore belong to the bootstrap role.
-    #[serde(default = "default_sequence_role_owner")]
-    pub role_owner: String,
-    /// Explicit ACL entries. `None` represents `PostgreSQL`'s null default ACL, in which the owner has all ordinary privileges.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub acl: Option<Vec<SequenceAclEntry>>,
+    /// Captured owner and ACL role identities, or a legacy row awaiting initial-open migration.
+    #[serde(flatten)]
+    pub security: SequenceSecurityRow,
     /// Stable identity of this sequence incarnation. Dropping and recreating the same qualified name must allocate a different value.
     #[serde(default)]
     pub object_id: [u8; 16],
-    /// Changes for every successful definition-changing `ALTER SEQUENCE` while remaining stable across name lifecycle operations, value reservations, and `setval`.
+    /// Changes when value-generation options or persistence replace the sequence's allocation state. Stable across ownership and name changes, value reservations, and `setval`.
     #[serde(default)]
     pub definition_generation: [u8; 16],
     pub start: i64,
@@ -272,10 +259,6 @@ pub struct SequenceRow {
     pub owner: Option<SequenceOwner>,
     #[serde(default)]
     pub options: SequenceOptions,
-}
-
-fn default_sequence_role_owner() -> String {
-    "uqa".into()
 }
 
 /// Physical sequence position consumed by one atomic reservation.
@@ -301,6 +284,14 @@ pub enum SequenceReservationResult {
     DefinitionChanged,
     Exhausted,
     Reserved(SequenceValueReservation),
+}
+
+/// A value update applies only to the definition whose bounds the caller validated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SequenceSetValueResult {
+    Missing,
+    DefinitionChanged,
+    Set(i64),
 }
 
 /// Reserve up to `cache_size` values without crossing a sequence bound. Cycling is applied when selecting the first value of a new reservation, matching `PostgreSQL`'s boundary-truncated cache blocks.
@@ -364,6 +355,16 @@ pub fn sequence_value_reservation(
 
 /// Engine-facing catalog facade for persistent metadata.
 pub trait CatalogFacade: Send + Sync {
+    /// Transaction model and database incarnation shared with the paired backend. Wrappers must forward this with the session affinity.
+    fn transaction_model(&self) -> crate::StorageTransactionModel {
+        crate::StorageTransactionModel::ProviderSerialized
+    }
+
+    /// Identity shared with the paired data backend's transaction context. Wrappers must delegate this when their underlying catalog reports an identity.
+    fn transaction_affinity(&self) -> Option<crate::StorageSessionAffinity> {
+        None
+    }
+
     /// Prepare durable catalog storage inside the backend's owning initial-restore transaction. Already initialized catalogs may keep the default.
     fn initialize_storage(&self) -> StorageBackendResult<()> {
         Ok(())
@@ -376,7 +377,43 @@ pub trait CatalogFacade: Send + Sync {
     }
 
     fn set_metadata(&self, key: &str, value: &str) -> StorageBackendResult<()>;
+    /// Remove one metadata record, retaining its private deletion and write precondition until transaction end.
+    fn delete_metadata(&self, key: &str) -> StorageBackendResult<()>;
     fn get_metadata(&self, key: &str) -> StorageBackendResult<Option<String>>;
+    /// Read matching metadata keys from one catalog snapshot; the prefix is literal, including NUL and wildcard characters.
+    fn metadata_with_prefix(&self, prefix: &str) -> StorageBackendResult<Vec<(String, String)>>;
+    /// Replace one already bound relation or attribute ACL without rewriting its definition. The caller holds the relation lifetime and catalog tuple locks until transaction end.
+    fn save_relation_acl(
+        &self,
+        relation: &RelationIdentity,
+        column: Option<&str>,
+        entry: &relation_acl::RelationAclTuple,
+    ) -> StorageBackendResult<()> {
+        if !self.transaction_model().is_versioned() {
+            return relation_acl::save_serialized(self, relation, column, entry);
+        }
+        self.set_metadata(&relation_acl::key(relation, column), &entry.encode(column)?)
+    }
+    /// Whether this metadata key has a transaction-private replacement in the current session.
+    fn metadata_has_private_changes(&self, _key: &str) -> StorageBackendResult<bool> {
+        if self.transaction_model().is_versioned() {
+            return Err(StorageBackendError::Other(
+                "private metadata provenance is not supported by this catalog".into(),
+            ));
+        }
+        Ok(false)
+    }
+    /// Persist evaluated maintenance state. Concurrent providers merge its counters under their existing record-publication boundary; serialized providers use an ordinary metadata replacement.
+    fn save_statistics_maintenance(
+        &self,
+        table: &str,
+        state: &crate::statistics_maintenance::StatisticsMaintenance,
+    ) -> StorageBackendResult<()> {
+        self.set_metadata(
+            &crate::statistics_maintenance::StatisticsMaintenance::key(table),
+            &serde_json::to_string(state)?,
+        )
+    }
     fn fts_storage_was_reset(&self) -> bool {
         false
     }
@@ -390,15 +427,25 @@ pub trait CatalogFacade: Send + Sync {
     fn drop_schema(&self, name: &str) -> StorageBackendResult<()>;
     fn load_schema_rows(&self) -> StorageBackendResult<Vec<SchemaRow>>;
 
+    /// Whether this exact schema has a private creation, replacement or deletion in the current session.
+    fn schema_has_private_changes(&self, _name: &str) -> StorageBackendResult<bool> {
+        if self.transaction_model().is_versioned() {
+            return Err(StorageBackendError::Other(
+                "private schema provenance is not supported by this catalog".into(),
+            ));
+        }
+        Ok(false)
+    }
+
     fn save_schema(&self, name: &str) -> StorageBackendResult<()> {
-        self.save_schema_row(&SchemaRow::legacy(name))
+        self.save_schema_row(&SchemaRow::bootstrap(name))
     }
 
     fn load_schemas(&self) -> StorageBackendResult<Vec<String>> {
         Ok(self
             .load_schema_rows()?
             .into_iter()
-            .map(|schema| schema.name)
+            .map(|schema| schema.name().to_owned())
             .collect())
     }
 
@@ -434,6 +481,20 @@ pub trait CatalogFacade: Send + Sync {
     fn rename_sequence_row(&self, from: &str, to: &str) -> StorageBackendResult<bool>;
     fn drop_sequence_row(&self, name: &str) -> StorageBackendResult<bool>;
     fn load_sequence_rows(&self) -> StorageBackendResult<Vec<SequenceRow>>;
+
+    /// Whether this sequence has transaction-private state that an autonomous value allocation must not bypass. Versioned catalogs must inspect their retained private records, including creation, rename and definition replacement.
+    fn sequence_has_private_changes(
+        &self,
+        _relation: &RelationIdentity,
+        _object_id: [u8; 16],
+    ) -> StorageBackendResult<bool> {
+        if self.transaction_model().is_versioned() {
+            return Err(StorageBackendError::Other(
+                "private sequence provenance is not supported by this catalog".into(),
+            ));
+        }
+        Ok(false)
+    }
     fn reserve_sequence_values(
         &self,
         name: &str,
@@ -474,10 +535,11 @@ pub trait CatalogFacade: Send + Sync {
         &self,
         name: &str,
         object_id: [u8; 16],
+        definition_generation: [u8; 16],
         value: i64,
         called: bool,
         log_count: i64,
-    ) -> StorageBackendResult<Option<i64>>;
+    ) -> StorageBackendResult<SequenceSetValueResult>;
 
     fn save_view(&self, view: &ViewRow) -> StorageBackendResult<()>;
     /// Atomically move one view catalog row and its shared relation claim.
@@ -490,6 +552,12 @@ pub trait CatalogFacade: Send + Sync {
     fn load_views(&self) -> StorageBackendResult<Vec<ViewRow>>;
 
     fn save_named_graph(&self, name: &str) -> StorageBackendResult<()>;
+    /// Bind graph mutations to their definition and allocation generation while allowing independent data writers to share the definition. Concurrent backends and catalog wrappers must implement this capability.
+    fn guard_graph_definition(&self, _graph: Option<&str>) -> StorageBackendResult<()> {
+        Err(crate::StorageBackendError::Other(
+            "graph definition guards are not supported".into(),
+        ))
+    }
     fn drop_named_graph(&self, name: &str) -> StorageBackendResult<()>;
     fn load_named_graphs(&self) -> StorageBackendResult<Vec<String>>;
     fn named_graph_exists(&self, name: &str) -> StorageBackendResult<bool>;
@@ -651,9 +719,7 @@ pub trait CatalogFacade: Send + Sync {
     fn update_foreign_table_security(
         &self,
         relation: &RelationIdentity,
-        role_owner: &str,
-        acl: Option<&[TableAclEntry]>,
-        column_acls: &std::collections::BTreeMap<String, Vec<TableAclEntry>>,
+        security: &RelationSecurityRow,
     ) -> StorageBackendResult<bool>;
     fn drop_foreign_table(&self, relation: &RelationIdentity) -> StorageBackendResult<()>;
     fn load_foreign_tables(&self) -> StorageBackendResult<Vec<ForeignTableRow>>;

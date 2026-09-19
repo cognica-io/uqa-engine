@@ -7,24 +7,26 @@
 //! Bind routine namespace lookup to live session and schema authorization state.
 
 use crate::{schema_security::SchemaAclPrivilege, Engine};
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
-    catalog::security::SchemaSecurity, routines::lifecycle::names::RoutineNameCatalog, SQLError,
+    catalog::security::BoundSchemaSecurity, routines::lifecycle::names::RoutineNameCatalog,
+    SQLError,
 };
 
 impl RoutineNameCatalog for Engine {
-    fn schema_security(&self, schema: &str) -> Option<SchemaSecurity> {
+    fn schema_security(&self, schema: &str) -> Option<BoundSchemaSecurity> {
         self.schema_security_for_privilege(schema)
     }
-    fn current_user_name(&self) -> String {
-        Engine::current_user_name(self)
+    fn current_role(&self) -> RoleReference {
+        Engine::current_role(self)
     }
     fn search_path(&self) -> Vec<String> {
         self.session.state.read().search_path.clone()
     }
-    fn require_schema_usage(&self, schema: &str, role: &str) -> Result<(), SQLError> {
+    fn require_schema_usage(&self, schema: &str, role: &RoleReference) -> Result<(), SQLError> {
         self.require_schema_privilege(schema, role, SchemaAclPrivilege::Usage)
     }
-    fn schema_has_usage(&self, schema: &str, role: &str) -> bool {
+    fn schema_has_usage(&self, schema: &str, role: &RoleReference) -> bool {
         self.schema_has_privilege_for_role(schema, role, SchemaAclPrivilege::Usage)
     }
 }

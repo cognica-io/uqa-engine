@@ -691,3 +691,22 @@ fn legacy_labels_without_kind_and_entities_report_consistently() {
         Some((3, LabelKind::Edge))
     );
 }
+
+#[test]
+fn existing_entity_observations_only_dirty_changed_label_allocations() {
+    let mut registry = GraphLabelRegistry::default();
+    assert!(!registry.observe("plain", 9, LabelKind::Vertex));
+    let first = make_graphid(FIRST_USER_LABEL_ID, 10).unwrap();
+    assert!(registry.observe("Item", first, LabelKind::Vertex));
+    let original = registry.clone();
+    assert!(!registry.observe("Item", first, LabelKind::Vertex));
+    assert!(!registry.observe("Item", first - 1, LabelKind::Vertex));
+    assert_eq!(registry, original);
+    assert!(registry.observe("Item", first + 1, LabelKind::Vertex));
+    registry.kinds.remove("Item");
+    assert!(registry.observe("Item", first, LabelKind::Vertex));
+    registry.dropped_label_ids.insert(FIRST_USER_LABEL_ID);
+    assert!(registry.observe("Item", first, LabelKind::Vertex));
+    assert!(!registry.observe("Item", first, LabelKind::Vertex));
+    assert_eq!(registry.sequences[&FIRST_USER_LABEL_ID], 11);
+}

@@ -15,9 +15,7 @@ use super::prepared::{
     PreparedDeleteAction, PreparedDocumentDelete, PreparedDocumentInsert, PreparedDocumentRewrite,
     PreparedMutationAction,
 };
-use super::{
-    errors::dml_storage_error, identity::integer_primary_key_doc_id, vectors::document_vectors,
-};
+use super::{identity::integer_primary_key_doc_id, vectors::document_vectors};
 mod context;
 pub use context::*;
 
@@ -124,7 +122,9 @@ pub fn apply_validated_prepared_document_rewrite(
         context
             .identifiers
             .advance_next_id(destination_table, *destination_doc_id)
-            .map_err(|err| dml_storage_error("UPDATE partition movement", err))?;
+            .map_err(|err| {
+                super::errors::identifier_storage_error("UPDATE partition movement", &err)
+            })?;
         context.history.note_rewrite(
             &prepared.table,
             prepared.doc_id,
@@ -160,7 +160,9 @@ pub fn apply_validated_prepared_document_rewrite(
                 context
                     .identifiers
                     .advance_next_id(&prepared.table, new_id)
-                    .map_err(|err| dml_storage_error("UPDATE primary key", err))?;
+                    .map_err(|err| {
+                        super::errors::identifier_storage_error("UPDATE primary key", &err)
+                    })?;
                 context.history.note_rewrite(
                     &prepared.table,
                     prepared.doc_id,

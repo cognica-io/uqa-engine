@@ -9,7 +9,8 @@
 use super::{
     CatalogFacade, Engine, RelationIdentity, SequenceRow, SequenceState, StorageBackendResult,
 };
-use crate::state::SequenceSecurity;
+use crate::state::BoundSequenceSecurity;
+use uqa_execution::catalog::sequence::snapshot::SequenceSnapshotSource;
 
 impl Engine {
     pub(crate) fn sequence_row(
@@ -17,7 +18,7 @@ impl Engine {
         object_id: [u8; 16],
         state: SequenceState,
         persistence: uqa_sql::ast::RelationPersistence,
-        security: &SequenceSecurity,
+        security: &BoundSequenceSecurity,
     ) -> StorageBackendResult<SequenceRow> {
         uqa_execution::catalog::sequence::sequence_row(
             name,
@@ -29,35 +30,21 @@ impl Engine {
     }
 
     pub(crate) fn refresh_sequences_from_catalog(&self) -> StorageBackendResult<()> {
-        let sequence_session = self.open_nontransactional_sequence_session()?;
-        let catalog = sequence_session
-            .as_ref()
-            .map(|session| session.catalog.as_ref())
-            .or(self.storage.catalog.as_deref());
-        let Some(catalog) = catalog else {
-            return Ok(());
-        };
-        let rows = catalog.load_sequence_rows()?;
-        self.install_durable_sequence_rows(rows)?;
+        let snapshot = self.sequence_read_snapshot()?;
+        self.install_sequence_read_snapshot(&snapshot);
         Ok(())
     }
 
-    /// Restore the typed sequence registry without modifying the catalog.
-    /// This is safe for initial hydration, pinned snapshots, external-commit
-    /// refreshes, and rollback cleanup alike.
+    /// Restore sequence state and authority inside the caller's catalog transaction.
     pub(crate) fn restore_sequences_from_catalog(
         &self,
         catalog: &dyn CatalogFacade,
+        allow_migration: bool,
     ) -> StorageBackendResult<()> {
-        let rows = catalog.load_sequence_rows()?;
-        self.install_durable_sequence_rows(rows)?;
-        Ok(())
-    }
-
-    fn install_durable_sequence_rows(&self, rows: Vec<SequenceRow>) -> StorageBackendResult<()> {
-        uqa_execution::catalog::sequence::restoration::restore_sequence_rows(
+        uqa_execution::catalog::sequence::restoration::restore_sequence_catalog(
             &self.sequence_restore_context(),
-            rows,
+            catalog,
+            allow_migration,
         )
     }
 }

@@ -11,47 +11,46 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use uqa_core::DocId;
 
-use super::codec::{decode_value, encode_value, other_error, read_u64, usize_to_u64};
-use super::index_keys::{hnsw_metadata_key, hnsw_node_key, hnsw_node_prefix};
-use super::{KeyValueBatch, KeyValueStore, KeyValueVectorIndex};
-use crate::hnsw_index::{
-    HNSWGraphMeta, HNSWIndex, HNSWNodeSnapshot, HNSWPersistenceDelta, MAX_HNSW_LEVEL,
-};
+use super::codec::{decode_value, other_error, read_u64, usize_to_u64};
+use super::index_keys::{hnsw_metadata_key, hnsw_node_prefix};
+use super::{KeyValueRead, KeyValueVectorIndex};
+use crate::hnsw_index::{HNSWGraphMeta, HNSWIndex, HNSWNodeSnapshot, MAX_HNSW_LEVEL};
+use crate::mvcc::HNSWRecordHeader;
 use crate::vector_index::HNSWIndexParams;
 use crate::{StorageBackendError, StorageBackendResult};
 
-const HNSW_FORMAT_VERSION: u32 = 1;
+pub(super) const HNSW_FORMAT_VERSION: u32 = 1;
 
 #[derive(Debug, Serialize, Deserialize)]
-struct PersistedHNSWMetadata {
-    format_version: u32,
-    dimensions: u32,
-    m: u64,
-    ef_construction: u64,
-    ef_search: u64,
-    rebuild_threshold: u64,
-    seed: u64,
-    entry_point: Option<u64>,
-    max_level: u64,
-    next_node_id: u64,
-    live_count: u64,
-    deleted_count: u64,
-    revision: u64,
+pub(super) struct PersistedHNSWMetadata {
+    pub(super) format_version: u32,
+    pub(super) dimensions: u32,
+    pub(super) m: u64,
+    pub(super) ef_construction: u64,
+    pub(super) ef_search: u64,
+    pub(super) rebuild_threshold: u64,
+    pub(super) seed: u64,
+    pub(super) entry_point: Option<u64>,
+    pub(super) max_level: u64,
+    pub(super) next_node_id: u64,
+    pub(super) live_count: u64,
+    pub(super) deleted_count: u64,
+    pub(super) revision: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct PersistedHNSWNode {
-    node_id: u64,
-    doc_id: u64,
-    vector_ordinal: u32,
-    raw_vector: Vec<f32>,
-    level: u64,
-    deleted: bool,
-    neighbors: Vec<Vec<u64>>,
+pub(super) struct PersistedHNSWNode<V = Vec<f32>, N = Vec<Vec<u64>>> {
+    pub(super) node_id: u64,
+    pub(super) doc_id: u64,
+    pub(super) vector_ordinal: u32,
+    pub(super) raw_vector: V,
+    pub(super) level: u64,
+    pub(super) deleted: bool,
+    pub(super) neighbors: N,
 }
 
 pub(super) fn restore_graph(
-    store: &dyn KeyValueStore,
+    store: &dyn KeyValueRead,
     raw: &KeyValueVectorIndex,
     table: &str,
     field: &str,
@@ -65,55 +64,22 @@ pub(super) fn restore_graph(
     })?;
     validate_metadata(&metadata, table, field, dimensions, params)?;
     let nodes = load_nodes(store, table, field)?;
-    validate_canonical_vectors(&raw.load_all_with_ordinals()?, &nodes)?;
-    let meta = HNSWGraphMeta {
-        entry_point: metadata.entry_point,
-        max_level: checked_level(metadata.max_level, "HNSW max_level")?,
-        next_node_id: metadata.next_node_id,
-        live_count: checked_usize(metadata.live_count, "HNSW live_count")?,
-        deleted_count: checked_usize(metadata.deleted_count, "HNSW deleted_count")?,
-    };
-    let graph = HNSWIndex::from_persistence(dimensions, params, meta, nodes)?;
+    validate_canonical_vectors(&raw.load_all_from(store)?, &nodes)?;
+    let header = metadata_header(&metadata)?;
+    let graph = HNSWIndex::from_persistence(dimensions, params, header.meta, nodes)?;
     Ok((graph, metadata.revision))
 }
 
 pub(super) fn load_revision(
-    store: &dyn KeyValueStore,
+    store: &dyn KeyValueRead,
     table: &str,
     field: &str,
 ) -> StorageBackendResult<Option<u64>> {
     Ok(load_metadata(store, table, field)?.map(|metadata| metadata.revision))
 }
 
-pub(super) fn stage_delta(
-    batch: &mut dyn KeyValueBatch,
-    table: &str,
-    field: &str,
-    dimensions: u32,
-    params: HNSWIndexParams,
-    delta: &HNSWPersistenceDelta,
-    revision: u64,
-) -> StorageBackendResult<()> {
-    batch.put(
-        &hnsw_metadata_key(table, field)?,
-        &encode_value(&metadata_from_graph(
-            dimensions, params, delta.meta, revision,
-        )?)?,
-    )?;
-    if delta.full_rewrite {
-        batch.delete_prefix(&hnsw_node_prefix(table, field)?)?;
-    }
-    for node in &delta.nodes {
-        batch.put(
-            &hnsw_node_key(table, field, node.node_id)?,
-            &encode_value(&PersistedHNSWNode::try_from(node)?)?,
-        )?;
-    }
-    Ok(())
-}
-
 fn load_metadata(
-    store: &dyn KeyValueStore,
+    store: &dyn KeyValueRead,
     table: &str,
     field: &str,
 ) -> StorageBackendResult<Option<PersistedHNSWMetadata>> {
@@ -124,19 +90,19 @@ fn load_metadata(
 }
 
 fn load_nodes(
-    store: &dyn KeyValueStore,
+    store: &dyn KeyValueRead,
     table: &str,
     field: &str,
 ) -> StorageBackendResult<Vec<HNSWNodeSnapshot>> {
     let prefix = hnsw_node_prefix(table, field)?;
     let mut nodes = Vec::new();
-    for (key, value) in store.scan_prefix(&prefix)? {
+    store.visit_prefix(&prefix, &mut |key, value| {
         let mut offset = prefix.len();
-        let node_id = read_u64(&key, &mut offset)?;
+        let node_id = read_u64(key, &mut offset)?;
         if offset != key.len() {
             return Err(other_error("persisted HNSW node key has trailing bytes"));
         }
-        let persisted: PersistedHNSWNode = decode_value(&value)?;
+        let persisted: PersistedHNSWNode = decode_value(value)?;
         if persisted.node_id != node_id {
             return Err(other_error(format!(
                 "persisted HNSW node key {node_id} disagrees with its payload {}",
@@ -144,11 +110,12 @@ fn load_nodes(
             )));
         }
         nodes.push(persisted.try_into()?);
-    }
+        Ok(())
+    })?;
     Ok(nodes)
 }
 
-fn metadata_from_graph(
+pub(super) fn metadata_from_graph(
     dimensions: u32,
     params: HNSWIndexParams,
     meta: HNSWGraphMeta,
@@ -178,22 +145,40 @@ fn validate_metadata(
     dimensions: u32,
     params: HNSWIndexParams,
 ) -> StorageBackendResult<()> {
-    let persisted_params = HNSWIndexParams {
-        m: checked_usize(metadata.m, "HNSW m")?,
-        ef_construction: checked_usize(metadata.ef_construction, "HNSW ef_construction")?,
-        ef_search: checked_usize(metadata.ef_search, "HNSW ef_search")?,
-        rebuild_threshold: checked_usize(metadata.rebuild_threshold, "HNSW rebuild_threshold")?,
-        seed: metadata.seed,
-    };
-    if metadata.format_version != HNSW_FORMAT_VERSION
-        || metadata.dimensions != dimensions
-        || persisted_params != params
-    {
+    let header = metadata_header(metadata)?;
+    if header.dimensions != dimensions || header.params != params {
         return Err(other_error(format!(
             "persisted HNSW metadata does not match the catalog for {table}.{field}"
         )));
     }
     Ok(())
+}
+
+pub(super) fn metadata_header(
+    meta: &PersistedHNSWMetadata,
+) -> StorageBackendResult<HNSWRecordHeader> {
+    if meta.format_version != HNSW_FORMAT_VERSION {
+        return Err(other_error("unsupported HNSW record format"));
+    }
+    Ok(HNSWRecordHeader {
+        dimensions: meta.dimensions,
+        params: HNSWIndexParams {
+            m: checked_usize(meta.m, "HNSW m")?,
+            ef_construction: checked_usize(meta.ef_construction, "HNSW ef_construction")?,
+            ef_search: checked_usize(meta.ef_search, "HNSW ef_search")?,
+            rebuild_threshold: checked_usize(meta.rebuild_threshold, "HNSW rebuild_threshold")?,
+            seed: meta.seed,
+        }
+        .validate()?,
+        meta: HNSWGraphMeta {
+            entry_point: meta.entry_point,
+            max_level: checked_level(meta.max_level, "HNSW max level")?,
+            next_node_id: meta.next_node_id,
+            live_count: checked_usize(meta.live_count, "HNSW live count")?,
+            deleted_count: checked_usize(meta.deleted_count, "HNSW deleted count")?,
+        },
+        revision: Some(meta.revision),
+    })
 }
 
 fn validate_canonical_vectors(
@@ -240,7 +225,7 @@ fn same_bits(left: &[f32], right: &[f32]) -> bool {
             .all(|(left, right)| left.to_bits() == right.to_bits())
 }
 
-fn checked_level(value: u64, field: &str) -> StorageBackendResult<usize> {
+pub(super) fn checked_level(value: u64, field: &str) -> StorageBackendResult<usize> {
     let value = checked_usize(value, field)?;
     if value > MAX_HNSW_LEVEL {
         return Err(corrupt(format!(
@@ -250,7 +235,7 @@ fn checked_level(value: u64, field: &str) -> StorageBackendResult<usize> {
     Ok(value)
 }
 
-fn checked_usize(value: u64, field: &str) -> StorageBackendResult<usize> {
+pub(super) fn checked_usize(value: u64, field: &str) -> StorageBackendResult<usize> {
     usize::try_from(value).map_err(|_| other_error(format!("{field} exceeds usize")))
 }
 
@@ -258,18 +243,18 @@ fn corrupt(message: impl std::fmt::Display) -> StorageBackendError {
     StorageBackendError::Other(format!("corrupt HNSW graph: {message}"))
 }
 
-impl TryFrom<&HNSWNodeSnapshot> for PersistedHNSWNode {
+impl<'a> TryFrom<&'a HNSWNodeSnapshot> for PersistedHNSWNode<&'a [f32], &'a [Vec<u64>]> {
     type Error = StorageBackendError;
 
-    fn try_from(node: &HNSWNodeSnapshot) -> Result<Self, Self::Error> {
+    fn try_from(node: &'a HNSWNodeSnapshot) -> Result<Self, Self::Error> {
         Ok(Self {
             node_id: node.node_id,
             doc_id: node.doc_id,
             vector_ordinal: node.vector_ordinal,
-            raw_vector: node.raw_vector.clone(),
+            raw_vector: &node.raw_vector,
             level: usize_to_u64(node.level, "HNSW node level")?,
             deleted: node.deleted,
-            neighbors: node.neighbors.clone(),
+            neighbors: &node.neighbors,
         })
     }
 }

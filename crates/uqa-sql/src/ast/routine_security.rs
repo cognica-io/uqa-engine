@@ -10,7 +10,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::{FunctionVolatility, RoutineColumnTypeReference};
+use super::{
+    AclRoleSpecification, FunctionVolatility, RoleSpecification, RoutineColumnTypeReference,
+};
 
 /// `PARALLEL UNSAFE`, `PARALLEL RESTRICTED`, or `PARALLEL SAFE` routine metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -35,11 +37,30 @@ pub struct RoutineSecurityAttributes {
 /// One explicit `EXECUTE` ACL entry. `None` on `CreateFunction::execute_acl` retains `PostgreSQL`'s default public execution privilege.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoutineAclEntry {
-    pub role: String,
-    /// Grantor for this ACL path. Legacy persisted definitions omit the field and therefore use the routine owner.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grantor: Option<String>,
+    /// An explicit null means PUBLIC; a missing grantee is invalid.
+    #[serde(deserialize_with = "Deserialize::deserialize")]
+    pub role: Option<uqa_core::catalog_role::RoleIdentity>,
+    pub grantor: uqa_core::catalog_role::RoleIdentity,
     pub grant_option: bool,
+}
+
+/// Old parsed declarations used an empty owner string. This accepts only that unbound marker; stored authority is separately required to carry a valid identity.
+pub(super) fn deserialize_routine_owner<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<uqa_core::catalog_role::RoleIdentity>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Owner {
+        Bound(Option<uqa_core::catalog_role::RoleIdentity>),
+        Unbound(String),
+    }
+    match Owner::deserialize(deserializer)? {
+        Owner::Bound(identity) => Ok(identity),
+        Owner::Unbound(name) if name.is_empty() => Ok(None),
+        Owner::Unbound(_) => Err(serde::de::Error::custom(
+            "routine owner requires a role identity",
+        )),
+    }
 }
 
 /// Routine namespace selected by `ALTER FUNCTION`, `ALTER PROCEDURE`, or `ALTER ROUTINE`.
@@ -89,7 +110,7 @@ pub struct AlterRoutineOwnerStmt {
     pub name: String,
     pub arg_types: Option<Vec<String>>,
     pub arg_type_references: Vec<Option<RoutineColumnTypeReference>>,
-    pub new_owner: String,
+    pub new_owner: RoleSpecification,
 }
 
 /// `ALTER FUNCTION | PROCEDURE | ROUTINE name[(input_types)] RENAME TO new_name`.
@@ -124,9 +145,9 @@ pub struct GrantRoutineStmt {
     pub grant_option: bool,
     pub grant_option_only: bool,
     pub items: Vec<GrantRoutineItem>,
-    pub grantees: Vec<String>,
+    pub grantees: Vec<AclRoleSpecification>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grantor: Option<String>,
+    pub grantor: Option<RoleSpecification>,
     #[serde(default)]
     pub revoke_behavior: RoutineRevokeBehavior,
 }
@@ -143,10 +164,10 @@ pub struct RoleMembershipOptions {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GrantRoleStmt {
     pub granted_roles: Vec<String>,
-    pub grantee_roles: Vec<String>,
+    pub grantee_roles: Vec<RoleSpecification>,
     pub is_grant: bool,
     pub options: RoleMembershipOptions,
-    pub grantor: Option<String>,
+    pub grantor: Option<RoleSpecification>,
     pub cascade: bool,
 }
 
@@ -167,11 +188,11 @@ pub struct CreateRoleStmt {
     pub attributes: BTreeSet<RoleAttribute>,
     pub connection_limit: i32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub in_roles: Vec<String>,
+    pub in_roles: Vec<RoleSpecification>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub role_members: Vec<String>,
+    pub role_members: Vec<RoleSpecification>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub admin_members: Vec<String>,
+    pub admin_members: Vec<RoleSpecification>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -182,15 +203,21 @@ pub enum RoleMembershipAction {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AlterRoleStmt {
-    pub name: String,
+    pub name: RoleSpecification,
     pub attributes: BTreeMap<RoleAttribute, bool>,
     pub connection_limit: Option<i32>,
     pub membership_action: Option<RoleMembershipAction>,
-    pub members: Vec<String>,
+    pub members: Vec<RoleSpecification>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenameRoleStmt {
+    pub name: String,
+    pub new_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DropRoleStmt {
-    pub names: Vec<String>,
+    pub names: Vec<RoleSpecification>,
     pub if_exists: bool,
 }

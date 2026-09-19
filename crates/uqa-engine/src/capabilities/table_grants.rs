@@ -11,31 +11,27 @@ use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::security::{
     table_grants::context::{
-        TableGrantContext, TableGrantInputs, TableGrantNotices, TableGrantRead, TableGrantRegistry,
-        TableGrantState, TableSecurityWrite,
+        TableGrantContext, TableGrantInputs, TableGrantNotices, TableGrantPersistence,
+        TableGrantRead, TableGrantRegistry, TableGrantState, TableSecurityWrite,
     },
     table_inquiry::TablePrivilegeState,
 };
 use uqa_sql::{
     catalog::{
         resolution::RelationResolution,
-        security::{table_grants::targets::TableGrantResolution, TableSecurity},
+        security::{table_grants::targets::TableGrantResolution, BoundTableSecurity},
     },
     SQLError,
 };
-use uqa_storage::StorageBackendResult;
-struct GrantTable<'a> {
-    engine: &'a Engine,
+struct GrantTable {
     state: Arc<TableState>,
 }
 struct GrantTables<'a> {
-    engine: &'a Engine,
     guard: RwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>,
 }
 impl TableGrantRegistry for Engine {
     fn tables(&self) -> Box<dyn TableGrantRead<'_> + '_> {
         Box::new(GrantTables {
-            engine: self,
             guard: self.storage.tables.read(),
         })
     }
@@ -45,52 +41,32 @@ impl<'a> TableGrantRead<'a> for GrantTables<'a> {
         Box::new(self.guard.keys())
     }
     fn retained(&self, relation: &RelationIdentity) -> Option<Box<dyn TableGrantState + 'a>> {
-        self.guard.get(relation).cloned().map(|state| {
-            Box::new(GrantTable {
-                engine: self.engine,
-                state,
-            }) as Box<dyn TableGrantState + 'a>
-        })
+        self.guard
+            .get(relation)
+            .cloned()
+            .map(|state| Box::new(GrantTable { state }) as Box<dyn TableGrantState + 'a>)
     }
 }
-impl TablePrivilegeState for GrantTable<'_> {
-    fn role_owner(&self) -> String {
+impl TablePrivilegeState for GrantTable {
+    fn role_owner(&self) -> uqa_sql::catalog::roles::RoleIdentity {
         self.state.role_owner()
     }
     fn columns(&self) -> uqa_execution::catalog::security::table_inquiry::TableColumnsRead<'_> {
         Box::new(self.state.columns.read())
     }
-    fn security(&self) -> TableSecurity {
+    fn security(&self) -> BoundTableSecurity {
         self.state.security()
     }
     fn column_names(&self) -> Vec<String> {
         TablePrivilegeState::column_names(self.state.as_ref())
     }
 }
-impl TableGrantState for GrantTable<'_> {
+impl TableGrantState for GrantTable {
     fn security_write(&self) -> TableSecurityWrite<'_> {
         Box::new(self.state.security.write())
     }
-    fn persist_security(&self, name: &str, security: &TableSecurity) -> StorageBackendResult<()> {
-        let table = self.state.as_ref();
-        let columns = table.columns.read().clone();
-        let constraints = uqa_sql::ast::TableConstraintSet {
-            columns_declared: Some(*table.columns_declared.read()),
-            checks: table.table_checks.read().clone(),
-            foreign_keys: table.foreign_keys.read().clone(),
-            key_constraints: table.key_constraints.read().clone(),
-            persistence: table.persistence,
-            on_commit: table.on_commit,
-            hierarchy: table.hierarchy.read().clone(),
-        };
-        self.engine
-            .try_save_table_schema_with_components_and_security(
-                name,
-                table,
-                &columns,
-                &constraints,
-                security,
-            )
+    fn persistence(&self) -> uqa_sql::ast::RelationPersistence {
+        self.state.persistence
     }
 }
 impl TableGrantResolution for Engine {
@@ -103,10 +79,28 @@ impl TableGrantNotices for Engine {
         self.push_sql_notice(level, message);
     }
 }
+impl TableGrantPersistence for Engine {
+    fn persist_relation_acl(
+        &self,
+        relation: &RelationIdentity,
+        column: Option<&str>,
+        entry: &uqa_storage::catalog::relation_acl::RelationAclTuple,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        if let Some(catalog) = &self.storage.catalog {
+            catalog.save_relation_acl(relation, column, entry)?;
+        }
+        Ok(())
+    }
+}
 impl TableGrantInputs for Engine {
     fn table_grant_context(&self) -> TableGrantContext<'_> {
         TableGrantContext {
             writer: self,
+            bindings: self,
+            locks: self,
+            shared_locks: self,
+            rows: self,
+            system: self,
             resolution: self,
             namespaces: self,
             names: self,
@@ -115,6 +109,7 @@ impl TableGrantInputs for Engine {
             tables: self,
             views: self,
             foreign: self,
+            acls: self,
             catalog: self.storage.catalog.as_deref(),
             changes: self,
             notices: self,

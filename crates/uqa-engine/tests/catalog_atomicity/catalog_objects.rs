@@ -108,7 +108,7 @@ fn sqlite_reopen_preserves_structural_ownership_for_every_relation_kind() {
 
     let connection = ManagedConnection::open(&path).unwrap();
     connection
-        .with(|conn| {
+        .with_physical(|conn| {
             let rows: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM _relations WHERE schema_name = 'app'",
                 [],
@@ -185,7 +185,7 @@ fn assert_quoted_dot_relation_values(engine: &Engine) {
 fn assert_structural_table_identities(path: &Path) {
     let connection = ManagedConnection::open(path).unwrap();
     let identities = connection
-        .with(|conn| {
+        .with_physical(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT schema_name, relation_name FROM _relations WHERE kind = 'table' \
                  ORDER BY schema_name, relation_name",

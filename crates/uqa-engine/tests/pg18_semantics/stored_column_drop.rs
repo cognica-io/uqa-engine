@@ -310,7 +310,7 @@ fn remove_merge_target_bindings(value: &mut serde_json::Value) -> usize {
 
 #[test]
 fn stored_column_drop_merge_migrates_legacy_target_identities() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("merge-column-migration.db");
@@ -318,7 +318,8 @@ fn stored_column_drop_merge_migrates_legacy_target_identities() {
     create_merge_column_lifecycle(&engine);
     drop(engine);
     {
-        let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+        let catalog =
+            crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
         let encoded = catalog.get_metadata("sql_functions_json").unwrap().unwrap();
         let mut definitions: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         assert_eq!(remove_merge_target_bindings(&mut definitions), 1);
@@ -335,7 +336,8 @@ fn stored_column_drop_merge_migrates_legacy_target_identities() {
         .unwrap());
     drop(engine);
     {
-        let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+        let catalog =
+            crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
         let encoded = catalog.get_metadata("sql_functions_json").unwrap().unwrap();
         assert!(encoded.contains("target_column_bindings"));
         assert!(encoded.contains("nextval"));
@@ -357,7 +359,7 @@ fn stored_column_drop_merge_migrates_legacy_target_identities() {
 
 #[test]
 fn stored_column_drop_merge_retains_domain_dependencies_after_target_removal() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("merge-domain-lifecycle.db");
@@ -365,7 +367,8 @@ fn stored_column_drop_merge_retains_domain_dependencies_after_target_removal() {
     engine.sql("CREATE DOMAIN merge_original_domain AS integer CHECK(VALUE > 0); CREATE DOMAIN merge_replacement_domain AS integer; CREATE TABLE merge_domain_lifecycle(id integer, amount merge_original_domain DEFAULT 3); INSERT INTO merge_domain_lifecycle VALUES(1,42); CREATE FUNCTION merge_domain_writer() RETURNS integer LANGUAGE SQL BEGIN ATOMIC MERGE INTO merge_domain_lifecycle d USING (VALUES(1)) s(id) ON d.id=s.id WHEN MATCHED THEN UPDATE SET amount=8 RETURNING d.id; END; CREATE FUNCTION merge_domain_default() RETURNS integer LANGUAGE SQL BEGIN ATOMIC MERGE INTO merge_domain_lifecycle d USING (VALUES(1)) s(id) ON d.id=s.id WHEN MATCHED THEN UPDATE SET amount=DEFAULT RETURNING d.id; END", &[]).unwrap();
     drop(engine);
     {
-        let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+        let catalog =
+            crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
         let encoded = catalog.get_metadata("sql_functions_json").unwrap().unwrap();
         let mut definitions: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         assert_eq!(remove_merge_target_bindings(&mut definitions), 2);

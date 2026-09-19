@@ -18,13 +18,6 @@ fn table_not_found(table: &str) -> StorageBackendError {
     StorageBackendError::Other(format!("table `{table}` does not exist"))
 }
 impl TableRemovalContext<'_> {
-    pub fn drop_table(&self, name: &str) -> StorageBackendResult<bool> {
-        let Some(name) = self.resolve_table_ddl_target(name, "DROP TABLE")? else {
-            return Ok(false);
-        };
-        self.try_drop_tables_inner(&[name], false)?;
-        Ok(true)
-    }
     pub fn try_drop_tables(&self, names: &[String], cascade: bool) -> StorageBackendResult<()> {
         self.transactions
             .with_table_removal_write(Box::new(move |context| {

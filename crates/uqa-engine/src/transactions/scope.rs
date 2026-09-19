@@ -12,6 +12,7 @@ use super::{Engine, SQLError};
 enum TransactionScopeState {
     Active,
     Finished,
+    AwaitingResolution,
 }
 
 pub(super) struct TransactionScope<'engine> {
@@ -65,6 +66,10 @@ impl<'engine> TransactionScope<'engine> {
             Err(commit_error) => {
                 self.finish_if_closed();
                 if self.state == TransactionScopeState::Finished {
+                    return Err(commit_error);
+                }
+                if self.engine.pending_commit().is_some() {
+                    self.state = TransactionScopeState::AwaitingResolution;
                     return Err(commit_error);
                 }
                 match self.rollback() {

@@ -22,6 +22,10 @@ impl SQLiteInvertedIndex {
         term: &str,
         target_doc_id: DocId,
     ) -> StorageBackendResult<(DocId, usize)> {
+        encode_index_u64("target document", target_doc_id)?;
+        if let Some(index) = self.native_index() {
+            return index.skip_to(field, term, target_doc_id);
+        }
         self.require_graph_format()?;
         let term = TokenTermKey::from_text(term);
         let table = self.skip_table_name(field);
@@ -85,6 +89,9 @@ impl SQLiteInvertedIndex {
         scorer: &S,
         scorer_fingerprint: &str,
     ) -> StorageBackendResult<()> {
+        if let Some(index) = self.native_index() {
+            return index.build_block_max_scores_key(field, term, scorer, scorer_fingerprint);
+        }
         let mut cursor = self.posting_cursor_key(field, term)?;
         if cursor.doc_freq() == 0 && !self.has_field(field)? {
             return Ok(());
@@ -138,6 +145,9 @@ impl SQLiteInvertedIndex {
         field: &str,
         scorer: &S,
     ) -> StorageBackendResult<()> {
+        if let Some(index) = self.native_index() {
+            return index.build_all_block_max_scores(field, scorer);
+        }
         let terms = self.vocabulary_keys(field)?;
         for term in terms {
             self.build_block_max_scores_key(field, &term, scorer, "")?;
@@ -151,6 +161,10 @@ impl SQLiteInvertedIndex {
         term: &str,
         block_idx: usize,
     ) -> StorageBackendResult<f64> {
+        encode_index_usize("block index", block_idx)?;
+        if let Some(index) = self.native_index() {
+            return index.get_block_max_score(field, term, block_idx);
+        }
         self.require_graph_format()?;
         let term = TokenTermKey::from_text(term);
         let table = self.blockmax_table_name(field);
@@ -184,6 +198,9 @@ impl SQLiteInvertedIndex {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<Vec<f64>> {
+        if let Some(index) = self.native_index() {
+            return index.get_all_block_max_scores_key(field, term);
+        }
         self.require_graph_format()?;
         let table = self.blockmax_table_name(field);
         Ok(self.conn.with(|conn| {
@@ -246,6 +263,13 @@ impl SQLiteInvertedIndex {
         terms: &[TokenTermKey],
         scorer_fingerprint: &str,
     ) -> StorageBackendResult<Vec<Option<Vec<f64>>>> {
+        if let Some(index) = self.native_index() {
+            return index.get_versioned_block_max_scores_keys_bulk(
+                field,
+                terms,
+                scorer_fingerprint,
+            );
+        }
         if terms.is_empty() {
             return Ok(Vec::new());
         }
@@ -328,6 +352,9 @@ impl SQLiteInvertedIndex {
     }
 
     pub fn load_block_max_into(&self, target: &mut BlockMaxIndex) -> StorageBackendResult<()> {
+        if let Some(index) = self.native_index() {
+            return index.load_block_max_into(target);
+        }
         for field in self.fields_with_blockmax_tables()? {
             for term in self.vocabulary_keys(&field)? {
                 let scores = self.get_all_block_max_scores_key(&field, &term)?;

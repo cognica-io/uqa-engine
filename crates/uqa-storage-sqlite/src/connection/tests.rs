@@ -534,6 +534,10 @@ fn ignored_storage_error_aborts_explicit_transaction() {
         Ok(())
     });
     assert!(matches!(
+        writer.pin_transaction_snapshot(),
+        Err(SQLiteError::TransactionAborted(_))
+    ));
+    assert!(matches!(
         writer.commit_transaction(),
         Err(SQLiteError::TransactionAborted(_))
     ));

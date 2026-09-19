@@ -198,7 +198,7 @@ fn validate_scores(scores: &[f64]) -> StorageBackendResult<()> {
     Ok(())
 }
 
-fn validate_score(score: f64) -> StorageBackendResult<()> {
+pub(crate) fn validate_score(score: f64) -> StorageBackendResult<()> {
     if score.is_finite() && score >= 0.0 {
         Ok(())
     } else {

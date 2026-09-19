@@ -61,7 +61,10 @@ pub fn pg_get_viewdef_value(
             .find_map(|(_, view)| (super::view_relation_oid(&view) == *oid).then_some(view)),
         Value::Str(name) | Value::FixedChar(name) => {
             let reference = view_name_reference(name)?;
-            if super::resolve_virtual_relation(&resolution, &reference).is_some() {
+            if catalog
+                .virtual_relation_resolved(&resolution, &reference)?
+                .is_some()
+            {
                 return Ok(Value::Null);
             }
             let canonical = match catalog.relation_kind_resolution(&resolution, &reference)? {

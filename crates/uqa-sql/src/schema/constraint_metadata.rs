@@ -7,6 +7,7 @@
 //! Normalize durable constraint names and identities through a caller-owned identity allocator.
 use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
+pub mod identity;
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -22,27 +23,7 @@ pub fn materialize_constraint_metadata(
 ) -> ConstraintMetadataResult<bool> {
     // Releases predating typed table-key persistence stored column-level PRIMARY KEY and UNIQUE declarations only as ColumnDef flags. Promote those legacy flags before assigning names so catalog publication always sees named constraints.
     let mut changed = promote_legacy_column_key_constraints(columns, constraints);
-    let mut used = BTreeSet::new();
-    for column in columns.iter() {
-        record_constraint_name(&mut used, column.not_null_name.as_deref())?;
-        record_constraint_name(&mut used, column.check_name.as_deref())?;
-        record_constraint_name(
-            &mut used,
-            column
-                .references
-                .as_ref()
-                .and_then(|reference| reference.name.as_deref()),
-        )?;
-    }
-    for constraint in &constraints.key_constraints {
-        record_constraint_name(&mut used, constraint.name.as_deref())?;
-    }
-    for constraint in &constraints.checks {
-        record_constraint_name(&mut used, constraint.name.as_deref())?;
-    }
-    for constraint in &constraints.foreign_keys {
-        record_constraint_name(&mut used, constraint.name.as_deref())?;
-    }
+    let mut used = existing_constraint_names(columns, constraints)?;
 
     let mut column_object_ids = BTreeSet::new();
     for column in columns.iter_mut() {
@@ -62,6 +43,7 @@ pub fn materialize_constraint_metadata(
                 format!("{}_{}_not_null", relation.name, column.name),
                 &mut used,
             )?;
+            changed |= identity::materialize_not_null_identity(column, allocate)?;
         }
         if column.check.is_some() {
             changed |= assign_constraint_name(
@@ -120,7 +102,36 @@ pub fn materialize_constraint_metadata(
         changed |= assign_constraint_object_id(&mut constraint.object_id, allocate)?;
     }
     changed |= synchronize_partition_inherited_foreign_key_ids(constraints);
+    identity::validate_not_null_identities(columns)?;
     Ok(changed)
+}
+
+fn existing_constraint_names(
+    columns: &[crate::ast::ColumnDef],
+    constraints: &crate::ast::TableConstraintSet,
+) -> ConstraintMetadataResult<BTreeSet<String>> {
+    let mut used = BTreeSet::new();
+    for column in columns {
+        record_constraint_name(&mut used, column.not_null_name.as_deref())?;
+        record_constraint_name(&mut used, column.check_name.as_deref())?;
+        record_constraint_name(
+            &mut used,
+            column
+                .references
+                .as_ref()
+                .and_then(|reference| reference.name.as_deref()),
+        )?;
+    }
+    for constraint in &constraints.key_constraints {
+        record_constraint_name(&mut used, constraint.name.as_deref())?;
+    }
+    for constraint in &constraints.checks {
+        record_constraint_name(&mut used, constraint.name.as_deref())?;
+    }
+    for constraint in &constraints.foreign_keys {
+        record_constraint_name(&mut used, constraint.name.as_deref())?;
+    }
+    Ok(used)
 }
 
 fn promote_legacy_column_key_constraints(

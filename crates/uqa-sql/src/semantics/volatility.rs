@@ -134,6 +134,7 @@ pub fn function_volatility_with_binding(
                 | "statement_timestamp"
                 | "transaction_timestamp"
                 | "current_schemas"
+                | "current_setting"
                 | "pg_backend_pid"
                 | "version"
                 | "pg_listening_channels"
@@ -161,6 +162,7 @@ pub fn function_volatility_with_binding(
                 | "has_database_privilege"
                 | "has_schema_privilege"
                 | "has_sequence_privilege"
+                | "has_function_privilege"
         )
         || (lower == "age" && argument_count == 1)
     {

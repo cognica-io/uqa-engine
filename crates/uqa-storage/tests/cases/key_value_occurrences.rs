@@ -22,6 +22,52 @@ fn fields(text: &str) -> BTreeMap<String, String> {
     BTreeMap::from([("body".into(), text.into())])
 }
 
+#[test]
+fn column_lifecycle_invalidates_occurrence_bounds_without_changing_retained_views() {
+    struct Frequency;
+    impl uqa_storage::block_max_index::BlockMaxScorer for Frequency {
+        fn score(&self, frequency: u64, _: u64, _: u64) -> f64 {
+            frequency as f64
+        }
+    }
+    let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(store.clone());
+    let mut index = KeyValueInvertedIndex::new(store, "docs", whitespace_analyzer());
+    index.add_document(1, fields("alpha alpha")).unwrap();
+    index
+        .rebuild_persisted_block_max("body", &Frequency, "old")
+        .unwrap();
+    let retained = index.snapshot().unwrap();
+    catalog
+        .rename_column_data("docs", "body", "caption")
+        .unwrap();
+    assert_eq!(index.get_doc_length(1, "caption").unwrap(), 2);
+    for field in ["body", "caption"] {
+        assert_eq!(
+            index
+                .persisted_block_max_scores(field, "alpha", "old")
+                .unwrap(),
+            None
+        );
+    }
+    index
+        .rebuild_persisted_block_max("caption", &Frequency, "new")
+        .unwrap();
+    catalog.drop_column_data("docs", "caption").unwrap();
+    assert_eq!(
+        index
+            .persisted_block_max_scores("caption", "alpha", "new")
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        retained
+            .persisted_block_max_scores("body", "alpha", "old")
+            .unwrap(),
+        Some(vec![2.0])
+    );
+}
+
 fn config() -> Analyzer {
     serde_json::from_str(r#"{"tokenizer":{"type":"whitespace"},"token_filters":[{"type":"stop","language":"","custom_words":["gap"]},{"type":"synonym","synonyms":{"a":["a","a"]}}]}"#).unwrap()
 }
@@ -321,9 +367,7 @@ fn binary_nori_terms_and_source_metadata_follow_column_and_table_lifecycles() {
     catalog
         .save_table(&TableSchema {
             relation: RelationIdentity::from_legacy_name("public.docs").unwrap(),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: BTreeMap::new(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             object_id: [1; 16],
             storage_generation: [1; 16],
             analyzer_json: serde_json::to_string(&config).unwrap(),
@@ -407,12 +451,68 @@ struct CancellingStore {
     puts: std::sync::atomic::AtomicUsize,
 }
 
+struct BorrowedBatch<'a>(&'a mut dyn uqa_storage::key_value::KeyValueBatch);
+impl uqa_storage::key_value::KeyValueBatch for BorrowedBatch<'_> {
+    fn require_unchanged(&mut self, key: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.0.require_unchanged(key)
+    }
+    fn touch_marker(&mut self, key: &[u8], value: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.0.touch_marker(key, value)
+    }
+    fn observe_identifier(
+        &mut self,
+        namespace: &[u8],
+        value: u64,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.0.observe_identifier(namespace, value)
+    }
+    fn inherit_identifiers(
+        &mut self,
+        from: &[u8],
+        to: &[u8],
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.0.inherit_identifiers(from, to)
+    }
+    fn put(&mut self, key: &[u8], value: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.0.put(key, value)
+    }
+    fn delete(&mut self, key: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.0.delete(key)
+    }
+    fn delete_prefix(&mut self, prefix: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.0.delete_prefix(prefix)
+    }
+    fn commit(self: Box<Self>) -> uqa_storage::StorageBackendResult<()> {
+        panic!("evaluation cannot commit its borrowed batch")
+    }
+}
+
 struct CancellingBatch<'a> {
     inner: Box<dyn uqa_storage::key_value::KeyValueBatch + 'a>,
     store: &'a CancellingStore,
 }
 
 impl uqa_storage::key_value::KeyValueBatch for CancellingBatch<'_> {
+    fn require_unchanged(&mut self, key: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.require_unchanged(key)
+    }
+    fn touch_marker(&mut self, key: &[u8], value: &[u8]) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.touch_marker(key, value)
+    }
+    fn observe_identifier(
+        &mut self,
+        namespace: &[u8],
+        value: u64,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.observe_identifier(namespace, value)
+    }
+    fn inherit_identifiers(
+        &mut self,
+        from: &[u8],
+        to: &[u8],
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.inherit_identifiers(from, to)
+    }
     fn put(&mut self, key: &[u8], value: &[u8]) -> uqa_storage::StorageBackendResult<()> {
         self.inner.put(key, value)?;
         let count = self
@@ -436,12 +536,57 @@ impl uqa_storage::key_value::KeyValueBatch for CancellingBatch<'_> {
     fn delete_prefix(&mut self, prefix: &[u8]) -> uqa_storage::StorageBackendResult<()> {
         self.inner.delete_prefix(prefix)
     }
+    fn graph_mutation(
+        &mut self,
+        mutation: uqa_storage::mvcc::GraphMutation<'_>,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.graph_mutation(mutation)
+    }
+    fn preview_graph_invalidation(
+        &mut self,
+        key: &[u8],
+        value: Option<&[u8]>,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.preview_graph_invalidation(key, value)
+    }
+    fn replace_graph_cache(
+        &mut self,
+        key: &[u8],
+        value: Option<&[u8]>,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.replace_graph_cache(key, value)
+    }
     fn commit(self: Box<Self>) -> uqa_storage::StorageBackendResult<()> {
         self.inner.commit()
     }
 }
 
 impl KeyValueStore for CancellingStore {
+    fn identifier_allocator(&self) -> Option<&dyn uqa_storage::mvcc::IdentifierAllocator> {
+        self.inner.identifier_allocator()
+    }
+
+    fn with_read_view(
+        &self,
+        read: &mut uqa_storage::key_value::KeyValueReadScope<'_>,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.with_read_view(read)
+    }
+    fn with_mutation(
+        &self,
+        mutate: &mut uqa_storage::key_value::KeyValueMutation<'_>,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.inner.with_mutation(&mut |read, batch| {
+            mutate(
+                read,
+                &mut CancellingBatch {
+                    inner: Box::new(BorrowedBatch(batch)),
+                    store: self,
+                },
+            )
+        })
+    }
+
     fn get(&self, key: &[u8]) -> uqa_storage::StorageBackendResult<Option<Vec<u8>>> {
         self.inner.get(key)
     }

@@ -6,10 +6,11 @@
 
 //! PL/pgSQL parser invocation, datum lowering, and condition normalization.
 
+use super::lowering_expression::lower_sourced_statement;
 use super::{
     condition_sqlstate, ensure_single_tag, expect_tag, json_bool_or_false, json_kind,
     json_optional_i64, json_usize_or_zero, lower_block, lower_cursor_scroll_options, lower_expr,
-    lower_full_statement, normalize_plpgsql_type, optional_array, require, require_nonempty_str,
+    normalize_plpgsql_type, optional_array, require, require_nonempty_str,
     validate_assignable_datum, CreateFunction, FunctionBody, FunctionParamMode, FunctionReturns,
     JSONValue, PLpgSQLCursor, PLpgSQLDatum, PLpgSQLFunction, PLpgSQLRowField, PLpgSQLVar, Result,
     RoutineColumnTypeReference, SQLError,
@@ -303,8 +304,10 @@ pub(super) fn lower_datum(raw: &JSONValue) -> Result<PLpgSQLDatum> {
             None => None,
         };
         let cursor = if let Some(query) = var.get("cursor_explicit_expr") {
+            let (query, source_sql) = lower_sourced_statement(query)?;
             Some(PLpgSQLCursor {
-                query: lower_full_statement(query)?,
+                query,
+                source_sql: source_sql.into(),
                 argument_row: match json_optional_i64(var, "cursor_explicit_argrow")? {
                     None | Some(-1) => None,
                     Some(index) if index >= 0 => Some(usize::try_from(index).map_err(|_| {

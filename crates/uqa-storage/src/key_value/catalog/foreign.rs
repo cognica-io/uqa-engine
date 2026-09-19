@@ -10,8 +10,7 @@ use super::{
     decode_relation_key, decode_value, encode_value, key_with_tag, read_str, relation_key,
     single_str_key, ForeignTableRow, KeyValueCatalog, RelationIdentity, RelationKind,
     StorageBackendError, StorageBackendResult, StoredForeignServer, StoredForeignTable,
-    TableAclEntry, STORED_FOREIGN_TABLE_SECURITY_VERSION, TAG_FOREIGN_SERVER, TAG_FOREIGN_TABLE,
-    TAG_RELATION,
+    STORED_FOREIGN_TABLE_SECURITY_VERSION, TAG_FOREIGN_SERVER, TAG_FOREIGN_TABLE, TAG_RELATION,
 };
 
 impl KeyValueCatalog {
@@ -53,47 +52,52 @@ impl KeyValueCatalog {
         &self,
         row: &ForeignTableRow,
     ) -> StorageBackendResult<()> {
-        let mut batch = self.store.batch();
-        self.claim_relation(batch.as_mut(), &row.relation, RelationKind::ForeignTable)?;
-        batch.put(
-            &relation_key(TAG_FOREIGN_TABLE, &row.relation)?,
-            &encode_value(&StoredForeignTable {
-                security_version: STORED_FOREIGN_TABLE_SECURITY_VERSION,
-                role_owner: row.role_owner.clone(),
-                acl: row.acl.clone(),
-                column_acls: row.column_acls.clone(),
-                server_name: row.server_name.clone(),
-                columns_json: row.columns_json.clone(),
-                options_json: row.options_json.clone(),
-            })?,
-        )?;
-        batch.commit()
+        self.store.with_mutation(&mut |read, batch| {
+            super::relations::claim_relation(
+                read,
+                batch,
+                &row.relation,
+                RelationKind::ForeignTable,
+            )?;
+            super::relation_acl::clear(read, batch, &row.relation)?;
+            batch.put(
+                &relation_key(TAG_FOREIGN_TABLE, &row.relation)?,
+                &encode_value(&StoredForeignTable {
+                    security_version: STORED_FOREIGN_TABLE_SECURITY_VERSION,
+                    security: row.security.clone(),
+                    server_name: row.server_name.clone(),
+                    columns_json: row.columns_json.clone(),
+                    options_json: row.options_json.clone(),
+                })?,
+            )
+        })
     }
 
     pub(super) fn update_foreign_table_security_impl(
         &self,
         relation: &RelationIdentity,
-        role_owner: &str,
-        acl: Option<&[TableAclEntry]>,
-        column_acls: &std::collections::BTreeMap<String, Vec<TableAclEntry>>,
+        security: &crate::RelationSecurityRow,
     ) -> StorageBackendResult<bool> {
         let key = relation_key(TAG_FOREIGN_TABLE, relation)?;
-        let Some(value) = self.store.get(&key)? else {
-            return Ok(false);
-        };
-        let mut stored: StoredForeignTable = decode_value(&value)?;
-        if stored.security_version != STORED_FOREIGN_TABLE_SECURITY_VERSION {
-            return Err(StorageBackendError::Other(format!(
-                "foreign-table catalog record `{}` has unsupported security version {}",
-                relation.qualified_name(),
-                stored.security_version
-            )));
-        }
-        stored.role_owner = role_owner.to_string();
-        stored.acl = acl.map(<[TableAclEntry]>::to_vec);
-        stored.column_acls.clone_from(column_acls);
-        self.store.put(&key, &encode_value(&stored)?)?;
-        Ok(true)
+        let mut found = false;
+        self.store.with_mutation(&mut |read, batch| {
+            let Some(value) = read.get(&key)? else {
+                return Ok(());
+            };
+            found = true;
+            let mut stored: StoredForeignTable = decode_value(&value)?;
+            if stored.security_version != STORED_FOREIGN_TABLE_SECURITY_VERSION {
+                return Err(StorageBackendError::Other(format!(
+                    "foreign-table catalog record `{}` has unsupported security version {}",
+                    relation.qualified_name(),
+                    stored.security_version
+                )));
+            }
+            stored.security = security.clone();
+            super::relation_acl::clear(read, batch, relation)?;
+            batch.put(&key, &encode_value(&stored)?)
+        })?;
+        Ok(found)
     }
 
     pub(super) fn rename_foreign_table_impl(
@@ -110,60 +114,68 @@ impl KeyValueCatalog {
                 "moving a foreign table between schemas is not supported by the catalog".into(),
             ));
         }
-        let Some(value) = self.store.get(&from_key)? else {
-            return Ok(false);
-        };
-        let to_key = relation_key(TAG_FOREIGN_TABLE, to)?;
-        if self.store.get(&to_key)?.is_some()
-            || self.store.get(&relation_key(TAG_RELATION, to)?)?.is_some()
-        {
-            return Err(StorageBackendError::Other(format!(
-                "relation `{}` already exists",
-                to.qualified_name()
-            )));
-        }
-        let mut batch = self.store.batch();
-        self.claim_relation(batch.as_mut(), to, RelationKind::ForeignTable)?;
-        batch.put(&to_key, &value)?;
-        batch.delete(&from_key)?;
-        self.release_relation(batch.as_mut(), from, RelationKind::ForeignTable)?;
-        batch.commit()?;
-        Ok(true)
+        let mut found = false;
+        self.store.with_mutation(&mut |read, batch| {
+            let Some(value) = read.get(&from_key)? else {
+                return Ok(());
+            };
+            found = true;
+            let to_key = relation_key(TAG_FOREIGN_TABLE, to)?;
+            if read.get(&to_key)?.is_some() || read.get(&relation_key(TAG_RELATION, to)?)?.is_some()
+            {
+                return Err(StorageBackendError::Other(format!(
+                    "relation `{}` already exists",
+                    to.qualified_name()
+                )));
+            }
+            super::relations::claim_relation(read, batch, to, RelationKind::ForeignTable)?;
+            super::relation_acl::rename(read, batch, from, to)?;
+            batch.put(&to_key, &value)?;
+            batch.delete(&from_key)?;
+            super::relations::release_relation(read, batch, from, RelationKind::ForeignTable)
+        })?;
+        Ok(found)
     }
 
     pub(super) fn drop_foreign_table_impl(
         &self,
         relation: &RelationIdentity,
     ) -> StorageBackendResult<()> {
-        let mut batch = self.store.batch();
-        batch.delete(&relation_key(TAG_FOREIGN_TABLE, relation)?)?;
-        self.release_relation(batch.as_mut(), relation, RelationKind::ForeignTable)?;
-        batch.commit()
+        self.store.with_mutation(&mut |read, batch| {
+            super::relation_acl::clear(read, batch, relation)?;
+            batch.delete(&relation_key(TAG_FOREIGN_TABLE, relation)?)?;
+            super::relations::release_relation(read, batch, relation, RelationKind::ForeignTable)
+        })
     }
 
     pub(super) fn load_foreign_tables_impl(&self) -> StorageBackendResult<Vec<ForeignTableRow>> {
-        let mut rows = Vec::new();
-        for (key, value) in self.store.scan_prefix(&key_with_tag(TAG_FOREIGN_TABLE))? {
-            let relation = decode_relation_key(&key)?;
-            let stored: StoredForeignTable = decode_value(&value)?;
-            if stored.security_version != STORED_FOREIGN_TABLE_SECURITY_VERSION {
-                return Err(StorageBackendError::Other(format!(
-                    "foreign-table catalog record `{}` has unsupported security version {}",
-                    relation.qualified_name(),
-                    stored.security_version
-                )));
+        crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
+            let mut rows = Vec::new();
+            read.visit_prefix(&[TAG_FOREIGN_TABLE], &mut |key, value| {
+                let relation = decode_relation_key(key)?;
+                let stored: StoredForeignTable = decode_value(value)?;
+                if stored.security_version != STORED_FOREIGN_TABLE_SECURITY_VERSION {
+                    return Err(StorageBackendError::Other(format!(
+                        "foreign-table catalog record `{}` has unsupported security version {}",
+                        relation.qualified_name(),
+                        stored.security_version
+                    )));
+                }
+                rows.push(ForeignTableRow {
+                    relation,
+                    security: stored.security,
+                    server_name: stored.server_name,
+                    columns_json: stored.columns_json,
+                    options_json: stored.options_json,
+                });
+                Ok(())
+            })?;
+            let acls = super::relation_acl::load(read)?;
+            for row in &mut rows {
+                acls.apply(&row.relation, &mut row.security)?;
             }
-            rows.push(ForeignTableRow {
-                relation,
-                role_owner: stored.role_owner,
-                acl: stored.acl,
-                column_acls: stored.column_acls,
-                server_name: stored.server_name,
-                columns_json: stored.columns_json,
-                options_json: stored.options_json,
-            });
-        }
-        rows.sort_by(|a, b| a.relation.cmp(&b.relation));
-        Ok(rows)
+            rows.sort_by(|left, right| left.relation.cmp(&right.relation));
+            Ok(rows)
+        })
     }
 }

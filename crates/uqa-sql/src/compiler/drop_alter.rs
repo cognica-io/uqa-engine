@@ -210,9 +210,8 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                 let owner = command.newowner.as_ref().ok_or_else(|| {
                     SQLError::Internal("ALTER SEQUENCE OWNER TO without owner".into())
                 })?;
-                alter.role_owner = Some(super::routines::compile_role_spec(
+                alter.role_owner = Some(super::routines::compile_role_specification(
                     owner,
-                    false,
                     "ALTER SEQUENCE OWNER TO",
                 )?);
             }
@@ -271,9 +270,8 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                 name: table,
                 if_exists,
                 action: crate::ast::AlterForeignTableAction::OwnerTo(
-                    super::routines::compile_role_spec(
+                    super::routines::compile_role_specification(
                         owner,
-                        false,
                         "ALTER FOREIGN TABLE OWNER TO",
                     )?,
                 ),
@@ -324,9 +322,8 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                 let owner = cmd.newowner.as_ref().ok_or_else(|| {
                     SQLError::Internal("ALTER VIEW OWNER TO without owner".into())
                 })?;
-                AlterViewAction::OwnerTo(super::routines::compile_role_spec(
+                AlterViewAction::OwnerTo(super::routines::compile_role_specification(
                     owner,
-                    false,
                     "ALTER VIEW OWNER TO",
                 )?)
             }
@@ -379,9 +376,8 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                     SQLError::Internal("ALTER TABLE OWNER TO without owner".into())
                 })?;
                 AlterTableAction::ChangeOwner {
-                    owner: super::routines::compile_role_spec(
+                    owner: super::routines::compile_role_specification(
                         owner,
-                        false,
                         "ALTER TABLE OWNER TO",
                     )?,
                 }
@@ -836,6 +832,12 @@ fn collect_reset_reloption_names(nodes: &[Node], kind: AlterViewKind) -> Result<
 
 pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Statement> {
     use pg_query::protobuf::ObjectType;
+    if stmt.rename_type() == ObjectType::ObjectRole {
+        return Ok(Statement::RenameRole(crate::ast::RenameRoleStmt {
+            name: stmt.subname.clone(),
+            new_name: stmt.newname.clone(),
+        }));
+    }
     let (routine_kind, context) = match stmt.rename_type() {
         ObjectType::ObjectFunction => (Some(AlterRoutineKind::Function), "ALTER FUNCTION"),
         ObjectType::ObjectProcedure => (Some(AlterRoutineKind::Procedure), "ALTER PROCEDURE"),

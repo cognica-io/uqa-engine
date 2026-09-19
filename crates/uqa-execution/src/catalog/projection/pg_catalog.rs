@@ -23,6 +23,6 @@ pub use relations::{
     build_pg_database, build_pg_matviews, build_pg_tables, build_pg_views, pg_class_catalog_row,
     pg_class_row, pg_class_row_with_lifecycle, table_relation_oid_from, table_rowtype_oid_from,
 };
-pub use roles::{build_pg_auth_members, build_pg_roles, build_pg_user};
+pub use roles::{build_pg_auth_members, build_pg_authid, build_pg_roles, build_pg_user};
 pub use sequences::build_pg_sequences;
 pub use types::{build_pg_range, build_pg_type};

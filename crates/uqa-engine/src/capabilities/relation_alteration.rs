@@ -10,10 +10,11 @@ use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 use uqa_execution::schema::{
     relation_alteration::{
-        RelationAlterLocks, RelationRenameDependencies, RoleTargetSchemaAccess, RoleTransferContext,
+        RelationRenameDependencies, RoleTargetSchemaAccess, RoleTransferContext,
     },
     sequences::role_ownership::{OwnedSequenceSecurityCatalog, OwnedSequenceSecurityRead},
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     catalog::resolution::RelationResolution, schema::relation_alteration::RelationAlterNames,
     SQLError,
@@ -26,6 +27,7 @@ impl Engine {
             roles: self,
             session: self,
             schemas: self,
+            locks: self,
         }
     }
 }
@@ -35,11 +37,6 @@ impl RelationAlterNames for Engine {
     }
     fn relation_kind_at(&self, name: &str) -> Result<Option<&'static str>, String> {
         Engine::relation_kind_at(self, name).map_err(|error| error.to_string())
-    }
-}
-impl RelationAlterLocks for Engine {
-    fn lock_exclusive(&self, name: &str) -> Result<(), SQLError> {
-        self.lock_relation(name, crate::row_locks::RelationLockMode::AccessExclusive)
     }
 }
 impl RelationRenameDependencies for Engine {
@@ -70,7 +67,7 @@ impl RelationRenameDependencies for Engine {
     }
 }
 impl RoleTargetSchemaAccess for Engine {
-    fn require_schema_create(&self, schema: &str, role: &str) -> Result<(), SQLError> {
+    fn require_schema_create(&self, schema: &str, role: &RoleReference) -> Result<(), SQLError> {
         self.require_schema_privilege(
             schema,
             role,

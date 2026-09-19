@@ -13,7 +13,8 @@ use uqa_execution::catalog::{
     services::{CatalogNamespace, CatalogSession, RelationCounts},
     RelationNameResolution,
 };
-use uqa_sql::catalog::session::PreparedStatementMetadata;
+use uqa_sql::catalog::roles::RoleReference;
+use uqa_sql::catalog::session::{CursorMetadata, PreparedStatementMetadata};
 use uqa_sql::SQLError;
 
 impl Engine {
@@ -31,8 +32,8 @@ impl Engine {
     }
 }
 impl CatalogSession for Engine {
-    fn current_user(&self) -> String {
-        self.session_execution_view().current_user()
+    fn current_role(&self) -> RoleReference {
+        self.session_execution_view().current_role()
     }
     fn temporary_schema_name(&self) -> String {
         self.session_execution_view().temporary_schema_name()
@@ -50,10 +51,13 @@ impl CatalogSession for Engine {
     fn prepared_statements(&self) -> Vec<PreparedStatementMetadata> {
         self.session_execution_view().prepared_statements()
     }
+    fn cursors(&self) -> Vec<CursorMetadata> {
+        self.session_execution_view().cursors()
+    }
 }
 impl CatalogSession for SessionExecutionView<'_> {
-    fn current_user(&self) -> String {
-        SessionExecutionView::current_user(self)
+    fn current_role(&self) -> RoleReference {
+        SessionExecutionView::current_role(self)
     }
     fn temporary_schema_name(&self) -> String {
         SessionExecutionView::temporary_schema_name(self)
@@ -70,6 +74,9 @@ impl CatalogSession for SessionExecutionView<'_> {
     }
     fn prepared_statements(&self) -> Vec<PreparedStatementMetadata> {
         SessionExecutionView::prepared_statements(self)
+    }
+    fn cursors(&self) -> Vec<CursorMetadata> {
+        SessionExecutionView::cursors(self)
     }
 }
 impl RelationCounts for Engine {

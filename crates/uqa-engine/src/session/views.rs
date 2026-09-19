@@ -94,7 +94,7 @@ impl Engine {
 
     pub fn view(&self, name: &str) -> Result<Option<uqa_planner::QueryPlan>, SQLError> {
         Ok(self.view_definition(name)?.and_then(|definition| {
-            (definition.kind == StoredViewKind::View).then_some(definition.query)
+            (definition.kind == StoredViewKind::View).then_some(definition.definition.query)
         }))
     }
 

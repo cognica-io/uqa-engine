@@ -291,6 +291,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::Load { .. }
         | CommandPlan::Analyze { .. }
         | CommandPlan::Vacuum(_)
+        | CommandPlan::LockTable(_)
         | CommandPlan::Truncate { .. }
         | CommandPlan::Transaction(_)
         | CommandPlan::FetchCursor(_)
@@ -315,6 +316,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::GrantRole(_)
         | CommandPlan::CreateRole(_)
         | CommandPlan::AlterRole(_)
+        | CommandPlan::RenameRole(_)
         | CommandPlan::DropRole(_)
         | CommandPlan::CreateTrigger(_)
         | CommandPlan::DropTrigger(_)

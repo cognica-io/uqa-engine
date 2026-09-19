@@ -8,17 +8,21 @@
 
 use std::collections::BTreeSet;
 
+use super::prepare::{check, Control};
 use super::types::HNSWIndex;
 use crate::{StorageBackendError, StorageBackendResult};
 
 impl HNSWIndex {
     pub fn validate_invariants(&self) -> StorageBackendResult<()> {
-        let computed_max = self
-            .nodes
-            .values()
-            .map(|node| node.level)
-            .max()
-            .unwrap_or(0);
+        self.validate_controlled(None)
+    }
+    pub(super) fn validate_controlled(&self, control: Control<'_>) -> StorageBackendResult<()> {
+        check(control)?;
+        let mut computed_max = 0;
+        for node in self.nodes.values() {
+            check(control)?;
+            computed_max = computed_max.max(node.level);
+        }
         if self.nodes.is_empty() {
             if self.entry_point.is_some() || self.max_level != 0 {
                 return Err(corrupt("empty graph has an entry point or non-zero level"));
@@ -43,12 +47,13 @@ impl HNSWIndex {
         {
             return Err(corrupt("next node id does not exceed persisted node ids"));
         }
-        self.validate_edges()?;
-        self.validate_reachability()
+        self.validate_edges(control)?;
+        self.validate_reachability(control)
     }
 
-    fn validate_edges(&self) -> StorageBackendResult<()> {
+    fn validate_edges(&self, control: Control<'_>) -> StorageBackendResult<()> {
         for node in self.nodes.values() {
+            check(control)?;
             if node.neighbors.len() != node.level + 1 {
                 return Err(corrupt(&format!(
                     "node {} adjacency layer count does not match its level",
@@ -56,7 +61,11 @@ impl HNSWIndex {
                 )));
             }
             for (layer, neighbors) in node.neighbors.iter().enumerate() {
-                let unique = neighbors.iter().copied().collect::<BTreeSet<_>>();
+                let mut unique = BTreeSet::new();
+                for neighbor in neighbors {
+                    check(control)?;
+                    unique.insert(*neighbor);
+                }
                 if unique.len() != neighbors.len() || unique.contains(&node.id) {
                     return Err(corrupt(&format!(
                         "node {} layer {layer} contains duplicate or self edges",
@@ -70,6 +79,7 @@ impl HNSWIndex {
                     )));
                 }
                 for neighbor_id in neighbors {
+                    check(control)?;
                     let neighbor = self.nodes.get(neighbor_id).ok_or_else(|| {
                         corrupt(&format!(
                             "node {} layer {layer} references missing node {neighbor_id}",
@@ -88,13 +98,14 @@ impl HNSWIndex {
         Ok(())
     }
 
-    fn validate_reachability(&self) -> StorageBackendResult<()> {
+    fn validate_reachability(&self, control: Control<'_>) -> StorageBackendResult<()> {
         let Some(entry_point) = self.entry_point else {
             return Ok(());
         };
         let mut reachable = BTreeSet::from([entry_point]);
         let mut pending = vec![entry_point];
         while let Some(node_id) = pending.pop() {
+            check(control)?;
             let node = self
                 .nodes
                 .get(&node_id)

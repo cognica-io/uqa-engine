@@ -37,7 +37,6 @@ impl Engine {
         let security = table.security();
         serde_json::to_vec(&(
             security.role_owner,
-            security.acl,
             table.analyzer.read().clone(),
             table.fts_fields.read().clone(),
             vector_dimensions,
@@ -131,6 +130,20 @@ impl Engine {
             merged.retain(|_, candidate| candidate.storage_generation() != generation);
             merged.insert(relation, table);
         }
+        for (relation, table) in &merged {
+            if let Some(previous) = current
+                .get(relation)
+                .filter(|previous| previous.object_id == table.object_id)
+            {
+                let security = uqa_execution::catalog::security::relation_authority::merge_private(
+                    self.storage.catalog.as_deref(),
+                    relation,
+                    &previous.security(),
+                    table.security(),
+                )?;
+                *table.security.write() = security;
+            }
+        }
         Ok((merged, latest_baseline))
     }
 
@@ -192,6 +205,62 @@ impl Engine {
         }
     }
 
+    fn latest_catalog_snapshot_with_private_records(
+        &self,
+        current: &crate::DurableCatalogSnapshot,
+        latest: &Engine,
+    ) -> StorageBackendResult<crate::DurableCatalogSnapshot> {
+        use uqa_execution::catalog::security::system_relations;
+        let mut snapshot = latest.durable.snapshot();
+        let sequences = snapshot.sequence_read_snapshot().merge_private(
+            self.storage.catalog.as_deref(),
+            &current.sequence_read_snapshot(),
+        )?;
+        snapshot.roles = sequences.roles.roles;
+        snapshot.role_memberships = sequences.roles.memberships;
+        snapshot.sequences = sequences.sequences;
+        snapshot.sequence_object_ids = sequences.object_ids;
+        snapshot.sequence_persistence = sequences.persistence;
+        snapshot.sequence_security = sequences.security;
+        snapshot.schemas = uqa_execution::schema::namespaces::authority::merge_private(
+            self.storage.catalog.as_deref(),
+            &current.schemas,
+            snapshot.schemas,
+            &snapshot.roles,
+        )?;
+        snapshot.domains = uqa_execution::catalog::domain::merge_private(
+            self.storage.catalog.as_deref(),
+            &current.domains,
+            snapshot.domains,
+            &snapshot.roles,
+        )?;
+        snapshot.sql_user_functions = uqa_execution::routines::catalog::merge_private(
+            self.storage.catalog.as_deref(),
+            &current.sql_user_functions,
+            snapshot.sql_user_functions,
+            &snapshot.roles,
+        )?;
+        snapshot.system_relation_security = Arc::new(system_relations::merge_private(
+            self.storage.catalog.as_deref(),
+            &current.system_relation_security,
+            (*snapshot.system_relation_security).clone(),
+        )?);
+        snapshot.views = uqa_execution::catalog::security::relation_authority::merge_private_views(
+            self.storage.catalog.as_deref(),
+            &current.views,
+            snapshot.views,
+        )?;
+        snapshot.foreign_table_security =
+            uqa_execution::catalog::security::relation_authority::merge_private_foreign(
+                self.storage.catalog.as_deref(),
+                &current.foreign_tables,
+                &current.foreign_table_security,
+                &snapshot.foreign_tables,
+                snapshot.foreign_table_security,
+            )?;
+        Ok(snapshot)
+    }
+
     fn install_latest_fixed_transaction_catalogs(
         &self,
         latest: &Engine,
@@ -209,56 +278,11 @@ impl Engine {
             .filter(|(_, view)| view.persistence == uqa_sql::ast::RelationPersistence::Temporary)
             .map(|(relation, view)| (relation.clone(), view.clone()))
             .collect::<BTreeMap<_, _>>();
-        let temporary_sequence_persistence = self
-            .durable
-            .sequence_persistence
-            .read()
-            .iter()
-            .filter(|(_, persistence)| {
-                **persistence == uqa_sql::ast::RelationPersistence::Temporary
-            })
-            .map(|(relation, persistence)| (relation.clone(), *persistence))
-            .collect::<BTreeMap<_, _>>();
-        let temporary_sequences = self
-            .durable
-            .sequences
-            .read()
-            .iter()
-            .filter(|(relation, _)| temporary_sequence_persistence.contains_key(*relation))
-            .map(|(relation, state)| (relation.clone(), *state))
-            .collect::<BTreeMap<_, _>>();
-        let temporary_sequence_object_ids = self
-            .durable
-            .sequence_object_ids
-            .read()
-            .iter()
-            .filter(|(relation, _)| temporary_sequence_persistence.contains_key(*relation))
-            .map(|(relation, object_id)| (relation.clone(), *object_id))
-            .collect::<BTreeMap<_, _>>();
-        let temporary_sequence_security = self
-            .durable
-            .sequence_security
-            .read()
-            .iter()
-            .filter(|(relation, _)| temporary_sequence_persistence.contains_key(*relation))
-            .map(|(relation, security)| (relation.clone(), security.clone()))
-            .collect::<BTreeMap<_, _>>();
-        self.durable.restore(&latest.durable.snapshot());
+        let latest_durable =
+            self.latest_catalog_snapshot_with_private_records(&previous_durable, latest)?;
+        self.durable.restore(&latest_durable);
         self.rebind_graph_stores()?;
         self.durable.views.write().extend(temporary_views);
-        self.durable.sequences.write().extend(temporary_sequences);
-        self.durable
-            .sequence_object_ids
-            .write()
-            .extend(temporary_sequence_object_ids);
-        self.durable
-            .sequence_persistence
-            .write()
-            .extend(temporary_sequence_persistence);
-        self.durable
-            .sequence_security
-            .write()
-            .extend(temporary_sequence_security);
         let previous_versions = self.swap_seen_catalog_versions(target_versions);
         let rollback = || {
             *self.storage.tables.write() = previous_tables.clone();
@@ -463,6 +487,10 @@ impl Engine {
             ));
         };
 
+        uqa_execution::schema::constraints::restoration::validate_constraint_catalog(
+            catalog.as_ref(),
+        )?;
+        self.restore_roles_from_metadata(catalog.as_ref(), false)?;
         let existing_lifetimes = self
             .storage
             .tables
@@ -476,9 +504,16 @@ impl Engine {
             })
             .collect::<BTreeMap<_, _>>();
         let mut rebound = BTreeMap::new();
-        for schema in catalog.load_tables()? {
+        for (schema, security) in
+            uqa_execution::catalog::security::relation_restoration::restore_tables(
+                catalog.as_ref(),
+                &self.durable.roles.read(),
+                false,
+            )?
+        {
             let relation = schema.relation.clone();
-            let table = Self::load_session_table(catalog.as_ref(), backend.as_ref(), schema)?;
+            let table =
+                Self::load_session_table(catalog.as_ref(), backend.as_ref(), schema, security)?;
             if let Some((lifecycle_id, storage_generation)) = existing_lifetimes.get(&relation) {
                 if *storage_generation == table.storage_generation() {
                     table
@@ -615,11 +650,13 @@ impl Engine {
         self.durable.foreign_servers.write().clear();
         self.durable.foreign_tables.write().clear();
         self.durable.foreign_table_security.write().clear();
+        self.durable.system_relation_security.write().clear();
         self.durable.sql_user_functions.write().clear();
         self.durable.models.write().clear();
         self.durable.scoring_params.write().clear();
 
-        self.restore_schemas_from_catalog(catalog.as_ref())?;
+        self.restore_roles_from_metadata(catalog.as_ref(), false)?;
+        self.restore_schemas_from_catalog(catalog.as_ref(), super::CatalogRestoreMode::LoadOnly)?;
         self.restore_graphs_from_catalog(catalog.as_ref())?;
         self.restore_engine_registries_from_catalog(
             catalog.as_ref(),

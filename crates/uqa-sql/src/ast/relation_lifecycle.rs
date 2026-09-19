@@ -6,6 +6,7 @@
 
 //! Relation persistence, view options, and sequence lifecycle nodes.
 
+use super::{AclRoleSpecification, RoleSpecification};
 use serde::{Deserialize, Serialize};
 
 /// `PostgreSQL`'s `pg_class.relpersistence` contract.
@@ -47,7 +48,7 @@ pub enum AlterViewKind {
 pub enum AlterViewAction {
     Set(Vec<(String, String)>),
     Reset(Vec<String>),
-    OwnerTo(String),
+    OwnerTo(RoleSpecification),
     RenameTo(String),
 }
 
@@ -61,7 +62,7 @@ pub struct AlterViewStmt {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AlterForeignTableAction {
-    OwnerTo(String),
+    OwnerTo(RoleSpecification),
     RenameTo(String),
 }
 
@@ -77,7 +78,7 @@ struct AlterForeignTableStmtSerde {
     name: String,
     if_exists: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    owner: Option<String>,
+    owner: Option<RoleSpecification>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     rename_to: Option<String>,
 }
@@ -289,7 +290,7 @@ pub struct AlterSequence {
     pub persistence: Option<RelationPersistence>,
     /// `OWNER TO role`, distinct from column ownership expressed by `OWNED BY`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub role_owner: Option<String>,
+    pub role_owner: Option<RoleSpecification>,
     /// `RENAME TO` or `SET SCHEMA`, kept distinct from definition changes.
     #[serde(default)]
     pub lifecycle: SequenceLifecycle,
@@ -351,9 +352,9 @@ pub struct GrantTableStmt {
     pub grant_option_only: bool,
     pub privileges: Vec<TablePrivilegeSpec>,
     pub target: GrantTableTarget,
-    pub grantees: Vec<String>,
+    pub grantees: Vec<AclRoleSpecification>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grantor: Option<String>,
+    pub grantor: Option<RoleSpecification>,
     #[serde(default)]
     pub revoke_behavior: TableRevokeBehavior,
 }
@@ -381,9 +382,9 @@ pub struct GrantSequenceStmt {
     pub grant_option_only: bool,
     pub privileges: Vec<SequencePrivilege>,
     pub target: GrantSequenceTarget,
-    pub grantees: Vec<String>,
+    pub grantees: Vec<AclRoleSpecification>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grantor: Option<String>,
+    pub grantor: Option<RoleSpecification>,
     #[serde(default)]
     pub revoke_behavior: SequenceRevokeBehavior,
 }
@@ -413,9 +414,9 @@ pub struct GrantDatabaseStmt {
     pub grant_option_only: bool,
     pub privileges: Vec<DatabasePrivilege>,
     pub databases: Vec<String>,
-    pub grantees: Vec<String>,
+    pub grantees: Vec<AclRoleSpecification>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grantor: Option<String>,
+    pub grantor: Option<RoleSpecification>,
     #[serde(default)]
     pub revoke_behavior: DatabaseRevokeBehavior,
 }
@@ -444,9 +445,9 @@ pub struct GrantSchemaStmt {
     pub grant_option_only: bool,
     pub privileges: Vec<SchemaPrivilege>,
     pub schemas: Vec<String>,
-    pub grantees: Vec<String>,
+    pub grantees: Vec<AclRoleSpecification>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grantor: Option<String>,
+    pub grantor: Option<RoleSpecification>,
     #[serde(default)]
     pub revoke_behavior: SchemaRevokeBehavior,
 }

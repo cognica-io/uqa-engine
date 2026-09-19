@@ -7,9 +7,8 @@
 //! Bind domain declaration consumers to current namespace, expression, and publication state.
 
 use crate::Engine;
-use uqa_execution::schema::domains::{
-    DomainCreationContext, DomainDeclarationBinding, DomainPublication,
-};
+use uqa_execution::schema::domains::{DomainCreationContext, DomainDeclarationBinding};
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::CreateDomain, catalog::domain::StoredDomain, schema::domains::DomainCreationCatalog,
     SQLError,
@@ -26,8 +25,8 @@ impl Engine {
                 crate::new_nonzero_catalog_identity("domain", "object identity")
                     .map_err(|error| SQLError::Internal(error.to_string()))
             },
-            session: self,
             publication: self,
+            changes: self,
         }
     }
 }
@@ -59,12 +58,6 @@ impl DomainDeclarationBinding for Engine {
         )
     }
 }
-impl DomainPublication for Engine {
-    fn publish_domain(&self, domain: StoredDomain) -> Result<(), SQLError> {
-        Engine::publish_domain(self, domain)
-    }
-}
-
 use crate::TableState;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -149,11 +142,11 @@ impl DomainViewDependencies for Engine {
     }
 }
 impl DomainRegistryPublication for Engine {
-    fn persist_domain_definitions(
-        &self,
-        registry: &BTreeMap<String, StoredDomain>,
-    ) -> Result<(), SQLError> {
-        self.persist_domains(registry)
+    fn domain_registry(&self) -> uqa_execution::catalog::domain::DomainRegistryRead<'_> {
+        Box::new(self.durable.domains.read())
+    }
+    fn domain_catalog(&self) -> Option<&dyn uqa_storage::CatalogFacade> {
+        self.storage.catalog.as_deref()
     }
     fn publish_domain_definitions(&self, registry: BTreeMap<String, StoredDomain>) {
         *self.durable.domains.write() = registry;
@@ -214,7 +207,7 @@ impl DomainIndexRemoval for Engine {
 use uqa_execution::schema::domains::removal::{
     DomainDropNotices, DomainRemovalContext, DomainRoutineRemoval,
 };
-use uqa_sql::catalog::security::SchemaSecurity;
+use uqa_sql::catalog::security::BoundSchemaSecurity;
 use uqa_sql::schema::domains::removal::{
     DomainDropAuthority, DomainDropBinding, DomainDropCatalog,
 };
@@ -234,7 +227,7 @@ impl Engine {
     }
 }
 impl DomainDropCatalog for Engine {
-    fn schema_security(&self, name: &str) -> Option<SchemaSecurity> {
+    fn schema_security(&self, name: &str) -> Option<BoundSchemaSecurity> {
         self.schema_security_for_privilege(name)
     }
     fn resolve_domain_drop_type(&self, name: &str) -> Result<Option<i64>, SQLError> {
@@ -253,14 +246,17 @@ impl DomainDropCatalog for Engine {
     }
 }
 impl DomainDropAuthority for Engine {
-    fn schema_usage(&self, schema: &str, role: &str) -> bool {
+    fn schema_usage(&self, schema: &str, role: &RoleReference) -> bool {
         self.schema_has_privilege_for_role(
             schema,
             role,
             uqa_sql::catalog::security::schema::SchemaAclPrivilege::Usage,
         )
     }
-    fn current_user_has_role_privileges(&self, role: &str) -> bool {
+    fn current_user_has_role_privileges(
+        &self,
+        role: &dyn uqa_sql::catalog::roles::identity::RoleSubject,
+    ) -> bool {
         Engine::current_user_has_role_privileges(self, role)
     }
 }

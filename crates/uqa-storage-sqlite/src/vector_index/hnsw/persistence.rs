@@ -4,64 +4,68 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Revision-aware immutable graph cache publication.
+//! Immutable graph caches identify both the metadata revision and its evaluated physical view.
 
 use std::sync::Arc;
 
-use super::{CachedGraph, SQLiteHNSWIndex};
+use super::{loading::load_meta_from, CachedGraph, GraphIdentity, SQLiteHNSWIndex};
+use crate::connection::SnapshotIdentity;
+use crate::Result;
 use uqa_storage::hnsw_index::HNSWIndex;
-use uqa_storage::{StorageBackendError, StorageBackendResult};
+use uqa_storage::StorageBackendResult;
 
 impl SQLiteHNSWIndex {
-    pub(super) fn cached_graph_for_revision(
+    pub(super) fn graph_snapshot(&self) -> StorageBackendResult<Option<CachedGraph>> {
+        Ok(self
+            .persistent
+            .conn
+            .with_snapshot(|connection, identity| {
+                let Some((_, _, _, revision)) = load_meta_from(connection, self)? else {
+                    return Ok(None);
+                };
+                self.cached_graph_at(connection, identity, revision)
+                    .map(Some)
+            })?
+            .0)
+    }
+
+    pub(super) fn cached_graph_at(
         &self,
+        connection: &rusqlite::Connection,
+        identity: &SnapshotIdentity,
         revision: u64,
-    ) -> StorageBackendResult<Arc<HNSWIndex>> {
-        self.cached_graph_state_for_revision(revision)
-            .map(|cached| cached.graph)
-    }
-
-    pub(super) fn cached_graph_state(&self) -> StorageBackendResult<CachedGraph> {
-        let revision = self.persisted_revision()?.ok_or_else(|| {
-            StorageBackendError::Other(format!(
-                "missing persisted HNSW metadata for {}.{}",
-                self.persistent.table, self.persistent.field
-            ))
-        })?;
-        self.cached_graph_state_for_revision(revision)
-    }
-
-    fn cached_graph_state_for_revision(&self, revision: u64) -> StorageBackendResult<CachedGraph> {
+    ) -> Result<CachedGraph> {
         if let Some(cached) = self.graph.read().as_ref() {
-            if cached.revision == revision {
+            if cached.revision == revision
+                && matches!(&cached.identity, GraphIdentity::Physical(view) if view.same_view(identity))
+            {
                 return Ok(cached.clone());
             }
         }
-        let (loaded_revision, loaded_graph) = self.load_graph()?;
+        let (revision, graph) = self.load_graph_from(connection)?;
         let loaded = CachedGraph {
-            revision: loaded_revision,
-            graph: Arc::new(loaded_graph),
+            revision,
+            identity: GraphIdentity::Physical(identity.clone()),
+            graph: Arc::new(graph),
         };
-        if self.persisted_revision()? != Some(loaded_revision) {
-            return Ok(loaded);
-        }
-        let mut graph = self.graph.write();
-        if let Some(existing) = graph.as_ref() {
-            if existing.revision == loaded_revision {
-                return Ok(existing.clone());
-            }
-        }
-        *graph = Some(loaded.clone());
+        *self.graph.write() = Some(loaded.clone());
         Ok(loaded)
     }
 
-    pub(super) fn publish_graph(&self, graph: HNSWIndex, revision: u64) {
+    pub(super) fn publish_graph(
+        &self,
+        graph: HNSWIndex,
+        revision: u64,
+        identity: SnapshotIdentity,
+    ) {
         *self.graph.write() = Some(CachedGraph {
             revision,
+            identity: GraphIdentity::Physical(identity),
             graph: Arc::new(graph),
         });
     }
 
+    #[cfg(test)]
     pub(super) fn persisted_revision(&self) -> StorageBackendResult<Option<u64>> {
         Ok(self.load_meta()?.map(|(_, _, _, revision)| revision))
     }

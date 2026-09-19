@@ -5,6 +5,7 @@
 //
 
 //! View and public-column access rules using the current authorization catalogs.
+use crate::catalog::roles::identity::RoleSubject;
 use crate::{
     catalog::{
         roles::guards::RoleCatalogGuards,
@@ -26,13 +27,14 @@ impl ViewAuthorizationContext<'_> {
         &self,
         name: &str,
         view: &StoredView,
-        subject: &str,
+        subject: &(impl RoleSubject + ?Sized),
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         let relation = RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
         let security = view.security();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
+        let security = security.resolve(&roles).map_err(SQLError::Internal)?;
         if role_has_privilege(
             &security,
             subject,
@@ -62,13 +64,14 @@ impl ViewAuthorizationContext<'_> {
         name: &str,
         view: &StoredView,
         column: &str,
-        subject: &str,
+        subject: &(impl RoleSubject + ?Sized),
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         let relation = RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
         let security = view.security();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
+        let security = security.resolve(&roles).map_err(SQLError::Internal)?;
         if column_privilege_check(
             &security,
             column,
@@ -98,12 +101,13 @@ impl ViewAuthorizationContext<'_> {
         &self,
         name: &str,
         view: &StoredView,
-        subject: &str,
+        subject: &(impl RoleSubject + ?Sized),
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         let security = view.security();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
+        let security = security.resolve(&roles).map_err(SQLError::Internal)?;
         let check = TablePrivilegeCheck {
             privilege,
             grant_option: false,

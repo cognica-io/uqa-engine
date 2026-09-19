@@ -42,24 +42,9 @@ impl Engine {
     ) -> StorageBackendResult<Option<&'static str>> {
         self.synchronize_table_catalog()?;
         self.synchronize_catalog_registries()?;
-        let relation = RelationIdentity::from_legacy_name(canonical_name)
-            .map_err(StorageBackendError::Other)?;
-        if self.storage.tables.read().contains_key(&relation) {
-            Ok(Some("table"))
-        } else if let Some(view) = self.durable.views.read().get(&relation) {
-            Ok(Some(match view.kind {
-                super::StoredViewKind::View => "view",
-                super::StoredViewKind::Materialized => "materialized view",
-            }))
-        } else if self.durable.sequences.read().contains_key(&relation) {
-            Ok(Some("sequence"))
-        } else if self.durable.foreign_tables.read().contains_key(&relation) {
-            Ok(Some("foreign table"))
-        } else if self.durable.catalog_indexes.read().contains_key(&relation) {
-            Ok(Some("index"))
-        } else {
-            Ok(None)
-        }
+        self.resolve_bound_relation_kind(canonical_name)
+            .map(|resolution| resolution.into_found().map(|(_, kind)| kind))
+            .map_err(|error| StorageBackendError::backend("resolve relation kind", error))
     }
 
     /// Resolve a SQL relation reference through the current user's effective namespace while preserving whether a qualified namespace or only the relation was absent.

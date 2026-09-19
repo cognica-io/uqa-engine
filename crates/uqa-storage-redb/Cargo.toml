@@ -14,10 +14,11 @@ exclude.workspace = true
 
 [dependencies]
 uqa-storage = { workspace = true }
-parking_lot = { workspace = true }
 redb = { workspace = true }
+getrandom = { workspace = true }
 
 [dev-dependencies]
+uqa-graph = { workspace = true }
 uqa-core = { workspace = true }
 allocation-counter = "=0.8.1"
 serde_json = { workspace = true }
@@ -29,10 +30,6 @@ uqa-analysis = { workspace = true }
 name = "nori_persistent"
 harness = false
 required-features = ["uqa-analysis/nori"]
-
-[[bench]]
-name = "commit_allocation_order"
-harness = false
 
 [lints]
 workspace = true

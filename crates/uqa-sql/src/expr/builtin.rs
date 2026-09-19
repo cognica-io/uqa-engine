@@ -52,11 +52,14 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         "array_to_string" if argument_count == 3 => Some(false),
         "string_to_array" | "string_to_table" if matches!(argument_count, 2 | 3) => Some(false),
         "pg_has_role" if matches!(argument_count, 2 | 3) => Some(true),
+        "current_setting" if matches!(argument_count, 1 | 2) => Some(true),
         "has_table_privilege" if matches!(argument_count, 2 | 3) => Some(true),
         "has_column_privilege" if matches!(argument_count, 3 | 4) => Some(true),
         "has_database_privilege" if matches!(argument_count, 2 | 3) => Some(true),
         "has_schema_privilege" if matches!(argument_count, 2 | 3) => Some(true),
-        "has_sequence_privilege" if matches!(argument_count, 2 | 3) => Some(true),
+        "has_sequence_privilege" | "has_function_privilege" if matches!(argument_count, 2 | 3) => {
+            Some(true)
+        }
         "pg_get_sequence_data" | "pg_sequence_last_value" | "pg_sequence_parameters"
             if argument_count == 1 =>
         {

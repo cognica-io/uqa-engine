@@ -47,13 +47,7 @@ pub trait DomainViewDependencies {
     fn cascade_view_closure(&self, names: Vec<String>) -> Result<Vec<String>, SQLError>;
     fn drop_views_inner(&self, names: &[String], cascade: bool) -> Result<(), SQLError>;
 }
-pub trait DomainRegistryPublication {
-    fn persist_domain_definitions(
-        &self,
-        registry: &BTreeMap<String, StoredDomain>,
-    ) -> Result<(), SQLError>;
-    fn publish_domain_definitions(&self, registry: BTreeMap<String, StoredDomain>);
-}
+pub use crate::catalog::domain::DomainRegistryPublication;
 pub trait DomainTableRemoval {
     fn drop_constraint_dependency(&self, table: &str, name: &str) -> Result<(), SQLError>;
     fn clear_column_default(&self, table: &str, column: &str) -> StorageBackendResult<()>;
@@ -277,8 +271,7 @@ pub fn drop_domain_routine_checks(
     }
     let mut registry = context.catalog.domain_definitions();
     analysis::remove_domain_routine_checks(&mut registry, checks)?;
-    context.publication.persist_domain_definitions(&registry)?;
-    context.publication.publish_domain_definitions(registry);
+    crate::catalog::domain::publish(context.publication, registry)?;
     context.changes.catalog_registry_changed();
     Ok(())
 }
@@ -295,8 +288,7 @@ pub fn commit_domain_drop(
     drop_domain_view_dependents(context, targets, &dependents)?;
     drop_domain_schema_dependents(context, &dependents)?;
     analysis::remove_domain_references(context.types, &mut registry, targets)?;
-    context.publication.persist_domain_definitions(&registry)?;
-    context.publication.publish_domain_definitions(registry);
+    crate::catalog::domain::publish(context.publication, registry)?;
     context.changes.catalog_registry_changed();
     Ok(())
 }

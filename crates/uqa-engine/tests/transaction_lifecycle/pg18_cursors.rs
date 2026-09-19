@@ -6,6 +6,10 @@
 
 use super::*;
 
+#[path = "pg18_cursors/catalog.rs"]
+mod catalog;
+#[path = "pg18_cursors/default_scroll.rs"]
+mod default_scroll;
 #[path = "pg18_cursors/movement.rs"]
 mod movement;
 #[path = "pg18_cursors/relation_locks.rs"]

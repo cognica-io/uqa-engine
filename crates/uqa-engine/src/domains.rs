@@ -6,15 +6,10 @@
 
 //! Durable domain identities and catalog publication.
 
-use std::collections::BTreeMap;
-
 use uqa_sql::ast::ColumnType;
-use uqa_sql::SQLError;
 use uqa_storage::CatalogFacade;
 
 use crate::{Engine, StorageBackendResult};
-
-const DOMAINS_METADATA_KEY: &str = "sql_domains_json";
 
 pub(crate) use uqa_sql::catalog::domain::StoredDomain;
 
@@ -49,41 +44,16 @@ impl Engine {
             .cloned()
     }
 
-    pub(crate) fn publish_domain(&self, domain: StoredDomain) -> Result<(), SQLError> {
-        let mut registry = self.durable.domains.write();
-        let mut next = registry.clone();
-        next.insert(domain.identity.qualified_name(), domain);
-        self.persist_domains(&next)?;
-        *registry = next;
-        drop(registry);
-        self.note_catalog_registry_changed();
-        Ok(())
-    }
-
-    pub(crate) fn persist_domains(
-        &self,
-        registry: &BTreeMap<String, StoredDomain>,
-    ) -> Result<(), SQLError> {
-        if let Some(catalog) = &self.storage.catalog {
-            let json = serde_json::to_string(registry).map_err(|error| {
-                SQLError::Internal(format!("serialize domain catalog: {error}"))
-            })?;
-            catalog
-                .set_metadata(DOMAINS_METADATA_KEY, &json)
-                .map_err(|error| SQLError::Internal(format!("persist domain catalog: {error}")))?;
-        }
-        Ok(())
-    }
-
     pub(crate) fn restore_domains_from_catalog(
         &self,
         catalog: &dyn CatalogFacade,
+        allow_migration: bool,
     ) -> StorageBackendResult<()> {
-        let registry = catalog
-            .get_metadata(DOMAINS_METADATA_KEY)?
-            .map(|json| serde_json::from_str(&json))
-            .transpose()?
-            .unwrap_or_default();
+        let registry = uqa_execution::catalog::domain::restore(
+            catalog,
+            &self.durable.roles.read(),
+            allow_migration,
+        )?;
         *self.durable.domains.write() = registry;
         Ok(())
     }

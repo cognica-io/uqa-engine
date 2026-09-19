@@ -45,15 +45,40 @@ fn reg_alias_scalar_and_array_names_preserve_type_identity() {
 }
 
 #[test]
-fn legacy_routine_acl_entries_default_the_grantor_to_the_owner() {
+fn current_routine_acl_entries_require_explicit_bound_endpoints() {
+    let owner = uqa_core::catalog_role::RoleIdentity::BOOTSTRAP;
     let entry: RoutineAclEntry = serde_json::from_value(serde_json::json!({
-        "role": "routine_caller",
-        "grant_option": true
+        "role": null, "grantor": owner, "grant_option": false
     }))
     .unwrap();
-    assert_eq!(entry.role, "routine_caller");
-    assert_eq!(entry.grantor, None);
-    assert!(entry.grant_option);
+    assert_eq!(entry.role, None);
+    assert_eq!(entry.grantor, owner);
+    for value in [
+        serde_json::json!({"grantor": owner, "grant_option": false}),
+        serde_json::json!({"role": null, "grant_option": false}),
+        serde_json::json!({"role": "routine_caller", "grantor": owner, "grant_option": false}),
+    ] {
+        assert!(serde_json::from_value::<RoutineAclEntry>(value).is_err());
+    }
+}
+
+#[test]
+fn historical_unbound_routine_declarations_accept_only_an_empty_owner_marker() {
+    let Statement::CreateFunction(definition) =
+        crate::compile("CREATE FUNCTION f() RETURNS int RETURN 7")
+            .unwrap()
+            .remove(0)
+    else {
+        unreachable!()
+    };
+    let mut json = serde_json::to_value(definition).unwrap();
+    json["owner"] = "".into();
+    assert!(serde_json::from_value::<CreateFunction>(json.clone())
+        .unwrap()
+        .owner
+        .is_none());
+    json["owner"] = "uqa".into();
+    assert!(serde_json::from_value::<CreateFunction>(json).is_err());
 }
 
 #[test]
@@ -113,7 +138,7 @@ fn alter_sequence_restart_reads_legacy_and_current_serde_shapes() {
 }
 
 #[test]
-fn alter_foreign_table_preserves_owner_serde_and_round_trips_rename() {
+fn alter_foreign_table_reads_legacy_owners_and_round_trips_current_actions() {
     let legacy: AlterForeignTableStmt =
         serde_json::from_str(r#"{"name":"items","if_exists":true,"owner":"new_owner"}"#).unwrap();
     assert_eq!(
@@ -125,7 +150,7 @@ fn alter_foreign_table_preserves_owner_serde_and_round_trips_rename() {
         serde_json::json!({
             "name": "items",
             "if_exists": true,
-            "owner": "new_owner"
+            "owner": {"kind": "named", "name": "new_owner"}
         })
     );
 
@@ -327,7 +352,7 @@ fn routine_identity_and_call_parameters_are_distinct() {
         creation_search_path: Vec::new(),
         volatility: FunctionVolatility::Volatile,
         strict: false,
-        owner: String::new(),
+        owner: None,
         security: RoutineSecurityAttributes::default(),
         parallel: FunctionParallel::Unsafe,
         support: None,

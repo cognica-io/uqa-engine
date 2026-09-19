@@ -27,7 +27,7 @@ pub fn build_info_schema_rows(
     session: &dyn CatalogSession,
     name: &str,
 ) -> Result<Option<Vec<ResultRow>>, SQLError> {
-    let Some(relation) = resolve_virtual_relation(resolution, name) else {
+    let Some(relation) = catalog.virtual_relation_resolved(resolution, name)? else {
         return ag_catalog::build_age_label_relation_rows(catalog, resolution, name);
     };
     let mut catalog_resolution = resolution.clone();
@@ -46,7 +46,7 @@ pub fn build_info_schema_rows(
         }
         VirtualRelation::InformationViews => build_info_views(context, catalog, resolution)?,
         VirtualRelation::InformationRoutines => build_info_routines(catalog)?,
-        VirtualRelation::InformationSequences => build_info_sequences(catalog, session),
+        VirtualRelation::InformationSequences => build_info_sequences(catalog, session)?,
         VirtualRelation::InformationTableConstraints => {
             build_info_table_constraints(catalog, resolution)?
         }
@@ -73,11 +73,13 @@ pub fn build_info_schema_rows(
         VirtualRelation::PgRange => build_pg_range(),
         VirtualRelation::PgProc => build_pg_proc(catalog)?,
         VirtualRelation::PgDatabase => build_pg_database(catalog)?,
-        VirtualRelation::PgAuthMembers => build_pg_auth_members(catalog),
+        VirtualRelation::PgAuthid => build_pg_authid(catalog),
+        VirtualRelation::PgAuthMembers => build_pg_auth_members(catalog)?,
         VirtualRelation::PgRoles => build_pg_roles(catalog),
         VirtualRelation::PgUser => build_pg_user(catalog),
         VirtualRelation::PgSettings => build_pg_settings(session)?,
         VirtualRelation::PgPreparedStatements => prepared_statements::rows(session)?,
+        VirtualRelation::PgCursors => cursors::rows(session),
         VirtualRelation::PgDescription => Vec::new(),
         VirtualRelation::PgMatviews => build_pg_matviews(catalog, resolution)?,
         VirtualRelation::PgSequences => build_pg_sequences(catalog, session)?,
@@ -88,6 +90,7 @@ pub fn build_info_schema_rows(
 
 mod ag_catalog;
 mod builtin_routines;
+mod cursors;
 mod events;
 use uqa_sql::catalog::expression_text;
 mod index_definition;
@@ -95,6 +98,7 @@ mod mutation;
 pub use index_definition::pg_get_indexdef_value;
 pub use mutation::virtual_relation_mutation_error;
 pub use regtypes::format_type_value;
+pub(crate) use regtypes::{resolve_regprocedure_input_oid, routine_oid_exists};
 mod view_definition;
 pub use view_definition::pg_get_viewdef_value;
 pub use view_definition::{rename_view_column_query, view_query_references_column};
@@ -105,6 +109,7 @@ mod partitioning;
 mod pg_catalog;
 mod pg_namespace;
 mod pg_proc;
+pub(crate) use pg_proc::user_routine_catalog_oid;
 mod pg_settings;
 mod plpgsql;
 mod prepared_statements;
@@ -172,8 +177,8 @@ pub fn runtime_constraints(
     Ok(constraints)
 }
 
-pub fn schema_object_oid(name: &str) -> i64 {
-    helpers::oids::schema_oid(name)
+pub fn schema_object_oid(catalog: &CatalogReadView, name: &str) -> i64 {
+    helpers::oids::namespace_oid(catalog, name)
 }
 
 pub fn resolve_age_label_relation_name(
@@ -278,10 +283,10 @@ pub fn snapshot_table_relation_oid(
     pg_catalog::table_relation_oid_from(catalog, resolution, table)
 }
 use pg_catalog::{
-    build_pg_attrdef, build_pg_attribute, build_pg_auth_members, build_pg_constraint,
-    build_pg_database, build_pg_index, build_pg_indexes, build_pg_matviews, build_pg_range,
-    build_pg_roles, build_pg_sequences, build_pg_tables, build_pg_type, build_pg_user,
-    build_pg_views,
+    build_pg_attrdef, build_pg_attribute, build_pg_auth_members, build_pg_authid,
+    build_pg_constraint, build_pg_database, build_pg_index, build_pg_indexes, build_pg_matviews,
+    build_pg_range, build_pg_roles, build_pg_sequences, build_pg_tables, build_pg_type,
+    build_pg_user, build_pg_views,
 };
 use pg_namespace::build_pg_namespace;
 use pg_proc::build_pg_proc;

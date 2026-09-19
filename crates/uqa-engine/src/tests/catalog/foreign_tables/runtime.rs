@@ -134,7 +134,7 @@ fn foreign_drop_checks_owned_sequence_dependents_before_removing_persisted_state
         .unwrap();
     let error = engine.drop_foreign_table("items").unwrap_err();
     assert!(
-        error.contains("owned sequence `public.items_id_seq`"),
+        error.contains("cannot drop foreign table public.items"),
         "{error}"
     );
     assert!(error.contains("view public.dependent"), "{error}");

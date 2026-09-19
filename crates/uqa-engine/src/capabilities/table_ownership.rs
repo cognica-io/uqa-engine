@@ -19,7 +19,7 @@ use uqa_execution::{
     },
     schema::sequences::role_ownership::OwnedSequenceSecurityWrite,
 };
-use uqa_sql::{ast::RelationPersistence, catalog::security::TableSecurity};
+use uqa_sql::{ast::RelationPersistence, catalog::security::BoundTableSecurity};
 use uqa_storage::StorageBackendResult;
 struct OwnedTable<'a> {
     engine: &'a Engine,
@@ -41,10 +41,10 @@ impl TableOwnerRegistry for Engine {
     }
 }
 impl TablePrivilegeState for OwnedTable<'_> {
-    fn role_owner(&self) -> String {
+    fn role_owner(&self) -> uqa_sql::catalog::roles::RoleIdentity {
         self.state.role_owner()
     }
-    fn security(&self) -> TableSecurity {
+    fn security(&self) -> BoundTableSecurity {
         self.state.security()
     }
     fn columns(&self) -> TableColumnsRead<'_> {
@@ -82,7 +82,7 @@ impl TableOwnerState for OwnedTable<'_> {
         &self,
         name: &str,
         schema: &TableOwnerSchema,
-        security: &TableSecurity,
+        security: &BoundTableSecurity,
     ) -> StorageBackendResult<()> {
         self.engine
             .try_save_table_schema_with_components_and_security(
@@ -107,7 +107,6 @@ impl Engine {
         TableOwnershipContext {
             writer: self,
             tables: self,
-            authorization: self.table_authorization_context(),
             roles: self.role_transfer_context(),
             owned_sequences: self,
             sequences: self,

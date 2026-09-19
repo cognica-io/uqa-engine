@@ -10,7 +10,7 @@
 //! scans, but the compact `(table, field, doc_id, value)` rows live in `SQLite`.
 //! Reopening an engine hydrates the B-tree from these rows instead of parsing
 //! every full document again. Writes replace the affected postings in the
-//! active `SQLite` transaction as the document mutation.
+//! same managed transaction as the document mutation, including a bound logical native session.
 
 use std::collections::BTreeMap;
 
@@ -20,6 +20,10 @@ use uqa_core::{ArrayValue, DecimalValue, DocId, TemporalValue, Value};
 
 use super::{ManagedConnection, Result, SQLiteError};
 use crate::value_index_key::SQLiteValueIndexKey;
+
+mod native;
+pub(crate) use native::columns::change_column as change_native_column;
+pub(crate) use native::delete_document as delete_native_document_entries;
 
 fn encode_doc_id(doc_id: DocId) -> Result<i64> {
     i64::try_from(doc_id).map_err(|_| {
@@ -147,6 +151,9 @@ impl SQLiteBTreeIndexStore {
     }
 
     pub fn fields(&self, table: &str) -> Result<Vec<uqa_storage::ValueIndexKey>> {
+        if let Some(snapshot) = self.conn.native_snapshot()? {
+            return native::fields(&snapshot, table);
+        }
         self.conn.with(|conn| {
             let mut stmt = conn.prepare_cached(
                 "SELECT field FROM _btree_indexes
@@ -166,6 +173,9 @@ impl SQLiteBTreeIndexStore {
     }
 
     pub fn repairs(&self) -> Result<Vec<(String, uqa_storage::ValueIndexKey)>> {
+        if let Some(snapshot) = self.conn.native_snapshot()? {
+            return native::repairs(&snapshot);
+        }
         self.conn.with(|conn| {
             let mut stmt = conn.prepare_cached(
                 "SELECT table_name, field FROM _btree_index_repairs ORDER BY table_name, field",
@@ -186,6 +196,15 @@ impl SQLiteBTreeIndexStore {
     }
 
     pub fn clear_repair(&self, table: &str, field: &uqa_storage::ValueIndexKey) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                native::clear_repair(snapshot, batch, table, field)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|conn| {
             conn.execute(
                 "DELETE FROM _btree_index_repairs
@@ -203,6 +222,9 @@ impl SQLiteBTreeIndexStore {
         table: &str,
         field: &uqa_storage::ValueIndexKey,
     ) -> Result<Option<Vec<(DocId, Value)>>> {
+        if let Some(snapshot) = self.conn.native_snapshot()? {
+            return native::load(&snapshot, table, field);
+        }
         self.conn.with(|conn| {
             let exists = conn
                 .prepare_cached(
@@ -255,6 +277,15 @@ impl SQLiteBTreeIndexStore {
         stale_doc_ids: &[DocId],
         missing: &[(DocId, Value)],
     ) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                native::repair(snapshot, batch, table, field, stale_doc_ids, missing)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         let stale_doc_ids = stale_doc_ids
             .iter()
             .map(|doc_id| encode_doc_id(*doc_id))
@@ -309,6 +340,15 @@ impl SQLiteBTreeIndexStore {
         table: &str,
         indexes: &[(&uqa_storage::ValueIndexKey, &[(DocId, Value)])],
     ) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                native::replace_many(snapshot, batch, table, indexes)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         let encoded = indexes
             .iter()
             .map(|(field, values)| {
@@ -362,6 +402,15 @@ impl SQLiteBTreeIndexStore {
         doc_id: DocId,
         values: Option<&BTreeMap<uqa_storage::ValueIndexKey, Value>>,
     ) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                native::apply_write(snapshot, batch, table, doc_id, values)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         let doc_id = encode_doc_id(doc_id)?;
         let encoded = values
             .map(|values| {
@@ -409,6 +458,13 @@ impl SQLiteBTreeIndexStore {
     }
 
     pub fn drop_index(&self, table: &str, field: &uqa_storage::ValueIndexKey) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| native::drop_index(snapshot, batch, table, field))?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with_mut(|conn| {
             let tx = conn.savepoint()?;
             tx.execute(
@@ -428,6 +484,13 @@ impl SQLiteBTreeIndexStore {
 
     /// TRUNCATE keeps the index definitions but removes every posting.
     pub fn clear_table(&self, table: &str) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| native::clear_table(snapshot, batch, table))?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|conn| {
             conn.execute(
                 "DELETE FROM _btree_index_entries WHERE table_name = ?1",

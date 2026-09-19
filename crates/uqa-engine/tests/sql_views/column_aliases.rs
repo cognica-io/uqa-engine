@@ -320,7 +320,7 @@ fn legacy_query_only_view_definitions_still_restore() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("legacy-view-definition.db");
     let legacy_json = {
-        let engine = Engine::open(&path).unwrap();
+        let engine = crate::native_storage::legacy_engine(&path);
         exec(&engine, "CREATE TABLE source (value SMALLINT)");
         exec(&engine, "INSERT INTO source VALUES (7)");
         exec(
@@ -384,7 +384,7 @@ fn legacy_views_restore_exact_scalar_function_and_function_group_bindings() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("legacy-view-routine-bindings.db");
     let legacy_json = {
-        let engine = Engine::open(&path).unwrap();
+        let engine = crate::native_storage::legacy_engine(&path);
         for sql in [
             "CREATE FUNCTION legacy_scalar(value INTEGER) RETURNS TEXT LANGUAGE SQL AS 'SELECT ''integer'''",
             "CREATE FUNCTION legacy_scalar(value BIGINT) RETURNS TEXT LANGUAGE SQL AS 'SELECT ''bigint'''",

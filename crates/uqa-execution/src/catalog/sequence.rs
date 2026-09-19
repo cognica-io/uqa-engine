@@ -46,7 +46,7 @@ const fn sequence_cache_size_default() -> i64 {
     1
 }
 
-use super::security::SequenceSecurity;
+use super::security::BoundSequenceSecurity;
 use uqa_core::RelationIdentity;
 use uqa_storage::{SequenceOptions, SequenceRow, StorageBackendError, StorageBackendResult};
 
@@ -55,12 +55,11 @@ pub fn sequence_row(
     object_id: [u8; 16],
     state: SequenceState,
     persistence: uqa_sql::ast::RelationPersistence,
-    security: &SequenceSecurity,
+    security: &BoundSequenceSecurity,
 ) -> StorageBackendResult<SequenceRow> {
     Ok(SequenceRow {
         relation: RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?,
-        role_owner: security.role_owner.clone(),
-        acl: security.acl.clone(),
+        security: security.row().into(),
         object_id,
         definition_generation: state.definition_generation,
         start: state.start,
@@ -83,4 +82,5 @@ pub fn sequence_row(
 pub mod restoration;
 
 pub mod session;
+pub mod snapshot;
 pub mod values;

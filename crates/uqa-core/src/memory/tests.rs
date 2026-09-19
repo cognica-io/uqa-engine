@@ -154,6 +154,13 @@ fn zero_sized_elements_need_no_buffer_reservation() {
         values.push(()).unwrap();
     }
     assert_eq!(values.len(), 10);
+    values.shrink_to_fit().unwrap();
+    assert_eq!(values.len(), 10);
+    let mut deque = BudgetedDeque::new(&budget);
+    for _ in 0..10 {
+        deque.push_back(()).unwrap();
+    }
+    assert_eq!(deque.len(), 10);
     assert_eq!(budget.peak(), 0);
 }
 

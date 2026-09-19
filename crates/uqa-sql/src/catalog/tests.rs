@@ -86,3 +86,26 @@ fn ag_catalog_relations_resolve_qualified_or_through_the_search_path() {
     assert!(matches!(&label[2].1, ColumnType::Domain { name, .. } if name == "label_id"));
     assert!(matches!(&label[3].1, ColumnType::Domain { name, .. } if name == "label_kind"));
 }
+
+#[test]
+fn catalog_names_preserve_quoted_case_and_information_schema_search_visibility() {
+    assert_eq!(
+        resolve_virtual_relation(&[], r#""pg_catalog"."pg_class""#),
+        Some(VirtualRelation::PgClass)
+    );
+    for name in [
+        r#""PG_CATALOG".pg_class"#,
+        r#"pg_catalog."PG_CLASS""#,
+        r#""pg_catalog.pg_class""#,
+    ] {
+        assert_eq!(resolve_virtual_relation(&[], name), None, "{name}");
+    }
+    assert_eq!(resolve_virtual_relation(&[], "tables"), None);
+    assert_eq!(
+        resolve_virtual_relation(&["information_schema".into()], "tables"),
+        Some(VirtualRelation::InformationTables)
+    );
+    assert_eq!(VirtualRelation::PgAuthMembers.oid(), 1261);
+    assert_eq!(VirtualRelation::PgRange.kind(), "table");
+    assert_eq!(VirtualRelation::PgPreparedStatements.kind(), "view");
+}

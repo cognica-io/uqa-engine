@@ -9,10 +9,15 @@
 mod indexes;
 mod privileges;
 
+#[cfg(test)]
+mod tests;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
+use uqa_sql::catalog::roles::identity::RoleSubject;
+use uqa_sql::catalog::roles::RoleReference;
 
 use uqa_graph::GraphStore;
 use uqa_sql::SQLError;
@@ -73,7 +78,8 @@ impl CatalogReadView {
     }
 
     fn relation_exists(&self, relation: &uqa_core::RelationIdentity) -> bool {
-        self.snapshot.tables.contains_key(relation)
+        uqa_sql::catalog::SystemRelation::at(&relation.schema, &relation.name).is_some()
+            || self.snapshot.tables.contains_key(relation)
             || self.snapshot.definitions.views.contains_key(relation)
             || self.snapshot.definitions.sequences.contains_key(relation)
             || self
@@ -111,7 +117,11 @@ impl CatalogReadView {
             }
         }
         for relation in self.relation_lookup_candidates(resolution, name)? {
-            let kind = if self.snapshot.tables.contains_key(&relation) {
+            let kind = if let Some(virtual_relation) =
+                uqa_sql::catalog::SystemRelation::at(&relation.schema, &relation.name)
+            {
+                Some(virtual_relation.kind())
+            } else if self.snapshot.tables.contains_key(&relation) {
                 Some("table")
             } else if let Some(view) = self.snapshot.definitions.views.get(&relation) {
                 Some(match view.kind {
@@ -143,6 +153,24 @@ impl CatalogReadView {
             }
         }
         Ok(RelationResolution::MissingRelation)
+    }
+
+    pub fn virtual_relation_resolved(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+    ) -> Result<Option<uqa_sql::catalog::VirtualRelation>, SQLError> {
+        for relation in self.relation_lookup_candidates(resolution, name)? {
+            if let Some(relation) =
+                uqa_sql::catalog::VirtualRelation::at(&relation.schema, &relation.name)
+            {
+                return Ok(Some(relation));
+            }
+            if self.relation_exists(&relation) {
+                return Ok(None);
+            }
+        }
+        Ok(None)
     }
 
     pub fn all_schema_names(&self, resolution: &RelationNameResolution) -> Vec<String> {
@@ -179,12 +207,36 @@ impl CatalogReadView {
         schemas
     }
 
-    pub fn schema_security(&self, name: &str) -> Option<&crate::catalog::security::SchemaSecurity> {
+    pub fn schema_security(
+        &self,
+        name: &str,
+    ) -> Option<&crate::catalog::security::BoundSchemaSecurity> {
         self.snapshot.definitions.schemas.get(name)
     }
 
-    pub fn database_security(&self) -> &crate::catalog::security::DatabaseSecurity {
+    pub fn schema_security_names(
+        &self,
+        name: &str,
+    ) -> Result<Option<crate::catalog::security::SchemaSecurity>, SQLError> {
+        self.schema_security(name)
+            .map(|security| {
+                security
+                    .resolve(&self.snapshot.definitions.roles)
+                    .map_err(SQLError::Internal)
+            })
+            .transpose()
+    }
+
+    pub fn database_security(&self) -> &crate::catalog::security::BoundDatabaseSecurity {
         &self.snapshot.definitions.database_security
+    }
+
+    pub fn database_security_names(
+        &self,
+    ) -> Result<crate::catalog::security::DatabaseSecurity, SQLError> {
+        self.database_security()
+            .resolve(&self.snapshot.definitions.roles)
+            .map_err(SQLError::Internal)
     }
 
     pub fn has_schema(&self, name: &str) -> bool {
@@ -203,26 +255,51 @@ impl CatalogReadView {
         self.snapshot.definitions.roles.values()
     }
 
+    pub fn relation_security_names(
+        &self,
+        security: &crate::catalog::security::BoundTableSecurity,
+    ) -> Result<crate::catalog::security::TableSecurity, SQLError> {
+        security
+            .resolve(&self.snapshot.definitions.roles)
+            .map_err(SQLError::Internal)
+    }
+
+    pub fn view_owner(
+        &self,
+        view: &crate::catalog::view::StoredView,
+    ) -> Result<RoleReference, SQLError> {
+        view.security
+            .owner_reference(&self.snapshot.definitions.roles)
+    }
+
+    pub fn bind_role(&self, name: &str) -> Result<RoleReference, SQLError> {
+        RoleReference::from(name)
+            .bind(&self.snapshot.definitions.roles)
+            .map(|role| RoleReference::Bound(Arc::new(role)))
+    }
+
+    pub fn role_oid(&self, name: &str) -> Result<i64, SQLError> {
+        self.snapshot
+            .definitions
+            .roles
+            .get(name)
+            .map(|role| role.oid)
+            .ok_or_else(|| SQLError::Internal(format!("catalog references missing role `{name}`")))
+    }
+
     pub fn role_memberships(
         &self,
     ) -> impl Iterator<Item = &uqa_sql::catalog::roles::RoleMembership> {
         self.snapshot.definitions.role_memberships.values()
     }
 
-    pub fn sequences(
-        &self,
-    ) -> Vec<(
-        String,
-        uqa_sql::ast::RelationPersistence,
-        [u8; 16],
-        crate::catalog::security::SequenceSecurity,
-    )> {
+    pub fn sequences(&self) -> Result<Vec<super::CatalogSequenceMetadata>, SQLError> {
         self.snapshot
             .definitions
             .sequences
             .keys()
             .map(|identity| {
-                (
+                Ok((
                     identity.qualified_name(),
                     self.snapshot
                         .definitions
@@ -236,34 +313,29 @@ impl CatalogReadView {
                         .get(identity)
                         .copied()
                         .unwrap_or_default(),
-                    self.snapshot
-                        .definitions
-                        .sequence_security
-                        .get(identity)
-                        .cloned()
-                        .unwrap_or_else(|| crate::catalog::security::SequenceSecurity {
-                            role_owner: "uqa".into(),
-                            acl: None,
-                        }),
-                )
+                    self.sequence_security(identity)?,
+                ))
             })
             .collect()
     }
 
     pub fn sequence_states(
         &self,
-    ) -> Vec<(
-        uqa_core::RelationIdentity,
-        crate::catalog::sequence::SequenceState,
-        uqa_sql::ast::RelationPersistence,
-        crate::catalog::security::SequenceSecurity,
-    )> {
+    ) -> Result<
+        Vec<(
+            uqa_core::RelationIdentity,
+            crate::catalog::sequence::SequenceState,
+            uqa_sql::ast::RelationPersistence,
+            crate::catalog::security::SequenceSecurity,
+        )>,
+        SQLError,
+    > {
         self.snapshot
             .definitions
             .sequences
             .iter()
             .map(|(identity, state)| {
-                (
+                Ok((
                     identity.clone(),
                     *state,
                     self.snapshot
@@ -272,24 +344,34 @@ impl CatalogReadView {
                         .get(identity)
                         .copied()
                         .unwrap_or_default(),
-                    self.snapshot
-                        .definitions
-                        .sequence_security
-                        .get(identity)
-                        .cloned()
-                        .unwrap_or_else(|| crate::catalog::security::SequenceSecurity {
-                            role_owner: "uqa".into(),
-                            acl: None,
-                        }),
-                )
+                    self.sequence_security(identity)?,
+                ))
             })
             .collect()
+    }
+
+    fn sequence_security(
+        &self,
+        relation: &uqa_core::RelationIdentity,
+    ) -> Result<crate::catalog::security::SequenceSecurity, SQLError> {
+        self.snapshot
+            .definitions
+            .sequence_security
+            .get(relation)
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "sequence `{}` has no security metadata",
+                    relation.qualified_name()
+                ))
+            })?
+            .resolve(&self.snapshot.definitions.roles)
+            .map_err(SQLError::Internal)
     }
 
     pub fn sequence_is_visible_to(
         &self,
         security: &crate::catalog::security::SequenceSecurity,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
     ) -> bool {
         crate::catalog::security::sequence::role_can_view_sequence(
             security,
@@ -302,7 +384,7 @@ impl CatalogReadView {
     pub fn sequence_is_selectable_to(
         &self,
         security: &crate::catalog::security::SequenceSecurity,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
     ) -> bool {
         crate::catalog::security::sequence::role_can_select_sequence(
             security,
@@ -315,7 +397,7 @@ impl CatalogReadView {
     pub fn sequence_value_is_readable_to(
         &self,
         security: &crate::catalog::security::SequenceSecurity,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
     ) -> bool {
         crate::catalog::security::sequence::role_can_read_sequence_value(
             security,
@@ -335,31 +417,10 @@ impl CatalogReadView {
                 return Ok(Some(CatalogSequenceSnapshot {
                     relation: relation.clone(),
                     state: *state,
-                    security: self
-                        .snapshot
-                        .definitions
-                        .sequence_security
-                        .get(&relation)
-                        .cloned()
-                        .unwrap_or_else(|| crate::catalog::security::SequenceSecurity {
-                            role_owner: "uqa".into(),
-                            acl: None,
-                        }),
+                    security: self.sequence_security(&relation)?,
                 }));
             }
-            if self.snapshot.tables.contains_key(&relation)
-                || self.snapshot.definitions.views.contains_key(&relation)
-                || self
-                    .snapshot
-                    .definitions
-                    .foreign_tables
-                    .contains_key(&relation)
-                || self
-                    .snapshot
-                    .definitions
-                    .catalog_indexes
-                    .contains_key(&relation)
-            {
+            if self.relation_exists(&relation) {
                 return Ok(None);
             }
         }
@@ -369,19 +430,23 @@ impl CatalogReadView {
     pub fn schema_has_privilege_to(
         &self,
         schema: &str,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
         privilege: crate::catalog::security::schema::SchemaAclPrivilege,
     ) -> bool {
         let Some(security) = self.snapshot.definitions.schemas.get(schema) else {
             return true;
         };
-        crate::catalog::security::schema::role_has_schema_privilege(
-            security,
-            role,
-            privilege,
-            &self.snapshot.definitions.roles,
-            &self.snapshot.definitions.role_memberships,
-        )
+        security
+            .resolve(&self.snapshot.definitions.roles)
+            .is_ok_and(|security| {
+                crate::catalog::security::schema::role_has_schema_privilege(
+                    &security,
+                    role,
+                    privilege,
+                    &self.snapshot.definitions.roles,
+                    &self.snapshot.definitions.role_memberships,
+                )
+            })
     }
 
     pub fn views_of_kind(
@@ -418,7 +483,7 @@ impl CatalogReadView {
     pub fn foreign_table_security(
         &self,
         name: &str,
-    ) -> Result<&crate::catalog::security::TableSecurity, SQLError> {
+    ) -> Result<crate::catalog::security::TableSecurity, SQLError> {
         let relation = uqa_core::RelationIdentity::from_legacy_name(name).map_err(|error| {
             SQLError::Internal(format!("resolve catalog foreign table `{name}`: {error}"))
         })?;
@@ -430,7 +495,9 @@ impl CatalogReadView {
                 SQLError::Internal(format!(
                     "catalog foreign table `{name}` has no security metadata"
                 ))
-            })
+            })?
+            .resolve(&self.snapshot.definitions.roles)
+            .map_err(SQLError::Internal)
     }
 
     pub fn catalog_indexes(&self) -> impl Iterator<Item = &uqa_storage::CatalogIndexRow> {

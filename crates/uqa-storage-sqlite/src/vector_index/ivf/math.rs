@@ -37,16 +37,16 @@ pub(super) fn nearest_centroids(
         .collect()
 }
 
-pub(super) fn scored_posting_list(
+pub(super) fn scored_posting_list<'a>(
     query: &[f32],
-    entries: &[(DocId, Vec<f32>)],
+    entries: impl IntoIterator<Item = (DocId, &'a [f32])>,
     k: usize,
 ) -> PostingList {
     let mut best_by_doc = BTreeMap::<DocId, f32>::new();
     for (doc_id, vector) in entries {
         let similarity = cosine_similarity(query, vector);
         best_by_doc
-            .entry(*doc_id)
+            .entry(doc_id)
             .and_modify(|best| *best = best.max(similarity))
             .or_insert(similarity);
     }

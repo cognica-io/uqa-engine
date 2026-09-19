@@ -22,12 +22,13 @@ pub(crate) fn empty_catalog() -> CatalogReadView {
             graphs: Arc::default(),
             views: Arc::default(),
             catalog_indexes: Arc::default(),
-            database_security: crate::catalog::security::DatabaseSecurity::bootstrap().into(),
+            database_security: crate::catalog::security::BoundDatabaseSecurity::bootstrap().into(),
             schemas: Arc::default(),
             sequences: Arc::default(),
             sequence_object_ids: Arc::default(),
             sequence_security: Arc::default(),
             foreign_table_security: Arc::default(),
+            system_relation_security: Arc::default(),
             roles: Arc::default(),
             triggers: Arc::default(),
             rules: Arc::default(),
@@ -50,6 +51,24 @@ impl uqa_sql::FunctionTypeResolver for NoRoutines {
     }
 }
 impl uqa_sql::routines::RoutineResolution for NoRoutines {}
+
+impl uqa_sql::semantics::volatility::VolatilityCatalog for NoRoutines {
+    fn host_function_volatility(&self, _: &str) -> Option<uqa_sql::ast::FunctionVolatility> {
+        None
+    }
+
+    fn routine_volatilities(
+        &self,
+        _: &str,
+        _: Option<&FunctionBinding>,
+    ) -> Option<Vec<uqa_sql::ast::FunctionVolatility>> {
+        None
+    }
+
+    fn view_query(&self, _: &str) -> Result<Option<uqa_sql::plan::QueryPlan>, SQLError> {
+        Ok(None)
+    }
+}
 
 pub(crate) fn empty_scope() -> crate::query::CteScope {
     crate::query::CteScope::with_catalog(

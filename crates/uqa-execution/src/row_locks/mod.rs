@@ -8,6 +8,7 @@
 //!
 //! Locks follow `PostgreSQL` 18 tuple-lock conflict rules and are held until the owning session's transaction ends or a savepoint rolls back the acquisition. Sessions inside one process arbitrate through the in-memory lock table; engines in separate OS processes over the same durable database additionally coordinate through native byte-range locks on a sidecar file next to the database.
 
+pub mod binding;
 mod change_gate;
 mod change_resolution;
 mod changes;
@@ -18,8 +19,11 @@ mod identity;
 mod physical_changes;
 mod registry;
 mod relation;
+pub mod shared_objects;
+pub mod temporary_roles;
 mod waits;
 
+pub use change_gate::RowChangePublication;
 use change_resolution::{
     epoch_is_after, mutation_strength, normalize_pending_row_changes, remove_inactive_versions,
     resolve_local_change_target, row_has_waiter,
@@ -59,8 +63,8 @@ use grants::{rollback_grant, try_grant, GrantAttempt, LockGrant, LockTable};
 pub use identity::RowLockKey;
 use identity::{LockRelationIdentity, ManagerIdentity};
 pub use registry::{shared_backend_manager, shared_provider_manager};
-pub use relation::RelationLockMode;
-use relation::{relation_modes_conflict, RelationLockGrant};
+use relation::RelationLockGrant;
+pub use relation::{RelationLockMode, ScopedRelationLock};
 #[cfg(test)]
 use waits::deadlock_exists;
 use waits::{deadlock_detected, relation_deadlock_exists, CrossWaitGuard};
@@ -80,6 +84,7 @@ pub struct RowLockManager {
     next_acquisition: AtomicU64,
     change_gate: RwLock<()>,
     state: Mutex<LockTable>,
+    temporary_roles: Mutex<HashMap<u64, std::collections::BTreeSet<u32>>>,
     wake: Condvar,
     cross: Option<CrossAttachment>,
 }

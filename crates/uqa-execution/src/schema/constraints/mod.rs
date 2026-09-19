@@ -6,6 +6,7 @@
 
 //! Execute constraint lifecycle operations against scoped metadata, row, and publication services.
 use crate::mutation::constraints::context::ConstraintContext;
+use crate::row_locks::binding::{RelationLockCatalog, RelationLockSession};
 use crate::schema::{
     hierarchy::{HierarchyCatalog, HierarchyNamespace},
     publication::{SchemaPublicationContext, SchemaWriteTransaction},
@@ -39,6 +40,8 @@ pub struct ConstraintAlterContext<'a> {
     pub relations: &'a dyn ConstraintRelations,
     pub access: &'a dyn ConstraintAlterAccess,
     pub locks: &'a dyn HierarchyNamespace,
+    pub lock_catalog: &'a dyn RelationLockCatalog,
+    pub lock_session: &'a dyn RelationLockSession,
     pub modes: &'a dyn ConstraintModes,
     pub names: &'a dyn IndexNameCatalog,
     pub rows: ConstraintContext<'a>,
@@ -52,8 +55,13 @@ fn ddl_storage_error(action: &str, error: StorageBackendError) -> SQLError {
 }
 pub mod checks;
 pub mod drop;
+mod inheritance;
 mod lifecycle;
+pub mod renaming;
+pub mod restoration;
+mod validation;
 pub use lifecycle::*;
+pub use validation::validate_constraint;
 
 pub fn table_constraint_state(
     context: &ConstraintAlterContext<'_>,

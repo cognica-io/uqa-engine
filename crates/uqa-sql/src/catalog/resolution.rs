@@ -6,6 +6,7 @@
 
 //! Relation namespace inputs for static SQL analysis.
 
+use crate::catalog::roles::RoleReference;
 use crate::SQLError;
 
 /// Immutable session inputs used to resolve unqualified relation names during one statement.
@@ -14,7 +15,7 @@ pub struct RelationNameResolution {
     pub search_path: Vec<String>,
     pub temporary_schema: String,
     pub temporary_namespace_allocated: bool,
-    pub current_user: String,
+    pub current_user: RoleReference,
     pub lookup_mode: RelationLookupMode,
 }
 
@@ -34,7 +35,7 @@ impl RelationNameResolution {
         self.search_path.iter().any(|candidate| candidate == schema)
     }
 
-    pub fn current_user(&self) -> &str {
+    pub fn current_user(&self) -> &RoleReference {
         &self.current_user
     }
 
@@ -76,17 +77,11 @@ impl RelationNameResolution {
             };
             return Ok(vec![uqa_core::RelationIdentity::new(schema, relation)]);
         }
-        let mut candidates = vec![uqa_core::RelationIdentity::new(
+        Ok(candidates::unqualified_candidates(
             &self.temporary_schema,
+            &self.search_path,
             &relation,
-        )];
-        candidates.extend(
-            self.search_path
-                .iter()
-                .filter(|schema| *schema != "pg_catalog" && *schema != "information_schema")
-                .map(|schema| uqa_core::RelationIdentity::new(schema, &relation)),
-        );
-        Ok(candidates)
+        ))
     }
 }
 
@@ -108,6 +103,14 @@ impl RelationResolution {
     }
 }
 
+pub fn missing_relation_notice(name: &str) -> Result<String, crate::SQLError> {
+    let (_, local_name) =
+        uqa_core::RelationIdentity::parse_reference(name).map_err(crate::SQLError::Internal)?;
+    Ok(format!(
+        "relation \"{local_name}\" does not exist, skipping"
+    ))
+}
+
 /// Bind rename-source diagnostics without losing the distinction between missing schemas and relations.
 pub fn resolve_relation_rename_source(
     resolution: RelationResolution,
@@ -118,11 +121,7 @@ pub fn resolve_relation_rename_source(
     match resolution {
         RelationResolution::Found(canonical, kind) => Ok(Some((canonical, kind))),
         RelationResolution::MissingSchema(_) | RelationResolution::MissingRelation if if_exists => {
-            let (_, local_name) = uqa_core::RelationIdentity::parse_reference(name)
-                .map_err(crate::SQLError::Internal)?;
-            notice(&format!(
-                "relation \"{local_name}\" does not exist, skipping"
-            ));
+            notice(&missing_relation_notice(name)?);
             Ok(None)
         }
         RelationResolution::MissingSchema(schema) => Err(crate::SQLError::Routine {

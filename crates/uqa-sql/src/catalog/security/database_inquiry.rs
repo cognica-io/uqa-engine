@@ -8,8 +8,10 @@
 
 use super::database::{
     parse_privilege_checks, role_has_database_privilege, role_has_database_privilege_check,
-    DatabaseAclPrivilege, DatabaseSecurity,
+    BoundDatabaseSecurity, DatabaseAclPrivilege,
 };
+use crate::catalog::roles::identity::RoleSubject;
+use crate::catalog::roles::RoleReference;
 use crate::{
     catalog::{
         roles::{guards::RoleCatalogGuards, RoleDefinition, RoleReferenceNames},
@@ -20,7 +22,7 @@ use crate::{
 use std::collections::BTreeMap;
 use uqa_core::Value;
 
-pub type DatabaseSecurityRead<'a> = Box<dyn std::ops::Deref<Target = DatabaseSecurity> + 'a>;
+pub type DatabaseSecurityRead<'a> = Box<dyn std::ops::Deref<Target = BoundDatabaseSecurity> + 'a>;
 
 pub trait DatabasePrivilegeCatalog {
     fn refresh_privilege_catalog(&self) -> Result<(), SQLError>;
@@ -36,16 +38,14 @@ pub struct DatabasePrivilegeInquiry<'a> {
 impl DatabasePrivilegeInquiry<'_> {
     pub fn ensure_database_privilege(
         &self,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
         privilege: DatabaseAclPrivilege,
     ) -> Result<(), SQLError> {
-        if role_has_database_privilege(
-            &self.catalog.security(),
-            role,
-            privilege,
-            &self.roles.role_definitions(),
-            &self.roles.role_memberships(),
-        ) {
+        let security = self.catalog.security();
+        let roles = self.roles.role_definitions();
+        let memberships = self.roles.role_memberships();
+        let resolved = security.resolve(&roles).map_err(SQLError::Internal)?;
+        if role_has_database_privilege(&resolved, role, privilege, &roles, &memberships) {
             return Ok(());
         }
         let message = match privilege {
@@ -80,14 +80,15 @@ impl DatabasePrivilegeInquiry<'_> {
                 })
             }
         };
-        let current_user = subject_value
-            .is_none()
-            .then(|| self.names.current_user_name());
+        let current_user = subject_value.is_none().then(|| self.names.current_role());
         let subject = {
             let roles = self.roles.role_definitions();
             subject_value.map_or_else(
                 || Ok(current_user),
-                |value| resolve_database_privilege_role(value, &roles),
+                |value| {
+                    resolve_database_privilege_role(value, &roles)
+                        .map(|role| role.map(RoleReference::from))
+                },
             )?
         };
         let database_exists = resolve_database_privilege_target(database_value)?;
@@ -103,8 +104,8 @@ impl DatabasePrivilegeInquiry<'_> {
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
         let subject_is_superuser = subject.as_ref().is_some_and(|subject| {
-            roles
-                .get(subject)
+            subject
+                .role_definition(&roles)
                 .is_some_and(|role| role.has(crate::ast::RoleAttribute::Superuser))
         });
         if !database_exists {
@@ -118,8 +119,9 @@ impl DatabasePrivilegeInquiry<'_> {
             return Ok(Value::Bool(false));
         };
         let security = self.catalog.security();
+        let resolved = security.resolve(&roles).map_err(SQLError::Internal)?;
         Ok(Value::Bool(checks.into_iter().any(|check| {
-            role_has_database_privilege_check(&security, &subject, check, &roles, &memberships)
+            role_has_database_privilege_check(&resolved, &subject, check, &roles, &memberships)
         })))
     }
 }

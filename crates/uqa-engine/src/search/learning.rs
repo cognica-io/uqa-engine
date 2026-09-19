@@ -178,6 +178,7 @@ impl Engine {
             return Err(SQLError::TypeMismatch("label must be 0 or 1".into()));
         }
         let key = format!("{table}.{field}");
+        self.lock_scoring_parameter_write(&key)?;
         let saved = self.load_scoring_params(&key)?;
         let has_saved_params = match saved.as_deref() {
             Some(json) => {

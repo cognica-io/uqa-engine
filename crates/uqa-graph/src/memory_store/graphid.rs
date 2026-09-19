@@ -27,7 +27,7 @@ pub const FIRST_USER_LABEL_ID: u32 = 3;
 /// 64-bit agtype integer.
 pub const MAX_GRAPHID_LABEL_ID: u32 = 32_767;
 
-pub(super) const MAX_GRAPHID_SEQUENCE: u64 = (1_u64 << GRAPHID_LABEL_SHIFT) - 1;
+pub(crate) const MAX_GRAPHID_SEQUENCE: u64 = (1_u64 << GRAPHID_LABEL_SHIFT) - 1;
 const MAX_EXACT_F64_INTEGER: u64 = 9_007_199_254_740_992;
 
 pub(crate) fn usize_to_f64_exact(value: usize, context: &str) -> GraphStoreResult<f64> {
@@ -135,6 +135,8 @@ pub struct GraphLabelInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GraphLabelRegistry {
+    /// Persistent allocation identity, preserved by rename. Zero denotes a legacy registry or an in-memory graph.
+    pub allocation_id: [u8; 16],
     /// Label name -> AGE label id. Vertex and edge labels share the
     /// namespace-wide counter; the reserved names for ids 1 / 2 are
     /// not stored here (empty labels map onto them implicitly).
@@ -156,6 +158,7 @@ pub struct GraphLabelRegistry {
 impl Default for GraphLabelRegistry {
     fn default() -> Self {
         Self {
+            allocation_id: [0; 16],
             labels: BTreeMap::new(),
             kinds: BTreeMap::new(),
             sequences: BTreeMap::new(),
@@ -368,27 +371,46 @@ impl GraphLabelRegistry {
         Ok(next)
     }
 
-    /// Fold an existing entity id back into the registry so restored
-    /// graphs never re-issue an id that is already in use.
-    pub(crate) fn observe(&mut self, label: &str, id: u64, kind: LabelKind) {
+    /// Fold an existing entity id into the allocation watermarks and report whether the registry changed.
+    pub(crate) fn observe(&mut self, label: &str, id: u64, kind: LabelKind) -> bool {
         let label_id = graphid_label_id(id);
         if label_id == 0 {
-            // Pre-AGE id (plain counter) - nothing to learn.
-            return;
+            // Plain counter ids contain no AGE label allocation to retain.
+            return false;
         }
+        let mut changed = false;
         if !label.is_empty() && label_id >= FIRST_USER_LABEL_ID {
-            self.labels.entry(label.to_string()).or_insert(label_id);
-            self.kinds.entry(label.to_string()).or_insert(kind);
+            if let std::collections::btree_map::Entry::Vacant(entry) =
+                self.labels.entry(label.to_string())
+            {
+                entry.insert(label_id);
+                changed = true;
+            }
+            if let std::collections::btree_map::Entry::Vacant(entry) =
+                self.kinds.entry(label.to_string())
+            {
+                entry.insert(kind);
+                changed = true;
+            }
         }
-        self.dropped_label_ids.remove(&label_id);
+        changed |= self.dropped_label_ids.remove(&label_id);
         let seq = graphid_sequence(id);
-        let entry = self.sequences.entry(label_id).or_insert(0);
-        if seq > *entry {
-            *entry = seq;
+        match self.sequences.entry(label_id) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(seq);
+                changed = true;
+            }
+            std::collections::btree_map::Entry::Occupied(mut entry) if seq > *entry.get() => {
+                entry.insert(seq);
+                changed = true;
+            }
+            std::collections::btree_map::Entry::Occupied(_) => {}
         }
         if label_id >= self.next_label_id {
             self.next_label_id = label_id + 1;
+            changed = true;
         }
+        changed
     }
 
     /// Merge another registry (e.g. persisted metadata) into this one,

@@ -21,7 +21,6 @@ pub struct SequenceOwnerPublicationContext<'a> {
     pub sequences: &'a dyn SequenceIntrospectionCatalog,
     pub definitions: &'a dyn SequenceDefinitionCatalog,
     pub publication: &'a dyn SequenceDefinitionPublication,
-    pub new_generation: fn() -> StorageBackendResult<[u8; 16]>,
 }
 impl SequenceOwnerPublicationContext<'_> {
     pub fn validate_implicit_sequence_owners_for_columns(
@@ -86,11 +85,6 @@ impl SequenceOwnerPublicationContext<'_> {
             )));
         }
         state.owner = Some(owner);
-        state.definition_generation = (self.new_generation)().map_err(|error| {
-            SQLError::Internal(format!(
-                "allocate sequence `{canonical}` definition generation: {error}"
-            ))
-        })?;
         self.publication.replace_sequence(
             &canonical,
             &relation,

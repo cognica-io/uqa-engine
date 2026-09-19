@@ -21,9 +21,12 @@ mod brute_force;
 mod codec;
 mod hnsw;
 mod ivf;
+mod native;
 
 pub use brute_force::SQLiteVectorIndex;
+pub(crate) use hnsw::NativeHNSWRecords;
 pub use hnsw::SQLiteHNSWIndex;
+pub(crate) use ivf::NativeIVFRecords;
 pub use ivf::SQLiteIVFIndex;
 
 use codec::{

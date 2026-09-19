@@ -18,6 +18,7 @@ use crate::scalar::plan::{PhysicalOuterRow, PhysicalSubqueryRunner};
 use crate::{Batch, PhysicalRow, RowSchema, SpillBuffer, SubqueryResult};
 use parking_lot::Mutex;
 use uqa_core::Value;
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::{FunctionBinding, FunctionVolatility},
     catalog::session::PreparedStatementMetadata,
@@ -97,7 +98,7 @@ impl CatalogSession for Services {
             lookup_mode: RelationLookupMode::Dynamic,
         }
     }
-    fn current_user(&self) -> String {
+    fn current_role(&self) -> RoleReference {
         panic!("unexpected session read")
     }
     fn temporary_schema_name(&self) -> String {
@@ -108,6 +109,9 @@ impl CatalogSession for Services {
     }
     fn runtime_parameter_source(&self, _: &str) -> &'static str {
         panic!("unexpected session read")
+    }
+    fn cursors(&self) -> Vec<uqa_sql::catalog::session::CursorMetadata> {
+        panic!("unexpected cursor catalog read")
     }
     fn prepared_statements(&self) -> Vec<PreparedStatementMetadata> {
         panic!("unexpected session read")

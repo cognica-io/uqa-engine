@@ -24,18 +24,36 @@ fn statement(sql: &str) -> GrantTableStmt {
 }
 fn roles() -> BTreeMap<String, RoleDefinition> {
     let mut roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
-    for name in ["alice", "reader", "independent"] {
+    for (index, name) in ["alice", "reader", "independent"].into_iter().enumerate() {
         let Statement::CreateRole(role) = crate::compile(&format!("CREATE ROLE {name}"))
             .unwrap()
             .remove(0)
         else {
             panic!("expected role")
         };
-        roles.insert(name.into(), RoleDefinition::from_create(&role));
+        roles.insert(
+            name.into(),
+            RoleDefinition::from_create(&role, 20_001 + index as i64, [index as u8 + 1; 16]),
+        );
     }
     roles
 }
 type AppliedGrant = (TableSecurity, usize, Vec<(&'static str, String)>);
+
+struct SessionRole<'a>(&'a str);
+
+impl crate::catalog::roles::RoleReferenceNames for SessionRole<'_> {
+    fn outer_role(&self) -> crate::catalog::roles::RoleReference {
+        self.current_role()
+    }
+    fn current_role(&self) -> crate::catalog::roles::RoleReference {
+        self.0.into()
+    }
+
+    fn session_role(&self) -> crate::catalog::roles::RoleReference {
+        self.current_role()
+    }
+}
 
 fn apply(
     sql: &str,
@@ -44,13 +62,20 @@ fn apply(
     current: &TableSecurity,
 ) -> Result<AppliedGrant, SQLError> {
     let statement = statement(sql);
+    let grantees = statement
+        .grantees
+        .iter()
+        .map(|role| {
+            crate::catalog::roles::resolve_acl_role_specification(&SessionRole(user), role, roles)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let requested = requested_acl_privileges(&statement.privileges)?;
     let memberships = BTreeMap::new();
     let application = TableGrantApplication {
         statement: &statement,
-        grantees: &statement.grantees,
+        grantees: &grantees,
         requested: &requested,
-        current_user: user,
+        current_user: &user,
         roles,
         memberships: &memberships,
     };
@@ -83,6 +108,7 @@ fn column_allowed(
 }
 fn target(kind: &'static str) -> ResolvedTableGrantTarget {
     ResolvedTableGrantTarget {
+        acl_columns: None,
         requested: "items".into(),
         name: "public.items".into(),
         relation: RelationIdentity::new("public", "items"),
@@ -244,7 +270,7 @@ fn role_errors_precede_public_grant_options_and_explicit_grantor_validation() {
     assert_eq!(
         validate_table_acl_roles(
             &grant,
-            &["absent".into(), "PUBLIC".into()],
+            &["absent".into(), uqa_core::catalog_acl::AclGrantee::Public],
             Some("absent"),
             "uqa",
             &roles
@@ -254,9 +280,15 @@ fn role_errors_precede_public_grant_options_and_explicit_grantor_validation() {
         Some("42704")
     );
     assert_eq!(
-        validate_table_acl_roles(&grant, &["PUBLIC".into()], Some("absent"), "uqa", &roles)
-            .unwrap_err()
-            .sqlstate(),
+        validate_table_acl_roles(
+            &grant,
+            &[uqa_core::catalog_acl::AclGrantee::Public],
+            Some("absent"),
+            "uqa",
+            &roles
+        )
+        .unwrap_err()
+        .sqlstate(),
         Some("0LP01")
     );
     grant.grant_option = false;
@@ -272,7 +304,14 @@ fn role_errors_precede_public_grant_options_and_explicit_grantor_validation() {
             .sqlstate(),
         Some("0A000")
     );
-    validate_table_acl_roles(&grant, &["PUBLIC".into()], Some("uqa"), "uqa", &roles).unwrap();
+    validate_table_acl_roles(
+        &grant,
+        &[uqa_core::catalog_acl::AclGrantee::Public],
+        Some("uqa"),
+        "uqa",
+        &roles,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -413,27 +452,160 @@ fn foreign_acl_candidates_validate_columns_without_mutating_the_source_security(
     let memberships = BTreeMap::new();
     let application = TableGrantApplication {
         statement: &statement,
-        grantees: &statement.grantees,
+        grantees: &["reader".into()],
         requested: &requested,
-        current_user: "uqa",
+        current_user: &"uqa",
         roles: &roles,
         memberships: &memberships,
     };
     let target = target("foreign table");
     let security = TableSecurity::owner("uqa");
     let updates = foreign_table_privilege_updates(
-        vec![(&target, security.clone(), vec!["id".into()])],
+        vec![(
+            &target,
+            BoundTableSecurity::bind(&security, &roles).unwrap(),
+            vec!["id".into()],
+        )],
         &application,
         &mut Vec::new(),
+        &mut std::collections::BTreeSet::new(),
     )
     .unwrap();
     assert_eq!(updates.len(), 1);
-    assert!(column_allowed(&updates[0].1, "id", "reader", &roles));
+    assert!(column_allowed(
+        &updates[0].1.resolve(&roles).unwrap(),
+        "id",
+        "reader",
+        &roles
+    ));
     assert_eq!(security, TableSecurity::owner("uqa"));
     assert!(foreign_table_privilege_updates(
-        vec![(&target, security, vec!["different".into()])],
+        vec![(
+            &target,
+            BoundTableSecurity::bind(&security, &roles).unwrap(),
+            vec!["different".into()]
+        )],
         &application,
-        &mut Vec::new()
+        &mut Vec::new(),
+        &mut std::collections::BTreeSet::new()
     )
     .is_err());
+}
+
+#[test]
+fn table_revoke_removes_implied_column_grants_and_checks_their_dependent_paths() {
+    let roles = roles();
+    let security = TableSecurity::owner("uqa");
+    let (security, _, _) = apply(
+        "GRANT SELECT(title) ON items TO alice WITH GRANT OPTION",
+        "uqa",
+        &roles,
+        &security,
+    )
+    .unwrap();
+    let (security, _, _) = apply(
+        "GRANT SELECT(title) ON items TO reader",
+        "alice",
+        &roles,
+        &security,
+    )
+    .unwrap();
+    let error = apply(
+        "REVOKE SELECT ON items FROM alice RESTRICT",
+        "uqa",
+        &roles,
+        &security,
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("2BP01"));
+    let (revoked, granted, notices) = apply(
+        "REVOKE SELECT ON items FROM alice CASCADE",
+        "uqa",
+        &roles,
+        &security,
+    )
+    .unwrap();
+    assert_eq!(granted, 1);
+    assert!(notices.is_empty());
+    assert!(revoked.column_acls.is_empty());
+}
+
+#[test]
+fn table_grant_option_revoke_tracks_column_grants_authorized_by_the_table_acl() {
+    let roles = roles();
+    let security = TableSecurity::owner("uqa");
+    let (security, _, _) = apply(
+        "GRANT SELECT ON items TO alice WITH GRANT OPTION",
+        "uqa",
+        &roles,
+        &security,
+    )
+    .unwrap();
+    let (security, _, _) = apply(
+        "GRANT SELECT(title) ON items TO reader",
+        "alice",
+        &roles,
+        &security,
+    )
+    .unwrap();
+    assert_eq!(
+        apply(
+            "REVOKE GRANT OPTION FOR SELECT ON items FROM alice RESTRICT",
+            "uqa",
+            &roles,
+            &security
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("2BP01")
+    );
+    let (security, _, _) = apply(
+        "REVOKE GRANT OPTION FOR SELECT ON items FROM alice CASCADE",
+        "uqa",
+        &roles,
+        &security,
+    )
+    .unwrap();
+    assert!(security.column_acls.is_empty());
+    assert!(role_has_privilege(
+        &security,
+        "alice",
+        TablePrivilegeCheck {
+            privilege: TableAclPrivilege::Select,
+            grant_option: false
+        },
+        &roles,
+        &BTreeMap::new()
+    ));
+}
+
+#[test]
+fn selected_attribute_candidates_preserve_new_grants_on_previously_skipped_columns() {
+    let roles = roles();
+    let (current, _, _) = apply(
+        "GRANT UPDATE(a, b) ON items TO reader",
+        "uqa",
+        &roles,
+        &TableSecurity::owner("uqa"),
+    )
+    .unwrap();
+    let statement = statement("REVOKE UPDATE ON items FROM reader");
+    let requested = requested_acl_privileges(&statement.privileges).unwrap();
+    let application = TableGrantApplication {
+        statement: &statement,
+        grantees: &["reader".into()],
+        requested: &requested,
+        current_user: &"uqa",
+        roles: &roles,
+        memberships: &BTreeMap::new(),
+    };
+    let mut target = target("table");
+    target.acl_columns = Some(BTreeSet::from(["b".into()]));
+    let (next, count) = application.apply_to(&target, &current).unwrap();
+    assert_eq!(count, 1);
+    assert!(column_allowed(&next, "a", "reader", &roles));
+    assert!(!column_allowed(&next, "b", "reader", &roles));
+    assert!(!target.includes_acl_tuple(Some("a")));
+    assert!(target.includes_acl_tuple(Some("b")));
+    assert!(target.includes_acl_tuple(None));
 }

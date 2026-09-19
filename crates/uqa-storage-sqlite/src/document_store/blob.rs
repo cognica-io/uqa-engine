@@ -147,6 +147,18 @@ pub(super) fn load_marked_document_blob(
     expected_field: &str,
     marker: &BlobMarker,
 ) -> SQLiteResult<Option<Value>> {
+    load_marked_document_blob_with(table, doc_id, expected_field, marker, |field| {
+        load_document_blob(conn, table, doc_id, field)
+    })
+}
+
+pub(super) fn load_marked_document_blob_with(
+    table: &str,
+    doc_id: DocId,
+    expected_field: &str,
+    marker: &BlobMarker,
+    load: impl FnOnce(&str) -> SQLiteResult<Option<Vec<u8>>>,
+) -> SQLiteResult<Option<Value>> {
     let field = match marker {
         BlobMarker::Bytes(field)
         | BlobMarker::F64List(field)
@@ -163,13 +175,11 @@ pub(super) fn load_marked_document_blob(
             ),
         });
     }
-    let bytes = load_document_blob(conn, table, doc_id, field)?.ok_or_else(|| {
-        SQLiteError::CorruptDocumentBlob {
-            table: table.to_string(),
-            doc_id,
-            field: field.to_string(),
-            reason: "JSON marker references a missing blob row".to_string(),
-        }
+    let bytes = load(field)?.ok_or_else(|| SQLiteError::CorruptDocumentBlob {
+        table: table.to_string(),
+        doc_id,
+        field: field.to_string(),
+        reason: "JSON marker references a missing blob row".to_string(),
     })?;
     let value = match marker {
         BlobMarker::Bytes(_) => Value::Bytes(bytes),

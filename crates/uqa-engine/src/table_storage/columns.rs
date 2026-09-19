@@ -203,9 +203,7 @@ impl Engine {
             return;
         }
         let mut security = table.security.write();
-        if let Some(acl) = security.column_acls.remove(from) {
-            security.column_acls.insert(to.to_string(), acl);
-        }
+        security.rename_column_acl(from, to);
     }
 
     fn rename_column_analyzer_assignments(&self, table_name: &str, from: &str, to: &str) {
@@ -448,7 +446,6 @@ impl Engine {
                 catalog.set_metadata(&table_next_id_metadata_key(&from), "")?;
             }
         }
-        self.statistics.invalidate_column_stats(&from);
         self.mark_column_stats_dirty(&to, &state)?;
         self.refresh_value_indexes_for_table(&to)?;
         self.rename_constraint_transaction_relation(&from_relation, &to_relation);

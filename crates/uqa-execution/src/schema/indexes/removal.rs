@@ -51,6 +51,10 @@ pub fn run_drop_index(
             indexes.push(row);
         }
     }
+    for row in &indexes {
+        context.locks.lock_exclusive(&row.table_name)?;
+    }
+    context.constraints.lock_session.refresh_after_wait()?;
     let mut dependents = std::collections::BTreeSet::new();
     for index in &indexes {
         let referrers = context
@@ -66,19 +70,17 @@ pub fn run_drop_index(
             &mut dependents,
         )?;
     }
-    for row in &indexes {
-        context.locks.lock_exclusive(&row.table_name)?;
-    }
+    let targets = crate::schema::constraints::drop::capture_foreign_key_dependencies(
+        &context.constraints,
+        dependents,
+    )?;
     context
         .transactions
         .with_index_write(Box::new(move |context| {
-            for (table, name) in dependents {
-                crate::schema::constraints::drop::drop_constraint_dependency(
-                    &context.constraints,
-                    &table,
-                    &name,
-                )?;
-            }
+            crate::schema::constraints::drop::drop_foreign_key_dependencies(
+                &context.constraints,
+                targets,
+            )?;
             for row in indexes {
                 drop_index_side_effects(context, &row)?;
                 context
