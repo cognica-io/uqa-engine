@@ -14,6 +14,9 @@ use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult, Tabl
 
 pub const IDENTITY_METADATA_KEY: &str = "sql_not_null_constraint_identity_version";
 pub const FOREIGN_KEY_IDENTITY_METADATA_KEY: &str = "sql_foreign_key_catalog_identity_version";
+pub const CATALOG_ADDRESS_METADATA_KEY: &str = "sql_constraint_catalog_address_version";
+
+mod addresses;
 
 /// Validate a load-only catalog without allocating identities or publishing repairs.
 pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
@@ -31,6 +34,7 @@ pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBacken
         }
     }
     require_foreign_key_identity_format(catalog, false)?;
+    addresses::require_format(catalog, false)?;
     let mut identities = BTreeSet::new();
     let mut oids = BTreeSet::new();
     let mut validate = |columns: &[uqa_sql::ast::ColumnDef],
@@ -39,6 +43,11 @@ pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBacken
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         foreign_keys::validate(columns, constraints)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        uqa_sql::schema::constraint_metadata::identity::claims::validate_key_and_check_identities(
+            columns,
+            constraints,
+        )
+        .map_err(|error| StorageBackendError::backend("constraint identity", error))?;
         register_identities(columns, constraints, &mut identities, &mut oids)
     };
     for row in catalog.load_tables()? {
@@ -61,7 +70,13 @@ pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBacken
             serde_json::from_str(&row.options_json)?,
             &row.columns_json,
         )?;
-        validate(&table.columns, &uqa_sql::ast::TableConstraintSet::default())?;
+        validate(
+            &table.columns,
+            &uqa_sql::ast::TableConstraintSet {
+                checks: table.checks,
+                ..Default::default()
+            },
+        )?;
     }
     Ok(())
 }
@@ -77,20 +92,12 @@ pub fn migrate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBackend
         }
     };
     let foreign_legacy = require_foreign_key_identity_format(catalog, true)?;
-    let mut migrations = load_constraint_metadata_migrations(catalog, legacy, foreign_legacy)?;
+    let address_legacy = addresses::require_format(catalog, true)?;
+    let mut migrations =
+        load_constraint_metadata_migrations(catalog, legacy, foreign_legacy, address_legacy)?;
     synchronize_inherited_constraint_object_ids(&mut migrations);
-    let mut identities = BTreeSet::new();
-    let mut oids = BTreeSet::new();
-    for migration in &migrations {
-        register_identities(
-            &migration.columns,
-            &migration.constraints,
-            &mut identities,
-            &mut oids,
-        )?;
-    }
     let mut foreign_migrations = Vec::new();
-    for mut row in catalog.load_foreign_tables()? {
+    for row in catalog.load_foreign_tables()? {
         let (mut table, _) = crate::catalog::foreign::StoredForeignTable::from_catalog(
             row.relation.qualified_name(),
             row.server_name.clone(),
@@ -101,29 +108,38 @@ pub fn migrate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBackend
             checks: std::mem::take(&mut table.checks),
             ..Default::default()
         };
-        let changed = materialize_metadata(
+        let (changed, legacy_addresses) = materialize_metadata(
             &row.relation,
             &mut table.columns,
             &mut constraints,
             legacy,
             foreign_legacy,
+            address_legacy,
         )?;
-        register_identities(&table.columns, &constraints, &mut identities, &mut oids)?;
         table.checks = constraints.checks;
-        if changed {
-            row.columns_json = table.schema_json()?;
-            foreign_migrations.push(row);
-        }
+        foreign_migrations.push(addresses::ForeignMigration {
+            row,
+            table,
+            changed,
+            legacy_addresses,
+        });
     }
+    addresses::coordinate(&mut migrations, &mut foreign_migrations)?;
     save_constraint_metadata_migrations(catalog, migrations)?;
-    for row in foreign_migrations {
-        catalog.save_foreign_table(&row)?;
+    for mut migration in foreign_migrations {
+        if migration.changed {
+            migration.row.columns_json = migration.table.schema_json()?;
+            catalog.save_foreign_table(&migration.row)?;
+        }
     }
     if legacy {
         catalog.set_metadata(IDENTITY_METADATA_KEY, "1")?;
     }
     if foreign_legacy {
         catalog.set_metadata(FOREIGN_KEY_IDENTITY_METADATA_KEY, "1")?;
+    }
+    if address_legacy {
+        catalog.set_metadata(CATALOG_ADDRESS_METADATA_KEY, "1")?;
     }
     Ok(())
 }
@@ -134,7 +150,28 @@ fn materialize_metadata(
     constraints: &mut uqa_sql::ast::TableConstraintSet,
     legacy: bool,
     foreign_legacy: bool,
-) -> StorageBackendResult<bool> {
+    address_legacy: bool,
+) -> StorageBackendResult<(bool, BTreeSet<[u8; 16]>)> {
+    let before: BTreeSet<_> =
+        uqa_sql::schema::constraint_metadata::identity::claims::identities(columns, constraints)
+            .into_iter()
+            .map(|identity| identity.object_id)
+            .collect();
+    let addresses = if address_legacy {
+        Some(
+            uqa_sql::schema::constraint_metadata::identity::legacy::LegacyIdentities::capture(
+                columns,
+                constraints,
+            ),
+        )
+    } else {
+        uqa_sql::schema::constraint_metadata::identity::claims::validate_key_and_check_identities(
+            columns,
+            constraints,
+        )
+        .map_err(|error| StorageBackendError::backend("constraint identity", error))?;
+        None
+    };
     let foreign_migration = if foreign_legacy {
         Some(foreign_keys::LegacyIdentities::capture(
             columns,
@@ -145,7 +182,7 @@ fn materialize_metadata(
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         None
     };
-    let allocate = &mut crate::catalog::identity::allocate_catalog_object_id;
+    let allocate = &mut addresses::MigrationAllocator::default();
     let mut changed = if legacy {
         migrate_constraint_metadata(relation, columns, constraints, allocate)
     } else {
@@ -164,7 +201,20 @@ fn materialize_metadata(
             .preserve_oids(relation, columns, constraints)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
     }
-    Ok(changed)
+    let mut legacy_addresses: BTreeSet<_> =
+        uqa_sql::schema::constraint_metadata::identity::claims::identities(columns, constraints)
+            .into_iter()
+            .map(|identity| identity.object_id)
+            .filter(|id| !before.contains(id))
+            .collect();
+    if let Some(addresses) = addresses {
+        let converted = addresses
+            .preserve_oids(relation, columns, constraints)
+            .map_err(|error| StorageBackendError::backend("constraint identity", error))?;
+        changed |= !converted.is_empty();
+        legacy_addresses.extend(converted);
+    }
+    Ok((changed, legacy_addresses))
 }
 
 fn require_foreign_key_identity_format(
@@ -206,6 +256,13 @@ fn register_identities(
             ));
         }
     }
+    for identity in addresses::key_and_check_identities(columns, constraints) {
+        if !identities.insert(identity.object_id) || !oids.insert(identity.oid) {
+            return Err(StorageBackendError::Other(
+                "duplicate key or CHECK constraint catalog identity".into(),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -230,12 +287,14 @@ struct ConstraintMetadataMigration {
     columns: Vec<uqa_sql::ast::ColumnDef>,
     constraints: uqa_sql::ast::TableConstraintSet,
     changed: bool,
+    legacy_addresses: BTreeSet<[u8; 16]>,
 }
 
 fn load_constraint_metadata_migrations(
     catalog: &dyn CatalogFacade,
     legacy: bool,
     foreign_legacy: bool,
+    address_legacy: bool,
 ) -> StorageBackendResult<Vec<ConstraintMetadataMigration>> {
     let mut migrations = Vec::new();
     for schema in catalog.load_tables()? {
@@ -254,18 +313,20 @@ fn load_constraint_metadata_migrations(
                 &mut columns,
                 &mut constraints,
             );
-        let metadata_changed = materialize_metadata(
+        let (metadata_changed, legacy_addresses) = materialize_metadata(
             &schema.relation,
             &mut columns,
             &mut constraints,
             legacy,
             foreign_legacy,
+            address_legacy,
         )?;
         migrations.push(ConstraintMetadataMigration {
             schema,
             columns,
             constraints,
             changed: dispatches_changed || metadata_changed,
+            legacy_addresses,
         });
     }
     Ok(migrations)

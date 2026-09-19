@@ -53,6 +53,7 @@ impl Engine {
                     predicate: definition.predicate,
                     constraint_owned: false,
                     constraint: TableKeyConstraint {
+                        catalog_identity: None,
                         name: Some(index.relation.name.clone()),
                         kind: TableKeyConstraintKind::Unique,
                         columns: index_keys

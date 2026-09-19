@@ -69,6 +69,10 @@ impl QueryMemorySettings for Services {
 }
 
 impl CatalogSnapshotSource for Services {
+    fn current_catalog_snapshot(&self) -> CatalogReadView {
+        panic!("subquery correlation does not read the current definition catalog")
+    }
+
     fn catalog_snapshot(&self) -> CatalogReadView {
         assert!(
             self.allow_metadata,

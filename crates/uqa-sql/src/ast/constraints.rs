@@ -88,24 +88,15 @@ pub struct ColumnDef {
     /// Durable identity of the column CHECK, preserved across constraint and relation renames.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check_object_id: Option<[u8; 16]>,
+    /// Public CHECK address allocated separately from its durable incarnation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_catalog_oid: Option<i64>,
     /// Column-level `REFERENCES parent[(col)]` foreign key. An omitted column is resolved to the referenced primary key before publication.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub references: Option<ForeignKeyRef>,
 }
 
-/// A constraint incarnation and its public OID. Migrated constraints retain their preceding name-derived OID.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ConstraintCatalogIdentity {
-    pub object_id: [u8; 16],
-    pub oid: i64,
-}
-
-impl ConstraintCatalogIdentity {
-    pub fn is_valid(self) -> bool {
-        self.object_id != [0; 16] && u32::try_from(self.oid).is_ok_and(|oid| oid != 0)
-    }
-}
+pub use uqa_core::catalog_identity::CatalogObjectIdentity as ConstraintCatalogIdentity;
 
 /// `REFERENCES table[(column)]` reference target.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -194,6 +185,9 @@ pub enum TableKeyConstraintKind {
 /// A table key whose columns are compared as one tuple.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableKeyConstraint {
+    /// Independent catalog row lifetime, retained while the owning index changes its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_identity: Option<ConstraintCatalogIdentity>,
     pub name: Option<String>,
     pub kind: TableKeyConstraintKind,
     pub columns: Vec<String>,
@@ -244,6 +238,8 @@ pub struct TableCheck {
     /// Durable identity of this CHECK, assigned when its definition is published.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub object_id: Option<[u8; 16]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_oid: Option<i64>,
     /// Whether this relation declares this CHECK locally, independently from inherited copies. Missing legacy origin retains the historical local projection.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub is_local: bool,

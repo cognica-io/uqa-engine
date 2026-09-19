@@ -7,9 +7,7 @@
 //! Schedule schema analysis, durable candidate persistence, and in-memory publication.
 use uqa_core::RelationIdentity;
 use uqa_sql::ast::{ColumnDef, TableConstraintSet};
-use uqa_sql::schema::constraint_metadata::{
-    materialize_constraint_metadata, ConstraintMetadataResult,
-};
+use uqa_sql::schema::constraint_metadata::materialize_constraint_metadata;
 use uqa_sql::schema::dependencies::{
     regclass,
     registration::{self, SchemaDependencyBindingContext},
@@ -19,6 +17,7 @@ use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 /// A retained table generation with only the metadata and writes needed for schema publication.
 pub trait TableSchemaState {
+    fn object_id(&self) -> [u8; 16];
     fn columns(&self) -> Vec<ColumnDef>;
     fn write_columns(&self) -> Box<dyn columns::ColumnSchemaWrite + '_>;
     fn persist_columns(&self, columns: &[ColumnDef]) -> StorageBackendResult<()>;
@@ -62,7 +61,16 @@ pub struct SchemaPublicationContext<'a> {
     pub catalog: &'a dyn TableSchemaCatalog,
     pub types: &'a dyn FunctionTypeResolver,
     pub bindings: SchemaDependencyBindingContext<'a>,
-    pub allocate_identity: fn(&str) -> ConstraintMetadataResult<[u8; 16]>,
+    pub identities: crate::catalog::identity::CatalogIdentityReservationContext<'a>,
+}
+
+impl<'a> SchemaPublicationContext<'a> {
+    pub fn identity_allocator(
+        &self,
+    ) -> crate::catalog::identity::ReservedCatalogIdentityAllocator<'a> {
+        self.identities
+            .allocator(crate::catalog::identity::allocate_catalog_object_id)
+    }
 }
 
 fn resolve_table_name(
@@ -76,6 +84,29 @@ fn resolve_table_name(
 fn table_not_found(name: &str) -> StorageBackendError {
     StorageBackendError::Other(format!("table `{name}` does not exist"))
 }
+
+/// Catalog address reservation may replace the cached table generation while refreshing after a wait. Publish into the current generation only if it still represents the retained relation.
+fn current_table_state<'a>(
+    catalog: &'a dyn TableSchemaCatalog,
+    name: &str,
+    retained: &dyn TableSchemaState,
+) -> StorageBackendResult<Box<dyn TableSchemaState + 'a>> {
+    let current = catalog
+        .table_state(name)?
+        .ok_or_else(|| table_not_found(name))?;
+    if current.object_id() != retained.object_id() {
+        return Err(StorageBackendError::backend(
+            "schema publication",
+            uqa_sql::SQLError::Routine {
+                sqlstate: "40001".into(),
+                message: format!(
+                    "relation `{name}` was replaced during catalog identity reservation"
+                ),
+            },
+        ));
+    }
+    Ok(current)
+}
 fn materialize_metadata(
     context: &SchemaPublicationContext<'_>,
     name: &str,
@@ -83,9 +114,9 @@ fn materialize_metadata(
     constraints: &mut TableConstraintSet,
 ) -> StorageBackendResult<bool> {
     let relation = RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?;
-    let mut allocate = context.allocate_identity;
+    let mut allocate = context.identity_allocator();
     materialize_constraint_metadata(&relation, columns, constraints, &mut allocate)
-        .map_err(|error| StorageBackendError::Other(error.to_string()))
+        .map_err(|error| StorageBackendError::backend("constraint identity", error))
 }
 
 pub fn register_column(
@@ -143,9 +174,12 @@ pub fn register_column(
     let mut constraints = state.constraints();
     constraints.columns_declared = Some(true);
     materialize_metadata(context, &table_name, &mut columns, &mut constraints)?;
+    let state = current_table_state(context.catalog, &table_name, state.as_ref())?;
     state.mark_statistics_dirty()?;
     state.persist_candidate(&columns, &constraints)?;
+    let hierarchy = std::mem::take(&mut constraints.hierarchy);
     state.publish_columns(true, columns, constraints);
+    state.publish_hierarchy(hierarchy);
     if legacy_auto_increment {
         state.persist_next_id()?;
     }
@@ -186,6 +220,7 @@ pub fn replace_constraint_state(
     )
     .map_err(StorageBackendError::Other)?;
     materialize_metadata(context, &table_name, &mut columns, &mut constraints)?;
+    let state = current_table_state(context.catalog, &table_name, state.as_ref())?;
     state.persist_candidate(&columns, &constraints)?;
     let hierarchy = std::mem::take(&mut constraints.hierarchy);
     state.publish_columns(

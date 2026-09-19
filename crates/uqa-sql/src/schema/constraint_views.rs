@@ -14,6 +14,7 @@ pub fn column_checks(columns: &[ColumnDef]) -> Vec<TableCheck> {
     for column in columns {
         if let Some(expr) = column.check.clone() {
             out.push(TableCheck {
+                catalog_oid: column.check_catalog_oid,
                 name: column
                     .check_name
                     .clone()
@@ -60,6 +61,7 @@ pub fn append_column_keys(columns: &[ColumnDef], constraints: &mut Vec<TableKeyC
             continue;
         }
         constraints.push(TableKeyConstraint {
+            catalog_identity: None,
             name: None,
             kind,
             columns: vec![column.name.clone()],

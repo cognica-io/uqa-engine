@@ -18,6 +18,16 @@ use uqa_sql::catalog::session::{CursorMetadata, PreparedStatementMetadata};
 use uqa_sql::SQLError;
 
 impl Engine {
+    pub(crate) fn catalog_identity_reservation_context(
+        &self,
+    ) -> uqa_execution::catalog::identity::CatalogIdentityReservationContext<'_> {
+        uqa_execution::catalog::identity::CatalogIdentityReservationContext {
+            catalog: self,
+            session: self,
+            locks: self,
+        }
+    }
+
     pub(crate) fn catalog_execution(&self) -> CatalogContext<'_> {
         CatalogContext {
             catalog: self,
@@ -104,6 +114,10 @@ impl uqa_execution::catalog::services::CatalogSnapshotSource for Engine {
 
     fn catalog_snapshot(&self) -> uqa_execution::catalog::CatalogReadView {
         self.catalog_read_view()
+    }
+
+    fn current_catalog_snapshot(&self) -> uqa_execution::catalog::CatalogReadView {
+        self.restored_catalog_read_view()
     }
 }
 

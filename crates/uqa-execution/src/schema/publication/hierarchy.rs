@@ -77,6 +77,7 @@ pub fn replace_hierarchy_components(
     )
     .map_err(StorageBackendError::Other)?;
     materialize_metadata(context, &table_name, &mut columns, &mut constraints)?;
+    let state = super::current_table_state(context.catalog, &table_name, state.as_ref())?;
     state.persist_candidate(&columns, &constraints)?;
     let hierarchy = constraints.hierarchy.clone();
     state.publish_columns(

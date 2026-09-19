@@ -67,6 +67,7 @@ pub fn restore(
                 &relation_name,
                 &mut table.columns,
                 &mut table.checks,
+                &mut crate::catalog::identity::allocate_catalog_object_id,
             )
             .map_err(|error| {
                 StorageBackendError::Other(format!(

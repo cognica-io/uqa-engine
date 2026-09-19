@@ -19,7 +19,7 @@ fn constraint_renaming_preserves_identity_and_other_definition_fields() {
         &uqa_core::RelationIdentity::new("public", "t"),
         &mut columns,
         &mut constraints,
-        &mut |_| {
+        &mut |_: &str| {
             next += 1;
             Ok([next; 16])
         },
@@ -82,7 +82,7 @@ fn foreign_key_rename_preserves_row_and_enforcement_identities_and_partition_pro
         &uqa_core::RelationIdentity::new("public", "child"),
         &mut columns,
         &mut constraints,
-        &mut |_| {
+        &mut |_: &str| {
             next += 1;
             Ok([next; 16])
         },

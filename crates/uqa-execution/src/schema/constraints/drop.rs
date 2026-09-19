@@ -137,6 +137,7 @@ pub fn drop_constraint_one(
             columns[index].check_no_inherit = false;
             columns[index].check_is_local = true;
             columns[index].check_object_id = None;
+            columns[index].check_catalog_oid = None;
         }
         ConstraintLocation::ColumnForeignKey(index) => columns[index].references = None,
         ConstraintLocation::TableCheck(index) => {
@@ -148,6 +149,14 @@ pub fn drop_constraint_one(
         ConstraintLocation::Key(index) => {
             let key = constraints.key_constraints[index].clone();
             constraints.key_constraints.remove(index);
+            constraints
+                .hierarchy
+                .partition_inherited_key_constraints
+                .retain(|inherited| {
+                    !uqa_sql::schema::constraint_metadata::identity::keys::provenance_matches(
+                        &key, inherited,
+                    )
+                });
             if key.columns.len() == 1 {
                 if let Some(column) = columns
                     .iter_mut()

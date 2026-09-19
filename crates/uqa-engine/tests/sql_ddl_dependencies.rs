@@ -33,6 +33,7 @@ fn integer_column(name: &str, default: Option<Expr>) -> ColumnDef {
         check_no_inherit: false,
         check_is_local: true,
         check_object_id: None,
+        check_catalog_oid: None,
         references: None,
     }
 }

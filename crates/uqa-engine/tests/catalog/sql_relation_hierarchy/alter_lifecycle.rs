@@ -475,14 +475,24 @@ fn attach_propagates_identity_key_and_foreign_key_then_detach_localizes_schema()
             .sqlstate(),
         Some("23502")
     );
+    assert_eq!(
+        engine
+            .sql(
+                "INSERT INTO attached_identity (id, k, ref_id) VALUES (21, 6, 999)",
+                &[]
+            )
+            .unwrap_err()
+            .sqlstate(),
+        Some("23503")
+    );
     exec(
         &engine,
-        "INSERT INTO attached_identity (id, k, ref_id) VALUES (21, 6, 999)",
+        "INSERT INTO attached_identity (id, k, ref_id) VALUES (21, 6, 1)",
     );
 }
 
 #[test]
-fn detach_removes_only_constraints_copied_by_attach() {
+fn detach_preserves_locally_declared_constraints() {
     let engine = Engine::new();
     exec(&engine, "CREATE TABLE detach_ref (id INTEGER PRIMARY KEY)");
     exec(&engine, "INSERT INTO detach_ref VALUES (1)");
@@ -658,7 +668,17 @@ fn legacy_partition_foreign_key_ids_are_synchronized_before_detach() {
         &reopened,
         "ALTER TABLE legacy_parent DETACH PARTITION legacy_child",
     );
-    exec(&reopened, "INSERT INTO legacy_child VALUES (1, 999)");
+    assert_eq!(
+        reopened
+            .sql("INSERT INTO legacy_child VALUES (1, 999)", &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("23503")
+    );
+    exec(
+        &reopened,
+        "INSERT INTO legacy_reference VALUES (1); INSERT INTO legacy_child VALUES (1, 1)",
+    );
 }
 
 #[test]

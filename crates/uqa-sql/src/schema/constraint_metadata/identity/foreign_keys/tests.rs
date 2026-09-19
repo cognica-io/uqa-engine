@@ -107,7 +107,13 @@ fn partition_copies_share_enforcement_but_receive_distinct_catalog_identities() 
     child.foreign_keys[0].name = Some("renamed".into());
     child.foreign_keys[0].validated = false;
     validate(&[], &child).unwrap();
-    crate::schema::inheritance::alter::remove_partition_inherited_constraints(&mut child);
+    let object_id = child.foreign_keys[0].object_id.unwrap();
+    crate::schema::constraint_changes::foreign_key_target::remove_foreign_key(
+        &mut [],
+        &mut child,
+        object_id,
+    )
+    .unwrap();
     assert!(child.foreign_keys.is_empty());
 }
 

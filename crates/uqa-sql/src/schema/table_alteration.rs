@@ -25,6 +25,7 @@ pub fn normalize_inherited_action(action: &mut AlterTableAction, is_partition: b
         }
         column.check_is_local = column.check.is_none();
         column.check_object_id = None;
+        column.check_catalog_oid = None;
         if column.check_no_inherit {
             column.check = None;
             column.check_name = None;
@@ -35,6 +36,7 @@ pub fn normalize_inherited_action(action: &mut AlterTableAction, is_partition: b
     if let AlterTableAction::AddCheckConstraint { constraint } = action {
         constraint.is_local = false;
         constraint.object_id = None;
+        constraint.catalog_oid = None;
     }
 }
 

@@ -555,6 +555,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                         }
                         AlterTableAction::AddKeyConstraint {
                             constraint: TableKeyConstraint {
+                                catalog_identity: None,
                                 name,
                                 kind,
                                 columns,
@@ -569,6 +570,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                         })?;
                         AlterTableAction::AddCheckConstraint {
                             constraint: TableCheck {
+                                catalog_oid: None,
                                 name,
                                 expr: compile_expr(raw)?,
                                 enforced: constraint.is_enforced,

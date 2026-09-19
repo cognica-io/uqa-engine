@@ -10,6 +10,7 @@ use crate::tests::relation_lock_support::{after_wait, error, sessions, sql};
 use crate::Engine;
 use uqa_core::Value;
 
+mod catalog_addresses;
 mod constraint_rename;
 mod foreign_key_removal;
 mod foreign_key_rename;

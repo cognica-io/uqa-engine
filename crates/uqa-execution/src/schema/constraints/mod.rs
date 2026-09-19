@@ -105,7 +105,7 @@ fn materialize_constraint_candidate(
         &canonical,
         &mut constraints.key_constraints,
     )?;
-    let mut allocate = context.publication.allocate_identity;
+    let mut allocate = context.publication.identity_allocator();
     uqa_sql::schema::constraint_metadata::materialize_constraint_metadata(
         &relation,
         columns,
@@ -115,7 +115,7 @@ fn materialize_constraint_candidate(
     .map_err(|error| {
         ddl_storage_error(
             "ALTER TABLE constraint naming",
-            StorageBackendError::Other(error.to_string()),
+            StorageBackendError::backend("constraint identity", error),
         )
     })?;
     Ok(())

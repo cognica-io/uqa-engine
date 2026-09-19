@@ -114,6 +114,7 @@ pub fn prepare_create_table_hierarchy(
             column.check = None;
             column.check_name = None;
             column.check_object_id = None;
+            column.check_catalog_oid = None;
             column.check_is_local = true;
             column.check_enforced = true;
             column.check_validated = true;
@@ -147,6 +148,7 @@ pub fn prepare_create_table_hierarchy(
             super::check_inheritance::bind_parent_check_columns(&parent, &mut check.expr)?;
             check.is_local = false;
             check.object_id = None;
+            check.catalog_oid = None;
             check.validated = check.enforced;
             inherited_checks.push(check);
         }
@@ -157,6 +159,7 @@ pub fn prepare_create_table_hierarchy(
             }));
             inherited_keys.extend(constraints.key_constraints.into_iter().map(|mut key| {
                 key.name = None;
+                key.catalog_identity = None;
                 key
             }));
         }
@@ -324,4 +327,5 @@ fn validate_partition_keys(
 
 pub mod alter;
 
+pub mod detachment;
 pub mod origins;

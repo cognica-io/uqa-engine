@@ -205,7 +205,7 @@ pub(super) fn materialize_recursive_action_names<S: Clone + 'static>(
         .map_err(|error| ddl_storage_error("ALTER TABLE recursive name binding", error))?;
     let relation = uqa_core::RelationIdentity::from_legacy_name(table)
         .map_err(|error| SQLError::Internal(format!("resolve ALTER TABLE relation: {error}")))?;
-    let mut allocate = context.hierarchy.publication.allocate_identity;
+    let mut allocate = context.hierarchy.publication.identity_allocator();
     uqa_sql::schema::table_alteration::materialize_recursive_action_names(
         &relation,
         &mut columns,

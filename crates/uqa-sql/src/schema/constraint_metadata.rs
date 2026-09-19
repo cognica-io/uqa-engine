@@ -9,11 +9,91 @@ use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
 pub mod identity;
 
-#[derive(Debug, thiserror::Error)]
-#[error("{0}")]
-pub struct ConstraintMetadataError(pub String);
+#[derive(Debug)]
+pub enum ConstraintMetadataError {
+    Invalid(String),
+    Execution(Box<crate::SQLError>),
+}
+
+impl std::fmt::Display for ConstraintMetadataError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(message) => formatter.write_str(message),
+            Self::Execution(error) => std::fmt::Display::fmt(error, formatter),
+        }
+    }
+}
+
+impl std::error::Error for ConstraintMetadataError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Invalid(_) => None,
+            Self::Execution(error) => Some(error.as_ref()),
+        }
+    }
+}
 pub type ConstraintMetadataResult<T> = Result<T, ConstraintMetadataError>;
-pub type CatalogIdentityAllocator<'a> = dyn FnMut(&str) -> ConstraintMetadataResult<[u8; 16]> + 'a;
+pub type CatalogIdentityAllocator<'a> = dyn CatalogObjectAllocator + 'a;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CatalogOidClass {
+    Constraint,
+}
+
+impl CatalogOidClass {
+    pub const fn class_id(self) -> u32 {
+        match self {
+            Self::Constraint => 2606,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Constraint => "constraint",
+        }
+    }
+}
+
+/// Declaration normalization requests identities from its caller. Execution reserves public addresses; isolated declarations and initial migration can derive candidates before validating the complete catalog.
+pub trait CatalogObjectAllocator {
+    /// Validate the owning relation and reserve supplied addresses before allocating another row.
+    fn include_catalog_identity(
+        &mut self,
+        _relation: &RelationIdentity,
+        _class: CatalogOidClass,
+        _identity: crate::ast::ConstraintCatalogIdentity,
+    ) -> ConstraintMetadataResult<()> {
+        Ok(())
+    }
+
+    fn allocate_object_id(&mut self, kind: &str) -> ConstraintMetadataResult<[u8; 16]>;
+
+    fn allocate_catalog_oid(
+        &mut self,
+        class: CatalogOidClass,
+        object_id: &[u8; 16],
+    ) -> ConstraintMetadataResult<i64>;
+}
+
+impl<F> CatalogObjectAllocator for F
+where
+    F: FnMut(&str) -> ConstraintMetadataResult<[u8; 16]>,
+{
+    fn allocate_object_id(&mut self, kind: &str) -> ConstraintMetadataResult<[u8; 16]> {
+        self(kind)
+    }
+
+    fn allocate_catalog_oid(
+        &mut self,
+        class: CatalogOidClass,
+        object_id: &[u8; 16],
+    ) -> ConstraintMetadataResult<i64> {
+        Ok(crate::catalog::oids::stable_object_oid(
+            class.label(),
+            object_id,
+        ))
+    }
+}
 
 pub fn materialize_constraint_metadata(
     relation: &RelationIdentity,
@@ -21,6 +101,10 @@ pub fn materialize_constraint_metadata(
     constraints: &mut crate::ast::TableConstraintSet,
     allocate: &mut CatalogIdentityAllocator<'_>,
 ) -> ConstraintMetadataResult<bool> {
+    identity::claims::validate_present_identities(columns, constraints)?;
+    for identity in identity::claims::identities(columns, constraints) {
+        allocate.include_catalog_identity(relation, CatalogOidClass::Constraint, identity)?;
+    }
     // Releases predating typed table-key persistence stored column-level PRIMARY KEY and UNIQUE declarations only as ColumnDef flags. Promote those legacy flags before assigning names so catalog publication always sees named constraints.
     let mut changed = promote_legacy_column_key_constraints(columns, constraints);
     let mut used = existing_constraint_names(columns, constraints)?;
@@ -56,6 +140,11 @@ pub fn materialize_constraint_metadata(
                 "CHECK constraint",
                 allocate,
             )?;
+            changed |= identity::materialize_check_oid(
+                column.check_object_id,
+                &mut column.check_catalog_oid,
+                allocate,
+            )?;
         }
         if let Some(reference) = &mut column.references {
             changed |= assign_constraint_name(
@@ -80,6 +169,7 @@ pub fn materialize_constraint_metadata(
             ),
         };
         changed |= assign_constraint_name(&mut constraint.name, base, &mut used)?;
+        changed |= identity::materialize_key_identity(constraint, allocate)?;
     }
     for constraint in &mut constraints.checks {
         let mut referenced_columns = Vec::new();
@@ -92,6 +182,11 @@ pub fn materialize_constraint_metadata(
         changed |= assign_constraint_name(&mut constraint.name, base, &mut used)?;
         changed |=
             assign_catalog_object_id(&mut constraint.object_id, "CHECK constraint", allocate)?;
+        changed |= identity::materialize_check_oid(
+            constraint.object_id,
+            &mut constraint.catalog_oid,
+            allocate,
+        )?;
     }
     changed |= synchronize_partition_inherited_foreign_key_ids(constraints);
     for constraint in &mut constraints.foreign_keys {
@@ -105,8 +200,8 @@ pub fn materialize_constraint_metadata(
         changed |= identity::foreign_keys::materialize(&mut constraint.catalog_identity, allocate)?;
     }
     changed |= synchronize_partition_inherited_foreign_key_ids(constraints);
-    identity::validate_not_null_identities(columns)?;
-    identity::foreign_keys::validate(columns, constraints)?;
+    changed |= identity::keys::synchronize_provenance(constraints);
+    identity::claims::validate_constraint_identities(columns, constraints)?;
     Ok(changed)
 }
 
@@ -162,6 +257,7 @@ fn promote_legacy_column_key_constraints(
             constraints
                 .key_constraints
                 .push(crate::ast::TableKeyConstraint {
+                    catalog_identity: None,
                     name: None,
                     kind,
                     columns: vec![column.name.clone()],
@@ -255,7 +351,7 @@ fn assign_catalog_object_id(
     if target.is_some() {
         return Ok(false);
     }
-    *target = Some(allocate(object_kind)?);
+    *target = Some(allocate.allocate_object_id(object_kind)?);
     Ok(true)
 }
 
@@ -267,12 +363,12 @@ fn record_constraint_name(
         return Ok(());
     };
     if name.is_empty() {
-        return Err(ConstraintMetadataError(
+        return Err(ConstraintMetadataError::Invalid(
             "constraint name must not be empty".into(),
         ));
     }
     if !used.insert(name.to_string()) {
-        return Err(ConstraintMetadataError(format!(
+        return Err(ConstraintMetadataError::Invalid(format!(
             "constraint `{name}` is declared more than once"
         )));
     }
@@ -298,7 +394,7 @@ fn assign_constraint_name(
             return Ok(true);
         }
     }
-    Err(ConstraintMetadataError(format!(
+    Err(ConstraintMetadataError::Invalid(format!(
         "constraint name suffix space exhausted for `{base}`"
     )))
 }
@@ -308,7 +404,7 @@ fn constraint_column_component(
     relation: &RelationIdentity,
 ) -> ConstraintMetadataResult<String> {
     if columns.is_empty() {
-        return Err(ConstraintMetadataError(format!(
+        return Err(ConstraintMetadataError::Invalid(format!(
             "constraint on table `{}` has no columns",
             relation.qualified_name()
         )));

@@ -77,6 +77,7 @@ pub fn create_table_as_columns(
             check_no_inherit: false,
             check_is_local: true,
             check_object_id: None,
+            check_catalog_oid: None,
             references: None,
         })
         .collect::<Vec<_>>();

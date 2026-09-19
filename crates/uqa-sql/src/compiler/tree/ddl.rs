@@ -87,6 +87,7 @@ pub(in crate::compiler) fn compile_create_table(
                     };
                     if let Some(kind) = kind {
                         key_constraints.push(TableKeyConstraint {
+                            catalog_identity: None,
                             name: constraint_name(&cstr.conname),
                             kind,
                             columns: vec![col.colname.clone()],
@@ -112,6 +113,7 @@ pub(in crate::compiler) fn compile_create_table(
                             Some(cstr.conname.clone())
                         };
                         checks.push(TableCheck {
+                            catalog_oid: None,
                             name: cname,
                             expr,
                             enforced: cstr.is_enforced,
@@ -193,6 +195,7 @@ pub(in crate::compiler) fn compile_create_table(
                             };
                         let key_columns = extract_strings(&cstr.keys)?;
                         key_constraints.push(TableKeyConstraint {
+                            catalog_identity: None,
                             name: constraint_name(&cstr.conname),
                             kind,
                             columns: key_columns,
@@ -677,6 +680,7 @@ pub(in crate::compiler) fn compile_column_def(
         check_no_inherit,
         check_is_local: true,
         check_object_id: None,
+        check_catalog_oid: None,
         references,
     })
 }

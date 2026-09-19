@@ -123,6 +123,7 @@ pub fn ensure_not_null_inheritable(
 pub fn take_column_check(column: &mut crate::ast::ColumnDef) -> Option<TableCheck> {
     let check = TableCheck {
         expr: column.check.take()?,
+        catalog_oid: column.check_catalog_oid.take(),
         name: column.check_name.take(),
         object_id: column.check_object_id.take(),
         is_local: column.check_is_local,

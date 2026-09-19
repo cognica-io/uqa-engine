@@ -37,6 +37,7 @@ pub trait ForeignCreationNamespace {
     fn relation_kind_at(&self, name: &str) -> StorageBackendResult<Option<&'static str>>;
 }
 pub struct ForeignCreationContext<'a> {
+    pub identities: crate::catalog::identity::CatalogIdentityReservationContext<'a>,
     pub creation: crate::schema::namespaces::relations::RelationCreationContext<'a>,
     pub schema: ForeignSchemaContext<'a>,
     pub namespace: &'a dyn ForeignCreationNamespace,
@@ -222,8 +223,14 @@ impl ForeignCreationContext<'_> {
             &mut columns,
             uqa_sql::ast::RelationPersistence::Permanent,
         )?;
-        self.schema
-            .prepare_foreign_table_schema(name, &mut columns, &mut checks)?;
+        self.schema.prepare_foreign_table_schema(
+            name,
+            &mut columns,
+            &mut checks,
+            &mut self
+                .identities
+                .allocator(crate::catalog::identity::allocate_catalog_object_id),
+        )?;
         self.ensure_foreign_server_exists(&server_name)?;
         let mut opt_map: std::collections::BTreeMap<String, String> =
             std::collections::BTreeMap::new();

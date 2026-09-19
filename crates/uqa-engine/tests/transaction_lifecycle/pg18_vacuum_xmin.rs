@@ -618,6 +618,7 @@ fn legacy_user_xmin_values_are_not_overwritten_by_tuple_version_metadata() {
             check_no_inherit: false,
             check_is_local: true,
             check_object_id: None,
+            check_catalog_oid: None,
             references: None,
         },
     )

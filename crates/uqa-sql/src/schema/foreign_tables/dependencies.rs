@@ -28,6 +28,7 @@ pub fn remove_foreign_check(
             column.check = None;
             column.check_name = None;
             column.check_object_id = None;
+            column.check_catalog_oid = None;
             column.check_is_local = true;
             column.check_enforced = true;
             column.check_validated = true;
@@ -87,6 +88,7 @@ pub fn remove_foreign_column(
             column.check = None;
             column.check_name = None;
             column.check_object_id = None;
+            column.check_catalog_oid = None;
             column.check_is_local = true;
             column.check_enforced = true;
             column.check_validated = true;

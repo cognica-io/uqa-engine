@@ -100,6 +100,7 @@ pub fn set_column_not_null(
         .map_err(StorageBackendError::Other)?;
     let mut constraints = state.constraints();
     materialize_metadata(context, &table_name, &mut next, &mut constraints)?;
+    let state = super::current_table_state(context.catalog, &table_name, state.as_ref())?;
     state.mark_statistics_dirty()?;
     state.persist_candidate(&next, &constraints)?;
     state.publish_constraints(next, constraints);
@@ -140,14 +141,15 @@ pub fn register_table_constraints(
         &mut constraints.checks,
     )
     .map_err(StorageBackendError::Other)?;
-    let mut allocate = context.allocate_identity;
+    let mut allocate = context.identity_allocator();
     uqa_sql::schema::constraint_metadata::materialize_constraint_metadata(
         &relation,
         &mut columns,
         &mut constraints,
         &mut allocate,
     )
-    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+    .map_err(|error| StorageBackendError::backend("constraint identity", error))?;
+    let state = super::current_table_state(context.catalog, &table_name, state.as_ref())?;
     state.persist_candidate(&columns, &constraints)?;
     state.publish_constraints(columns, constraints);
     Ok(())

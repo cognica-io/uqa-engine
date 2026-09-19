@@ -23,7 +23,26 @@ impl Engine {
             constraints: self.constraint_execution_context(),
             partitions: self.partition_context(),
             publication: self.schema_publication_context(),
+            constraint_access: self,
+            constraint_modes: self,
         }
+    }
+}
+
+impl uqa_execution::schema::hierarchy::detachment::DetachedConstraintModes for Engine {
+    fn preserve_split_modes(
+        &self,
+        retained: &[uqa_sql::catalog::constraints::ConstraintIdentity],
+        detached: &[uqa_sql::schema::inheritance::detachment::ConstraintIdentityChange],
+    ) -> Result<(), SQLError> {
+        if let Some(frame) = self.session.transactions.lock().last_mut() {
+            uqa_sql::schema::inheritance::detachment::preserve_split_constraint_modes(
+                &mut frame.constraint_modes.named,
+                retained,
+                detached,
+            );
+        }
+        self.prune_constraint_modes()
     }
 }
 impl HierarchyCatalog for Engine {

@@ -224,16 +224,18 @@ pub fn append_inherited_keys(
         }
         let mut constraint = constraint.clone();
         constraint.name = None;
+        constraint.catalog_identity = None;
         target.push(constraint.clone());
         appended.push(constraint);
     }
     appended
 }
 
-fn key_equivalent(left: &TableKeyConstraint, right: &TableKeyConstraint) -> bool {
+pub fn key_equivalent(left: &TableKeyConstraint, right: &TableKeyConstraint) -> bool {
     left.kind == right.kind
         && left.columns == right.columns
         && left.nulls_not_distinct == right.nulls_not_distinct
+        && left.without_overlaps == right.without_overlaps
 }
 
 pub fn append_inherited_foreign_keys(
@@ -255,25 +257,15 @@ pub fn append_inherited_foreign_keys(
     appended
 }
 
-pub fn remove_partition_inherited_constraints(constraints: &mut crate::ast::TableConstraintSet) {
-    for inherited in &constraints.hierarchy.partition_inherited_key_constraints {
-        if let Some(index) = constraints
-            .key_constraints
-            .iter()
-            .position(|constraint| constraint == inherited)
-        {
-            constraints.key_constraints.remove(index);
-        }
-    }
-    for inherited in &constraints.hierarchy.partition_inherited_foreign_keys {
-        if let Some(index) = constraints.foreign_keys.iter().position(|constraint| {
-            crate::schema::constraint_metadata::foreign_key_provenance_matches(
-                constraint, inherited,
-            )
-        }) {
-            constraints.foreign_keys.remove(index);
-        }
-    }
+pub fn clear_partition_constraint_provenance(constraints: &mut crate::ast::TableConstraintSet) {
+    constraints
+        .hierarchy
+        .partition_inherited_key_constraints
+        .clear();
+    constraints
+        .hierarchy
+        .partition_inherited_foreign_keys
+        .clear();
 }
 
 fn foreign_key_equivalent(left: &ForeignKey, right: &ForeignKey) -> bool {
@@ -305,6 +297,7 @@ pub fn detached_bound_check(
     );
     let name = unique_constraint_name(&base, existing);
     TableCheck {
+        catalog_oid: None,
         name: Some(name),
         expr,
         enforced: true,

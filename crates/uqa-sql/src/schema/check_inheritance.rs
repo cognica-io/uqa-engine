@@ -157,6 +157,7 @@ pub fn merge_create_checks(table: &mut CreateTable) -> Result<(), SQLError> {
             continue;
         };
         let incoming = TableCheck {
+            catalog_oid: column.check_catalog_oid,
             name: Some(name.clone()),
             object_id: column.check_object_id,
             is_local: true,

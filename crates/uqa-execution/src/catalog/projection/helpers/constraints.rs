@@ -247,7 +247,7 @@ pub fn constraint_catalog_rows(
                     table: table.clone(),
                     requested_name: col.check_name.clone(),
                     object_id: col.check_object_id,
-                    catalog_oid: None,
+                    catalog_oid: col.check_catalog_oid,
                     kind: ConstraintCatalogKind::Check,
                     columns: check_constraint_columns(expr, &columns, &table_name)?,
                     state: ConstraintCatalogState::new(
@@ -292,6 +292,7 @@ pub fn constraint_catalog_rows(
                 continue;
             }
             key_constraints.push(uqa_sql::ast::TableKeyConstraint {
+                catalog_identity: None,
                 name: None,
                 kind,
                 columns: vec![column.name.clone()],
@@ -304,8 +305,10 @@ pub fn constraint_catalog_rows(
                 schema: schema.clone(),
                 table: table.clone(),
                 requested_name: constraint.name,
-                object_id: None,
-                catalog_oid: None,
+                object_id: constraint
+                    .catalog_identity
+                    .map(|identity| identity.object_id),
+                catalog_oid: constraint.catalog_identity.map(|identity| identity.oid),
                 kind: match constraint.kind {
                     TableKeyConstraintKind::PrimaryKey => ConstraintCatalogKind::PrimaryKey,
                     TableKeyConstraintKind::Unique => ConstraintCatalogKind::Unique {
@@ -329,7 +332,7 @@ pub fn constraint_catalog_rows(
                 table: table.clone(),
                 requested_name: constraint.name.clone(),
                 object_id: constraint.object_id,
-                catalog_oid: None,
+                catalog_oid: constraint.catalog_oid,
                 kind: ConstraintCatalogKind::Check,
                 columns: check_constraint_columns(&constraint.expr, &columns, &table_name)?,
                 state: ConstraintCatalogState::new(
@@ -418,7 +421,7 @@ pub fn constraint_catalog_rows(
                     table: table.clone(),
                     requested_name: column.check_name.clone(),
                     object_id: column.check_object_id,
-                    catalog_oid: None,
+                    catalog_oid: column.check_catalog_oid,
                     kind: ConstraintCatalogKind::Check,
                     columns: check_constraint_columns(expression, &columns, &table_name)?,
                     state: ConstraintCatalogState::new(
@@ -440,7 +443,7 @@ pub fn constraint_catalog_rows(
                 table: table.clone(),
                 requested_name: check.name,
                 object_id: check.object_id,
-                catalog_oid: None,
+                catalog_oid: check.catalog_oid,
                 kind: ConstraintCatalogKind::Check,
                 columns: check_constraint_columns(&check.expr, &columns, &table_name)?,
                 state: ConstraintCatalogState::new(
@@ -527,6 +530,7 @@ fn foreign_key_catalog_row(
             continue;
         }
         referenced_keys.push(uqa_sql::ast::TableKeyConstraint {
+            catalog_identity: None,
             name: None,
             kind,
             columns: vec![column.name.clone()],
