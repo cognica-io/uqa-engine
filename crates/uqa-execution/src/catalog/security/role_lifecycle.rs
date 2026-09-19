@@ -8,7 +8,7 @@
 
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
-    ast::{AlterRoleStmt, CreateRoleStmt, DropRoleStmt, GrantRoleStmt},
+    ast::{AlterRoleStmt, CreateRoleStmt, GrantRoleStmt},
     catalog::roles::{
         definition::{self, require_role_creation},
         memberships::require_role_attribute_authority,
@@ -17,8 +17,9 @@ use uqa_sql::{
     SQLError,
 };
 pub mod context;
+mod deletion;
 mod identity;
-mod locking;
+pub use deletion::drop_roles;
 mod memberships;
 mod rename;
 pub use rename::rename_role;
@@ -167,48 +168,6 @@ pub fn alter_role(
     next.insert(replacement.name.clone(), replacement);
     context.publication.persist_roles(&roles, &next)?;
     **roles = next;
-    drop(roles);
-    context.publication.catalog_changed();
-    Ok(())
-}
-
-pub fn drop_roles(
-    context: &RoleExecutionContext<'_>,
-    statement: &DropRoleStmt,
-) -> Result<(), SQLError> {
-    let current = context.analysis.names.current_role();
-    let session = context.analysis.names.session_role();
-    let bindings = locking::lock_drop_targets(context, statement, &current, &session)?;
-    context.publication.prepare_writer()?;
-    let targets = tuples::prepare_drop(context, &bindings, &current, &session)?;
-    for target in &targets {
-        tuples::lock(context, target)?;
-    }
-    let mut roles = context.registry.write_roles();
-    let identities = targets
-        .iter()
-        .map(|target| {
-            target
-                .revalidate(&roles)
-                .map(uqa_sql::catalog::roles::RoleDefinition::identity)
-        })
-        .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
-    let mut memberships = context.registry.write_memberships();
-    let mut next_roles = roles.clone();
-    next_roles.retain(|_, role| !identities.contains(&role.identity()));
-    let mut next_memberships = memberships.clone();
-    next_memberships.retain(|_, membership| {
-        !identities.contains(&membership.role.identity())
-            && !identities.contains(&membership.member.identity())
-            && !identities.contains(&membership.grantor.identity())
-    });
-    context.publication.persist_roles(&roles, &next_roles)?;
-    context
-        .publication
-        .persist_memberships(&memberships, &next_memberships)?;
-    **roles = next_roles;
-    **memberships = next_memberships;
-    drop(memberships);
     drop(roles);
     context.publication.catalog_changed();
     Ok(())

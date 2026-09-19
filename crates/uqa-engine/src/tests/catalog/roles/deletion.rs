@@ -13,6 +13,8 @@ use crate::{
 };
 use uqa_core::Value;
 
+mod order;
+
 #[test]
 fn drop_special_role_specifiers_preserve_permission_precedence_and_literal_names() {
     let engine = Engine::new();

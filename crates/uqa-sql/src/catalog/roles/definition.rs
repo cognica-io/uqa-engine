@@ -9,13 +9,15 @@
 use super::{
     guards::RoleCatalogGuards,
     memberships::{
-        insufficient_privilege, require_role_attribute_authority, role_has_admin, role_is_superuser,
+        insufficient_privilege, require_role_attribute_authority, role_has_transitive_admin,
+        role_is_superuser,
     },
-    RoleDefinition, RoleIdentity, RoleMembership, RoleMembershipKey, RoleReferenceNames,
+    RoleDefinition, RoleIdentity, RoleMembership, RoleMembershipKey, RoleReference,
+    RoleReferenceNames,
 };
-use crate::catalog::roles::identity::RoleSubject;
+use crate::catalog::roles::identity::{RoleBinding, RoleSubject};
 use crate::{
-    ast::{AlterRoleStmt, DropRoleStmt, RoleAttribute, RoleSpecification},
+    ast::{AlterRoleStmt, RoleAttribute, RoleSpecification},
     SQLError,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -72,7 +74,7 @@ pub fn require_role_administration_for(
             .role_definition(roles)
             .zip(roles.get(target))
             .is_some_and(|(member, role)| {
-                role_has_admin(&memberships, member.identity(), role.identity())
+                role_has_transitive_admin(&memberships, member.identity(), role.identity())
             })
     {
         Ok(())
@@ -146,16 +148,39 @@ pub fn alter_role_candidate(
     Ok(next)
 }
 
-pub fn resolve_drop_role_names(
-    context: &RoleValidationContext<'_>,
-    statement: &DropRoleStmt,
-    current: &(impl RoleSubject + ?Sized),
-    session: &(impl RoleSubject + ?Sized),
-    snapshot: &BTreeMap<String, RoleDefinition>,
-) -> Result<Vec<String>, SQLError> {
-    require_createrole(snapshot, current, "drop role")?;
-    let mut names = Vec::new();
-    for requested in &statement.names {
+/// Initial CREATEROLE authority is checked once; each later target uses the current membership graph after preceding removals.
+pub struct RoleDropAuthority {
+    current: RoleBinding,
+    session: RoleReference,
+}
+
+impl RoleDropAuthority {
+    pub fn new(
+        current: RoleReference,
+        session: RoleReference,
+        roles: &BTreeMap<String, RoleDefinition>,
+    ) -> Result<Self, SQLError> {
+        require_createrole(roles, &current, "drop role")?;
+        let session = match session {
+            RoleReference::Bound(_) => session,
+            RoleReference::Named(_) => {
+                RoleReference::Bound(std::sync::Arc::new(session.bind(roles)?))
+            }
+        };
+        Ok(Self {
+            current: current.bind(roles)?,
+            session,
+        })
+    }
+
+    /// Resolve only the next target. Execution must finish its object wait and remove its memberships before requesting another target.
+    pub fn resolve_target(
+        &self,
+        context: &RoleValidationContext<'_>,
+        requested: &RoleSpecification,
+        if_exists: bool,
+        roles: &BTreeMap<String, RoleDefinition>,
+    ) -> Result<Option<RoleBinding>, SQLError> {
         // PostgreSQL treats the exact lowercase name public as a role specifier even when quoted.
         let name = match requested {
             RoleSpecification::Named(name) if name != "public" => name,
@@ -166,33 +191,44 @@ pub fn resolve_drop_role_names(
                 });
             }
         };
-        if !snapshot.contains_key(name) {
-            if statement.if_exists {
+        let Some(role) = roles.get(name) else {
+            if if_exists {
                 context.notices.notice(
                     "NOTICE",
                     &format!("role \"{name}\" does not exist, skipping"),
                 );
-                continue;
+                return Ok(None);
             }
             return Err(SQLError::Routine {
                 sqlstate: "42704".into(),
                 message: format!("role \"{name}\" does not exist"),
             });
-        }
-        require_role_drop_authority(context, snapshot, current, session, name)?;
-        names.push(name.clone());
+        };
+        require_role_drop_authority(context, roles, &self.current, &self.session, name)?;
+        RoleBinding::from_definition(role).map(Some)
     }
-    Ok(names)
 }
 
-pub fn require_role_drop_authority(
+pub fn role_drop_memberships_candidate(
+    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    removed: RoleIdentity,
+) -> BTreeMap<RoleMembershipKey, RoleMembership> {
+    memberships
+        .iter()
+        .filter(|(_, membership)| {
+            membership.role.identity() != removed && membership.member.identity() != removed
+        })
+        .map(|(key, membership)| (*key, membership.clone()))
+        .collect()
+}
+
+fn require_role_drop_authority(
     context: &RoleValidationContext<'_>,
     roles: &BTreeMap<String, RoleDefinition>,
     current: &(impl RoleSubject + ?Sized),
     session: &(impl RoleSubject + ?Sized),
     name: &str,
 ) -> Result<(), SQLError> {
-    require_createrole(roles, current, "drop role")?;
     let protected_user = if current.role_name(roles) == Some(name)
         || context.names.outer_role().role_name(roles) == Some(name)
     {
@@ -215,7 +251,21 @@ pub fn require_role_drop_authority(
     {
         return Err(insufficient_privilege("permission denied to drop role"));
     }
-    require_role_administration_for(context.roles, roles, current, name, "drop role")
+    if role_is_superuser(roles, current) {
+        return Ok(());
+    }
+    let memberships = context.roles.role_memberships();
+    if current
+        .role_definition(roles)
+        .zip(roles.get(name))
+        .is_some_and(|(member, role)| {
+            role_has_transitive_admin(&memberships, member.identity(), role.identity())
+        })
+    {
+        Ok(())
+    } else {
+        Err(insufficient_privilege("permission denied to drop role"))
+    }
 }
 
 pub fn ensure_no_grantor_dependencies(

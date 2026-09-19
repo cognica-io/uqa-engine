@@ -5,6 +5,7 @@
 //
 
 use super::*;
+mod deletion;
 mod fixtures;
 mod identity;
 mod memberships;
@@ -12,7 +13,7 @@ mod rename;
 mod tuples;
 use fixtures::{create, Catalog};
 use std::collections::{BTreeMap, BTreeSet};
-use uqa_sql::ast::{RoleAttribute, RoleMembershipOptions};
+use uqa_sql::ast::{DropRoleStmt, RoleAttribute, RoleMembershipOptions};
 
 #[test]
 fn create_keeps_both_write_guards_and_publishes_only_after_both_persistence_calls() {

@@ -19,6 +19,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve PostgreSQL target order during multi-role deletion: wait and remove memberships before resolving later targets, check initial CREATEROLE once, and perform dependency checks and tuple deletion in target order. Retain statement/savepoint atomicity and original identities. Reuse transitive ADMIN authority for role alteration, rename and deletion independently of INHERIT/SET options.
+
 - Reject special role specifiers in DROP ROLE after checking CREATEROLE authority, matching PostgreSQL 18 error and notice order. Preserve quoted uppercase role names and reject invalid multi-target deletions without publishing partial removals.
 
 - Prevent SECURITY DEFINER code from dropping its caller’s selected role. Keep effective, outer-selected and session identity protection distinct, with PostgreSQL 18 error precedence and session-user diagnostics.

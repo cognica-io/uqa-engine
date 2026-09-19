@@ -6,7 +6,9 @@
 
 use super::super::guards::{RoleDefinitionRead, RoleMembershipRead};
 use super::*;
-use crate::ast::{CreateRoleStmt, GrantRoleStmt, RoleMembershipOptions, RoleSpecification};
+use crate::ast::{
+    CreateRoleStmt, DropRoleStmt, GrantRoleStmt, RoleMembershipOptions, RoleSpecification,
+};
 use crate::catalog::roles::{
     memberships::command::{creator_membership, MembershipRecipients},
     RoleReference,
@@ -62,6 +64,86 @@ impl RoleNotices for Inputs {
         self.notices
             .borrow_mut()
             .push((level.into(), message.into()));
+    }
+}
+
+fn resolve_drop_role_names(
+    context: &RoleValidationContext<'_>,
+    statement: &DropRoleStmt,
+    current: &str,
+    session: &str,
+    roles: &BTreeMap<String, RoleDefinition>,
+) -> Result<Vec<String>, SQLError> {
+    let authority = RoleDropAuthority::new(current.into(), session.into(), roles)?;
+    let mut names = Vec::new();
+    for requested in &statement.names {
+        if let Some(role) =
+            authority.resolve_target(context, requested, statement.if_exists, roles)?
+        {
+            names.push(role.name);
+        }
+    }
+    Ok(names)
+}
+
+#[test]
+fn role_definition_administration_uses_membership_paths_independent_of_inherit_and_set() {
+    for inherit in [false, true] {
+        let mut inputs = Inputs::new();
+        for (index, name) in ["actor", "middle", "target"].into_iter().enumerate() {
+            let mut role = RoleDefinition::bootstrap();
+            role.name = name.into();
+            role.oid = 20_000 + i64::try_from(index).unwrap();
+            role.object_id = [u8::try_from(index + 1).unwrap(); 16];
+            role.attributes = BTreeSet::from([RoleAttribute::CreateRole]);
+            inputs.roles.insert(name.into(), role);
+        }
+        for (index, (role, member)) in [("middle", "actor"), ("target", "middle")]
+            .into_iter()
+            .enumerate()
+        {
+            let membership = RoleMembership {
+                oid: 30_000 + i64::try_from(index).unwrap(),
+                role: RoleBinding::from_definition(&inputs.roles[role]).unwrap(),
+                member: RoleBinding::from_definition(&inputs.roles[member]).unwrap(),
+                grantor: RoleBinding::from_definition(&inputs.roles["uqa"]).unwrap(),
+                admin_option: role == "target",
+                inherit_option: inherit && role == "middle",
+                set_option: false,
+            };
+            inputs.memberships.insert(membership.key(), membership);
+        }
+        let result = require_role_administration_for(
+            &inputs,
+            &inputs.roles,
+            "actor",
+            "target",
+            "alter role",
+        );
+        result.unwrap();
+        let authority =
+            RoleDropAuthority::new("actor".into(), "uqa".into(), &inputs.roles).unwrap();
+        inputs.roles.get_mut("actor").unwrap().attributes.clear();
+        assert_eq!(
+            authority
+                .resolve_target(&inputs.context(), &"target".into(), false, &inputs.roles)
+                .unwrap()
+                .unwrap()
+                .name,
+            "target"
+        );
+        assert_eq!(
+            require_role_administration_for(
+                &inputs,
+                &inputs.roles,
+                "actor",
+                "target",
+                "alter role"
+            )
+            .unwrap_err()
+            .sqlstate(),
+            Some("42501")
+        );
     }
 }
 
