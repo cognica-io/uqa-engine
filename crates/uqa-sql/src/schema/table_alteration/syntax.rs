@@ -6,9 +6,29 @@
 
 //! Validate ALTER TABLE transaction restrictions and bind native relation-kind actions.
 use crate::{
-    ast::{AlterTableAction, AlterTableStmt},
+    ast::{AlterTableAction, AlterTableStmt, TableLockMode},
     SQLError,
 };
+
+pub fn table_alter_lock_mode(statement: &AlterTableStmt) -> TableLockMode {
+    let mut mode = TableLockMode::ShareUpdateExclusive;
+    for action in &statement.actions {
+        match action {
+            AlterTableAction::SetTriggerEnableMode { .. }
+            | AlterTableAction::AddForeignKeyConstraint { .. } => {
+                mode = TableLockMode::ShareRowExclusive;
+            }
+            AlterTableAction::ValidateConstraint { .. }
+            | AlterTableAction::AttachPartition { .. }
+            | AlterTableAction::DetachPartition {
+                concurrently: true, ..
+            }
+            | AlterTableAction::DetachPartition { finalize: true, .. } => {}
+            _ => return TableLockMode::AccessExclusive,
+        }
+    }
+    mode
+}
 
 pub fn validate_alter_table_transaction(
     stmt: &AlterTableStmt,
@@ -146,3 +166,6 @@ pub fn alter_foreign_table_from_table_syntax(
         action,
     }))
 }
+
+#[cfg(test)]
+mod tests;

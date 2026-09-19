@@ -92,24 +92,36 @@ pub fn lock_descendants(
                 .map(|id| id.map(|id| (name, id)))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    for (mut name, object_id) in targets.into_iter().flatten() {
-        loop {
-            let acquired = match acquire_relation(session, &name, mode, nowait) {
-                Err(error) if error.sqlstate() != Some("55P03") => return Err(error),
-                other => other,
-            };
-            session.refresh_after_wait()?;
-            let Some(current) = catalog.table_name(object_id) else {
-                break;
-            };
-            if current == name {
-                acquired?.retain();
-                break;
-            }
-            name = current;
-        }
+    for (name, object_id) in targets.into_iter().flatten() {
+        lock_relation_identity(catalog, session, name, object_id, mode, nowait)?;
     }
     Ok(())
+}
+
+/// Return the current locked name of the original table, or None if it was removed.
+pub fn lock_relation_identity(
+    catalog: &dyn RelationLockCatalog,
+    session: &dyn RelationLockSession,
+    mut name: String,
+    object_id: [u8; 16],
+    mode: RelationLockMode,
+    nowait: bool,
+) -> Result<Option<String>, SQLError> {
+    loop {
+        let acquired = match acquire_relation(session, &name, mode, nowait) {
+            Err(error) if error.sqlstate() != Some("55P03") => return Err(error),
+            other => other,
+        };
+        session.refresh_after_wait()?;
+        let Some(current) = catalog.table_name(object_id) else {
+            return Ok(None);
+        };
+        if current == name {
+            acquired?.retain();
+            return Ok(Some(current));
+        }
+        name = current;
+    }
 }
 
 #[cfg(test)]

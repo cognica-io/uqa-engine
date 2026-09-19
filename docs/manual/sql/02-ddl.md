@@ -369,6 +369,8 @@ Implemented changes include:
 
 The historical `ALTER TABLE name OWNER TO role` spelling also accepts regular views, materialized views, sequences and foreign tables, with the same owner-transfer checks as their explicit ALTER commands. After a concurrent replacement of the requested name, the current relation kind selects that command's execution path.
 
+Trigger enable/disable and `ADD FOREIGN KEY` retain SHARE ROW EXCLUSIVE on the target, while `VALIDATE CONSTRAINT` and `ATTACH PARTITION` use SHARE UPDATE EXCLUSIVE. Combined actions retain the strongest required mode. Foreign-key addition, including a new column's REFERENCES declaration, also retains SHARE ROW EXCLUSIVE on the referenced table. `INHERIT` requires ownership of its parent and takes SHARE UPDATE EXCLUSIVE there; `NO INHERIT` requires only child ownership and takes ACCESS SHARE on the parent. Attachment requires ownership of the attached table and locks its subtree and the default partition subtree before publication. Inherited column addition and CHECK addition, validation and renaming retain selected child identities, so a concurrent rename cannot redirect a change to a replacement using the former name. Explicit secondary references are resolved again after waits, and all these locks participate in transaction completion and savepoint rollback.
+
 Examples:
 
 ```sql

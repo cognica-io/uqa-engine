@@ -27,6 +27,17 @@ pub struct RelationAlterTarget {
 }
 
 impl RelationAlterTarget {
+    pub fn resolve(
+        resolution: RelationResolution,
+        name: &str,
+        if_exists: bool,
+        notice: &mut dyn FnMut(&str),
+    ) -> Result<Option<Self>, SQLError> {
+        resolve_relation_rename_source(resolution, name, if_exists, notice)?
+            .map(|(canonical, kind)| Self::from_name(canonical, kind))
+            .transpose()
+    }
+
     pub(crate) fn from_name(canonical: String, kind: &'static str) -> Result<Self, SQLError> {
         let relation = RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
             SQLError::Internal(format!(

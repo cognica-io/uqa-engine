@@ -85,7 +85,7 @@ fn run_alter_action_branch<S: Clone + 'static>(
     Ok(())
 }
 
-fn recursive_alter_children<S: Clone + 'static>(
+pub(super) fn recursive_alter_children<S: Clone + 'static>(
     context: &TableAlterContext<'_, S>,
     table: &str,
     recurse: bool,

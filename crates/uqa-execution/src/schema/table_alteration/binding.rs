@@ -8,9 +8,8 @@
 
 use crate::{
     catalog::security::table_inquiry::TablePrivilegeContext,
-    row_locks::{
-        binding::{bind_relation, RelationBinding, RelationLockCatalog, RelationLockSession},
-        RelationLockMode,
+    row_locks::binding::{
+        bind_relation, RelationBinding, RelationDefinitionSession, RelationLockCatalog,
     },
     schema::{
         namespaces::relations::RelationCreationContext,
@@ -21,7 +20,10 @@ use uqa_sql::{
     ast::{AlterTableAction, AlterTableStmt},
     schema::{
         relation_alteration::RelationAlterNames,
-        table_alteration::targets::{self, BoundTableAlteration},
+        table_alteration::{
+            syntax::table_alter_lock_mode,
+            targets::{self, BoundTableAlteration},
+        },
     },
     SQLError,
 };
@@ -31,7 +33,7 @@ pub struct TableAlterBindingContext<'a> {
     pub catalog: &'a dyn RelationLockCatalog,
     pub authority: TablePrivilegeContext<'a>,
     pub creation: RelationCreationContext<'a>,
-    pub locks: &'a dyn RelationLockSession,
+    pub locks: &'a dyn RelationDefinitionSession,
     pub notices: &'a parking_lot::Mutex<Vec<(String, String)>>,
 }
 
@@ -41,7 +43,7 @@ pub fn bind_table_alteration(
 ) -> Result<Option<BoundTableAlteration>, SQLError> {
     let binding = bind_relation(
         context.locks,
-        RelationLockMode::AccessExclusive,
+        table_alter_lock_mode(&statement).into(),
         false,
         || {
             let Some(target) = targets::table_alter_target(

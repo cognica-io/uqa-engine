@@ -64,8 +64,8 @@ pub fn run_alter_table<S: Clone + 'static>(
     };
     match bound {
         BoundTableAlteration::Table(statement) => {
-            context.tables.with_table_write(Box::new(move |context| {
-                super::run_alter_table(context, statement)
+            context.tables.with_table_write(Box::new(move |tables| {
+                super::run_alter_table(tables, statement)
             }))
         }
         BoundTableAlteration::Sequence(statement) => {

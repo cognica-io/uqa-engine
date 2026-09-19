@@ -11,7 +11,7 @@ use super::syntax::{
 };
 use crate::{
     ast::{AlterForeignTableStmt, AlterSequence, AlterTableAction, AlterTableStmt, AlterViewStmt},
-    catalog::resolution::{resolve_relation_rename_source, RelationResolution},
+    catalog::resolution::RelationResolution,
     schema::relation_alteration::RelationAlterTarget,
     SQLError,
 };
@@ -36,12 +36,7 @@ pub fn table_alter_target(
     statement: &AlterTableStmt,
     notice: &mut dyn FnMut(&str),
 ) -> Result<Option<RelationAlterTarget>, SQLError> {
-    let Some((canonical, kind)) =
-        resolve_relation_rename_source(resolution, &statement.table, statement.if_exists, notice)?
-    else {
-        return Ok(None);
-    };
-    RelationAlterTarget::from_name(canonical, kind).map(Some)
+    RelationAlterTarget::resolve(resolution, &statement.table, statement.if_exists, notice)
 }
 
 pub fn bind_table_alteration(

@@ -12,7 +12,7 @@ use super::{
     StorageBackendResult,
 };
 use std::collections::BTreeSet;
-use uqa_sql::ast::TableCheck;
+use uqa_sql::ast::{TableCheck, TableLockMode};
 
 fn find_check(
     context: &ConstraintAlterContext<'_>,
@@ -82,7 +82,9 @@ pub fn validate_check(
             ));
         }
         for child in targets.iter().filter(|target| target.as_str() != table) {
-            context.locks.lock_exclusive(child)?;
+            context
+                .locks
+                .lock_relation(child, TableLockMode::ShareUpdateExclusive)?;
             validate_and_mark_constraint(context, child, name)?;
         }
     }
@@ -202,7 +204,9 @@ fn drop_check_branch(
     };
     super::drop::drop_constraint_one(context, table, &name, false, cascade)?;
     for child in children {
-        context.locks.lock_exclusive(&child)?;
+        context
+            .locks
+            .lock_relation(&child, TableLockMode::AccessExclusive)?;
         context
             .access
             .ensure_no_pending_events(&child, "ALTER TABLE")?;
@@ -260,7 +264,9 @@ pub fn rename_check(
     let target_set = targets.iter().cloned().collect::<BTreeSet<_>>();
     let mut changes = Vec::new();
     for target in targets {
-        context.locks.lock_exclusive(&target)?;
+        context
+            .locks
+            .lock_relation(&target, TableLockMode::AccessExclusive)?;
         context.access.ensure_table_owner(&target)?;
         let (columns, constraints) = table_constraint_state(context, &target)?;
         let mut check = find_check(context, &target, from)?.ok_or_else(|| {

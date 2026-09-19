@@ -18,6 +18,7 @@ use uqa_sql::{
 pub mod binding;
 mod context;
 pub mod entry;
+mod locking;
 mod recursion;
 pub use context::*;
 use recursion::{materialize_recursive_action_names, run_recursive_alter_action};
@@ -28,6 +29,7 @@ pub fn run_alter_table<S: Clone + 'static>(
     context: &TableAlterContext<'_, S>,
     stmt: AlterTableStmt,
 ) -> Result<SQLResult, SQLError> {
+    let mode = uqa_sql::schema::table_alteration::syntax::table_alter_lock_mode(&stmt).into();
     let AlterTableStmt {
         table,
         qualifier,
@@ -58,28 +60,7 @@ pub fn run_alter_table<S: Clone + 'static>(
                 continue;
             }
         }
-        match &mut action {
-            AlterTableAction::AddColumn { column, .. } => {
-                column.ty = uqa_sql::type_resolution::resolve_declared_column_type(
-                    context.hierarchy.publication.types,
-                    &column.ty,
-                )?;
-            }
-            AlterTableAction::AlterColumnType { ty, .. } => {
-                *ty = uqa_sql::type_resolution::resolve_declared_column_type(
-                    context.hierarchy.publication.types,
-                    ty,
-                )?;
-            }
-            _ => {}
-        }
-        materialize_recursive_action_names(context, &table, recurse, &mut action)?;
-        // Column merging can stop at an existing child column. Its CHECK still has an independent inheritance lifecycle and must reach every supplying edge.
-        let column_check = if let AlterTableAction::AddColumn { column, .. } = &mut action {
-            uqa_sql::schema::constraint_changes::take_column_check(column)
-        } else {
-            None
-        };
+        let column_check = prepare_alter_action(context, &table, recurse, &mut action, mode)?;
         run_recursive_alter_action(
             context,
             AlterTableStmt {
@@ -91,8 +72,7 @@ pub fn run_alter_table<S: Clone + 'static>(
             },
             action,
         )?;
-        if let Some(constraint) = column_check {
-            let mut action = AlterTableAction::AddCheckConstraint { constraint };
+        if let Some(mut action) = column_check {
             materialize_recursive_action_names(context, &table, recurse, &mut action)?;
             run_recursive_alter_action(
                 context,
@@ -108,6 +88,51 @@ pub fn run_alter_table<S: Clone + 'static>(
         }
     }
     Ok(SQLResult::empty())
+}
+
+fn prepare_alter_action<S: Clone + 'static>(
+    context: &TableAlterContext<'_, S>,
+    table: &str,
+    recurse: bool,
+    action: &mut AlterTableAction,
+    mode: crate::row_locks::RelationLockMode,
+) -> Result<Option<AlterTableAction>, SQLError> {
+    match action {
+        AlterTableAction::AddColumn { column, .. } => {
+            column.ty = uqa_sql::type_resolution::resolve_declared_column_type(
+                context.hierarchy.publication.types,
+                &column.ty,
+            )?;
+        }
+        AlterTableAction::AlterColumnType { ty, .. } => {
+            *ty = uqa_sql::type_resolution::resolve_declared_column_type(
+                context.hierarchy.publication.types,
+                ty,
+            )?;
+        }
+        _ => {}
+    }
+    materialize_recursive_action_names(context, table, recurse, action)?;
+    // Column merging can stop at an existing child column. Its CHECK still has an independent inheritance lifecycle and must reach every supplying edge.
+    let mut column_check = if let AlterTableAction::AddColumn { column, .. } = action {
+        uqa_sql::schema::constraint_changes::take_column_check(column)
+            .map(|constraint| AlterTableAction::AddCheckConstraint { constraint })
+    } else {
+        None
+    };
+    locking::prepare_table_alter_action(&context.binding, context, table, recurse, action, mode)?;
+    if let Some(check) = &mut column_check {
+        locking::prepare_table_alter_action(
+            &context.binding,
+            context,
+            table,
+            recurse,
+            check,
+            mode,
+        )?;
+    }
+    context.binding.locks.prepare_definition_write()?;
+    Ok(column_check)
 }
 
 #[expect(

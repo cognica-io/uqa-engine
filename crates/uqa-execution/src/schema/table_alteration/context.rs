@@ -39,6 +39,7 @@ pub trait TableEventLifecycle {
     ) -> Result<(), SQLError>;
 }
 pub struct TableAlterContext<'a, S: Clone + 'static> {
+    pub binding: super::binding::TableAlterBindingContext<'a>,
     pub ownership: crate::catalog::security::table_ownership::TableOwnershipContext<'a>,
     pub hierarchy: HierarchyContext<'a>,
     pub constraints: ConstraintAlterContext<'a>,

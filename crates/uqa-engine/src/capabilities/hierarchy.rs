@@ -10,7 +10,7 @@ use uqa_execution::schema::hierarchy::{HierarchyCatalog, HierarchyContext, Hiera
 use uqa_sql::{
     ast::{
         ColumnDef, ForeignKey, RelationPersistence, TableCheck, TableConstraintSet,
-        TableKeyConstraint,
+        TableKeyConstraint, TableLockMode,
     },
     SQLError,
 };
@@ -59,7 +59,7 @@ impl HierarchyNamespace for Engine {
     ) -> Result<uqa_execution::catalog::RelationResolution, SQLError> {
         Engine::resolve_visible_relation_kind(self, name)
     }
-    fn lock_exclusive(&self, table: &str) -> Result<(), SQLError> {
-        self.lock_relation(table, crate::row_locks::RelationLockMode::AccessExclusive)
+    fn lock_relation(&self, table: &str, mode: TableLockMode) -> Result<(), SQLError> {
+        self.lock_relation(table, mode.into())
     }
 }
