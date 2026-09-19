@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Validate inheritable NOT NULL constraints on descendants before marking the parent valid, match child constraints by column, and reject ONLY validation while children require validation. Retain foreign-key reference RowShare locks and inheritance descendant AccessShare locks, preserving original identities through waits and releasing acquisitions at savepoint rollback.
+
 - Retain RowExclusive sequence locks through the outer transaction for nextval, currval, lastval and setval, including cached values and savepoint rollback. Recheck definitions and authority after waits while preserving the original object identity and ordinary query snapshot. Direct calls release implicit locks, and value execution reuses an active query transaction without reentering its statement gate.
 
 - Select ALTER TABLE locks by action and retain secondary targets for foreign-key addition, inheritance changes, inheritable additions, CHECK validation/rename and partition attachment. Foreign-key addition and trigger mode changes allow readers; CHECK validation allows writers. Recheck explicit secondary names after waits, retain inherited child identities through rename, and enforce parent ownership for INHERIT.

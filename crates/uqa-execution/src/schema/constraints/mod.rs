@@ -53,7 +53,9 @@ fn ddl_storage_error(action: &str, error: StorageBackendError) -> SQLError {
 pub mod checks;
 pub mod drop;
 mod lifecycle;
+mod validation;
 pub use lifecycle::*;
+pub use validation::validate_constraint;
 
 pub fn table_constraint_state(
     context: &ConstraintAlterContext<'_>,

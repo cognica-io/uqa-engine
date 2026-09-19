@@ -4,12 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Execute recursive CHECK validation, merging, renaming, and removal.
+//! Execute recursive CHECK merging, renaming, and removal.
 use super::{
     constraint_error, ddl_storage_error, ensure_constraint_name_available, find_constraint,
-    publish_constraint_state, table_constraint_state, validate_and_mark_constraint,
-    validate_check_expression, ConstraintAlterContext, ConstraintLocation, SQLError,
-    StorageBackendResult,
+    publish_constraint_state, table_constraint_state, validate_check_expression,
+    ConstraintAlterContext, ConstraintLocation, SQLError, StorageBackendResult,
 };
 use std::collections::BTreeSet;
 use uqa_sql::ast::{TableCheck, TableLockMode};
@@ -53,43 +52,6 @@ fn replace_check(
         }
     }
     publish_constraint_state(context, table, columns, constraints)
-}
-
-pub fn validate_check(
-    context: &ConstraintAlterContext<'_>,
-    table: &str,
-    name: &str,
-    recurse: bool,
-) -> Result<bool, SQLError> {
-    let Some(check) = find_check(context, table, name)? else {
-        return Ok(false);
-    };
-    if !check.enforced {
-        return Err(constraint_error(
-            "55000",
-            "cannot validate NOT ENFORCED constraint",
-        ));
-    }
-    if check.validated {
-        return Ok(true);
-    }
-    if !check.no_inherit {
-        let targets = context.rows.catalog.hierarchy_scan_tables(table, true)?;
-        if !recurse && targets.len() > 1 {
-            return Err(constraint_error(
-                "42P16",
-                "constraint must be validated on child tables too",
-            ));
-        }
-        for child in targets.iter().filter(|target| target.as_str() != table) {
-            context
-                .locks
-                .lock_relation(child, TableLockMode::ShareUpdateExclusive)?;
-            validate_and_mark_constraint(context, child, name)?;
-        }
-    }
-    validate_and_mark_constraint(context, table, name)?;
-    Ok(true)
 }
 
 pub fn merge_added_check(

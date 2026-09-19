@@ -14,6 +14,7 @@ use crate::row_locks::{
 use std::collections::BTreeSet;
 use uqa_sql::{
     ast::{AlterTableAction, PartitionBound},
+    schema::constraint_changes::validation::{constraint_validation, ConstraintValidationKind},
     schema::relation_alteration::RelationAlterTarget,
     SQLError,
 };
@@ -67,6 +68,13 @@ fn bind_secondary_relations<S: Clone + 'static>(
                 RelationLockMode::ShareUpdateExclusive,
                 true,
             )?;
+            lock_alter_children(binding, primary, RelationLockMode::AccessShare, |parent| {
+                tables
+                    .hierarchy
+                    .partitions
+                    .catalog
+                    .direct_hierarchy_children(parent)
+            })?;
         }
         AlterTableAction::DropInheritance { parent } => {
             *parent = bind_secondary_table(binding, parent, RelationLockMode::AccessShare, false)?;
@@ -97,7 +105,39 @@ fn bind_secondary_relations<S: Clone + 'static>(
                 bind_secondary_table(binding, partition, RelationLockMode::AccessExclusive, false)?;
             lock_partition_subtree(binding, tables, partition)?;
         }
+        AlterTableAction::ValidateConstraint { name } => {
+            lock_validation_reference(binding, tables, primary, name)?;
+        }
         _ => {}
+    }
+    Ok(())
+}
+
+fn lock_validation_reference<S: Clone + 'static>(
+    binding: &TableAlterBindingContext<'_>,
+    tables: &TableAlterContext<'_, S>,
+    primary: &str,
+    name: &str,
+) -> Result<(), SQLError> {
+    let (columns, constraints) =
+        crate::schema::constraints::table_constraint_state(&tables.constraints, primary)?;
+    let target = constraint_validation(primary, name, &columns, &constraints)?;
+    if let (false, ConstraintValidationKind::ForeignKey { referenced_table }) =
+        (target.validated, target.kind)
+    {
+        let identity = binding
+            .catalog
+            .relation_object_id(referenced_table)?
+            .ok_or_else(|| SQLError::UnknownTable(referenced_table.to_string()))?;
+        lock_relation_identity(
+            binding.catalog,
+            binding.locks,
+            referenced_table.to_string(),
+            identity,
+            RelationLockMode::RowShare,
+            false,
+        )?
+        .ok_or_else(|| SQLError::UnknownTable(referenced_table.to_string()))?;
     }
     Ok(())
 }
@@ -255,9 +295,14 @@ fn locks_all_descendants<S: Clone + 'static>(
     ) {
         return Ok(recurse);
     }
-    if let AlterTableAction::ValidateConstraint { name }
-    | AlterTableAction::RenameConstraint { from: name, .. } = action
-    {
+    if let AlterTableAction::ValidateConstraint { name } = action {
+        let (columns, constraints) =
+            crate::schema::constraints::table_constraint_state(&context.constraints, parent)?;
+        return Ok(
+            constraint_validation(parent, name, &columns, &constraints)?.requires_descendants()
+        );
+    }
+    if let AlterTableAction::RenameConstraint { from: name, .. } = action {
         let checks = context
             .constraints
             .catalog
@@ -266,14 +311,7 @@ fn locks_all_descendants<S: Clone + 'static>(
         return Ok(checks
             .iter()
             .find(|check| check.name.as_deref() == Some(name))
-            .is_some_and(|check| {
-                !check.no_inherit
-                    && if matches!(action, AlterTableAction::ValidateConstraint { .. }) {
-                        !check.validated
-                    } else {
-                        recurse
-                    }
-            }));
+            .is_some_and(|check| !check.no_inherit && recurse));
     }
     Ok(false)
 }

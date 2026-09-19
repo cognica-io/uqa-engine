@@ -10,6 +10,8 @@ use crate::tests::relation_lock_support::{after_wait, error, sessions, sql};
 use crate::Engine;
 use uqa_core::Value;
 
+mod validation;
+
 fn peer_lock(engine: &Engine, table: &str, mode: &str, allowed: bool) {
     sql(engine, "BEGIN");
     let result = engine.sql(

@@ -9,7 +9,7 @@ use crate::schema::columns::removal::drop_column;
 use crate::schema::constraints::{
     add_check_constraint, add_foreign_key_constraint, add_not_null_constraint, alter_constraint,
     checks, drop::drop_constraint, set_not_null_constraint, table_constraint_state,
-    validate_and_mark_constraint,
+    validate_constraint,
 };
 use uqa_sql::{
     ast::{AlterTableAction, AlterTableStmt},
@@ -243,9 +243,7 @@ fn run_alter_table_action<S: Clone + 'static>(
             )?;
         }
         AlterTableAction::ValidateConstraint { name } => {
-            if !checks::validate_check(&context.constraints, &stmt.table, &name, stmt.recurse)? {
-                validate_and_mark_constraint(&context.constraints, &stmt.table, &name)?;
-            }
+            validate_constraint(&context.constraints, &stmt.table, &name, stmt.recurse)?;
         }
         AlterTableAction::AlterConstraint {
             name,
