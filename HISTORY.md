@@ -19,6 +19,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Prevent SECURITY DEFINER code from dropping its caller’s selected role. Keep effective, outer-selected and session identity protection distinct, with PostgreSQL 18 error precedence and session-user diagnostics.
+
 - Implement SQL role renaming with retained OIDs, incarnations, memberships, ownership and ACLs. Preserve selected sessions and SECURITY DEFINER authority through name reuse, including bootstrap-role renaming. Bind ACL recipients and new owners before waits so peer renames cannot retarget publication. Coordinate tuple and destination-name conflicts with transaction/savepoint undo; development record format 27 excludes incompatible writers.
 
 - Serialize competing role attribute changes and deletion against the originally selected definition tuple, including identical attribute assignments. Match PostgreSQL 18 commit, rollback and savepoint outcomes without blocking independent membership publication. Initial restoration atomically initializes legacy tuple revisions; current missing revisions fail without repair. Role catalog format 3 and development record format 26 exclude preceding writers.

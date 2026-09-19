@@ -185,10 +185,19 @@ pub fn require_role_drop_authority(
     name: &str,
 ) -> Result<(), SQLError> {
     require_createrole(roles, current, "drop role")?;
-    if current.role_name(roles) == Some(name) || session.role_name(roles) == Some(name) {
+    let protected_user = if current.role_name(roles) == Some(name)
+        || context.names.outer_role().role_name(roles) == Some(name)
+    {
+        Some("current")
+    } else if session.role_name(roles) == Some(name) {
+        Some("session")
+    } else {
+        None
+    };
+    if let Some(subject) = protected_user {
         return Err(SQLError::Routine {
             sqlstate: "55006".into(),
-            message: "current user cannot be dropped".into(),
+            message: format!("{subject} user cannot be dropped"),
         });
     }
     if roles

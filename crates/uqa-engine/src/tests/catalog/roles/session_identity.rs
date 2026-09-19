@@ -254,3 +254,16 @@ fn active_transaction_and_role_restoration_never_rebind_a_removed_identity() {
         }
     }
 }
+
+#[test]
+fn definer_role_deletion_protects_effective_outer_and_session_identities() {
+    let engine = Engine::new();
+    sql(&engine, "CREATE ROLE caller; CREATE ROLE definer SUPERUSER; CREATE FUNCTION drop_outer() RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$ BEGIN DROP ROLE caller; END $$; ALTER FUNCTION drop_outer() OWNER TO definer; CREATE FUNCTION drop_definer() RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$ BEGIN DROP ROLE definer; END $$; ALTER FUNCTION drop_definer() OWNER TO definer; CREATE FUNCTION drop_session() RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$ BEGIN DROP ROLE uqa; END $$; ALTER FUNCTION drop_session() OWNER TO definer; SET ROLE caller");
+    let original = engine.durable.roles.read().clone();
+    for function in ["drop_outer", "drop_definer", "drop_session"] {
+        error(&engine, &format!("SELECT {function}()"), "55006");
+        assert_eq!(scalar(&engine, "current_user"), Value::Str("caller".into()));
+        assert_eq!(scalar(&engine, "session_user"), Value::Str("uqa".into()));
+    }
+    assert_eq!(*engine.durable.roles.read(), original);
+}

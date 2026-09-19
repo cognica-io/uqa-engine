@@ -158,3 +158,75 @@ fn grant_binds_explicit_grantor_before_recipients_without_aliasing_target_names(
     assert_eq!(bound.members[0].name, "current_1");
     assert_eq!(inputs.current_reads.get(), 2);
 }
+
+#[test]
+fn role_deletion_protects_effective_outer_and_session_incarnations() {
+    struct Names {
+        effective: RoleReference,
+        outer: RoleReference,
+        session: RoleReference,
+    }
+    impl RoleReferenceNames for Names {
+        fn current_role(&self) -> RoleReference {
+            self.effective.clone()
+        }
+        fn session_role(&self) -> RoleReference {
+            self.session.clone()
+        }
+        fn outer_role(&self) -> RoleReference {
+            self.outer.clone()
+        }
+    }
+    let mut inputs = Inputs::new();
+    for (index, name) in ["effective", "outer"].into_iter().enumerate() {
+        let mut role = RoleDefinition::bootstrap();
+        role.name = name.into();
+        role.oid = 20_000 + i64::try_from(index).unwrap();
+        role.object_id = [u8::try_from(index + 1).unwrap(); 16];
+        inputs.roles.insert(name.into(), role);
+    }
+    let reference = |name: &str| {
+        RoleReference::from_identity(inputs.roles[name].identity(), &inputs.roles).unwrap()
+    };
+    let names = Names {
+        effective: reference("effective"),
+        outer: reference("outer"),
+        session: reference("uqa"),
+    };
+    let check = |inputs: &Inputs, target: &str| {
+        require_role_drop_authority(
+            &RoleValidationContext {
+                names: &names,
+                roles: inputs,
+                notices: inputs,
+            },
+            &inputs.roles,
+            &names.effective,
+            &names.session,
+            target,
+        )
+    };
+    for (target, message) in [
+        ("effective", "current user cannot be dropped"),
+        ("outer", "current user cannot be dropped"),
+        ("uqa", "session user cannot be dropped"),
+    ] {
+        assert!(
+            matches!(check(&inputs, target), Err(SQLError::Routine { sqlstate, message: actual }) if sqlstate == "55006" && actual == message),
+            "{target}"
+        );
+    }
+    let mut original = inputs.roles.remove("outer").unwrap();
+    let mut replacement = original.clone();
+    replacement.oid += 10;
+    replacement.object_id[0] += 10;
+    original.name = "renamed_outer".into();
+    original.advance_revision().unwrap();
+    inputs.roles.insert(original.name.clone(), original);
+    inputs.roles.insert(replacement.name.clone(), replacement);
+    assert_eq!(
+        check(&inputs, "renamed_outer").unwrap_err().sqlstate(),
+        Some("55006")
+    );
+    check(&inputs, "outer").unwrap();
+}
