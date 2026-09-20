@@ -164,7 +164,7 @@ impl Engine {
             && backend.supports_concurrent_pinned_read_and_write()
             && !backend.transaction_has_written().map_err(snapshot_error)?
         {
-            let snapshot: Arc<Engine> = self.open_independent_pinned_read_snapshot()?.into();
+            let snapshot: Arc<Engine> = self.open_retained_pinned_read_snapshot()?.into();
             let GraphStoreHandle::Persistent(store) =
                 snapshot.new_graph_store().map_err(snapshot_error)?
             else {

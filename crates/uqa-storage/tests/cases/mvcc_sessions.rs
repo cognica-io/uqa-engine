@@ -34,6 +34,8 @@ mod metadata;
 mod occurrence_merging;
 #[path = "mvcc_sessions/occurrences.rs"]
 mod occurrences;
+#[path = "mvcc_sessions/retained.rs"]
+mod retained;
 #[path = "mvcc_sessions/sequences.rs"]
 mod sequences;
 #[path = "mvcc_sessions/serializable.rs"]

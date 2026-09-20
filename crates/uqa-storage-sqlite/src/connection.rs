@@ -785,7 +785,12 @@ impl ManagedConnection {
             if logical.in_transaction() {
                 return Err(SQLiteError::TransactionAlreadyActive);
             }
-            return logical.begin_transaction().map_err(Into::into);
+            return if statement == "BEGIN DEFERRED" {
+                logical.begin_upgradeable_transaction()
+            } else {
+                logical.begin_transaction()
+            }
+            .map_err(Into::into);
         }
         let mut transaction = self.session.transaction.lock();
         if transaction.is_some() {

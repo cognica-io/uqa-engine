@@ -307,6 +307,17 @@ pub trait PersistentStorageBackend: Send + Sync {
         self.open_session()
     }
 
+    /// Bind an independent read-only catalog/backend pair to this exact committed/private view before restoration. Both handles must retain the original snapshot and logical reader attribution without taking ownership of transaction completion. Versioned wrappers must forward this capability.
+    fn open_retained_read_session(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        cancellation.check()?;
+        Err(StorageBackendError::Other(
+            "retained read sessions are not implemented by this storage backend".into(),
+        ))
+    }
+
     /// Transaction ownership shared with the paired catalog. Legacy providers retain serialized Engine writer admission; versioned providers keep private writes and support command refresh without ending the transaction.
     fn transaction_model(&self) -> StorageTransactionModel {
         StorageTransactionModel::ProviderSerialized

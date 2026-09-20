@@ -218,29 +218,42 @@ impl Engine {
     /// must return catalog and data handles bound to one session transaction
     /// so every durable mutation commits atomically.
     pub fn new_session(&self) -> StorageBackendResult<Self> {
-        self.new_sibling_session(false)
+        self.new_sibling_session(false, None)
     }
 
     /// Retain an internal read view without acquiring another automatic-maintenance client lease.
     pub(crate) fn new_internal_read_session(&self) -> StorageBackendResult<Self> {
-        self.new_sibling_session(true)
+        self.new_sibling_session(true, None)
     }
 
-    fn new_sibling_session(&self, internal_read: bool) -> StorageBackendResult<Self> {
+    pub(crate) fn new_internal_retained_read_session(&self) -> StorageBackendResult<Self> {
+        let backend = self.storage.backend.as_ref().ok_or_else(|| {
+            StorageBackendError::Other("retained reads require persistent storage".into())
+        })?;
+        let storage_session =
+            backend.open_retained_read_session(&uqa_core::CancellationToken::new())?;
+        self.new_sibling_session(true, Some(storage_session))
+    }
+
+    fn new_sibling_session(
+        &self,
+        internal_read: bool,
+        retained_session: Option<PersistentStorageSession>,
+    ) -> StorageBackendResult<Self> {
         let _statement = self.runtime.statement_gate.lock();
         let provider = self.storage.provider.as_ref().ok_or_else(|| {
             StorageBackendError::Other(
                 "independent sessions require a PersistentStorageProvider".into(),
             )
         })?;
-        // Fixed-snapshot construction can call this while holding the
-        // transaction stack. In that case restore committed storage instead
-        // of recursively locking the stack or sharing private definitions.
-        let share_catalog = self
-            .session
-            .transactions
-            .try_lock()
-            .is_some_and(|stack| stack.is_empty())
+        // A retained pair supplies its own fixed catalog view. Other readers opened while the source transaction stack is locked must restore independent storage instead of sharing mutable transaction definitions or recursively locking that stack.
+        let retained = retained_session.is_some();
+        let share_catalog = !retained
+            && self
+                .session
+                .transactions
+                .try_lock()
+                .is_some_and(|stack| stack.is_empty())
             && !self.session.state.read().temporary_namespace_allocated;
         if share_catalog {
             self.synchronize_table_catalog()?;
@@ -248,7 +261,10 @@ impl Engine {
             self.synchronize_catalog_registries()?;
         }
         let observed_epochs = self.epochs.published_epochs();
-        let storage_session = provider.open_session()?;
+        let storage_session = match retained_session {
+            Some(session) => session,
+            None => provider.open_session()?,
+        };
         storage_session.validate_transaction_affinity()?;
         let storage_version_before_restore = storage_session.backend.change_version()?;
         let shared = if share_catalog {
@@ -294,9 +310,11 @@ impl Engine {
         // Catalog cells keep independent mutable owners over shared immutable
         // values, so a writer cannot expose uncommitted definitions to siblings.
         session.extensions = super::RuntimeExtensions::shared_from(&self.extensions);
-        session.synchronize_table_catalog()?;
-        session.synchronize_table_data()?;
-        session.synchronize_catalog_registries()?;
+        if !retained {
+            session.synchronize_table_catalog()?;
+            session.synchronize_table_data()?;
+            session.synchronize_catalog_registries()?;
+        }
         session.start_automatic_statistics();
         Ok(session)
     }

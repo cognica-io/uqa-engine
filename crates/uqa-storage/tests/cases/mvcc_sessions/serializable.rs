@@ -173,6 +173,43 @@ fn empty_sessions_finish_without_a_physical_allocation_and_views_retain_the_orig
 }
 
 #[test]
+fn retained_read_sessions_preserve_attribution_without_finishing_the_original_participant() {
+    let persistence = Persistence::new();
+    let (source, actor) = start(&persistence, false);
+    let cancellation = uqa_core::CancellationToken::new();
+    let reader = source.new_retained_read_session(&cancellation).unwrap();
+    let view = reader.record_snapshot().unwrap();
+    assert_eq!(view.serializable().unwrap().id(), actor.id());
+    read(view.serializable().unwrap(), b"absent");
+    drop(view);
+    for commit in [false, true] {
+        reader.begin_read_transaction().unwrap();
+        if commit {
+            reader.commit_transaction().unwrap();
+        } else {
+            reader.rollback_transaction().unwrap();
+        }
+        assert_eq!(
+            persistence.actor_status(actor.id()).unwrap(),
+            SerializableStatus::Active
+        );
+    }
+    source.commit_transaction().unwrap();
+    let id = actor.id();
+    drop((actor, source));
+    assert_eq!(
+        persistence.actor_status(id).unwrap(),
+        SerializableStatus::Committed
+    );
+    assert_eq!(persistence.state.lock().next, 0);
+    drop(reader);
+    assert!(matches!(
+        persistence.actor_status(id),
+        Err(VersionError::UnknownTransaction)
+    ));
+}
+
+#[test]
 fn first_snapshot_after_a_savepoint_and_command_refresh_keep_original_attribution() {
     let persistence = Persistence::new();
     let session = persistence.session(1 << 20);

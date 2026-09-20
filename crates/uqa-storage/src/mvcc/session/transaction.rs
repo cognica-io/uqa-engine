@@ -57,8 +57,20 @@ impl Transaction {
         read_only: bool,
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
-        Ok(Self {
-            committed: persistence.snapshot(control)?,
+        Ok(Self::at_snapshot(
+            persistence.snapshot(control)?,
+            read_only,
+            control,
+        ))
+    }
+
+    pub(super) fn at_snapshot(
+        committed: Arc<dyn CommittedRecordSnapshot>,
+        read_only: bool,
+        control: &StorageReadControl,
+    ) -> Self {
+        Self {
+            committed,
             changes: PrivateRecordChanges::new(control.memory()),
             read_only,
             allocation: None,
@@ -71,7 +83,7 @@ impl Transaction {
             savepoints: BudgetedVec::new(control.memory()),
             serializable: None,
             completion: None,
-        })
+        }
     }
 
     pub(super) fn view(&self) -> VersionResult<MergedRecordSnapshot> {

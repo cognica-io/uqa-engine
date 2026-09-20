@@ -50,6 +50,7 @@ pub struct VersionedKeyValueStore {
     options: VersionedSessionOptions,
     control: StorageReadControl,
     write_cancellation: uqa_core::CancellationToken,
+    retained: Option<MergedRecordSnapshot>,
     active: Mutex<Option<Transaction>>,
 }
 
@@ -74,6 +75,7 @@ impl VersionedKeyValueStore {
         namespace: &[u8],
         request: super::IdentifierRequest,
     ) -> StorageBackendResult<super::IdentifierAllocation> {
+        self.require_mutable_session()?;
         let active = self.active.lock();
         if let Some(transaction) = active.as_ref() {
             transaction
@@ -112,6 +114,7 @@ impl VersionedKeyValueStore {
             options,
             control: StorageReadControl::with_limit(options.retained_bytes),
             write_cancellation,
+            retained: None,
             active: Mutex::new(None),
         }
     }
@@ -138,6 +141,27 @@ impl VersionedKeyValueStore {
         )
     }
 
+    /// Open an independently owned read-only session at this exact committed/private view. Its original participant and snapshot leases remain retained, but completing this reader never completes the originating transaction.
+    pub fn new_retained_read_session(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<Self> {
+        cancellation.check()?;
+        let retained = self.view().map_err(VersionError::into_storage_error)?;
+        let mut session = self.new_session_with_cancellation(cancellation);
+        session.retained = Some(retained);
+        Ok(session)
+    }
+
+    fn require_mutable_session(&self) -> StorageBackendResult<()> {
+        if self.retained.is_some() {
+            return Err(StorageBackendError::Other(
+                "cannot write through a retained read-only session".into(),
+            ));
+        }
+        Ok(())
+    }
+
     fn write_control(&self) -> StorageReadControl {
         StorageReadControl::new(self.control.memory(), &self.write_cancellation)
     }
@@ -159,6 +183,10 @@ impl VersionedKeyValueStore {
         cancellation.check()?;
         let control = StorageReadControl::new(self.control.memory(), cancellation);
         let mut active = self.active.lock();
+        if self.retained.is_some() {
+            active.as_ref().ok_or_else(no_transaction)?;
+            return Ok(());
+        }
         active
             .as_mut()
             .ok_or_else(no_transaction)?
@@ -193,6 +221,7 @@ impl VersionedKeyValueStore {
 
     /// Establish the original SSI participant and fixed record boundary before this transaction's first logical access. SQL must call this at its first snapshot-bearing statement, then supply logical observations for every participating access path. Capability presence alone does not enable SQL SSI or fence legacy publishers.
     pub fn establish_serializable_snapshot(&self) -> StorageBackendResult<SerializableReadContext> {
+        self.require_mutable_session()?;
         self.active
             .lock()
             .as_mut()
@@ -223,20 +252,27 @@ impl VersionedKeyValueStore {
     }
 
     fn begin(&self, read_only: bool) -> StorageBackendResult<()> {
+        if !read_only {
+            self.require_mutable_session()?;
+        }
         let mut active = self.active.lock();
         if active.is_some() {
             return Err(StorageBackendError::Other(
                 "a KeyValue transaction is already active".into(),
             ));
         }
-        *active = Some(
-            Transaction::new(&*self.persistence, read_only, &self.control)
+        *active = Some(match self.retained.as_ref() {
+            Some(view) => Transaction::at_snapshot(view.retain_committed(), true, &self.control),
+            None => Transaction::new(&*self.persistence, read_only, &self.control)
                 .map_err(VersionError::into_storage_error)?,
-        );
+        });
         Ok(())
     }
 
     fn view(&self) -> VersionResult<MergedRecordSnapshot> {
+        if let Some(view) = self.retained.as_ref() {
+            return view.try_clone();
+        }
         let active = self.active.lock();
         if let Some(transaction) = active.as_ref() {
             transaction.view()
@@ -249,6 +285,7 @@ impl VersionedKeyValueStore {
         &self,
         operation: impl FnOnce(&mut Transaction) -> VersionResult<T>,
     ) -> StorageBackendResult<T> {
+        self.require_mutable_session()?;
         let mut active = self.active.lock();
         if let Some(transaction) = active.as_mut() {
             return transaction
@@ -316,6 +353,13 @@ impl KeyValueStore for VersionedKeyValueStore {
     ) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
         cancellation.check()?;
         Ok(Arc::new(self.new_session_with_cancellation(cancellation)))
+    }
+
+    fn open_retained_read_session(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
+        Ok(Arc::new(self.new_retained_read_session(cancellation)?))
     }
 
     fn transaction_model(&self) -> crate::StorageTransactionModel {
@@ -516,6 +560,9 @@ impl KeyValueStore for VersionedKeyValueStore {
     }
     fn begin_read_transaction(&self) -> StorageBackendResult<()> {
         self.begin(true)
+    }
+    fn begin_upgradeable_transaction(&self) -> StorageBackendResult<()> {
+        self.begin(self.retained.is_some())
     }
     fn in_transaction(&self) -> bool {
         self.active.lock().is_some()

@@ -87,6 +87,31 @@ impl ManagedConnection {
         }
     }
 
+    /// Keep the bound record view and its logical reader attribution in an independent read-only connection. The source session retains ownership of publication and transaction completion.
+    pub(crate) fn new_retained_read_session(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> Result<Self> {
+        self.surface_cleanup_failure()?;
+        let _gate = self.session.gate.read();
+        let logical = self
+            .session
+            .logical
+            .get()
+            .ok_or(SQLiteError::LogicalSessionRequired)?;
+        let store = logical.new_retained_read_session(cancellation)?;
+        let session = SessionState::with_cancellation(cancellation.clone());
+        let _ = session.logical.set(Arc::new(BoundRecordSession {
+            store: Arc::new(store),
+            native: logical.native,
+        }));
+        Ok(Self {
+            pool: Arc::clone(&self.pool),
+            session: Arc::new(session),
+            record_access: self.record_access,
+        })
+    }
+
     /// Share the token used for autonomous allocation and record publication. Cleanup reads and rollback remain independent of this flag.
     pub fn write_cancellation(&self) -> uqa_core::CancellationToken {
         self.session.write_cancellation.clone()

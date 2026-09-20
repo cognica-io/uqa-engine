@@ -323,6 +323,10 @@ impl MergedRecordSnapshot {
         self.committed.as_ref()
     }
 
+    pub(super) fn retain_committed(&self) -> Arc<dyn CommittedRecordSnapshot> {
+        Arc::clone(&self.committed)
+    }
+
     /// Bounded private key metadata for provider-derived cache invalidation; values are never materialized.
     pub fn private_keys(
         &self,

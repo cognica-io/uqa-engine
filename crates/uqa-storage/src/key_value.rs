@@ -279,6 +279,17 @@ pub trait KeyValueStore: Send + Sync {
         self.open_session()
     }
 
+    /// Retain this exact committed/private view in a separate read-only session, including its original logical reader attribution. The returned session cannot publish records or complete the source transaction. Versioned wrappers must forward this capability; opening a newer independent snapshot is not equivalent.
+    fn open_retained_read_session(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
+        cancellation.check()?;
+        Err(StorageBackendError::Other(
+            "retained read sessions are not implemented by this KeyValue store".into(),
+        ))
+    }
+
     /// Whether writes remain private while independent sessions read and write. Versioned stores must provide command refresh, retained reads, savepoint undo and conditional publication under one reported affinity.
     fn transaction_model(&self) -> crate::StorageTransactionModel {
         crate::StorageTransactionModel::ProviderSerialized

@@ -103,6 +103,14 @@ impl KeyValueStore for SQLiteKeyValueStore {
         Ok(Arc::new(self.new_session_with_cancellation(cancellation)))
     }
 
+    fn open_retained_read_session(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
+        let conn = self.conn.new_retained_read_session(cancellation)?;
+        Ok(Arc::new(Self::with_options(conn, self.records.options())?))
+    }
+
     fn transaction_model(&self) -> uqa_storage::StorageTransactionModel {
         self.records.transaction_model()
     }

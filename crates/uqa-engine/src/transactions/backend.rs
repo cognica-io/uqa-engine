@@ -132,7 +132,7 @@ impl Engine {
         let catalog_baseline = self.capture_fixed_transaction_catalog_baseline()?;
         let (snapshot, graph_snapshot) = if backend.supports_concurrent_pinned_read_and_write() {
             let snapshot: std::sync::Arc<Engine> =
-                self.open_independent_pinned_read_snapshot()?.into();
+                self.open_retained_pinned_read_snapshot()?.into();
             let uqa_graph::GraphStoreHandle::Persistent(graph_store) =
                 snapshot
                     .new_graph_store()
@@ -255,7 +255,23 @@ impl Engine {
     }
 
     pub(crate) fn open_independent_pinned_read_snapshot(&self) -> Result<Box<Engine>, SQLError> {
-        let snapshot = self.new_internal_read_session().map_err(|error| {
+        self.pin_read_snapshot(self.new_internal_read_session())
+    }
+
+    pub(crate) fn open_retained_pinned_read_snapshot(&self) -> Result<Box<Engine>, SQLError> {
+        let snapshot = if self.versioned_backend_transactions() {
+            self.new_internal_retained_read_session()
+        } else {
+            self.new_internal_read_session()
+        };
+        self.pin_read_snapshot(snapshot)
+    }
+
+    fn pin_read_snapshot(
+        &self,
+        snapshot: uqa_storage::StorageBackendResult<Engine>,
+    ) -> Result<Box<Engine>, SQLError> {
+        let snapshot = snapshot.map_err(|error| {
             SQLError::Internal(format!("open fixed transaction snapshot session: {error}"))
         })?;
         let backend = snapshot.storage.backend.as_ref().ok_or_else(|| {
