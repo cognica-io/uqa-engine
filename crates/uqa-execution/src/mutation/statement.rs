@@ -29,6 +29,7 @@ impl<S: Clone + 'static> Copy for MutationExecutionContext<'_, S> {}
 impl<'a, S: Clone + 'static> MutationExecutionContext<'a, S> {
     pub fn point_update(&self) -> super::point_update::PointMutationContext<'a, S> {
         super::point_update::PointMutationContext {
+            observations: self.publication.observations,
             assignment: self.preparation.referential.assignment,
             constraints: self.preparation.referential.constraints,
             locking: self.preparation.referential.locking,

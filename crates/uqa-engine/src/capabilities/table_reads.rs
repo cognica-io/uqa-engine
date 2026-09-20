@@ -43,6 +43,13 @@ impl Engine {
     }
 }
 impl QueryTableAccess for Engine {
+    fn serializable_read(
+        &self,
+        name: &str,
+    ) -> Result<Option<uqa_execution::serializable::SerializableRelationRead>, SQLError> {
+        self.serializable_table_read(name)
+    }
+
     fn table(&self, name: &str) -> Result<std::sync::Arc<dyn TableRead>, SQLError> {
         self.require_query_table(name)
             .map(|table| table as std::sync::Arc<dyn TableRead>)
@@ -126,5 +133,38 @@ impl uqa_execution::query::block::context::QueryDocumentRead for Engine {
     }
     fn command_overlay_active(&self) -> bool {
         self.command_mutation_overlay_active()
+    }
+}
+
+use uqa_execution::{
+    serializable::{SerializableRelationRead, SerializableWrites},
+    storage_errors::storage_error,
+};
+use uqa_sql::ast::RelationPersistence;
+
+impl Engine {
+    pub(crate) fn serializable_table_read(
+        &self,
+        table: &str,
+    ) -> Result<Option<SerializableRelationRead>, SQLError> {
+        let Some(session) = self.serializable_session() else {
+            return Ok(None);
+        };
+        let Some(context) = session
+            .serializable_read_context()
+            .map_err(|error| storage_error("retain serializable reader", &error))?
+        else {
+            return Ok(None);
+        };
+        let table = self.require_query_table(table)?;
+        Ok(
+            (table.persistence != RelationPersistence::Temporary).then(|| {
+                SerializableRelationRead::new(
+                    table.object_id(),
+                    context,
+                    &self.runtime.cancellation,
+                )
+            }),
+        )
     }
 }

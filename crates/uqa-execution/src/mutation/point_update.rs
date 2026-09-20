@@ -107,6 +107,7 @@ pub fn try_run_point_update<S: Clone + 'static>(
     {
         return Ok(Some(SQLResult::from_affected(0)));
     }
+    crate::serializable::observe_row_write(context.observations, &stmt.table, doc_id)?;
     let affected = context.storage.patch_document_fields_with_vector_values(
         &stmt.table,
         doc_id,

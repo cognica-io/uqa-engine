@@ -44,6 +44,7 @@ impl ScoredDocumentSource {
         if max_rows == 0 {
             return Ok(Some(false));
         }
+        self.serializable.observe_relation()?;
         let fields = self
             .projected_fields
             .iter()
@@ -125,6 +126,7 @@ impl ScoredDocumentSource {
         if max_rows == 0 {
             return Ok(Some(Vec::new()));
         }
+        self.serializable.observe_relation()?;
         let fields = self
             .projected_fields
             .iter()

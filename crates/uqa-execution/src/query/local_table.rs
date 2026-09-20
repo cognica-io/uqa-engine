@@ -18,6 +18,7 @@ pub type SharedLockOrigin = (Arc<str>, Arc<str>);
 
 pub struct LocalTableRowSource {
     cancellation: uqa_core::CancellationToken,
+    serializable: crate::serializable::SerializableScan,
     table_name: String,
     table: Arc<dyn super::table_read::TableRead>,
     column_definitions: Arc<Vec<uqa_sql::ast::ColumnDef>>,
@@ -118,6 +119,7 @@ impl crate::RowSource for HierarchyRowSource {
 
 pub struct LocalTableScanConfig {
     pub cancellation: uqa_core::CancellationToken,
+    pub serializable: Option<crate::serializable::SerializableRelationRead>,
     pub table_name: String,
     pub table: Arc<dyn super::table_read::TableRead>,
     pub column_definitions: Arc<Vec<uqa_sql::ast::ColumnDef>>,
@@ -139,6 +141,7 @@ impl LocalTableRowSource {
     pub fn new(config: LocalTableScanConfig) -> Self {
         Self {
             cancellation: config.cancellation,
+            serializable: crate::serializable::SerializableScan::new(config.serializable),
             table_name: config.table_name,
             table: config.table,
             column_definitions: config.column_definitions,

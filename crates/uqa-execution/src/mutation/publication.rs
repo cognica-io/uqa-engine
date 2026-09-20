@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::serializable::observe_row_write;
 use uqa_core::DocId;
 use uqa_sql::SQLError;
 
@@ -66,6 +67,7 @@ pub fn publish_prepared_mutation_action(
         }) => {
             let text_fields = context.text.text_fields(&table, &document)?;
             let vectors = document_vectors(context.catalog, &table, &document)?;
+            observe_row_write(context.observations, &table, doc_id)?;
             context.storage.insert_document_deferred_text(
                 &table,
                 doc_id,
@@ -109,6 +111,8 @@ pub fn apply_validated_prepared_document_rewrite(
         return Ok(prepared.doc_id);
     }
     if let Some((destination_table, destination_doc_id)) = prepared.destination.as_ref() {
+        observe_row_write(context.observations, &prepared.table, prepared.doc_id)?;
+        observe_row_write(context.observations, destination_table, *destination_doc_id)?;
         context
             .storage
             .delete_document(&prepared.table, prepared.doc_id)?;
@@ -147,6 +151,8 @@ pub fn apply_validated_prepared_document_rewrite(
         {
             // An integer primary key names the row's doc_id slot; keep that invariant when the key itself changes, or value -> doc_id lookups (the unique fast path and FOREIGN KEY validation) read the stale slot and miss the row.
             Some(new_id) if new_id != prepared.doc_id => {
+                observe_row_write(context.observations, &prepared.table, prepared.doc_id)?;
+                observe_row_write(context.observations, &prepared.table, new_id)?;
                 context
                     .storage
                     .delete_document(&prepared.table, prepared.doc_id)?;
@@ -178,6 +184,7 @@ pub fn apply_validated_prepared_document_rewrite(
                 new_id
             }
             _ => {
+                observe_row_write(context.observations, &prepared.table, prepared.doc_id)?;
                 context.storage.rewrite_document(
                     &prepared.table,
                     prepared.doc_id,
@@ -212,6 +219,7 @@ pub fn apply_validated_prepared_document_delete(
             }
         }
     }
+    observe_row_write(context.observations, &prepared.table, prepared.doc_id)?;
     context
         .storage
         .delete_document(&prepared.table, prepared.doc_id)

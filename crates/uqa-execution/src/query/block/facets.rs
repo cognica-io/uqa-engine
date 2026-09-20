@@ -77,6 +77,7 @@ pub fn build_facet_output<'a, S: Clone + Send + Sync + 'static>(
         None,
         None,
     )
+    .with_serializable_read(context.scans.tables.serializable_read(table)?)
     .with_table_oid(crate::catalog::projection::table_relation_oid(
         &context.catalog,
         table,

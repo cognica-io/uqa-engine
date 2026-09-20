@@ -20,6 +20,7 @@ use uqa_storage::document_store::Document;
 impl Engine {
     pub(crate) fn mutation_publication_context(&self) -> PublicationContext<'_> {
         PublicationContext {
+            observations: self,
             storage: self,
             text: self,
             history: self,
@@ -144,5 +145,20 @@ impl Engine {
             constraints: self.constraint_execution_context(),
             triggers: self.trigger_execution_context(),
         }
+    }
+}
+
+use uqa_execution::serializable::SerializableWrites;
+use uqa_sql::ast::RelationPersistence;
+use uqa_storage::mvcc::SerializableSession;
+
+impl SerializableWrites for Engine {
+    fn serializable_session(&self) -> Option<&dyn SerializableSession> {
+        self.storage.backend.as_ref()?.serializable_session()
+    }
+
+    fn serializable_write_object(&self, table: &str) -> Result<Option<[u8; 16]>, SQLError> {
+        let table = self.require_table(table)?;
+        Ok((table.persistence != RelationPersistence::Temporary).then_some(table.object_id()))
     }
 }

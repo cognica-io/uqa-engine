@@ -18,6 +18,11 @@ pub trait TableRead: Send + Sync {
 
 /// The chosen transaction snapshot supplies a table generation and the command's row overlay separately.
 pub trait QueryTableAccess: Sync {
+    fn serializable_read(
+        &self,
+        name: &str,
+    ) -> Result<Option<crate::serializable::SerializableRelationRead>, uqa_sql::SQLError>;
+
     fn table(&self, name: &str) -> Result<std::sync::Arc<dyn TableRead>, uqa_sql::SQLError>;
     fn command_overlay_changes(
         &self,

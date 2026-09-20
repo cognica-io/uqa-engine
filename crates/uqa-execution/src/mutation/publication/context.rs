@@ -69,6 +69,7 @@ pub trait MutationConstraintDeferrals {
 }
 #[derive(Clone, Copy)]
 pub struct PublicationContext<'a> {
+    pub observations: &'a dyn crate::serializable::SerializableWrites,
     pub storage: &'a dyn MutationStorage,
     pub text: &'a dyn MutationTextIndex,
     pub history: &'a dyn MutationHistory,

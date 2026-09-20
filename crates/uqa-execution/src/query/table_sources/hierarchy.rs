@@ -194,6 +194,7 @@ pub fn build_hierarchy_retrieval_operator<'a, S: Clone>(
                 None,
                 ScoredSourceAttributes::shared_score(score_column, metadata),
             )
+            .with_serializable_read(context.tables.serializable_read(&retrieval.table_name)?)
             .with_table_oid(crate::catalog::projection::snapshot_table_relation_oid(
                 &catalog,
                 &resolution,

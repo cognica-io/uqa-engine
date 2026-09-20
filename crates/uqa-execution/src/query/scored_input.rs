@@ -193,6 +193,7 @@ impl ScoredInput {
 }
 
 pub struct ScoredDocumentSource {
+    serializable: crate::serializable::SerializableScan,
     table_name: String,
     table: Arc<dyn TableRead>,
     column_definitions: Vec<uqa_sql::ast::ColumnDef>,
@@ -515,7 +516,16 @@ impl ScoredDocumentSource {
             lock_origin: None,
             recheck_pinned: false,
             recheck_documents: std::collections::BTreeMap::new(),
+            serializable: crate::serializable::SerializableScan::default(),
         }
+    }
+
+    pub fn with_serializable_read(
+        mut self,
+        read: Option<crate::serializable::SerializableRelationRead>,
+    ) -> Self {
+        self.serializable = crate::serializable::SerializableScan::new(read);
+        self
     }
 
     pub fn with_lock_origin(mut self, origin: Option<(Arc<str>, Arc<str>)>) -> Self {
@@ -615,9 +625,18 @@ impl ScoredDocumentSource {
     }
 
     fn next_entries(&mut self, max_rows: usize) -> Result<Vec<ScoredEntry>, SQLError> {
+        if max_rows == 0 {
+            return Ok(Vec::new());
+        }
         match &mut self.input {
-            ScoredInputCursor::Entries(entries) => Ok(entries.by_ref().take(max_rows).collect()),
+            ScoredInputCursor::Entries(entries) => {
+                for entry in entries.as_slice().iter().take(max_rows) {
+                    self.serializable.observe_row(entry.doc_id)?;
+                }
+                Ok(entries.by_ref().take(max_rows).collect())
+            }
             ScoredInputCursor::All { after } => {
+                self.serializable.observe_relation()?;
                 let doc_ids = self
                     .table
                     .read_documents()

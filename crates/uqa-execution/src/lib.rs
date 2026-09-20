@@ -80,9 +80,11 @@ pub mod scalar;
 pub mod scan;
 pub mod scope_overlay;
 pub mod scroll_materialize;
+pub mod serializable;
 pub mod set_operation;
 pub mod spill;
 pub mod spill_scan;
+pub mod storage_errors;
 pub mod type_resolution;
 pub mod window;
 

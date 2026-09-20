@@ -302,6 +302,7 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
             .map(Value::Int);
         sources.push(LocalTableRowSource::new(LocalTableScanConfig {
             cancellation: context.runtime.cancellation_token(),
+            serializable: context.tables.serializable_read(&table_name)?,
             table_name,
             table,
             column_definitions,

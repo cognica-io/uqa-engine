@@ -30,6 +30,8 @@ mod concurrent_writes;
 mod identifiers;
 #[path = "sessions/native_records.rs"]
 mod native_records;
+#[path = "sessions/serializable_observations.rs"]
+mod serializable_observations;
 
 fn scalar_int(engine: &Engine, sql: &str, column: &str) -> i64 {
     match engine.sql(sql, &[]).unwrap().rows[0].get(column) {

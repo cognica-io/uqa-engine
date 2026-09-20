@@ -247,6 +247,7 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         pushed_predicate,
         metadata_projection,
     )
+    .with_serializable_read(context.scans.tables.serializable_read(table)?)
     .with_table_oid(crate::catalog::projection::snapshot_table_relation_oid(
         &catalog,
         &resolution,

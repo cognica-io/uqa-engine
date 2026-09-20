@@ -307,9 +307,14 @@ impl<'a> PhysicalRetrievalDriver<'a> {
         let candidates: Vec<DocId> = match source {
             Some(child) => {
                 let inner = self.execute_posting_node(child)?;
+                if let Some(read) = self.context.relations.serializable_read(self.table)? {
+                    for entry in inner.entries() {
+                        read.observe_row(entry.doc_id)?;
+                    }
+                }
                 inner.entries().iter().map(|e| e.doc_id).collect()
             }
-            None => self.context.relations.table_doc_ids(self.table)?,
+            None => self.scan_doc_ids()?,
         };
         let values = self
             .context
@@ -329,5 +334,13 @@ impl<'a> PhysicalRetrievalDriver<'a> {
         }
         entries.sort_by_key(|e| e.doc_id);
         Ok(PostingList::from_sorted_unchecked(entries))
+    }
+
+    /// Enumerating a relation is a logical scan even when a later predicate yields no postings. Index hydration and planner statistics do not use this execution boundary.
+    fn scan_doc_ids(&self) -> DriverResult<Vec<DocId>> {
+        if let Some(read) = self.context.relations.serializable_read(self.table)? {
+            read.observe_scan()?;
+        }
+        self.context.relations.table_doc_ids(self.table)
     }
 }

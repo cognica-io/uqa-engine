@@ -35,6 +35,7 @@ pub trait PointMutationStorage {
 }
 #[derive(Clone)]
 pub struct PointMutationContext<'a, S: Clone + 'static> {
+    pub observations: &'a dyn crate::serializable::SerializableWrites,
     pub assignment: MutationAssignmentContext<'a, S>,
     pub constraints: ConstraintContext<'a>,
     pub locking: RowLockContext<'a, S>,

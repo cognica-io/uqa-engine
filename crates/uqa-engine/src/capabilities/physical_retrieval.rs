@@ -35,6 +35,13 @@ impl RetrievalIndexState for TableIndexState {
 }
 
 impl RetrievalRelations for Engine {
+    fn serializable_read(
+        &self,
+        table: &str,
+    ) -> Result<Option<uqa_execution::serializable::SerializableRelationRead>, SQLError> {
+        self.serializable_table_read(table)
+    }
+
     fn try_describe_query_table(
         &self,
         table: &str,

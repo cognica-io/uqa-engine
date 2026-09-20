@@ -32,6 +32,11 @@ pub trait RetrievalIndexState: Send + Sync {
 }
 
 pub trait RetrievalRelations: Sync {
+    fn serializable_read(
+        &self,
+        table: &str,
+    ) -> Result<Option<crate::serializable::SerializableRelationRead>, SQLError>;
+
     fn try_describe_query_table(&self, table: &str)
         -> StorageBackendResult<Option<Vec<ColumnDef>>>;
     fn has_table(&self, table: &str) -> StorageBackendResult<bool>;
