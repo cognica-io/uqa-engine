@@ -27,3 +27,4 @@ pub fn index_references_column(
 mod enforcement;
 pub use enforcement::enforced_keys;
 pub mod physical;
+pub mod value;
