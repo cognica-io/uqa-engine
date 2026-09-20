@@ -24,11 +24,24 @@ pub fn projection_label_at(proj: &ProjectionPlan) -> String {
         ScalarExpr::Column(c) => c.clone(),
         ScalarExpr::QualifiedColumn { column, .. } => column.clone(),
         ScalarExpr::Star | ScalarExpr::QualifiedStar(_) => "*".into(),
-        ScalarExpr::Func { name, .. } => crate::parse_regobject_name(name)
-            .and_then(|mut names| names.pop())
-            .unwrap_or_else(|| name.clone()),
+        ScalarExpr::Func { name, binding, .. } => function_projection_label(name, binding.as_ref()),
         _ => "?column?".into(),
     }
+}
+
+pub(crate) fn function_projection_label(
+    name: &str,
+    binding: Option<&crate::ast::FunctionBinding>,
+) -> String {
+    if matches!(
+        binding.and_then(|binding| binding.dispatch),
+        Some(crate::ast::FunctionDispatch::NumericOperator(_))
+    ) {
+        return "?column?".into();
+    }
+    crate::parse_regobject_name(name)
+        .and_then(|mut names| names.pop())
+        .unwrap_or_else(|| name.to_string())
 }
 
 pub fn expand_from_star_columns(

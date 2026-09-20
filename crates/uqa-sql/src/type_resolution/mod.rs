@@ -17,6 +17,7 @@ mod array_transform;
 mod cast_compatibility;
 mod checksum;
 mod common;
+pub(crate) use common::value_type;
 mod containment;
 mod equality;
 mod fixed_builtin;
@@ -64,8 +65,9 @@ pub use md5::{resolve_md5_overload, ResolvedMd5Overload};
 #[doc(hidden)]
 pub use operators::{
     binary_operator_by_oid, binary_operator_catalog_entry, binary_operator_types,
-    binary_result_type, require_equality_operator, require_ordering_operator, unary_minus_by_oid,
-    unary_minus_catalog_entry, BinaryOperatorCatalogEntry, UnaryOperatorCatalogEntry,
+    binary_result_type, numeric_operator_types, require_equality_operator,
+    require_ordering_operator, unary_minus_catalog_entry, unary_operator_by_oid,
+    BinaryOperatorCatalogEntry, NumericOperatorTypes, UnaryOperatorCatalogEntry,
 };
 #[doc(hidden)]
 pub use overload_resolution::{
@@ -413,15 +415,11 @@ pub(super) fn scalar_type_inner(
             order_by,
             filter,
         } => {
-            if let Some(crate::ast::FunctionResolutionError::UndefinedFunction { signature }) =
-                binding
-                    .as_ref()
-                    .and_then(|binding| binding.resolution_error.as_ref())
+            if let Some(error) = binding
+                .as_ref()
+                .and_then(|binding| binding.resolution_error.as_ref())
             {
-                return Err(SQLError::Routine {
-                    sqlstate: "42883".into(),
-                    message: format!("function {signature} does not exist"),
-                });
+                return Err(error.sql_error());
             }
             if let Some(filter) = filter {
                 scalar_type_inner(filter, schema, params, resolver)?;

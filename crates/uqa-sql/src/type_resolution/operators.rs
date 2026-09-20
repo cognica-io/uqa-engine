@@ -10,27 +10,32 @@ use crate::SQLError;
 use super::common::{base_type, common_numeric_type, merge_optional_types, numeric_rank};
 
 mod catalog;
+pub(super) mod numeric;
 mod resolution;
+pub use numeric::{numeric_operator_types, NumericOperatorTypes};
 pub use resolution::binary_operator_types;
 
 #[derive(Debug, Clone)]
 pub struct UnaryOperatorCatalogEntry {
+    pub name: &'static str,
     pub operand_type: ColumnType,
     pub oid: i64,
     pub function_oid: i64,
 }
 
 #[must_use]
-pub fn unary_minus_by_oid(oid: i64) -> Option<UnaryOperatorCatalogEntry> {
+pub fn unary_operator_by_oid(oid: i64) -> Option<UnaryOperatorCatalogEntry> {
     catalog::UNARY_MINUS
         .iter()
         .find_map(|&(name, candidate, function_oid)| {
             (candidate == oid).then(|| UnaryOperatorCatalogEntry {
+                name: "-",
                 operand_type: resolution::catalog_type(name).expect("static unary operator type"),
                 oid,
                 function_oid,
             })
         })
+        .or_else(|| numeric::prefix_by_oid(oid))
 }
 
 pub fn unary_minus_catalog_entry(ty: &ColumnType) -> Result<UnaryOperatorCatalogEntry, SQLError> {
@@ -40,7 +45,7 @@ pub fn unary_minus_catalog_entry(ty: &ColumnType) -> Result<UnaryOperatorCatalog
         .iter()
         .find_map(|&(candidate, oid, _)| (candidate == name).then_some(oid))
         .ok_or_else(|| SQLError::Internal("missing unary operator identity".into()))?;
-    Ok(unary_minus_by_oid(oid).expect("resolved unary operator identity"))
+    Ok(unary_operator_by_oid(oid).expect("resolved unary operator identity"))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -72,6 +77,13 @@ pub fn binary_operator_catalog_entry(
     operands: [&ColumnType; 2],
 ) -> Result<BinaryOperatorCatalogEntry, SQLError> {
     let name = binary_operator_name(op);
+    named_binary_operator_catalog_entry(name, operands)
+}
+
+fn named_binary_operator_catalog_entry(
+    name: &str,
+    operands: [&ColumnType; 2],
+) -> Result<BinaryOperatorCatalogEntry, SQLError> {
     for polymorphic in [false, true] {
         for &(candidate, left, right, result_type, oid, function_oid) in catalog::SIGNATURES {
             if candidate == name
@@ -108,7 +120,7 @@ pub fn binary_operator_catalog_entry(
         }
     }
     Err(undefined_binary_operator(
-        op,
+        name,
         Some(operands[0]),
         Some(operands[1]),
     ))
@@ -202,7 +214,11 @@ pub fn binary_result_type(
                 ordering_operator_available
             };
         if left.is_some_and(|ty| !available(ty)) || right.is_some_and(|ty| !available(ty)) {
-            return Err(undefined_binary_operator(op, left, right));
+            return Err(undefined_binary_operator(
+                binary_operator_name(op),
+                left,
+                right,
+            ));
         }
         return Ok(Some(ColumnType::Boolean));
     }
@@ -240,7 +256,7 @@ pub fn binary_result_type(
 }
 
 fn undefined_binary_operator(
-    op: BinaryOp,
+    name: &str,
     left: Option<&ColumnType>,
     right: Option<&ColumnType>,
 ) -> SQLError {
@@ -251,7 +267,7 @@ fn undefined_binary_operator(
         message: format!(
             "operator does not exist: {} {} {}",
             type_name(left),
-            binary_operator_name(op),
+            name,
             type_name(right)
         ),
     }

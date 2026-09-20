@@ -21,6 +21,14 @@ pub fn binary_operator_types(
     right: Option<&ColumnType>,
 ) -> Result<[ColumnType; 3], SQLError> {
     let name = binary_operator_name(op);
+    named_binary_operator_types(name, left, right)
+}
+
+pub(super) fn named_binary_operator_types(
+    name: &str,
+    left: Option<&ColumnType>,
+    right: Option<&ColumnType>,
+) -> Result<[ColumnType; 3], SQLError> {
     let mut candidates = overloads().get(name).cloned().unwrap_or_default();
     let concrete = left.or(right).map(base_type);
     if let Some(
@@ -89,7 +97,7 @@ pub fn binary_operator_types(
                         ),
                     }
                 } else {
-                    undefined_binary_operator(op, left, right)
+                    undefined_binary_operator(name, left, right)
                 }
             })?;
     let argument =

@@ -151,7 +151,7 @@ pub(super) fn parameter_type(parameter: &SQLParam) -> Option<ColumnType> {
     }
 }
 
-pub(super) fn value_type(value: &Value) -> Option<ColumnType> {
+pub(crate) fn value_type(value: &Value) -> Option<ColumnType> {
     match value {
         Value::Null | Value::Map(_) => None,
         Value::Void => Some(ColumnType::Void),

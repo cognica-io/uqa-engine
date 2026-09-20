@@ -23,6 +23,9 @@ impl ExpressionContext<'_> {
         args: &[Expr],
     ) -> Result<Option<TypedNode>, SQLError> {
         match binding.and_then(|binding| binding.dispatch) {
+            Some(FunctionDispatch::NumericOperator(operator)) => {
+                return self.numeric_operator(operator, args).map(Some);
+            }
             Some(FunctionDispatch::AnyOperator | FunctionDispatch::AllOperator) => {
                 let [lhs, rhs, Expr::Literal(Value::Str(operator))] = args else {
                     return Err(SQLError::Internal(

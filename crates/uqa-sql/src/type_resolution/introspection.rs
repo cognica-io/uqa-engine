@@ -68,6 +68,30 @@ fn bind_type_introspection_inner(
             if let Some(filter) = filter.as_deref_mut() {
                 bind_type_introspection_in_place(filter, schema, params, resolver);
             }
+            if let Some((
+                operator_binding,
+                crate::ast::FunctionDispatch::NumericOperator(operator),
+            )) = binding
+                .as_mut()
+                .and_then(|binding| binding.dispatch.map(|dispatch| (binding, dispatch)))
+            {
+                super::operators::numeric::bind_call(
+                    operator,
+                    operator_binding,
+                    &args,
+                    schema,
+                    params,
+                    resolver,
+                );
+                return ScalarExpr::Func {
+                    name,
+                    binding,
+                    args,
+                    distinct,
+                    order_by,
+                    filter,
+                };
+            }
             if containment::is_operator(&name) {
                 containment::bind_unknown_arguments(&mut args, schema, params, resolver);
             }

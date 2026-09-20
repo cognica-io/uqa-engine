@@ -110,7 +110,9 @@ pub use context::{
 };
 pub use diagnostics::{unknown_function_error, value_type_name};
 pub use evaluator::eval;
+mod numeric_operator;
 use evaluator::eval_between;
+pub use numeric_operator::eval_numeric_operator;
 
 #[cfg(test)]
 mod tests;

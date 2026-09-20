@@ -88,6 +88,42 @@ fn range_error(kind: &str) -> SQLError {
     }
 }
 
+pub(super) fn square_root(value: f64) -> Result<f64> {
+    if value < 0.0 {
+        return Err(SQLError::Routine {
+            sqlstate: "2201F".into(),
+            message: "cannot take square root of a negative number".into(),
+        });
+    }
+    Ok(value.sqrt())
+}
+
+pub(super) fn power(base: f64, exponent: f64) -> Result<f64> {
+    let invalid = if base == 0.0 && exponent < 0.0 {
+        Some("zero raised to a negative power is undefined")
+    } else if base < 0.0 && !exponent.is_nan() && exponent.floor() != exponent {
+        Some("a negative number raised to a non-integer power yields a complex result")
+    } else {
+        None
+    };
+    if let Some(message) = invalid {
+        return Err(SQLError::Routine {
+            sqlstate: "2201F".into(),
+            message: message.into(),
+        });
+    }
+    let value = libm::pow(base, exponent);
+    if base.is_finite() && exponent.is_finite() {
+        if value.is_infinite() {
+            return Err(range_error("overflow"));
+        }
+        if value == 0.0 && base != 0.0 {
+            return Err(range_error("underflow"));
+        }
+    }
+    Ok(value)
+}
+
 /// Apply arithmetic at its resolved float width before widening the storage carrier.
 pub fn eval_float_arithmetic(
     op: BinaryOp,

@@ -288,6 +288,30 @@ impl Deparser<'_> {
         scope: &Scope,
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
+        if let Some(uqa_sql::ast::FunctionDispatch::NumericOperator(operator)) =
+            binding.and_then(|binding| binding.dispatch)
+        {
+            let priority = numeric_operator_precedence(operator);
+            let text = match args {
+                [argument] if operator.arity() == 1 => format!(
+                    "{} {}",
+                    operator.symbol(),
+                    self.operand(argument, priority, false, scope, subqueries)?
+                ),
+                [left, right] if operator.arity() == 2 => format!(
+                    "{} {} {}",
+                    self.operand(left, priority, false, scope, subqueries)?,
+                    operator.symbol(),
+                    self.operand(right, priority, true, scope, subqueries)?
+                ),
+                _ => {
+                    return Err(SQLError::Internal(
+                        "invalid numeric operator operands".into(),
+                    ))
+                }
+            };
+            return Ok(self.parenthesize(text));
+        }
         if let [left, right] = args {
             let operator = match name {
                 "like" => Some(("~~", 40)),
@@ -590,6 +614,20 @@ fn type_name(ty: &str) -> String {
 
 fn precedence(expression: &ScalarExpr) -> u8 {
     match expression {
+        ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } if matches!(
+            binding.dispatch,
+            Some(uqa_sql::ast::FunctionDispatch::NumericOperator(_))
+        ) =>
+        {
+            let Some(uqa_sql::ast::FunctionDispatch::NumericOperator(operator)) = binding.dispatch
+            else {
+                unreachable!()
+            };
+            numeric_operator_precedence(operator)
+        }
         ScalarExpr::Or(_) => 10,
         ScalarExpr::And(_) | ScalarExpr::Between { .. } => 20,
         ScalarExpr::Not(_) => 30,
@@ -598,6 +636,16 @@ fn precedence(expression: &ScalarExpr) -> u8 {
         ScalarExpr::UnaryMinus(_) => 70,
         ScalarExpr::Cast { .. } => 80,
         _ => 100,
+    }
+}
+
+fn numeric_operator_precedence(operator: uqa_sql::ast::NumericOperator) -> u8 {
+    use uqa_sql::ast::NumericOperator;
+    match operator {
+        NumericOperator::Modulo => 60,
+        NumericOperator::Power => 65,
+        NumericOperator::Plus => 70,
+        NumericOperator::Absolute | NumericOperator::SquareRoot | NumericOperator::CubeRoot => 45,
     }
 }
 

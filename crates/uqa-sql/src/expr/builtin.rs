@@ -204,6 +204,7 @@ pub fn bound_scalar_function_strictness(
     };
     if let Some(dispatch) = binding.dispatch {
         return match dispatch {
+            FunctionDispatch::NumericOperator(_) => Some(true),
             FunctionDispatch::ArraySubscripts
             | FunctionDispatch::Subscript
             | FunctionDispatch::BetweenSymmetric
@@ -238,8 +239,23 @@ pub fn eval_bound_builtin_function_call(
     call_args: Vec<(Option<String>, Value)>,
     ctx: &EvalContext<'_>,
 ) -> Result<Value> {
+    if let Some(error) = &binding.resolution_error {
+        return Err(error.sql_error());
+    }
     let Some(dispatch) = binding.dispatch else {
-        return eval_builtin_function_call(&binding.name, call_args, ctx);
+        let value = eval_builtin_function_call(&binding.name, call_args, ctx)?;
+        // Fixed signatures retain widths that the shared integer and floating carriers cannot enforce on their own.
+        if matches!(value, Value::Int(_) | Value::Float(_)) {
+            if let Some(
+                ty @ (crate::ColumnType::SmallInteger
+                | crate::ColumnType::Integer
+                | crate::ColumnType::Real),
+            ) = crate::fixed_builtin_return_type(binding)
+            {
+                return super::cast_value(&value, &ty.sql_name());
+            }
+        }
+        return Ok(value);
     };
     if let Some(result) = random::eval_dispatched_random_function(dispatch, &call_args, ctx) {
         return result;
@@ -258,6 +274,9 @@ pub fn eval_bound_builtin_function_call(
         return result;
     }
     match dispatch {
+        FunctionDispatch::NumericOperator(operator) => {
+            super::numeric_operator::eval_bound_operator(operator, binding, &evaluated)
+        }
         FunctionDispatch::ArraySortJson => {
             scalar_array::eval_dispatched_json_array_sort(&evaluated)
         }

@@ -9,9 +9,9 @@
 use icu_casemap::CaseMapper;
 
 use super::{
-    compare, compile_pg_regex, division_by_zero, float1, gcd_i64, initcap_str, json_concat,
-    out_of_range, string1, to_decimal, to_f64, to_i64, trim_chars, value_to_string, values_equal,
-    ArrayValue, DecimalValue, Result, SQLError, Value,
+    compare, compile_pg_regex, division_by_zero, gcd_i64, initcap_str, json_concat, out_of_range,
+    string1, to_decimal, to_f64, to_i64, trim_chars, value_to_string, values_equal, ArrayValue,
+    DecimalValue, Result, SQLError, Value,
 };
 
 #[expect(
@@ -370,9 +370,17 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
                     return numeric_power(&to_decimal(&args[0])?, &to_decimal(&args[1])?)
                         .map(Value::Decimal);
                 }
-                Ok(Value::Float(to_f64(&args[0])?.powf(to_f64(&args[1])?)))
+                super::floating::power(to_f64(&args[0])?, to_f64(&args[1])?).map(Value::Float)
             }
-            "sqrt" => float1(args, "sqrt", f64::sqrt),
+            "sqrt" => {
+                if args.len() != 1 {
+                    return Err(SQLError::TypeMismatch("sqrt takes 1 arg".into()));
+                }
+                if matches!(args[0], Value::Null) {
+                    return Ok(Value::Null);
+                }
+                super::floating::square_root(to_f64(&args[0])?).map(Value::Float)
+            }
             "mod" => {
                 if args.len() != 2 {
                     return Err(SQLError::TypeMismatch("mod takes 2 args".into()));
@@ -382,6 +390,7 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
                 }
                 match (&args[0], &args[1]) {
                     (Value::Int(_), Value::Int(0)) => Err(division_by_zero()),
+                    (Value::Int(_), Value::Int(-1)) => Ok(Value::Int(0)),
                     (Value::Int(a), Value::Int(b)) => a
                         .checked_rem(*b)
                         .map(Value::Int)

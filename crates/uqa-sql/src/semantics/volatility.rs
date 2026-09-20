@@ -63,6 +63,12 @@ pub fn function_volatility_with_binding(
     binding: Option<&FunctionBinding>,
     argument_count: usize,
 ) -> FunctionVolatility {
+    if matches!(
+        binding.and_then(|binding| binding.dispatch),
+        Some(crate::ast::FunctionDispatch::NumericOperator(_))
+    ) {
+        return FunctionVolatility::Immutable;
+    }
     let identity = name.to_ascii_lowercase();
     let lower = builtin_function_dispatch_name(&identity);
 

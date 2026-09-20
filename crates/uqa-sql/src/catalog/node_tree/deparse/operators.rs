@@ -11,11 +11,10 @@ use super::{atom, invalid, list, parentheses, prefix, Field, Node, Renderer, SQL
 impl Renderer<'_> {
     pub(super) fn operator(&self, node: &Node, outer: bool) -> Result<String, SQLError> {
         if let [argument] = list(node, "args")? {
-            if crate::type_resolution::unary_minus_by_oid(node.integer("opno")?).is_none() {
-                return Err(invalid("unknown unary operator"));
-            }
+            let operator = crate::type_resolution::unary_operator_by_oid(node.integer("opno")?)
+                .ok_or_else(|| invalid("unknown unary operator"))?;
             return Ok(parentheses(
-                format!("- {}", self.field(argument, false)?),
+                format!("{} {}", operator.name, self.field(argument, false)?),
                 !outer,
             ));
         }

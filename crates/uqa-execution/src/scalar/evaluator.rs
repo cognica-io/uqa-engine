@@ -75,6 +75,42 @@ pub fn eval_scalar(
             args,
             ..
         } => {
+            if let Some(error) = binding
+                .as_ref()
+                .and_then(|binding| binding.resolution_error.as_ref())
+            {
+                return Err(error.sql_error());
+            }
+            if let Some((binding, uqa_sql::ast::FunctionDispatch::NumericOperator(operator))) =
+                binding
+                    .as_ref()
+                    .and_then(|binding| binding.dispatch.map(|dispatch| (binding, dispatch)))
+            {
+                let values = args
+                    .iter()
+                    .map(|arg| eval_scalar(arg, context))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let empty_schema = crate::RowSchema::default();
+                let types = if binding.argument_types.is_empty() {
+                    args.iter()
+                        .map(|arg| {
+                            crate::common_context_expression_type(
+                                arg,
+                                context.row_schema().unwrap_or(&empty_schema),
+                                context.params(),
+                                None,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
+                } else {
+                    binding
+                        .argument_types
+                        .iter()
+                        .map(|name| uqa_sql::ColumnType::from_sql_name(name).map(Some))
+                        .collect::<Result<Vec<_>, _>>()?
+                };
+                return uqa_sql::expr::eval_numeric_operator(operator, &values, &types);
+            }
             if name.eq_ignore_ascii_case("coalesce")
                 && binding.as_ref().is_none_or(|binding| binding.builtin)
             {
@@ -88,15 +124,6 @@ pub fn eval_scalar(
             }
             let arguments = eval_call_arguments(args, context)?;
             if let Some(binding) = binding {
-                if let Some(uqa_sql::ast::FunctionResolutionError::UndefinedFunction {
-                    signature,
-                }) = binding.resolution_error.as_ref()
-                {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42883".into(),
-                        message: format!("function {signature} does not exist"),
-                    });
-                }
                 if binding.builtin {
                     if let Some(result) = context
                         .function_hook()

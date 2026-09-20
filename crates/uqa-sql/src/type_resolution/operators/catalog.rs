@@ -17,6 +17,12 @@ pub(super) const UNARY_MINUS: &[(&str, i64, i64)] = &[
 ];
 
 pub(super) const SIGNATURES: &[(&str, &str, &str, &str, i64, i64)] = &[
+    ("%", "int2", "int2", "int2", 529, 155),
+    ("%", "int4", "int4", "int4", 530, 156),
+    ("%", "int8", "int8", "int8", 439, 945),
+    ("%", "numeric", "numeric", "numeric", 1762, 1729),
+    ("^", "float8", "float8", "float8", 965, 232),
+    ("^", "numeric", "numeric", "numeric", 1038, 1739),
     (
         "*",
         "anymultirange",

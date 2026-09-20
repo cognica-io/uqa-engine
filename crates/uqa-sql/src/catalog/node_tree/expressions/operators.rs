@@ -16,6 +16,29 @@ use crate::type_resolution::{
 };
 
 impl ExpressionContext<'_> {
+    pub(super) fn numeric_operator(
+        &self,
+        operator: crate::ast::NumericOperator,
+        arguments: &[Expr],
+    ) -> Result<TypedNode, SQLError> {
+        let types = arguments
+            .iter()
+            .map(|arg| self.expression_type(arg))
+            .collect::<Result<Vec<_>, _>>()?;
+        let selected = crate::type_resolution::numeric_operator_types(operator, &types)?;
+        let arguments = arguments
+            .iter()
+            .zip(&selected.arguments)
+            .map(|(arg, ty)| self.encode(arg, Some(ty)))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(operator_node(
+            selected.oid,
+            selected.function_oid,
+            arguments,
+            selected.result,
+        ))
+    }
+
     pub(super) fn unary_minus(&self, argument: &Expr) -> Result<TypedNode, SQLError> {
         let value = self.encode(argument, None)?;
         if let Expr::Literal(literal) = argument {

@@ -11,6 +11,23 @@ use super::{numeric_type, overload, BuiltinFunctionOverload, ColumnType};
 pub(super) fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
     use ColumnType as T;
     Some(match name {
+        "mod" => [T::SmallInteger, T::Integer, T::BigInteger, numeric_type()]
+            .into_iter()
+            .map(|ty| overload(name, &[ty.clone(), ty.clone()], ty))
+            .collect(),
+        "power" | "pow" => vec![
+            overload(
+                name,
+                &[T::DoublePrecision, T::DoublePrecision],
+                T::DoublePrecision,
+            ),
+            overload(name, &[numeric_type(), numeric_type()], numeric_type()),
+        ],
+        "sqrt" => vec![
+            overload(name, &[T::DoublePrecision], T::DoublePrecision),
+            overload(name, &[numeric_type()], numeric_type()),
+        ],
+        "cbrt" => vec![overload(name, &[T::DoublePrecision], T::DoublePrecision)],
         "round" | "trunc" => vec![
             overload(name, &[T::DoublePrecision], T::DoublePrecision),
             overload(name, &[numeric_type()], numeric_type()),

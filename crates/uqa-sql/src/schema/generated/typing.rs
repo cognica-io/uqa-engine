@@ -105,6 +105,25 @@ fn bind_function_calls(
             if let Some(filter) = filter {
                 bind_function_calls(engine, columns, filter, dependencies)?;
             }
+            if let Some(binding) = binding.as_mut() {
+                if let Some(FunctionDispatch::NumericOperator(operator)) = binding.dispatch {
+                    let types = args
+                        .iter()
+                        .map(|arg| {
+                            let inferred = infer_expression(engine, columns, arg, dependencies)?;
+                            Ok(generation_expression_column_type(columns, arg, &inferred))
+                        })
+                        .collect::<Result<Vec<_>, SQLError>>()?;
+                    let selected =
+                        crate::type_resolution::numeric_operator_types(operator, &types)?;
+                    binding.argument_types = selected
+                        .arguments
+                        .iter()
+                        .map(ColumnType::sql_name)
+                        .collect();
+                    return Ok(());
+                }
+            }
             if binding
                 .as_ref()
                 .and_then(|binding| binding.dispatch)
@@ -627,6 +646,20 @@ fn infer_dispatched_function(
         })
     };
     Ok(Some(match dispatch {
+        FunctionDispatch::NumericOperator(operator) => {
+            let types = arguments
+                .iter()
+                .map(|ty| {
+                    if type_rules::is_unknown(ty) {
+                        Ok(None)
+                    } else {
+                        ColumnType::from_sql_name(&generation_type_name(ty)).map(Some)
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let selected = crate::type_resolution::numeric_operator_types(operator, &types)?;
+            column_generation_type(&selected.result)
+        }
         FunctionDispatch::NamedArgument | FunctionDispatch::VariadicArgument => return Ok(None),
         FunctionDispatch::ArraySubscripts | FunctionDispatch::Subscript => match first()? {
             GenerationType::Array(element) => *element,

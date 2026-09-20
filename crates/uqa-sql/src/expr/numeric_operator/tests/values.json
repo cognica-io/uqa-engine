@@ -1,0 +1,115 @@
+[
+  {
+    "expression": "(-9223372036854775808)::bigint % (-1)::bigint",
+    "type": "bigint",
+    "value": "0"
+  },
+  {
+    "expression": "5::int2 % 2::int2",
+    "type": "smallint",
+    "value": "1"
+  },
+  {
+    "expression": "5::int2 % 2::int8",
+    "type": "bigint",
+    "value": "1"
+  },
+  {
+    "expression": "5.5::numeric % 2::int2",
+    "type": "numeric",
+    "value": "1.5"
+  },
+  {
+    "expression": "2 ^ 3",
+    "type": "double precision",
+    "value": "8"
+  },
+  {
+    "expression": "2::numeric ^ 3",
+    "type": "numeric",
+    "value": "8.0000000000000000"
+  },
+  {
+    "expression": "|/ 9::numeric",
+    "type": "double precision",
+    "value": "3"
+  },
+  {
+    "expression": "+ '1'",
+    "type": "double precision",
+    "value": "1"
+  },
+  {
+    "expression": "'5' % 2",
+    "type": "integer",
+    "value": "1"
+  },
+  {
+    "expression": "5 % '2.5'",
+    "sqlstate": "22P02"
+  },
+  {
+    "expression": "5::float8 % 2",
+    "sqlstate": "42883"
+  },
+  {
+    "expression": "+ true",
+    "sqlstate": "42883"
+  },
+  {
+    "expression": "@ (-32768)::int2",
+    "sqlstate": "22003"
+  },
+  {
+    "expression": "@ (-2147483648)::int4",
+    "sqlstate": "22003"
+  },
+  {
+    "expression": "@ (-9223372036854775808)::int8",
+    "sqlstate": "22003"
+  },
+  {
+    "expression": "0::float8 ^ (-1)",
+    "sqlstate": "2201F"
+  },
+  {
+    "expression": "(-1)::float8 ^ 0.5::float8",
+    "sqlstate": "2201F"
+  },
+  {
+    "expression": "|/ (-1)",
+    "sqlstate": "2201F"
+  },
+  {
+    "expression": "1e308::float8 ^ 2",
+    "sqlstate": "22003"
+  },
+  {
+    "expression": "1e-300::float8 ^ 2",
+    "sqlstate": "22003"
+  },
+  {
+    "expression": "'NaN'::float8 ^ 0",
+    "type": "double precision",
+    "value": "1"
+  },
+  {
+    "expression": "1::float8 ^ 'NaN'::float8",
+    "type": "double precision",
+    "value": "1"
+  },
+  {
+    "expression": "(-1)::float8 ^ 'Infinity'::float8",
+    "type": "double precision",
+    "value": "1"
+  },
+  {
+    "expression": "'-Infinity'::float8 ^ 0.5::float8",
+    "sqlstate": "2201F"
+  },
+  {
+    "expression": "NULL::int2 % 2::int2",
+    "type": "smallint",
+    "value": null
+  }
+]

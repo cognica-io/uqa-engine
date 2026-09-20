@@ -415,7 +415,10 @@ fn numeric_comparison_preserves_large_integer_and_nan_ordering() {
 #[test]
 fn integer_builtins_report_overflow_instead_of_panicking_or_saturating() {
     assert!(eval_scalar_function("abs", &[Value::Int(i64::MIN)]).is_err());
-    assert!(eval_scalar_function("mod", &[Value::Int(i64::MIN), Value::Int(-1)]).is_err());
+    assert_eq!(
+        eval_scalar_function("mod", &[Value::Int(i64::MIN), Value::Int(-1)]).unwrap(),
+        Value::Int(0)
+    );
     assert!(eval_scalar_function("div", &[Value::Int(i64::MIN), Value::Int(-1)]).is_err());
     assert!(eval_scalar_function("gcd", &[Value::Int(i64::MIN), Value::Int(0)]).is_err());
     assert!(eval_scalar_function("lcm", &[Value::Int(i64::MAX), Value::Int(2)]).is_err());

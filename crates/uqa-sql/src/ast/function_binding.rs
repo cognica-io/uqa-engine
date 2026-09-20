@@ -32,11 +32,33 @@ pub struct FunctionBinding {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FunctionResolutionError {
     UndefinedFunction { signature: String },
+    Operator(Box<OperatorResolutionError>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperatorResolutionError {
+    pub sqlstate: String,
+    pub message: String,
+}
+
+impl FunctionResolutionError {
+    #[must_use]
+    pub fn sql_error(&self) -> crate::SQLError {
+        let (sqlstate, message) = match self {
+            Self::UndefinedFunction { signature } => (
+                "42883".to_string(),
+                format!("function {signature} does not exist"),
+            ),
+            Self::Operator(error) => (error.sqlstate.clone(), error.message.clone()),
+        };
+        crate::SQLError::Routine { sqlstate, message }
+    }
 }
 
 /// Structural identity for parser-owned expressions and overload-specific built-in implementations. These variants occupy no SQL function-name namespace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FunctionDispatch {
+    NumericOperator(NumericOperator),
     NamedArgument,
     VariadicArgument,
     ArraySubscripts,
@@ -87,6 +109,7 @@ impl FunctionDispatch {
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
+            Self::NumericOperator(operator) => operator.symbol(),
             Self::NamedArgument => "named argument",
             Self::VariadicArgument => "VARIADIC argument",
             Self::ArraySubscripts | Self::Subscript => "subscript",
@@ -183,6 +206,39 @@ impl FunctionDispatch {
             }
         }
         None
+    }
+}
+
+/// Numeric operator syntax, kept separate from ordinary calls such as `mod` or `abs`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NumericOperator {
+    Modulo,
+    Power,
+    Plus,
+    SquareRoot,
+    CubeRoot,
+    Absolute,
+}
+
+impl NumericOperator {
+    #[must_use]
+    pub const fn symbol(self) -> &'static str {
+        match self {
+            Self::Modulo => "%",
+            Self::Power => "^",
+            Self::Plus => "+",
+            Self::SquareRoot => "|/",
+            Self::CubeRoot => "||/",
+            Self::Absolute => "@",
+        }
+    }
+
+    #[must_use]
+    pub const fn arity(self) -> usize {
+        match self {
+            Self::Modulo | Self::Power => 2,
+            Self::Plus | Self::SquareRoot | Self::CubeRoot | Self::Absolute => 1,
+        }
     }
 }
 

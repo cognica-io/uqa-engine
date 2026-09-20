@@ -8,7 +8,7 @@
 
 use uqa_core::{ArrayValue, Value};
 
-use crate::ast::{Expr, FunctionResolutionError};
+use crate::ast::Expr;
 use crate::error::{Result, SQLError};
 use crate::params::SQLParam;
 
@@ -107,6 +107,18 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             args,
             ..
         } => {
+            if let Some(binding) = binding {
+                if let Some(error) = &binding.resolution_error {
+                    return Err(error.sql_error());
+                }
+                if let Some(crate::ast::FunctionDispatch::NumericOperator(operator)) =
+                    binding.dispatch
+                {
+                    return super::numeric_operator::eval_ast_operator(
+                        operator, binding, args, ctx,
+                    );
+                }
+            }
             if name.eq_ignore_ascii_case("coalesce")
                 && binding.as_ref().is_none_or(|binding| binding.builtin)
             {
@@ -120,14 +132,6 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             }
             let call_args = evaluate_call_args(args, ctx)?;
             if let Some(binding) = binding {
-                if let Some(FunctionResolutionError::UndefinedFunction { signature }) =
-                    binding.resolution_error.as_ref()
-                {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42883".into(),
-                        message: format!("function {signature} does not exist"),
-                    });
-                }
                 if binding.builtin {
                     return eval_bound_builtin_function_call(binding, call_args, ctx);
                 }

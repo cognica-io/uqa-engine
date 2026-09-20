@@ -400,10 +400,8 @@ fn projection_output_columns(
             Expr::Column(column) | Expr::QualifiedColumn { column, .. } => {
                 columns.push(column.clone());
             }
-            Expr::Func { name, .. } => columns.push(
-                name.rsplit_once('.')
-                    .map_or(name.as_str(), |(_, local)| local)
-                    .to_string(),
+            Expr::Func { name, binding, .. } => columns.push(
+                crate::semantics::function_projection_label(name, binding.as_ref()),
             ),
             _ => columns.push("?column?".into()),
         }

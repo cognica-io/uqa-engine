@@ -74,6 +74,28 @@ pub(super) fn builtin_function_type_inner(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ColumnType>, SQLError> {
+    if let Some((binding, FunctionDispatch::NumericOperator(operator))) =
+        binding.and_then(|binding| binding.dispatch.map(|dispatch| (binding, dispatch)))
+    {
+        if let Some(error) = &binding.resolution_error {
+            return Err(error.sql_error());
+        }
+        let operand_types = if binding.argument_types.is_empty() {
+            args.iter()
+                .map(|argument| {
+                    super::common_context_expression_type(argument, schema, params, resolver)
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            binding
+                .argument_types
+                .iter()
+                .map(|name| ColumnType::from_sql_name(name).map(Some))
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        return super::operators::numeric_operator_types(operator, &operand_types)
+            .map(|selected| Some(selected.result));
+    }
     let original_name = name;
     let lower = name.to_ascii_lowercase();
     let name = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
@@ -82,7 +104,10 @@ pub(super) fn builtin_function_type_inner(
     {
         return Ok(None);
     }
-    if name.contains('.') && resolver.is_none() {
+    if name.contains('.')
+        && resolver.is_none()
+        && binding.and_then(|binding| binding.dispatch).is_none()
+    {
         return Ok(None);
     }
     let call_arguments = scalar_call_arguments(args)?;
@@ -93,7 +118,7 @@ pub(super) fn builtin_function_type_inner(
         .iter()
         .map(|argument| scalar_type_inner(argument.value, schema, params, resolver))
         .collect::<Result<Vec<_>, _>>()?;
-    if name.contains('.') {
+    if name.contains('.') && binding.and_then(|binding| binding.dispatch).is_none() {
         return resolve_extension_function_type(
             resolver,
             original_name,
@@ -113,6 +138,7 @@ pub(super) fn builtin_function_type_inner(
     let first = || argument(0);
     if let Some(dispatch) = binding.and_then(|binding| binding.dispatch) {
         match dispatch {
+            FunctionDispatch::NumericOperator(_) => unreachable!("numeric operator handled above"),
             FunctionDispatch::NamedArgument | FunctionDispatch::VariadicArgument => {
                 return Ok(first());
             }
@@ -302,12 +328,11 @@ pub(super) fn builtin_function_type_inner(
         "round" | "trunc" | "ceil" | "ceiling" | "floor" | "sign" => {
             Ok(first().map(|ty| numeric_unary_result_type(&ty)))
         }
-        "mod" | "gcd" | "lcm" => numeric_binary_function_type(argument(0), argument(1)),
+        "gcd" | "lcm" => numeric_binary_function_type(argument(0), argument(1)),
         "div" | "factorial" | "extract" | "to_number" => Ok(Some(numeric_type())),
-        "power" | "pow" => numeric_power_type(args, &argument_types),
-        "sqrt" | "ln" | "log" | "log10" => numeric_transcendental_type(args, &argument_types),
+        "ln" | "log" | "log10" => numeric_transcendental_type(args, &argument_types),
         "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "atan2" | "sinh" | "cosh" | "tanh"
-        | "exp" | "log2" | "cbrt" | "degrees" | "radians" | "pi" | "st_distance" | "date_part" => {
+        | "exp" | "log2" | "degrees" | "radians" | "pi" | "st_distance" | "date_part" => {
             Ok(Some(ColumnType::DoublePrecision))
         }
         "regexp_match" | "regexp_matches" | "string_to_array" => {
@@ -504,43 +529,6 @@ fn numeric_transcendental_type(
         None
     } else {
         Some(ColumnType::DoublePrecision)
-    })
-}
-
-fn numeric_power_type(
-    args: &[ScalarExpr],
-    argument_types: &[Option<ColumnType>],
-) -> Result<Option<ColumnType>, SQLError> {
-    let mut saw_numeric = false;
-    let mut saw_floating = false;
-    for (argument, argument_type) in args.iter().zip(argument_types) {
-        let argument = named_argument_value(argument);
-        if matches!(argument, ScalarExpr::Literal(Value::Str(_) | Value::Null)) {
-            continue;
-        }
-        let Some(ty) = argument_type else {
-            continue;
-        };
-        match base_type(ty) {
-            ColumnType::Numeric { .. } => saw_numeric = true,
-            ColumnType::SmallInteger | ColumnType::Integer | ColumnType::BigInteger => {}
-            ColumnType::Real | ColumnType::DoublePrecision => saw_floating = true,
-            _ => {
-                return Err(SQLError::Routine {
-                    sqlstate: "42883".into(),
-                    message: "function power with these argument types does not exist".into(),
-                })
-            }
-        }
-    }
-    Ok(if saw_floating {
-        Some(ColumnType::DoublePrecision)
-    } else if saw_numeric {
-        Some(numeric_type())
-    } else if !args.is_empty() {
-        Some(ColumnType::DoublePrecision)
-    } else {
-        None
     })
 }
 
