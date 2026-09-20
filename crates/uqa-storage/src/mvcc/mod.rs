@@ -55,7 +55,10 @@ pub use retention::{
     verify_version_reclamation, ReclamationHorizon, SnapshotLease, SnapshotLeaseTransport,
     SnapshotRegistry,
 };
-pub use serializable::{SafeSnapshot, SerializableGraph};
+pub use serializable::{
+    SafeSnapshot, SerializableGraph, SerializableKeySpace, SerializablePredicate,
+    SerializableWriteMark,
+};
 pub use session::{VersionedKeyValueStore, VersionedSessionOptions};
 pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};
 pub use view::{

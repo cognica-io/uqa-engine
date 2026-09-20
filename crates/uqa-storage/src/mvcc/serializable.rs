@@ -7,6 +7,8 @@
 //! Serializable read/write dependencies, commit ordering and retained conflict summaries.
 
 mod conflicts;
+mod observations;
+mod predicates;
 #[cfg(test)]
 mod tests;
 
@@ -14,6 +16,9 @@ use uqa_core::memory::{BudgetedVec, MemoryBudget};
 
 use super::{DatabaseId, StorageTransactionId, VersionError, VersionResult};
 use crate::read_control::StorageReadControl;
+
+pub use observations::SerializableWriteMark;
+pub use predicates::{SerializableKeySpace, SerializablePredicate};
 
 /// Whether a read-only snapshot can execute without predicate observations. An unsafe snapshot must be discarded and captured again; waiting cannot repair it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +38,7 @@ struct Transaction {
     aborted: bool,
     doomed: bool,
     summarized_out: Option<u64>,
+    writes: u64,
 }
 
 impl Transaction {
@@ -49,7 +55,7 @@ impl Transaction {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Edge(u64, u64);
 
-/// Common SSI algorithm for one database incarnation. All records and both edge indexes share a caller-selected retention budget. The owner serializes calls with snapshot admission, predicate registration and durable commit admission; this type does not acquire provider or SQL locks.
+/// Common SSI algorithm for one database incarnation. Participants, both edge indexes, logical observations and owned predicate keys share a caller-selected retention budget. The owner serializes calls with snapshot admission, predicate registration and durable commit admission; this type does not acquire provider or SQL locks.
 ///
 /// Only SERIALIZABLE transactions participate. Register a read/write edge when the reader cannot see the writer's logical change, including absent keys and predicate ranges. Physical index-sharing conflicts are not such edges. Check existing writer intents when registering reads and existing reads when registering writes; observing only committed changes loses cycles.
 ///
@@ -61,6 +67,7 @@ pub struct SerializableGraph {
     transactions: BudgetedVec<Transaction>,
     outgoing: BudgetedVec<Edge>,
     incoming: BudgetedVec<Edge>,
+    predicates: observations::Observations,
 }
 
 impl SerializableGraph {
@@ -72,6 +79,7 @@ impl SerializableGraph {
             transactions: BudgetedVec::new(memory),
             outgoing: BudgetedVec::new(memory),
             incoming: BudgetedVec::new(memory),
+            predicates: observations::Observations::new(memory),
         }
     }
 
@@ -101,6 +109,7 @@ impl SerializableGraph {
             aborted: false,
             doomed: false,
             summarized_out: None,
+            writes: 0,
         })?;
         self.transactions[position..].rotate_right(1);
         self.clock += 1;
@@ -130,54 +139,12 @@ impl SerializableGraph {
         writer: StorageTransactionId,
         control: &StorageReadControl,
     ) -> VersionResult<()> {
-        control.check()?;
-        self.check_active(observer)?;
-        if observer != reader && observer != writer {
-            return Err(VersionError::InvalidEncoding(
-                "serializable observer is not a dependency endpoint",
-            ));
-        }
-        let reader_position = self.position(reader)?;
-        let writer_position = self.position(writer)?;
-        let read = self.transactions[reader_position];
-        let write = self.transactions[writer_position];
-        if reader == writer || !read.relevant() || !write.relevant() {
+        let Some(action) = self.plan_dependency(observer, reader, writer, control)? else {
             return Ok(());
-        }
-        if write.read_only {
-            return Err(VersionError::InvalidEncoding(
-                "serializable dependency targets a read-only writer",
-            ));
-        }
-        if write.committed.is_some_and(|end| end <= read.snapshot)
-            || read.committed.is_some_and(|end| end <= write.snapshot)
-        {
-            return Ok(());
-        }
-        let edge = Edge(read.id, write.id);
-        if self.outgoing.binary_search(&edge).is_ok() {
-            return Ok(());
-        }
-        if self.dangerous_edge(read, write, control)? {
-            let victim = if write.prepared.is_some() {
-                reader_position
-            } else {
-                writer_position
-            };
-            if self.transactions[victim].id == observer.allocation() {
-                return Err(VersionError::SerializationConflict {
-                    transaction: observer,
-                });
-            }
-            self.transactions[victim].doomed = true;
-            return Ok(());
-        }
+        };
         // Reserve both orientations before publishing either, so exhaustion cannot hide half an edge.
-        self.outgoing.reserve(1)?;
-        self.incoming.reserve(1)?;
-        insert_edge(&mut self.outgoing, edge)?;
-        insert_edge(&mut self.incoming, Edge(write.id, read.id))?;
-        Ok(())
+        self.reserve_dependencies(usize::from(action.victim.is_none()))?;
+        self.publish_dependency(action)
     }
 
     /// Check incoming dangerous structures before durable publication, preferring an unprepared pivot as the victim. Preparation is idempotent and reserves ordering space for authoritative completion even if other transactions continue meanwhile.
@@ -249,6 +216,7 @@ impl SerializableGraph {
             }
             entry.aborted = true;
         }
+        self.predicates.forget(transaction.allocation());
         Ok(())
     }
 
@@ -304,6 +272,7 @@ impl SerializableGraph {
             self.transactions = BudgetedVec::new(self.transactions.budget());
             self.outgoing = BudgetedVec::new(self.outgoing.budget());
             self.incoming = BudgetedVec::new(self.incoming.budget());
+            self.predicates.clear();
             return;
         };
         for index in 0..self.transactions.len() {
@@ -333,6 +302,7 @@ impl SerializableGraph {
         };
         retain_copy(&mut self.outgoing, retain_edge);
         retain_copy(&mut self.incoming, retain_edge);
+        self.predicates.reclaim(&self.transactions);
     }
 
     fn reserve_order(&self, preparing: bool) -> VersionResult<()> {
