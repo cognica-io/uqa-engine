@@ -6,9 +6,10 @@
 
 //! Participant ordering and physical outcome state have one checked checkpoint representation.
 
+use super::super::ParticipantOwner;
 use super::{
     io::{invalid, Decoder, Encoder},
-    Transaction, VersionResult,
+    SerializableGraph, Transaction, VersionResult,
 };
 use crate::mvcc::{
     serializable::publication::{PreparedPublication, PublicationOutcome},
@@ -27,7 +28,10 @@ pub(super) fn write(encoder: &mut Encoder<'_>, entry: Transaction) -> VersionRes
         encoder.number(value)?;
     }
     encoder.byte(
-        u8::from(entry.read_only) | (u8::from(entry.aborted) << 1) | (u8::from(entry.doomed) << 2),
+        u8::from(entry.read_only)
+            | (u8::from(entry.aborted) << 1)
+            | (u8::from(entry.doomed) << 2)
+            | (u8::from(entry.owner == ParticipantOwner::Leased) << 3),
     )?;
     let Some(publication) = entry.publication else {
         return encoder.byte(0);
@@ -45,10 +49,37 @@ pub(super) fn write(encoder: &mut Encoder<'_>, entry: Transaction) -> VersionRes
     Ok(())
 }
 
-pub(super) fn read(
+pub(super) fn restore(
+    graph: &mut SerializableGraph,
+    count: usize,
+    supports_leases: bool,
+    decoder: &mut Decoder<'_>,
+) -> VersionResult<()> {
+    graph.transactions.reserve(count)?;
+    let mut pending = 0;
+    for _ in 0..count {
+        let entry = read(decoder, graph.clock, graph.last_allocation, supports_leases)?;
+        if graph
+            .transactions
+            .last()
+            .is_some_and(|previous| previous.id >= entry.id)
+        {
+            return Err(invalid());
+        }
+        pending += u64::from(entry.prepared.is_some() && entry.live());
+        graph.transactions.push(entry)?;
+    }
+    if pending != graph.pending_finishes {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+fn read(
     decoder: &mut Decoder<'_>,
     clock: u64,
     allocation: u64,
+    supports_leases: bool,
 ) -> VersionResult<Transaction> {
     let id = decoder.number()?;
     let snapshot = decoder.number()?;
@@ -57,7 +88,7 @@ pub(super) fn read(
     let summarized_out = nonzero(decoder.number()?);
     let writes = decoder.number()?;
     let flags = decoder.byte()?;
-    if flags & !7 != 0
+    if flags & !(if supports_leases { 15 } else { 7 }) != 0
         || id == 0
         || id > allocation
         || snapshot == 0
@@ -79,6 +110,11 @@ pub(super) fn read(
         read_only: flags & 1 != 0,
         aborted: flags & 2 != 0,
         doomed: flags & 4 != 0,
+        owner: if flags & 8 != 0 {
+            ParticipantOwner::Leased
+        } else {
+            ParticipantOwner::Manual
+        },
         publication: None,
     };
     if (entry.aborted && committed.is_some())

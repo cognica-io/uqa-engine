@@ -18,7 +18,7 @@ use super::{DatabaseId, Edge, SerializableGraph, Transaction, VersionError, Vers
 use crate::read_control::StorageReadControl;
 use io::{invalid, Decoder, Encoder};
 
-const MAGIC: &[u8; 8] = b"UQASER01";
+const MAGIC: &[u8; 8] = b"UQASER02";
 
 impl SerializableGraph {
     /// Stream one complete coordinator checkpoint, including predicates and prepared physical receipt bindings. The provider owns atomic replacement, encryption and shared admission. A checksum detects incomplete/corrupt state; it does not replace the provider's authentication or durability. No complete encoded-state buffer is allocated.
@@ -72,7 +72,8 @@ impl SerializableGraph {
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
         let mut decoder = Decoder::new(input, control);
-        if decoder.array::<8>()? != *MAGIC {
+        let magic = decoder.array::<8>()?;
+        if magic != *MAGIC && magic != *b"UQASER01" {
             return Err(invalid());
         }
         if decoder.array::<16>()? != database.as_bytes() {
@@ -94,23 +95,7 @@ impl SerializableGraph {
         let edge_count = decoder.count()?;
         let read_count = decoder.count()?;
         let write_count = decoder.count()?;
-        graph.transactions.reserve(transaction_count)?;
-        let mut pending = 0;
-        for _ in 0..transaction_count {
-            let entry = nodes::read(&mut decoder, graph.clock, graph.last_allocation)?;
-            if graph
-                .transactions
-                .last()
-                .is_some_and(|previous| previous.id >= entry.id)
-            {
-                return Err(invalid());
-            }
-            pending += u64::from(entry.prepared.is_some() && entry.live());
-            graph.transactions.push(entry)?;
-        }
-        if pending != graph.pending_finishes {
-            return Err(invalid());
-        }
+        nodes::restore(&mut graph, transaction_count, magic == *MAGIC, &mut decoder)?;
         graph.outgoing.reserve(edge_count)?;
         graph.incoming.reserve(edge_count)?;
         for _ in 0..edge_count {

@@ -9,6 +9,7 @@
 mod checkpoint;
 mod conflicts;
 mod identity;
+mod liveness;
 mod observations;
 mod predicates;
 mod publication;
@@ -21,6 +22,7 @@ use super::{DatabaseId, VersionError, VersionResult};
 use crate::read_control::StorageReadControl;
 
 pub use identity::SerializableTransactionId;
+pub use liveness::{LocalSerializableLeases, SerializableParticipant};
 pub use observations::SerializableWriteMark;
 pub use predicates::{SerializableKeySpace, SerializablePredicate};
 pub use publication::SerializablePublication;
@@ -33,6 +35,12 @@ pub enum SafeSnapshot {
     Unsafe,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ParticipantOwner {
+    Manual,
+    Leased,
+}
+
 #[derive(Clone, Copy)]
 struct Transaction {
     id: u64,
@@ -42,6 +50,7 @@ struct Transaction {
     committed: Option<u64>,
     aborted: bool,
     doomed: bool,
+    owner: ParticipantOwner,
     summarized_out: Option<u64>,
     writes: u64,
     publication: Option<publication::PreparedPublication>,
@@ -140,6 +149,7 @@ impl SerializableGraph {
             committed: None,
             aborted: false,
             doomed: false,
+            owner: ParticipantOwner::Manual,
             summarized_out: None,
             writes: 0,
             publication: None,
