@@ -24,15 +24,15 @@ pub struct SerializableWriteMark {
     writes: u64,
 }
 
-struct Observation {
-    owner: u64,
-    write: u64,
-    predicate: OwnedPredicate,
+pub(super) struct Observation {
+    pub(super) owner: u64,
+    pub(super) write: u64,
+    pub(super) predicate: OwnedPredicate,
 }
 
 pub(super) struct Observations {
-    reads: BudgetedVec<Observation>,
-    writes: BudgetedVec<Observation>,
+    pub(super) reads: BudgetedVec<Observation>,
+    pub(super) writes: BudgetedVec<Observation>,
 }
 
 impl Observations {

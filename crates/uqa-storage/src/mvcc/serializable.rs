@@ -6,6 +6,7 @@
 
 //! Serializable read/write dependencies, commit ordering and retained conflict summaries.
 
+mod checkpoint;
 mod conflicts;
 mod identity;
 mod observations;

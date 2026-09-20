@@ -25,13 +25,13 @@ pub struct SerializablePublication {
 
 #[derive(Clone, Copy)]
 pub(super) struct PreparedPublication {
-    allocation: u64,
-    fingerprint: CommitFingerprint,
-    outcome: PublicationOutcome,
+    pub(super) allocation: u64,
+    pub(super) fingerprint: CommitFingerprint,
+    pub(super) outcome: PublicationOutcome,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum PublicationOutcome {
+pub(super) enum PublicationOutcome {
     Prepared,
     Committed(CommitSequence),
     Aborted,

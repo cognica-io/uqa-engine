@@ -139,10 +139,10 @@ fn before_upper(key: &[u8], upper: Bound<&[u8]>) -> bool {
 
 pub(super) struct OwnedPredicate {
     pub(super) object: [u8; 16],
-    space: Option<SerializableKeySpace>,
-    point: bool,
-    lower: Bound<BudgetedVec<u8>>,
-    upper: Bound<BudgetedVec<u8>>,
+    pub(super) space: Option<SerializableKeySpace>,
+    pub(super) point: bool,
+    pub(super) lower: Bound<BudgetedVec<u8>>,
+    pub(super) upper: Bound<BudgetedVec<u8>>,
 }
 
 impl OwnedPredicate {
