@@ -59,7 +59,7 @@ pub use serializable::{
     admit_serializable, LocalSerializableLeases, LocalSerializableState, SafeSnapshot,
     SerializableCoordinator, SerializableGraph, SerializableKeySpace, SerializableLeases,
     SerializableOperation, SerializableParticipant, SerializablePredicate, SerializablePublication,
-    SerializableTransactionId, SerializableWriteMark,
+    SerializableStatus, SerializableTransactionId, SerializableWriteMark,
 };
 pub use session::{VersionedKeyValueStore, VersionedSessionOptions};
 pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};

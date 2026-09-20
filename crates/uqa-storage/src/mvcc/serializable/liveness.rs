@@ -185,7 +185,7 @@ impl SerializableGraph {
         }
     }
 
-    /// Retire only participants whose liveness owner is authoritatively gone. An unbound participant can abort immediately. A prepared physical publication must be resolved or aborted through its exact durable receipt identity; a missing receipt stops recovery and never proves rollback. Earlier confirmed resolutions survive a later error. The caller retains the resulting state before releasing shared admission, including on failure.
+    /// Retire only participants whose liveness owner is authoritatively gone. Completed participants release their outcome-retention lease without changing their confirmed state. A live unbound participant can abort immediately. A prepared physical publication must be resolved or aborted through its exact durable receipt identity; a missing receipt stops recovery and never proves rollback. Earlier confirmed resolutions survive a later error. The caller retains the resulting state before releasing shared admission, including on failure.
     pub fn recover_abandoned(
         &mut self,
         control: &StorageReadControl,
@@ -195,7 +195,7 @@ impl SerializableGraph {
         for index in 0..self.transactions.len() {
             control.check()?;
             let entry = self.transactions[index];
-            if !entry.live() || entry.owner != ParticipantOwner::Leased {
+            if entry.owner != ParticipantOwner::Leased {
                 continue;
             }
             let participant =
@@ -203,8 +203,13 @@ impl SerializableGraph {
             if is_alive(participant)? {
                 continue;
             }
+            if !entry.live() {
+                self.transactions[index].owner = ParticipantOwner::Manual;
+                continue;
+            }
             let Some(publication) = self.publication(participant)? else {
                 self.rollback(participant)?;
+                self.transactions[index].owner = ParticipantOwner::Manual;
                 continue;
             };
             let status = match finish(publication.transaction()) {
@@ -220,6 +225,9 @@ impl SerializableGraph {
             match self.resolve_publication(publication, status)? {
                 CommitStatus::Unknown => return Err(VersionError::UnknownTransaction),
                 CommitStatus::Pending | CommitStatus::Committed(_) | CommitStatus::Aborted => {}
+            }
+            if !self.transactions[index].live() {
+                self.transactions[index].owner = ParticipantOwner::Manual;
             }
         }
         Ok(())

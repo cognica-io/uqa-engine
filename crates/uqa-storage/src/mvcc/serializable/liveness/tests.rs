@@ -7,6 +7,8 @@
 use super::*;
 use crate::mvcc::{CommitReceipt, CommitSequence};
 
+mod completion;
+
 fn setup() -> (
     SerializableGraph,
     Arc<LocalSerializableLeases>,

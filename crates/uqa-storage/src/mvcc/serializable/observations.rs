@@ -53,11 +53,11 @@ impl Observations {
         retain(&mut self.writes, |entry| entry.owner != owner);
     }
 
-    pub(super) fn reclaim(&mut self, transactions: &[Transaction]) {
+    pub(super) fn reclaim(&mut self, transactions: &[Transaction], oldest: u64) {
         let retained = |entry: &Observation| {
             transactions
                 .binary_search_by_key(&entry.owner, |transaction| transaction.id)
-                .is_ok()
+                .is_ok_and(|position| transactions[position].retains_history(oldest))
         };
         retain(&mut self.reads, retained);
         retain(&mut self.writes, retained);

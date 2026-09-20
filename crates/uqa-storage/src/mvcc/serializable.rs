@@ -40,8 +40,19 @@ pub enum SafeSnapshot {
     Unsafe,
 }
 
+/// Logical participant state, independent of a physical write receipt. A retained provider lease keeps terminal state available for completion retries even when the transaction wrote no records. Conflict history can be reclaimed before that lease is released.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SerializableStatus {
+    Active,
+    Prepared,
+    Committed,
+    Aborted,
+    Doomed,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ParticipantOwner {
+    // No provider lease remains bound; active manual actors are never inferred dead.
     Manual,
     Leased,
 }
@@ -68,6 +79,10 @@ impl Transaction {
 
     fn relevant(self) -> bool {
         !self.aborted && !self.doomed
+    }
+
+    fn retains_history(self, oldest: u64) -> bool {
+        !self.aborted && self.committed.is_none_or(|end| end > oldest)
     }
 }
 
@@ -163,6 +178,25 @@ impl SerializableGraph {
         self.clock += 1;
         self.last_allocation = self.last_allocation.max(transaction.allocation());
         Ok(())
+    }
+
+    /// Read the original logical outcome while its participant lease is retained. Terminal outcomes take precedence over earlier victim selection; this never converts an uncertain physical publication into a completed transaction.
+    pub fn status(
+        &self,
+        transaction: SerializableTransactionId,
+    ) -> VersionResult<SerializableStatus> {
+        let entry = self.transactions[self.position(transaction)?];
+        Ok(if entry.committed.is_some() {
+            SerializableStatus::Committed
+        } else if entry.aborted {
+            SerializableStatus::Aborted
+        } else if entry.doomed {
+            SerializableStatus::Doomed
+        } else if entry.prepared.is_some() {
+            SerializableStatus::Prepared
+        } else {
+            SerializableStatus::Active
+        })
     }
 
     /// Fail a doomed transaction before another statement or commit. Prepared state is sealed, including while its durable outcome is unknown.
@@ -325,7 +359,7 @@ impl SerializableGraph {
         })
     }
 
-    /// Reclaim participants that cannot overlap any live snapshot, preserving earlier conflict-out order on every retained reader. Dropping those summaries would allow a late read of a committed pivot to miss a serialization anomaly. No allocation or cancellation is needed for cleanup.
+    /// Reclaim conflict history that cannot overlap any live snapshot, preserving earlier conflict-out order on every retained reader. Retained participant leases keep their terminal identity/outcome until owner recovery confirms release, without retaining obsolete predicates or edges. Dropping necessary summaries would allow a late read of a committed pivot to miss a serialization anomaly. No allocation or cancellation is needed for cleanup.
     pub fn reclaim(&mut self) {
         let oldest = self
             .transactions
@@ -334,7 +368,12 @@ impl SerializableGraph {
             .map(|entry| entry.snapshot)
             .min();
         let Some(oldest) = oldest else {
-            self.transactions = BudgetedVec::new(self.transactions.budget());
+            retain_copy(&mut self.transactions, |entry| {
+                entry.owner == ParticipantOwner::Leased
+            });
+            if self.transactions.is_empty() {
+                self.transactions = BudgetedVec::new(self.transactions.budget());
+            }
             self.outgoing = BudgetedVec::new(self.outgoing.budget());
             self.incoming = BudgetedVec::new(self.incoming.budget());
             self.predicates.clear();
@@ -354,20 +393,20 @@ impl SerializableGraph {
             self.transactions[index].summarized_out = earliest;
         }
         retain_copy(&mut self.transactions, |entry| {
-            !entry.aborted && entry.committed.is_none_or(|end| end > oldest)
+            entry.owner == ParticipantOwner::Leased || entry.retains_history(oldest)
         });
         let retained = &self.transactions;
         let retain_edge = |edge: Edge| {
             retained
                 .binary_search_by_key(&edge.0, |entry| entry.id)
-                .is_ok()
+                .is_ok_and(|position| retained[position].retains_history(oldest))
                 && retained
                     .binary_search_by_key(&edge.1, |entry| entry.id)
-                    .is_ok()
+                    .is_ok_and(|position| retained[position].retains_history(oldest))
         };
         retain_copy(&mut self.outgoing, retain_edge);
         retain_copy(&mut self.incoming, retain_edge);
-        self.predicates.reclaim(&self.transactions);
+        self.predicates.reclaim(&self.transactions, oldest);
     }
 
     fn reserve_order(&self, preparing: bool) -> VersionResult<()> {

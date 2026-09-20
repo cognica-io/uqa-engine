@@ -10,6 +10,33 @@ use uqa_storage::mvcc::{SerializableParticipant, StorageTransactionId};
 
 use super::*;
 
+#[test]
+fn retained_read_only_completion_survives_an_independent_owners_recovery() {
+    use uqa_storage::mvcc::{SerializableCoordinator, SerializableStatus};
+
+    for mode in 0..5 {
+        let (_directory, a, b) = owners(mode);
+        let control = control();
+        let (completed, view) = a.admit_serializable_snapshot(true, &control).unwrap();
+        a.with_serializable_admission(&control, &mut |graph, _| {
+            graph.prepare_commit(completed.id(), &control)?;
+            graph.commit(completed.id())
+        })
+        .unwrap();
+        let next = admit(&b, &control);
+        b.with_serializable_admission(&control, &mut |graph, _| {
+            assert_eq!(graph.status(completed.id())?, SerializableStatus::Committed);
+            assert!(graph.publication(completed.id())?.is_none());
+            graph.commit(completed.id())
+        })
+        .unwrap();
+        assert_eq!(b.allocate_transaction(&control).unwrap().allocation(), 1);
+        drop((completed, view, next));
+        b.recover_serializable(&control).unwrap();
+        assert_eq!(control.memory().used(), 0, "mode {mode}");
+    }
+}
+
 fn owners(mode: usize) -> (tempfile::TempDir, SQLiteRecordStore, SQLiteRecordStore) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("participants.db");

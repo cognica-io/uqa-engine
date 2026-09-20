@@ -243,3 +243,29 @@ fn concurrent_admission_over_independent_adapters_has_one_allocation_order() {
     first.recover_serializable_participants(&control).unwrap();
     assert_eq!(control.memory().used(), 0);
 }
+
+#[test]
+fn read_only_completion_remains_resolvable_while_its_original_handle_is_retained() {
+    use uqa_storage::mvcc::SerializableStatus;
+
+    let store = memory();
+    let peer = RedbRecordStore::new(Arc::clone(&store.database)).unwrap();
+    let control = StorageReadControl::with_limit(1 << 20);
+    let (completed, view) = store.admit_serializable_snapshot(true, &control).unwrap();
+    graph(&store, &control, |graph| {
+        graph.prepare_commit(completed.id(), &control)?;
+        graph.commit(completed.id())
+    })
+    .unwrap();
+    let next = actor(&peer, &control);
+    graph(&peer, &control, |graph| {
+        assert_eq!(graph.status(completed.id())?, SerializableStatus::Committed);
+        assert!(graph.publication(completed.id())?.is_none());
+        graph.commit(completed.id())
+    })
+    .unwrap();
+    assert_eq!(peer.allocate_transaction(&control).unwrap().allocation(), 1);
+    drop((completed, view, next));
+    peer.recover_serializable_participants(&control).unwrap();
+    assert_eq!(control.memory().used(), 0);
+}
