@@ -128,3 +128,5 @@ pub fn observe_row_write(
         ))
         .map_err(|error| storage_error("observe serializable write", &error))
 }
+
+pub mod index_key;
