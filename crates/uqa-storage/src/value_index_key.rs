@@ -6,6 +6,14 @@
 
 //! Physical B-tree namespaces distinguish column accelerators from named SQL indexes.
 
+/// A stored evaluated key distinguishes an unbuilt index, an absent row and a present SQL NULL. Consumers must not recompute an old expression against a newer routine definition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValueIndexEntry {
+    Unbuilt,
+    Absent,
+    Present(uqa_core::Value),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ValueIndexKey {
     Column(String),

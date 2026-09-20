@@ -24,6 +24,7 @@ use super::{
 };
 use crate::{PersistentStorageBackend, StorageBackendError};
 
+mod btree_entries;
 mod catalog;
 mod compound;
 mod controlled;

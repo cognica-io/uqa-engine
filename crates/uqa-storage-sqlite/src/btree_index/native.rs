@@ -69,6 +69,39 @@ pub(super) fn clear_repair(
     Ok(())
 }
 
+pub(super) fn read_entry(
+    snapshot: &NativeSnapshot,
+    table: &str,
+    field: &ValueIndexKey,
+    doc_id: DocId,
+) -> Result<uqa_storage::ValueIndexEntry> {
+    let Some(owner) = snapshot.table_owner(table)? else {
+        return Ok(uqa_storage::ValueIndexEntry::Unbuilt);
+    };
+    let field = SQLiteValueIndexKey(field);
+    if !snapshot.contains_row(Family::BtreeIndexes, owner, &[field.as_value_ref()])? {
+        return Ok(uqa_storage::ValueIndexEntry::Unbuilt);
+    }
+    let value = snapshot.read_row(
+        Family::BtreeIndexEntries,
+        owner,
+        &[
+            field.as_value_ref(),
+            ValueRef::Integer(encode_doc_id(doc_id)?),
+        ],
+        |row| {
+            let value = row[3].as_str().map_err(|_| {
+                SQLiteError::StorageBackend("native B-tree value must be text".into())
+            })?;
+            decode_value(value)
+        },
+    )?;
+    Ok(value.map_or(
+        uqa_storage::ValueIndexEntry::Absent,
+        uqa_storage::ValueIndexEntry::Present,
+    ))
+}
+
 pub(super) fn load(
     snapshot: &NativeSnapshot,
     table: &str,

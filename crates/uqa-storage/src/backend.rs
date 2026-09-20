@@ -408,6 +408,21 @@ pub trait PersistentStorageBackend: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Read one previously evaluated key on the caller's retained transaction boundary, without loading the posting collection. An unbuilt index is distinct from an absent row and a stored NULL.
+    fn read_btree_index_entry(
+        &self,
+        _table: &str,
+        _field: &crate::ValueIndexKey,
+        _doc_id: DocId,
+    ) -> StorageBackendResult<crate::ValueIndexEntry> {
+        if self.persists_btree_indexes() {
+            return Err(crate::StorageBackendError::Other(
+                "point reads of stored B-tree entries are not implemented for this backend".into(),
+            ));
+        }
+        Ok(crate::ValueIndexEntry::Unbuilt)
+    }
+
     /// Fields whose persisted posting support was found inconsistent during a
     /// schema migration. The engine repairs these at its explicit open-time
     /// write boundary and clears each durable retry marker only after success.

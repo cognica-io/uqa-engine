@@ -180,6 +180,15 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         btree_index::fields(self.store.as_ref(), table)
     }
 
+    fn read_btree_index_entry(
+        &self,
+        table: &str,
+        field: &crate::ValueIndexKey,
+        doc_id: DocId,
+    ) -> StorageBackendResult<crate::ValueIndexEntry> {
+        btree_index::read_entry(self.store.as_ref(), table, field, doc_id)
+    }
+
     fn replace_btree_index(
         &self,
         table: &str,

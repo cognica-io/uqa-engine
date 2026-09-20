@@ -215,6 +215,40 @@ impl SQLiteBTreeIndexStore {
         })
     }
 
+    /// Read one stored key without rebuilding or reevaluating its expression. Both metadata and entry come from the same retained native or connection read.
+    pub fn read_entry(
+        &self,
+        table: &str,
+        field: &uqa_storage::ValueIndexKey,
+        doc_id: DocId,
+    ) -> Result<uqa_storage::ValueIndexEntry> {
+        if let Some(snapshot) = self.conn.native_snapshot()? {
+            return native::read_entry(&snapshot, table, field, doc_id);
+        }
+        let id = encode_doc_id(doc_id)?;
+        self.conn.with(|conn| {
+            let encoded = conn
+                .prepare_cached(
+                    "SELECT entry.value_json FROM _btree_indexes AS definition
+                     LEFT JOIN _btree_index_entries AS entry
+                       ON entry.table_name = definition.table_name
+                      AND entry.field = definition.field AND entry.doc_id = ?3
+                     WHERE definition.table_name = ?1 AND definition.field = ?2",
+                )?
+                .query_row(params![table, SQLiteValueIndexKey(field), id], |row| {
+                    row.get::<_, Option<String>>(0)
+                })
+                .optional()?;
+            match encoded {
+                None => Ok(uqa_storage::ValueIndexEntry::Unbuilt),
+                Some(None) => Ok(uqa_storage::ValueIndexEntry::Absent),
+                Some(Some(value)) => {
+                    decode_value(&value).map(uqa_storage::ValueIndexEntry::Present)
+                }
+            }
+        })
+    }
+
     /// Load a complete persisted index. `None` means this field has not been
     /// built yet and the engine must backfill it from the document store once.
     pub fn load(
@@ -518,6 +552,46 @@ mod tests {
         })
         .unwrap();
         SQLiteBTreeIndexStore::new(conn)
+    }
+
+    #[test]
+    fn stored_point_reads_preserve_null_absence_and_selected_namespace() {
+        use uqa_storage::{ValueIndexEntry, ValueIndexKey};
+        let store = store();
+        let column = ValueIndexKey::Column("price".into());
+        let named = ValueIndexKey::Index("price".into());
+        assert_eq!(
+            store.read_entry("messages", &column, 1).unwrap(),
+            ValueIndexEntry::Unbuilt
+        );
+        store
+            .replace("messages", &column, &[(1, Value::Null)])
+            .unwrap();
+        store
+            .replace("messages", &named, &[(1, Value::Row(vec![Value::Int(5)]))])
+            .unwrap();
+        assert_eq!(
+            store.read_entry("messages", &column, 1).unwrap(),
+            ValueIndexEntry::Present(Value::Null)
+        );
+        assert_eq!(
+            store.read_entry("messages", &column, 2).unwrap(),
+            ValueIndexEntry::Absent
+        );
+        assert_eq!(
+            store.read_entry("messages", &named, 1).unwrap(),
+            ValueIndexEntry::Present(Value::Row(vec![Value::Int(5)]))
+        );
+        store.clear_table("messages").unwrap();
+        assert_eq!(
+            store.read_entry("messages", &column, 1).unwrap(),
+            ValueIndexEntry::Absent
+        );
+        store.drop_index("messages", &column).unwrap();
+        assert_eq!(
+            store.read_entry("messages", &column, 1).unwrap(),
+            ValueIndexEntry::Unbuilt
+        );
     }
 
     #[test]

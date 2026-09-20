@@ -177,6 +177,14 @@ fn native_btree_replacement_repair_delete_clear_and_namespaces_follow_one_snapsh
     other.begin_deferred_transaction().unwrap();
     let old = SQLiteBTreeIndexStore::new(other.clone());
     indexes.apply_write("docs", 2, None).unwrap();
+    assert_eq!(
+        old.read_entry("docs", field, 2).unwrap(),
+        uqa_storage::ValueIndexEntry::Present(Value::Int(2))
+    );
+    assert_eq!(
+        indexes.read_entry("docs", field, 2).unwrap(),
+        uqa_storage::ValueIndexEntry::Absent
+    );
     assert_eq!(old.load("docs", field).unwrap().unwrap().len(), 2);
     assert_eq!(
         indexes.load("docs", field).unwrap(),
@@ -204,6 +212,14 @@ fn native_btree_replacement_repair_delete_clear_and_namespaces_follow_one_snapsh
         .unwrap();
     let got = indexes.load("docs", field).unwrap().unwrap();
     assert_eq!(got[0], (1, Value::Null));
+    assert_eq!(
+        indexes.read_entry("docs", field, 1).unwrap(),
+        uqa_storage::ValueIndexEntry::Present(Value::Null)
+    );
+    assert_eq!(
+        old.read_entry("docs", field, 1).unwrap(),
+        uqa_storage::ValueIndexEntry::Absent
+    );
     let Value::Float(zero) = got[1].1 else {
         panic!("lost floating point storage class")
     };
@@ -214,6 +230,14 @@ fn native_btree_replacement_repair_delete_clear_and_namespaces_follow_one_snapsh
     assert_eq!(indexes.fields("docs").unwrap(), keys());
     assert_eq!(indexes.load("docs", field).unwrap(), Some(vec![]));
     indexes.drop_index("docs", named).unwrap();
+    assert_eq!(
+        indexes.read_entry("docs", named, 1).unwrap(),
+        uqa_storage::ValueIndexEntry::Unbuilt
+    );
+    assert_eq!(
+        old.read_entry("docs", named, 1).unwrap(),
+        uqa_storage::ValueIndexEntry::Present(values(1)[named].clone())
+    );
     assert_eq!(indexes.load("docs", named).unwrap(), None);
     assert_eq!(old.load("docs", named).unwrap().unwrap().len(), 2);
     other.rollback_transaction().unwrap();
