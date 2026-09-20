@@ -218,6 +218,7 @@ pub fn bound_scalar_function_strictness(
             | FunctionDispatch::RandomInt8Range
             | FunctionDispatch::RandomNumericRange
             | FunctionDispatch::ArraySortJson
+            | FunctionDispatch::JsonExtract { .. }
             | FunctionDispatch::Range { .. } => Some(true),
             FunctionDispatch::ArraySlices
             | FunctionDispatch::Slice
@@ -276,6 +277,9 @@ pub fn eval_bound_builtin_function_call(
     match dispatch {
         FunctionDispatch::NumericOperator(operator) => {
             super::numeric_operator::eval_bound_operator(operator, binding, &evaluated)
+        }
+        FunctionDispatch::JsonExtract { as_text, path } => {
+            super::json::json_extract_operator(&evaluated, as_text, path)
         }
         FunctionDispatch::ArraySortJson => {
             scalar_array::eval_dispatched_json_array_sort(&evaluated)

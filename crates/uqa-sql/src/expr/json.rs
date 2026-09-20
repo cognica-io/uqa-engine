@@ -354,18 +354,72 @@ pub(super) fn json_extract_path(args: &[Value], as_text: bool, jsonb: bool) -> R
             "json_extract_path takes 2+ args".into(),
         ));
     }
-    let jsonb = jsonb || matches!(args[0], Value::JsonB(_));
-    let mut current = parse_json(&value_to_string(&args[0]))?;
-    for key in &args[1..] {
+    extract_json(&args[0], &args[1..], as_text, jsonb, None)
+}
+
+pub(super) fn json_extract_operator(args: &[Value], as_text: bool, path: bool) -> Result<Value> {
+    let [input, key] = args else {
+        return Err(SQLError::Internal(
+            "JSON extraction requires two operands".into(),
+        ));
+    };
+    if matches!(input, Value::Null) || matches!(key, Value::Null) {
+        return Ok(Value::Null);
+    }
+    if path {
+        let Value::Array(keys) = super::casting::cast_value(key, "text[]")? else {
+            return Err(SQLError::Internal(
+                "JSON path cast must return an array".into(),
+            ));
+        };
+        extract_json(input, keys.elements(), as_text, false, None)
+    } else {
+        extract_json(
+            input,
+            std::slice::from_ref(key),
+            as_text,
+            false,
+            Some(matches!(key, Value::Int(_))),
+        )
+    }
+}
+
+fn extract_json(
+    input: &Value,
+    keys: &[Value],
+    as_text: bool,
+    jsonb: bool,
+    array_index: Option<bool>,
+) -> Result<Value> {
+    if matches!(input, Value::Null) || keys.iter().any(|arg| matches!(arg, Value::Null)) {
+        return Ok(Value::Null);
+    }
+    let jsonb = jsonb || matches!(input, Value::JsonB(_));
+    let mut current = parse_json(&value_to_string(input))?;
+    if matches!(
+        (&current, array_index),
+        (serde_json::Value::Object(_), Some(true)) | (serde_json::Value::Array(_), Some(false))
+    ) {
+        return Ok(Value::Null);
+    }
+    for key in keys {
         let key_str = value_to_string(key);
         current = match current {
             serde_json::Value::Object(mut obj) => {
-                obj.remove(&key_str).unwrap_or(serde_json::Value::Null)
+                let Some(value) = obj.remove(&key_str) else {
+                    return Ok(Value::Null);
+                };
+                value
             }
-            serde_json::Value::Array(arr) => json_array_index(arr.len(), &key_str)
-                .and_then(|idx| arr.into_iter().nth(idx))
-                .unwrap_or(serde_json::Value::Null),
-            _ => serde_json::Value::Null,
+            serde_json::Value::Array(arr) => {
+                let Some(value) =
+                    json_array_index(arr.len(), &key_str).and_then(|idx| arr.into_iter().nth(idx))
+                else {
+                    return Ok(Value::Null);
+                };
+                value
+            }
+            _ => return Ok(Value::Null),
         };
     }
     if as_text {
@@ -374,8 +428,6 @@ pub(super) fn json_extract_path(args: &[Value], as_text: bool, jsonb: bool) -> R
             serde_json::Value::Null => return Ok(Value::Null),
             other => format_json(&other, jsonb),
         }))
-    } else if matches!(current, serde_json::Value::Null) {
-        Ok(Value::Null)
     } else {
         typed_json_value(&current, jsonb)
     }

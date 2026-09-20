@@ -203,6 +203,27 @@ The extraction functions are strict and immutable. Version 1 timestamps use the 
 
 JSON expansion functions are table functions when used in `FROM`.
 
+### JSON extraction operators
+
+Use `value -> key`, `value ->> key`, `value #> path` or `value #>> path`, where `value` is a JSON or JSONB expression. A text `key` selects an object field; an integer `key` selects a zero-based array element, with negative indexes counted from the end. Text keys do not select array indexes, and integer indexes do not select object fields. A `path` is a PostgreSQL `text[]` value whose elements traverse object fields or array indexes; use an array constructor for keys containing commas or other array-literal syntax.
+
+The `->` and `#>` operators return the input JSON or JSONB type. The `->>` and `#>>` operators return text, unquoting JSON strings. Missing keys, out-of-range indexes, incompatible structures and SQL NULL operands return SQL NULL. A present JSON null remains a JSON or JSONB null under `->` and `#>`, but becomes SQL NULL under text extraction. A NULL path element returns SQL NULL; an empty path returns the input value in the operator's result type.
+
+These operators do not change database or transaction state. JSONB extraction results support JSONB equality, including in queries over empty tables, bound-parameter comparisons and generated-column expressions. Equality on JSON values remains an operator-resolution error. Invalid operand types fail operator resolution, and malformed JSON or path-array input fails conversion rather than being treated as a missing field.
+
+```sql execute
+SELECT ('{"query":{}}'::jsonb -> 'query') = '{}'::jsonb AS matches,
+       ('{"query":null}'::jsonb -> 'query') = 'null'::jsonb AS json_null,
+       ('{}'::jsonb -> 'query') IS NULL AS missing,
+       '{"query":null}'::jsonb ->> 'query' AS null_text,
+       '{"a,b":{"items":[7]}}'::jsonb #> ARRAY['a,b', 'items', '0'] AS nested,
+       '{"name":"UQA"}'::jsonb #>> '{name}' AS name;
+```
+
+The results are `true`, `true`, `true`, SQL NULL, JSONB `7` and text `UQA`.
+
+### Stripping JSON nulls
+
 `json_strip_nulls(target json [, strip_in_arrays boolean DEFAULT false]) -> json` and `jsonb_strip_nulls(target jsonb [, strip_in_arrays boolean DEFAULT false]) -> jsonb` recursively remove object fields whose value is JSON null. The optional flag retains null array elements when omitted or `false` and removes them when `true`; `target` and `strip_in_arrays` support named notation in declaration-independent order. Both functions are strict, immutable, and parallel safe, do not change database state, preserve the input base return type, and accept domains over their declared argument types. Textual `json` results compact insignificant whitespace while preserving object order, duplicate keys, and numeric lexemes and decoding string escapes; `jsonb` results use normal binary-JSON key and numeric canonicalization. Calls with explicit `text`, the other JSON storage type, a non-Boolean flag, an unknown argument name, or an unsupported arity fail during overload resolution, while malformed unknown JSON input reports invalid JSON syntax.
 
 ```sql execute

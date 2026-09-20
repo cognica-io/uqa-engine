@@ -139,6 +139,25 @@ pub(super) fn builtin_function_type_inner(
     if let Some(dispatch) = binding.and_then(|binding| binding.dispatch) {
         match dispatch {
             FunctionDispatch::NumericOperator(_) => unreachable!("numeric operator handled above"),
+            FunctionDispatch::JsonExtract { as_text, .. } => {
+                let input = first();
+                let input = input.as_ref().map(base_type);
+                return match input {
+                    Some(ColumnType::Json | ColumnType::JsonB) => Ok(Some(if as_text {
+                        ColumnType::Text
+                    } else {
+                        input.expect("matched JSON input").clone()
+                    })),
+                    None => Ok(None),
+                    Some(other) => Err(SQLError::Routine {
+                        sqlstate: "42883".into(),
+                        message: format!(
+                            "JSON extraction operator does not exist for {}",
+                            other.sql_name()
+                        ),
+                    }),
+                };
+            }
             FunctionDispatch::NamedArgument | FunctionDispatch::VariadicArgument => {
                 return Ok(first());
             }

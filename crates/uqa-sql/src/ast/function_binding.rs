@@ -79,6 +79,10 @@ pub enum FunctionDispatch {
     RandomInt8Range,
     RandomNumericRange,
     ArraySortJson,
+    JsonExtract {
+        as_text: bool,
+        path: bool,
+    },
     Range {
         operation: RangeFunctionOperation,
         subtype: RangeSubtype,
@@ -125,6 +129,8 @@ impl FunctionDispatch {
                 "pg_catalog.random"
             }
             Self::ArraySortJson => "pg_catalog.array_sort",
+            Self::JsonExtract { as_text: false, .. } => "JSON extraction operator",
+            Self::JsonExtract { as_text: true, .. } => "JSON text extraction operator",
             Self::Range { operation, .. } => operation.label(),
         }
     }

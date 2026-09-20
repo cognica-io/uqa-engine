@@ -22,6 +22,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve numeric operator identity, declared operand widths, PostgreSQL errors and output labels through stored definitions and execution. Resolve ordinary numeric functions with the shared search-path-aware signature registry. Common record format 40 fences incompatible stored-expression writers.
 - Retain a separate durable incarnation and public OID for each domain CHECK and NOT NULL constraint. Reserve addresses against table, foreign-table and trigger constraints; finalize legacy conversion against the complete catalog and reject corrupt current identities. Domain format 3 and common record format 39 fence incompatible writers.
 - Reserve domain and relation row-type names across concurrent creation and rename, preserving PostgreSQL duplicate diagnostics, transaction/savepoint undo and independent sequence/index names.
 - Keep automatic constraint and index names within PostgreSQL’s 63-byte identifier limit, including collision suffixes and UTF-8 boundaries. Preserve quoted case, spaces, punctuation and repeated key labels when assigning unnamed indexes.
@@ -104,6 +105,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Preserve and resolve uncertain logical commits through Engine without replaying SQL preparation or Rust callbacks. Typed storage outcomes retain their transaction identity across later failures; matching receipts complete session publication, and rollback cannot report success for already committed data. `Engine::pending_commit` exposes retained resolution state.
 - Roll back a retained storage transaction before refreshing Engine caches after a failed commit. If rollback also fails, preserve the failed Engine frame and locks until storage cleanup succeeds instead of exposing private catalog or graph state as committed.
 - Reject persistent catalog/backend pairs from different reported transaction contexts before Engine restoration or sibling attachment, including separate sessions over the same file. Native SQLite, SQLite Key/Value and redb expose the shared affinity contract; custom wrappers must forward it as described in the [Rust upgrade notes](docs/manual/reference/10-upgrading.md#unreleased-rust-session-affinity).
+
+## [0.3.8] - 2026-09-20
+
+See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.3.8/docs/manual/reference/10-upgrading.md) for package updates and corrected JSON extraction behavior.
+
+### Fixed
+
+- Preserved JSON and JSONB input types through `->` and `#>` extraction, including comparisons on empty tables, bound parameters and generated columns. Text extraction with `->>` and `#>>` continues to return text, and JSON equality remains rejected.
+- Distinguished present JSON null from missing keys and SQL NULL, preserved text object-key versus integer array-index overloads, and decoded path operands as PostgreSQL text arrays, including quoted keys and NULL path elements. SQL rendering retains all four extraction operators and their result types.
 
 ## [0.3.7] - 2026-09-18
 
