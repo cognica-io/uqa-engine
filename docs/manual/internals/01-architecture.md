@@ -110,6 +110,8 @@ The executable dependency policy is stored in [`scripts/workspace-dependency-pol
 
 SQL binding receives immutable `BindingContext` inputs, `AnalysisCatalog` relation definitions, and `RoutineResolution` signature lookup. These contracts expose no physical operators, row buffers, transaction mutation, or engine recovery. Engine adapters preserve namespace privileges and statement snapshots while returning SQL-owned definitions. `uqa-sql` can reach only `uqa-core` and `uqa-pg-query`; importing the engine, planner, execution, or storage through another crate also violates the dependency policy.
 
+SQL's [catalog expression codec](../../../crates/uqa-sql/src/catalog/node_tree.rs) owns typed PostgreSQL node-tree parsing, CHECK expression binding, Datum representation and SQL reconstruction. It reuses SQL's operator and cast catalogs and receives column schemas and routine/type identities through borrowed interfaces; reconstruction does not execute user routines. Its expression coverage and integration with domain constraint projection and catalog SQL functions remain in progress in the [concurrent-storage implementation plan](../../plans/0008-concurrent-storage-transactions.md). Runtime catalog projection remains execution's responsibility.
+
 ## Carrier boundaries
 
 | Representation | Identity and combination contract |

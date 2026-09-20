@@ -9,6 +9,7 @@
 use crate::ast::ColumnType;
 
 pub mod expression_text;
+pub mod node_tree;
 pub mod oids;
 pub mod resolution;
 pub mod result_type;

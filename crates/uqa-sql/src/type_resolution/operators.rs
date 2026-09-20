@@ -13,6 +13,107 @@ mod catalog;
 mod resolution;
 pub use resolution::binary_operator_types;
 
+#[derive(Debug, Clone)]
+pub struct UnaryOperatorCatalogEntry {
+    pub operand_type: ColumnType,
+    pub oid: i64,
+    pub function_oid: i64,
+}
+
+#[must_use]
+pub fn unary_minus_by_oid(oid: i64) -> Option<UnaryOperatorCatalogEntry> {
+    catalog::UNARY_MINUS
+        .iter()
+        .find_map(|&(name, candidate, function_oid)| {
+            (candidate == oid).then(|| UnaryOperatorCatalogEntry {
+                operand_type: resolution::catalog_type(name).expect("static unary operator type"),
+                oid,
+                function_oid,
+            })
+        })
+}
+
+pub fn unary_minus_catalog_entry(ty: &ColumnType) -> Result<UnaryOperatorCatalogEntry, SQLError> {
+    let operand = unary_minus_result_type(ty)?;
+    let name = super::canonical_column_type_name(&operand);
+    let oid = catalog::UNARY_MINUS
+        .iter()
+        .find_map(|&(candidate, oid, _)| (candidate == name).then_some(oid))
+        .ok_or_else(|| SQLError::Internal("missing unary operator identity".into()))?;
+    Ok(unary_minus_by_oid(oid).expect("resolved unary operator identity"))
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BinaryOperatorCatalogEntry {
+    pub name: &'static str,
+    pub operand_types: [&'static str; 2],
+    pub result_type: &'static str,
+    pub oid: i64,
+    pub function_oid: i64,
+}
+
+pub fn binary_operator_by_oid(oid: i64) -> Option<BinaryOperatorCatalogEntry> {
+    catalog::SIGNATURES.iter().find_map(
+        |&(name, left, right, result_type, candidate, function_oid)| {
+            (candidate == oid).then_some(BinaryOperatorCatalogEntry {
+                name,
+                operand_types: [left, right],
+                result_type,
+                oid,
+                function_oid,
+            })
+        },
+    )
+}
+
+/// Read the identity of the exact overload chosen by the shared operand resolver.
+pub fn binary_operator_catalog_entry(
+    op: BinaryOp,
+    operands: [&ColumnType; 2],
+) -> Result<BinaryOperatorCatalogEntry, SQLError> {
+    let name = binary_operator_name(op);
+    for polymorphic in [false, true] {
+        for &(candidate, left, right, result_type, oid, function_oid) in catalog::SIGNATURES {
+            if candidate == name
+                && [left, right]
+                    .into_iter()
+                    .zip(operands)
+                    .all(|(declared, actual)| {
+                        let actual = base_type(actual);
+                        resolution::catalog_type(declared).is_some_and(|ty| {
+                            crate::catalog::type_metadata::pg_type_oid(&ty)
+                                == crate::catalog::type_metadata::pg_type_oid(actual)
+                        }) || polymorphic
+                            && match declared {
+                                "anyarray" => matches!(
+                                    actual,
+                                    ColumnType::Array(_)
+                                        | ColumnType::Int2Vector
+                                        | ColumnType::OidVector
+                                ),
+                                "anyrange" => matches!(actual, ColumnType::Range(_)),
+                                "anymultirange" => matches!(actual, ColumnType::Multirange(_)),
+                                _ => false,
+                            }
+                    })
+            {
+                return Ok(BinaryOperatorCatalogEntry {
+                    name: candidate,
+                    operand_types: [left, right],
+                    result_type,
+                    oid,
+                    function_oid,
+                });
+            }
+        }
+    }
+    Err(undefined_binary_operator(
+        op,
+        Some(operands[0]),
+        Some(operands[1]),
+    ))
+}
+
 /// Require the equality semantics used by grouping, duplicate elimination, and set operations. `PostgreSQL` exposes `void` as a result pseudo-type but does not register an equality operator for it.
 pub fn require_equality_operator(ty: &ColumnType) -> Result<(), SQLError> {
     require_operator_capability(ty, "equality", equality_operator_available(ty))

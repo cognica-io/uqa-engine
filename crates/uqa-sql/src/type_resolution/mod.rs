@@ -34,7 +34,10 @@ mod reverse;
 mod routine_signature;
 mod string_binary;
 
-pub use cast_compatibility::{assignment_type_compatible, explicit_type_compatible};
+pub use cast_compatibility::{
+    assignment_type_compatible, cast_catalog_entry, explicit_type_compatible, CastCatalogEntry,
+    CastMethod,
+};
 #[doc(hidden)]
 pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};
 pub use common::{
@@ -60,7 +63,9 @@ pub use length::{resolve_length_overload, ResolvedLengthOverload};
 pub use md5::{resolve_md5_overload, ResolvedMd5Overload};
 #[doc(hidden)]
 pub use operators::{
-    binary_operator_types, binary_result_type, require_equality_operator, require_ordering_operator,
+    binary_operator_by_oid, binary_operator_catalog_entry, binary_operator_types,
+    binary_result_type, require_equality_operator, require_ordering_operator, unary_minus_by_oid,
+    unary_minus_catalog_entry, BinaryOperatorCatalogEntry, UnaryOperatorCatalogEntry,
 };
 #[doc(hidden)]
 pub use overload_resolution::{

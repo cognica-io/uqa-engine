@@ -13,6 +13,35 @@ use crate::SQLError;
 
 use super::common::base_type;
 
+/// A `PostgreSQL` cast's implementation, separate from its value conversion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CastMethod {
+    Binary,
+    Function { oid: i64, arguments: usize },
+    InputOutput,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CastCatalogEntry {
+    /// `i`, `a`, and `e` identify implicit, assignment, and explicit casts.
+    pub context: u8,
+    pub method: CastMethod,
+}
+
+/// Return the same cast identity used by static coercion compatibility.
+#[must_use]
+pub fn cast_catalog_entry(source: &ColumnType, target: &ColumnType) -> Option<CastCatalogEntry> {
+    let (context, method, oid, arguments) =
+        catalog::entry(&cast_catalog_name(source), &cast_catalog_name(target))?;
+    let method = match method {
+        b'b' => CastMethod::Binary,
+        b'f' => CastMethod::Function { oid, arguments },
+        b'i' => CastMethod::InputOutput,
+        _ => unreachable!("invalid static cast method"),
+    };
+    Some(CastCatalogEntry { context, method })
+}
+
 /// Whether an explicit SQL cast has a `PostgreSQL` coercion path, independently of its value. NULL input does not make an otherwise missing cast valid.
 #[must_use]
 pub fn explicit_type_compatible(source: &ColumnType, target: &ColumnType) -> bool {

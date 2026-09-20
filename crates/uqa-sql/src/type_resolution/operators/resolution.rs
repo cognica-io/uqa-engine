@@ -36,7 +36,7 @@ pub fn binary_operator_types(
             ColumnType::Range(_) => "anyrange",
             _ => "anymultirange",
         };
-        for &(operator, lhs, rhs, result) in SIGNATURES {
+        for &(operator, lhs, rhs, result, _, _) in SIGNATURES {
             let consistent = left
                 .zip(right)
                 .is_none_or(|(left, right)| super::super::common::same_operator_type(left, right));
@@ -97,7 +97,7 @@ pub fn binary_operator_types(
     Ok([argument(0)?, argument(1)?, selected.return_type])
 }
 
-fn catalog_type(name: &str) -> Option<ColumnType> {
+pub(super) fn catalog_type(name: &str) -> Option<ColumnType> {
     match name {
         "char" => Some(ColumnType::InternalChar),
         "_text" => Some(ColumnType::Array(Box::new(ColumnType::Text))),
@@ -127,7 +127,7 @@ fn overloads() -> &'static BTreeMap<&'static str, Vec<BuiltinFunctionOverload>> 
         OnceLock::new();
     OVERLOADS.get_or_init(|| {
         let mut operators: BTreeMap<_, Vec<_>> = BTreeMap::new();
-        for &(name, left, right, result) in SIGNATURES {
+        for &(name, left, right, result, _, _) in SIGNATURES {
             if let (Some(left), Some(right), Some(result)) = (
                 catalog_type(left),
                 catalog_type(right),
