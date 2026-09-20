@@ -300,16 +300,20 @@ pub fn parse_domain_index_keys(keys: &str) -> Result<Vec<IndexKey>, SQLError> {
     serde_json::from_str(keys).map_err(|error| SQLError::Internal(error.to_string()))
 }
 
-pub fn index_references_domain(
+/// Column key types depend on their table column; its cascade removes the index and any owning constraint. Only expression keys and predicates introduce direct domain dependencies.
+pub fn index_directly_references_domain(
     types: &dyn DomainTypeCatalog,
     definition: &IndexDefinition,
     keys: &[IndexKey],
     targets: &BTreeSet<u32>,
 ) -> Result<bool, SQLError> {
-    let mut depends = definition
-        .key_types
-        .iter()
-        .any(|ty| references_domain(ty, targets));
+    let mut depends = keys.iter().enumerate().any(|(position, key)| {
+        matches!(key, IndexKey::Expression(_))
+            && definition
+                .key_types
+                .get(position)
+                .is_some_and(|ty| references_domain(ty, targets))
+    });
     for expression in keys
         .iter()
         .filter_map(|key| match key {
@@ -322,3 +326,6 @@ pub fn index_references_domain(
     }
     Ok(depends)
 }
+
+#[cfg(test)]
+mod tests;

@@ -6,7 +6,7 @@
 
 //! Domain catalog publication must preserve independent concurrent declarations.
 
-use crate::tests::relation_lock_support::{before_commit, reopen, sessions, sql};
+use crate::tests::relation_lock_support::{before_commit, error, reopen, sessions, sql};
 use uqa_core::Value;
 
 #[test]
@@ -102,6 +102,51 @@ fn private_domain_records_survive_peer_publication_and_undo_at_each_isolation() 
                     assert_eq!(registry["public.private"].object_id, private);
                 }
             }
+        }
+    }
+}
+
+#[test]
+fn domain_cascade_preserves_constraint_ownership_and_undo_across_reopen() {
+    for provider in 0..3 {
+        for removal in [
+            "DROP DOMAIN removed.d CASCADE",
+            "DROP SCHEMA removed CASCADE",
+        ] {
+            let (directory, engine, peer) = sessions(provider);
+            drop(peer);
+            sql(&engine, "CREATE SCHEMA removed; CREATE DOMAIN removed.d AS int; CREATE TABLE domain_keys(id removed.d PRIMARY KEY, u removed.d UNIQUE, keep int, twice int GENERATED ALWAYS AS (id::int * 2) STORED); CREATE TABLE domain_ref(id int REFERENCES domain_keys(id)); CREATE VIEW domain_view AS SELECT twice FROM domain_keys; CREATE INDEX domain_plain ON domain_keys(id); CREATE INDEX domain_expression ON domain_keys(((keep::removed.d)::int)); CREATE INDEX domain_predicate ON domain_keys(keep) WHERE (keep::removed.d)::int > 0; CREATE INDEX domain_keep ON domain_keys(keep); INSERT INTO domain_keys(id,u,keep) VALUES (2,4,3); INSERT INTO domain_ref VALUES (2)");
+            let indexes = |engine: &crate::Engine| {
+                sql(engine, "SELECT indexname FROM pg_indexes WHERE tablename='domain_keys' ORDER BY indexname").rows
+            };
+            let original = indexes(&engine);
+            assert_eq!(original.len(), 6);
+            error(&engine, "DROP INDEX domain_keys_pkey CASCADE", "2BP01");
+            error(&engine, "DROP DOMAIN removed.d", "2BP01");
+            sql(&engine, &format!("BEGIN; SAVEPOINT kept; {removal}"));
+            assert_eq!(indexes(&engine).len(), 1);
+            assert_eq!(sql(&engine, "SELECT * FROM domain_keys").columns, ["keep"]);
+            sql(&engine, "ROLLBACK TO kept; COMMIT");
+            drop(engine);
+            let path = directory.path().join("table-locks.db");
+            let engine = reopen(provider, &path);
+            assert_eq!(indexes(&engine), original);
+            assert_eq!(
+                sql(&engine, "SELECT twice FROM domain_view").rows[0]["twice"],
+                Value::Int(4)
+            );
+            error(&engine, "INSERT INTO domain_ref VALUES (9)", "23503");
+            sql(&engine, removal);
+            drop(engine);
+            let engine = reopen(provider, &path);
+            let rows = indexes(&engine);
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0]["indexname"], Value::Str("domain_keep".into()));
+            let rows = sql(&engine, "SELECT * FROM domain_keys");
+            assert_eq!(rows.columns, ["keep"]);
+            assert_eq!(rows.rows[0]["keep"], Value::Int(3));
+            sql(&engine, "INSERT INTO domain_ref VALUES (9)");
+            error(&engine, "SELECT * FROM domain_view", "42P01");
         }
     }
 }

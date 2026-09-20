@@ -327,7 +327,7 @@ fn domain_dependent_indexes(
         let definition =
             crate::catalog::index::index_definition(row).map_err(|error| storage_error(&error))?;
         let keys = analysis::parse_domain_index_keys(&row.columns_json)?;
-        if analysis::index_references_domain(context.types, &definition, &keys, targets)? {
+        if analysis::index_directly_references_domain(context.types, &definition, &keys, targets)? {
             indexes.insert(row.relation.clone());
         }
     }
