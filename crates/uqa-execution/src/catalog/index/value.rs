@@ -140,6 +140,19 @@ impl ColumnValueIndex {
         })
     }
 
+    /// The selected access path registers its logical predicate before reading even an empty posting list. Declined predicates do not register a read.
+    pub fn scan_observing(
+        &self,
+        predicate: &Predicate,
+        observe: impl FnOnce() -> Result<(), uqa_sql::SQLError>,
+    ) -> Result<Option<PostingList>, uqa_sql::SQLError> {
+        if !self.supports(predicate) {
+            return Ok(None);
+        }
+        observe()?;
+        Ok(self.scan(predicate))
+    }
+
     pub fn supports(&self, predicate: &Predicate) -> bool {
         predicate_targets_are_index_safe(predicate)
             && !matches!(predicate, Predicate::NotEquals(_))

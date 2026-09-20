@@ -157,6 +157,10 @@ impl SerializableWrites for Engine {
         self.storage.backend.as_ref()?.serializable_session()
     }
 
+    fn serializable_cancellation(&self) -> &uqa_core::CancellationToken {
+        &self.runtime.cancellation
+    }
+
     fn serializable_write_object(&self, table: &str) -> Result<Option<[u8; 16]>, SQLError> {
         let table = self.require_table(table)?;
         Ok((table.persistence != RelationPersistence::Temporary).then_some(table.object_id()))

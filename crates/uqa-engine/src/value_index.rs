@@ -105,11 +105,45 @@ impl crate::Engine {
         field: &ValueIndexKey,
         predicate: &Predicate,
     ) -> Result<Option<PostingList>, SQLError> {
+        self.value_index_scan_with_read(table, field, predicate, None)
+    }
+
+    pub(crate) fn value_index_query_scan(
+        &self,
+        table: &str,
+        field: &str,
+        predicate: &Predicate,
+    ) -> Result<Option<PostingList>, SQLError> {
+        let read = self.serializable_table_read(table)?;
+        self.value_index_scan_with_read(
+            table,
+            &ValueIndexKey::Column(field.into()),
+            predicate,
+            read.as_ref(),
+        )
+    }
+
+    fn value_index_scan_with_read(
+        &self,
+        table: &str,
+        field: &ValueIndexKey,
+        predicate: &Predicate,
+        read: Option<&uqa_execution::serializable::SerializableRelationRead>,
+    ) -> Result<Option<PostingList>, SQLError> {
         let t = self.require_query_table(table)?;
+        let observed = read.map(|read| (read, t.columns.snapshot()));
+        let scan = |index: &ColumnValueIndex| {
+            index.scan_observing(predicate, || {
+                if let Some((read, columns)) = &observed {
+                    read.observe_column_index(columns, field, predicate)?;
+                }
+                Ok(())
+            })
+        };
         {
             let indexes = t.value_indexes.read();
             if let Some(index) = indexes.get(field) {
-                return Ok(index.scan(predicate));
+                return scan(index);
             }
         }
         if !self
@@ -118,12 +152,11 @@ impl crate::Engine {
         {
             return Ok(None);
         }
-        let result = t
-            .value_indexes
-            .read()
-            .get(field)
-            .and_then(|index| index.scan(predicate));
-        Ok(result)
+        let indexes = t.value_indexes.read();
+        match indexes.get(field) {
+            Some(index) => scan(index),
+            None => Ok(None),
+        }
     }
 
     /// Estimate one exact value-index predicate without materializing or

@@ -24,6 +24,44 @@ impl uqa_execution::catalog::index::physical::rebuild::IndexDocuments
 }
 
 impl Engine {
+    pub(crate) fn observe_value_index_write(
+        &self,
+        table: &str,
+        state: &TableState,
+        doc_id: DocId,
+        had_old: bool,
+        cached_old: Option<&BTreeMap<ValueIndexKey, Value>>,
+        new: Option<&BTreeMap<ValueIndexKey, Value>>,
+    ) -> Result<(), SQLError> {
+        use uqa_execution::serializable::column_index::{
+            ColumnIndexChange, SerializableColumnWrites,
+        };
+        let object = (state.persistence != uqa_sql::ast::RelationPersistence::Temporary)
+            .then_some(state.object_id());
+        let Some(writer) = SerializableColumnWrites::new(
+            self.storage.backend.as_deref(),
+            object,
+            &self.runtime.cancellation,
+        )?
+        else {
+            return Ok(());
+        };
+        let definitions = self.physical_index_definitions().map_err(|error| {
+            uqa_execution::storage_errors::storage_error("retain index definitions", &error)
+        })?;
+        writer.observe(ColumnIndexChange {
+            table,
+            columns: &state.columns.snapshot(),
+            constraints: &state.key_constraints.snapshot(),
+            definitions: &definitions,
+            documents: &RetainedIndexDocuments(state),
+            doc_id,
+            had_old,
+            cached_old,
+            new,
+        })
+    }
+
     fn physical_index_definitions(
         &self,
     ) -> StorageBackendResult<std::sync::Arc<PhysicalIndexDefinitions>> {

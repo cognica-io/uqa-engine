@@ -892,6 +892,14 @@ impl Engine {
             .map_err(|err| document_store_write_error(&err))?
             .is_some();
         let old_indexed = Self::value_indexes_old_values(&t, doc_id);
+        self.observe_value_index_write(
+            &table_name,
+            &t,
+            doc_id,
+            existed,
+            old_indexed.as_ref(),
+            None,
+        )?;
         let mut store = t.document_store.write();
         store
             .delete(doc_id)

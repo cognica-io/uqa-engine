@@ -31,11 +31,13 @@ pub fn try_run_point_update<S: Clone + 'static>(
     stmt: &UpdatePlan,
     params: &[SQLParam],
 ) -> Result<Option<SQLResult>, SQLError> {
-    if context
+    let columns = context
         .constraints
         .catalog
         .try_describe_table(&stmt.table)
-        .map_err(|error| dml_storage_error("UPDATE", error))?
+        .map_err(|error| dml_storage_error("UPDATE", error))?;
+    if columns
+        .as_ref()
         .is_some_and(|columns| columns.iter().any(|column| column.generated.is_some()))
     {
         return Ok(None);
@@ -73,6 +75,18 @@ pub fn try_run_point_update<S: Clone + 'static>(
         &lookup_field,
     )? {
         return Ok(None);
+    }
+    if let Some(read) = crate::serializable::SerializableRelationRead::for_mutation(
+        context.observations,
+        &stmt.table,
+    )? {
+        read.observe_column_index(
+            columns
+                .as_deref()
+                .ok_or_else(|| SQLError::UnknownTable(stmt.table.clone()))?,
+            &uqa_storage::ValueIndexKey::Column(lookup_field.clone()),
+            &uqa_core::Predicate::Equals(lookup_value.clone()),
+        )?;
     }
     let Some(doc_id) =
         context

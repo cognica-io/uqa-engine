@@ -117,7 +117,7 @@ impl RetrievalIndexes for Engine {
         field: &str,
         predicate: &uqa_core::Predicate,
     ) -> Result<Option<uqa_core::PostingList>, SQLError> {
-        self.value_index_scan(table, field, predicate)
+        self.value_index_query_scan(table, field, predicate)
     }
 }
 

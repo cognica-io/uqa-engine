@@ -312,14 +312,6 @@ impl Engine {
                 .map_err(|error| SQLError::Internal(format!("read existing document: {error}")))?
                 .is_some()
         };
-        if index_fts {
-            let text_fields = self.prepared_document_text_fields(table, &document)?;
-            // Replacement is one atomic inverted-index operation even when the new document has no indexed text. Skipping an empty field map would leave stale postings from the previous version; remove-then-add would expose a destructive failure window when analysis fails.
-            t.inverted_index
-                .write()
-                .add_document(doc_id, text_fields)
-                .map_err(|error| SQLError::Internal(format!("index document: {error}")))?;
-        }
         // Value-index maintenance: unindex the previous field values
         // (put may replace an existing document), index the new ones.
         // `old_indexed` is `None` exactly when no index is built, so
@@ -348,6 +340,22 @@ impl Engine {
                 self.value_index_document_values(&table_name, &fields, &document)
             })
             .transpose()?;
+        self.observe_value_index_write(
+            &table_name,
+            &t,
+            doc_id,
+            existed,
+            old_indexed.as_ref(),
+            persistent_indexed.as_ref().or(new_indexed.as_ref()),
+        )?;
+        if index_fts {
+            let text_fields = self.prepared_document_text_fields(table, &document)?;
+            // Replacement is one atomic inverted-index operation even when the new document has no indexed text. Skipping an empty field map would leave stale postings from the previous version; remove-then-add would expose a destructive failure window when analysis fails.
+            t.inverted_index
+                .write()
+                .add_document(doc_id, text_fields)
+                .map_err(|error| SQLError::Internal(format!("index document: {error}")))?;
+        }
         let columns = t.columns.read().clone();
         crate::generated::strip_virtual_generated_columns(&columns, &mut document);
         let metadata = match metadata {

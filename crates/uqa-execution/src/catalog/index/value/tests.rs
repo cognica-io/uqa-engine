@@ -85,3 +85,39 @@ fn temporal_and_nan_guards_refuse_acceleration() {
         .scan(&Predicate::Equals(Value::Temporal(temporal)))
         .is_none());
 }
+
+#[test]
+fn selected_reads_observe_before_empty_or_cached_results_and_propagate_failure() {
+    let index = ColumnValueIndex::build("v", [(1, Value::Int(10))].into_iter());
+    for target in [10, 99] {
+        let mut observed = false;
+        let result = index
+            .scan_observing(&Predicate::Equals(Value::Int(target)), || {
+                observed = true;
+                Ok(())
+            })
+            .unwrap()
+            .unwrap();
+        assert!(observed);
+        assert_eq!(result.len(), usize::from(target == 10));
+    }
+    let declined = index
+        .scan_observing(&Predicate::NotEquals(Value::Int(10)), || {
+            panic!("a declined predicate is not an observed index read")
+        })
+        .unwrap();
+    assert!(declined.is_none());
+    let error = index
+        .scan_observing(&Predicate::Equals(Value::Int(10)), || {
+            Err(uqa_sql::SQLError::Routine {
+                sqlstate: "40001".into(),
+                message: "observation failed".into(),
+            })
+        })
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("40001"));
+    assert_eq!(
+        ids(&index.scan(&Predicate::Equals(Value::Int(10))).unwrap()),
+        vec![1]
+    );
+}

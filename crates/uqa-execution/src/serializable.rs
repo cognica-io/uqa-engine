@@ -39,6 +39,25 @@ impl SerializableRelationRead {
         }
     }
 
+    /// Retain the original mutation participant before reading its selected target, including an absent unique-key match.
+    pub fn for_mutation(
+        writes: &dyn SerializableWrites,
+        table: &str,
+    ) -> Result<Option<Self>, SQLError> {
+        let Some(session) = writes.serializable_session() else {
+            return Ok(None);
+        };
+        let Some(context) = session
+            .serializable_read_context()
+            .map_err(|error| storage_error("retain serializable mutation reader", &error))?
+        else {
+            return Ok(None);
+        };
+        Ok(writes
+            .serializable_write_object(table)?
+            .map(|object| Self::new(object, context, writes.serializable_cancellation())))
+    }
+
     /// A sequential access path observes the relation before reading even an empty result. Index access paths must supply their own precise logical ranges instead.
     pub fn observe_scan(&self) -> Result<(), SQLError> {
         self.observe(SerializablePredicate::object(self.object))
@@ -98,6 +117,7 @@ impl SerializableScan {
 /// State adapters supply the original mutation session and a persistent relation's immutable identity. Temporary relations do not participate in shared conflict tracking.
 pub trait SerializableWrites {
     fn serializable_session(&self) -> Option<&dyn SerializableSession>;
+    fn serializable_cancellation(&self) -> &CancellationToken;
     fn serializable_write_object(&self, table: &str) -> Result<Option<[u8; 16]>, SQLError>;
 }
 
@@ -129,4 +149,5 @@ pub fn observe_row_write(
         .map_err(|error| storage_error("observe serializable write", &error))
 }
 
+pub mod column_index;
 pub mod index_key;

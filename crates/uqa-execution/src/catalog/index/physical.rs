@@ -26,6 +26,10 @@ use uqa_storage::{
 
 type IndexRows = BTreeMap<RelationIdentity, CatalogIndexRow>;
 
+pub fn column_value<'a>(document: &'a Document, column: &str) -> &'a Value {
+    document.get(column).unwrap_or(&Value::Null)
+}
+
 struct PreparedIndex {
     table: String,
     method: String,
@@ -155,9 +159,7 @@ impl PhysicalIndexDefinitions {
             .iter()
             .map(|field| {
                 let value = match field {
-                    ValueIndexKey::Column(column) => {
-                        document.get(column).cloned().unwrap_or(Value::Null)
-                    }
+                    ValueIndexKey::Column(column) => column_value(document, column).clone(),
                     ValueIndexKey::Index(key) => {
                         let index = self
                             .indexes

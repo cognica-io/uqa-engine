@@ -12,6 +12,9 @@ use uqa_storage::{PersistentStorageBackend, PersistentStorageProvider, Persisten
 use uqa_storage_redb::RedbStorage;
 use uqa_storage_sqlite::{ManagedConnection, SQLiteKeyValueStorage, SQLiteStorageProvider};
 
+#[path = "serializable_observations/indexed.rs"]
+mod indexed;
+
 struct Session {
     engine: Engine,
     backend: Arc<dyn PersistentStorageBackend>,
