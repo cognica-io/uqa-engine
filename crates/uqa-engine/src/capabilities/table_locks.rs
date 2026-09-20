@@ -90,7 +90,23 @@ impl RelationLockSession for Engine {
         nowait: bool,
     ) -> Result<Option<ScopedRelationLock<'_>>, SQLError> {
         self.prepare_transaction_lock_wait()?;
-        let table = self.row_locks.table_key(name);
+        let relation =
+            uqa_core::RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
+        let identity = self
+            .durable
+            .catalog_indexes
+            .read()
+            .get(&relation)
+            .map(crate::catalog_indexes::index_definition)
+            .transpose()
+            .map_err(|error| {
+                uqa_sql::catalog::errors::storage_error("index lock identity", &error)
+            })?
+            .and_then(|definition| definition.catalog.map(|catalog| catalog.identity.object_id));
+        let table = identity.map_or_else(
+            || self.row_locks.table_key(name),
+            |identity| self.row_locks.index_key(identity),
+        );
         let marks = self.temporary_relation_lock_marks()?;
         if nowait {
             self.row_locks.try_acquire_scoped_relation(
@@ -162,6 +178,13 @@ impl RelationLockCatalog for Engine {
         }
         if let Some(object_id) = self.durable.sequence_object_ids.read().get(&relation) {
             return Ok(Some(*object_id));
+        }
+        if let Some(index) = self.durable.catalog_indexes.read().get(&relation) {
+            return crate::catalog_indexes::index_definition(index)
+                .map(|definition| definition.catalog.map(|catalog| catalog.identity.object_id))
+                .map_err(|error| {
+                    uqa_sql::catalog::errors::storage_error("index lock identity", &error)
+                });
         }
         Ok(self
             .durable

@@ -70,6 +70,7 @@ pub fn forbidden_command(
         CommandPlan::Drop(drop) if drop.kind == DropKind::Domain => Ok(Some("DROP DOMAIN")),
         CommandPlan::Drop(_) => Ok(Some("DROP")),
         CommandPlan::AlterTable(_) => Ok(Some("ALTER TABLE")),
+        CommandPlan::RenameIndex(_) => Ok(Some("ALTER INDEX")),
         CommandPlan::AlterForeignTable(_) => Ok(Some("ALTER FOREIGN TABLE")),
         CommandPlan::AlterView(_) => Ok(Some("ALTER VIEW")),
         CommandPlan::CreateView { .. } => Ok(Some("CREATE VIEW")),

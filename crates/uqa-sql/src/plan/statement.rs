@@ -59,6 +59,9 @@ impl UnifiedPlan {
             Statement::CreateIndex(value) => {
                 Self::Command(Box::new(CommandPlan::CreateIndex(value)))
             }
+            Statement::RenameIndex(value) => {
+                Self::Command(Box::new(CommandPlan::RenameIndex(value)))
+            }
             Statement::Insert(statement) => {
                 let ctes = lower_ctes(&statement.with, aggregates);
                 let source = statement
@@ -526,6 +529,7 @@ impl CommandPlan {
             Self::CreateTable(_) => "CreateTable",
             Self::CreateTableIfNotExists(_) => "CreateTableIfNotExists",
             Self::CreateIndex(_) => "CreateIndex",
+            Self::RenameIndex(_) => "RenameIndex",
             Self::Insert(_) => "Insert",
             Self::Update(_) => "Update",
             Self::Delete(_) => "Delete",

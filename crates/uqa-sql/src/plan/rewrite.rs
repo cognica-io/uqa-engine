@@ -272,6 +272,7 @@ pub(super) fn rewrite_command_scalars(
         CommandPlan::CreateTable(_)
         | CommandPlan::CreateTableIfNotExists(_)
         | CommandPlan::CreateIndex(_)
+        | CommandPlan::RenameIndex(_)
         | CommandPlan::Drop(_)
         | CommandPlan::AlterTable(_)
         | CommandPlan::AlterForeignTable(_)

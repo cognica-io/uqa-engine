@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use crate::row_locks::{RowLockManager, ScopedRelationLock};
+use crate::row_locks::{RelationLockMode, RowLockManager, ScopedRelationLock};
 use std::cell::{Cell, RefCell};
 use uqa_core::{catalog_identity::CatalogObjectIdentity, CancellationToken, RelationIdentity};
 use uqa_sql::{
@@ -179,7 +179,7 @@ fn replacement_indexes_and_renamed_tables_release_the_previous_table_lock() {
         let rows = session.bind(false, &mut Vec::new()).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].table_name, "public.moved");
-        assert_eq!(session.refreshes.get(), 2);
+        assert_eq!(session.refreshes.get(), 3);
         assert!(session.peer_acquires("public.t", RelationLockMode::AccessExclusive));
         assert!(!session.peer_acquires("public.moved", RelationLockMode::AccessShare));
         session.locks.release_session(1);
@@ -191,7 +191,7 @@ fn replacement_indexes_and_renamed_tables_release_the_previous_table_lock() {
 fn same_table_recreation_rebinds_the_index_incarnation_before_retaining_the_lock() {
     let session = Session::new(snapshot(2, "public.t"));
     let rows = session.bind(false, &mut Vec::new()).unwrap();
-    assert_eq!(session.refreshes.get(), 2);
+    assert_eq!(session.refreshes.get(), 3);
     assert_eq!(
         crate::catalog::index::index_definition(&rows[0])
             .unwrap()
@@ -233,7 +233,6 @@ fn changed_kind_and_missing_targets_keep_their_sqlstate() {
 fn constraint_index_targets_retain_the_current_table_before_dependency_validation() {
     let mut replacement = snapshot(2, "public.other");
     replacement.owned = true;
-    replacement.row.as_mut().unwrap().definition_json = None;
     let session = Session::new(replacement);
     let rows = session.bind(false, &mut Vec::new()).unwrap();
     assert_eq!(rows[0].table_name, "public.other");

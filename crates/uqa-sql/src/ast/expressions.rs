@@ -739,6 +739,7 @@ impl Statement {
             Self::CreateTable(_)
             | Self::CreateTableIfNotExists(_)
             | Self::CreateIndex(_)
+            | Self::RenameIndex(_)
             | Self::Drop(_)
             | Self::AlterTable(_)
             | Self::AlterForeignTable(_)

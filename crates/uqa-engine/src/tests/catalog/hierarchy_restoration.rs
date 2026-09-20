@@ -151,6 +151,8 @@ fn legacy_partition_foreign_key_addresses_convert_with_and_without_the_original_
 
 // These fixtures predate persisted constraint and partition indexes; current index graphs reject a missing parent.
 pub(super) fn legacy_index_registry(catalog: &dyn uqa_storage::CatalogFacade) {
+    let names = uqa_execution::schema::indexes::constraint_names::KeyConstraintNames::load(catalog)
+        .unwrap();
     for row in catalog.load_catalog_indexes().unwrap() {
         let definition = crate::catalog_indexes::index_definition(&row).unwrap();
         if !definition.relationships.is_empty() {
@@ -160,8 +162,7 @@ pub(super) fn legacy_index_registry(catalog: &dyn uqa_storage::CatalogFacade) {
     for mut row in catalog.load_tables().unwrap() {
         let mut columns: Vec<uqa_sql::ast::ColumnDef> =
             serde_json::from_str(&row.columns_json).unwrap();
-        let mut constraints: uqa_sql::ast::TableConstraintSet =
-            serde_json::from_str(&row.constraints_json).unwrap();
+        let mut constraints = names.decode(&row).unwrap();
         for reference in columns
             .iter_mut()
             .filter_map(|column| column.references.as_mut())

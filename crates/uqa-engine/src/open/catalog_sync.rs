@@ -504,6 +504,9 @@ impl Engine {
             })
             .collect::<BTreeMap<_, _>>();
         let mut rebound = BTreeMap::new();
+        let names = uqa_execution::schema::indexes::constraint_names::KeyConstraintNames::load(
+            catalog.as_ref(),
+        )?;
         for (schema, security) in
             uqa_execution::catalog::security::relation_restoration::restore_tables(
                 catalog.as_ref(),
@@ -512,8 +515,13 @@ impl Engine {
             )?
         {
             let relation = schema.relation.clone();
-            let table =
-                Self::load_session_table(catalog.as_ref(), backend.as_ref(), schema, security)?;
+            let table = Self::load_session_table(
+                catalog.as_ref(),
+                backend.as_ref(),
+                schema,
+                security,
+                &names,
+            )?;
             if let Some((lifecycle_id, storage_generation)) = existing_lifetimes.get(&relation) {
                 if *storage_generation == table.storage_generation() {
                     table

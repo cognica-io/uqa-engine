@@ -28,7 +28,54 @@ pub(super) fn prepare_table_alter_action<S: Clone + 'static>(
     mode: RelationLockMode,
 ) -> Result<(), SQLError> {
     bind_secondary_relations(binding, tables, primary, action)?;
-    lock_inherited_action(binding, tables, primary, recurse, action, mode)
+    lock_inherited_action(binding, tables, primary, recurse, action, mode)?;
+    bind_key_index(tables, primary, action)
+}
+
+fn bind_key_index<S: Clone + 'static>(
+    tables: &TableAlterContext<'_, S>,
+    table: &str,
+    action: &mut AlterTableAction,
+) -> Result<(), SQLError> {
+    let (name, mode) = match action {
+        AlterTableAction::RenameConstraint { from, .. } => {
+            (from, RelationLockMode::ShareUpdateExclusive)
+        }
+        AlterTableAction::DropConstraint { name, .. } => (name, RelationLockMode::AccessExclusive),
+        _ => return Ok(()),
+    };
+    let (_, constraints) =
+        crate::schema::constraints::table_constraint_state(&tables.constraints, table)?;
+    let Some(owner) = constraints
+        .key_constraints
+        .iter()
+        .find(|key| key.name.as_ref() == Some(name))
+        .and_then(|key| key.catalog_identity)
+    else {
+        return Ok(());
+    };
+    let registry = &tables.constraints.publication.indexes;
+    let catalog = registry.identities.catalog.current_catalog_snapshot();
+    let mut identity = None;
+    for row in catalog
+        .catalog_indexes()
+        .filter(|row| row.table_name == table)
+    {
+        let definition = crate::catalog::index::index_definition(row)
+            .map_err(|error| super::ddl_storage_error("constraint index lock", error))?;
+        if definition.relationships.owning_constraint == Some(owner.object_id) {
+            identity = definition.catalog.map(|catalog| catalog.identity.object_id);
+            break;
+        }
+    }
+    let identity =
+        identity.ok_or_else(|| SQLError::Internal("constraint has no owned index".into()))?;
+    let current =
+        crate::schema::indexes::registry::binding::index_identity(registry, identity, mode)
+            .map_err(|error| super::ddl_storage_error("constraint index lock", error))?
+            .ok_or_else(|| SQLError::Internal("constraint index disappeared".into()))?;
+    *name = current.relation.name;
+    Ok(())
 }
 
 fn bind_secondary_relations<S: Clone + 'static>(

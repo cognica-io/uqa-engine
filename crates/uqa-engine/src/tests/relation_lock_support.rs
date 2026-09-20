@@ -62,6 +62,15 @@ pub(super) fn wait_for_relation(
     finished: impl Fn() -> bool,
 ) -> bool {
     let key = first.row_locks.table_key(relation);
+    wait_for_relation_key(first, session, key, finished)
+}
+
+fn wait_for_relation_key(
+    first: &Engine,
+    session: u64,
+    key: u64,
+    finished: impl Fn() -> bool,
+) -> bool {
     let deadline = Instant::now() + Duration::from_secs(30);
     while !first.row_locks.waiting_for_relation(session, key)
         && !finished()
@@ -92,6 +101,37 @@ pub(super) fn after_operation_wait<T: Send + 'static>(
     release: &str,
     operation: impl FnOnce(&Engine) -> Result<T, SQLError> + Send + 'static,
 ) -> (Engine, Result<T, SQLError>) {
+    let key = holder.row_locks.table_key(relation);
+    after_operation_key_wait(holder, worker, key, relation, release, operation)
+}
+
+pub(super) fn after_index_wait(
+    holder: &Engine,
+    worker: Engine,
+    statement: &str,
+    index: [u8; 16],
+    release: &str,
+) -> (Engine, Result<SQLResult, SQLError>) {
+    let key = holder.row_locks.index_key(index);
+    let statement = statement.to_owned();
+    after_operation_key_wait(
+        holder,
+        worker,
+        key,
+        "index incarnation",
+        release,
+        move |worker| worker.sql(&statement, &[]),
+    )
+}
+
+fn after_operation_key_wait<T: Send + 'static>(
+    holder: &Engine,
+    worker: Engine,
+    key: u64,
+    relation: &str,
+    release: &str,
+    operation: impl FnOnce(&Engine) -> Result<T, SQLError> + Send + 'static,
+) -> (Engine, Result<T, SQLError>) {
     let session = worker.session_id;
     let cancel = worker.runtime.cancellation.clone();
     let (send, done) = mpsc::channel();
@@ -100,7 +140,7 @@ pub(super) fn after_operation_wait<T: Send + 'static>(
         let _ = send.send(result);
         worker
     });
-    let waited = wait_for_relation(holder, session, relation, || task.is_finished());
+    let waited = wait_for_relation_key(holder, session, key, || task.is_finished());
     let released = holder.sql(release, &[]);
     if released.is_err() {
         cancel.cancel();

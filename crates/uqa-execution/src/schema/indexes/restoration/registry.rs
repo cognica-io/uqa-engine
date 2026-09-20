@@ -19,7 +19,7 @@ use uqa_sql::{
     },
 };
 
-pub(super) const REGISTRY_VERSION: &str = "sql_index_registry_version";
+pub(super) use crate::schema::indexes::constraint_names::REGISTRY_VERSION;
 
 #[derive(Debug)]
 pub struct RestoredIndexCatalog {
@@ -41,14 +41,17 @@ pub fn restore(
     resolution: &RelationNameResolution,
     allow_migration: bool,
 ) -> StorageBackendResult<RestoredIndexCatalog> {
-    let mut durable = catalog.snapshot().clone();
+    let names = crate::schema::indexes::constraint_names::KeyConstraintNames::load(storage)?;
+    let (projected, refreshed) = names.project(catalog)?;
+    let mut durable = projected.snapshot().clone();
     durable
         .tables
         .retain(|_, table| table.persistence != uqa_sql::ast::RelationPersistence::Temporary);
     let catalog = &CatalogReadView::new(durable);
-    let legacy = match storage.get_metadata(REGISTRY_VERSION)?.as_deref() {
-        Some("1") => false,
-        None if allow_migration => true,
+    let (legacy, names_migration) = match storage.get_metadata(REGISTRY_VERSION)?.as_deref() {
+        Some("2") => (false, false),
+        Some("1") if allow_migration => (false, true),
+        None if allow_migration => (true, true),
         _ => {
             return Err(invalid(
                 "index registry migration is incomplete or unsupported",
@@ -63,19 +66,23 @@ pub fn restore(
     let (mut candidate, _) =
         super::candidate_catalog(catalog, &rows.values().cloned().collect::<Vec<_>>())?;
     let mut schemas = Vec::new();
-    let mut tables = super::tables::Tables::load(storage)?;
+    let mut tables = super::tables::Tables::load(storage, &names)?;
     if legacy {
         candidate = materialize_legacy(candidate, resolution, &mut rows, &stored, &mut tables)?;
     }
     validation::validate(&candidate, &rows)?;
     let mut schema_rows = Vec::new();
     for (name, (columns, constraints)) in &mut tables.declarations {
-        if foreign_keys::bind(&rows, columns, constraints, legacy)? || tables.changed.contains(name)
-        {
+        let persist = foreign_keys::bind(&rows, columns, constraints, legacy)?
+            || tables.changed.contains(name)
+            || names_migration;
+        if persist || refreshed.contains(name) {
+            schemas.push((name.clone(), columns.clone(), constraints.clone()));
+        }
+        if persist {
             let mut table = tables.rows[name].clone();
             table.columns_json = serde_json::to_string(columns)?;
-            table.constraints_json = serde_json::to_string(constraints)?;
-            schemas.push((table.relation.clone(), columns.clone(), constraints.clone()));
+            table.constraints_json = crate::schema::indexes::constraint_names::encode(constraints)?;
             schema_rows.push(table);
         }
     }
@@ -95,8 +102,8 @@ pub fn restore(
     if storage.get_metadata(VERSION)?.is_none() {
         storage.set_metadata(VERSION, "1")?;
     }
-    if legacy {
-        storage.set_metadata(REGISTRY_VERSION, "1")?;
+    if names_migration {
+        storage.set_metadata(REGISTRY_VERSION, "2")?;
     }
     let builds = if legacy {
         crate::schema::indexes::registry::builds::new_descendants(

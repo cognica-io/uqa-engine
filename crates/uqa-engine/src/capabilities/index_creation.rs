@@ -7,6 +7,9 @@
 //! Metadata and publication adapters for SQL-owned index declarations and execution-owned builds.
 use crate::{capabilities::RelationResolution, Engine};
 use uqa_execution::schema::indexes::registry::{IndexRegistryContext, IndexRegistryPublication};
+use uqa_execution::schema::indexes::renaming::{
+    IndexRenameContext, IndexRenameTransactions, IndexRenameWrite,
+};
 use uqa_execution::schema::indexes::{
     creation::{IndexCreationContext, IndexCreationNamespace, IndexCreationPublication},
     IndexBuildContext,
@@ -107,6 +110,21 @@ impl IndexRegistryPublication for Engine {
 
     fn refresh_index_table(&self, table: &str) -> StorageBackendResult<()> {
         self.refresh_value_indexes_for_table(table)
+    }
+}
+
+impl IndexRenameTransactions for Engine {
+    fn with_index_rename(
+        &self,
+        write: IndexRenameWrite<'_>,
+    ) -> Result<uqa_sql::SQLResult, SQLError> {
+        self.with_implicit_definition_transaction(|engine| {
+            write(&IndexRenameContext {
+                registry: engine.index_registry_context(),
+                constraints: engine.constraint_alter_context(),
+                binding: engine.table_alter_binding_context(),
+            })
+        })
     }
 }
 impl IndexCreationNamespace for Engine {

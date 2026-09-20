@@ -9,6 +9,22 @@
 use super::*;
 
 #[test]
+fn index_rename_preserves_qualified_names_and_optional_lookup() {
+    let Statement::RenameIndex(rename) =
+        first("ALTER INDEX IF EXISTS \"a.b\".idx RENAME TO \"New.Name\"")
+    else {
+        panic!("expected index rename");
+    };
+    assert_eq!(rename.name, "\"a.b\".idx");
+    assert_eq!(rename.new_name, "\"New.Name\"");
+    assert!(rename.if_exists);
+    let Statement::RenameIndex(rename) = first("ALTER INDEX idx RENAME TO renamed") else {
+        panic!("expected index rename");
+    };
+    assert!(!rename.if_exists);
+}
+
+#[test]
 fn create_table_with_tensor_column() {
     let stmt = first("CREATE TABLE docs (id INTEGER PRIMARY KEY, chunks TENSOR(4))");
     let Statement::CreateTable(ct) = stmt else {

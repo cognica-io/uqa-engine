@@ -21,6 +21,10 @@ pub enum BoundTableAlteration {
     Sequence(AlterSequence),
     View(AlterViewStmt),
     ForeignTable(AlterForeignTableStmt),
+    IndexRename {
+        name: String,
+        new_name: String,
+    },
     ViewEvents {
         name: String,
         actions: Vec<AlterTableAction>,
@@ -47,6 +51,20 @@ pub fn bind_table_alteration(
         canonical, kind, ..
     } = target;
     let bound = match kind {
+        "index"
+            if matches!(
+                statement.actions.as_slice(),
+                [AlterTableAction::RenameTable { .. }]
+            ) =>
+        {
+            let AlterTableAction::RenameTable { to } = &statement.actions[0] else {
+                unreachable!();
+            };
+            BoundTableAlteration::IndexRename {
+                name: canonical,
+                new_name: to.clone(),
+            }
+        }
         "table" => {
             statement.table = canonical;
             BoundTableAlteration::Table(statement)

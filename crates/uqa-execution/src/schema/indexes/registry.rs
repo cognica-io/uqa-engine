@@ -55,6 +55,19 @@ pub struct IndexRegistryChange {
 }
 
 impl IndexRegistryChange {
+    /// A name change preserves every physical key and must not hydrate the indexed table.
+    pub(super) fn rename(
+        context: &IndexRegistryContext<'_>,
+        previous: &CatalogIndexRow,
+        renamed: CatalogIndexRow,
+    ) -> StorageBackendResult<()> {
+        context.publication.erase_index(previous)?;
+        context.publication.persist_index(&renamed)?;
+        context.publication.forget_index(&previous.relation);
+        context.publication.publish_index(renamed);
+        Ok(())
+    }
+
     /// All identity reservations and schema candidate writes precede this non-refreshing publication path. The caller's schema transaction restores both registries if persistence or physical hydration fails.
     pub fn publish(self, context: &IndexRegistryContext<'_>) -> StorageBackendResult<()> {
         let publication = context.publication;

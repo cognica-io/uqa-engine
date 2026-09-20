@@ -114,6 +114,11 @@ impl RowLockManager {
         self.relation_key(LockRelationIdentity::Table(Arc::from(table)))
     }
 
+    /// An index keeps its relation lock across renames and receives a new one after same-name recreation.
+    pub fn index_key(&self, identity: [u8; 16]) -> u64 {
+        self.relation_key(LockRelationIdentity::Index(identity))
+    }
+
     pub fn shared_catalog_key(&self, target: super::shared_objects::SharedCatalogLock<'_>) -> u64 {
         use super::shared_objects::SharedCatalogLock;
         self.relation_key(match target {

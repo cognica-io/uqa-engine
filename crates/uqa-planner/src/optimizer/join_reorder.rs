@@ -134,6 +134,7 @@ fn reorder_command_joins(
         | CommandPlan::CreateTable(_)
         | CommandPlan::CreateTableIfNotExists(_)
         | CommandPlan::CreateIndex(_)
+        | CommandPlan::RenameIndex(_)
         | CommandPlan::Drop(_)
         | CommandPlan::RefreshMaterializedView { .. }
         | CommandPlan::AlterTable(_)

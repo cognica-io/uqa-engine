@@ -51,6 +51,7 @@ pub struct TableAlterEntryContext<'a, S: Clone + 'static> {
     pub views: &'a dyn ViewAlterTransactions,
     pub foreign_tables: &'a dyn ForeignTableAlterTransactions,
     pub sequences: &'a dyn SequenceAlterTransactions,
+    pub indexes: &'a dyn crate::schema::indexes::renaming::IndexRenameTransactions,
     pub notices: &'a parking_lot::Mutex<Vec<(String, String)>>,
 }
 
@@ -62,7 +63,41 @@ pub fn run_alter_table<S: Clone + 'static>(
     let Some(bound) = bind_table_alteration(&context.binding, statement)? else {
         return Ok(SQLResult::empty());
     };
+    execute_bound(context, bound)
+}
+
+pub fn run_rename_index<S: Clone + 'static>(
+    context: &TableAlterEntryContext<'_, S>,
+    statement: &uqa_sql::ast::RenameIndexStmt,
+) -> Result<SQLResult, SQLError> {
+    let (_, qualifier) =
+        uqa_core::RelationIdentity::parse_reference(&statement.name).map_err(SQLError::Internal)?;
+    let statement = AlterTableStmt {
+        table: statement.name.clone(),
+        qualifier,
+        if_exists: statement.if_exists,
+        recurse: false,
+        actions: vec![AlterTableAction::RenameTable {
+            to: statement.new_name.clone(),
+        }],
+    };
+    let Some(bound) = super::binding::bind_alteration(&context.binding, statement, true)? else {
+        return Ok(SQLResult::empty());
+    };
+    execute_bound(context, bound)
+}
+
+fn execute_bound<S: Clone + 'static>(
+    context: &TableAlterEntryContext<'_, S>,
+    bound: BoundTableAlteration,
+) -> Result<SQLResult, SQLError> {
     match bound {
+        BoundTableAlteration::IndexRename { name, new_name } => {
+            context.indexes.with_index_rename(Box::new(move |context| {
+                crate::schema::indexes::renaming::rename_bound_index(context, &name, &new_name)?;
+                Ok(SQLResult::empty())
+            }))
+        }
         BoundTableAlteration::Table(statement) => {
             context.tables.with_table_write(Box::new(move |tables| {
                 super::run_alter_table(tables, statement)

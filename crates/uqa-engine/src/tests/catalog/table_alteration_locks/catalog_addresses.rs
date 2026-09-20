@@ -171,7 +171,7 @@ fn current_key_or_check_identity_loss_is_rejected_without_repair() {
             failure.to_string().contains(if check {
                 "CHECK constraints require"
             } else {
-                "key constraints require"
+                "key name has no constraint identity"
             }),
             "{failure}"
         );
@@ -199,6 +199,7 @@ fn legacy_key_and_check_conversion_rolls_back_with_a_later_restore_failure() {
         );
         let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
         let raw = factory.open_session().unwrap();
+        crate::tests::catalog::hierarchy_restoration::legacy_index_registry(raw.catalog.as_ref());
         let mut schema = raw
             .catalog
             .load_tables()
@@ -216,7 +217,6 @@ fn legacy_key_and_check_conversion_rolls_back_with_a_later_restore_failure() {
         raw.catalog
             .delete_metadata(CATALOG_ADDRESS_METADATA_KEY)
             .unwrap();
-        crate::tests::catalog::hierarchy_restoration::legacy_index_registry(raw.catalog.as_ref());
         assert!(first.new_session().is_err());
         assert!(first.reload_table_catalog_after_rollback().is_err());
         raw.catalog.set_metadata("sql_triggers_json", "{").unwrap();

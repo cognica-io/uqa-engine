@@ -36,26 +36,7 @@ pub fn rename_constraint(
         .iter()
         .position(|key| key.name.as_deref() == Some(from))
     {
-        ensure_constraint_name_available(&columns, &constraints, Some(to), table)?;
-        let relation =
-            uqa_core::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
-        if !context.names.relation_name_available(
-            &uqa_core::RelationIdentity::new(&relation.schema, to).qualified_name(),
-        )? {
-            return Err(constraint_error(
-                "42P07",
-                format!("relation \"{to}\" already exists"),
-            ));
-        }
-        let key = &mut constraints.key_constraints[position];
-        key.name = Some(to.into());
-        let identity = key.catalog_identity;
-        for inherited in &mut constraints.hierarchy.partition_inherited_key_constraints {
-            if inherited.catalog_identity == identity {
-                inherited.name = Some(to.into());
-            }
-        }
-        publish_constraint_state(context, table, columns, constraints)?;
+        rename_key_constraint(context, table, to, position, columns, constraints)?;
         return Ok(true);
     }
     if rename_foreign_key(table, &mut columns, &mut constraints, from, to)? {
@@ -124,4 +105,46 @@ pub fn rename_constraint(
         publish_constraint_state(context, &target, columns, constraints)?;
     }
     Ok(true)
+}
+
+fn rename_key_constraint(
+    context: &ConstraintAlterContext<'_>,
+    table: &str,
+    to: &str,
+    position: usize,
+    columns: Vec<uqa_sql::ast::ColumnDef>,
+    mut constraints: uqa_sql::ast::TableConstraintSet,
+) -> Result<(), SQLError> {
+    ensure_constraint_name_available(&columns, &constraints, Some(to), table)?;
+    let relation =
+        uqa_core::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
+    if !context.names.relation_name_available(
+        &uqa_core::RelationIdentity::new(&relation.schema, to).qualified_name(),
+    )? {
+        return Err(constraint_error(
+            "42P07",
+            format!("relation \"{to}\" already exists"),
+        ));
+    }
+    let key = &mut constraints.key_constraints[position];
+    key.name = Some(to.into());
+    let identity = key.catalog_identity;
+    for inherited in &mut constraints.hierarchy.partition_inherited_key_constraints {
+        if inherited.catalog_identity == identity {
+            inherited.name = Some(to.into());
+        }
+    }
+    let owner = identity
+        .ok_or_else(|| SQLError::Internal("key constraint has no catalog identity".into()))?
+        .object_id;
+    crate::schema::indexes::renaming::rename_owned_constraint(
+        &context.publication.indexes,
+        table,
+        owner,
+        to,
+        columns,
+        constraints,
+    )
+    .map_err(|error| uqa_sql::catalog::errors::storage_error("RENAME CONSTRAINT", &error))?;
+    Ok(())
 }

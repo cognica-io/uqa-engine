@@ -180,6 +180,7 @@ impl TableRemovalPublication for Engine {
 impl Engine {
     pub(crate) fn table_removal_context(&self) -> TableRemovalContext<'_> {
         TableRemovalContext {
+            indexes: self.index_registry_context(),
             catalog: self,
             hierarchy: self,
             publication: self,

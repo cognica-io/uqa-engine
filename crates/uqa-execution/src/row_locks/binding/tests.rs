@@ -85,6 +85,30 @@ fn stable_identity_returns_the_new_definition_after_waiting() {
 }
 
 #[test]
+fn changed_relation_kind_replaces_the_provisional_lock_mode() {
+    let session = Session::new();
+    let result = bind_relation_with_mode(
+        &session,
+        |binding: &RelationBinding<u32>| {
+            if binding.value == 1 {
+                RelationLockMode::ShareUpdateExclusive
+            } else {
+                RelationLockMode::AccessExclusive
+            }
+        },
+        false,
+        || session.resolve(),
+        |_| Ok(()),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(result.value, 2);
+    assert!(!session.peer_acquires(RelationLockMode::AccessShare));
+    session.manager.release_session(1);
+    assert!(session.peer_acquires(RelationLockMode::AccessExclusive));
+}
+
+#[test]
 fn revoked_authority_discards_only_the_provisional_lock_upgrade() {
     let session = Session::new();
     session

@@ -7,10 +7,7 @@
 //! Rebind explicit index names and authority after waiting for the indexed table.
 
 use super::{ddl_storage_error, IndexRemovalCatalog, IndexRemovalPrivileges};
-use crate::row_locks::{
-    binding::{bind_relation, RelationBinding, RelationLockSession},
-    RelationLockMode,
-};
+use crate::row_locks::binding::RelationLockSession;
 use std::collections::BTreeSet;
 use uqa_sql::{ast::DropStmt, schema::indexes::removal::resolve_drop_index_name, SQLError};
 use uqa_storage::CatalogIndexRow;
@@ -25,10 +22,8 @@ pub(super) fn bind_drop_targets(
     let mut indexes = Vec::new();
     let mut seen = BTreeSet::new();
     for requested in &statement.names {
-        let bound = bind_relation(
+        let bound = super::super::binding::bind_index_and_table(
             session,
-            RelationLockMode::AccessExclusive,
-            false,
             || {
                 let Some(canonical) = resolve_drop_index_name(
                     catalog.resolve_relation_kind(requested)?,
@@ -47,29 +42,16 @@ pub(super) fn bind_drop_targets(
                             "resolved index `{canonical}` has no bound catalog row"
                         ))
                     })?;
-                let definition = crate::catalog::index::index_definition(&row)
-                    .map_err(|error| ddl_storage_error("DROP INDEX", error))?;
-                Ok(Some(RelationBinding {
-                    name: row.table_name.clone(),
-                    object_id: definition.catalog.map(|catalog| catalog.identity.object_id),
-                    value: row,
-                }))
+                Ok(Some(row))
             },
-            |binding| {
-                let row = &binding.value;
+            |row| {
                 privileges.ensure_drop_authority(row)?;
-                if binding.object_id.is_none() && !catalog.has_constraint_index(&row.relation) {
-                    return Err(SQLError::Internal(format!(
-                        "index `{}` has no catalog identity",
-                        row.relation.qualified_name()
-                    )));
-                }
                 Ok(())
             },
         )?;
         if let Some(bound) = bound {
-            if seen.insert(bound.value.relation.clone()) {
-                indexes.push(bound.value);
+            if seen.insert(bound.relation.clone()) {
+                indexes.push(bound);
             }
         }
     }

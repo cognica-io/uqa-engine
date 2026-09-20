@@ -890,6 +890,13 @@ fn compile_relation_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Stat
         ObjectType::ObjectTable => AlterTableAction::RenameTable {
             to: render_relation_component(&stmt.newname),
         },
+        ObjectType::ObjectIndex => {
+            return Ok(Statement::RenameIndex(crate::ast::RenameIndexStmt {
+                name: table,
+                new_name: render_relation_component(&stmt.newname),
+                if_exists: stmt.missing_ok,
+            }));
+        }
         ObjectType::ObjectSequence => {
             return Ok(Statement::AlterSequence(AlterSequence {
                 name: table,

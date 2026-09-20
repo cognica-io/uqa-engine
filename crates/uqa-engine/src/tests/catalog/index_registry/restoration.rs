@@ -7,7 +7,7 @@
 //! Initial conversion and current-metadata rejection through real provider sessions.
 
 use super::*;
-use uqa_sql::ast::{ColumnDef, TableConstraintSet};
+use uqa_sql::ast::ColumnDef;
 use uqa_storage::ValueIndexKey;
 
 #[test]
@@ -74,6 +74,10 @@ fn legacy_partition_registry_preserves_postings_addresses_and_foreign_key_target
         let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
         let raw = factory.open_session().unwrap();
         let mut postings = None;
+        let names = uqa_execution::schema::indexes::constraint_names::KeyConstraintNames::load(
+            raw.catalog.as_ref(),
+        )
+        .unwrap();
         for row in raw.catalog.load_catalog_indexes().unwrap() {
             let index = crate::catalog_indexes::index_definition(&row).unwrap();
             if row.table_name == "public.c" && index.relationships.owning_constraint.is_none() {
@@ -99,8 +103,7 @@ fn legacy_partition_registry_preserves_postings_addresses_and_foreign_key_target
         }
         for mut row in raw.catalog.load_tables().unwrap() {
             let mut columns: Vec<ColumnDef> = serde_json::from_str(&row.columns_json).unwrap();
-            let mut constraints: TableConstraintSet =
-                serde_json::from_str(&row.constraints_json).unwrap();
+            let mut constraints = names.decode(&row).unwrap();
             for column in &mut columns {
                 if let Some(reference) = &mut column.references {
                     reference.referenced_index = None;
@@ -216,6 +219,15 @@ fn later_hydration_failure_restores_the_entire_legacy_registry_conversion() {
         );
         let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
         let raw = factory.open_session().unwrap();
+        let names = uqa_execution::schema::indexes::constraint_names::KeyConstraintNames::load(
+            raw.catalog.as_ref(),
+        )
+        .unwrap();
+        for mut schema in raw.catalog.load_tables().unwrap() {
+            schema.constraints_json =
+                serde_json::to_string(&names.decode(&schema).unwrap()).unwrap();
+            raw.catalog.save_table(&schema).unwrap();
+        }
         for mut row in raw.catalog.load_catalog_indexes().unwrap() {
             if row.relation.name == "owned" {
                 raw.catalog.drop_catalog_index(&row.relation).unwrap();
@@ -242,6 +254,7 @@ fn later_hydration_failure_restores_the_entire_legacy_registry_conversion() {
         rows[0].index_type = "btree".into();
         raw.catalog.save_catalog_index_row(&rows[0]).unwrap();
         let restored = Engine::from_persistent_provider(factory).unwrap();
+        assert!(restored.catalog_index("owned").unwrap().is_some());
         error(&restored, "INSERT INTO t VALUES(1)", "23505");
     }
 }

@@ -13,6 +13,7 @@ use uqa_core::Value;
 use uqa_sql::catalog::index::IndexDefinition;
 
 mod physical;
+mod renaming;
 mod restoration;
 
 fn definition(engine: &Engine, name: &str) -> IndexDefinition {

@@ -62,6 +62,7 @@ fn command_completion(
         }
         CommandPlan::CreateTable(_) | CommandPlan::CreateTableIfNotExists(_) => "CREATE TABLE",
         CommandPlan::CreateIndex(_) => "CREATE INDEX",
+        CommandPlan::RenameIndex(_) => "ALTER INDEX",
         CommandPlan::Drop(statement) => match statement.kind {
             DropKind::Table => "DROP TABLE",
             DropKind::ForeignTable => "DROP FOREIGN TABLE",

@@ -9,7 +9,7 @@
 use crate::{
     catalog::security::table_inquiry::TablePrivilegeContext,
     row_locks::binding::{
-        bind_relation, RelationBinding, RelationDefinitionSession, RelationLockCatalog,
+        bind_relation_with_mode, RelationBinding, RelationDefinitionSession, RelationLockCatalog,
     },
     schema::{
         namespaces::relations::RelationCreationContext,
@@ -41,9 +41,23 @@ pub fn bind_table_alteration(
     context: &TableAlterBindingContext<'_>,
     statement: AlterTableStmt,
 ) -> Result<Option<BoundTableAlteration>, SQLError> {
-    let binding = bind_relation(
+    bind_alteration(context, statement, false)
+}
+
+pub(super) fn bind_alteration(
+    context: &TableAlterBindingContext<'_>,
+    statement: AlterTableStmt,
+    index_rename: bool,
+) -> Result<Option<BoundTableAlteration>, SQLError> {
+    let binding = bind_relation_with_mode(
         context.locks,
-        table_alter_lock_mode(&statement).into(),
+        |binding: &RelationBinding<uqa_sql::schema::relation_alteration::RelationAlterTarget>| {
+            if index_rename && binding.value.kind == "index" {
+                crate::row_locks::RelationLockMode::ShareUpdateExclusive
+            } else {
+                table_alter_lock_mode(&statement).into()
+            }
+        },
         false,
         || {
             let Some(target) = targets::table_alter_target(

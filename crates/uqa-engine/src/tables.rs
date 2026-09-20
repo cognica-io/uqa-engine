@@ -89,7 +89,7 @@ impl Engine {
             .collect();
         let columns_json = serde_json::to_string(columns).map_err(StorageBackendError::from)?;
         let constraints_json =
-            serde_json::to_string(constraints).map_err(StorageBackendError::from)?;
+            uqa_execution::schema::indexes::constraint_names::encode(constraints)?;
         catalog.save_table(&TableSchema {
             relation: RelationIdentity::from_legacy_name(name)
                 .map_err(StorageBackendError::Other)?,

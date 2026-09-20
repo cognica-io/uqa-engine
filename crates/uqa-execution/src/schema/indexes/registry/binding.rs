@@ -71,33 +71,84 @@ pub fn removal(
     context: &IndexRegistryContext<'_>,
     relation: &RelationIdentity,
 ) -> StorageBackendResult<Option<CatalogIndexRow>> {
-    let bound = bind_relation(
+    let bound = super::super::binding::bind_index_and_table(
         context.locks,
-        RelationLockMode::AccessExclusive,
-        false,
         || {
             let catalog = context.identities.catalog.current_catalog_snapshot();
             let Some(row) = catalog.snapshot().definitions.catalog_indexes.get(relation) else {
                 return Ok(None);
             };
-            let definition = index_definition(row).map_err(|error| {
-                uqa_sql::catalog::errors::storage_error("index binding", &error)
-            })?;
-            Ok(Some(RelationBinding {
-                name: row.table_name.clone(),
-                object_id: definition
-                    .catalog
-                    .map(|identity| identity.identity.object_id),
-                value: row.clone(),
-            }))
+            Ok(Some(row.clone()))
         },
         |_| Ok(()),
     )
     .map_err(storage_error)?;
     if let Some(bound) = &bound {
-        lock_partition_tree(context, &bound.name, RelationLockMode::AccessExclusive)?;
+        lock_partition_tree(
+            context,
+            &bound.table_name,
+            RelationLockMode::AccessExclusive,
+        )?;
     }
-    Ok(bound.map(|binding| binding.value))
+    Ok(bound)
+}
+
+/// Descendant and owning-constraint operations retain an incarnation even if another command renames it while they wait.
+pub fn table_indexes(
+    context: &IndexRegistryContext<'_>,
+    tables: &[String],
+    mode: RelationLockMode,
+) -> StorageBackendResult<()> {
+    let catalog = context.identities.catalog.current_catalog_snapshot();
+    let identities = catalog
+        .catalog_indexes()
+        .filter(|row| tables.contains(&row.table_name))
+        .map(|row| {
+            index_definition(row)?
+                .catalog
+                .map(|catalog| catalog.identity.object_id)
+                .ok_or_else(|| invalid("table index has no catalog identity"))
+        })
+        .collect::<StorageBackendResult<BTreeSet<_>>>()?;
+    for identity in identities {
+        index_identity(context, identity, mode)?;
+    }
+    Ok(())
+}
+
+/// Retain an index incarnation even if another command renames it while the caller waits.
+pub fn index_identity(
+    context: &IndexRegistryContext<'_>,
+    identity: [u8; 16],
+    mode: RelationLockMode,
+) -> StorageBackendResult<Option<CatalogIndexRow>> {
+    bind_relation(
+        context.locks,
+        mode,
+        false,
+        || {
+            let catalog = context.identities.catalog.current_catalog_snapshot();
+            for row in catalog.catalog_indexes() {
+                let definition = index_definition(row).map_err(|error| {
+                    uqa_sql::catalog::errors::storage_error("index binding", &error)
+                })?;
+                if definition
+                    .catalog
+                    .is_some_and(|catalog| catalog.identity.object_id == identity)
+                {
+                    return Ok(Some(RelationBinding {
+                        name: row.relation.qualified_name(),
+                        object_id: Some(identity),
+                        value: row.clone(),
+                    }));
+                }
+            }
+            Ok(None)
+        },
+        |_| Ok(()),
+    )
+    .map(|binding| binding.map(|binding| binding.value))
+    .map_err(storage_error)
 }
 
 fn lock_partition_tree(

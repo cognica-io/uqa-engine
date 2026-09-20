@@ -48,6 +48,11 @@ impl TableRemovalContext<'_> {
         cascade: bool,
     ) -> StorageBackendResult<()> {
         let canonical_names = self.canonical_hierarchy_drop_targets(names, cascade)?;
+        crate::schema::indexes::registry::binding::table_indexes(
+            &self.indexes,
+            &canonical_names,
+            crate::row_locks::RelationLockMode::AccessExclusive,
+        )?;
         crate::routines::removal::drop_relation_routine_dependents(
             &self.routines,
             &canonical_names,

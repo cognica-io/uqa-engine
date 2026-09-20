@@ -12,6 +12,7 @@ use super::{
     TableState, VectorIndex,
 };
 use crate::{VectorIndexOpenMode, VectorIndexSpec};
+use uqa_execution::schema::indexes::constraint_names::KeyConstraintNames;
 
 impl Engine {
     pub(super) fn restore_from_catalog(
@@ -36,9 +37,10 @@ impl Engine {
             &self.durable.roles.read(),
             mode.allows_migration(),
         )?;
+        let names = KeyConstraintNames::load(catalog)?;
         for (schema, security) in schemas {
             let relation = schema.relation.clone();
-            let table = Self::load_session_table(catalog, backend, schema, security)?;
+            let table = Self::load_session_table(catalog, backend, schema, security, &names)?;
             self.storage.tables.write().insert(relation, table);
         }
         self.synchronize_partition_identity_watermarks()?;
@@ -124,6 +126,7 @@ impl Engine {
         backend: &dyn PersistentStorageBackend,
         schema: TableSchema,
         security: crate::state::BoundTableSecurity,
+        names: &KeyConstraintNames,
     ) -> StorageBackendResult<Arc<TableState>> {
         let table_name = schema.relation.qualified_name();
         let analyzer: Analyzer = serde_json::from_str(&schema.analyzer_json)?;
@@ -147,11 +150,7 @@ impl Engine {
         } else {
             serde_json::from_str(&schema.columns_json)?
         };
-        let constraints: uqa_sql::ast::TableConstraintSet = if schema.constraints_json.is_empty() {
-            uqa_sql::ast::TableConstraintSet::default()
-        } else {
-            serde_json::from_str(&schema.constraints_json)?
-        };
+        let constraints = names.decode(&schema)?;
         uqa_sql::schema::constraint_metadata::identity::validate_not_null_identities(&columns)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         uqa_sql::schema::constraint_metadata::identity::foreign_keys::validate(

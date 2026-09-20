@@ -440,6 +440,12 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                     statement.clone(),
                 )
             }
+            CommandPlan::RenameIndex(statement) => {
+                crate::schema::table_alteration::entry::run_rename_index(
+                    &self.context.schemas.inputs.table_alter_entry_context(),
+                    statement,
+                )
+            }
             CommandPlan::Insert(plan) => self.execute_insert(plan),
             CommandPlan::Update(plan) => self.execute_update(plan),
             CommandPlan::Delete(plan) => self.execute_delete(plan),

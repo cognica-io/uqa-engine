@@ -27,6 +27,21 @@ pub(super) fn bind_removals(
         for row in super::super::registry::lifecycle::descendants(&rows, &root.relation)
             .map_err(|error| ddl_storage_error("DROP INDEX ancestry", error))?
         {
+            let identity = crate::catalog::index::index_definition(&row)
+                .map_err(|error| ddl_storage_error("DROP INDEX identity", error))?
+                .catalog
+                .ok_or_else(|| SQLError::Internal("index has no catalog identity".into()))?
+                .identity
+                .object_id;
+            let Some(row) = super::super::registry::binding::index_identity(
+                &context.constraints.publication.indexes,
+                identity,
+                crate::row_locks::RelationLockMode::AccessExclusive,
+            )
+            .map_err(|error| ddl_storage_error("DROP INDEX descendant", error))?
+            else {
+                continue;
+            };
             if row.relation != root.relation
                 && crate::catalog::index::index_definition(&row)
                     .map_err(|error| ddl_storage_error("DROP INDEX owner", error))?

@@ -518,6 +518,7 @@ pub enum Statement {
     CreateTable(CreateTable),
     CreateTableIfNotExists(DeferredCreateTable),
     CreateIndex(CreateIndex),
+    RenameIndex(RenameIndexStmt),
     Insert(InsertStmt),
     /// `SelectStmt` is the largest variant by far (CTEs + set-ops + n-ary
     /// expression trees), so we box it to keep the enum's stack footprint

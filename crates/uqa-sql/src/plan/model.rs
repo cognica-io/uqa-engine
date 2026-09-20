@@ -512,6 +512,7 @@ pub enum CommandPlan {
     CreateTable(Box<crate::ast::CreateTable>),
     CreateTableIfNotExists(crate::ast::DeferredCreateTable),
     CreateIndex(crate::ast::CreateIndex),
+    RenameIndex(crate::ast::RenameIndexStmt),
     Insert(Box<InsertPlan>),
     Update(Box<UpdatePlan>),
     Delete(Box<DeletePlan>),

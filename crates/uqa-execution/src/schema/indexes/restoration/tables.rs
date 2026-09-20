@@ -22,7 +22,10 @@ pub(super) struct Tables {
 }
 
 impl Tables {
-    pub fn load(storage: &dyn CatalogFacade) -> StorageBackendResult<Self> {
+    pub fn load(
+        storage: &dyn CatalogFacade,
+        names: &crate::schema::indexes::constraint_names::KeyConstraintNames,
+    ) -> StorageBackendResult<Self> {
         let rows = storage
             .load_tables()?
             .into_iter()
@@ -35,11 +38,7 @@ impl Tables {
             } else {
                 serde_json::from_str(&row.columns_json)?
             };
-            let constraints = if row.constraints_json.is_empty() {
-                TableConstraintSet::default()
-            } else {
-                serde_json::from_str(&row.constraints_json)?
-            };
+            let constraints = names.decode(row)?;
             declarations.insert(name.clone(), (columns, constraints));
         }
         Ok(Self {

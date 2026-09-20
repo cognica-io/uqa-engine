@@ -157,6 +157,7 @@ pub(super) fn optimize_command(
         | CommandPlan::CreateTable(_)
         | CommandPlan::CreateTableIfNotExists(_)
         | CommandPlan::CreateIndex(_)
+        | CommandPlan::RenameIndex(_)
         | CommandPlan::Drop(_)
         | CommandPlan::AlterTable(_)
         | CommandPlan::AlterForeignTable(_)

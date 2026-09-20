@@ -51,17 +51,14 @@ pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBacken
         .map_err(|error| StorageBackendError::backend("constraint identity", error))?;
         register_identities(columns, constraints, &mut identities, &mut oids)
     };
+    let names = crate::schema::indexes::constraint_names::KeyConstraintNames::load(catalog)?;
     for row in catalog.load_tables()? {
         let columns = if row.columns_json.is_empty() {
             Vec::new()
         } else {
             serde_json::from_str(&row.columns_json)?
         };
-        let constraints = if row.constraints_json.is_empty() {
-            uqa_sql::ast::TableConstraintSet::default()
-        } else {
-            serde_json::from_str(&row.constraints_json)?
-        };
+        let constraints = names.decode(&row)?;
         validate(&columns, &constraints)?;
     }
     for row in catalog.load_foreign_tables()? {
@@ -298,17 +295,14 @@ fn load_constraint_metadata_migrations(
     address_legacy: bool,
 ) -> StorageBackendResult<Vec<ConstraintMetadataMigration>> {
     let mut migrations = Vec::new();
+    let names = crate::schema::indexes::constraint_names::KeyConstraintNames::load(catalog)?;
     for schema in catalog.load_tables()? {
         let mut columns = if schema.columns_json.is_empty() {
             Vec::new()
         } else {
             serde_json::from_str(&schema.columns_json)?
         };
-        let mut constraints = if schema.constraints_json.is_empty() {
-            uqa_sql::ast::TableConstraintSet::default()
-        } else {
-            serde_json::from_str(&schema.constraints_json)?
-        };
+        let mut constraints = names.decode(&schema)?;
         let dispatches_changed =
             uqa_sql::schema::dependencies::rewrites::upgrade_legacy_schema_function_dispatches(
                 &mut columns,
@@ -434,12 +428,13 @@ fn save_constraint_metadata_migrations(
     catalog: &dyn CatalogFacade,
     migrations: Vec<ConstraintMetadataMigration>,
 ) -> StorageBackendResult<()> {
+    let names = crate::schema::indexes::constraint_names::KeyConstraintNames::load(catalog)?;
     for mut migration in migrations {
         if !migration.changed {
             continue;
         }
         migration.schema.columns_json = serde_json::to_string(&migration.columns)?;
-        migration.schema.constraints_json = serde_json::to_string(&migration.constraints)?;
+        migration.schema.constraints_json = names.encode(&migration.constraints)?;
         catalog.save_table(&migration.schema)?;
     }
     Ok(())

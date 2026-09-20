@@ -56,6 +56,17 @@ pub fn bind_relation<T>(
     session: &dyn RelationLockSession,
     mode: RelationLockMode,
     nowait: bool,
+    resolve: impl FnMut() -> Result<Option<RelationBinding<T>>, SQLError>,
+    validate: impl FnMut(&RelationBinding<T>) -> Result<(), SQLError>,
+) -> Result<Option<RelationBinding<T>>, SQLError> {
+    bind_relation_with_mode(session, |_| mode, nowait, resolve, validate)
+}
+
+/// Select the lock from the resolved relation kind and repeat that choice if a wait replaces the target.
+pub fn bind_relation_with_mode<T>(
+    session: &dyn RelationLockSession,
+    mode: impl Fn(&RelationBinding<T>) -> RelationLockMode,
+    nowait: bool,
     mut resolve: impl FnMut() -> Result<Option<RelationBinding<T>>, SQLError>,
     mut validate: impl FnMut(&RelationBinding<T>) -> Result<(), SQLError>,
 ) -> Result<Option<RelationBinding<T>>, SQLError> {
@@ -64,12 +75,16 @@ pub fn bind_relation<T>(
             return Ok(None);
         };
         validate(&initial)?;
-        let guard = acquire_relation(session, &initial.name, mode, nowait)?;
+        let lock_mode = mode(&initial);
+        let guard = acquire_relation(session, &initial.name, lock_mode, nowait)?;
         session.refresh_after_wait()?;
         let Some(current) = resolve()? else {
             return Ok(None);
         };
-        if initial.name == current.name && initial.object_id == current.object_id {
+        if initial.name == current.name
+            && initial.object_id == current.object_id
+            && lock_mode == mode(&current)
+        {
             validate(&current)?;
             guard.retain();
             return Ok(Some(current));

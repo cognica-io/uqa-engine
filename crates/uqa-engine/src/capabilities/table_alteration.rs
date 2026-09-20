@@ -51,6 +51,7 @@ impl Engine {
             views: self,
             foreign_tables: self,
             sequences: self,
+            indexes: self,
             notices: self.query_runtime_view().notices,
         }
     }

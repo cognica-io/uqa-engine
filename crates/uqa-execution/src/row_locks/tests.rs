@@ -25,6 +25,48 @@ fn wait_until_registered(manager: &RowLockManager, session_id: u64) {
 }
 
 #[test]
+fn index_incarnations_keep_stable_locks_and_release_at_savepoints() {
+    let manager = RowLockManager::new();
+    let peer = RowLockManager::new();
+    let table = manager.table_key("public.idx");
+    let index = manager.index_key([1; 16]);
+    let replacement = manager.index_key([2; 16]);
+    let peer_index = peer.index_key([1; 16]);
+    assert_eq!(
+        manager.relation_bytes(index),
+        peer.relation_bytes(peer_index)
+    );
+    assert_ne!(manager.relation_bytes(index), manager.relation_bytes(table));
+    assert_ne!(
+        manager.relation_bytes(index),
+        manager.relation_bytes(replacement)
+    );
+    let cancel = uqa_core::CancellationToken::new();
+    assert!(manager
+        .try_acquire_relation(1, index, RelationLockMode::ShareUpdateExclusive, 1, &cancel)
+        .unwrap());
+    assert!(!manager
+        .try_acquire_relation(2, index, RelationLockMode::ShareUpdateExclusive, 1, &cancel)
+        .unwrap());
+    assert!(manager
+        .try_acquire_relation(
+            2,
+            replacement,
+            RelationLockMode::AccessExclusive,
+            1,
+            &cancel
+        )
+        .unwrap());
+    assert!(manager
+        .try_acquire_relation(2, table, RelationLockMode::AccessExclusive, 1, &cancel)
+        .unwrap());
+    manager.release_mark_above(1, 0);
+    assert!(manager
+        .try_acquire_relation(2, index, RelationLockMode::AccessExclusive, 1, &cancel)
+        .unwrap());
+}
+
+#[test]
 fn scoring_parameter_names_have_stable_independent_transaction_lock_identities() {
     let manager = RowLockManager::new();
     let peer = RowLockManager::new();
