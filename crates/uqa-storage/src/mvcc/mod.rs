@@ -56,8 +56,9 @@ pub use retention::{
     SnapshotRegistry,
 };
 pub use serializable::{
-    LocalSerializableLeases, SafeSnapshot, SerializableGraph, SerializableKeySpace,
-    SerializableParticipant, SerializablePredicate, SerializablePublication,
+    admit_serializable, LocalSerializableLeases, LocalSerializableState, SafeSnapshot,
+    SerializableCoordinator, SerializableGraph, SerializableKeySpace, SerializableLeases,
+    SerializableOperation, SerializableParticipant, SerializablePredicate, SerializablePublication,
     SerializableTransactionId, SerializableWriteMark,
 };
 pub use session::{VersionedKeyValueStore, VersionedSessionOptions};

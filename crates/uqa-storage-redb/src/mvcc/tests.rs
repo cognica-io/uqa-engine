@@ -19,6 +19,7 @@ mod metadata;
 mod migration;
 mod read;
 mod reclamation;
+mod serializable;
 
 #[derive(Clone, Debug, Default)]
 struct FaultBackend {

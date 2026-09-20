@@ -67,8 +67,11 @@ fn cloned_participants_survive_independent_owners_and_only_dead_handles_are_recl
     for mode in 0..5 {
         let (_directory, a, b) = owners(mode);
         let control = control();
-        let (actor, view) = a
-            .admit_serializable(false, &control, || a.snapshot(&control))
+        let provider: &dyn VersionedPersistence = &a;
+        let (actor, view) = provider
+            .serializable_coordinator()
+            .unwrap()
+            .admit_serializable_snapshot(false, &control)
             .unwrap();
         let id = actor.id();
         let nested = actor.clone();

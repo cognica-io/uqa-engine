@@ -213,6 +213,10 @@ impl SQLiteRecordStore {
 }
 
 impl VersionedPersistence for SQLiteRecordStore {
+    fn serializable_coordinator(&self) -> Option<&dyn uqa_storage::mvcc::SerializableCoordinator> {
+        Some(self)
+    }
+
     fn identifier_watermark(
         &self,
         namespace: &[u8],

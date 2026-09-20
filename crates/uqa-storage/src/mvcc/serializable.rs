@@ -8,6 +8,7 @@
 
 mod checkpoint;
 mod conflicts;
+mod coordinator;
 mod identity;
 mod liveness;
 mod observations;
@@ -21,6 +22,10 @@ use uqa_core::memory::{BudgetedVec, MemoryBudget};
 use super::{DatabaseId, VersionError, VersionResult};
 use crate::read_control::StorageReadControl;
 
+pub use coordinator::{
+    admit_serializable, LocalSerializableState, SerializableCoordinator, SerializableLeases,
+    SerializableOperation,
+};
 pub use identity::SerializableTransactionId;
 pub use liveness::{LocalSerializableLeases, SerializableParticipant};
 pub use observations::SerializableWriteMark;

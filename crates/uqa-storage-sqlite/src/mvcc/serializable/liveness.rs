@@ -12,8 +12,9 @@ use std::sync::Arc;
 use uqa_core::memory::BudgetedVec;
 use uqa_storage::{
     mvcc::{
-        LocalSerializableLeases, SerializableGraph, SerializableParticipant,
-        SerializableTransactionId, VersionResult, VersionedPersistence,
+        admit_serializable, LocalSerializableLeases, SerializableCoordinator, SerializableGraph,
+        SerializableLeases, SerializableOperation, SerializableParticipant,
+        SerializableTransactionId, VersionResult,
     },
     read_control::{CancellationToken, StorageReadControl},
 };
@@ -78,13 +79,20 @@ impl Liveness {
             store.connection.serializable_local_leases(control),
         ))
     }
+}
 
-    fn is_alive(&self, id: SerializableTransactionId) -> bool {
-        match self {
+impl SerializableLeases for Liveness {
+    fn is_alive(
+        &self,
+        id: SerializableTransactionId,
+        control: &StorageReadControl,
+    ) -> VersionResult<bool> {
+        control.cancellation().check()?;
+        Ok(match self {
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             Self::Native { live, .. } => live.binary_search(&id.allocation()).is_ok(),
             Self::Local(leases) => leases.is_alive(id),
-        }
+        })
     }
 
     fn retain(
@@ -118,49 +126,28 @@ impl SQLiteRecordStore {
         control: &StorageReadControl,
         capture: impl FnOnce() -> VersionResult<T>,
     ) -> VersionResult<(SerializableParticipant, T)> {
-        let mut held = self.serializable_admission(control)?;
-        let liveness = Liveness::open(self, held.graph(), control)?;
-        let result = (|| {
-            self.recover_participants(held.graph_mut(), &liveness, control)?;
-            let participant = held
-                .graph_mut()
-                .admit_with_lease(read_only, control, |id| liveness.retain(id, control))?;
-            let view = capture()?;
-            Ok((participant, view))
-        })();
-        // A later cancellation/error cannot discard earlier confirmed physical outcomes. Serialization itself allocates no second encoded buffer; no SQL/callback is retried.
-        let finish = StorageReadControl::new(control.memory(), &CancellationToken::new());
-        held.persist(&finish)?;
-        result
+        admit_serializable(self, read_only, control, capture)
     }
 
     /// Reconcile receipts and retire dead retained participants without admitting a new one. Untracked legacy actors remain manually owned. A missing prepared receipt is an error, not evidence of abort.
     pub fn recover_serializable(&self, control: &StorageReadControl) -> VersionResult<()> {
+        self.recover_serializable_participants(control)
+    }
+}
+
+impl SerializableCoordinator for SQLiteRecordStore {
+    fn with_serializable_admission(
+        &self,
+        control: &StorageReadControl,
+        operation: &mut SerializableOperation<'_>,
+    ) -> VersionResult<()> {
         let mut held = self.serializable_admission(control)?;
         let liveness = Liveness::open(self, held.graph(), control)?;
-        let result = self.recover_participants(held.graph_mut(), &liveness, control);
+        let result = operation(held.graph_mut(), &liveness);
+        // A later cancellation/error cannot discard earlier confirmed physical outcomes. Serialization itself allocates no second encoded buffer; no SQL/callback is retried.
         let finish = StorageReadControl::new(control.memory(), &CancellationToken::new());
         held.persist(&finish)?;
         result
-    }
-
-    fn recover_participants(
-        &self,
-        graph: &mut SerializableGraph,
-        liveness: &Liveness,
-        control: &StorageReadControl,
-    ) -> VersionResult<()> {
-        graph.reconcile_publications(control, |transaction| {
-            self.commit_status(transaction, control)
-        })?;
-        graph.recover_abandoned(
-            control,
-            |id| Ok(liveness.is_alive(id)),
-            |transaction| self.abort(transaction, control),
-        )?;
-        graph.reclaim();
-        liveness.reclaim();
-        Ok(())
     }
 }
 

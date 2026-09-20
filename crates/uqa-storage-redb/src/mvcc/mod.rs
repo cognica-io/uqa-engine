@@ -12,6 +12,7 @@ mod migration;
 mod read;
 mod reclamation;
 mod retention;
+mod serializable;
 #[cfg(test)]
 mod tests;
 
@@ -44,6 +45,7 @@ pub struct RedbRecordStore {
     database: Arc<Database>,
     identity: DatabaseId,
     snapshots: Arc<uqa_storage::mvcc::SnapshotRegistry>,
+    serializable: Arc<uqa_storage::mvcc::LocalSerializableState>,
 }
 
 impl RedbRecordStore {
@@ -140,10 +142,12 @@ impl RedbRecordStore {
         };
         transaction.commit().map_err(redb_error)?;
         let snapshots = retention::registry(&database, identity)?;
+        let serializable = serializable::registry(&database, identity)?;
         Ok(Self {
             database,
             identity,
             snapshots,
+            serializable,
         })
     }
 
@@ -236,6 +240,10 @@ impl RedbRecordStore {
 }
 
 impl VersionedPersistence for RedbRecordStore {
+    fn serializable_coordinator(&self) -> Option<&dyn uqa_storage::mvcc::SerializableCoordinator> {
+        Some(self)
+    }
+
     fn identifier_watermark(
         &self,
         namespace: &[u8],

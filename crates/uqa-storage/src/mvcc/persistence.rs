@@ -127,6 +127,11 @@ pub type CommitResult = Result<CommitReceipt, CommitFailure>;
 pub trait VersionedPersistence: Send + Sync {
     fn database_id(&self) -> DatabaseId;
 
+    /// Shared participant admission and recovery for this exact physical database. Wrappers must forward the capability; its presence alone does not enable public SQL SSI.
+    fn serializable_coordinator(&self) -> Option<&dyn super::SerializableCoordinator> {
+        None
+    }
+
     /// Read the latest autonomous watermark in one physical read transaction. Absence must remain absent; this must not acquire write admission, create records or change allocation state. Validate the database incarnation and retain the caller's resource and cancellation controls.
     fn identifier_watermark(
         &self,
