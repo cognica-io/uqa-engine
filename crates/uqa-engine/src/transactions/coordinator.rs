@@ -126,8 +126,18 @@ impl Engine {
             })
     }
 
-    /// Durable identity of an unresolved commit. Only commit resolution or whole-transaction rollback may proceed; callers must not replay the transaction body.
+    /// Physical write identity of an unresolved commit. Read-only serializable completion has no physical receipt; use `pending_transaction_completion` to inspect either kind. Callers must not replay transaction bodies.
     pub fn pending_commit(&self) -> Option<uqa_storage::mvcc::StorageTransactionId> {
+        match self.pending_transaction_completion()? {
+            uqa_storage::mvcc::TransactionOutcomeId::Records(transaction) => Some(transaction),
+            uqa_storage::mvcc::TransactionOutcomeId::Serializable(_) => None,
+        }
+    }
+
+    /// Retained physical or logical completion identity. Only commit resolution or whole-transaction rollback may proceed while this is present.
+    pub fn pending_transaction_completion(
+        &self,
+    ) -> Option<uqa_storage::mvcc::TransactionOutcomeId> {
         self.session.transactions.lock().last().and_then(|frame| {
             if let TransactionStatus::CommitPending(transaction) = frame.status {
                 Some(transaction)
@@ -513,9 +523,9 @@ impl Engine {
         }
     }
     pub(super) fn storage_tx_error(action: &str, err: &StorageBackendError) -> SQLError {
-        use uqa_storage::mvcc::{CommitErrorOutcome, VersionError};
-        match err.commit_outcome() {
-            Some(CommitErrorOutcome::Aborted(transaction)) => {
+        use uqa_storage::mvcc::{TransactionOutcome, VersionError};
+        match err.transaction_outcome() {
+            Some(TransactionOutcome::Aborted(transaction)) => {
                 return SQLError::Routine {
                     sqlstate: "25000".into(),
                     message: format!(
@@ -523,10 +533,10 @@ impl Engine {
                     ),
                 };
             }
-            Some(CommitErrorOutcome::Indeterminate(transaction)) => {
+            Some(TransactionOutcome::Indeterminate(transaction)) => {
                 return Self::pending_commit_error(transaction, err);
             }
-            Some(CommitErrorOutcome::Committed(_)) => {
+            Some(TransactionOutcome::Committed(_)) => {
                 return SQLError::Internal(format!(
                     "{action} failed after storage committed: {err}"
                 ));
@@ -579,7 +589,7 @@ impl Engine {
     }
 
     pub(super) fn pending_commit_error(
-        transaction: uqa_storage::mvcc::StorageTransactionId,
+        transaction: uqa_storage::mvcc::TransactionOutcomeId,
         detail: impl std::fmt::Display,
     ) -> SQLError {
         SQLError::Routine {

@@ -5,6 +5,7 @@
 //
 
 mod refresh;
+mod serializable;
 
 use std::sync::Arc;
 
@@ -31,6 +32,7 @@ struct Savepoint {
     requirement_position: usize,
     committed: Arc<dyn CommittedRecordSnapshot>,
     changes: PrivateRecordChanges,
+    serializable: Option<crate::mvcc::SerializableWriteMark>,
 }
 
 pub(super) struct Transaction {
@@ -45,6 +47,8 @@ pub(super) struct Transaction {
     requirements: BudgetedVec<RecordRequirement>,
     outcome: Option<CommitErrorOutcome>,
     savepoints: BudgetedVec<Savepoint>,
+    serializable: Option<super::SerializableReadContext>,
+    completion: Option<crate::mvcc::TransactionOutcome>,
 }
 
 impl Transaction {
@@ -65,14 +69,16 @@ impl Transaction {
             requirements: BudgetedVec::new(control.memory()),
             outcome: None,
             savepoints: BudgetedVec::new(control.memory()),
+            serializable: None,
+            completion: None,
         })
     }
 
     pub(super) fn view(&self) -> VersionResult<MergedRecordSnapshot> {
-        Ok(MergedRecordSnapshot::new(
-            Arc::clone(&self.committed),
-            self.changes.snapshot()?,
-        ))
+        Ok(
+            MergedRecordSnapshot::new(Arc::clone(&self.committed), self.changes.snapshot()?)
+                .with_serializable(self.serializable.clone()),
+        )
     }
 
     pub(super) fn writable(&self) -> VersionResult<()> {
@@ -86,7 +92,7 @@ impl Transaction {
     }
 
     pub(super) fn unsealed(&self) -> VersionResult<()> {
-        if self.prepared.is_some() {
+        if self.prepared.is_some() || self.completion.is_some() {
             return Err(VersionError::TransactionSealed);
         }
         Ok(())
@@ -294,6 +300,7 @@ impl Transaction {
         owned.extend_from_slice(name.as_bytes())?;
         self.savepoints.reserve(1)?;
         let id = StorageSavepointId::allocate();
+        let serializable = self.serializable_mark(control)?;
         self.changes.savepoint(id)?;
         self.savepoints.push(Savepoint {
             name: owned,
@@ -303,6 +310,7 @@ impl Transaction {
             requirement_position: self.requirements.len(),
             committed: Arc::clone(&self.committed),
             changes: self.changes.share_owner(),
+            serializable,
         })?;
         Ok(())
     }
@@ -325,8 +333,29 @@ impl Transaction {
         Ok(())
     }
 
-    pub(super) fn rollback_to(&mut self, name: &str) -> VersionResult<()> {
+    pub(super) fn rollback_to(
+        &mut self,
+        name: &str,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
         let position = self.savepoint_position(name)?;
+        if let Some(context) = self.serializable.clone() {
+            let mark =
+                self.savepoints[position]
+                    .serializable
+                    .ok_or(VersionError::InvalidEncoding(
+                        "serializable savepoint has no write mark",
+                    ))?;
+            context.with_graph(control, |graph| {
+                graph.rollback_writes(mark)?;
+                self.restore_savepoint(position)
+            })
+        } else {
+            self.restore_savepoint(position)
+        }
+    }
+
+    fn restore_savepoint(&mut self, position: usize) -> VersionResult<()> {
         let savepoint = &self.savepoints[position];
         savepoint.changes.rollback_to_savepoint(savepoint.id)?;
         self.changes = savepoint.changes.share_owner();
@@ -341,7 +370,7 @@ impl Transaction {
         Ok(())
     }
 
-    pub(super) fn commit(
+    fn commit_records(
         &mut self,
         persistence: &dyn VersionedPersistence,
         control: &StorageReadControl,
@@ -353,6 +382,23 @@ impl Transaction {
             }
             None | Some(CommitErrorOutcome::Indeterminate(_)) => {}
         }
+        let Some(_) = self.seal_publication(persistence, control)? else {
+            return Ok(());
+        };
+        loop {
+            self.prepare_publication_effects(persistence, control)?;
+            if self.publish_records(persistence, control)? {
+                return Ok(());
+            }
+        }
+    }
+
+    /// Freeze the evaluated batch once and allocate only when records or validation effects require physical publication.
+    fn seal_publication(
+        &mut self,
+        persistence: &dyn VersionedPersistence,
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<StorageTransactionId>> {
         if self.prepared.is_none() {
             self.prepared = Some(self.prepare(control)?);
         }
@@ -362,52 +408,63 @@ impl Transaction {
             && prepared.vector.is_none()
             && !prepared.has_requirements()
         {
-            return Ok(());
+            return Ok(None);
         }
-        let allocation = if let Some(id) = self.allocation {
-            id
-        } else {
-            let id = persistence.allocate_transaction(control)?;
-            self.allocation = Some(id);
-            id
-        };
-        loop {
-            if let Err(error) = self.prepare_effects(persistence, control) {
-                return Err(self.retain_uncertain_outcome(allocation, error.into()));
+        if self.allocation.is_none() {
+            self.allocation = Some(persistence.allocate_transaction(control)?);
+        }
+        Ok(self.allocation)
+    }
+
+    fn prepare_publication_effects(
+        &mut self,
+        persistence: &dyn VersionedPersistence,
+        control: &StorageReadControl,
+    ) -> Result<(), CommitFailure> {
+        self.prepare_effects(persistence, control).map_err(|error| {
+            self.retain_uncertain_outcome(
+                self.allocation.expect("sealed publication"),
+                error.into(),
+            )
+        })
+    }
+
+    /// One physical attempt. False permits only re-preparation of derived effects after an authoritative snapshot rejection; no evaluated user changes are replayed.
+    fn publish_records(
+        &mut self,
+        persistence: &dyn VersionedPersistence,
+        control: &StorageReadControl,
+    ) -> Result<bool, CommitFailure> {
+        let allocation = self.allocation.expect("sealed publication");
+        let prepared = self
+            .materialized
+            .as_ref()
+            .or(self.prepared.as_ref())
+            .expect("prepared once");
+        match persistence.commit(allocation, prepared, control) {
+            Ok(receipt)
+                if receipt.transaction == allocation
+                    && receipt.fingerprint == prepared.fingerprint() =>
+            {
+                self.outcome = Some(CommitErrorOutcome::Committed(receipt));
+                Ok(true)
             }
-            let prepared = self
-                .materialized
-                .as_ref()
-                .or(self.prepared.as_ref())
-                .expect("prepared once");
-            match persistence.commit(allocation, prepared, control) {
-                Ok(receipt)
-                    if receipt.transaction == allocation
-                        && receipt.fingerprint == prepared.fingerprint() =>
-                {
-                    self.outcome = Some(CommitErrorOutcome::Committed(receipt));
-                    return Ok(());
-                }
-                Ok(_) => {
-                    self.outcome = Some(CommitErrorOutcome::Indeterminate(allocation));
-                    return Err(self.retain_uncertain_outcome(
-                        allocation,
-                        VersionError::CommitMismatch.into(),
-                    ));
-                }
-                Err(CommitFailure::Rejected(VersionError::CommitSnapshotChanged {
-                    expected,
-                    actual,
-                })) if prepared.resolved_at == Some(expected) && expected != actual => {
-                    // Admission proved the receipt is still pending. Re-evaluate only typed storage effects; the original user changes and fingerprint stay sealed.
-                    self.materialized = None;
-                }
-                Err(CommitFailure::Rejected(VersionError::TransactionFinished)) => {
-                    self.outcome = Some(CommitErrorOutcome::Aborted(allocation));
-                    return Err(VersionError::AlreadyAborted(allocation).into());
-                }
-                Err(error) => return Err(self.retain_uncertain_outcome(allocation, error)),
+            Ok(_) => {
+                self.outcome = Some(CommitErrorOutcome::Indeterminate(allocation));
+                Err(self.retain_uncertain_outcome(allocation, VersionError::CommitMismatch.into()))
             }
+            Err(CommitFailure::Rejected(VersionError::CommitSnapshotChanged {
+                expected,
+                actual,
+            })) if prepared.resolved_at == Some(expected) && expected != actual => {
+                self.materialized = None;
+                Ok(false)
+            }
+            Err(CommitFailure::Rejected(VersionError::TransactionFinished)) => {
+                self.outcome = Some(CommitErrorOutcome::Aborted(allocation));
+                Err(VersionError::AlreadyAborted(allocation).into())
+            }
+            Err(error) => Err(self.retain_uncertain_outcome(allocation, error)),
         }
     }
 
@@ -465,7 +522,7 @@ impl Transaction {
         }
     }
 
-    pub(super) fn abort(
+    fn abort_records(
         &mut self,
         persistence: &dyn VersionedPersistence,
         control: &StorageReadControl,

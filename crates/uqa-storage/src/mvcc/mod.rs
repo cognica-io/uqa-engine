@@ -19,6 +19,7 @@ mod key;
 mod markers;
 mod memory;
 mod occurrence;
+mod outcome;
 mod overlay;
 mod persistence;
 mod projection;
@@ -44,6 +45,7 @@ pub use memory::{MemoryRecordSnapshot, MemoryVersionStore};
 pub use occurrence::{
     OccurrenceRecordKind, OccurrenceRecordLayout, OccurrenceRecordValue, OccurrenceRelatedKey,
 };
+pub use outcome::{TransactionCompletionError, TransactionOutcome, TransactionOutcomeId};
 pub use overlay::{
     PrivateRecordChanges, PrivateRecordKey, PrivateRecordRevision, PrivateRecordSnapshot,
 };
@@ -61,7 +63,7 @@ pub use serializable::{
     SerializableOperation, SerializableParticipant, SerializablePredicate, SerializablePublication,
     SerializableStatus, SerializableTransactionId, SerializableWriteMark,
 };
-pub use session::{VersionedKeyValueStore, VersionedSessionOptions};
+pub use session::{SerializableReadContext, VersionedKeyValueStore, VersionedSessionOptions};
 pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};
 pub use view::{
     retain_record_snapshot, BorrowedRecord, CommittedRecordSnapshot, MergedRecordSnapshot,

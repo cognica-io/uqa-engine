@@ -13,7 +13,7 @@ use super::{
 };
 use crate::notifications::NotificationCommitGuard;
 use uqa_execution::row_locks::{temporary_roles::TemporaryRolePublication, RowChangePublication};
-use uqa_storage::mvcc::CommitErrorOutcome;
+use uqa_storage::mvcc::TransactionOutcome;
 
 // Drop temporary additions before the notification and row-publication guards are released.
 struct TransactionPublication<'a> {
@@ -375,19 +375,20 @@ impl Engine {
         };
         if let Err(error) = rollback_result {
             if storage_savepoint.is_none() {
-                if let Some(CommitErrorOutcome::Committed(receipt)) = error.commit_outcome() {
+                if let Some(TransactionOutcome::Committed(transaction)) =
+                    error.transaction_outcome()
+                {
                     stack
                         .last_mut()
                         .ok_or_else(|| {
                             SQLError::Internal("commit receipt without a transaction frame".into())
                         })?
-                        .status = TransactionStatus::CommitPending(receipt.transaction);
+                        .status = TransactionStatus::CommitPending(transaction);
                     self.commit_transaction_frame(stack, false)?;
                     return Err(SQLError::Routine {
                         sqlstate: "25000".into(),
                         message: format!(
-                            "transaction {:?} already committed; ROLLBACK cannot undo it",
-                            receipt.transaction
+                            "transaction {transaction:?} already committed; ROLLBACK cannot undo it"
                         ),
                     });
                 }
@@ -412,10 +413,12 @@ impl Engine {
         if frame.storage_savepoint.is_some() {
             return None;
         }
-        let transaction = match error.commit_outcome() {
-            Some(CommitErrorOutcome::Indeterminate(transaction)) => transaction,
-            Some(CommitErrorOutcome::Committed(receipt)) => receipt.transaction,
-            Some(CommitErrorOutcome::Aborted(_)) => {
+        let transaction = match error.transaction_outcome() {
+            Some(
+                TransactionOutcome::Indeterminate(transaction)
+                | TransactionOutcome::Committed(transaction),
+            ) => transaction,
+            Some(TransactionOutcome::Aborted(_)) => {
                 frame.status = TransactionStatus::Failed;
                 return None;
             }

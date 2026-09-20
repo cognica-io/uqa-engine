@@ -68,7 +68,7 @@ impl<'engine> TransactionScope<'engine> {
                 if self.state == TransactionScopeState::Finished {
                     return Err(commit_error);
                 }
-                if self.engine.pending_commit().is_some() {
+                if self.engine.pending_transaction_completion().is_some() {
                     self.state = TransactionScopeState::AwaitingResolution;
                     return Err(commit_error);
                 }

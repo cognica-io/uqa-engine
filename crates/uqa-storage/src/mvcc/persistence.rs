@@ -87,23 +87,35 @@ impl StorageBackendError {
     pub fn commit_outcome(&self) -> Option<CommitErrorOutcome> {
         let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(self);
         while let Some(error) = cause {
-            if let Some(CommitFailure::Indeterminate { transaction, .. }) =
-                error.downcast_ref::<CommitFailure>()
+            if let Some(outcome) = error
+                .downcast_ref::<super::TransactionCompletionError>()
+                .and_then(|error| error.publication)
+                .or_else(|| error_commit_outcome(error))
             {
-                return Some(CommitErrorOutcome::Indeterminate(*transaction));
-            }
-            if let Some(VersionError::AlreadyCommitted(receipt)) =
-                error.downcast_ref::<VersionError>()
-            {
-                return Some(CommitErrorOutcome::Committed(*receipt));
-            }
-            if let Some(VersionError::AlreadyAborted(transaction)) =
-                error.downcast_ref::<VersionError>()
-            {
-                return Some(CommitErrorOutcome::Aborted(*transaction));
+                return Some(outcome);
             }
             cause = error.source();
         }
+        None
+    }
+}
+
+pub(super) fn error_commit_outcome(
+    error: &(dyn std::error::Error + 'static),
+) -> Option<CommitErrorOutcome> {
+    if let Some(CommitFailure::Indeterminate { transaction, .. }) =
+        error.downcast_ref::<CommitFailure>()
+    {
+        Some(CommitErrorOutcome::Indeterminate(*transaction))
+    } else if let Some(VersionError::AlreadyCommitted(receipt)) =
+        error.downcast_ref::<VersionError>()
+    {
+        Some(CommitErrorOutcome::Committed(*receipt))
+    } else if let Some(VersionError::AlreadyAborted(transaction)) =
+        error.downcast_ref::<VersionError>()
+    {
+        Some(CommitErrorOutcome::Aborted(*transaction))
+    } else {
         None
     }
 }

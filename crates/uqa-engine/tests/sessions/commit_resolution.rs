@@ -8,6 +8,8 @@
 
 #[path = "commit_resolution/conflicts.rs"]
 mod conflicts;
+#[path = "commit_resolution/serializable.rs"]
+mod serializable;
 
 use std::sync::{
     atomic::{AtomicU8, AtomicUsize, Ordering},
@@ -67,6 +69,7 @@ struct FaultPersistence {
     inner: Arc<dyn VersionedPersistence>,
     fault: AtomicU8,
     identifier_fault: AtomicU8,
+    serializable_fault: AtomicU8,
     foreground: std::thread::ThreadId,
     attempt: Mutex<Option<StorageTransactionId>>,
     aborts: AtomicUsize,
@@ -93,6 +96,9 @@ impl FaultPersistence {
 }
 
 impl VersionedPersistence for FaultPersistence {
+    fn serializable_coordinator(&self) -> Option<&dyn uqa_storage::mvcc::SerializableCoordinator> {
+        Some(self)
+    }
     fn identifier_watermark(
         &self,
         namespace: &[u8],
@@ -241,6 +247,7 @@ fn fixtures() -> (tempfile::TempDir, Vec<Arc<FaultPersistence>>) {
                     inner,
                     fault: AtomicU8::new(HEALTHY),
                     identifier_fault: AtomicU8::new(HEALTHY),
+                    serializable_fault: AtomicU8::new(HEALTHY),
                     foreground: std::thread::current().id(),
                     attempt: Mutex::new(None),
                     aborts: AtomicUsize::new(0),

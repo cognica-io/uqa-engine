@@ -127,12 +127,12 @@ The engine exposes explicit transaction primitives:
 
 - `begin`, `commit`, and `rollback`
 - `savepoint`, `release_savepoint`, and `rollback_to_savepoint`
-- `transaction_failed` and `pending_commit` for failed or unresolved transaction state
+- `transaction_failed` and `pending_transaction_completion` for failed or unresolved transaction state; `pending_commit` exposes only a physical write identity
 - SQL forms such as `BEGIN`, `SAVEPOINT`, and `COMMIT`
 
 `Engine::transaction` executes a Rust closure as one transaction. An error or panic from the closure rolls the transaction back; a successful closure attempts to commit it.
 
-The development SQLite Key/Value and redb providers retain uncertain commits. A commit whose durable result cannot be confirmed returns SQLSTATE `08007` and leaves `Engine::pending_commit()` set to its durable storage transaction identity. Ordinary SQL, nested BEGIN and savepoint commands are blocked until the caller resolves the attempt with `commit`/`COMMIT` or requests whole-transaction rollback. `transaction_failed()` is false for an unresolved commit; its separate `pending_commit()` state must be checked before resuming work.
+Development versioned provider sessions retain uncertain completion. A commit whose durable result cannot be confirmed returns SQLSTATE `08007` and leaves `Engine::pending_transaction_completion()` set to `TransactionOutcomeId::Records` for a physical publication or `TransactionOutcomeId::Serializable` for logical SSI completion without a write receipt. `pending_commit()` continues to expose only a physical write identity; its absence does not establish that logical completion finished. Ordinary SQL, nested BEGIN and savepoint commands are blocked until the caller resolves the attempt with `commit`/`COMMIT` or requests whole-transaction rollback. `transaction_failed()` is false for unresolved completion; check `pending_transaction_completion()` before resuming work. The logical identity supports the common SSI session boundary; automatic public SQL SSI admission and predicate integration remain unfinished.
 
 Repeating COMMIT resolves the same evaluated storage batch and does not rerun the Rust callback, deferred triggers, held-cursor materialization or temporary-table COMMIT actions. If rollback discovers a matching committed receipt, Engine finishes that commit's session publication and returns `25000` explaining that rollback could not undo it. If a later COMMIT confirms a recorded abort, Engine restores the rolled-back session state and returns `25000` instead of a successful COMMIT.
 

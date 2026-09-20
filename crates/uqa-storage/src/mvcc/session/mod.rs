@@ -8,6 +8,8 @@
 
 mod batch;
 mod read;
+mod serializable;
+pub use serializable::SerializableReadContext;
 mod transaction;
 
 use std::sync::Arc;
@@ -181,6 +183,45 @@ impl VersionedKeyValueStore {
             .and_then(|transaction| transaction.allocation)
     }
 
+    /// Identify a retained physical attempt or uncertain logical completion, including an empty/read-only SSI transaction without a write receipt. Completion retries never replay evaluated application work.
+    pub fn pending_transaction_completion(&self) -> Option<super::TransactionOutcomeId> {
+        self.active
+            .lock()
+            .as_ref()
+            .and_then(Transaction::pending_completion)
+    }
+
+    /// Establish the original SSI participant and fixed record boundary before this transaction's first logical access. SQL must call this at its first snapshot-bearing statement, then supply logical observations for every participating access path. Capability presence alone does not enable SQL SSI or fence legacy publishers.
+    pub fn establish_serializable_snapshot(&self) -> StorageBackendResult<SerializableReadContext> {
+        self.active
+            .lock()
+            .as_mut()
+            .ok_or_else(no_transaction)?
+            .establish_serializable(Arc::clone(&self.persistence), &self.write_control())
+            .map_err(VersionError::into_storage_error)
+    }
+
+    /// Register a logical write before staging its records. SQL statement/savepoint ownership must encompass both this observation and the evaluated mutation. Retained record readers expose only read observation capability.
+    pub fn observe_serializable_write(
+        &self,
+        predicate: super::SerializablePredicate<'_>,
+    ) -> StorageBackendResult<()> {
+        let mut active = self.active.lock();
+        let transaction = active.as_mut().ok_or_else(no_transaction)?;
+        transaction
+            .writable()
+            .map_err(VersionError::into_storage_error)?;
+        let context = transaction.serializable_context().ok_or_else(|| {
+            StorageBackendError::Other("no serializable participant in this session".into())
+        })?;
+        let control = self.write_control();
+        context
+            .with_graph(&control, |graph| {
+                graph.observe_write(context.id(), predicate, &control)
+            })
+            .map_err(VersionError::into_storage_error)
+    }
+
     fn begin(&self, read_only: bool) -> StorageBackendResult<()> {
         let mut active = self.active.lock();
         if active.is_some() {
@@ -222,8 +263,7 @@ impl VersionedKeyValueStore {
         active
             .as_mut()
             .expect("retained attempt")
-            .commit(&*self.persistence, &self.write_control())
-            .map_err(commit_error)?;
+            .commit(&*self.persistence, &self.write_control())?;
         *active = None;
         Ok(result)
     }
@@ -499,8 +539,7 @@ impl KeyValueStore for VersionedKeyValueStore {
         active
             .as_mut()
             .ok_or_else(no_transaction)?
-            .commit(&*self.persistence, &self.write_control())
-            .map_err(commit_error)?;
+            .commit(&*self.persistence, &self.write_control())?;
         *active = None;
         Ok(())
     }
@@ -510,8 +549,7 @@ impl KeyValueStore for VersionedKeyValueStore {
         active
             .as_mut()
             .ok_or_else(no_transaction)?
-            .abort(&*self.persistence, &self.control)
-            .map_err(commit_error)?;
+            .abort(&*self.persistence, &self.control)?;
         *active = None;
         Ok(())
     }
@@ -523,7 +561,7 @@ impl KeyValueStore for VersionedKeyValueStore {
         self.savepoint_action(|transaction| transaction.release(name))
     }
     fn rollback_to_savepoint(&self, name: &str) -> StorageBackendResult<()> {
-        self.savepoint_action(|transaction| transaction.rollback_to(name))
+        self.savepoint_action(|transaction| transaction.rollback_to(name, &self.control))
     }
 }
 

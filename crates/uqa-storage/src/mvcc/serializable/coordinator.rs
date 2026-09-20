@@ -89,7 +89,7 @@ pub fn admit_serializable<C: SerializableCoordinator + ?Sized, T>(
     ))
 }
 
-fn recover<C: SerializableCoordinator + ?Sized>(
+pub(crate) fn recover<C: SerializableCoordinator + ?Sized>(
     coordinator: &C,
     graph: &mut SerializableGraph,
     leases: &dyn SerializableLeases,

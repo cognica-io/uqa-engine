@@ -36,6 +36,8 @@ mod occurrence_merging;
 mod occurrences;
 #[path = "mvcc_sessions/sequences.rs"]
 mod sequences;
+#[path = "mvcc_sessions/serializable.rs"]
+mod serializable;
 #[path = "mvcc_sessions/vector_merging.rs"]
 mod vector_merging;
 
@@ -113,12 +115,14 @@ struct State {
 struct Persistence {
     store: MemoryVersionStore,
     state: Mutex<State>,
+    serializable: Mutex<serializable::Fixture>,
 }
 
 impl Persistence {
     fn new() -> Arc<Self> {
         Arc::new(Self {
             store: MemoryVersionStore::new(&MemoryBudget::new(1 << 24)),
+            serializable: Mutex::new(serializable::Fixture::new()),
             state: Mutex::new(State {
                 next: 0,
                 identifiers: BTreeMap::new(),
@@ -141,6 +145,9 @@ impl Persistence {
 }
 
 impl VersionedPersistence for Persistence {
+    fn serializable_coordinator(&self) -> Option<&dyn SerializableCoordinator> {
+        Some(self)
+    }
     fn identifier_watermark(
         &self,
         namespace: &[u8],

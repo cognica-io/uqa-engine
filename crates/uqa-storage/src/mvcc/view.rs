@@ -277,6 +277,7 @@ pub struct ScannedVisibleRecord {
 pub struct MergedRecordSnapshot {
     committed: Arc<dyn CommittedRecordSnapshot>,
     private: PrivateRecordSnapshot,
+    serializable: Option<super::SerializableReadContext>,
 }
 
 impl MergedRecordSnapshot {
@@ -285,6 +286,7 @@ impl MergedRecordSnapshot {
         Ok(Self {
             committed: Arc::clone(&self.committed),
             private: self.private.try_clone()?,
+            serializable: self.serializable.clone(),
         })
     }
 
@@ -292,7 +294,24 @@ impl MergedRecordSnapshot {
         committed: Arc<dyn CommittedRecordSnapshot>,
         private: PrivateRecordSnapshot,
     ) -> Self {
-        Self { committed, private }
+        Self {
+            committed,
+            private,
+            serializable: None,
+        }
+    }
+
+    pub(crate) fn with_serializable(
+        mut self,
+        context: Option<super::SerializableReadContext>,
+    ) -> Self {
+        self.serializable = context;
+        self
+    }
+
+    /// Original logical reader attribution. Clones retain the same participant and fixed data boundaries.
+    pub fn serializable(&self) -> Option<&super::SerializableReadContext> {
+        self.serializable.as_ref()
     }
 
     pub fn sequence(&self) -> CommitSequence {

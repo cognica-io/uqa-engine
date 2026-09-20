@@ -39,7 +39,7 @@ impl StatementTransactions for Engine {
         Engine::transaction_depth(self)
     }
     fn commit_resolution_pending(&self) -> bool {
-        self.pending_commit().is_some()
+        self.pending_transaction_completion().is_some()
     }
     fn current_transaction_is_read_only(&self) -> bool {
         Engine::current_transaction_is_read_only(self)

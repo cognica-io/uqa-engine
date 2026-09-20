@@ -22,6 +22,7 @@ use uqa_core::memory::{BudgetedVec, MemoryBudget};
 use super::{DatabaseId, VersionError, VersionResult};
 use crate::read_control::StorageReadControl;
 
+pub(crate) use coordinator::recover;
 pub use coordinator::{
     admit_serializable, LocalSerializableState, SerializableCoordinator, SerializableLeases,
     SerializableOperation,
